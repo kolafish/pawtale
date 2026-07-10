@@ -32,28 +32,19 @@ export interface SpeakerTranscriptionGatewayEvent {
   occurred_start_at_ms?: number | null;
   occurred_end_at_ms?: number | null;
   confidence?: number | null;
-  provider_event_type?: string;
-  provider_payload?: Record<string, unknown>;
   message?: string;
-}
-
-export interface SpeakerTranscriptionCaptureStats {
-  frameCount: number;
-  audioBytesSent: number;
-  recordingElapsedMs: number;
-  audioLevel: number;
 }
 
 export interface SpeakerTranscriptionCallbacks {
   onStatus(status: SpeakerTranscriptionConnectionStatus): void;
-  onStats(stats: SpeakerTranscriptionCaptureStats): void;
+  onAudioLevel(audioLevel: number): void;
   onSpeakerEvent(event: SpeakerTranscriptionGatewayEvent): void;
   onDiarizationStatus?(event: SpeakerTranscriptionGatewayEvent): void;
   onError(message: string): void;
 }
 
 interface SpeakerTranscriptionClientEvent {
-  type: "session.start" | "audio.frame" | "audio.end" | "session.stop";
+  type: "session.start" | "audio.frame" | "session.stop";
   audio?: string;
 }
 
@@ -88,8 +79,8 @@ export class SpeakerTranscriptionClient {
   private recorderStarted = false;
   private acceptingFrames = false;
   private stopping = false;
-  private frameCount = 0;
-  private audioBytesSent = 0;
+  private closed = false;
+  private cancelPendingStart: (() => void) | null = null;
   private captureStartedAtMs = 0;
   private readonly recorderOwnerId: string;
 
@@ -102,27 +93,40 @@ export class SpeakerTranscriptionClient {
   }
 
   async start(): Promise<void> {
+    if (this.closed) {
+      throw new Error("多人转写连接已取消");
+    }
     if (this.socketOpen || this.recorderStarted || this.acceptingFrames) {
       return;
     }
     this.callbacks.onStatus("connecting");
     const cookie = await backendSessionCookieHeader();
+    if (this.closed) {
+      throw new Error("多人转写连接已取消");
+    }
     const gatewayUrl = speakerTranscriptionGatewayUrl();
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      let timedOut = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        this.closeSocket();
-        reject(new Error("多人转写连接超时"));
-      }, SPEAKER_TRANSCRIPTION_CONNECT_TIMEOUT_MS);
+      let timer: number | null = null;
       const settle = (callback: () => void) => {
-        if (settled || timedOut) {
+        if (settled) {
           return;
         }
         settled = true;
-        clearTimeout(timer);
+        if (timer !== null) {
+          clearTimeout(timer);
+        }
+        this.cancelPendingStart = null;
         callback();
+      };
+      timer = setTimeout(() => {
+        settle(() => {
+          this.closeSocket();
+          reject(new Error("多人转写连接超时"));
+        });
+      }, SPEAKER_TRANSCRIPTION_CONNECT_TIMEOUT_MS);
+      this.cancelPendingStart = () => {
+        settle(() => reject(new Error("多人转写连接已取消")));
       };
       const socketTask = wx.connectSocket({
         url: gatewayUrl,
@@ -134,6 +138,10 @@ export class SpeakerTranscriptionClient {
       });
       this.socketTask = socketTask;
       socketTask.onOpen(() => {
+        if (this.socketTask !== socketTask) {
+          socketTask.close({ code: 1000, reason: "stale speaker transcription socket" });
+          return;
+        }
         this.socketOpen = true;
         this.callbacks.onStatus("ready");
         const started = this.startRecorder();
@@ -145,19 +153,34 @@ export class SpeakerTranscriptionClient {
         settle(resolve);
       });
       socketTask.onMessage((message) => {
+        if (this.socketTask !== socketTask) {
+          return;
+        }
         this.handleSocketMessage(message.data);
       });
       socketTask.onError((error) => {
+        if (this.socketTask !== socketTask) {
+          return;
+        }
         const message = error.errMsg || "多人转写连接错误";
         settle(() => reject(new Error(message)));
+        this.closed = true;
         this.closeSocket();
         this.callbacks.onError(message);
         this.callbacks.onStatus("error");
       });
       socketTask.onClose(() => {
+        if (this.socketTask !== socketTask) {
+          return;
+        }
+        const connecting = !settled;
+        this.closed = true;
+        this.socketTask = null;
         this.socketOpen = false;
-        if (!this.stopping) {
-          this.releaseRecorder();
+        this.releaseRecorder();
+        if (connecting) {
+          settle(() => reject(new Error("多人转写连接已断开")));
+        } else {
           this.callbacks.onStatus("closed");
         }
       });
@@ -178,7 +201,9 @@ export class SpeakerTranscriptionClient {
   }
 
   close(): void {
+    this.closed = true;
     this.stopping = true;
+    this.cancelPendingStart?.();
     if (this.recorderStarted || this.recorderResource.isOwnedBy(this.recorderOwnerId)) {
       this.recorderResource.stop(this.recorderOwnerId);
     }
@@ -187,8 +212,6 @@ export class SpeakerTranscriptionClient {
   }
 
   private startRecorder(): boolean {
-    this.frameCount = 0;
-    this.audioBytesSent = 0;
     this.captureStartedAtMs = Date.now();
     try {
       return this.recorderResource.start(this.recorderOwnerId, {
@@ -213,11 +236,15 @@ export class SpeakerTranscriptionClient {
   }
 
   private handleRecorderStarted(): void {
+    if (this.closed || !this.socketOpen) {
+      this.releaseRecorder();
+      return;
+    }
     this.recorderStarted = true;
     this.acceptingFrames = true;
     this.sendJson({ type: "session.start" });
     this.callbacks.onStatus("listening");
-    this.emitStats(0);
+    this.callbacks.onAudioLevel(0);
   }
 
   private handleFrame(frameBuffer: ArrayBuffer, isLastFrame: boolean): void {
@@ -225,9 +252,7 @@ export class SpeakerTranscriptionClient {
       return;
     }
     if (frameBuffer.byteLength > 0) {
-      this.frameCount += 1;
-      this.audioBytesSent += frameBuffer.byteLength;
-      this.emitStats(estimatePcm16Level(frameBuffer));
+      this.callbacks.onAudioLevel(estimatePcm16Level(frameBuffer));
       this.sendJson({
         type: "audio.frame",
         audio: arrayBufferToBase64(frameBuffer),
@@ -265,7 +290,7 @@ export class SpeakerTranscriptionClient {
       this.callbacks.onStatus("listening");
       return;
     }
-    if (event.type === "speaker.partial" || event.type === "speaker.final" || event.type === "speaker.reassign") {
+    if (event.type === "speaker.partial" || event.type === "speaker.final") {
       this.callbacks.onSpeakerEvent(this.eventWithOccurrenceTime(event));
       return;
     }
@@ -274,25 +299,18 @@ export class SpeakerTranscriptionClient {
       return;
     }
     if (event.type === "session.stopped") {
+      this.closed = true;
       this.closeSocket();
       this.callbacks.onStatus("closed");
       return;
     }
     if (event.type === "session.error") {
       const message = event.error || "多人转写服务异常";
+      this.closed = true;
       this.closeSocket();
       this.callbacks.onError(message);
       this.callbacks.onStatus("error");
     }
-  }
-
-  private emitStats(audioLevel: number): void {
-    this.callbacks.onStats({
-      frameCount: this.frameCount,
-      audioBytesSent: this.audioBytesSent,
-      recordingElapsedMs: this.captureStartedAtMs ? Date.now() - this.captureStartedAtMs : 0,
-      audioLevel,
-    });
   }
 
   private eventWithOccurrenceTime(event: SpeakerTranscriptionGatewayEvent): SpeakerTranscriptionGatewayEvent {
@@ -323,10 +341,11 @@ export class SpeakerTranscriptionClient {
   }
 
   private closeSocket(): void {
-    this.releaseRecorder();
-    this.socketTask?.close({ code: 1000, reason: "speaker transcription closed" });
+    const socketTask = this.socketTask;
     this.socketTask = null;
     this.socketOpen = false;
+    this.releaseRecorder();
+    socketTask?.close({ code: 1000, reason: "speaker transcription closed" });
   }
 
   private releaseRecorder(): void {

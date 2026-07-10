@@ -17,7 +17,6 @@ class SpeakerSegment:
     start_ms: int | None = None
     end_ms: int | None = None
     confidence: float | None = None
-    provider_payload: dict[str, Any] | None = None
 
 
 def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[SpeakerSegment]:
@@ -49,7 +48,6 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[SpeakerSeg
                 start_ms=start_ms,
                 end_ms=end_ms,
                 confidence=_optional_float(utterance.get("confidence")),
-                provider_payload=utterance,
             )
         )
     if segments:
@@ -77,7 +75,6 @@ def speaker_segments_from_asr_event(event: StreamingASREvent) -> list[SpeakerSeg
                 start_ms=start_ms,
                 end_ms=end_ms,
                 confidence=_optional_float(base.get("confidence")),
-                provider_payload=base,
             )
         )
     return segments

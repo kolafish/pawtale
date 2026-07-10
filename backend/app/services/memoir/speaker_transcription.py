@@ -226,8 +226,6 @@ class SpeakerTranscriptionSession:
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
-                    provider_event_type=event.type,
-                    provider_payload=segment.provider_payload or event.raw,
                 )
             )
             if event_type == "speaker.final":
@@ -251,7 +249,6 @@ class SpeakerTranscriptionSession:
                 stable_key=LIVE_PARTIAL_SEGMENT_KEY,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
-                provider_payload=event.raw,
             )
         ], event_type="partial")
         for segment in segments:
@@ -265,8 +262,6 @@ class SpeakerTranscriptionSession:
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
-                    provider_event_type=f"live.{event.type}",
-                    provider_payload=segment.provider_payload or event.raw,
                 )
             )
 
@@ -284,7 +279,6 @@ class SpeakerTranscriptionSession:
                     "speaker.diarization",
                     status="available",
                     message="已收到说话人标签，会按不同人标注显示。",
-                    provider_event_type=event.type,
                 )
             )
             return
@@ -299,7 +293,6 @@ class SpeakerTranscriptionSession:
                     "当前 ASR 返回结果没有说话人标签，暂时只能标成未分辨说话人；"
                     "请确认服务商已开启说话人聚类分离。"
                 ),
-                provider_event_type=event.type,
             )
         )
 
@@ -321,7 +314,6 @@ class SpeakerTranscriptionSession:
                 speaker_gender=None,
                 start_ms=event.start_ms,
                 end_ms=event.end_ms,
-                provider_payload=event.raw,
             )
         ], event_type=event.type)
 
@@ -355,7 +347,6 @@ class SpeakerTranscriptionSession:
                     start_ms=segment.start_ms,
                     end_ms=segment.end_ms,
                     confidence=segment.confidence,
-                    provider_payload=segment.provider_payload,
                 )
             )
         return emit_segments

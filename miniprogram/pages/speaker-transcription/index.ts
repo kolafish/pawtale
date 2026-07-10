@@ -19,7 +19,6 @@ interface SpeakerLineView {
   sourceText?: string;
   lineClass: string;
   textClass: string;
-  previewEnabled: boolean;
   metaText: string;
   startMs: number | null;
   endMs: number | null;
@@ -35,22 +34,12 @@ interface ConversationLineView extends SpeakerLineView {
   domId: string;
 }
 
-interface SpeakerWindowView {
-  speakerId: string;
-  title: string;
-  speakerToneClass: string;
+interface SpeakerStreamState {
   partialText: string;
-  partialEndId: string;
-  partialScrollClass: string;
-  partialScrollTarget: string;
   partialScrollTop: number;
   cumulativeFinalText: string;
   cumulativeFinalStartMs: number | null;
   cumulativeFinalEndMs: number | null;
-  lines: SpeakerLineView[];
-  segmentCountText: string;
-  cardClass: string;
-  showNoLines: boolean;
 }
 
 interface ActivePartialView {
@@ -63,19 +52,7 @@ interface ActivePartialView {
   text: string;
   startMs: number | null;
   endMs: number | null;
-  partialEndId: string;
-  partialScrollClass: string;
-  partialScrollTarget: string;
   partialScrollTop: number;
-}
-
-interface HistoryLinePreviewView {
-  visible: boolean;
-  speakerTitle: string;
-  speakerToneClass: string;
-  metaText: string;
-  statusText: string;
-  text: string;
 }
 
 interface SpeakerTranscriptionPageData {
@@ -89,43 +66,16 @@ interface SpeakerTranscriptionPageData {
   recording: boolean;
   busy: boolean;
   error: string;
-  speakers: SpeakerWindowView[];
   conversationLines: ConversationLineView[];
   activePartial: ActivePartialView;
   conversationScrollTarget: string;
   showEmpty: boolean;
-  elapsedText: string;
-  frameCountText: string;
-  audioBytesText: string;
   audioLevelStyle: string;
   clearDisabled: boolean;
   showDiarizationNotice: boolean;
   diarizationNotice: string;
   diarizationNoticeClass: string;
   latestFinalLineId: string;
-  historyLinePreview: HistoryLinePreviewView;
-}
-
-interface TouchPoint {
-  clientX: number;
-  clientY: number;
-}
-
-interface HistoryLineTouch {
-  lineId: string;
-  startX: number;
-  startY: number;
-}
-
-interface LineTouchEvent {
-  currentTarget: {
-    dataset: {
-      lineId?: string;
-      previewEnabled?: boolean | string;
-    };
-  };
-  touches?: TouchPoint[];
-  changedTouches?: TouchPoint[];
 }
 
 interface ComparableSpeechChar {
@@ -145,8 +95,6 @@ type FinalizedSpeechLine = Pick<
   "text" | "sourceText" | "startMs" | "endMs"
 >;
 
-const HISTORY_PREVIEW_HOLD_MS = 160;
-const HISTORY_PREVIEW_CANCEL_DISTANCE = 18;
 const FUZZY_SPEECH_MIN_CHARS = 6;
 const FUZZY_SPEECH_MAX_CHARS = 40;
 const FUZZY_SPEECH_MAX_LENGTH_RATIO = 1.6;
@@ -157,14 +105,6 @@ const LIVE_PARTIAL_FINAL_TIME_PADDING_MS = 1500;
 const BEIJING_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 const UNKNOWN_SPEAKER_ID = "speaker_unknown";
 const SPEAKER_TONE_COUNT = 8;
-const EMPTY_HISTORY_LINE_PREVIEW: HistoryLinePreviewView = {
-  visible: false,
-  speakerTitle: "",
-  speakerToneClass: "",
-  metaText: "",
-  statusText: "",
-  text: "",
-};
 const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   visible: false,
   speakerId: "",
@@ -175,12 +115,9 @@ const EMPTY_ACTIVE_PARTIAL: ActivePartialView = {
   text: "",
   startMs: null,
   endMs: null,
-  partialEndId: "active-partial-end",
-  partialScrollClass: "partial-scroll",
-  partialScrollTarget: "",
   partialScrollTop: 0,
 };
-const SPEAKER_TRANSCRIPTION_STATS_RENDER_INTERVAL_MS = 800;
+const SPEAKER_TRANSCRIPTION_LEVEL_RENDER_INTERVAL_MS = 800;
 
 function statusText(status: SpeakerTranscriptionConnectionStatus): string {
   const texts: Record<SpeakerTranscriptionConnectionStatus, string> = {
@@ -210,16 +147,6 @@ function formatElapsed(ms: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-  if (bytes < 1024 * 1024) {
-    return `${Math.round(bytes / 1024)} KB`;
-  }
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function formatBeijingClockTime(epochMs: number): string {
@@ -374,7 +301,7 @@ function isCumulativeSpeakerText(
 
 function finalLineFromSpeakerEvent(
   event: SpeakerTranscriptionGatewayEvent,
-  existing: SpeakerWindowView,
+  existing: SpeakerStreamState,
   fallbackId: string,
 ): SpeakerLineView | null {
   const text = (event.text || "").trim();
@@ -402,7 +329,6 @@ function finalLineFromSpeakerEvent(
     sourceText: incrementalText,
     lineClass: "line-item history",
     textClass: "line-text history",
-    previewEnabled: true,
     metaText: formatSegmentMeta({
       ...event,
       text: incrementalText,
@@ -419,26 +345,12 @@ function lineClasses(
   lineId: string,
   latestLineId: string,
   toneClass = "",
-): Pick<SpeakerLineView, "lineClass" | "textClass" | "previewEnabled"> {
+): Pick<SpeakerLineView, "lineClass" | "textClass"> {
   const stateClass = lineId === latestLineId ? "latest" : "history";
   return {
     lineClass: classNames("line-item", stateClass, toneClass),
     textClass: `line-text ${stateClass}`,
-    previewEnabled: stateClass === "history",
   };
-}
-
-function applyLatestLineClasses(
-  speakers: SpeakerWindowView[],
-  latestLineId: string,
-): SpeakerWindowView[] {
-  return speakers.map((speaker) => ({
-    ...speaker,
-    lines: speaker.lines.map((line) => ({
-      ...line,
-      ...lineClasses(line.id, latestLineId, speaker.speakerToneClass),
-    })),
-  }));
 }
 
 function conversationLineFromSpeakerLine(
@@ -478,33 +390,6 @@ function applyLatestConversationLineClasses(
   }));
 }
 
-function isPreviewEnabled(value: boolean | string | undefined): boolean {
-  return value === true || value === "true";
-}
-
-function touchPoint(event: LineTouchEvent): TouchPoint | null {
-  const point = event.touches?.[0] || event.changedTouches?.[0];
-  return point || null;
-}
-
-function historyLinePreview(
-  lines: ConversationLineView[],
-  lineId: string,
-  latestLineId: string,
-): HistoryLinePreviewView {
-  const line = lines.find((item) => item.id === lineId);
-  if (!line || line.id === latestLineId || !line.text.trim()) {
-    return EMPTY_HISTORY_LINE_PREVIEW;
-  }
-  return {
-    visible: true,
-    speakerTitle: line.speakerTitle,
-    speakerToneClass: line.speakerToneClass,
-    metaText: line.metaText,
-    statusText: line.proofreadStatusText,
-    text: line.text,
-  };
-}
 
 function isComparableSpeechChar(char: string): boolean {
   return /[0-9A-Za-z\u3400-\u9fff]/.test(char);
@@ -773,8 +658,6 @@ function activePartialAfterConversationLines(
   return {
     ...activePartial,
     text: nextText,
-    partialScrollClass: partialIsLong ? "partial-scroll long" : "partial-scroll",
-    partialScrollTarget: partialIsLong ? activePartial.partialScrollTarget : "",
     partialScrollTop: partialIsLong ? activePartial.partialScrollTop : 0,
   };
 }
@@ -802,49 +685,13 @@ function speakerProofreadContextLines(
     }));
 }
 
-function patchSpeakerLine(
-  speakers: SpeakerWindowView[],
-  speakerId: string,
-  lineId: string,
-  patch: Partial<SpeakerLineView>,
-): SpeakerWindowView[] {
-  return speakers.map((speaker) => {
-    if (speaker.speakerId !== speakerId) {
-      return speaker;
-    }
-    return {
-      ...speaker,
-      lines: speaker.lines.map((line) => (
-        line.id === lineId ? { ...line, ...patch } : line
-      )),
-    };
-  });
-}
-
-function speakerWindow(
-  speakerId: string,
-  speakerIndex: number,
-  patch: Partial<SpeakerWindowView> = {},
-): SpeakerWindowView {
-  const lines = patch.lines || [];
-  const partialEndId = patch.partialEndId || `${speakerDomId(speakerId)}-partial-end`;
+function speakerStreamState(): SpeakerStreamState {
   return {
-    speakerId,
-    title: speakerTitle(speakerId, speakerIndex),
-    speakerToneClass: "",
     partialText: "",
-    partialEndId,
-    partialScrollClass: "partial-scroll",
-    partialScrollTarget: "",
     partialScrollTop: 0,
     cumulativeFinalText: "",
     cumulativeFinalStartMs: null,
     cumulativeFinalEndMs: null,
-    lines,
-    segmentCountText: `${lines.length} 段`,
-    cardClass: "speaker-window",
-    showNoLines: !patch.partialText && lines.length === 0,
-    ...patch,
   };
 }
 
@@ -882,20 +729,24 @@ function pagePatch(
 
 Page<SpeakerTranscriptionPageData, {
   client: SpeakerTranscriptionClient | null;
-  lastStatsRenderMs: number;
+  pageActive: boolean;
+  starting: boolean;
+  transcriptionRunSerial: number;
+  lastLevelRenderMs: number;
   lastPartialSignature: string;
+  streamStateBySpeakerId: Record<string, SpeakerStreamState>;
   speakerOrder: string[];
   speakerGenderById: Record<string, "male" | "female" | "">;
   genderSpeakerOrder: Record<"male" | "female", string[]>;
-  historyPreviewTimer: number | null;
-  historyPreviewTouch: HistoryLineTouch | null;
+  proofreadRequestSerial: number;
+  proofreadRequestByLineId: Record<string, number>;
   onLoad(): void;
   onShow(): void;
   onUnload(): void;
   refreshAccessibilitySettings(): void;
   setStatus(status: SpeakerTranscriptionConnectionStatus): void;
   hasTranscript(): boolean;
-  shouldRenderStats(nowMs: number): boolean;
+  shouldRenderAudioLevel(nowMs: number): boolean;
   speakerLabelForEvent(speakerId: string, speakerIndex: number, speakerGender?: string | null): {
     title: string;
     badgeClass: string;
@@ -909,15 +760,7 @@ Page<SpeakerTranscriptionPageData, {
   refreshConversationSpeakerLabels(lines: ConversationLineView[]): ConversationLineView[];
   handleSpeakerEvent(event: SpeakerTranscriptionGatewayEvent): void;
   handleDiarizationStatus(event: SpeakerTranscriptionGatewayEvent): void;
-  handleLineTouchStart(event: LineTouchEvent): void;
-  handleLineTouchMove(event: LineTouchEvent): void;
-  handleLineTouchEnd(): void;
-  handleLineTouchCancel(): void;
-  cancelHistoryPreviewTimer(): void;
-  showHistoryLinePreview(lineId: string): void;
-  hideHistoryLinePreview(): void;
   proofreadFinalLine(
-    speakerId: string,
     lineId: string,
     text: string,
     contextLines: SpeakerProofreadContextLine[],
@@ -927,16 +770,20 @@ Page<SpeakerTranscriptionPageData, {
   goBack(): void;
 }>({
   client: null,
-  lastStatsRenderMs: 0,
+  pageActive: true,
+  starting: false,
+  transcriptionRunSerial: 0,
+  lastLevelRenderMs: 0,
   lastPartialSignature: "",
+  streamStateBySpeakerId: {},
   speakerOrder: [],
   speakerGenderById: {},
   genderSpeakerOrder: {
     male: [],
     female: [],
   },
-  historyPreviewTimer: null as number | null,
-  historyPreviewTouch: null as HistoryLineTouch | null,
+  proofreadRequestSerial: 0,
+  proofreadRequestByLineId: {},
 
   data: {
     pageClass: "speaker-transcription-page",
@@ -949,24 +796,20 @@ Page<SpeakerTranscriptionPageData, {
     recording: false,
     busy: false,
     error: "",
-    speakers: [],
     conversationLines: [],
     activePartial: EMPTY_ACTIVE_PARTIAL,
     conversationScrollTarget: "",
     showEmpty: true,
-    elapsedText: "0:00",
-    frameCountText: "0 帧",
-    audioBytesText: "0 B",
     audioLevelStyle: "width: 0%;",
     clearDisabled: true,
     showDiarizationNotice: false,
     diarizationNotice: "",
     diarizationNoticeClass: "diarization-notice",
     latestFinalLineId: "",
-    historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW,
   },
 
   onLoad() {
+    this.pageActive = true;
     this.refreshAccessibilitySettings();
   },
 
@@ -975,7 +818,9 @@ Page<SpeakerTranscriptionPageData, {
   },
 
   onUnload() {
-    this.cancelHistoryPreviewTimer();
+    this.pageActive = false;
+    this.starting = false;
+    this.proofreadRequestByLineId = {};
     this.client?.close();
     this.client = null;
   },
@@ -992,15 +837,15 @@ Page<SpeakerTranscriptionPageData, {
     return this.data.conversationLines.length > 0 || this.data.activePartial.visible;
   },
 
-  shouldRenderStats(nowMs) {
+  shouldRenderAudioLevel(nowMs) {
     if (!this.data.recording) {
-      this.lastStatsRenderMs = nowMs;
+      this.lastLevelRenderMs = nowMs;
       return true;
     }
-    if (nowMs - this.lastStatsRenderMs < SPEAKER_TRANSCRIPTION_STATS_RENDER_INTERVAL_MS) {
+    if (nowMs - this.lastLevelRenderMs < SPEAKER_TRANSCRIPTION_LEVEL_RENDER_INTERVAL_MS) {
       return false;
     }
-    this.lastStatsRenderMs = nowMs;
+    this.lastLevelRenderMs = nowMs;
     return true;
   },
 
@@ -1051,14 +896,18 @@ Page<SpeakerTranscriptionPageData, {
   },
 
   async toggleRecording() {
-    if (this.data.busy) {
+    if (this.data.busy || this.starting) {
       return;
     }
     if (this.data.recording) {
       this.client?.stop();
       return;
     }
-    this.lastStatsRenderMs = 0;
+    if (this.client) {
+      return;
+    }
+    this.starting = true;
+    this.lastLevelRenderMs = 0;
     this.setData({
       error: "",
       showDiarizationNotice: false,
@@ -1067,33 +916,76 @@ Page<SpeakerTranscriptionPageData, {
     });
     try {
       await ensureRecorderPrivacyAuthorization();
-      const client = new SpeakerTranscriptionClient({
-        onStatus: (status) => this.setStatus(status),
-        onStats: (stats) => {
-          if (!this.shouldRenderStats(Date.now())) {
-            return;
-          }
-          const levelPercent = Math.round(Math.max(0, Math.min(1, stats.audioLevel)) * 100);
-          this.setData({
-            elapsedText: formatElapsed(stats.recordingElapsedMs),
-            frameCountText: `${stats.frameCount} 帧`,
-            audioBytesText: formatBytes(stats.audioBytesSent),
-            audioLevelStyle: `width: ${levelPercent}%;`,
-          });
-        },
-        onSpeakerEvent: (event) => this.handleSpeakerEvent(event),
-        onDiarizationStatus: (event) => this.handleDiarizationStatus(event),
-        onError: (message) => this.setData({ error: message }),
-      });
-      this.client = client;
-      await client.start();
     } catch (error) {
+      this.starting = false;
+      if (!this.pageActive) {
+        return;
+      }
       this.setStatus("error");
       this.setData({ error: error instanceof Error ? error.message : "多人转写启动失败" });
+      return;
+    }
+    if (!this.pageActive) {
+      this.starting = false;
+      return;
+    }
+    this.transcriptionRunSerial += 1;
+    this.streamStateBySpeakerId = {};
+    this.lastPartialSignature = "";
+    let client: SpeakerTranscriptionClient;
+    client = new SpeakerTranscriptionClient({
+      onStatus: (status) => {
+        if (!this.pageActive || this.client !== client) {
+          return;
+        }
+        this.setStatus(status);
+        if (status === "closed" || status === "error") {
+          this.client = null;
+        }
+      },
+      onAudioLevel: (audioLevel) => {
+        if (!this.pageActive || this.client !== client || !this.shouldRenderAudioLevel(Date.now())) {
+          return;
+        }
+        const levelPercent = Math.round(Math.max(0, Math.min(1, audioLevel)) * 100);
+        this.setData({ audioLevelStyle: `width: ${levelPercent}%;` });
+      },
+      onSpeakerEvent: (event) => {
+        if (this.pageActive && this.client === client) {
+          this.handleSpeakerEvent(event);
+        }
+      },
+      onDiarizationStatus: (event) => {
+        if (this.pageActive && this.client === client) {
+          this.handleDiarizationStatus(event);
+        }
+      },
+      onError: (message) => {
+        if (this.pageActive && this.client === client) {
+          this.setData({ error: message });
+        }
+      },
+    });
+    this.client = client;
+    try {
+      await client.start();
+    } catch (error) {
+      if (!this.pageActive || this.client !== client) {
+        return;
+      }
+      client.close();
+      this.client = null;
+      this.setStatus("error");
+      this.setData({ error: error instanceof Error ? error.message : "多人转写启动失败" });
+    } finally {
+      this.starting = false;
     }
   },
 
   handleSpeakerEvent(event) {
+    if (event.type !== "speaker.partial" && event.type !== "speaker.final") {
+      return;
+    }
     const speakerId = event.speaker_id || UNKNOWN_SPEAKER_ID;
     const previousHasTranscript = this.hasTranscript();
     const speakerOrder = this.speakerOrder.includes(speakerId)
@@ -1104,11 +996,7 @@ Page<SpeakerTranscriptionPageData, {
     const previousSpeakerGender = this.speakerGenderById[speakerId] || "";
     const speakerLabel = this.speakerLabelForEvent(speakerId, speakerIndex, event.speaker_gender);
     const speakerLabelsChanged = previousSpeakerGender !== (this.speakerGenderById[speakerId] || "");
-    const speakers = [...this.data.speakers];
-    const existingIndex = speakers.findIndex((item) => item.speakerId === speakerId);
-    const existing = existingIndex >= 0
-      ? speakers[existingIndex]
-      : speakerWindow(speakerId, speakerIndex);
+    const existing = this.streamStateBySpeakerId[speakerId] || speakerStreamState();
     let conversationLines = speakerLabelsChanged
       ? this.refreshConversationSpeakerLabels(this.data.conversationLines)
       : this.data.conversationLines;
@@ -1116,11 +1004,7 @@ Page<SpeakerTranscriptionPageData, {
     let activePartial = this.data.activePartial;
     let conversationScrollTarget = "";
     const text = event.text || "";
-    const nextLines = existing.lines.slice();
     let partialText = existing.partialText;
-    let partialEndId = existing.partialEndId;
-    let partialScrollClass = existing.partialScrollClass;
-    let partialScrollTarget = existing.partialScrollTarget;
     let partialScrollTop = existing.partialScrollTop;
     let cumulativeFinalText = existing.cumulativeFinalText;
     let cumulativeFinalStartMs = existing.cumulativeFinalStartMs;
@@ -1130,25 +1014,23 @@ Page<SpeakerTranscriptionPageData, {
     let latestFinalLineId = this.data.latestFinalLineId;
     if (event.type === "speaker.final") {
       this.lastPartialSignature = "";
-      const lineId = stableLineIdForEvent(
+      const lineId = `run-${this.transcriptionRunSerial}-${stableLineIdForEvent(
         speakerId,
         event,
-        `${speakerId}-${Date.now()}-${nextLines.length}`,
-      );
+        `${speakerId}-${Date.now()}-${conversationLines.length}`,
+      )}`;
       const line = finalLineFromSpeakerEvent(event, existing, lineId);
       if (line) {
         let finalLineChanged = false;
         const existingConversationLine = conversationLines.find((item) => item.id === line.id);
-        const existingSpeakerLine = nextLines.find((item) => item.id === line.id);
         if (
           existingConversationLine
           && existingConversationLine.text === line.text
           && existingConversationLine.metaText === line.metaText
         ) {
           lineForProofread = null;
-        } else if (existingConversationLine || existingSpeakerLine) {
-          const previousLine = existingConversationLine || existingSpeakerLine;
-          const textChanged = previousLine?.text !== line.text;
+        } else if (existingConversationLine) {
+          const textChanged = existingConversationLine.text !== line.text;
           if (textChanged) {
             proofreadContextLines = speakerProofreadContextLines(
               conversationLines.filter((item) => item.id !== line.id),
@@ -1158,16 +1040,11 @@ Page<SpeakerTranscriptionPageData, {
             ...line,
             proofreadLoading: textChanged
               ? true
-              : existingConversationLine?.proofreadLoading || existingSpeakerLine?.proofreadLoading || false,
+              : existingConversationLine.proofreadLoading,
             proofreadStatusText: textChanged
               ? "校对中"
-              : existingConversationLine?.proofreadStatusText || existingSpeakerLine?.proofreadStatusText || "",
+              : existingConversationLine.proofreadStatusText,
           };
-          for (let index = 0; index < nextLines.length; index += 1) {
-            if (nextLines[index].id === line.id) {
-              nextLines[index] = { ...nextLines[index], ...linePatch };
-            }
-          }
           conversationLines = patchConversationLine(conversationLines, line.id, linePatch);
           if (textChanged) {
             lineForProofread = { ...line, proofreadLoading: true, proofreadStatusText: "校对中" };
@@ -1177,7 +1054,6 @@ Page<SpeakerTranscriptionPageData, {
           proofreadContextLines = speakerProofreadContextLines(conversationLines);
           line.proofreadLoading = true;
           line.proofreadStatusText = "校对中";
-          nextLines.unshift(line);
           lineForProofread = line;
           const conversationLine = conversationLineFromSpeakerLine(
             speakerId,
@@ -1196,8 +1072,6 @@ Page<SpeakerTranscriptionPageData, {
         }
       }
       partialText = "";
-      partialScrollClass = "partial-scroll";
-      partialScrollTarget = "";
       partialScrollTop = 0;
       activePartial = activePartialAfterConversationLines(this.data.activePartial, conversationLines);
       if (activePartial.visible) {
@@ -1207,9 +1081,6 @@ Page<SpeakerTranscriptionPageData, {
         cumulativeFinalText = text.trim();
         cumulativeFinalStartMs = eventStartMs(event);
         cumulativeFinalEndMs = eventEndMs(event);
-      }
-      if (!conversationLinesChanged && !this.data.activePartial.visible && !speakerLabelsChanged) {
-        return;
       }
     } else if (event.type === "speaker.partial") {
       const eventStart = eventStartMs(event);
@@ -1230,17 +1101,11 @@ Page<SpeakerTranscriptionPageData, {
         );
       }
       const partialIsLong = partialText.length > 90;
-      partialScrollClass = partialIsLong ? "partial-scroll long" : "partial-scroll";
       if (partialIsLong) {
         if (partialText !== existing.partialText) {
           partialScrollTop += 10000;
-          partialEndId = `${speakerDomId(speakerId)}-partial-end-${partialScrollTop}`;
-          partialScrollTarget = partialEndId;
-        } else {
-          partialScrollTarget = "";
         }
       } else {
-        partialScrollTarget = "";
         partialScrollTop = 0;
       }
       activePartial = partialText
@@ -1254,9 +1119,6 @@ Page<SpeakerTranscriptionPageData, {
           text: partialText,
           startMs: eventStart,
           endMs: eventEndMs(event),
-          partialEndId,
-          partialScrollClass,
-          partialScrollTarget,
           partialScrollTop,
         }
         : EMPTY_ACTIVE_PARTIAL;
@@ -1265,7 +1127,6 @@ Page<SpeakerTranscriptionPageData, {
         speakerId,
         event.segment_id || "",
         partialText,
-        partialScrollClass,
         String(partialScrollTop),
       ].join("|");
       if (!speakerLabelsChanged && partialSignature === this.lastPartialSignature) {
@@ -1273,36 +1134,26 @@ Page<SpeakerTranscriptionPageData, {
       }
       this.lastPartialSignature = partialSignature;
     }
-    const nextSpeaker = speakerWindow(speakerId, speakerIndex, {
-      ...existing,
-      title: speakerLabel.title,
-      speakerToneClass: speakerLabel.toneClass,
+    this.streamStateBySpeakerId[speakerId] = {
       partialText,
-      partialEndId,
-      partialScrollClass,
-      partialScrollTarget,
       partialScrollTop,
       cumulativeFinalText,
       cumulativeFinalStartMs,
       cumulativeFinalEndMs,
-      lines: nextLines.slice(0, 20),
-      segmentCountText: `${nextLines.length} 段`,
-      cardClass: partialText ? "speaker-window active" : "speaker-window",
-      showNoLines: !partialText && nextLines.length === 0,
-    });
-    if (existingIndex >= 0) {
-      speakers[existingIndex] = nextSpeaker;
-    } else {
-      speakers.push(nextSpeaker);
+    };
+    if (
+      !conversationLinesChanged
+      && activePartial === this.data.activePartial
+      && !speakerLabelsChanged
+    ) {
+      return;
     }
-    const visibleSpeakers = applyLatestLineClasses(speakers, latestFinalLineId);
     const visibleConversationLines = conversationLinesChanged
       ? this.refreshConversationSpeakerLabels(
         applyLatestConversationLineClasses(conversationLines, latestFinalLineId),
       )
       : this.data.conversationLines;
     const dataPatch: Partial<SpeakerTranscriptionPageData> = {
-      speakers: visibleSpeakers,
       activePartial,
       conversationScrollTarget,
       latestFinalLineId,
@@ -1320,7 +1171,6 @@ Page<SpeakerTranscriptionPageData, {
     this.setData(dataPatch);
     if (lineForProofread) {
       void this.proofreadFinalLine(
-        speakerId,
         lineForProofread.id,
         lineForProofread.text,
         proofreadContextLines,
@@ -1339,90 +1189,22 @@ Page<SpeakerTranscriptionPageData, {
     });
   },
 
-  handleLineTouchStart(event) {
-    this.cancelHistoryPreviewTimer();
-    const { lineId = "", previewEnabled } = event.currentTarget.dataset;
-    const point = touchPoint(event);
-    if (!lineId || !isPreviewEnabled(previewEnabled) || !point) {
-      this.historyPreviewTouch = null;
-      return;
-    }
-    this.historyPreviewTouch = {
-      lineId,
-      startX: point.clientX,
-      startY: point.clientY,
-    };
-    this.historyPreviewTimer = setTimeout(() => {
-      this.historyPreviewTimer = null;
-      const pendingTouch = this.historyPreviewTouch;
-      if (pendingTouch?.lineId === lineId) {
-        this.showHistoryLinePreview(lineId);
-      }
-    }, HISTORY_PREVIEW_HOLD_MS);
-  },
-
-  handleLineTouchMove(event) {
-    const pendingTouch = this.historyPreviewTouch;
-    const point = touchPoint(event);
-    if (!pendingTouch || !point) {
-      return;
-    }
-    const movedX = Math.abs(point.clientX - pendingTouch.startX);
-    const movedY = Math.abs(point.clientY - pendingTouch.startY);
-    if (movedX > HISTORY_PREVIEW_CANCEL_DISTANCE || movedY > HISTORY_PREVIEW_CANCEL_DISTANCE) {
-      this.cancelHistoryPreviewTimer();
-      this.historyPreviewTouch = null;
-      this.hideHistoryLinePreview();
-    }
-  },
-
-  handleLineTouchEnd() {
-    this.cancelHistoryPreviewTimer();
-    this.historyPreviewTouch = null;
-    this.hideHistoryLinePreview();
-  },
-
-  handleLineTouchCancel() {
-    this.cancelHistoryPreviewTimer();
-    this.historyPreviewTouch = null;
-    this.hideHistoryLinePreview();
-  },
-
-  cancelHistoryPreviewTimer() {
-    if (this.historyPreviewTimer !== null) {
-      clearTimeout(this.historyPreviewTimer);
-      this.historyPreviewTimer = null;
-    }
-  },
-
-  showHistoryLinePreview(lineId) {
-    const preview = historyLinePreview(
-      this.data.conversationLines,
-      lineId,
-      this.data.latestFinalLineId,
-    );
-    this.setData({ historyLinePreview: preview });
-  },
-
-  hideHistoryLinePreview() {
-    if (this.data.historyLinePreview.visible) {
-      this.setData({ historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW });
-    }
-  },
-
-  async proofreadFinalLine(speakerId, lineId, text, contextLines) {
+  async proofreadFinalLine(lineId, text, contextLines) {
+    this.proofreadRequestSerial += 1;
+    const requestId = this.proofreadRequestSerial;
+    this.proofreadRequestByLineId[lineId] = requestId;
     try {
       const result = await proofreadSpeakerTranscriptLine(text, contextLines);
+      if (!this.pageActive || this.proofreadRequestByLineId[lineId] !== requestId) {
+        return;
+      }
+      delete this.proofreadRequestByLineId[lineId];
       const proofreadText = result.proofread_text.trim();
       const linePatch = {
         text: proofreadText || text,
         proofreadLoading: false,
         proofreadStatusText: "已校对",
       };
-      const speakers = applyLatestLineClasses(
-        patchSpeakerLine(this.data.speakers, speakerId, lineId, linePatch),
-        this.data.latestFinalLineId,
-      );
       const conversationLines = this.refreshConversationSpeakerLabels(
         applyLatestConversationLineClasses(
           patchConversationLine(this.data.conversationLines, lineId, linePatch),
@@ -1430,23 +1212,23 @@ Page<SpeakerTranscriptionPageData, {
         ),
       );
       const activePartial = activePartialAfterConversationLines(this.data.activePartial, conversationLines);
-      this.setData({ speakers, conversationLines, activePartial });
+      this.setData({ conversationLines, activePartial });
     } catch (_error) {
+      if (!this.pageActive || this.proofreadRequestByLineId[lineId] !== requestId) {
+        return;
+      }
+      delete this.proofreadRequestByLineId[lineId];
       const linePatch = {
         proofreadLoading: false,
         proofreadStatusText: "校对失败",
       };
-      const speakers = applyLatestLineClasses(
-        patchSpeakerLine(this.data.speakers, speakerId, lineId, linePatch),
-        this.data.latestFinalLineId,
-      );
       const conversationLines = this.refreshConversationSpeakerLabels(
         applyLatestConversationLineClasses(
           patchConversationLine(this.data.conversationLines, lineId, linePatch),
           this.data.latestFinalLineId,
         ),
       );
-      this.setData({ speakers, conversationLines });
+      this.setData({ conversationLines });
     }
   },
 
@@ -1454,30 +1236,24 @@ Page<SpeakerTranscriptionPageData, {
     if (this.data.recording || this.data.busy) {
       return;
     }
-    this.cancelHistoryPreviewTimer();
-    this.historyPreviewTouch = null;
+    this.streamStateBySpeakerId = {};
     this.speakerOrder = [];
     this.speakerGenderById = {};
     this.genderSpeakerOrder = {
       male: [],
       female: [],
     };
+    this.proofreadRequestByLineId = {};
     this.lastPartialSignature = "";
-    const speakers: SpeakerWindowView[] = [];
     this.setData({
-      speakers,
       conversationLines: [],
       activePartial: EMPTY_ACTIVE_PARTIAL,
       conversationScrollTarget: "",
-      elapsedText: "0:00",
-      frameCountText: "0 帧",
-      audioBytesText: "0 B",
       audioLevelStyle: "width: 0%;",
       showDiarizationNotice: false,
       diarizationNotice: "",
       diarizationNoticeClass: "diarization-notice",
       latestFinalLineId: "",
-      historyLinePreview: EMPTY_HISTORY_LINE_PREVIEW,
       ...pagePatch("idle", false),
     });
   },
@@ -1486,14 +1262,3 @@ Page<SpeakerTranscriptionPageData, {
     wx.navigateBack({ delta: 1 });
   },
 });
-
-export {
-  formatBytes as formatSpeakerTranscriptionBytes,
-  formatElapsed as formatSpeakerTranscriptionElapsed,
-  formatSegmentMeta as formatSpeakerTranscriptionSegmentMeta,
-  pagePatch as speakerTranscriptionPagePatch,
-  speakerTranscriptionPageClass,
-  speakerProofreadContextLines,
-  removeFinalTextFromPartialText,
-  removeConversationTextFromUnknownPartial,
-};
