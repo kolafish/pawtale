@@ -30,7 +30,19 @@ export function voiceRecordingReconnectPatch(
   currentAutoListenStateText: string,
 ): VoiceChatPatch {
   return {
+    error: "",
+    recordingStarting: true,
+    captureStateText: "正在连接麦克风",
+    persistenceStateText: "正在准备收音",
     autoListenStateText: autoTriggered ? "正在重新连接语音" : currentAutoListenStateText,
+  };
+}
+
+export function voiceRecordingStartRequestedPatch(): VoiceChatPatch {
+  return {
+    recordingStarting: true,
+    error: "",
+    captureStateText: "正在打开麦克风",
   };
 }
 
@@ -49,6 +61,7 @@ export function voiceRecorderPrivacyDeniedPatch(
 ): VoiceChatPatch {
   return {
     recording: false,
+    recordingStarting: false,
     primaryActionText: "继续说话",
     autoListenStateText: autoTriggered ? "自动收音已暂停，等待隐私授权" : currentAutoListenStateText,
   };
@@ -60,6 +73,7 @@ export function voiceRecordingUnavailablePatch(
 ): VoiceChatPatch {
   return {
     error: "语音未就绪，请重新连接",
+    recordingStarting: false,
     status: "error",
     statusText: statusText("error"),
     primaryActionText: "重新连接",
@@ -71,6 +85,7 @@ export function voiceRecordingUnavailablePatch(
 export function voiceRecordingStartedPatch(autoTriggered: boolean): VoiceChatPatch {
   return {
     recording: true,
+    recordingStarting: false,
     error: "",
     liveText: "",
     liveCharCount: 0,
@@ -247,6 +262,7 @@ export function finishSessionStartPatch(wasRecording: boolean): VoiceChatPatch {
     finishingSession: true,
     error: "",
     recording: false,
+    recordingStarting: false,
     status: "stopping",
     statusText: statusText("stopping"),
     primaryActionText: "保存中",

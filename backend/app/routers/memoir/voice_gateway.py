@@ -18,9 +18,9 @@ from app.schemas.memoir_voice import (
 from app.services.memoir import voice_sessions as memoir_voice_sessions
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_voice_assistant_turn_stream import BookVoiceAssistantTurnStreamSession
-from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
+from app.services.memoir.streaming_asr import create_realtime_volc_streaming_asr_client
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
-from app.services.memoir.voice_gateway import VoiceGatewaySession
+from app.services.memoir.voice_gateway import VoiceGatewaySession, VoiceGatewayStopReason
 from app.services.memoir.voice_gateway_capacity import (
     VoiceGatewayCapacityError,
     VoiceGatewayCapacityLimits,
@@ -83,7 +83,7 @@ async def mobile_memoir_voice_gateway(
         async def on_start() -> None:
             await memoir_voice_sessions.mark_voice_session_listening(db, voice_session_id, current_user_id)
 
-        async def on_stop(error_message: str | None) -> None:
+        async def on_stop(error_message: str | None, stop_reason: VoiceGatewayStopReason) -> None:
             nonlocal discard_pending_audio
             stop_error = error_message
             try:
@@ -108,16 +108,17 @@ async def mobile_memoir_voice_gateway(
                     pending_audio_size_bytes=persistence.pending_audio_size_bytes,
                     **diagnostics_context,
                 )
-            await memoir_voice_sessions.stop_voice_session(
-                db,
-                voice_session_id,
-                current_user_id,
-                MemoirVoiceSessionStopRequest(error_message=stop_error),
-            )
+            if stop_reason != "transport_closed":
+                await memoir_voice_sessions.stop_voice_session(
+                    db,
+                    voice_session_id,
+                    current_user_id,
+                    MemoirVoiceSessionStopRequest(error_message=stop_error),
+                )
 
         gateway_session = VoiceGatewaySession(
             client=websocket,
-            asr_client_factory=lambda: create_volc_streaming_asr_client(
+            asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
                 current_user_id,
                 voice_session_id,
             ),
@@ -180,7 +181,7 @@ async def mobile_memoir_book_voice_command_gateway(
         connection_id = str(uuid.uuid4())
         gateway_session = VoiceGatewaySession(
             client=websocket,
-            asr_client_factory=lambda: create_volc_streaming_asr_client(
+            asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
                 current_user_id,
                 transient_session_id,
             ),

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
+from starlette.websockets import WebSocketDisconnect
 
 from app.domain.memoir.types import (
     MemoirCreatedBy,
@@ -64,7 +65,7 @@ async def test_voice_gateway_streams_audio_and_forwards_asr_events():
         client=client,
         asr_client_factory=lambda: asr_client,
         on_start=lambda: _record_start(started_count),
-        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_stop=lambda error, _reason: _record_stop(stopped_with, error),
     )
 
     run_task = asyncio.create_task(session.run())
@@ -179,7 +180,7 @@ async def test_voice_gateway_ignores_provider_no_status_close_during_finish():
     session = VoiceGatewaySession(
         client=client,
         asr_client_factory=lambda: asr_client,
-        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_stop=lambda error, _reason: _record_stop(stopped_with, error),
         on_asr_final=persist_final,
     )
 
@@ -233,6 +234,31 @@ async def test_voice_gateway_rejects_audio_before_session_start_with_ready_state
     assert error["state"] == "ready"
     assert asr_client.sent_audio == []
     assert stopped["state"] == "stopped"
+
+
+async def test_voice_gateway_treats_client_no_status_close_as_transport_disconnect():
+    class DisconnectedGatewayClient(FakeGatewayClient):
+        async def receive_json(self) -> dict[str, Any]:
+            raise WebSocketDisconnect(code=1005)
+
+    client = DisconnectedGatewayClient()
+    stopped_with: list[tuple[str | None, str]] = []
+
+    async def record_stop(error: str | None, reason: str) -> None:
+        stopped_with.append((error, reason))
+
+    session = VoiceGatewaySession(
+        client=client,
+        asr_client_factory=lambda: FakeStreamingASRClient(),
+        on_stop=record_stop,
+    )
+
+    await session.run()
+
+    assert stopped_with == [(None, "transport_closed")]
+    assert not [event for event in client.sent if event["type"] == "session.error"]
+    stopped = [event for event in client.sent if event["type"] == "session.stopped"]
+    assert stopped == [{"type": "session.stopped", "state": "stopped", "status": "stopped", "error": ""}]
 
 
 async def test_voice_gateway_rejects_invalid_base64_audio_frame():
@@ -654,7 +680,7 @@ async def test_voice_gateway_provider_error_stops_session_with_error():
     session = VoiceGatewaySession(
         client=client,
         asr_client_factory=lambda: asr_client,
-        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_stop=lambda error, _reason: _record_stop(stopped_with, error),
     )
 
     run_task = asyncio.create_task(session.run())
@@ -684,7 +710,7 @@ async def test_voice_gateway_masks_final_persistence_errors():
     session = VoiceGatewaySession(
         client=client,
         asr_client_factory=lambda: asr_client,
-        on_stop=lambda error: _record_stop(stopped_with, error),
+        on_stop=lambda error, _reason: _record_stop(stopped_with, error),
         on_asr_final=fail_persist,
     )
 
@@ -764,7 +790,7 @@ async def test_book_voice_command_gateway_uses_transient_realtime_session(monkey
     monkeypatch.setattr(voice_gateway_router, "load_memoir_project", fake_load_project)
     monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
     monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", FakeBookGatewaySession)
-    monkeypatch.setattr(voice_gateway_router, "create_volc_streaming_asr_client", fake_create_asr_client)
+    monkeypatch.setattr(voice_gateway_router, "create_realtime_volc_streaming_asr_client", fake_create_asr_client)
 
     await voice_gateway_router.mobile_memoir_book_voice_command_gateway(websocket, "project-1", db)
 
@@ -792,7 +818,7 @@ async def test_book_voice_command_gateway_uses_transient_realtime_session(monkey
     assert lease.released
 
 
-async def test_mobile_voice_gateway_preserves_pending_audio_when_stop_flush_fails(monkeypatch):
+async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch):
     from app.routers.memoir import voice_gateway as voice_gateway_router
 
     calls: dict[str, Any] = {"logs": []}
@@ -862,7 +888,7 @@ async def test_mobile_voice_gateway_preserves_pending_audio_when_stop_flush_fail
             calls["gateway_kwargs"] = kwargs
 
         async def run(self) -> None:
-            await calls["gateway_kwargs"]["on_stop"](None)
+            await calls["gateway_kwargs"]["on_stop"](None, "transport_closed")
 
     def fake_log(event: str, **payload: Any) -> None:
         calls["logs"].append({"event": event, **payload})
@@ -887,7 +913,7 @@ async def test_mobile_voice_gateway_preserves_pending_audio_when_stop_flush_fail
     assert websocket.accepted
     assert persistence.discard_calls == 0
     assert lease.released
-    assert calls["stop"] == (db, "voice-1", "user-1", "database unavailable")
+    assert "stop" not in calls
     assert calls["logs"][0]["event"] == "websocket.accepted"
     assert calls["logs"][1]["event"] == "unfinalized_audio.flush_failed"
     assert calls["logs"][1]["pending_audio_size_bytes"] == 4096

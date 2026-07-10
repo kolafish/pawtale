@@ -88,6 +88,9 @@ export class StreamingVoiceController {
       onStatus: (status) => {
         if (isCurrent()) {
           callbacks.onStatus(status);
+          if (status === "closed" || status === "error") {
+            this.client = null;
+          }
         }
       },
       onCaptureStats: (stats) => {
@@ -113,6 +116,11 @@ export class StreamingVoiceController {
       onError: (message, error) => {
         if (isCurrent()) {
           callbacks.onError(message, error);
+        }
+      },
+      onClientEvent: (event) => {
+        if (isCurrent()) {
+          callbacks.onClientEvent?.(event);
         }
       },
     };

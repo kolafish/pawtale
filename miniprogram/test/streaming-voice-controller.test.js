@@ -86,6 +86,26 @@ test("StreamingVoiceController replaces the previous client and ignores stale ca
   assert.deepEqual(partials, ["second:new"]);
 });
 
+test("StreamingVoiceController forwards diagnostics and drops a closed socket client", async () => {
+  const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
+  const events = [];
+  const statuses = [];
+  const controller = new StreamingVoiceController();
+
+  await controller.connect(connectOptions({
+    onStatus: (status) => statuses.push(status),
+    onClientEvent: (event) => events.push(event),
+  }));
+  const client = clients[0];
+  client.options.callbacks.onClientEvent({ type: "socket_close", frameCount: 0, audioBytesSent: 0 });
+  client.options.callbacks.onStatus("closed");
+
+  assert.deepEqual(events, [{ type: "socket_close", frameCount: 0, audioBytesSent: 0 }]);
+  assert.deepEqual(statuses, ["closed"]);
+  assert.equal(controller.hasClient(), false);
+  assert.equal(controller.startRecording(), false);
+});
+
 test("StreamingVoiceController proxies recording, auto-stop, and close to the current client", async () => {
   const { StreamingVoiceController, clients } = loadControllerWithFakeClient();
   const controller = new StreamingVoiceController();

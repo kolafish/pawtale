@@ -10,7 +10,9 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable, Literal, Protocol
+
+from starlette.websockets import WebSocketDisconnect
 
 from app.domain.memoir.types import MemoirSpeakerRole
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
@@ -30,7 +32,8 @@ class VoiceGatewayClient(Protocol):
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
 SessionStartHandler = Callable[[], Awaitable[None]]
 TurnStartHandler = Callable[["VoiceGatewayTurnContext"], Awaitable[None]]
-SessionStopHandler = Callable[[str | None], Awaitable[None]]
+VoiceGatewayStopReason = Literal["client_stop", "transport_closed", "terminal_error"]
+SessionStopHandler = Callable[[str | None, VoiceGatewayStopReason], Awaitable[None]]
 AudioFrameHandler = Callable[[bytes], Awaitable[None]]
 ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
@@ -100,31 +103,44 @@ class VoiceGatewaySession:
         self._log_diagnostic("session.ready")
         await self.client.send_json(self._event("session.ready"))
         stop_error: str | None = None
+        stop_reason: VoiceGatewayStopReason = "client_stop"
         try:
             while not self._terminal_stop.is_set():
                 message = await self._receive_next_message()
                 if message is None:
                     stop_error = self._terminal_error
+                    stop_reason = "terminal_error"
                     break
                 should_stop = await self._handle_client_message(message)
                 if should_stop:
                     break
         except Exception as exc:
-            stop_error = str(exc)
-            self._state = VoiceGatewayState.FAILED
-            with contextlib.suppress(Exception):
-                await self._send_error(stop_error)
+            if _is_client_transport_disconnect(exc):
+                stop_reason = "transport_closed"
+                self._log_diagnostic(
+                    "client.transport_closed",
+                    close_code=getattr(exc, "code", None),
+                )
+            else:
+                stop_error = str(exc)
+                stop_reason = "terminal_error"
+                self._state = VoiceGatewayState.FAILED
+                with contextlib.suppress(Exception):
+                    await self._send_error(stop_error)
         finally:
             stop_error = stop_error or self._terminal_error
+            if stop_error:
+                stop_reason = "terminal_error"
             await self._shutdown()
             self._state = VoiceGatewayState.FAILED if stop_error else VoiceGatewayState.STOPPED
             self._log_diagnostic(
                 "session.stopping",
                 error=stop_error or "",
                 status="failed" if stop_error else "stopped",
+                stop_reason=stop_reason,
             )
             if self.on_stop:
-                await self.on_stop(stop_error)
+                await self.on_stop(stop_error, stop_reason)
             with contextlib.suppress(Exception):
                 await self.client.send_json(
                     self._event(
@@ -498,3 +514,7 @@ def _is_asr_provider_no_status_close(exc: Exception) -> bool:
             continue
     text = str(exc).lower()
     return "no_status_rcvd" in text or "closecode.no_status_rcvd" in text
+
+
+def _is_client_transport_disconnect(exc: Exception) -> bool:
+    return isinstance(exc, WebSocketDisconnect)
