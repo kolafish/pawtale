@@ -757,11 +757,14 @@ def _optimized_pdf_image_source(command: PDFImageCommand) -> str | ImageReader:
     max_width = max(1, round(command.width * PDF_EMBEDDED_IMAGE_DPI / 72))
     max_height = max(1, round(command.height * PDF_EMBEDDED_IMAGE_DPI / 72))
     with Image.open(command.path) as original:
+        source_format = (original.format or "").upper()
         with ImageOps.exif_transpose(original) as source:
-            if source.width <= max_width and source.height <= max_height:
+            within_print_size = source.width <= max_width and source.height <= max_height
+            if within_print_size and source_format in {"JPEG", "JPG"}:
                 return str(command.path)
 
-            source.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            if not within_print_size:
+                source.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
             image = source.convert("RGBA")
             background = Image.new("RGB", image.size, "white")
             background.paste(image, mask=image.getchannel("A"))

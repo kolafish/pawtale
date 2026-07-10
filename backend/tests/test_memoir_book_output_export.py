@@ -36,16 +36,21 @@ EXPECTED_PDF_COVER_STYLES = {
 }
 
 
-def test_pdf_renderer_downsamples_images_to_print_resolution(tmp_path):
-    image_path = tmp_path / "large-illustration.png"
-    Image.new("RGB", (2848, 1600), "#6f7f72").save(image_path)
+def test_pdf_renderer_reencodes_png_and_downsamples_to_print_resolution(tmp_path):
+    cases = [
+        ((1280, 720), (1280, 720)),
+        ((2848, 1600), (1350, 758)),
+    ]
+    for index, (source_size, expected_size) in enumerate(cases):
+        image_path = tmp_path / f"illustration-{index}.png"
+        Image.new("RGB", source_size, "#6f7f72").save(image_path)
 
-    source = _optimized_pdf_image_source(
-        PDFImageCommand(path=image_path, x=0, y=0, width=324, height=220)
-    )
+        source = _optimized_pdf_image_source(
+            PDFImageCommand(path=image_path, x=0, y=0, width=324, height=220)
+        )
 
-    assert isinstance(source, ImageReader)
-    assert source.getSize() == (1350, 758)
+        assert isinstance(source, ImageReader)
+        assert source.getSize() == expected_size
 
 
 def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) -> dict:
