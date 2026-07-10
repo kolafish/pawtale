@@ -1,4 +1,4 @@
-import { FileAudio, ListTree, Loader2, NotebookPen } from 'lucide-react';
+import { BookMarked, FileAudio, ListTree, Loader2, NotebookPen } from 'lucide-react';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import type { Project } from '../../types';
@@ -12,6 +12,9 @@ const MemoirChapterWorkspace = lazy(async () => ({
 }));
 const MemoirChapterDraftWorkspace = lazy(async () => ({
   default: (await import('../memoir/MemoirChapterDraftWorkspace')).MemoirChapterDraftWorkspace,
+}));
+const MemoirBookWorkspace = lazy(async () => ({
+  default: (await import('../memoir/MemoirBookWorkspace')).MemoirBookWorkspace,
 }));
 
 interface MemoirWorkspaceProps {
@@ -39,6 +42,14 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   });
+
+  const openDrafts = (chapterId?: string) => {
+    if (!changeView('drafts')) return;
+    const url = new URL(window.location.href);
+    if (chapterId) url.searchParams.set('chapter', chapterId);
+    else url.searchParams.delete('chapter');
+    window.history.replaceState(window.history.state, '', url);
+  };
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-[#f7f8f7] text-[#202824] antialiased">
@@ -87,6 +98,13 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
               onUnsavedChange={setHasUnsavedChanges}
               onOpenChapters={() => changeView('chapters')}
             />
+          ) : view === 'book' ? (
+            <MemoirBookWorkspace
+              project={project}
+              onUnsavedChange={setHasUnsavedChanges}
+              onOpenChapters={() => changeView('chapters')}
+              onOpenDrafts={openDrafts}
+            />
           ) : (
             <MemoirMaterialWorkspace
               project={project}
@@ -99,18 +117,19 @@ export function MemoirWorkspace({ project }: MemoirWorkspaceProps) {
   );
 }
 
-type MemoirWorkspaceView = 'materials' | 'chapters' | 'drafts';
+type MemoirWorkspaceView = 'materials' | 'chapters' | 'drafts' | 'book';
 
 const WORKSPACE_VIEWS = [
   { value: 'materials' as const, label: '素材校对', icon: FileAudio },
   { value: 'chapters' as const, label: '章节目录', icon: ListTree },
   { value: 'drafts' as const, label: '章节稿', icon: NotebookPen },
+  { value: 'book' as const, label: '全书', icon: BookMarked },
 ];
 
 function initialView(): MemoirWorkspaceView {
   if (typeof window === 'undefined') return 'materials';
   const view = new URL(window.location.href).searchParams.get('view');
-  if (view === 'chapters' || view === 'drafts') return view;
+  if (view === 'chapters' || view === 'drafts' || view === 'book') return view;
   return 'materials';
 }
 

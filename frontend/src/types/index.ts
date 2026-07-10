@@ -659,11 +659,129 @@ export interface MemoirBookChapterDraft {
   updated_at: string;
 }
 
-export interface MemoirBookDraftEditorData {
+export type MemoirBookCoverStyle =
+  | 'classic_plain'
+  | 'warm_gray'
+  | 'dark_album'
+  | 'moonlit_courtyard'
+  | 'navy_gilt';
+
+export interface MemoirBookOutputTableOfContentsItem {
+  chapter_id: string;
+  index: number;
+  title: string;
+  char_count: number;
+  source_count: number;
+}
+
+export interface MemoirBookOutputStructuredChapter extends MemoirBookOutputTableOfContentsItem {
+  content: string;
+  draft_version_id?: string | null;
+  draft_version?: number | null;
+}
+
+export interface MemoirBookOutputStructuredContent {
+  title: string;
+  chapter_count: number;
+  char_count: number;
+  table_of_contents: MemoirBookOutputTableOfContentsItem[];
+  chapters: MemoirBookOutputStructuredChapter[];
+}
+
+export interface MemoirBookManuscriptSection {
+  kind: string;
+  title: string;
+  content: string;
+  enabled: boolean;
+}
+
+export interface MemoirBookManuscriptQuote {
+  text: string;
+  source_ref_ids: string[];
+  source: string;
+}
+
+export interface MemoirBookManuscriptChapter {
+  chapter_id: string;
+  index: number;
+  title: string;
+  subtitle: string;
+  intro: string;
+  content: string;
+  pull_quotes: MemoirBookManuscriptQuote[];
+}
+
+export interface MemoirBookManuscript {
+  schema_version: number;
+  profile: {
+    template: string;
+    title: string;
+    subtitle: string;
+    narrator_name: string;
+    prepared_by: string;
+  };
+  front_matter: MemoirBookManuscriptSection[];
+  table_of_contents: MemoirBookOutputTableOfContentsItem[];
+  chapters: MemoirBookManuscriptChapter[];
+  back_matter: {
+    afterword: MemoirBookManuscriptSection;
+  };
+  render_settings: {
+    cover_style: MemoirBookCoverStyle;
+    back_cover_quote: string;
+  };
+}
+
+export interface MemoirBookOutputVersion {
+  id: string;
+  output_id: string;
+  project_id: string;
+  plan_id: string;
+  version: number;
+  content: string;
+  structured_content?: MemoirBookOutputStructuredContent | null;
+  manuscript?: MemoirBookManuscript | null;
+  created_by: string;
+  created_at: string;
+}
+
+export interface MemoirBookOutput {
+  id: string;
+  project_id: string;
+  plan_id: string;
+  title: string;
+  status: string;
+  metadata_json: Record<string, unknown>;
+  is_stale: boolean;
+  stale_chapter_titles: string[];
+  latest_version?: MemoirBookOutputVersion | null;
+  versions: MemoirBookOutputVersion[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookEditorData {
   project_id: string;
   plan?: MemoirBookPlan | null;
   chapter_source_editor: MemoirChapterSourceEditor;
   chapter_drafts: MemoirBookChapterDraft[];
+  output?: MemoirBookOutput | null;
+}
+
+export interface MemoirBookOutputForm {
+  title: string;
+  subtitle: string;
+  narrator_name: string;
+  prepared_by: string;
+  preface: string;
+  afterword: string;
+  back_cover_quote: string;
+  cover_style: MemoirBookCoverStyle;
+}
+
+export interface MemoirBookExportDownload {
+  blob: Blob;
+  filename?: string;
 }
 
 export interface MemoirInterviewEditorAnswer {
