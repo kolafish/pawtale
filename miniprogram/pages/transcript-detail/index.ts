@@ -38,12 +38,14 @@ import {
   sourceAssignmentRequest,
   transcriptChapterAssignOptions,
   transcriptChapterMoveOptions,
+  transcriptNeedsBookPlanConfirmation,
   transcriptSourceMoveRequest,
 } from "../../services/memoir-book-source-actions";
 import { ApiError } from "../../services/request";
 import {
   isAuthError,
   routeAuthError,
+  switchToBook,
   switchToMe,
 } from "../../services/navigation";
 import {
@@ -100,6 +102,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canRecoverTranscription: boolean;
   bookInclusionText: string;
   isIncludedInBook: boolean;
+  needsBookPlanConfirmation: boolean;
   canAssignChapterSource: boolean;
   chapterAssignOptions: ChapterPickerOption[];
   canMoveChapterSource: boolean;
@@ -552,6 +555,8 @@ function toViewItem(
   );
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
+  const needsBookPlanConfirmation = !canRecoverTranscription
+    && transcriptNeedsBookPlanConfirmation(item, bookPlan);
   const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
   const chapterMoveOptions = canRecoverTranscription ? [] : transcriptChapterMoveOptions(item, bookPlan);
   const createdAtText = transcriptCreatedAtText(item);
@@ -573,8 +578,11 @@ function toViewItem(
       ? "pending"
       : (isIncludedInBook ? "included" : ""),
     canRecoverTranscription,
-    bookInclusionText: canRecoverTranscription ? "等待转写后再入章" : transcriptBookInclusionText(item),
+    bookInclusionText: canRecoverTranscription
+      ? "等待转写后再入章"
+      : (needsBookPlanConfirmation ? "先确认章节结构，再归入章节" : transcriptBookInclusionText(item)),
     isIncludedInBook,
+    needsBookPlanConfirmation,
     canAssignChapterSource: chapterAssignOptions.length > 0,
     chapterAssignOptions,
     canMoveChapterSource: chapterMoveOptions.length > 0,
@@ -1917,6 +1925,10 @@ definePage<TranscriptDetailData>()({
 
   openLogin() {
     switchToMe();
+  },
+
+  openBook() {
+    switchToBook();
   },
 
   onUnload() {

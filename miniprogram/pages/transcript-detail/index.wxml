@@ -451,6 +451,13 @@
         <text class="section-count">{{item.isIncludedInBook ? "已入章" : "未入章"}}</text>
       </view>
       <view class="actions-row">
+        <button
+          wx:if="{{item.needsBookPlanConfirmation}}"
+          class="primary-button"
+          bindtap="openBook"
+        >
+          先确认章节
+        </button>
         <picker
           wx:if="{{item.canAssignChapterSource}}"
           range="{{item.chapterAssignOptions}}"

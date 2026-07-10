@@ -1254,7 +1254,9 @@ export function chapterCollectionData(
   return {
     chapters: decorated,
     ...chapterStateData(decorated),
-    chapterPickerOptions: buildSourceActionPickerOptions(decorated, stage === "drafting"),
+    chapterPickerOptions: stage === "drafting"
+      ? buildSourceActionPickerOptions(decorated, true)
+      : [],
   };
 }
 

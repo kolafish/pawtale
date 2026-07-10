@@ -7,6 +7,7 @@ const {
   sourceAssignmentRequest,
   transcriptChapterAssignOptions,
   transcriptChapterMoveOptions,
+  transcriptNeedsBookPlanConfirmation,
   transcriptSourceMoveRequest,
 } = require("../services/memoir-book-source-actions.ts");
 
@@ -93,6 +94,18 @@ test("transcriptChapterAssignOptions lists chapters only for uncovered transcrip
     ],
   );
   assert.deepEqual(transcriptChapterAssignOptions(transcript("utterance-2", true), plan()), []);
+});
+
+test("transcript chapter actions require a confirmed book plan", () => {
+  const draftPlan = { ...plan(), status: "draft" };
+  const uncovered = transcript("utterance-new");
+  const included = transcript("utterance-2", true);
+
+  assert.deepEqual(transcriptChapterAssignOptions(uncovered, draftPlan), []);
+  assert.deepEqual(transcriptChapterMoveOptions(included, draftPlan), []);
+  assert.equal(transcriptNeedsBookPlanConfirmation(uncovered, draftPlan), true);
+  assert.equal(transcriptNeedsBookPlanConfirmation(included, draftPlan), false);
+  assert.equal(transcriptNeedsBookPlanConfirmation(uncovered, plan()), false);
 });
 
 test("transcript source move helpers build requests and enforce source chapter boundaries", () => {

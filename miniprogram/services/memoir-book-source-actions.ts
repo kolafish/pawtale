@@ -68,16 +68,30 @@ export function transcriptChapterAssignOptions(
   item: MemoirVoiceTranscriptItem,
   plan: MemoirBookPlan | null,
 ): ChapterPickerOption[] {
-  if (item.is_included_in_book || item.included_chapters?.length) {
+  if (plan?.status !== "confirmed" || item.is_included_in_book || item.included_chapters?.length) {
     return [];
   }
   return planChapterPickerOptions(plan);
+}
+
+export function transcriptNeedsBookPlanConfirmation(
+  item: MemoirVoiceTranscriptItem,
+  plan: MemoirBookPlan | null,
+): boolean {
+  return Boolean(
+    plan?.status === "draft"
+    && !item.is_included_in_book
+    && !item.included_chapters?.length,
+  );
 }
 
 export function transcriptChapterMoveOptions(
   item: MemoirVoiceTranscriptItem,
   plan: MemoirBookPlan | null,
 ): ChapterPickerOption[] {
+  if (plan?.status !== "confirmed") {
+    return [];
+  }
   const sourceChapters = transcriptSourceChapters(item, plan);
   if (sourceChapters.length !== 1) {
     return [];

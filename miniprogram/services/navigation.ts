@@ -1,6 +1,7 @@
 import { ApiError } from "./request";
 
 export const HOME_PAGE_URL = "/pages/home/index";
+export const BOOK_PAGE_URL = "/pages/book/index";
 export const LOGIN_PAGE_URL = "/pages/login/index";
 export const ME_PAGE_URL = "/pages/me/index";
 
@@ -12,6 +13,10 @@ export function isAuthError(error: unknown): boolean {
 
 export function switchToHome(): void {
   wx.switchTab({ url: HOME_PAGE_URL });
+}
+
+export function switchToBook(): void {
+  wx.switchTab({ url: BOOK_PAGE_URL });
 }
 
 export function relaunchHome(): void {

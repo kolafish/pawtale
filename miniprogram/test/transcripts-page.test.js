@@ -562,6 +562,57 @@ test("transcripts page assigns an uncovered source to a chapter", async () => {
   delete global.wx;
 });
 
+test("transcripts page routes draft plan assignments to book confirmation", async () => {
+  const assignments = [];
+  const navigations = [];
+  global.wx = {
+    switchTab(options) {
+      navigations.push(options);
+    },
+  };
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      getMemoirBookPlan: async () => ({ ...sampleBookPlan(), status: "draft" }),
+      listMemoirVoiceTranscripts: async () => ({
+        items: [sampleTranscript("utterance-new")],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+      assignMemoirBookSources: async (projectId, data) => {
+        assignments.push({ projectId, data });
+        return sampleBookPlan();
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(context.data.items[0].canAssignChapterSource, false);
+  assert.equal(context.data.items[0].needsBookPlanConfirmation, true);
+  assert.equal(context.data.items[0].bookInclusionText, "先确认章节结构，再归入章节");
+  assert.deepEqual(context.data.items[0].chapterAssignOptions, []);
+
+  await page.assignTranscriptChapter.call(context, {
+    currentTarget: { dataset: { id: "utterance-new" } },
+    detail: { value: 0 },
+  });
+  page.openBook.call(context);
+
+  assert.deepEqual(assignments, []);
+  assert.deepEqual(navigations, [{ url: "/pages/book/index" }]);
+  delete global.wx;
+});
+
 test("transcripts page searches records and clears back to the full list", async () => {
   const calls = [];
   const { page } = loadTranscriptsPage({

@@ -1424,6 +1424,24 @@ test("book page confirms chapters with trimmed user edits and original source re
   delete global.wx;
 });
 
+test("book page hides source assignment options until the plan is confirmed", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page, {
+    projectId: "project-1",
+    projectTitle: "外婆回忆录",
+  });
+
+  page.applyPlan.call(context, samplePlan("draft"));
+  assert.deepEqual(context.data.chapterPickerOptions, []);
+
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  assert.deepEqual(context.data.chapterPickerOptions.map((option) => option.label), [
+    "第 1 章 外婆家的童年",
+    "第 2 章 第一次离家",
+    "作为新章",
+  ]);
+});
+
 test("book page assigns uncovered transcript to selected chapter", async () => {
   const calls = [];
   global.wx = { showToast() {}, switchTab() {} };
