@@ -27,6 +27,8 @@ import type {
   MemoirChapterSourceEditor,
   MemoirBookPlan,
   MemoirBookPlanStructureCommand,
+  MemoirBookChapterDraft,
+  MemoirBookDraftEditorData,
   MemoirBatchTranscriptCleanupConfirmResponse,
   MemoirBatchTranscriptCleanupPreviewResponse,
   MemoirDialectGlossaryEntry,
@@ -344,6 +346,10 @@ export const memoirChapterSourceEditorApi = {
 };
 
 export const memoirBookEditorApi = {
+  get: (projectId: string) =>
+    api.get<MemoirBookDraftEditorData>(
+      `/memoir/projects/${projectId}/book-editor`,
+    ).then(r => r.data),
   generatePlan: (projectId: string, aiModel?: string) =>
     api.post<MemoirBookPlan>(
       `/memoir/projects/${projectId}/book-editor/plan/generate`,
@@ -371,6 +377,27 @@ export const memoirBookEditorApi = {
     api.patch<MemoirBookPlan>(
       `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/title`,
       { title },
+    ).then(r => r.data),
+  generateChapterDraft: (
+    projectId: string,
+    chapterId: string,
+    options: { aiModel?: string; feedback?: string; forceRegenerate?: boolean } = {},
+  ) => api.post<MemoirBookChapterDraft>(
+    `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft/generate`,
+    {
+      ai_model: options.aiModel,
+      feedback: options.feedback,
+      force_regenerate: options.forceRegenerate ?? false,
+    },
+  ).then(r => r.data),
+  updateChapterDraft: (projectId: string, chapterId: string, content: string) =>
+    api.patch<MemoirBookChapterDraft>(
+      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft`,
+      { content },
+    ).then(r => r.data),
+  confirmChapterDraft: (projectId: string, chapterId: string) =>
+    api.post<MemoirBookChapterDraft>(
+      `/memoir/projects/${projectId}/book-editor/chapters/${chapterId}/draft/confirm`,
     ).then(r => r.data),
 };
 

@@ -629,6 +629,43 @@ export interface MemoirBookPlanStructureCommand {
   utterance_ids?: string[];
 }
 
+export type MemoirBookChapterDraftStatus = 'draft' | 'confirmed';
+
+export interface MemoirBookChapterDraftVersion {
+  id: string;
+  draft_id: string;
+  project_id: string;
+  chapter_id: string;
+  version: number;
+  content: string;
+  created_by: string;
+  model?: string | null;
+  prompt_snapshot: string;
+  feedback?: string | null;
+  created_at: string;
+}
+
+export interface MemoirBookChapterDraft {
+  id: string;
+  project_id: string;
+  chapter_id: string;
+  status: MemoirBookChapterDraftStatus;
+  metadata_json: Record<string, unknown>;
+  pending_source_count: number;
+  removed_source_count: number;
+  latest_version?: MemoirBookChapterDraftVersion | null;
+  versions: MemoirBookChapterDraftVersion[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookDraftEditorData {
+  project_id: string;
+  plan?: MemoirBookPlan | null;
+  chapter_source_editor: MemoirChapterSourceEditor;
+  chapter_drafts: MemoirBookChapterDraft[];
+}
+
 export interface MemoirInterviewEditorAnswer {
   id: string;
   message_id: string;
