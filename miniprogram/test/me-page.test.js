@@ -87,6 +87,9 @@ function loadMePage({
     ...aiModelExports,
   });
   mockModule("../services/accessibility-settings.ts", {
+    accessibilityPageClass: (baseClass, largeTextEnabled) => (
+      largeTextEnabled ? `${baseClass} large-text` : baseClass
+    ),
     readAccessibilitySettings: () => ({
       largeTextEnabled: false,
       autoBargeInEnabled: true,
@@ -167,15 +170,18 @@ test("me saves local accessibility and voice environment switches", () => {
   const context = pageContext(page);
 
   page.refreshAccessibilitySettings.call(context);
+  assert.equal(context.data.pageClass, "me-page large-text");
   assert.equal(context.data.largeTextEnabled, true);
   assert.equal(context.data.autoBargeInEnabled, false);
 
   page.changeLargeText.call(context, { detail: { value: false } });
+  assert.equal(context.data.pageClass, "me-page");
   page.changeAutoBargeIn.call(context, { detail: { value: true } });
 
   assert.deepEqual(savedLargeText, [false]);
   assert.deepEqual(savedBargeIn, [true]);
   assert.equal(context.data.largeTextEnabled, true);
+  assert.equal(context.data.pageClass, "me-page large-text");
   assert.equal(context.data.autoBargeInEnabled, true);
   assert.deepEqual(toasts, ["大字模式已关闭", "自动检测已打开"]);
   delete global.wx;

@@ -408,3 +408,69 @@
 .bottom-spacer {
   height: 20rpx;
 }
+
+.transcripts-page.large-text {
+  padding: 40rpx 24rpx 120rpx;
+}
+
+.transcripts-page.large-text .page-title {
+  font-size: 48rpx;
+  line-height: 64rpx;
+}
+
+.transcripts-page.large-text .page-meta,
+.transcripts-page.large-text .search-summary,
+.transcripts-page.large-text .record-meta {
+  font-size: 30rpx;
+  line-height: 1.45;
+}
+
+.transcripts-page.large-text .search-box {
+  min-height: 96rpx;
+}
+
+.transcripts-page.large-text .search-input {
+  height: 92rpx;
+  font-size: 32rpx;
+  line-height: 92rpx;
+}
+
+.transcripts-page.large-text .search-clear,
+.transcripts-page.large-text .voice-search-button {
+  min-height: 48px;
+  font-size: 28rpx;
+}
+
+.transcripts-page.large-text .search-chip,
+.transcripts-page.large-text .book-status,
+.transcripts-page.large-text .transcription-status,
+.transcripts-page.large-text .record-count {
+  font-size: 28rpx;
+  line-height: 40rpx;
+}
+
+.transcripts-page.large-text .transcript-card {
+  padding: 32rpx 28rpx;
+}
+
+.transcripts-page.large-text .record-title,
+.transcripts-page.large-text .empty-title {
+  font-size: 40rpx;
+  line-height: 54rpx;
+}
+
+.transcripts-page.large-text .summary-preview,
+.transcripts-page.large-text .empty-copy,
+.transcripts-page.large-text .empty-panel {
+  font-size: 34rpx;
+  line-height: 1.65;
+}
+
+.transcripts-page.large-text .small-primary,
+.transcripts-page.large-text .load-more,
+.transcripts-page.large-text .picker-action,
+.transcripts-page.large-text .login-button {
+  min-height: 48px;
+  font-size: 30rpx;
+  line-height: 1.35;
+}

@@ -56,3 +56,10 @@ test("reads and saves accessibility settings locally", () => {
 
   delete global.wx;
 });
+
+test("builds a stable page class for large text mode", () => {
+  const { accessibilityPageClass } = require("../services/accessibility-settings.ts");
+
+  assert.equal(accessibilityPageClass("book-page", false), "book-page");
+  assert.equal(accessibilityPageClass("book-page", true), "book-page large-text");
+});

@@ -1,4 +1,4 @@
-<view class="me-page">
+<view class="{{pageClass}}">
   <view class="header">
     <text class="page-title">我的</text>
     <text class="page-subtitle">账号、回忆录和语音访谈设置</text>
@@ -12,7 +12,7 @@
       <view class="switch-row">
         <view class="switch-copy">
           <text class="action-title">大字模式</text>
-          <text class="action-meta">打开后，首页和语音访谈页会使用更大的字号。</text>
+          <text class="action-meta">打开后，小程序主要页面会使用更大的字号和按钮。</text>
         </view>
         <switch
           checked="{{largeTextEnabled}}"

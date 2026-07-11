@@ -7,6 +7,7 @@ import type {
   MemoirVoiceSearchQueryParseResponse,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
+import { accessibilityPageClass } from "../../services/accessibility-settings";
 import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -103,6 +104,7 @@ interface TranscriptItemView {
 }
 
 interface TranscriptsData {
+  pageClass: string;
   loading: boolean;
   needsLogin: boolean;
   recoveringId: string;
@@ -465,6 +467,7 @@ definePage<TranscriptsData>()({
   searchDebounceTimer: null as number | null,
 
   data: {
+    pageClass: "transcripts-page",
     loading: false,
     needsLogin: false,
     recoveringId: "",
@@ -504,6 +507,7 @@ definePage<TranscriptsData>()({
   },
 
   async onShow() {
+    this.setData({ pageClass: accessibilityPageClass("transcripts-page") });
     await this.loadTranscripts(true);
     await this.revealStoredTranscriptTarget();
   },

@@ -1,4 +1,4 @@
-<view class="book-page">
+<view class="{{pageClass}}">
   <view class="top-row">
     <view class="title-block">
       <text class="page-title">书稿</text>

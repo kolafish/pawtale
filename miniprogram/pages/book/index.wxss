@@ -1707,3 +1707,128 @@
 .bottom-spacer {
   height: 20rpx;
 }
+
+.book-page.large-text {
+  padding: 40rpx 24rpx 120rpx;
+}
+
+.book-page.large-text .page-title {
+  font-size: 50rpx;
+  line-height: 66rpx;
+}
+
+.book-page.large-text .page-meta,
+.book-page.large-text .status-meta,
+.book-page.large-text .progress-note,
+.book-page.large-text .automation-meta,
+.book-page.large-text .coverage-meta,
+.book-page.large-text .chapter-summary-meta,
+.book-page.large-text .image-assets-entry-meta,
+.book-page.large-text .image-assets-entry-note {
+  font-size: 30rpx;
+  line-height: 1.5;
+}
+
+.book-page.large-text .book-share-button {
+  flex-basis: 184rpx;
+  width: 184rpx;
+  min-height: 48px;
+  font-size: 30rpx;
+}
+
+.book-page.large-text .status-title,
+.book-page.large-text .automation-title,
+.book-page.large-text .coverage-title,
+.book-page.large-text .section-title,
+.book-page.large-text .chapter-summary-title,
+.book-page.large-text .image-assets-entry-title {
+  font-size: 38rpx;
+  line-height: 1.45;
+}
+
+.book-page.large-text .automation-item-title,
+.book-page.large-text .chapter-order-title,
+.book-page.large-text .book-voice-title {
+  font-size: 34rpx;
+  line-height: 1.45;
+}
+
+.book-page.large-text .automation-count,
+.book-page.large-text .automation-error,
+.book-page.large-text .automation-item-status,
+.book-page.large-text .automation-item-summary,
+.book-page.large-text .automation-item-detail,
+.book-page.large-text .automation-item-suggestion,
+.book-page.large-text .automation-suggestion-label,
+.book-page.large-text .automation-suggestion-body,
+.book-page.large-text .automation-suggestion-chapter,
+.book-page.large-text .automation-detail-toggle,
+.book-page.large-text .automation-detail-title,
+.book-page.large-text .automation-detail-chapter,
+.book-page.large-text .automation-detail-preview,
+.book-page.large-text .automation-detail-meta,
+.book-page.large-text .automation-item-meta,
+.book-page.large-text .automation-ack,
+.book-page.large-text .coverage-count,
+.book-page.large-text .coverage-source-time,
+.book-page.large-text .coverage-assign,
+.book-page.large-text .coverage-link,
+.book-page.large-text .coverage-empty,
+.book-page.large-text .status-pill,
+.book-page.large-text .source-count,
+.book-page.large-text .draft-status,
+.book-page.large-text .draft-version,
+.book-page.large-text .draft-count,
+.book-page.large-text .section-count,
+.book-page.large-text .chapter-order-index,
+.book-page.large-text .chapter-order-edit,
+.book-page.large-text .chapter-summary-status,
+.book-page.large-text .chapter-summary-status-hint,
+.book-page.large-text .chapter-summary-error,
+.book-page.large-text .chapter-audio-status,
+.book-page.large-text .chapter-index,
+.book-page.large-text .source-ref-label,
+.book-page.large-text .source-split-toggle,
+.book-page.large-text .draft-pending,
+.book-page.large-text .image-assets-entry-count {
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.book-page.large-text .coverage-source-text,
+.book-page.large-text .source-preview,
+.book-page.large-text .source-ref-text,
+.book-page.large-text .guest-steps,
+.book-page.large-text .book-voice-hint,
+.book-page.large-text .book-voice-status,
+.book-page.large-text .book-voice-message-text,
+.book-page.large-text .book-voice-command-text,
+.book-page.large-text .book-voice-command-summary {
+  font-size: 32rpx;
+  line-height: 1.6;
+}
+
+.book-page.large-text .field-label,
+.book-page.large-text .book-voice-meter-text,
+.book-page.large-text .book-voice-message-role,
+.book-page.large-text .book-voice-command-state,
+.book-page.large-text .book-voice-command-panel-title {
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.book-page.large-text .primary-button,
+.book-page.large-text .ghost-button,
+.book-page.large-text .danger-button,
+.book-page.large-text .section-head-action,
+.book-page.large-text .source-toggle-button,
+.book-page.large-text .structure-button,
+.book-page.large-text .book-voice-button,
+.book-page.large-text .book-voice-command-button,
+.book-page.large-text .coverage-assign,
+.book-page.large-text .coverage-link,
+.book-page.large-text .image-assets-entry-action {
+  min-height: 48px;
+  font-size: 30rpx;
+  line-height: 1.35;
+}
