@@ -12,6 +12,8 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas as pdf_canvas
 
+from app.services.memoir.branding import BRAND_NAME
+
 PDF_SANS_FONT_NAME = "MemoirNotoSansSC"
 PDF_SERIF_FONT_NAME = "MemoirNotoSerifSC"
 PDF_SERIF_BOLD_FONT_NAME = "MemoirNotoSerifSCBold"
@@ -766,6 +768,16 @@ def _optimized_pdf_image_source(command: PDFImageCommand) -> str | ImageReader:
             if not within_print_size:
                 source.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
             image = source.convert("RGBA")
+            if image.getchannel("A").getextrema()[0] < 255:
+                output = BytesIO()
+                image.save(
+                    output,
+                    format="PNG",
+                    optimize=True,
+                    dpi=(PDF_EMBEDDED_IMAGE_DPI, PDF_EMBEDDED_IMAGE_DPI),
+                )
+                output.seek(0)
+                return ImageReader(output)
             background = Image.new("RGB", image.size, "white")
             background.paste(image, mask=image.getchannel("A"))
 
@@ -809,11 +821,11 @@ def _render_pdf_pages(
     pdf.setAuthor(metadata_author or "家人整理")
     pdf.setSubject("家庭回忆录")
     pdf.setKeywords("回忆录, 口述史, 家庭")
-    pdf.setCreator("Pawtale")
+    pdf.setCreator(BRAND_NAME)
     if hasattr(pdf, "setProducer"):
-        pdf.setProducer("Pawtale")
+        pdf.setProducer(BRAND_NAME)
     elif hasattr(pdf, "_doc") and hasattr(pdf._doc, "info"):
-        pdf._doc.info.producer = "Pawtale"
+        pdf._doc.info.producer = BRAND_NAME
     image_sources: dict[tuple[Path, int, int], str | ImageReader] = {}
     for page_number, page in enumerate(pages, start=1):
         if page.background_color:
@@ -837,16 +849,20 @@ def _render_pdf_pages(
             if image_source is None:
                 image_source = _optimized_pdf_image_source(image)
                 image_sources[image_key] = image_source
-            pdf.drawImage(
-                image_source,
-                image.x,
-                image.y,
-                width=image.width,
-                height=image.height,
-                preserveAspectRatio=True,
-                anchor="c",
-                mask="auto",
-            )
+            pdf.saveState()
+            try:
+                pdf.drawImage(
+                    image_source,
+                    image.x,
+                    image.y,
+                    width=image.width,
+                    height=image.height,
+                    preserveAspectRatio=True,
+                    anchor="c",
+                    mask="auto",
+                )
+            finally:
+                pdf.restoreState()
         if page.anchor:
             pdf.bookmarkPage(page.anchor)
             if page.outline_title:

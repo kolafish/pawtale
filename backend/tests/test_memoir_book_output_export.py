@@ -25,6 +25,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
+from app.services.memoir.branding import BRAND_ATTRIBUTION
 
 
 EXPECTED_PDF_COVER_STYLES = {
@@ -51,6 +52,23 @@ def test_pdf_renderer_reencodes_png_and_downsamples_to_print_resolution(tmp_path
 
         assert isinstance(source, ImageReader)
         assert source.getSize() == expected_size
+
+
+def test_pdf_renderer_preserves_transparency_for_brand_assets(tmp_path):
+    image_path = tmp_path / "transparent-logo.png"
+    image = Image.new("RGBA", (320, 80), (0, 0, 0, 0))
+    for x in range(40, 280):
+        for y in range(20, 60):
+            image.putpixel((x, y), (58, 33, 25, 255))
+    image.save(image_path)
+
+    source = _optimized_pdf_image_source(
+        PDFImageCommand(path=image_path, x=0, y=0, width=120, height=30)
+    )
+
+    assert isinstance(source, ImageReader)
+    source.getRGBData()
+    assert source._dataA is not None
 
 
 def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) -> dict:
@@ -144,6 +162,10 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
         for page in chapter_pages
         for command in page.commands
     )
+    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert len(pages[-1].images) == 1
+    assert "-dark-" in pages[-1].images[0].path.name
+    assert "memoir-brand-v1" in pages[-1].images[0].path.name
 
 
 def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
@@ -170,7 +192,9 @@ def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
     assert pages[-1].background_image_path.name == "moonlit_courtyard_back_cover.jpg"
     assert any(command.text == "家庭回忆录" for command in pages[0].commands)
     assert any(command.text == "回望这一生" for command in pages[0].commands)
-    assert any("本书根据口述访谈整理" in command.text for command in pages[-1].commands)
+    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert len(pages[-1].images) == 1
+    assert "-dark-" in pages[-1].images[0].path.name
 
     export = render_book_output_export(
         title="回望这一生",
@@ -209,7 +233,9 @@ def test_navy_gilt_cover_style_uses_system_backgrounds():
     assert pages[-1].background_image_path.name == "navy_gilt_back_cover.jpg"
     assert any(command.text == "家庭回忆录" for command in pages[0].commands)
     assert any(command.text == "回望这一生" for command in pages[0].commands)
-    assert any("本书根据口述访谈整理" in command.text for command in pages[-1].commands)
+    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert len(pages[-1].images) == 1
+    assert "-light-" in pages[-1].images[0].path.name
 
     export = render_book_output_export(
         title="回望这一生",

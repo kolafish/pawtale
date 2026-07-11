@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import tempfile
 
+from app.services.memoir.branding import brand_lockup_file
+
 
 _VIDEO_WIDTH = 1280
 _VIDEO_HEIGHT = 720
@@ -27,6 +29,9 @@ _QUOTE_MIN_FRAGMENT_CHARS = 4
 _QUOTE_STRONG_BREAK_CHARS = "。！？!?；;\n"
 _QUOTE_SOFT_BREAK_CHARS = "，,、"
 _QUOTE_PUNCTUATION_CHARS = "，,、。！？!?；;：“”‘’\"'（）()[]【】《》…—- \t\r\n"
+_BRAND_OVERLAY_WIDTH = 180
+_BRAND_MARGIN_X = 38
+_BRAND_MARGIN_Y = 34
 
 
 @dataclass(frozen=True)
@@ -456,6 +461,25 @@ def _video_filter_argument(subtitle_path: Path, *, has_background_image: bool = 
     return ",".join(filters)
 
 
+def _brand_overlay_filter(video_label: str, *, brand_input_index: int) -> str:
+    return (
+        f"[{video_label}][{brand_input_index}:v]"
+        f"overlay=x=W-w-{_BRAND_MARGIN_X}:y=H-h-{_BRAND_MARGIN_Y}:"
+        "format=auto:shortest=1[vout]"
+    )
+
+
+def _single_background_filter_complex(
+    subtitle_path: Path,
+    *,
+    has_background_image: bool,
+) -> str:
+    return ";".join((
+        f"[0:v]{_video_filter_argument(subtitle_path, has_background_image=has_background_image)}[captioned]",
+        _brand_overlay_filter("captioned", brand_input_index=2),
+    ))
+
+
 def _valid_background_segments(
     request: ShareVideoRenderRequest,
 ) -> list[ShareVideoBackgroundSegment]:
@@ -515,7 +539,8 @@ def _multi_background_filter_complex(
         parts.append(f"{labels}concat=n={len(segments)}:v=1:a=0[concatbg]")
         current_label = "concatbg"
 
-    parts.append(f"[{current_label}]{_subtitle_filter_argument(subtitle_path)}[vout]")
+    parts.append(f"[{current_label}]{_subtitle_filter_argument(subtitle_path)}[captioned]")
+    parts.append(_brand_overlay_filter("captioned", brand_input_index=len(segments) + 1))
     return ";".join(parts)
 
 
@@ -529,6 +554,12 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
         clip_audio_path = tmpdir / "clip.wav"
         temp_video_path = tmpdir / "video.mp4"
         subtitle_path.write_text(_subtitle_file_content(request), encoding="utf-8")
+        brand_path = brand_lockup_file(
+            _BRAND_OVERLAY_WIDTH,
+            variant="light",
+            opacity=0.76,
+            contrast_outline=True,
+        )
 
         audio_input_args = []
         if request.source_audio_mime_type == "audio/pcm":
@@ -567,6 +598,10 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
                 *video_input_args,
                 "-i",
                 str(clip_audio_path),
+                "-loop",
+                "1",
+                "-i",
+                str(brand_path),
                 "-filter_complex",
                 _multi_background_filter_complex(
                     background_segments,
@@ -626,8 +661,19 @@ async def render_share_video_clip(request: ShareVideoRenderRequest) -> None:
             *video_input_args,
             "-i",
             str(clip_audio_path),
-            "-vf",
-            _video_filter_argument(subtitle_path, has_background_image=has_background_image),
+            "-loop",
+            "1",
+            "-i",
+            str(brand_path),
+            "-filter_complex",
+            _single_background_filter_complex(
+                subtitle_path,
+                has_background_image=has_background_image,
+            ),
+            "-map",
+            "[vout]",
+            "-map",
+            "1:a",
             "-c:v",
             "libx264",
             "-preset",
