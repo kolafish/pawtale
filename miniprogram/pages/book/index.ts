@@ -176,6 +176,7 @@ interface BookDataset {
   action?: string;
   direction?: string;
   utteranceId?: string;
+  view?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<BookDataset>;
@@ -199,7 +200,13 @@ const BOOK_VOICE_NO_VOICE_MS = 3500;
 const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
 const BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.75;
 
-type BookPageData = BookHomeData & { pageClass: string };
+type BookWorkspaceView = "chapters" | "tools";
+
+type BookPageData = BookHomeData & {
+  pageClass: string;
+  bookWorkspaceView: BookWorkspaceView;
+  sourceCoverageExpanded: boolean;
+};
 
 definePage<BookPageData>()({
   audioPlayback: new AudioPlaybackController(),
@@ -216,6 +223,8 @@ definePage<BookPageData>()({
 
   data: {
     pageClass: "book-page",
+    bookWorkspaceView: "chapters",
+    sourceCoverageExpanded: false,
     loading: false,
     needsLogin: false,
     generatingPlan: false,
@@ -807,6 +816,18 @@ definePage<BookPageData>()({
     }
     const action = datasetString(event, "action") || "preview";
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
+  },
+
+  changeBookWorkspaceView(event: DatasetEvent) {
+    const view = datasetString(event, "view");
+    if (view !== "chapters" && view !== "tools") {
+      return;
+    }
+    this.setData({ bookWorkspaceView: view });
+  },
+
+  toggleSourceCoverageExpanded() {
+    this.setData({ sourceCoverageExpanded: !this.data.sourceCoverageExpanded });
   },
 
   changeChapterTitle(event: TextInputEvent) {
