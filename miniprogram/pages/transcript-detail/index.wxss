@@ -1048,3 +1048,99 @@
 .bottom-spacer {
   height: 20rpx;
 }
+
+.detail-page.large-text {
+  padding: 40rpx 24rpx 120rpx;
+}
+
+.detail-page.large-text .back-hit {
+  min-width: 48px;
+  min-height: 48px;
+}
+
+.detail-page.large-text .page-title {
+  font-size: 50rpx;
+  line-height: 66rpx;
+}
+
+.detail-page.large-text .page-meta,
+.detail-page.large-text .record-meta,
+.detail-page.large-text .section-hint,
+.detail-page.large-text .offline-asr-detail,
+.detail-page.large-text .offline-asr-error,
+.detail-page.large-text .danger-panel-copy,
+.detail-page.large-text .repair-panel-copy {
+  font-size: 30rpx;
+  line-height: 1.5;
+}
+
+.detail-page.large-text .record-title {
+  font-size: 46rpx;
+  line-height: 1.4;
+}
+
+.detail-page.large-text .section-title,
+.detail-page.large-text .danger-panel-title,
+.detail-page.large-text .repair-panel-title,
+.detail-page.large-text .voice-edit-status-title {
+  font-size: 34rpx;
+  line-height: 1.4;
+}
+
+.detail-page.large-text .section-count,
+.detail-page.large-text .book-status,
+.detail-page.large-text .transcription-notice,
+.detail-page.large-text .playback-time-row,
+.detail-page.large-text .more-actions-toggle {
+  font-size: 28rpx;
+  line-height: 1.45;
+}
+
+.detail-page.large-text .body-text,
+.detail-page.large-text .voice-edit-text,
+.detail-page.large-text .voice-edit-diff-text,
+.detail-page.large-text .share-video-segment-text,
+.detail-page.large-text .share-video-selection-text {
+  font-size: 34rpx;
+  line-height: 1.65;
+}
+
+.detail-page.large-text .transcript-textarea {
+  min-height: 360rpx;
+  font-size: 34rpx;
+  line-height: 1.65;
+}
+
+.detail-page.large-text .primary-button,
+.detail-page.large-text .ghost-button,
+.detail-page.large-text .repair-button,
+.detail-page.large-text .danger-button,
+.detail-page.large-text .text-action-button {
+  min-height: 48px;
+  font-size: 30rpx;
+  line-height: 1.35;
+}
+
+.detail-page.large-text .share-video-state,
+.detail-page.large-text .share-video-error,
+.detail-page.large-text .share-video-background-label,
+.detail-page.large-text .custom-background-status,
+.detail-page.large-text .share-video-job-title,
+.detail-page.large-text .voice-edit-change-text {
+  font-size: 30rpx;
+  line-height: 1.5;
+}
+
+.detail-page.large-text .share-video-segment-meta,
+.detail-page.large-text .share-video-selection-meta,
+.detail-page.large-text .share-video-background-current,
+.detail-page.large-text .share-video-background-desc,
+.detail-page.large-text .share-video-job-meta,
+.detail-page.large-text .voice-edit-status-detail,
+.detail-page.large-text .voice-edit-change-scope,
+.detail-page.large-text .voice-edit-label,
+.detail-page.large-text .voice-edit-confidence,
+.detail-page.large-text .voice-edit-change-reason {
+  font-size: 28rpx;
+  line-height: 1.5;
+}

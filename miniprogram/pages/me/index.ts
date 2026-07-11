@@ -27,6 +27,7 @@ import {
   type AIModelOption,
 } from "../../services/ai-model-settings";
 import {
+  accessibilityPageClass,
   readAccessibilitySettings,
   saveAutoBargeInEnabled,
   saveLargeTextEnabled,
@@ -51,6 +52,7 @@ import { replaceMemoirStore } from "../../stores/session";
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 
 interface MeData {
+  pageClass: string;
   loading: boolean;
   loggedIn: boolean;
   savingName: boolean;
@@ -214,9 +216,10 @@ function voiceAuthorizationSettingsData(): Pick<
   };
 }
 
-function accessibilitySettingsData(): Pick<MeData, "largeTextEnabled" | "autoBargeInEnabled"> {
+function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabled" | "autoBargeInEnabled"> {
   const settings = readAccessibilitySettings();
   return {
+    pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
     largeTextEnabled: settings.largeTextEnabled,
     autoBargeInEnabled: settings.autoBargeInEnabled,
   };
@@ -254,6 +257,7 @@ function loggedOutData(): Partial<MeData> {
 
 definePage<MeData>()({
   data: {
+    pageClass: "me-page",
     loading: false,
     loggedIn: false,
     savingName: false,
@@ -576,6 +580,7 @@ definePage<MeData>()({
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
     this.setData({
+      pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
       largeTextEnabled: settings.largeTextEnabled,
       autoBargeInEnabled: settings.autoBargeInEnabled,
     });
@@ -585,6 +590,7 @@ definePage<MeData>()({
   changeAutoBargeIn(event: SwitchChangeEvent) {
     const settings = saveAutoBargeInEnabled(event.detail.value);
     this.setData({
+      pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
       largeTextEnabled: settings.largeTextEnabled,
       autoBargeInEnabled: settings.autoBargeInEnabled,
     });

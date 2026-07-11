@@ -5,6 +5,7 @@ import type {
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
+import { accessibilityPageClass } from "../../services/accessibility-settings";
 import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -131,6 +132,7 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
 }
 
 interface TranscriptDetailData extends TranscriptShareVideoData {
+  pageClass: string;
   loading: boolean;
   needsLogin: boolean;
   saving: boolean;
@@ -430,6 +432,7 @@ definePage<TranscriptDetailData>()({
   offlineAsrPollAttempts: 0,
 
   data: {
+    pageClass: "detail-page",
     loading: false,
     needsLogin: false,
     saving: false,
@@ -1495,6 +1498,7 @@ definePage<TranscriptDetailData>()({
   },
 
   onShow() {
+    this.setData({ pageClass: accessibilityPageClass("detail-page") });
     this.startOfflineAsrPollingIfNeeded();
   },
 

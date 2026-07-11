@@ -15,6 +15,7 @@ import type {
   VoiceGatewayServerEvent,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
+import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookHomeData, BookVoiceCommandUndoSnapshot } from "./book-view-model";
 import { getMemoirIdentity } from "../../services/auth";
@@ -198,7 +199,9 @@ const BOOK_VOICE_NO_VOICE_MS = 3500;
 const BOOK_VOICE_AUTO_LISTEN_NO_VOICE_MS = 15000;
 const BOOK_VOICE_STREAMING_TTS_PROGRESS_HOLD_SECONDS = 0.75;
 
-definePage<BookHomeData>()({
+type BookPageData = BookHomeData & { pageClass: string };
+
+definePage<BookPageData>()({
   audioPlayback: new AudioPlaybackController(),
   bookVoiceStreaming: new StreamingVoiceController(),
   bookVoiceAssistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
@@ -212,6 +215,7 @@ definePage<BookHomeData>()({
   bookOutputGenerationSubmitting: false,
 
   data: {
+    pageClass: "book-page",
     loading: false,
     needsLogin: false,
     generatingPlan: false,
@@ -286,6 +290,7 @@ definePage<BookHomeData>()({
   },
 
   async onShow() {
+    this.setData({ pageClass: accessibilityPageClass("book-page") });
     enableMiniProgramShareMenu({ includeTimeline: false });
     this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();

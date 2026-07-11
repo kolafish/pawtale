@@ -66,6 +66,13 @@ export function readLargeTextEnabled(): boolean {
   return readAccessibilitySettings().largeTextEnabled;
 }
 
+export function accessibilityPageClass(
+  baseClass: string,
+  largeTextEnabled = readLargeTextEnabled(),
+): string {
+  return largeTextEnabled ? `${baseClass} large-text` : baseClass;
+}
+
 export function saveLargeTextEnabled(largeTextEnabled: boolean): AccessibilitySettings {
   return saveAccessibilitySettings({ largeTextEnabled });
 }
