@@ -1,4 +1,6 @@
 page {
+  --ui-success-surface: #eef2e8;
+  --ui-success-text: #5f6f4f;
   min-height: 100vh;
   background: #fcf7ed;
   color: #3a2a25;

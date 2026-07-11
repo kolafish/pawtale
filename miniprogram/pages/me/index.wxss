@@ -414,7 +414,7 @@
 }
 
 .setting-current.ok {
-  color: #147d64;
+  color: var(--ui-success-text);
 }
 
 .setting-current.warn {

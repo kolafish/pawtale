@@ -119,8 +119,8 @@
 }
 
 .status-pill.live {
-  background: #edf6ef;
-  color: #2f6f4e;
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
 }
 
 .status-pill.error-state {
@@ -221,9 +221,9 @@
 }
 
 .diarization-notice.ok {
-  border: 2rpx solid #a8d1ad;
-  background: #edf6ef;
-  color: #2f6f4e;
+  border: 2rpx solid #c9d1b9;
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
 }
 
 .empty-panel {

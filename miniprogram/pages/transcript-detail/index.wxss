@@ -176,8 +176,8 @@
 }
 
 .book-status.included {
-  background: #edf6ef;
-  color: #2f6f4e;
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
 }
 
 .book-status.pending {
@@ -219,7 +219,7 @@
 }
 
 .offline-asr-status.succeeded {
-  color: #2f6f4e;
+  color: var(--ui-success-text);
 }
 
 .offline-asr-status.failed {
@@ -409,8 +409,8 @@
 
 .repair-button {
   width: 100%;
-  background: #edf6ef;
-  color: #2f6f4e;
+  background: #fff2d9;
+  color: #8a5b2f;
 }
 
 .danger-button {
@@ -491,7 +491,7 @@
 }
 
 .voice-edit-count.ready {
-  color: #2f6f4e;
+  color: var(--ui-success-text);
 }
 
 .voice-edit-count.error {
@@ -517,7 +517,7 @@
 }
 
 .voice-edit-status.ready {
-  background: #edf6ef;
+  background: var(--ui-success-surface);
 }
 
 .voice-edit-status.error {
@@ -548,8 +548,8 @@
 }
 
 .voice-edit-status.ready .voice-edit-status-dot {
-  background: #2f7a54;
-  box-shadow: 0 0 0 8rpx rgba(47, 122, 84, 0.12);
+  background: var(--ui-success-text);
+  box-shadow: 0 0 0 8rpx rgba(95, 111, 79, 0.12);
 }
 
 .voice-edit-status.error .voice-edit-status-dot {
@@ -681,8 +681,8 @@
 .voice-edit-diff-segment.insert {
   padding: 0 4rpx;
   border-radius: 6rpx;
-  background: #e9f7ef;
-  color: #2f7a54;
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
   font-weight: 800;
 }
 
@@ -697,7 +697,7 @@
 
 .share-video-count.ready,
 .share-video-count.succeeded {
-  color: #2f7a54;
+  color: var(--ui-success-text);
 }
 
 .share-video-count.running,
@@ -927,7 +927,7 @@
 }
 
 .share-video-job.succeeded {
-  background: #edf6ef;
+  background: var(--ui-success-surface);
 }
 
 .share-video-job.failed {
@@ -943,7 +943,7 @@
 }
 
 .share-video-job.succeeded .share-video-job-title {
-  color: #2f7a54;
+  color: var(--ui-success-text);
 }
 
 .share-video-job.failed .share-video-job-title {
@@ -998,8 +998,8 @@
   margin-top: 20rpx;
   padding: 20rpx;
   border-radius: 16rpx;
-  background: #f4faf5;
-  box-shadow: inset 0 0 0 1rpx rgba(47, 111, 78, 0.16);
+  background: #fff8e8;
+  box-shadow: inset 0 0 0 1rpx rgba(138, 91, 47, 0.16);
 }
 
 .repair-panel + .danger-panel {
@@ -1016,7 +1016,7 @@
 
 .repair-panel-title {
   display: block;
-  color: #2f6f4e;
+  color: #8a5b2f;
   font-size: 27rpx;
   font-weight: 850;
   line-height: 1.35;
@@ -1034,7 +1034,7 @@
 .repair-panel-copy {
   display: block;
   margin-top: 8rpx;
-  color: #476857;
+  color: #6f5a45;
   font-size: 25rpx;
   line-height: 1.5;
   word-break: break-word;
