@@ -481,6 +481,8 @@ test("transcript detail page shows every voice edit processing phase", async () 
   assert.equal(context.data.voiceEditPhase, "listening");
   assert.equal(context.data.voiceEditStatusVisible, true);
   assert.equal(context.data.voiceEditActionText, "结束并生成预览");
+  assert.equal(recordingOptions.stopMode, "manual");
+  assert.equal(recordingOptions.maxDurationMs, 30000);
 
   recordingOptions.onRecordingEnd();
   assert.equal(context.data.voiceEditPhase, "transcribing");
@@ -510,6 +512,15 @@ test("transcript detail page shows every voice edit processing phase", async () 
   assert.equal(context.data.voiceEditStatusText, "等待确认");
   assert.equal(context.data.voiceEditPreview.changes[0].scopeLabel, "片段改写");
   assert.equal(context.data.voiceEditPreview.canConfirm, true);
+
+  const repeatOperation = page.startVoiceEdit.call(context);
+  assert.equal(context.data.voiceEditPhase, "listening");
+  assert.equal(context.data.voiceEditPreview, null);
+  assert.equal(recordingOptions.stopMode, "manual");
+  recordingOptions.onRecordingEnd();
+  await repeatOperation;
+  assert.equal(context.data.voiceEditPhase, "review");
+  assert.equal(context.data.error, "");
 });
 
 test("transcript detail page keeps editing non-blocking while offline ASR runs", async () => {
