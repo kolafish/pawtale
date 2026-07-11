@@ -33,6 +33,7 @@ from app.schemas.memoir_images import (
     MemoirImageAssetUpdateRequest,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.branding import branded_image_derivative
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 
 
@@ -75,9 +76,26 @@ def _file_path(storage_path: str) -> Path:
     return resolved
 
 
-def image_asset_file_path(asset: MemoirImageAsset, *, thumbnail: bool = False) -> Path:
+def _should_brand_download(asset: MemoirImageAsset) -> bool:
+    metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
+    return (
+        asset.source_type != MemoirImageAssetSourceType.MANUAL_UPLOAD.value
+        and asset.provider != "user_upload"
+        and metadata.get("share_video_background_source") != "custom_upload"
+    )
+
+
+def image_asset_file_path(
+    asset: MemoirImageAsset,
+    *,
+    thumbnail: bool = False,
+    branded: bool = False,
+) -> Path:
     storage_path = asset.thumbnail_storage_path if thumbnail and asset.thumbnail_storage_path else asset.storage_path
-    return _file_path(storage_path)
+    path = _file_path(storage_path)
+    if branded and not thumbnail and _should_brand_download(asset):
+        return branded_image_derivative(path)
+    return path
 
 
 def _file_url(project_id: str, asset_id: str, *, thumbnail: bool = False) -> str:
@@ -405,9 +423,10 @@ async def load_image_asset_file(
     project_id: str,
     asset_id: str,
     thumbnail: bool = False,
+    branded: bool = False,
 ) -> tuple[MemoirImageAsset, Path]:
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
-    return asset, image_asset_file_path(asset, thumbnail=thumbnail)
+    return asset, image_asset_file_path(asset, thumbnail=thumbnail, branded=branded)
 
 
 def _asset_file_metadata(storage_path: str) -> tuple[str, int | None]:
