@@ -211,8 +211,14 @@
 
 .profile-actions {
   width: 148rpx;
+  min-width: 0;
   display: grid;
   gap: 10rpx;
+}
+
+.profile-actions > button {
+  width: 100%;
+  min-width: 0;
 }
 
 .mini-button,
@@ -231,7 +237,8 @@
 }
 
 .mini-button {
-  height: 56rpx;
+  height: 80rpx;
+  min-height: 40px;
   border-radius: 14rpx;
   font-size: 24rpx;
 }
@@ -248,8 +255,12 @@
 }
 
 .edit-name-button {
+  flex: 0 0 96rpx;
   width: 96rpx;
-  height: 60rpx;
+  min-width: 0;
+  height: 80rpx;
+  min-height: 40px;
+  padding: 0;
   border-radius: 16rpx;
   font-size: 24rpx;
 }
