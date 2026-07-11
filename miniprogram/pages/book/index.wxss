@@ -589,7 +589,7 @@
 .book-voice-meter-fill {
   height: 100%;
   border-radius: inherit;
-  background: #2f7d63;
+  background: #a64b3e;
   transition: width 120ms ease;
 }
 
@@ -658,12 +658,12 @@
 
 .book-voice-message.user .book-voice-message-role {
   order: 2;
-  color: #2f7d63;
+  color: #8f3e35;
 }
 
 .book-voice-message.user .book-voice-message-text {
   order: 1;
-  background: #eef8f2;
+  background: #fff3ef;
 }
 
 .book-voice-message.assistant .book-voice-message-text {
@@ -974,8 +974,8 @@
 
 .draft-status.confirmed,
 .chapter-summary-status.confirmed {
-  background: #f4faf6;
-  color: #4f8067;
+  background: var(--ui-success-surface);
+  color: var(--ui-success-text);
 }
 
 .source-count,
@@ -1520,7 +1520,7 @@
 .tts-progress-fill {
   height: 100%;
   border-radius: inherit;
-  background: #2f7d63;
+  background: #a64b3e;
   transition: width 180ms ease;
 }
 
