@@ -11,7 +11,6 @@ import type { ChapterPickerOption } from "../../services/memoir-book-source-acti
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   assignMemoirBookSources,
-  deleteMemoirVoiceTranscript,
   getMemoirBookPlan,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
@@ -28,7 +27,6 @@ import {
   isAuthError,
   routeAuthError,
   switchToBook,
-  switchToHome,
   switchToMe,
 } from "../../services/navigation";
 import {
@@ -99,19 +97,14 @@ interface TranscriptItemView {
   chapterAssignOptions: ChapterPickerOption[];
   cardClass: string;
   bookStatusClass: string;
-  deleteButtonLoading: boolean;
-  deleteButtonDisabled: boolean;
-  deleteButtonText: string;
   assignPickerDisabled: boolean;
   assignPickerActionClass: string;
   assignPickerText: string;
-  editButtonDisabled: boolean;
 }
 
 interface TranscriptsData {
   loading: boolean;
   needsLogin: boolean;
-  deletingId: string;
   recoveringId: string;
   assigningSourceId: string;
   error: string;
@@ -213,11 +206,11 @@ function withTranscriptRuntimeState(
   item: TranscriptItemView,
   state: Pick<
     TranscriptsData,
-    "deletingId" | "assigningSourceId" | "highlightedId" | "recoveringId"
+    "assigningSourceId" | "highlightedId" | "recoveringId"
   >,
 ): TranscriptItemView {
-  const editBusy = Boolean(state.deletingId || state.recoveringId);
-  const chapterBusy = Boolean(editBusy || state.assigningSourceId);
+  const transcriptBusy = Boolean(state.recoveringId);
+  const chapterBusy = Boolean(transcriptBusy || state.assigningSourceId);
   const baseCardClass = item.canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card";
   return {
     ...item,
@@ -225,16 +218,12 @@ function withTranscriptRuntimeState(
     bookStatusClass: item.canRecoverTranscription
       ? "book-status pending"
       : (item.isIncludedInBook ? "book-status included" : "book-status"),
-    deleteButtonLoading: state.deletingId === item.id,
-    deleteButtonDisabled: editBusy,
-    deleteButtonText: state.deletingId === item.id ? "删除中" : "删除",
     assignPickerDisabled: chapterBusy,
     assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
     assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
     recoverButtonLoading: state.recoveringId === item.id,
-    recoverButtonDisabled: editBusy,
+    recoverButtonDisabled: transcriptBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
-    editButtonDisabled: editBusy || item.canRecoverTranscription,
   };
 }
 
@@ -452,13 +441,9 @@ function toViewItem(
     bookStatusClass: canRecoverTranscription
       ? "book-status pending"
       : (isIncludedInBook ? "book-status included" : "book-status"),
-    deleteButtonLoading: false,
-    deleteButtonDisabled: false,
-    deleteButtonText: "删除",
     assignPickerDisabled: false,
     assignPickerActionClass: "small-primary picker-action",
     assignPickerText: "放入章节",
-    editButtonDisabled: canRecoverTranscription,
   };
 }
 
@@ -475,24 +460,6 @@ function replaceItem(
   ));
 }
 
-function removeItem(items: TranscriptItemView[], id: string): TranscriptItemView[] {
-  return items.filter((item) => item.id !== id);
-}
-
-function confirmDelete(item: TranscriptItemView): Promise<boolean> {
-  return new Promise((resolve) => {
-    const preview = item.summaryTitleText || item.summaryPreviewText || "这条讲述记录";
-    wx.showModal({
-      title: "删除讲述记录",
-      content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
-      confirmText: "删除",
-      confirmColor: "#b84a5a",
-      success: (result) => resolve(Boolean(result.confirm)),
-      fail: () => resolve(false),
-    });
-  });
-}
-
 definePage<TranscriptsData>()({
   loadToken: 0,
   searchDebounceTimer: null as number | null,
@@ -500,7 +467,6 @@ definePage<TranscriptsData>()({
   data: {
     loading: false,
     needsLogin: false,
-    deletingId: "",
     recoveringId: "",
     assigningSourceId: "",
     error: "",
@@ -662,15 +628,6 @@ definePage<TranscriptsData>()({
     wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id }) });
   },
 
-  openTranscriptEdit(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || item?.canRecoverTranscription) {
-      return;
-    }
-    wx.navigateTo({ url: pageUrl("/pages/transcript-detail/index", { id, mode: "edit" }) });
-  },
-
   stopCardTap() {
   },
 
@@ -812,8 +769,7 @@ definePage<TranscriptsData>()({
       !id ||
       !item ||
       !item.canRecoverTranscription ||
-      this.data.recoveringId ||
-      this.data.deletingId
+      this.data.recoveringId
     ) {
       return;
     }
@@ -832,32 +788,6 @@ definePage<TranscriptsData>()({
     }
   },
 
-  async deleteTranscript(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === id);
-    if (!id || !item || this.data.deletingId) {
-      return;
-    }
-    const confirmed = await confirmDelete(item);
-    if (!confirmed) {
-      return;
-    }
-    setTranscriptsData(this, { deletingId: id, error: "" });
-    try {
-      await deleteMemoirVoiceTranscript(id);
-      setTranscriptsData(this, {
-        items: removeItem(this.data.items, id),
-        total: Math.max(0, this.data.total - 1),
-        offset: Math.max(0, this.data.offset - 1),
-      });
-      wx.showToast({ title: "已删除", icon: "success" });
-    } catch (error) {
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "删除失败" });
-    } finally {
-      setTranscriptsData(this, { deletingId: "" });
-    }
-  },
-
   onUnload() {
     if (this.searchDebounceTimer !== null) {
       clearTimeout(this.searchDebounceTimer);
@@ -866,10 +796,6 @@ definePage<TranscriptsData>()({
     if (this.data.voiceSearchRecording) {
       stopMemoirVoiceSearchRecording();
     }
-  },
-
-  openHome() {
-    switchToHome();
   },
 
   openBook() {

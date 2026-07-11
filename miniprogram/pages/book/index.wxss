@@ -12,22 +12,6 @@
   margin-bottom: 28rpx;
 }
 
-.back-hit {
-  width: 72rpx;
-  height: 72rpx;
-  min-width: 40px;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 72rpx;
-  line-height: 1;
-}
-
 .title-block {
   min-width: 0;
   flex: 1;

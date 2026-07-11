@@ -15,9 +15,6 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     assignMemoirBookSources: async () => {
       throw new Error("assignMemoirBookSources was not mocked");
     },
-    deleteMemoirVoiceTranscript: async () => {
-      throw new Error("deleteMemoirVoiceTranscript was not mocked");
-    },
     getMemoirBookPlan: async () => null,
     listMemoirVoiceTranscripts: async () => {
       throw new Error("listMemoirVoiceTranscripts was not mocked");
@@ -262,9 +259,6 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.showLoadMore, false);
   assert.equal(context.data.items[0].cardClass, "transcript-card");
   assert.equal(context.data.items[0].bookStatusClass, "book-status");
-  assert.equal(context.data.items[0].deleteButtonDisabled, false);
-  assert.equal(context.data.items[0].deleteButtonText, "删除");
-  assert.equal(context.data.items[0].editButtonDisabled, false);
   assert.equal("transcript_raw" in context.data.items[0], false);
 });
 
@@ -333,21 +327,11 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(item.bookStatusClass, "book-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
   assert.equal(item.canAssignChapterSource, false);
-  assert.equal(item.editButtonDisabled, true);
-
-  const navigations = [];
   global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
     showToast(options) {
       toasts.push(options);
     },
   };
-  page.openTranscriptEdit.call(context, {
-    currentTarget: { dataset: { id: "utterance-pending" } },
-  });
-  assert.deepEqual(navigations, []);
 
   await page.recoverTranscript.call(context, {
     currentTarget: { dataset: { id: "utterance-pending" } },
@@ -361,58 +345,7 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   delete global.wx;
 });
 
-test("transcripts page deletes a record from the first-screen list action", async () => {
-  const deleted = [];
-  const modals = [];
-  const toasts = [];
-  global.wx = {
-    showModal(options) {
-      modals.push(options);
-      options.success({ confirm: true });
-    },
-    showToast(options) {
-      toasts.push(options);
-    },
-  };
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      listMemoirVoiceTranscripts: async () => ({
-        items: [sampleTranscript("utterance-delete")],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-      deleteMemoirVoiceTranscript: async (id) => {
-        deleted.push(id);
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-  assert.equal(context.data.items[0].deleteButtonText, "删除");
-
-  await page.deleteTranscript.call(context, {
-    currentTarget: { dataset: { id: "utterance-delete" } },
-  });
-
-  assert.deepEqual(deleted, ["utterance-delete"]);
-  assert.match(modals[0].content, /这条原始讲述会从素材库移除/);
-  assert.equal(context.data.items.length, 0);
-  assert.equal(context.data.total, 0);
-  assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
-  delete global.wx;
-});
-
-test("transcripts page opens transcript detail from record header", () => {
+test("transcripts page opens transcript detail from a record card", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -430,13 +363,6 @@ test("transcripts page opens transcript detail from record header", () => {
     { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
   ]);
 
-  page.openTranscriptEdit.call(context, {
-    currentTarget: { dataset: { id: "utterance/edit id" } },
-  });
-
-  assert.deepEqual(navigations[1], {
-    url: "/pages/transcript-detail/index?id=utterance%2Fedit%20id&mode=edit",
-  });
   delete global.wx;
 });
 
