@@ -590,7 +590,3 @@
   font-size: 28rpx;
   line-height: 1.45;
 }
-
-.tap-hover {
-  opacity: 0.82;
-}
