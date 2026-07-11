@@ -682,6 +682,32 @@ test("book page routes progress export actions to the full-book export page", ()
   delete global.wx;
 });
 
+test("book page switches between chapter work and secondary tools", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page, { bookWorkspaceView: "chapters" });
+
+  page.changeBookWorkspaceView.call(context, {
+    currentTarget: { dataset: { view: "tools" } },
+  });
+  assert.equal(context.data.bookWorkspaceView, "tools");
+
+  page.changeBookWorkspaceView.call(context, {
+    currentTarget: { dataset: { view: "unsupported" } },
+  });
+  assert.equal(context.data.bookWorkspaceView, "tools");
+});
+
+test("book page keeps pending source details collapsed until requested", () => {
+  const { page } = loadBookPage();
+  const context = pageContext(page, { sourceCoverageExpanded: false });
+
+  page.toggleSourceCoverageExpanded.call(context);
+  assert.equal(context.data.sourceCoverageExpanded, true);
+
+  page.toggleSourceCoverageExpanded.call(context);
+  assert.equal(context.data.sourceCoverageExpanded, false);
+});
+
 test("book page builds outline narration for saved chapter titles", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
