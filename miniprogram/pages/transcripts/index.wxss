@@ -7,24 +7,7 @@
 .top-row {
   display: flex;
   align-items: center;
-  gap: 22rpx;
   margin-bottom: 28rpx;
-}
-
-.back-hit {
-  width: 72rpx;
-  height: 72rpx;
-  min-width: 40px;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 72rpx;
-  line-height: 1;
 }
 
 .title-block {
@@ -360,7 +343,6 @@
   margin-top: 24rpx;
 }
 
-.danger-button,
 .small-primary,
 .load-more {
   min-width: 0;
@@ -379,7 +361,6 @@
   white-space: nowrap;
 }
 
-.danger-button,
 .small-primary {
   flex: 1 1 148rpx;
 }
@@ -401,7 +382,6 @@
   opacity: 0.5;
 }
 
-.danger-button::after,
 .small-primary::after,
 .load-more::after {
   border: 0;
@@ -412,12 +392,6 @@
   color: #ffffff;
 }
 
-.danger-button {
-  background: #fff1f3;
-  color: #b84a5a;
-}
-
-.danger-button[disabled],
 .small-primary[disabled],
 .load-more[disabled] {
   opacity: 0.62;

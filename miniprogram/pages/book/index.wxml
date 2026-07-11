@@ -1,8 +1,5 @@
 <view class="book-page">
   <view class="top-row">
-    <view class="back-hit" bindtap="openHome">
-      <text class="back-mark">‹</text>
-    </view>
     <view class="title-block">
       <text class="page-title">书稿</text>
       <text class="page-meta">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>

@@ -1,8 +1,5 @@
 <view class="transcripts-page">
   <view class="top-row">
-    <view class="back-hit" bindtap="openHome">
-      <text class="back-mark">‹</text>
-    </view>
     <view class="title-block">
       <text class="page-title">讲述记录</text>
       <text class="page-meta">{{pageMetaText}}</text>
@@ -100,16 +97,11 @@
       >{{segment.text}}</text>
     </text>
 
-    <view class="actions-row list-actions" catchtap="stopCardTap">
-      <button
-        class="danger-button"
-        data-id="{{item.id}}"
-        catchtap="deleteTranscript"
-        loading="{{item.deleteButtonLoading}}"
-        disabled="{{item.deleteButtonDisabled}}"
-      >
-        {{item.deleteButtonText}}
-      </button>
+    <view
+      wx:if="{{item.needsBookPlanConfirmation || item.canAssignChapterSource || item.canRecoverTranscription}}"
+      class="actions-row list-actions"
+      catchtap="stopCardTap"
+    >
       <button
         wx:if="{{item.needsBookPlanConfirmation}}"
         class="small-primary"
@@ -141,15 +133,6 @@
         disabled="{{item.recoverButtonDisabled}}"
       >
         {{item.recoverButtonText}}
-      </button>
-      <button
-        wx:if="{{!item.canRecoverTranscription}}"
-        class="small-primary"
-        data-id="{{item.id}}"
-        catchtap="openTranscriptEdit"
-        disabled="{{item.editButtonDisabled}}"
-      >
-        编辑整理文字
       </button>
     </view>
   </view>
