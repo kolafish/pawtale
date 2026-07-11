@@ -1,11 +1,14 @@
-import base64
-
+from PIL import Image
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirShareVideoJobStatus
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirImageAssetSourceType,
+    MemoirShareVideoJobStatus,
+)
 from app.migrations.runtime import migrate_runtime_schema
-from app.models.memoir import MemoirMaterialShareVideo
+from app.models.memoir import MemoirImageAsset, MemoirMaterialShareVideo
 from app.schemas.memoir_book import MemoirBookOutputGenerateRequest
 from app.services.memoir import book_output_export, book_outputs, image_assets
 from app.services.memoir.image_assets import (
@@ -19,12 +22,6 @@ from tests.memoir_helpers import (
     ensure_mobile_memoir_project,
     memoir_source_ref,
 )
-
-
-PNG_1X1 = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
-)
-
 
 async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
@@ -47,7 +44,7 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
     )
     image_path = tmp_path / "memoir" / "share-video-backgrounds" / "old_album" / "fake" / "asset.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
-    image_path.write_bytes(PNG_1X1)
+    Image.new("RGB", (1280, 720), (232, 218, 196)).save(image_path)
     job = MemoirMaterialShareVideo(
         project_id=project_id,
         utterance_id=created["utterance_id"],
@@ -140,6 +137,44 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
     )
     assert exported.media_type == "application/pdf"
     assert exported.content.startswith(b"%PDF")
+
+
+async def test_generated_image_download_is_branded_without_changing_clean_source(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    _, project_id, _, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
+    source_path = tmp_path / "memoir" / "share-video-backgrounds" / "old_album" / "fake" / "asset.png"
+    source_bytes = source_path.read_bytes()
+
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file")
+    assert response.status_code == 200
+    assert response.content != source_bytes
+    assert source_path.read_bytes() == source_bytes
+    assert list(source_path.parent.glob("asset.memoir-brand-v1.png"))
+
+    thumbnail_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file?variant=thumbnail"
+    )
+    assert thumbnail_response.status_code == 200
+    assert thumbnail_response.content == source_bytes
+
+
+def test_user_uploaded_image_file_is_never_branded(tmp_path, monkeypatch):
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    source_path = tmp_path / "custom.png"
+    Image.new("RGB", (1280, 720), (232, 218, 196)).save(source_path)
+    asset = MemoirImageAsset(
+        source_type=MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+        storage_path="custom.png",
+        provider="user_upload",
+        metadata_json={"share_video_background_source": "custom_upload"},
+    )
+
+    assert image_assets.image_asset_file_path(asset, branded=True) == source_path
+    assert not list(tmp_path.glob("*.memoir-brand-v1.png"))
 
 
 async def test_image_assets_are_project_owner_scoped(client, test_db, tmp_path, monkeypatch):
