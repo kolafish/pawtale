@@ -305,7 +305,7 @@
   width: 48rpx;
   height: 48rpx;
   display: block;
-  transform: translateY(-1rpx);
+  transform: translateY(-1rpx) scale(1.35);
 }
 
 .voice-start-copy {
