@@ -198,6 +198,7 @@ function voiceEditStateData(
 }
 
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
+const VOICE_EDIT_MAX_RECORDING_MS = 30000;
 const OFFLINE_ASR_POLL_INTERVAL_MS = 2000;
 const OFFLINE_ASR_MAX_POLL_ATTEMPTS = 150;
 type TranscriptDetailAudioKind = "question" | "answer";
@@ -1107,6 +1108,8 @@ definePage<TranscriptDetailData>()({
     });
     try {
       const instructionText = await recordMemoirVoiceSearchQuery({
+        stopMode: "manual",
+        maxDurationMs: VOICE_EDIT_MAX_RECORDING_MS,
         onRecordingEnd: () => {
           if (requestToken !== this.voiceEditToken) {
             return;

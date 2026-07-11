@@ -21,14 +21,19 @@ interface VoiceSearchRecorderPending {
   vad: VoiceActivityDetector;
   stopping: boolean;
   noVoiceAutoStopped: boolean;
+  stopMode: VoiceInputStopMode;
   onNoVoiceAutoStop?: () => void;
 }
+
+type VoiceInputStopMode = "voice_activity" | "manual";
 
 interface RecordMemoirVoiceSearchQueryOptions {
   onRecordingEnd?: () => void;
   onNoVoiceAutoStop?: () => void;
   emptyTranscriptMessage?: string;
   noVoiceTranscriptMessage?: string;
+  stopMode?: VoiceInputStopMode;
+  maxDurationMs?: number;
 }
 
 let recorderManager: WechatMiniprogram.RecorderManager | null = null;
@@ -74,7 +79,10 @@ function bindRecorderEvents(manager: WechatMiniprogram.RecorderManager): void {
 }
 
 function recordVoiceSearchAudio(
-  options: Pick<RecordMemoirVoiceSearchQueryOptions, "onNoVoiceAutoStop"> = {},
+  options: Pick<
+    RecordMemoirVoiceSearchQueryOptions,
+    "onNoVoiceAutoStop" | "stopMode" | "maxDurationMs"
+  > = {},
 ): Promise<WechatMiniprogram.RecorderManagerStopCallbackResult & { noVoiceAutoStopped?: boolean }> {
   if (pendingRecording) {
     return Promise.reject(new Error("已有语音搜索正在录音"));
@@ -91,11 +99,12 @@ function recordVoiceSearchAudio(
       }),
       stopping: false,
       noVoiceAutoStopped: false,
+      stopMode: options.stopMode ?? "voice_activity",
       onNoVoiceAutoStop: options.onNoVoiceAutoStop,
     };
     try {
       manager.start({
-        duration: VOICE_SEARCH_MAX_DURATION_MS,
+        duration: options.maxDurationMs ?? VOICE_SEARCH_MAX_DURATION_MS,
         sampleRate: 16000,
         numberOfChannels: 1,
         encodeBitRate: 48000,
@@ -132,6 +141,9 @@ function handleRecordedFrame(frameBuffer: ArrayBuffer): void {
     return;
   }
   const vad = pending.vad.update(frameBuffer);
+  if (pending.stopMode === "manual") {
+    return;
+  }
   if (
     !vad.hasVoiceActivity
     && vad.silentElapsedMs >= VOICE_SEARCH_NO_VOICE_AUTO_STOP_MS
@@ -177,6 +189,8 @@ export async function recordMemoirVoiceSearchQuery(
   await ensureRecorderPrivacyAuthorization();
   let noVoiceAutoStopped = false;
   const audio = await recordVoiceSearchAudio({
+    stopMode: options.stopMode,
+    maxDurationMs: options.maxDurationMs,
     onNoVoiceAutoStop: () => {
       noVoiceAutoStopped = true;
       options.onNoVoiceAutoStop?.();

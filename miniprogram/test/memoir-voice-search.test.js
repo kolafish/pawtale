@@ -230,6 +230,65 @@ test("voice search service auto-stops when no speech is detected", async () => {
   delete global.wx;
 });
 
+test("voice input manual mode waits for the user to stop despite initial silence", async () => {
+  let onStop = null;
+  let onFrameRecorded = null;
+  const starts = [];
+  const stops = [];
+  global.wx = {
+    getRecorderManager() {
+      return {
+        start(options) {
+          starts.push(options);
+        },
+        stop() {
+          stops.push("stop");
+        },
+        onStart() {},
+        onStop(callback) {
+          onStop = callback;
+        },
+        onFrameRecorded(callback) {
+          onFrameRecorded = callback;
+        },
+        onError() {},
+      };
+    },
+    getFileSystemManager() {
+      return {
+        readFile(options) {
+          options.success({ errMsg: "ok", data: "cGNt" });
+        },
+      };
+    },
+  };
+  const {
+    recordMemoirVoiceSearchQuery,
+    stopMemoirVoiceSearchRecording,
+  } = loadVoiceSearchService({
+    voiceApiExports: {
+      transcribeMemoirVoiceSearchAudio: async () => ({ transcript: "把外婆改成奶奶" }),
+    },
+  });
+
+  const promise = recordMemoirVoiceSearchQuery({
+    stopMode: "manual",
+    maxDurationMs: 30000,
+  });
+  await flushAsyncSetup();
+  for (let index = 0; index < 40; index += 1) {
+    onFrameRecorded({ frameBuffer: pcmFrame(0), isLastFrame: false });
+  }
+
+  assert.equal(starts[0].duration, 30000);
+  assert.deepEqual(stops, []);
+  stopMemoirVoiceSearchRecording();
+  assert.deepEqual(stops, ["stop"]);
+  onStop({ tempFilePath: "/tmp/voice-edit.pcm", duration: 5000, fileSize: 20000 });
+  assert.equal(await promise, "把外婆改成奶奶");
+  delete global.wx;
+});
+
 test("voice search service navigates to authorization before recording", async () => {
   const navigations = [];
   global.wx = {
