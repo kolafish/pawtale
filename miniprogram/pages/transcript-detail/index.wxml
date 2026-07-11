@@ -177,24 +177,6 @@
       </view>
     </view>
 
-    <view class="section-card evidence-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">原始讲述</text>
-          <text class="section-hint">根据录音识别，保留口述痕迹</text>
-        </view>
-        <text class="section-count">{{item.rawCountText}}</text>
-      </view>
-      <text class="body-text raw-text">
-        <text
-          wx:for="{{item.rawSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-        >{{segment.text}}</text>
-      </text>
-    </view>
-
     <view wx:if="{{item.showOfflineAsr && !item.canRecoverTranscription}}" class="section-card offline-asr-card">
       <view class="section-head">
         <view class="section-heading">
@@ -513,6 +495,24 @@
           </view>
         </picker>
       </view>
+    </view>
+
+    <view class="section-card evidence-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">原始讲述</text>
+          <text class="section-hint">根据录音识别，保留口述痕迹</text>
+        </view>
+        <text class="section-count">{{item.rawCountText}}</text>
+      </view>
+      <text class="body-text raw-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
     </view>
 
     <view class="section-card more-actions-card">
