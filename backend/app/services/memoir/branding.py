@@ -3,9 +3,10 @@ from __future__ import annotations
 from functools import lru_cache
 import os
 from pathlib import Path
+import tempfile
 from typing import Literal
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageStat
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
 
 
 BRAND_NAME = "余主任留声机"
@@ -22,6 +23,10 @@ _MIN_BRANDABLE_WIDTH = 320
 _MIN_BRANDABLE_HEIGHT = 180
 
 
+def _brand_asset_mtime() -> float:
+    return max(BRAND_MARK_PATH.stat().st_mtime, BRAND_FONT_PATH.stat().st_mtime)
+
+
 @lru_cache(maxsize=1)
 def _brand_mark() -> Image.Image:
     with Image.open(BRAND_MARK_PATH) as source:
@@ -35,6 +40,7 @@ def render_brand_lockup(
     *,
     variant: Literal["dark", "light"] = "dark",
     opacity: float = 1.0,
+    contrast_outline: bool = False,
 ) -> Image.Image:
     """Render the established gramophone mark with an exact Chinese wordmark."""
     max_width = max(80, int(max_width))
@@ -86,10 +92,60 @@ def render_brand_lockup(
         stroke_width=1,
         stroke_fill=color,
     )
+    if contrast_outline:
+        padding = 3
+        padded = Image.new(
+            "RGBA",
+            (canvas.width + padding * 2, canvas.height + padding * 2),
+            (0, 0, 0, 0),
+        )
+        padded.alpha_composite(canvas, (padding, padding))
+        alpha = padded.getchannel("A")
+        expanded_alpha = alpha.filter(ImageFilter.MaxFilter(5))
+        outline_alpha = ImageChops.subtract(expanded_alpha, alpha).point(
+            lambda value: round(value * 0.78)
+        )
+        outline_color = _DARK_COLOR if variant == "light" else _LIGHT_COLOR
+        outlined = Image.new("RGBA", padded.size, outline_color)
+        outlined.putalpha(outline_alpha)
+        outlined.alpha_composite(padded)
+        canvas = outlined
     if opacity < 1.0:
         alpha = canvas.getchannel("A").point(lambda value: round(value * opacity))
         canvas.putalpha(alpha)
     return canvas
+
+
+def brand_lockup_file(
+    max_width: int,
+    *,
+    variant: Literal["dark", "light"] = "dark",
+    opacity: float = 1.0,
+    contrast_outline: bool = False,
+) -> Path:
+    """Materialize a reusable transparent lockup for PDF and video renderers."""
+    width = max(80, int(max_width))
+    opacity_key = round(max(0.0, min(1.0, opacity)) * 100)
+    asset_dir = Path(tempfile.gettempdir()) / "pawtale-brand-assets"
+    outline_key = "outlined" if contrast_outline else "plain"
+    target_path = asset_dir / f"{BRAND_VERSION}-{variant}-{width}-{opacity_key}-{outline_key}.png"
+    if target_path.exists() and target_path.stat().st_mtime >= _brand_asset_mtime():
+        return target_path
+
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(dir=asset_dir, suffix=".png", delete=False) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        render_brand_lockup(
+            width,
+            variant=variant,
+            opacity=opacity,
+            contrast_outline=contrast_outline,
+        ).save(temporary_path, format="PNG")
+        os.replace(temporary_path, target_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return target_path
 
 
 def _brand_variant(image: Image.Image, *, logo_width: int, margin: int) -> Literal["dark", "light"]:
@@ -123,7 +179,7 @@ def branded_image_derivative(source_path: Path) -> Path:
         return source_path
 
     target_path = _derivative_path(source_path, image_format)
-    newest_input_mtime = max(source_path.stat().st_mtime, BRAND_MARK_PATH.stat().st_mtime)
+    newest_input_mtime = max(source_path.stat().st_mtime, _brand_asset_mtime())
     if target_path.exists() and target_path.stat().st_mtime >= newest_input_mtime:
         return target_path
 

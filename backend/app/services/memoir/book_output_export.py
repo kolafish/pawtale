@@ -20,6 +20,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     PDFBookBuilder,
     PDFColor,
     PDFLayout,
+    PDFImageCommand,
     PDFPage,
     PDFTocEntry,
     MemoirBookOutputExportLayout,
@@ -29,6 +30,7 @@ from app.services.memoir.book_output_pdf_renderer import (
     _truncate_units,
     _wrap_pdf_line,
 )
+from app.services.memoir.branding import BRAND_ATTRIBUTION, brand_lockup_file
 
 
 PDF_BOOK_COVER_ASSET_DIR = Path(__file__).resolve().parents[2] / "assets" / "book_covers"
@@ -898,6 +900,45 @@ def _watercolor_back_cover_quote_lines(quote: str, *, max_units: int) -> list[st
     return _wrap_pdf_line(cleaned, max_units)
 
 
+def _add_back_cover_brand_signature(builder: PDFBookBuilder, *, style: PDFCoverStyle) -> None:
+    background_luminance = sum(style.background) / len(style.background)
+    variant = "light" if background_luminance < 0.45 else "dark"
+    logo_width = 122
+    logo_height = 30
+    logo_y = builder.layout.margin_bottom + 36
+    page = builder.current_page
+    assert page is not None
+    page.images.append(
+        PDFImageCommand(
+            path=brand_lockup_file(360, variant=variant),
+            x=(builder.layout.page_width - logo_width) / 2,
+            y=logo_y,
+            width=logo_width,
+            height=logo_height,
+        )
+    )
+    builder.add_centered_at(
+        BRAND_ATTRIBUTION,
+        y=builder.layout.margin_bottom + 19,
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=0.5,
+    )
+    builder.add_centered_at(
+        f"整理于 {_today_month_text()}",
+        y=builder.layout.margin_bottom,
+        font_size=builder.layout.small_font_size,
+        line_height=builder.layout.line_height,
+        max_units=builder.layout.max_line_units,
+        color=style.text,
+        font_name=PDF_SERIF_FONT_NAME,
+        char_spacing=0.8,
+    )
+
+
 def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
     builder.new_page(
         show_header=False,
@@ -922,26 +963,7 @@ def _add_watercolor_back_cover(builder: PDFBookBuilder, *, quote: str, style: PD
         )
     quote_next_y -= 28
     _add_watercolor_separator(builder, style=style, y=quote_next_y + 8, width=92)
-    builder.add_centered_at(
-        "本书根据口述访谈整理",
-        y=quote_next_y - 32,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_FONT_NAME,
-        char_spacing=0.7,
-    )
-    builder.add_centered_at(
-        f"整理于 {_today_month_text()}",
-        y=quote_next_y - 52,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_FONT_NAME,
-        char_spacing=1.1,
-    )
+    _add_back_cover_brand_signature(builder, style=style)
 
 
 def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDFCoverStyle) -> None:
@@ -965,26 +987,7 @@ def _add_navy_gilt_back_cover(builder: PDFBookBuilder, *, quote: str, style: PDF
             font_name=PDF_SERIF_BOLD_FONT_NAME,
             char_spacing=2.5,
         )
-    builder.add_centered_at(
-        "本书根据口述访谈整理",
-        y=layout.margin_bottom + 118,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=1.2,
-    )
-    builder.add_centered_at(
-        f"整理于 {_today_month_text()}",
-        y=layout.margin_bottom + 94,
-        font_size=layout.small_font_size + 1,
-        line_height=layout.line_height,
-        max_units=layout.max_line_units,
-        color=style.text,
-        font_name=PDF_SERIF_BOLD_FONT_NAME,
-        char_spacing=1.8,
-    )
+    _add_back_cover_brand_signature(builder, style=style)
 
 
 def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) -> None:
@@ -1021,15 +1024,6 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
         color=subtle_line_color,
         line_width=0.35,
     )
-    builder.add_decoration(
-        kind="line",
-        x=builder.layout.margin_x,
-        y=builder.layout.margin_bottom + 20,
-        width=builder.layout.page_width - builder.layout.margin_x * 2,
-        height=0,
-        color=style.line,
-        line_width=0.7,
-    )
     builder.add_spacer(6)
     if quote:
         builder.add_centered(
@@ -1039,20 +1033,7 @@ def _add_back_cover(builder: PDFBookBuilder, *, quote: str, cover_style: str) ->
             max_units=max(10, builder.layout.max_line_units - 4),
             spacing_after=28,
         )
-    builder.y = max(builder.layout.margin_bottom + 90, builder.y - 160)
-    builder.add_centered(
-        "本书根据口述访谈整理",
-        font_size=builder.layout.small_font_size,
-        line_height=builder.layout.line_height,
-        max_units=builder.layout.max_line_units,
-        spacing_after=4,
-    )
-    builder.add_centered(
-        f"整理于 {_today_month_text()}",
-        font_size=builder.layout.small_font_size,
-        line_height=builder.layout.line_height,
-        max_units=builder.layout.max_line_units,
-    )
+    _add_back_cover_brand_signature(builder, style=style)
 
 
 def _chapter_page_numbers(pages: list[PDFPage]) -> dict[str, int]:

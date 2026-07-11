@@ -601,6 +601,13 @@ def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path
     )
     assert "scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720" in image_video_filter
     assert ":fontsdir='" in image_video_filter
+    branded_filter = share_video_rendering._single_background_filter_complex(
+        tmp_path / "subtitles.ass",
+        has_background_image=True,
+    )
+    assert "[0:v]scale=1280:720" in branded_filter
+    assert "[captioned][2:v]overlay=x=W-w-38:y=H-h-34" in branded_filter
+    assert branded_filter.endswith("[vout]")
 
 
 def test_share_video_subtitle_ranges_do_not_split_tiny_fragments():
@@ -654,6 +661,7 @@ def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
     assert "xfade=" not in filter_argument
     assert "concat=n=2:v=1:a=0" in filter_argument
     assert "[concatbg]" in filter_argument
+    assert "[captioned][3:v]overlay=x=W-w-38:y=H-h-34" in filter_argument
     assert "[vout]" in filter_argument
 
 
