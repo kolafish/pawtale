@@ -498,6 +498,15 @@ definePage<BookChapterPageData>()({
     }
   },
 
+  openChapterWorkspace() {
+    if (!this.data.projectId || !this.data.chapterId) {
+      return;
+    }
+    wx.navigateTo({
+      url: `/pages/chapter-workspace/index?projectId=${encodeURIComponent(this.data.projectId)}&chapterId=${encodeURIComponent(this.data.chapterId)}`,
+    });
+  },
+
   goBack() {
     wx.navigateBack();
   },

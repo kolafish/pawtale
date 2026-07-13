@@ -25,6 +25,20 @@ from .decisions import (
 )
 from .entities import MemoirNarrativeEntityCreate
 from .extraction import MemoirNarrativeExtraction
+from .gaps import (
+    MemoirChapterGapAuditJobResponse,
+    MemoirChapterGapAuditRequest,
+    MemoirChapterWorkspaceGapGroups,
+    MemoirChapterWorkspaceResponse,
+    MemoirChapterWorkspaceStoryResponse,
+    MemoirChapterWorkspaceStorySlotResponse,
+    MemoirNarrativeGapCandidate,
+    MemoirNarrativeGapDismissRequest,
+    MemoirNarrativeGapListResponse,
+    MemoirNarrativeGapResolutionRequest,
+    MemoirNarrativeGapResponse,
+    MemoirSemanticGapAuditOutput,
+)
 from .responses import (
     MemoirClaimResponse,
     MemoirClaimSummaryResponse,
@@ -75,6 +89,18 @@ __all__ = [
     "MemoirNarrativeEntityMergeRequest",
     "MemoirNarrativeEntityResponse",
     "MemoirNarrativeExtraction",
+    "MemoirChapterGapAuditJobResponse",
+    "MemoirChapterGapAuditRequest",
+    "MemoirChapterWorkspaceGapGroups",
+    "MemoirChapterWorkspaceResponse",
+    "MemoirChapterWorkspaceStoryResponse",
+    "MemoirChapterWorkspaceStorySlotResponse",
+    "MemoirNarrativeGapCandidate",
+    "MemoirNarrativeGapDismissRequest",
+    "MemoirNarrativeGapListResponse",
+    "MemoirNarrativeGapResolutionRequest",
+    "MemoirNarrativeGapResponse",
+    "MemoirSemanticGapAuditOutput",
     "MemoirStoryClaimInput",
     "MemoirStoryClaimLinkResponse",
     "MemoirStoryClaimsAttachRequest",

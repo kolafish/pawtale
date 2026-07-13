@@ -7,6 +7,7 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
+    MemoirNarrativeGap,
     MemoirStory,
     MemoirStorySlot,
 )
@@ -112,6 +113,13 @@ class MemoirNarrativeDecisionRepository:
                 select(MemoirStorySlot.id).where(
                     MemoirStorySlot.project_id == data.project_id,
                     MemoirStorySlot.id == data.target_id,
+                )
+            )
+        elif data.target_type == MemoirNarrativeDecisionTargetType.GAP:
+            target_exists = await self._db.scalar(
+                select(MemoirNarrativeGap.id).where(
+                    MemoirNarrativeGap.project_id == data.project_id,
+                    MemoirNarrativeGap.id == data.target_id,
                 )
             )
         else:

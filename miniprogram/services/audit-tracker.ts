@@ -52,6 +52,7 @@ const PAGE_FEATURES: Record<string, string> = {
   "/pages/transcripts/index": "transcript.view",
   "/pages/book/index": "book.view",
   "/pages/book-chapter/index": "book.view",
+  "/pages/chapter-workspace/index": "book.view",
   "/pages/book-export/index": "book.view",
   "/pages/book-reader/index": "book.view",
   "/pages/voice-progress/index": "voice_progress.view",

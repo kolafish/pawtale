@@ -413,6 +413,7 @@ declare namespace WechatMiniprogram {
     showToast(option: ToastOption): void;
     showLoading(option: LoadingOption): void;
     hideLoading(): void;
+    stopPullDownRefresh(): void;
     base64ToArrayBuffer(value: string): ArrayBuffer;
     getStorageSync<T = unknown>(key: string): T;
     setStorageSync<T = unknown>(key: string, value: T): void;

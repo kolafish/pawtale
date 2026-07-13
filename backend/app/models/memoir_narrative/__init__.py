@@ -6,6 +6,12 @@ from .chapter_structures import (
 )
 from .decisions import MemoirNarrativeDecision
 from .entities import MemoirNarrativeEntity
+from .gaps import (
+    MemoirNarrativeGap,
+    MemoirNarrativeGapChapter,
+    MemoirNarrativeGapClaim,
+    MemoirNarrativeGapStory,
+)
 from .stories import (
     MemoirStory,
     MemoirStoryClaim,
@@ -22,6 +28,10 @@ __all__ = [
     "MemoirChapterNodeStory",
     "MemoirNarrativeDecision",
     "MemoirNarrativeEntity",
+    "MemoirNarrativeGap",
+    "MemoirNarrativeGapChapter",
+    "MemoirNarrativeGapClaim",
+    "MemoirNarrativeGapStory",
     "MemoirStory",
     "MemoirStoryClaim",
     "MemoirStoryRevision",
