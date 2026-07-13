@@ -148,6 +148,76 @@
   border-bottom: 1rpx solid #d8d0c7;
 }
 
+.contract-heading,
+.slot-state,
+.claim-meta,
+.decision-actions {
+  display: flex;
+  align-items: center;
+}
+
+.contract-heading,
+.slot-state {
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.contract-heading .section-label {
+  flex: 1 1 auto;
+}
+
+.compact-primary-button,
+.compact-danger-button,
+.slot-actions button {
+  min-height: 58rpx;
+  margin: 0;
+  padding: 7rpx 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8rpx;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 30rpx;
+  box-sizing: border-box;
+}
+
+.compact-primary-button {
+  border: 1rpx solid #527a6a;
+  background: #527a6a;
+  color: #ffffff;
+}
+
+.compact-danger-button {
+  border: 1rpx solid #c7a19c;
+  background: #ffffff;
+  color: #9b3e43;
+}
+
+.compact-primary-button::after,
+.compact-danger-button::after,
+.slot-actions button::after {
+  border: 0;
+}
+
+.compact-primary-button[disabled],
+.compact-danger-button[disabled],
+.slot-actions button[disabled] {
+  border-color: #d5cdc6;
+  background: #eeeae5;
+  color: #a29a94;
+}
+
+.decision-actions {
+  margin-top: 16rpx;
+  flex-wrap: wrap;
+  gap: 10rpx;
+}
+
+.decision-actions button {
+  min-width: 150rpx;
+}
+
 .section-label,
 .contract-objective,
 .contract-takeaway {
@@ -663,11 +733,26 @@
 .slot-row {
   min-width: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10rpx;
   padding: 10rpx 0;
   border-bottom: 1rpx dashed #ded7cf;
+}
+
+.slot-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+}
+
+.slot-actions button {
+  width: 100%;
+  padding-left: 8rpx;
+  padding-right: 8rpx;
+  border: 1rpx solid #c9b9ae;
+  background: #ffffff;
+  color: #6e3b32;
 }
 
 .slot-name,
@@ -712,6 +797,22 @@
   color: #315947;
   font-size: 23rpx;
   font-weight: 700;
+}
+
+.claim-meta {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  gap: 10rpx;
+}
+
+.claim-review-status {
+  color: #47705f;
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.claim-actions {
+  margin-top: 14rpx;
 }
 
 .claim-statement {

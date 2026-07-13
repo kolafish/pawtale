@@ -150,6 +150,34 @@ export interface MemoirNarrativeGapResolutionRequest {
   note?: string;
 }
 
+export interface MemoirNarrativeDecisionRequest {
+  idempotency_key: string;
+  reason?: string;
+}
+
+export interface MemoirStorySlotResolutionRequest {
+  idempotency_key: string;
+  note?: string;
+}
+
+export interface MemoirNarrativeDecision {
+  id: string;
+  project_id: string;
+  target_type: string;
+  target_id: string;
+  action: string;
+  actor_type: string;
+  actor_user_id: string | null;
+  before_state_json: Record<string, unknown>;
+  after_state_json: Record<string, unknown>;
+  reason: string;
+  idempotency_key: string;
+  created_at: string;
+}
+
+export type MemoirVerificationDecision = "confirm" | "reject";
+export type MemoirStorySlotResolutionStatus = "accepted_incomplete" | "not_applicable";
+
 export type MemoirNarrativeGapAction =
   | "resolve"
   | "accept-incomplete"

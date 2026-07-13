@@ -15,7 +15,12 @@ from app.models.memoir_narrative import (
     MemoirStoryClaim,
     MemoirStorySlotClaim,
 )
-from app.services.memoir.narrative import decision_log, story_revisions, story_slots
+from app.services.memoir.narrative import (
+    chapter_nodes,
+    decision_log,
+    story_revisions,
+    story_slots,
+)
 from app.services.memoir.narrative.story_decisions import story_state
 
 
@@ -190,6 +195,13 @@ async def merge_stories(
     db.add(source)
     await db.flush()
     await story_slots.recompute_story_slots(db, story=retained)
+    for story in (source, retained):
+        await chapter_nodes.recompute_nodes_for_story(
+            db,
+            project_id=project_id,
+            story_id=story.id,
+            actor_user_id=actor_user_id,
+        )
     await story_revisions.record_story_revision(
         db,
         story=source,

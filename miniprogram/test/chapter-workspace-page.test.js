@@ -156,6 +156,18 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     resolveMemoirNarrativeGap: async () => {
       throw new Error("resolveMemoirNarrativeGap was not mocked");
     },
+    confirmMemoirChapterContract: async () => {
+      throw new Error("confirmMemoirChapterContract was not mocked");
+    },
+    decideMemoirClaim: async () => {
+      throw new Error("decideMemoirClaim was not mocked");
+    },
+    decideMemoirStory: async () => {
+      throw new Error("decideMemoirStory was not mocked");
+    },
+    resolveMemoirStorySlot: async () => {
+      throw new Error("resolveMemoirStorySlot was not mocked");
+    },
     listMemoirFollowupTasks: async () => ({ items: [], total: 0 }),
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
@@ -188,6 +200,14 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     ...voiceApiExports,
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 test("chapter workspace maps draft block sources and keeps AI revision as a visible pending suggestion", async () => {
@@ -492,5 +512,236 @@ test("gap actions persist a specific user decision without disabling unrelated g
   assert.match(calls[0].data.idempotency_key, /^workspace:gap-1:accept-incomplete:/);
   assert.equal(context.data.gapGroups[2].items[0].status, "accepted_incomplete");
   assert.equal(context.data.actionBusyGapId, "");
+  delete global.wx;
+});
+
+test("confirming one story keeps unrelated review controls available and refreshes server state", async () => {
+  const pending = deferred();
+  const calls = [];
+  const initial = sampleWorkspace();
+  const secondStory = {
+    ...initial.stories[0],
+    id: "story-2",
+    title: "第二个故事",
+    slots: initial.stories[0].slots.map((slot) => ({ ...slot, id: "slot-2" })),
+    claims: initial.stories[0].claims.map((claim) => ({ ...claim, id: "claim-2" })),
+  };
+  let workspace = { ...initial, stories: [initial.stories[0], secondStory] };
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      decideMemoirStory: async (projectId, storyId, decision, data) => {
+        calls.push({ projectId, storyId, decision, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          stories: workspace.stories.map((story) => (
+            story.id === storyId ? { ...story, verification_status: "confirmed" } : story
+          )),
+        };
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.decideStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-1", decision: "confirm" } },
+  });
+  assert.equal(context.data.stories[0].busy, true);
+  assert.equal(context.data.stories[1].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+  assert.equal(context.data.contractActionBusy, false);
+
+  pending.resolve();
+  await request;
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].storyId, "story-1");
+  assert.equal(calls[0].decision, "confirm");
+  assert.match(calls[0].data.idempotency_key, /^workspace:story:story-1:confirm:/);
+  assert.equal(context.data.stories[0].verification_status, "confirmed");
+  assert.equal(context.data.stories[0].busy, false);
+  delete global.wx;
+});
+
+test("confirming one claim only marks that claim busy", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = sampleWorkspace();
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      decideMemoirClaim: async (projectId, claimId, decision, data) => {
+        calls.push({ projectId, claimId, decision, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          stories: workspace.stories.map((story) => ({
+            ...story,
+            claims: story.claims.map((claim) => (
+              claim.id === claimId ? { ...claim, verification_status: "confirmed" } : claim
+            )),
+          })),
+        };
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.decideClaim.call(context, {
+    currentTarget: { dataset: { claimId: "claim-1", decision: "confirm" } },
+  });
+  assert.equal(context.data.stories[0].claims[0].busy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].slots[0].busy, false);
+
+  pending.resolve();
+  await request;
+  assert.equal(calls[0].claimId, "claim-1");
+  assert.equal(calls[0].decision, "confirm");
+  assert.match(calls[0].data.idempotency_key, /^workspace:claim:claim-1:confirm:/);
+  assert.equal(context.data.stories[0].claims[0].verification_status, "confirmed");
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+  delete global.wx;
+});
+
+test("accepting an incomplete slot submits the backend note contract and only locks that slot", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = sampleWorkspace();
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    showToast() {},
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      resolveMemoirStorySlot: async (projectId, storyId, slotKey, decision, data) => {
+        calls.push({ projectId, storyId, slotKey, decision, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          stories: workspace.stories.map((story) => ({
+            ...story,
+            slots: story.slots.map((slot) => (
+              slot.slot_key === slotKey ? { ...slot, status: decision } : slot
+            )),
+          })),
+        };
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.resolveStorySlot.call(context, {
+    currentTarget: {
+      dataset: {
+        storyId: "story-1",
+        slotKey: "background",
+        decision: "accepted_incomplete",
+      },
+    },
+  });
+  await Promise.resolve();
+  assert.equal(context.data.stories[0].slots[0].busy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+
+  pending.resolve();
+  await request;
+  assert.equal(calls[0].slotKey, "background");
+  assert.equal(calls[0].decision, "accepted_incomplete");
+  assert.equal(calls[0].data.note, "用户确认暂时无法补充");
+  assert.equal(Object.hasOwn(calls[0].data, "reason"), false);
+  assert.equal(context.data.stories[0].slots[0].status, "accepted_incomplete");
+  assert.equal(context.data.stories[0].slots[0].busy, false);
+  delete global.wx;
+});
+
+test("confirming a chapter contract uses its own busy state and refreshes the locked structure", async () => {
+  const pending = deferred();
+  const calls = [];
+  const initial = sampleWorkspace();
+  let workspace = {
+    ...initial,
+    contract: { ...initial.contract, status: "draft" },
+  };
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    showToast() {},
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      confirmMemoirChapterContract: async (projectId, contractId) => {
+        calls.push({ projectId, contractId });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: { ...workspace.contract, status: "confirmed" },
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.confirmContract.call(context);
+  await Promise.resolve();
+  assert.equal(context.data.contractActionBusy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+
+  pending.resolve();
+  await request;
+  assert.deepEqual(calls[0], { projectId: "project/1", contractId: "contract-1" });
+  assert.equal(context.data.workspace.contract.status, "confirmed");
+  assert.equal(context.data.contractActionBusy, false);
+  delete global.wx;
+});
+
+test("a successful decision is not reported as a save failure when the follow-up refresh fails", async () => {
+  let loadCount = 0;
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => {
+        loadCount += 1;
+        if (loadCount === 1) {
+          return sampleWorkspace();
+        }
+        throw new Error("network unavailable");
+      },
+      decideMemoirStory: async () => ({}),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  await page.decideStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-1", decision: "confirm" } },
+  });
+
+  assert.equal(
+    context.data.error,
+    "故事状态已保存，但页面刷新失败，请重新进入本页查看最新状态",
+  );
+  assert.equal(context.data.stories[0].busy, false);
   delete global.wx;
 });

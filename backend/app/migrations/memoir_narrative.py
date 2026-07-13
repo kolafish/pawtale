@@ -253,6 +253,22 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
                     OR (id = NEW.contract_id AND project_id = NEW.project_id)
                   )
             )
+              AND NOT (
+                NEW.id IS OLD.id
+                AND NEW.project_id IS OLD.project_id
+                AND NEW.chapter_id IS OLD.chapter_id
+                AND NEW.contract_id IS OLD.contract_id
+                AND NEW.node_type IS OLD.node_type
+                AND NEW.title IS OLD.title
+                AND NEW.purpose IS OLD.purpose
+                AND NEW.sort_order IS OLD.sort_order
+                AND NEW.required IS OLD.required
+                AND NEW.transition_from_node_id IS OLD.transition_from_node_id
+                AND NEW.transition_to_node_id IS OLD.transition_to_node_id
+                AND NEW.created_by IS OLD.created_by
+                AND NEW.created_by_user_id IS OLD.created_by_user_id
+                AND NEW.created_at IS OLD.created_at
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
             END
@@ -325,8 +341,20 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
         """,
     }
     for trigger_name, statement in statements.items():
-        if await _trigger_exists(conn, trigger_name):
+        existing = await conn.execute(
+            text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'trigger' AND name = :trigger_name"
+            ),
+            {"trigger_name": trigger_name},
+        )
+        existing_sql = str(existing.scalar_one_or_none() or "")
+        normalized_existing = " ".join(existing_sql.split()).rstrip(";")
+        normalized_expected = " ".join(statement.split()).rstrip(";")
+        if normalized_existing == normalized_expected:
             continue
+        if existing_sql:
+            await conn.execute(text(f"DROP TRIGGER {trigger_name}"))
         await conn.execute(text(statement))
         changed.append(trigger_name)
     return changed

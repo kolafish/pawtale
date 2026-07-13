@@ -2,9 +2,15 @@ import type {
   MemoirChapterGapAuditJob,
   MemoirChapterGapAuditRequest,
   MemoirChapterWorkspace,
+  MemoirChapterWorkspaceContract,
+  MemoirNarrativeDecision,
+  MemoirNarrativeDecisionRequest,
   MemoirNarrativeGap,
   MemoirNarrativeGapAction,
   MemoirNarrativeGapResolutionRequest,
+  MemoirStorySlotResolutionRequest,
+  MemoirStorySlotResolutionStatus,
+  MemoirVerificationDecision,
 } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
@@ -24,6 +30,18 @@ function gapPath(projectId: string, gapId: string, action: MemoirNarrativeGapAct
   return memoirNarrativeProjectPath(
     projectId,
     `/gaps/${encodeURIComponent(gapId)}/${action}`,
+  );
+}
+
+function narrativeTargetPath(
+  projectId: string,
+  target: "claims" | "stories" | "chapter-contracts",
+  targetId: string,
+  suffix: string,
+): string {
+  return memoirNarrativeProjectPath(
+    projectId,
+    `/${target}/${encodeURIComponent(targetId)}${suffix}`,
   );
 }
 
@@ -61,4 +79,59 @@ export function resolveMemoirNarrativeGap(
     method: "POST",
     data,
   });
+}
+
+export function decideMemoirClaim(
+  projectId: string,
+  claimId: string,
+  action: MemoirVerificationDecision,
+  data: MemoirNarrativeDecisionRequest,
+): Promise<MemoirNarrativeDecision> {
+  return memoirRequest<MemoirNarrativeDecision>(
+    narrativeTargetPath(projectId, "claims", claimId, `/${action}`),
+    { method: "POST", data },
+  );
+}
+
+export function decideMemoirStory(
+  projectId: string,
+  storyId: string,
+  action: MemoirVerificationDecision,
+  data: MemoirNarrativeDecisionRequest,
+): Promise<MemoirNarrativeDecision> {
+  return memoirRequest<MemoirNarrativeDecision>(
+    narrativeTargetPath(projectId, "stories", storyId, `/${action}`),
+    { method: "POST", data },
+  );
+}
+
+export function resolveMemoirStorySlot(
+  projectId: string,
+  storyId: string,
+  slotKey: string,
+  status: MemoirStorySlotResolutionStatus,
+  data: MemoirStorySlotResolutionRequest,
+): Promise<MemoirNarrativeDecision> {
+  return memoirRequest<MemoirNarrativeDecision>(
+    narrativeTargetPath(
+      projectId,
+      "stories",
+      storyId,
+      `/slots/${encodeURIComponent(slotKey)}/resolve`,
+    ),
+    {
+      method: "POST",
+      data: { ...data, status },
+    },
+  );
+}
+
+export function confirmMemoirChapterContract(
+  projectId: string,
+  contractId: string,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    narrativeTargetPath(projectId, "chapter-contracts", contractId, "/confirm"),
+    { method: "POST", data: {} },
+  );
 }

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from hashlib import sha256
 from statistics import median
 
 
@@ -18,6 +20,9 @@ KEY_IMPROVEMENT_DIMENSIONS = {
     "people_relationships",
 }
 QUALITY_RUBRIC_VERSION = "1"
+BLIND_CANDIDATE_LABELS = ("A", "B")
+QUALITY_SAMPLE_CATEGORIES = {"event", "relationship", "career"}
+HUMAN_REVIEW_ROLES = {"owner", "editor", "narrator", "reviewer"}
 QUALITY_SCORE_ANCHORS = {
     "focus": {1: "主题散乱", 3: "主线可辨但有明显游离", 5: "始终围绕章节目标"},
     "structure": {1: "素材堆叠", 3: "有开合但过程薄弱", 5: "开端、展开、转折和收束完整"},
@@ -27,6 +32,26 @@ QUALITY_SCORE_ANCHORS = {
     "readability_voice": {1: "机械或不像讲述者", 3: "通顺但个人声音不稳定", 5: "书面流畅且保留个人声音"},
     "honest_gaps": {1: "用扩写掩盖缺口", 3: "部分缺口有提示", 5: "缺口和不确定性均被诚实呈现"},
 }
+
+
+def candidate_content_sha256(content: str) -> str:
+    return sha256(content.encode("utf-8")).hexdigest()
+
+
+def _nonempty_string(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
+
+
+def _valid_review_timestamp(value: object) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None and parsed.utcoffset() is not None
 
 
 def _valid_scores(value: object) -> dict[str, int] | None:
@@ -40,13 +65,36 @@ def _valid_scores(value: object) -> dict[str, int] | None:
 def _paired_human_reviews(
     sample: dict,
     *,
+    sample_id: str,
     old_label: str,
     new_label: str,
+    reasons: list[str],
 ) -> list[tuple[dict, dict[str, int], dict[str, int]]]:
     paired = []
-    for review in sample.get("reviews", []):
+    reviews = sample.get("reviews", [])
+    if not isinstance(reviews, list):
+        reasons.append(f"{sample_id} reviews must be a list")
+        return paired
+    seen_reviewer_ids: set[str] = set()
+    for review in reviews:
+        if not isinstance(review, dict):
+            reasons.append(f"{sample_id} contains an invalid review record")
+            continue
         if review.get("reviewer_type") != "human":
             continue
+        reviewer_id = _nonempty_string(review.get("reviewer_id"))
+        role = review.get("role")
+        independent = review.get("independent")
+        if (
+            reviewer_id is None
+            or reviewer_id in seen_reviewer_ids
+            or role not in HUMAN_REVIEW_ROLES
+            or type(independent) is not bool
+            or not _valid_review_timestamp(review.get("reviewed_at"))
+        ):
+            reasons.append(f"{sample_id} contains invalid human review provenance")
+            continue
+        seen_reviewer_ids.add(reviewer_id)
         scores = review.get("scores", {})
         if not isinstance(scores, dict):
             continue
@@ -57,9 +105,197 @@ def _paired_human_reviews(
     return paired
 
 
+def _candidate_hashes(
+    sample: dict,
+    *,
+    sample_id: str,
+    reasons: list[str],
+) -> dict[str, str] | None:
+    candidates = sample.get("candidates")
+    if not isinstance(candidates, dict) or set(candidates) != set(BLIND_CANDIDATE_LABELS):
+        reasons.append(f"{sample_id} requires exactly two blinded candidates A and B")
+        return None
+    hashes: dict[str, str] = {}
+    for label in BLIND_CANDIDATE_LABELS:
+        candidate = candidates.get(label)
+        if not isinstance(candidate, dict):
+            reasons.append(f"{sample_id} candidate {label} is invalid")
+            return None
+        if set(candidate) != {"content", "content_sha256"}:
+            reasons.append(f"{sample_id} candidate {label} exposes non-blind metadata")
+            return None
+        content = candidate.get("content")
+        declared_hash = candidate.get("content_sha256")
+        if not isinstance(content, str) or not content.strip():
+            reasons.append(f"{sample_id} candidate {label} has no chapter content")
+            return None
+        actual_hash = candidate_content_sha256(content)
+        if declared_hash != actual_hash:
+            reasons.append(f"{sample_id} candidate {label} content hash does not match")
+            return None
+        hashes[label] = actual_hash
+    if hashes["A"] == hashes["B"]:
+        reasons.append(f"{sample_id} blind candidates must contain different content")
+        return None
+    return hashes
+
+
+def _valid_answer_mapping(
+    mapping: object,
+    *,
+    sample_id: str,
+    candidate_hashes: dict[str, str] | None,
+    reasons: list[str],
+) -> tuple[str, str] | None:
+    if not isinstance(mapping, dict):
+        reasons.append(f"{sample_id} has no valid blind answer key")
+        return None
+    old_label = mapping.get("old")
+    new_label = mapping.get("new")
+    if (
+        not isinstance(old_label, str)
+        or not isinstance(new_label, str)
+        or {old_label, new_label} != set(BLIND_CANDIDATE_LABELS)
+    ):
+        reasons.append(f"{sample_id} has no valid blind answer key")
+        return None
+    answer_hashes = mapping.get("candidate_sha256")
+    if (
+        candidate_hashes is None
+        or not isinstance(answer_hashes, dict)
+        or set(answer_hashes) != set(BLIND_CANDIDATE_LABELS)
+        or answer_hashes != candidate_hashes
+    ):
+        reasons.append(f"{sample_id} answer key is not bound to the reviewed candidates")
+        return None
+    sources = mapping.get("source_versions")
+    if not isinstance(sources, dict) or set(sources) != {"old", "new"}:
+        reasons.append(f"{sample_id} answer key has no candidate version provenance")
+        return None
+    required_source_fields = {"pipeline", "project_id", "chapter_id", "version_id"}
+    for pipeline in ("old", "new"):
+        source = sources.get(pipeline)
+        if (
+            not isinstance(source, dict)
+            or not required_source_fields.issubset(source)
+            or source.get("pipeline") != ("legacy" if pipeline == "old" else "narrative")
+            or any(_nonempty_string(source.get(field)) is None for field in required_source_fields - {"pipeline"})
+        ):
+            reasons.append(f"{sample_id} has invalid {pipeline} candidate provenance")
+            return None
+    old_source = sources["old"]
+    new_source = sources["new"]
+    if (
+        old_source["project_id"] != new_source["project_id"]
+        or old_source["chapter_id"] != new_source["chapter_id"]
+    ):
+        reasons.append(f"{sample_id} candidates are not from the same project chapter")
+        return None
+    if old_source["version_id"] == new_source["version_id"]:
+        reasons.append(f"{sample_id} candidates must use different chapter versions")
+        return None
+    return str(old_label), str(new_label)
+
+
+def _valid_new_candidate_metrics(
+    mapping: dict,
+    *,
+    sample_id: str,
+    new_label: str,
+    new_content_hash: str,
+    reasons: list[str],
+) -> dict[str, object] | None:
+    metrics_by_label = mapping.get("candidate_metrics")
+    metrics = metrics_by_label.get(new_label) if isinstance(metrics_by_label, dict) else None
+    required_fields = {
+        "fact_sentence_count",
+        "mapped_fact_sentence_count",
+        "unmapped_fact_ids",
+        "unresolved_high_gaps",
+        "locked_block_changes",
+        "unrelated_block_changes",
+        "measurement_provenance",
+    }
+    if not isinstance(metrics, dict) or not required_fields.issubset(metrics):
+        reasons.append(f"{sample_id} has no measured metrics for the new candidate")
+        return None
+    integer_fields = (
+        "fact_sentence_count",
+        "mapped_fact_sentence_count",
+        "locked_block_changes",
+        "unrelated_block_changes",
+    )
+    if any(type(metrics.get(field)) is not int or metrics[field] < 0 for field in integer_fields):
+        reasons.append(f"{sample_id} has invalid candidate metric counts")
+        return None
+    gaps = metrics.get("unresolved_high_gaps")
+    if (
+        not isinstance(gaps, dict)
+        or set(gaps) != {"time", "people", "evidence"}
+        or any(type(value) is not int or value < 0 for value in gaps.values())
+    ):
+        reasons.append(f"{sample_id} has invalid unresolved high-gap metrics")
+        return None
+    unmapped_ids = metrics.get("unmapped_fact_ids")
+    if (
+        not isinstance(unmapped_ids, list)
+        or any(_nonempty_string(value) is None for value in unmapped_ids)
+        or len(set(unmapped_ids)) != len(unmapped_ids)
+    ):
+        reasons.append(f"{sample_id} has invalid unmapped factual sentence ids")
+        return None
+    fact_count = metrics["fact_sentence_count"]
+    mapped_count = metrics["mapped_fact_sentence_count"]
+    if mapped_count > fact_count or len(unmapped_ids) != fact_count - mapped_count:
+        reasons.append(f"{sample_id} factual sentence metrics are internally inconsistent")
+        return None
+    provenance = metrics.get("measurement_provenance")
+    if (
+        not isinstance(provenance, dict)
+        or _nonempty_string(provenance.get("engine")) is None
+        or _nonempty_string(provenance.get("artifact_id")) is None
+        or not _valid_review_timestamp(provenance.get("measured_at"))
+        or provenance.get("content_sha256") != new_content_hash
+    ):
+        reasons.append(f"{sample_id} candidate metrics have invalid provenance")
+        return None
+    return metrics
+
+
+def _validate_narrator_review(
+    mapping: dict,
+    *,
+    sample_id: str,
+    new_content_hash: str,
+    reasons: list[str],
+) -> bool:
+    review = mapping.get("narrator_review")
+    if review is None:
+        return False
+    if (
+        not isinstance(review, dict)
+        or _nonempty_string(review.get("reviewer_id")) is None
+        or not _valid_review_timestamp(review.get("reviewed_at"))
+        or review.get("content_sha256") != new_content_hash
+        or type(review.get("facts_confirmed")) is not bool
+        or type(review.get("voice_acceptable")) is not bool
+    ):
+        reasons.append(f"{sample_id} contains an invalid narrator review")
+        return False
+    if not review["facts_confirmed"]:
+        reasons.append(f"{sample_id} narrator did not confirm the new candidate facts")
+    if not review["voice_acceptable"]:
+        reasons.append(f"{sample_id} narrator did not accept the new candidate voice")
+    return True
+
+
 def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
-    samples = packet.get("samples", [])
-    mappings = answer_key.get("samples", {})
+    packet_data = packet if isinstance(packet, dict) else {}
+    answer_key_data = answer_key if isinstance(answer_key, dict) else {}
+    raw_samples = packet_data.get("samples", [])
+    samples = raw_samples if isinstance(raw_samples, list) else []
+    raw_mappings = answer_key_data.get("samples", {})
+    mappings = raw_mappings if isinstance(raw_mappings, dict) else {}
     reasons: list[str] = []
     dimension_scores = {
         "old": {dimension: [] for dimension in QUALITY_DIMENSIONS},
@@ -68,6 +304,7 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
     completed_samples = 0
     owner_or_editor_reviewed = False
     independent_reviewed = False
+    narrator_reviewed_count = 0
     new_fact_sentence_count = 0
     new_mapped_fact_sentence_count = 0
     new_unmapped_facts: list[str] = []
@@ -75,36 +312,97 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
     locked_block_changes = 0
     unrelated_block_changes = 0
 
-    if packet.get("rubric_version") != QUALITY_RUBRIC_VERSION:
+    if not isinstance(packet, dict):
+        reasons.append("quality packet must be an object")
+    if not isinstance(answer_key, dict):
+        reasons.append("answer key must be an object")
+    if packet_data.get("rubric_version") != QUALITY_RUBRIC_VERSION:
         reasons.append("quality rubric version is missing or unsupported")
+    if answer_key_data.get("rubric_version") != QUALITY_RUBRIC_VERSION:
+        reasons.append("answer key rubric version is missing or unsupported")
+    if not isinstance(raw_samples, list):
+        reasons.append("quality packet samples must be a list")
+    if not isinstance(raw_mappings, dict):
+        reasons.append("answer key samples must be an object")
 
     if len(samples) < 2:
         reasons.append("at least two blind chapter samples are required")
-    sample_ids = [str(sample.get("id") or "").strip() for sample in samples]
+    sample_ids = [
+        str(sample.get("id") or "").strip() if isinstance(sample, dict) else ""
+        for sample in samples
+    ]
     if any(not sample_id for sample_id in sample_ids):
         reasons.append("every evaluation sample requires an id")
     if len(set(sample_ids)) != len(sample_ids):
         reasons.append("evaluation sample ids must be unique")
-    categories = {str(sample.get("category") or "") for sample in samples}
-    missing_categories = {"event", "relationship", "career"} - categories
-    if missing_categories:
-        reasons.append("missing evaluation categories: " + ", ".join(sorted(missing_categories)))
+    covered_categories: set[str] = set()
 
     for sample in samples:
-        sample_id = str(sample.get("id") or "")
-        mapping = mappings.get(sample_id, {})
-        old_label = mapping.get("old")
-        new_label = mapping.get("new")
-        if {old_label, new_label} != {"A", "B"}:
-            reasons.append(f"{sample_id or 'sample'} has no valid blind answer key")
+        if not isinstance(sample, dict):
+            reasons.append("every evaluation sample must be an object")
             continue
+        sample_id = str(sample.get("id") or "")
+        display_id = sample_id or "sample"
+        unexpected_sample_fields = set(sample) - {
+            "id",
+            "categories",
+            "candidates",
+            "reviews",
+        }
+        if unexpected_sample_fields:
+            reasons.append(f"{display_id} exposes non-blind sample metadata")
+        categories = sample.get("categories")
+        if (
+            not isinstance(categories, list)
+            or not categories
+            or any(
+                not isinstance(category, str)
+                or category not in QUALITY_SAMPLE_CATEGORIES
+                for category in categories
+            )
+            or len(set(categories)) != len(categories)
+        ):
+            reasons.append(f"{display_id} has invalid evaluation categories")
+        else:
+            covered_categories.update(categories)
+        candidate_hashes = _candidate_hashes(
+            sample,
+            sample_id=display_id,
+            reasons=reasons,
+        )
+        mapping = mappings.get(sample_id)
+        labels = _valid_answer_mapping(
+            mapping,
+            sample_id=display_id,
+            candidate_hashes=candidate_hashes,
+            reasons=reasons,
+        )
+        if labels is None:
+            continue
+        old_label, new_label = labels
+        assert candidate_hashes is not None
         paired_reviews = _paired_human_reviews(
             sample,
+            sample_id=display_id,
             old_label=old_label,
             new_label=new_label,
+            reasons=reasons,
         )
         if not paired_reviews:
             reasons.append(f"{sample_id} has incomplete paired human scores")
+            continue
+        if not any(review.get("role") in {"owner", "editor"} for review, _, _ in paired_reviews):
+            reasons.append(f"{sample_id} requires an owner or primary editor review")
+            continue
+        assert isinstance(mapping, dict)
+        new_metrics = _valid_new_candidate_metrics(
+            mapping,
+            sample_id=display_id,
+            new_label=new_label,
+            new_content_hash=candidate_hashes[new_label],
+            reasons=reasons,
+        )
+        if new_metrics is None:
             continue
         completed_samples += 1
         for review, old_scores, new_scores in paired_reviews:
@@ -114,20 +412,32 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
                 dimension_scores["old"][dimension].append(old_scores[dimension])
                 dimension_scores["new"][dimension].append(new_scores[dimension])
 
-        new_metrics = sample.get("candidate_metrics", {}).get(new_label, {})
-        sample_fact_count = int(new_metrics.get("fact_sentence_count") or 0)
-        sample_mapped_fact_count = int(new_metrics.get("mapped_fact_sentence_count") or 0)
+        sample_fact_count = int(new_metrics["fact_sentence_count"])
+        sample_mapped_fact_count = int(new_metrics["mapped_fact_sentence_count"])
         new_fact_sentence_count += sample_fact_count
         new_mapped_fact_sentence_count += sample_mapped_fact_count
         if sample_fact_count < 1:
             reasons.append(f"{sample_id} has no measured factual sentences")
         elif sample_mapped_fact_count != sample_fact_count:
             reasons.append(f"{sample_id} factual sentence source coverage is not 100%")
-        new_unmapped_facts.extend(str(item) for item in new_metrics.get("unmapped_fact_ids", []))
-        gaps = new_metrics.get("unresolved_high_gaps", {})
-        high_gap_count += sum(int(gaps.get(key) or 0) for key in ("time", "people", "evidence"))
-        locked_block_changes += int(new_metrics.get("locked_block_changes") or 0)
-        unrelated_block_changes += int(new_metrics.get("unrelated_block_changes") or 0)
+        new_unmapped_facts.extend(str(item) for item in new_metrics["unmapped_fact_ids"])
+        gaps = new_metrics["unresolved_high_gaps"]
+        assert isinstance(gaps, dict)
+        high_gap_count += sum(int(gaps[key]) for key in ("time", "people", "evidence"))
+        locked_block_changes += int(new_metrics["locked_block_changes"])
+        unrelated_block_changes += int(new_metrics["unrelated_block_changes"])
+        narrator_reviewed_count += int(
+            _validate_narrator_review(
+                mapping,
+                sample_id=display_id,
+                new_content_hash=candidate_hashes[new_label],
+                reasons=reasons,
+            )
+        )
+
+    missing_categories = QUALITY_SAMPLE_CATEGORIES - covered_categories
+    if missing_categories:
+        reasons.append("missing evaluation categories: " + ", ".join(sorted(missing_categories)))
 
     if completed_samples < 2:
         reasons.append("at least two samples need paired human reviews")
@@ -178,6 +488,7 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
         "unrelated_block_changes": unrelated_block_changes,
         "owner_or_editor_reviewed": owner_or_editor_reviewed,
         "independent_reviewed": independent_reviewed,
+        "narrator_reviewed_count": narrator_reviewed_count,
         "reasons": list(dict.fromkeys(reasons)),
     }
 
@@ -196,6 +507,7 @@ def quality_report_markdown(result: dict) -> str:
         f"- Unrelated local rewrite changes: {result['unrelated_block_changes']}",
         f"- Owner/editor reviewed: {'yes' if result['owner_or_editor_reviewed'] else 'no'}",
         f"- Independent reviewer included: {'yes' if result['independent_reviewed'] else 'no'}",
+        f"- Narrator-reviewed samples: {result['narrator_reviewed_count']}",
         "",
         "## Median Human Scores",
         "",

@@ -147,6 +147,48 @@ async def test_narrative_migration_adds_structured_block_snapshot_column_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_replaces_stale_chapter_node_trigger_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await migrate_memoir_narrative_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TRIGGER memoir_chapter_nodes_immutable_update"))
+            await conn.execute(
+                text(
+                    """
+                    CREATE TRIGGER memoir_chapter_nodes_immutable_update
+                    BEFORE UPDATE ON memoir_chapter_nodes
+                    BEGIN
+                        SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
+                    END
+                    """
+                )
+            )
+
+        upgraded = await migrate_memoir_narrative_schema(engine)
+        repeated = await migrate_memoir_narrative_schema(engine)
+
+        assert upgraded["changed_triggers"] == [
+            "memoir_chapter_nodes_immutable_update"
+        ]
+        assert repeated["changed_triggers"] == []
+        async with engine.begin() as conn:
+            trigger_sql = await conn.scalar(
+                text(
+                    "SELECT sql FROM sqlite_master "
+                    "WHERE type = 'trigger' "
+                    "AND name = 'memoir_chapter_nodes_immutable_update'"
+                )
+            )
+        assert "NEW.status IS OLD.status" not in trigger_sql
+        assert "NEW.title IS OLD.title" in trigger_sql
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_repositories_enforce_project_scoping_and_source_shapes():
     register_models()
     engine = _sqlite_engine()

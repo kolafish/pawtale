@@ -4,7 +4,7 @@
 
 本文档是 Pawtale 回忆录“事实整理、故事构建、章节结构、补访规划、正文生成和全书审校”的主设计文档。
 
-- 状态：已确认设计基线，等待按 PR 计划实施。
+- 状态：设计基线已确认；PR1-PR11 已实施，PR12 工程改造已完成，等待项目所有者章节决策、结构化样本正文和真实人工盲评通过后切流。
 - 适用范围：新版回忆录项目的叙事领域层、成书链路和成书驱动访谈。
 - 不取代：实时录音、Streaming ASR、LLM/TTS 对话状态机等语音基础能力。
 - 上游文档：`docs/MEMOIR_VOICE_CHAT_REDESIGN.md`。
@@ -447,7 +447,7 @@ updated_at
 
 已确认的 contract version 及其 ChapterNode 集合不可原地改写。结构编辑创建新的 contract version 并从上一版本显式复制或调整节点，历史 DraftBlockVersion 继续引用原 contract/node，保证旧书稿可解释。
 
-确认和替代必须记录执行用户与时间。数据库层同时保护已确认 contract、Node 和 NodeStory，除 `confirmed -> superseded` 生命周期迁移外不允许原地更新或删除，不能只依赖 API 约定维持历史可解释性。
+确认和替代必须记录执行用户与时间。数据库层同时保护已确认 contract、Node 和 NodeStory：contract 除 `confirmed -> superseded` 生命周期迁移外不可更新，Node 的类型、标题、目标、顺序、必选性和 Story 关联不可原地更新或删除，不能只依赖 API 约定维持历史可解释性。Node 的 `status` 是由当前 Story/Claim/slot 状态计算的运行态投影，允许在确认后随用户核对结果在 `ready/needs_work` 间变化，但不得借此修改结构字段。
 
 `core_questions_json` 中每个问题必须有稳定 question key；问题是否已回答由 Node/Story/Claim 和 Gap 计算，不能在 JSON 中维护第二套完成状态。
 
@@ -1199,6 +1199,15 @@ PR12 切换后，正式成书只从 confirmed/current DraftBlock 快照组装；
 - 缺口是否被诚实暴露而非 AI 扩写。
 
 真实原始录音和未脱敏文本不提交仓库。仓库测试只保存最小脱敏片段和结构化事件序列；完整评估样本通过本地受控路径运行。
+
+盲评材料必须通过 `scripts/prepare_memoir_narrative_blind_review.py` 从受控 manifest 生成，不得手工把 pipeline 标签和评分写在同一个文件：
+
+- manifest 至少包含两个真实章节，`categories` 合计覆盖 `event`、`relationship`、`career`；每个样本明确同一项目、同一章节的 legacy/narrative 版本 ID 和本地正文路径。
+- `blind-packet.json` 只包含 A/B 正文、正文 SHA-256、匿名人工评审记录，不包含 pipeline、版本 ID 或确定性指标。
+- `answer-key.json` 单独保存 A/B 对应关系、版本来源和确定性指标，文件权限为 `0600`，不得在评审完成前交给评审者。
+- 确定性指标必须记录审计引擎、受控 artifact ID、带时区测量时间，并绑定 narrative 正文 SHA-256；不能由评审人估算或根据预期结论填写。
+- 每条人工评审必须有匿名 `reviewer_id`、`role`、`independent`、带时区 `reviewed_at`，同一评审人必须同时评价 A/B 的全部七个维度。
+- 叙述者复核放在答案文件的 `narrator_review` 中并绑定新稿 SHA-256；一旦叙述者否定事实或个人声音，人工分数不能覆盖该否决。
 
 每个维度使用预先写明锚点的 1 到 5 分人工量表，不能让参与生成的同一 LLM 充当唯一裁判。正式切换至少满足：
 

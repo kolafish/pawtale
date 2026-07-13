@@ -29,7 +29,7 @@ from app.schemas.memoir_narrative import (
     MemoirStorySummaryResponse,
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
-from app.services.memoir.narrative import story_revisions, story_slots
+from app.services.memoir.narrative import chapter_nodes, story_revisions, story_slots
 
 
 async def create_story(
@@ -63,6 +63,12 @@ async def recompute_story_with_revision(
         return False
     before = await story_revisions.story_snapshot(db, story)
     result = await story_slots.recompute_story_slots(db, story=story)
+    await chapter_nodes.recompute_nodes_for_story(
+        db,
+        project_id=story.project_id,
+        story_id=story.id,
+        actor_user_id=None,
+    )
     if not result.changed:
         return False
     await story_revisions.record_story_revision(
@@ -179,6 +185,12 @@ async def attach_claims_to_story(
             changed = True
     await db.flush()
     recomputed = await story_slots.recompute_story_slots(db, story=story)
+    await chapter_nodes.recompute_nodes_for_story(
+        db,
+        project_id=story.project_id,
+        story_id=story.id,
+        actor_user_id=actor_user_id,
+    )
     if changed or recomputed.changed:
         await story_revisions.record_story_revision(
             db,

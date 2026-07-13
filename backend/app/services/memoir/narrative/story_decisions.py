@@ -25,7 +25,12 @@ from app.models.memoir_narrative import (
     MemoirStorySlot,
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
-from app.services.memoir.narrative import decision_log, story_revisions, story_slots
+from app.services.memoir.narrative import (
+    chapter_nodes,
+    decision_log,
+    story_revisions,
+    story_slots,
+)
 
 
 def _utcnow() -> datetime:
@@ -196,6 +201,12 @@ async def decide_story_verification(
         actor_user_id=actor_user_id,
         reason=reason,
     )
+    await chapter_nodes.recompute_nodes_for_story(
+        db,
+        project_id=project_id,
+        story_id=story.id,
+        actor_user_id=actor_user_id,
+    )
     return await decision_log.record_decision(
         db,
         project_id=project_id,
@@ -266,6 +277,12 @@ async def decide_story_publication(
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
         reason=reason,
+    )
+    await chapter_nodes.recompute_nodes_for_story(
+        db,
+        project_id=project_id,
+        story_id=story.id,
+        actor_user_id=actor_user_id,
     )
     return await decision_log.record_decision(
         db,
@@ -349,6 +366,12 @@ async def resolve_story_slot(
     db.add(slot)
     await db.flush()
     await story_slots.recompute_story_slots(db, story=story)
+    await chapter_nodes.recompute_nodes_for_story(
+        db,
+        project_id=project_id,
+        story_id=story.id,
+        actor_user_id=actor_user_id,
+    )
     await story_revisions.record_story_revision(
         db,
         story=story,

@@ -160,7 +160,7 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
         chapter_titles=["第一次离家"],
         source_refs_by_chapter=[[memoir_source_ref(created)]],
     )
-    story, _ = await _create_ready_story(test_db, created=created)
+    story, claim = await _create_ready_story(test_db, created=created)
     story_id = story.id
 
     suggested = await client.post(
@@ -215,23 +215,49 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
         "required_node_not_ready",
     }
 
-    for node in contract["nodes"]:
-        if node["required"] and node["node_type"] != "story":
-            response = await client.patch(
-                f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/nodes/{node['id']}",
-                json={"status": "ready"},
-            )
-            assert response.status_code == 200, response.text
     confirmed = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/confirm"
     )
     assert confirmed.status_code == 200, confirmed.text
+    assert all(
+        node["status"] == "ready"
+        for node in confirmed.json()["nodes"]
+        if node["required"]
+    )
     validated = await client.get(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/generation-validation"
     )
     assert validated.status_code == 200
     assert validated.json()["can_generate"] is True
     assert validated.json()["issues"] == []
+
+    rejected_story = await client.post(
+        f"/api/memoir/projects/{project_id}/stories/{story_id}/reject",
+        json={"idempotency_key": "reject-required-story", "reason": "核对后暂不采用"},
+    )
+    assert rejected_story.status_code == 200, rejected_story.text
+    rejected_contract = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}"
+    )
+    rejected_story_node = next(
+        node for node in rejected_contract.json()["nodes"]
+        if node["node_type"] == "story"
+    )
+    assert rejected_story_node["status"] == "needs_work"
+
+    reconfirmed_story = await client.post(
+        f"/api/memoir/projects/{project_id}/stories/{story_id}/confirm",
+        json={"idempotency_key": "reconfirm-required-story", "reason": "重新核对证据后确认"},
+    )
+    assert reconfirmed_story.status_code == 200, reconfirmed_story.text
+    reconfirmed_contract = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}"
+    )
+    reconfirmed_story_node = next(
+        node for node in reconfirmed_contract.json()["nodes"]
+        if node["node_type"] == "story"
+    )
+    assert reconfirmed_story_node["status"] == "ready"
 
     await test_db.execute(
         update(MemoirStory)
@@ -274,6 +300,24 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
     assert "excluded_story_linked" in {
         issue["code"] for issue in excluded_validation.json()["issues"]
     }
+
+    rejected_claim = await client.post(
+        f"/api/memoir/projects/{project_id}/claims/{claim.id}/reject",
+        json={
+            "idempotency_key": "reject-required-story-claim",
+            "reason": "原始事实有误",
+        },
+    )
+    assert rejected_claim.status_code == 200, rejected_claim.text
+    claim_rejected_contract = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}"
+    )
+    claim_rejected_story_node = next(
+        node
+        for node in claim_rejected_contract.json()["nodes"]
+        if node["node_type"] == "story"
+    )
+    assert claim_rejected_story_node["status"] == "needs_work"
 
 
 async def test_confirmed_contract_is_immutable_and_title_change_does_not_change_objective(

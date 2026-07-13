@@ -254,6 +254,49 @@ async def recompute_story_node_status(
         await db.flush()
 
 
+async def recompute_nodes_for_story(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    story_id: str,
+    actor_user_id: str | None,
+) -> None:
+    nodes = list(
+        (
+            await db.scalars(
+                select(MemoirChapterNode)
+                .join(
+                    MemoirChapterNodeStory,
+                    (MemoirChapterNodeStory.project_id == MemoirChapterNode.project_id)
+                    & (MemoirChapterNodeStory.node_id == MemoirChapterNode.id),
+                )
+                .join(
+                    MemoirChapterContract,
+                    (MemoirChapterContract.project_id == MemoirChapterNode.project_id)
+                    & (MemoirChapterContract.id == MemoirChapterNode.contract_id),
+                )
+                .where(
+                    MemoirChapterNode.project_id == project_id,
+                    MemoirChapterNodeStory.story_id == story_id,
+                    MemoirChapterContract.status.in_(
+                        {
+                            MemoirChapterContractStatus.DRAFT.value,
+                            MemoirChapterContractStatus.CONFIRMED.value,
+                        }
+                    ),
+                )
+                .order_by(MemoirChapterNode.id)
+            )
+        ).unique().all()
+    )
+    for node in nodes:
+        await recompute_story_node_status(
+            db,
+            node=node,
+            actor_user_id=actor_user_id,
+        )
+
+
 async def update_node(
     db: AsyncSession,
     *,

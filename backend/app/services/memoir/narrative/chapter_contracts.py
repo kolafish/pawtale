@@ -707,6 +707,23 @@ async def confirm_contract(
     if not nodes:
         raise ValueError("chapter contract requires at least one structure node")
 
+    from app.services.memoir.narrative import chapter_nodes
+
+    for node in nodes:
+        if node.node_type == MemoirChapterNodeType.STORY.value:
+            await chapter_nodes.recompute_story_node_status(
+                db,
+                node=node,
+                actor_user_id=actor_user_id,
+            )
+            continue
+        if node.status == MemoirChapterNodeStatus.PLANNED.value:
+            node.status = MemoirChapterNodeStatus.READY.value
+            node.updated_by = MemoirNarrativeActorType.USER.value
+            node.updated_by_user_id = actor_user_id
+            db.add(node)
+    await db.flush()
+
     previous = await db.scalar(
         select(MemoirChapterContract).where(
             MemoirChapterContract.project_id == project_id,

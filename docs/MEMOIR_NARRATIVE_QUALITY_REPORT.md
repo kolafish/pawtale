@@ -19,6 +19,8 @@
 - PR12 全量工具已在受控真实数据库副本上完成备份、schema 修复、dry-run、摄取任务执行、Story/Contract 回填、重复执行和回滚演练。
 - 受控副本的自动迁移报告为 `migration_complete=true`、`cutover_data_ready=true`，无待处理或失败摄取任务，Claim evidence 缺失数为零。
 - SQLite 恢复工具已验证会保留迁移后调查快照并清理 WAL/SHM/journal，恢复后 `integrity_check=ok`。
+- 盲审准备工具会随机分配 A/B，将候选正文与答案/版本来源物理分离，并用 SHA-256 绑定正文、确定性指标和叙述者复核。
+- 质量 evaluator 已拒绝空候选、正文换包、身份泄露、无版本来源、无人工评审来源和无审计来源的手填指标。
 
 仍需完成：
 
@@ -27,6 +29,7 @@
 - 条件允许时增加一名不参与实现的独立评审者。
 - 叙述者本人核对事实和个人声音；该意见优先于自动指标。
 - 样本 Story 和 ChapterContract 必须由项目所有者按产品工作流确认后才能生成新链路正文；不得为制作盲评包而伪造确认人或绕过 `needs_work` 状态。
+- 在本地受控路径建立 manifest，由准备脚本生成相互隔离的盲审包和答案文件；评审完成前不得查看答案文件。
 
 ## 人工量表
 
@@ -55,7 +58,56 @@
 
 ## 运行方式
 
-真实原始录音、未脱敏正文、A/B 对照答案和评审人信息只放在本地受控路径，不提交仓库。完成评审后运行：
+真实原始录音、未脱敏正文、A/B 对照答案和评审人信息只放在本地受控路径，不提交仓库。受控 manifest 中每个样本使用以下结构；`candidate_metrics` 必须来自绑定该新稿的确定性审计 artifact，不是人工估计：
+
+```json
+{
+  "rubric_version": "1",
+  "samples": [
+    {
+      "id": "opaque-sample-id",
+      "categories": ["event", "relationship"],
+      "old": {
+        "content_path": "old-chapter.txt",
+        "project_id": "...",
+        "chapter_id": "...",
+        "version_id": "..."
+      },
+      "new": {
+        "content_path": "new-chapter.txt",
+        "project_id": "...",
+        "chapter_id": "...",
+        "version_id": "...",
+        "candidate_metrics": {
+          "fact_sentence_count": 12,
+          "mapped_fact_sentence_count": 12,
+          "unmapped_fact_ids": [],
+          "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
+          "locked_block_changes": 0,
+          "unrelated_block_changes": 0,
+          "measurement_provenance": {
+            "engine": "deterministic-quality-audit-v1",
+            "artifact_id": "...",
+            "measured_at": "2026-07-14T09:00:00+08:00"
+          }
+        }
+      }
+    }
+  ]
+}
+```
+
+先生成盲审材料：
+
+```bash
+cd backend
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_blind_review.py \
+  --manifest /controlled/memoir-quality/manifest.json \
+  --packet /controlled/memoir-quality/blind-packet.json \
+  --answer-key /controlled/memoir-quality/answer-key.json
+```
+
+准备脚本生成的 `reviews` 初始为空。主要编辑在不知道 A/B 身份的情况下，为同一条 review 同时填写两份稿件的七维评分，并记录匿名 `reviewer_id`、`reviewer_type=human`、`role`、`independent` 和带时区 `reviewed_at`。完成评审并锁定正文后再运行：
 
 ```bash
 cd backend

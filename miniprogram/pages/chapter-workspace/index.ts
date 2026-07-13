@@ -6,6 +6,8 @@ import type {
   MemoirChapterWorkspaceStorySlot,
   MemoirNarrativeGap,
   MemoirNarrativeGapAction,
+  MemoirStorySlotResolutionStatus,
+  MemoirVerificationDecision,
 } from "../../domain/chapter-workspace";
 import type { MemoirFollowupTask } from "../../domain/voice-chat";
 import type {
@@ -24,7 +26,10 @@ import {
   applyMemoirDraftBlockRevision,
   assembleMemoirChapterDraftBlocks,
   confirmMemoirBookChapterDraft,
+  confirmMemoirChapterContract,
+  decideMemoirClaim,
   decideMemoirDraftBlock,
+  decideMemoirStory,
   enqueueMemoirDraftBlockGeneration,
   enqueueMemoirDraftBlockRevision,
   enqueueMemoirChapterWorkspaceAudit,
@@ -34,6 +39,7 @@ import {
   listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
   resolveMemoirNarrativeGap,
+  resolveMemoirStorySlot,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -49,6 +55,8 @@ import {
 
 const TAB_VALUES = ["structure", "stories", "drafts", "checks", "followups"] as const;
 const GAP_ACTIONS = ["resolve", "accept-incomplete", "not-applicable", "dismiss"] as const;
+const VERIFICATION_DECISIONS = ["confirm", "reject"] as const;
+const SLOT_RESOLUTIONS = ["accepted_incomplete", "not_applicable"] as const;
 const AUDIT_POLL_INTERVAL_MS = 1500;
 const DRAFT_JOB_POLL_INTERVAL_MS = 1500;
 
@@ -60,6 +68,10 @@ interface WorkspaceDataset {
   action?: string;
   taskId?: string;
   blockId?: string;
+  storyId?: string;
+  claimId?: string;
+  slotKey?: string;
+  decision?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
@@ -73,14 +85,22 @@ interface StorySlotView extends MemoirChapterWorkspaceStorySlot {
   labelText: string;
   statusText: string;
   statusClass: string;
+  actionKey: string;
+  canResolve: boolean;
+  busy: boolean;
 }
 
 interface ClaimView extends MemoirChapterWorkspaceClaim {
   evidenceCountText: string;
+  statusText: string;
+  canDecide: boolean;
+  busy: boolean;
 }
 
 interface StoryView extends MemoirChapterWorkspaceStory {
   statusText: string;
+  canDecide: boolean;
+  busy: boolean;
   slots: StorySlotView[];
   claims: ClaimView[];
 }
@@ -142,6 +162,10 @@ interface ChapterWorkspacePageData {
   auditError: string;
   auditBusy: boolean;
   actionBusyGapId: string;
+  contractActionBusy: boolean;
+  busyStoryIds: string[];
+  busyClaimIds: string[];
+  busySlotKeys: string[];
   nodes: NodeView[];
   stories: StoryView[];
   gapGroups: GapGroupView[];
@@ -212,8 +236,43 @@ function storyStatusText(story: MemoirChapterWorkspaceStory): string {
   if (story.verification_status === "rejected") {
     return "已否定";
   }
-  return ({ incomplete: "待补充", sufficient: "内容充分", accepted_incomplete: "接受不完整" })[story.completion_status]
-    || story.completion_status;
+  const verification = story.verification_status === "confirmed" ? "故事已确认" : "故事待确认";
+  const completion = ({
+    incomplete: "待补充",
+    sufficient: "内容充分",
+    accepted_incomplete: "接受不完整",
+  })[story.completion_status] || story.completion_status;
+  return `${verification} · ${completion}`;
+}
+
+function claimStatusText(status: string): string {
+  return ({
+    unreviewed: "待确认",
+    needs_verification: "需核对",
+    confirmed: "已确认",
+    disputed: "有冲突",
+    rejected: "已否定",
+  })[status] || status;
+}
+
+function isVerificationDecision(value: string): value is MemoirVerificationDecision {
+  return VERIFICATION_DECISIONS.includes(value as MemoirVerificationDecision);
+}
+
+function isSlotResolution(value: string): value is MemoirStorySlotResolutionStatus {
+  return SLOT_RESOLUTIONS.includes(value as MemoirStorySlotResolutionStatus);
+}
+
+function confirmDialog(title: string, content: string, confirmText: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    wx.showModal({
+      title,
+      content,
+      confirmText,
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
 }
 
 function gapStatusText(status: string): string {
@@ -364,6 +423,10 @@ definePage<ChapterWorkspacePageData>()({
     auditError: "",
     auditBusy: false,
     actionBusyGapId: "",
+    contractActionBusy: false,
+    busyStoryIds: [],
+    busyClaimIds: [],
+    busySlotKeys: [],
     nodes: [],
     stories: [],
     gapGroups: [],
@@ -403,6 +466,9 @@ definePage<ChapterWorkspacePageData>()({
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
     const storyTitles = new Map(workspace.stories.map((story) => [story.id, story.title]));
+    const busyStoryIds = new Set(this.data.busyStoryIds);
+    const busyClaimIds = new Set(this.data.busyClaimIds);
+    const busySlotKeys = new Set(this.data.busySlotKeys);
     const notes = new Map(
       this.data.gapGroups.flatMap((group) => group.items.map((gap) => [gap.id, gap.note] as const)),
     );
@@ -426,18 +492,27 @@ definePage<ChapterWorkspacePageData>()({
       stories: workspace.stories.map((story) => ({
         ...story,
         statusText: storyStatusText(story),
+        canDecide: story.publication_status === "eligible",
+        busy: busyStoryIds.has(story.id),
         slots: story.slots.map((slot) => {
           const status = slotStatus(slot.status);
+          const actionKey = `${story.id}:${slot.slot_key}`;
           return {
             ...slot,
             labelText: SLOT_LABELS[slot.slot_key] || slot.slot_key,
             statusText: status.text,
             statusClass: status.className,
+            actionKey,
+            canResolve: ["missing", "partial"].includes(slot.status),
+            busy: busySlotKeys.has(actionKey),
           };
         }),
         claims: story.claims.map((claim) => ({
           ...claim,
           evidenceCountText: `${claim.evidence.length} 条证据`,
+          statusText: claimStatusText(claim.verification_status),
+          canDecide: claim.publication_status === "eligible",
+          busy: busyClaimIds.has(claim.id),
         })),
       })),
       gapGroups: [
@@ -491,6 +566,217 @@ definePage<ChapterWorkspacePageData>()({
       if (!silent) {
         this.setData({ loading: false });
       }
+    }
+  },
+
+  async refreshWorkspaceOnly() {
+    const workspace = await getMemoirChapterWorkspace(this.data.projectId, this.data.chapterId);
+    this.applyWorkspace(workspace);
+  },
+
+  setStoryBusy(storyId: string, busy: boolean) {
+    const busyStoryIds = busy
+      ? [...new Set([...this.data.busyStoryIds, storyId])]
+      : this.data.busyStoryIds.filter((id) => id !== storyId);
+    this.setData({
+      busyStoryIds,
+      stories: this.data.stories.map((story) => (
+        story.id === storyId ? { ...story, busy } : story
+      )),
+    });
+  },
+
+  setClaimBusy(claimId: string, busy: boolean) {
+    const busyClaimIds = busy
+      ? [...new Set([...this.data.busyClaimIds, claimId])]
+      : this.data.busyClaimIds.filter((id) => id !== claimId);
+    this.setData({
+      busyClaimIds,
+      stories: this.data.stories.map((story) => ({
+        ...story,
+        claims: story.claims.map((claim) => (
+          claim.id === claimId ? { ...claim, busy } : claim
+        )),
+      })),
+    });
+  },
+
+  setSlotBusy(actionKey: string, busy: boolean) {
+    const busySlotKeys = busy
+      ? [...new Set([...this.data.busySlotKeys, actionKey])]
+      : this.data.busySlotKeys.filter((key) => key !== actionKey);
+    this.setData({
+      busySlotKeys,
+      stories: this.data.stories.map((story) => ({
+        ...story,
+        slots: story.slots.map((slot) => (
+          slot.actionKey === actionKey ? { ...slot, busy } : slot
+        )),
+      })),
+    });
+  },
+
+  async confirmContract() {
+    const contract = this.data.workspace?.contract;
+    if (!contract || contract.status === "confirmed" || this.data.contractActionBusy) {
+      return;
+    }
+    const confirmed = await confirmDialog(
+      "确认章节结构",
+      "确认后章节目标和节点结构会锁定；故事和事实仍可继续核对。",
+      "确认结构",
+    );
+    if (!confirmed) {
+      return;
+    }
+    this.setData({ contractActionBusy: true, error: "" });
+    let saved = false;
+    try {
+      await confirmMemoirChapterContract(this.data.projectId, contract.id);
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "章节结构已确认", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "章节结构已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "章节结构确认失败"),
+      });
+    } finally {
+      this.setData({ contractActionBusy: false });
+    }
+  },
+
+  async decideStory(event: DatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    const decision = datasetString(event, "decision");
+    if (
+      !storyId
+      || !isVerificationDecision(decision)
+      || this.data.busyStoryIds.includes(storyId)
+    ) {
+      return;
+    }
+    if (
+      decision === "reject"
+      && !await confirmDialog("不采用这个故事", "该故事将不再用于当前成书结构。", "不采用")
+    ) {
+      return;
+    }
+    this.setStoryBusy(storyId, true);
+    this.setData({ error: "" });
+    let saved = false;
+    try {
+      await decideMemoirStory(this.data.projectId, storyId, decision, {
+        idempotency_key: `workspace:story:${storyId}:${decision}:${Date.now()}`,
+        reason: decision === "confirm" ? "章节工作台人工确认" : "章节工作台人工否定",
+      });
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: decision === "confirm" ? "故事已确认" : "故事已否定", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "故事状态已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "故事状态保存失败"),
+      });
+    } finally {
+      this.setStoryBusy(storyId, false);
+    }
+  },
+
+  async decideClaim(event: DatasetEvent) {
+    const claimId = datasetString(event, "claimId");
+    const decision = datasetString(event, "decision");
+    if (
+      !claimId
+      || !isVerificationDecision(decision)
+      || this.data.busyClaimIds.includes(claimId)
+    ) {
+      return;
+    }
+    if (
+      decision === "reject"
+      && !await confirmDialog("否定这条事实", "这条事实及依赖它的正文会重新进入待处理状态。", "否定事实")
+    ) {
+      return;
+    }
+    this.setClaimBusy(claimId, true);
+    this.setData({ error: "" });
+    let saved = false;
+    try {
+      await decideMemoirClaim(this.data.projectId, claimId, decision, {
+        idempotency_key: `workspace:claim:${claimId}:${decision}:${Date.now()}`,
+        reason: decision === "confirm" ? "章节工作台人工确认" : "章节工作台人工否定",
+      });
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: decision === "confirm" ? "事实已确认" : "事实已否定", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "事实状态已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "事实状态保存失败"),
+      });
+    } finally {
+      this.setClaimBusy(claimId, false);
+    }
+  },
+
+  async resolveStorySlot(event: DatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    const slotKey = datasetString(event, "slotKey");
+    const decision = datasetString(event, "decision");
+    const actionKey = `${storyId}:${slotKey}`;
+    if (
+      !storyId
+      || !slotKey
+      || !isSlotResolution(decision)
+      || this.data.busySlotKeys.includes(actionKey)
+    ) {
+      return;
+    }
+    const accepted = await confirmDialog(
+      decision === "accepted_incomplete" ? "接受信息不完整" : "标记为不适用",
+      decision === "accepted_incomplete"
+        ? "确认叙述者暂时无法补充这一项，成书时会保留这份不确定性。"
+        : "确认这一项不适用于当前故事。",
+      "确认",
+    );
+    if (!accepted) {
+      return;
+    }
+    this.setSlotBusy(actionKey, true);
+    this.setData({ error: "" });
+    let saved = false;
+    try {
+      await resolveMemoirStorySlot(this.data.projectId, storyId, slotKey, decision, {
+        idempotency_key: `workspace:slot:${actionKey}:${decision}:${Date.now()}`,
+        note: decision === "accepted_incomplete" ? "用户确认暂时无法补充" : "用户确认该项不适用",
+      });
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "完整度决定已保存", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "完整度决定已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "完整度决定保存失败"),
+      });
+    } finally {
+      this.setSlotBusy(actionKey, false);
     }
   },
 
