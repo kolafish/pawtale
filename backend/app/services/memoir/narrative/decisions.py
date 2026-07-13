@@ -20,7 +20,11 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
 )
-from app.services.memoir.narrative import decision_log, stories as story_service
+from app.services.memoir.narrative import (
+    decision_log,
+    draft_blocks,
+    stories as story_service,
+)
 
 
 def _entity_state(entity: MemoirNarrativeEntity) -> dict[str, object]:
@@ -239,12 +243,18 @@ async def decide_claim_verification(
         reason=reason,
         idempotency_key=idempotency_key,
     )
+    await draft_blocks.mark_blocks_stale_for_claim(
+        db,
+        project_id=project_id,
+        claim_id=claim.id,
+    )
     await _recompute_stories_for_claim(
         db,
         claim=claim,
         reason=f"claim verification changed by user decision {decision.id}",
     )
     return decision
+
 
 async def decide_claim_publication(
     db: AsyncSession,
@@ -301,6 +311,11 @@ async def decide_claim_publication(
         reason=reason,
         idempotency_key=idempotency_key,
     )
+    await draft_blocks.mark_blocks_stale_for_claim(
+        db,
+        project_id=project_id,
+        claim_id=claim.id,
+    )
     await _recompute_stories_for_claim(
         db,
         claim=claim,
@@ -333,7 +348,7 @@ async def mark_claim_needs_review(
     claim.updated_by = MemoirNarrativeActorType.SYSTEM.value
     claim.updated_by_user_id = None
     db.add(claim)
-    return await decision_log.record_decision(
+    decision = await decision_log.record_decision(
         db,
         project_id=claim.project_id,
         target_type=MemoirNarrativeDecisionTargetType.CLAIM,
@@ -346,6 +361,12 @@ async def mark_claim_needs_review(
         reason=reason,
         idempotency_key=idempotency_key,
     )
+    await draft_blocks.mark_blocks_stale_for_claim(
+        db,
+        project_id=claim.project_id,
+        claim_id=claim.id,
+    )
+    return decision
 
 
 async def _recompute_stories_for_claim(

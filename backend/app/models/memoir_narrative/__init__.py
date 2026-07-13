@@ -5,6 +5,12 @@ from .chapter_structures import (
     MemoirChapterNodeStory,
 )
 from .decisions import MemoirNarrativeDecision
+from .draft_blocks import (
+    MemoirDraftBlock,
+    MemoirDraftBlockClaim,
+    MemoirDraftBlockStory,
+    MemoirDraftBlockVersion,
+)
 from .entities import MemoirNarrativeEntity
 from .gaps import (
     MemoirNarrativeGap,
@@ -32,6 +38,10 @@ __all__ = [
     "MemoirChapterNode",
     "MemoirChapterNodeStory",
     "MemoirNarrativeDecision",
+    "MemoirDraftBlock",
+    "MemoirDraftBlockClaim",
+    "MemoirDraftBlockStory",
+    "MemoirDraftBlockVersion",
     "MemoirNarrativeEntity",
     "MemoirNarrativeGap",
     "MemoirNarrativeGapChapter",

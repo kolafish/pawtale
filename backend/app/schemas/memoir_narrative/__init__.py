@@ -23,6 +23,15 @@ from .decisions import (
     MemoirNarrativeDecisionRequest,
     MemoirNarrativeEntityMergeRequest,
 )
+from .draft_blocks import (
+    MemoirDraftBlockClaimSource,
+    MemoirDraftBlockDecisionRequest,
+    MemoirDraftBlockListResponse,
+    MemoirDraftBlockManualRevisionRequest,
+    MemoirDraftBlockResponse,
+    MemoirDraftBlockStorySource,
+    MemoirDraftBlockVersionResponse,
+)
 from .entities import MemoirNarrativeEntityCreate
 from .extraction import MemoirNarrativeExtraction
 from .gaps import (
@@ -97,6 +106,13 @@ __all__ = [
     "MemoirNarrativeDecisionCreate",
     "MemoirNarrativeDecisionRequest",
     "MemoirNarrativeDecisionResponse",
+    "MemoirDraftBlockClaimSource",
+    "MemoirDraftBlockDecisionRequest",
+    "MemoirDraftBlockListResponse",
+    "MemoirDraftBlockManualRevisionRequest",
+    "MemoirDraftBlockResponse",
+    "MemoirDraftBlockStorySource",
+    "MemoirDraftBlockVersionResponse",
     "MemoirNarrativeEntityCreate",
     "MemoirNarrativeEntityMergeRequest",
     "MemoirNarrativeEntityResponse",

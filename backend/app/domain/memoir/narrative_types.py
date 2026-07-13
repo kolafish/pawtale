@@ -202,6 +202,39 @@ class MemoirChapterNodeStoryRole(str, Enum):
     TRANSITION_CONTEXT = "transition_context"
 
 
+class MemoirDraftBlockRole(str, Enum):
+    FACTUAL = "factual"
+    TRANSITION = "transition"
+    REFLECTION = "reflection"
+    OPENING = "opening"
+    CLOSING = "closing"
+    LEGACY_SNAPSHOT = "legacy_snapshot"
+
+
+class MemoirDraftBlockEditorialStatus(str, Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    EXCLUDED = "excluded"
+
+
+class MemoirDraftBlockFreshnessStatus(str, Enum):
+    CURRENT = "current"
+    STALE = "stale"
+
+
+class MemoirDraftBlockClaimUsageRole(str, Enum):
+    CORE = "core"
+    CONTEXT = "context"
+    DETAIL = "detail"
+    QUOTED = "quoted"
+
+
+class MemoirDraftBlockStoryUsageRole(str, Enum):
+    PRIMARY = "primary"
+    SUPPORTING = "supporting"
+    CONTRAST = "contrast"
+
+
 class MemoirNarrativeGapScopeType(str, Enum):
     STORY = "story"
     CHAPTER = "chapter"
