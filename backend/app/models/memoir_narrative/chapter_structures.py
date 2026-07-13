@@ -57,13 +57,14 @@ class MemoirChapterContract(Base):
             name="ck_memoir_chapter_contracts_created_actor",
         ),
         CheckConstraint(
-            "status != 'confirmed' OR "
-            "(confirmed_by_user_id IS NOT NULL AND confirmed_at IS NOT NULL)",
-            name="ck_memoir_chapter_contracts_confirmation",
-        ),
-        CheckConstraint(
-            "status != 'superseded' OR superseded_at IS NOT NULL",
-            name="ck_memoir_chapter_contracts_superseded_at",
+            "(status = 'draft' AND confirmed_by_user_id IS NULL "
+            "AND confirmed_at IS NULL AND superseded_at IS NULL) OR "
+            "(status = 'confirmed' AND confirmed_by_user_id IS NOT NULL "
+            "AND confirmed_at IS NOT NULL AND superseded_at IS NULL) OR "
+            "(status = 'superseded' AND superseded_at IS NOT NULL "
+            "AND ((confirmed_by_user_id IS NULL AND confirmed_at IS NULL) "
+            "OR (confirmed_by_user_id IS NOT NULL AND confirmed_at IS NOT NULL)))",
+            name="ck_memoir_chapter_contracts_lifecycle_shape",
         ),
         CheckConstraint("version >= 1", name="ck_memoir_chapter_contracts_version"),
         CheckConstraint("length(trim(objective)) > 0", name="ck_memoir_chapter_contracts_objective"),

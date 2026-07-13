@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from hashlib import sha256
 
 import pytest
@@ -191,6 +192,7 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
     )
     test_db.add(optional_story)
     await test_db.commit()
+    optional_story_id = optional_story.id
     optional_link = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/nodes/{story_nodes[0]['id']}/stories",
         json={
@@ -230,6 +232,48 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
     assert validated.json()["can_generate"] is True
     assert validated.json()["issues"] == []
 
+    await test_db.execute(
+        update(MemoirStory)
+        .where(MemoirStory.id == optional_story_id)
+        .values(
+            publication_status=MemoirStoryPublicationStatus.PRIVATE.value,
+            publication_decided_by_user_id=created["user_id"],
+        )
+    )
+    await test_db.commit()
+    private_story_validation = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/generation-validation"
+    )
+    assert private_story_validation.status_code == 200
+    assert private_story_validation.json()["can_generate"] is False
+    assert "linked_story_ineligible" in {
+        issue["code"] for issue in private_story_validation.json()["issues"]
+    }
+    await test_db.execute(
+        update(MemoirStory)
+        .where(MemoirStory.id == optional_story_id)
+        .values(publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value)
+    )
+    await test_db.commit()
+
+    excluded_revision = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload(
+            "exclude-linked-story",
+            objective="调整本章收录边界。",
+            exclude_story_ids=[story_id],
+            copy_from_contract_id=contract["id"],
+        ),
+    )
+    assert excluded_revision.status_code == 200, excluded_revision.text
+    excluded_validation = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{excluded_revision.json()['id']}/generation-validation"
+    )
+    assert excluded_validation.status_code == 200
+    assert "excluded_story_linked" in {
+        issue["code"] for issue in excluded_validation.json()["issues"]
+    }
+
 
 async def test_confirmed_contract_is_immutable_and_title_change_does_not_change_objective(
     client,
@@ -249,6 +293,16 @@ async def test_confirmed_contract_is_immutable_and_title_change_does_not_change_
     )
     assert draft.status_code == 200, draft.text
     contract = draft.json()
+    with pytest.raises(IntegrityError, match="lifecycle_shape"):
+        await test_db.execute(
+            update(MemoirChapterContract)
+            .where(MemoirChapterContract.id == contract["id"])
+            .values(
+                confirmed_by_user_id=created["user_id"],
+                confirmed_at=datetime.now(UTC).replace(tzinfo=None),
+            )
+        )
+    await test_db.rollback()
     node = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/nodes",
         json={
@@ -262,6 +316,11 @@ async def test_confirmed_contract_is_immutable_and_title_change_does_not_change_
     )
     assert node.status_code == 200, node.text
     node_id = node.json()["nodes"][0]["id"]
+    empty_update = await client.patch(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/nodes/{node_id}",
+        json={},
+    )
+    assert empty_update.status_code == 422
     confirmed = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/confirm"
     )

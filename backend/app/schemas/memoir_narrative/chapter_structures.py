@@ -154,6 +154,12 @@ class MemoirChapterNodeUpdateRequest(BaseModel):
     def strip_text(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
 
+    @model_validator(mode="after")
+    def require_update(self):
+        if not self.model_fields_set:
+            raise ValueError("chapter node update requires at least one field")
+        return self
+
 
 class MemoirChapterNodeReorderRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")

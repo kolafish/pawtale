@@ -595,7 +595,7 @@ async def create_legacy_contract_suggestion(
         reader_takeaway=f"读者能够理解“{chapter.title}”中的关键经历及其影响。",
         core_questions_json=[question.model_dump(mode="json") for question in questions],
         constraints_json=MemoirChapterContractConstraints(
-            include_story_ids=[story.id for story in candidates]
+            include_story_ids=[story.id for story in candidates[:1]]
         ).model_dump(mode="json"),
         status=MemoirChapterContractStatus.DRAFT.value,
         created_by=MemoirNarrativeActorType.SYSTEM.value,
@@ -825,6 +825,34 @@ async def validate_contract_for_generation(
 
     linked_story_ids = set(stories)
     constraints = contract_constraints(contract)
+    excluded_story_ids = set(constraints.exclude_story_ids)
+    for node in nodes:
+        for link in links_by_node.get(node.id, []):
+            story = stories.get(link.story_id)
+            if story is None or (
+                story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
+                or story.publication_status
+                != MemoirStoryPublicationStatus.ELIGIBLE.value
+                or story.verification_status
+                == MemoirStoryVerificationStatus.REJECTED.value
+            ):
+                issues.append(
+                    MemoirChapterContractValidationIssue(
+                        code="linked_story_ineligible",
+                        message=f"节点“{node.title}”引用的 Story 已不可用于成书。",
+                        node_id=node.id,
+                        story_id=link.story_id,
+                    )
+                )
+            if link.story_id in excluded_story_ids:
+                issues.append(
+                    MemoirChapterContractValidationIssue(
+                        code="excluded_story_linked",
+                        message=f"节点“{node.title}”引用了契约明确排除的 Story。",
+                        node_id=node.id,
+                        story_id=link.story_id,
+                    )
+                )
     for story_id in set(constraints.include_story_ids) - linked_story_ids:
         issues.append(
             MemoirChapterContractValidationIssue(
@@ -833,6 +861,16 @@ async def validate_contract_for_generation(
                 story_id=story_id,
             )
         )
+    for story_id in set(constraints.include_story_ids) & linked_story_ids:
+        story = stories[story_id]
+        if not story_is_ready(story):
+            issues.append(
+                MemoirChapterContractValidationIssue(
+                    code="required_story_not_ready",
+                    message="契约要求收录的 Story 尚未满足成书条件。",
+                    story_id=story_id,
+                )
+            )
     return MemoirChapterContractValidationResponse(
         contract_id=contract.id,
         contract_confirmed=(

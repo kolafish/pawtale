@@ -1,4 +1,7 @@
-from fastapi import APIRouter, Depends
+from typing import NoReturn
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -33,6 +36,19 @@ async def _commit_contract_response(
 ) -> MemoirChapterContractResponse:
     await db.commit()
     return await chapter_contracts.contract_response(db, contract=contract)
+
+
+async def _raise_mutation_error(
+    db: AsyncSession,
+    exc: ValueError | IntegrityError,
+) -> NoReturn:
+    await db.rollback()
+    if isinstance(exc, ValueError):
+        raise decision_error(exc) from exc
+    raise HTTPException(
+        status_code=409,
+        detail="chapter structure changed concurrently; reload and retry",
+    ) from exc
 
 
 @router.get(
@@ -76,9 +92,8 @@ async def suggest_memoir_chapter_contract(
             idempotency_key=req.idempotency_key,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.post(
@@ -102,9 +117,8 @@ async def create_memoir_chapter_contract_revision(
             actor_user_id=current_user.id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.get(
@@ -148,9 +162,8 @@ async def confirm_memoir_chapter_contract(
             actor_user_id=current_user.id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.get(
@@ -200,9 +213,8 @@ async def create_memoir_chapter_node(
             contract_id=contract_id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.patch(
@@ -233,9 +245,8 @@ async def update_memoir_chapter_node(
             contract_id=contract_id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.post(
@@ -264,9 +275,8 @@ async def reorder_memoir_chapter_nodes(
             contract_id=contract_id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.post(
@@ -297,9 +307,8 @@ async def attach_story_to_memoir_chapter_node(
             contract_id=contract_id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.delete(
@@ -330,9 +339,8 @@ async def detach_story_from_memoir_chapter_node(
             contract_id=contract_id,
         )
         return await _commit_contract_response(db, contract=contract)
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 async def _structure_mutation_response(
@@ -371,9 +379,8 @@ async def split_memoir_chapter_structure(
             source=source,
             target=target,
         )
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
 
 
 @router.post(
@@ -399,6 +406,5 @@ async def merge_memoir_chapter_structures(
             source=source,
             target=target,
         )
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
