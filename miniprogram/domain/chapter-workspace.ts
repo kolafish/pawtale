@@ -175,6 +175,27 @@ export interface MemoirNarrativeDecision {
   created_at: string;
 }
 
+export interface MemoirChapterNodeUpdateRequest {
+  title?: string;
+  purpose?: string;
+  required?: boolean;
+}
+
+export interface MemoirChapterNodeReorderRequest {
+  node_ids: string[];
+}
+
+export interface MemoirChapterNodeStoryMoveRequest {
+  source_node_id: string;
+  target_node_id: string;
+}
+
+export interface MemoirStoryMergeRequest {
+  retained_story_id: string;
+  idempotency_key: string;
+  reason?: string;
+}
+
 export type MemoirVerificationDecision = "confirm" | "reject";
 export type MemoirStorySlotResolutionStatus = "accepted_incomplete" | "not_applicable";
 

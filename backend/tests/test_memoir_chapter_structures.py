@@ -273,6 +273,200 @@ async def test_excluding_story_is_contract_scoped_audited_and_keeps_story(
     assert immutable.status_code == 409
 
 
+async def test_story_can_move_between_draft_nodes_without_recreating_its_link(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["第一次离家"],
+    )
+    story, _ = await _create_ready_story(test_db, created=created)
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload(
+            "move-story-contract",
+            objective="按时间顺序整理离家经历。",
+            include_story_ids=[story.id],
+        ),
+    )
+    contract_id = draft.json()["id"]
+    node_ids: list[str] = []
+    for index, title in enumerate(["离家前", "离家后"]):
+        response = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes",
+            json={
+                "idempotency_key": f"move-story-node-{index}",
+                "node_type": "story",
+                "title": title,
+                "purpose": f"讲述{title}的经历。",
+                "required": True,
+            },
+        )
+        assert response.status_code == 200, response.text
+        node_ids.append(response.json()["nodes"][-1]["id"])
+    linked = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes/{node_ids[0]}/stories",
+        json={
+            "story_id": story.id,
+            "story_role": "primary",
+            "sort_order": 0,
+            "required": True,
+        },
+    )
+    link_id = linked.json()["nodes"][0]["stories"][0]["id"]
+
+    moved = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story.id}/move",
+        json={
+            "source_node_id": node_ids[0],
+            "target_node_id": node_ids[1],
+        },
+    )
+
+    assert moved.status_code == 200, moved.text
+    nodes = {node["id"]: node for node in moved.json()["nodes"]}
+    assert nodes[node_ids[0]]["stories"] == []
+    assert nodes[node_ids[0]]["required"] is False
+    assert nodes[node_ids[0]]["status"] == "excluded"
+    assert nodes[node_ids[1]]["stories"] == [
+        {
+            "id": link_id,
+            "story_id": story.id,
+            "story_role": "primary",
+            "sort_order": 0,
+            "required": True,
+        }
+    ]
+
+
+async def test_story_merge_rewires_draft_contract_and_collapses_duplicate_node(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["搬家往事", "旧稿快照"],
+    )
+    source, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="搬家片段",
+    )
+    retained, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="搬到成都",
+    )
+    historical = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/contract/revisions",
+        json=_draft_payload(
+            "merge-story-confirmed-history",
+            objective="保留合并前已经确认的章节结构。",
+            include_story_ids=[source.id],
+        ),
+    )
+    historical_contract_id = historical.json()["id"]
+    historical_node = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{historical_contract_id}/nodes",
+        json={
+            "idempotency_key": "merge-story-confirmed-node",
+            "node_type": "story",
+            "title": source.title,
+            "purpose": "记录当时确认使用的故事版本。",
+            "required": True,
+        },
+    )
+    historical_node_id = historical_node.json()["nodes"][-1]["id"]
+    historical_link = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{historical_contract_id}/nodes/{historical_node_id}/stories",
+        json={
+            "story_id": source.id,
+            "story_role": "primary",
+            "sort_order": 0,
+            "required": True,
+        },
+    )
+    assert historical_link.status_code == 200, historical_link.text
+    historical_confirmed = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{historical_contract_id}/confirm"
+    )
+    assert historical_confirmed.status_code == 200, historical_confirmed.text
+
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload(
+            "merge-story-contract",
+            objective="合并重复片段后讲清搬家经过。",
+            include_story_ids=[source.id, retained.id],
+        ),
+    )
+    contract_id = draft.json()["id"]
+    node_ids: list[str] = []
+    for index, story in enumerate([source, retained]):
+        node = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes",
+            json={
+                "idempotency_key": f"merge-story-node-{index}",
+                "node_type": "story",
+                "title": story.title,
+                "purpose": f"讲述{story.title}。",
+                "required": True,
+            },
+        )
+        node_id = node.json()["nodes"][-1]["id"]
+        node_ids.append(node_id)
+        linked = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes/{node_id}/stories",
+            json={
+                "story_id": story.id,
+                "story_role": "primary",
+                "sort_order": 0,
+                "required": True,
+            },
+        )
+        assert linked.status_code == 200, linked.text
+
+    merged = await client.post(
+        f"/api/memoir/projects/{project_id}/stories/{source.id}/merge",
+        json={
+            "retained_story_id": retained.id,
+            "idempotency_key": "merge-duplicate-draft-story",
+            "reason": "项目所有者确认是同一段经历",
+        },
+    )
+
+    assert merged.status_code == 200, merged.text
+    contract = (
+        await client.get(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}"
+        )
+    ).json()
+    nodes = {node["id"]: node for node in contract["nodes"]}
+    assert nodes[node_ids[0]]["stories"] == []
+    assert nodes[node_ids[0]]["required"] is False
+    assert nodes[node_ids[0]]["status"] == "excluded"
+    assert nodes[node_ids[1]]["stories"][0]["story_id"] == retained.id
+    assert contract["constraints"]["include_story_ids"] == [retained.id]
+    historical_after_merge = (
+        await client.get(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{historical_contract_id}"
+        )
+    ).json()
+    assert historical_after_merge["status"] == "confirmed"
+    assert historical_after_merge["nodes"][0]["id"] == historical_node_id
+    assert historical_after_merge["nodes"][0]["stories"][0]["story_id"] == source.id
+    await test_db.refresh(source)
+    assert source.lifecycle_status == MemoirStoryLifecycleStatus.MERGED.value
+    assert source.merged_into_story_id == retained.id
+
+
 async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generation_gate(
     client,
     test_db,

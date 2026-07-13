@@ -2,6 +2,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
+    MemoirChapterContractStatus,
+    MemoirChapterNodeStatus,
+    MemoirChapterNodeStoryRole,
     MemoirNarrativeActorType,
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
@@ -10,18 +13,177 @@ from app.domain.memoir.narrative_types import (
     MemoirStorySlotStatus,
 )
 from app.models.memoir_narrative import (
+    MemoirChapterContract,
+    MemoirChapterNode,
+    MemoirChapterNodeStory,
     MemoirNarrativeDecision,
     MemoirStory,
     MemoirStoryClaim,
     MemoirStorySlotClaim,
 )
 from app.services.memoir.narrative import (
+    chapter_contracts,
     chapter_nodes,
     decision_log,
     story_revisions,
     story_slots,
 )
 from app.services.memoir.narrative.story_decisions import story_state
+
+
+async def _rewire_draft_chapter_links(
+    db: AsyncSession,
+    *,
+    source: MemoirStory,
+    retained: MemoirStory,
+    actor_user_id: str,
+) -> None:
+    rows = list(
+        (
+            await db.execute(
+                select(
+                    MemoirChapterNodeStory,
+                    MemoirChapterNode,
+                    MemoirChapterContract,
+                )
+                .join(
+                    MemoirChapterNode,
+                    (MemoirChapterNode.project_id == MemoirChapterNodeStory.project_id)
+                    & (MemoirChapterNode.id == MemoirChapterNodeStory.node_id),
+                )
+                .join(
+                    MemoirChapterContract,
+                    (MemoirChapterContract.project_id == MemoirChapterNode.project_id)
+                    & (MemoirChapterContract.id == MemoirChapterNode.contract_id),
+                )
+                .where(
+                    MemoirChapterNodeStory.project_id == source.project_id,
+                    MemoirChapterNodeStory.story_id == source.id,
+                    MemoirChapterContract.status
+                    == MemoirChapterContractStatus.DRAFT.value,
+                )
+                .order_by(MemoirChapterContract.id, MemoirChapterNode.sort_order)
+            )
+        ).all()
+    )
+    if not rows:
+        return
+
+    contracts = {contract.id: contract for _, _, contract in rows}
+    for contract_id, contract in contracts.items():
+        constraints = chapter_contracts.contract_constraints(contract)
+        if retained.id in constraints.exclude_story_ids:
+            raise ValueError(
+                "a draft chapter containing the merged Story excludes the retained Story"
+            )
+        contract_nodes = list(
+            (
+                await db.scalars(
+                    select(MemoirChapterNode).where(
+                        MemoirChapterNode.project_id == source.project_id,
+                        MemoirChapterNode.contract_id == contract_id,
+                    )
+                )
+            ).all()
+        )
+        node_ids = {node.id for node in contract_nodes}
+        retained_links = (
+            list(
+                (
+                    await db.scalars(
+                        select(MemoirChapterNodeStory).where(
+                            MemoirChapterNodeStory.project_id == source.project_id,
+                            MemoirChapterNodeStory.node_id.in_(node_ids),
+                            MemoirChapterNodeStory.story_id == retained.id,
+                        )
+                    )
+                ).all()
+            )
+            if node_ids
+            else []
+        )
+        retained_by_node = {link.node_id: link for link in retained_links}
+        retained_primary = next(
+            (
+                link
+                for link in retained_links
+                if link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value
+            ),
+            None,
+        )
+        affected_nodes = {
+            node.id: node
+            for _, node, row_contract in rows
+            if row_contract.id == contract_id
+        }
+        source_links = [
+            link for link, _, row_contract in rows if row_contract.id == contract_id
+        ]
+        for link in source_links:
+            same_node = retained_by_node.get(link.node_id)
+            if same_node is not None:
+                if link.required and not same_node.required:
+                    same_node.required = True
+                    db.add(same_node)
+                if (
+                    link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value
+                    and retained_primary is None
+                ):
+                    same_node.story_role = MemoirChapterNodeStoryRole.PRIMARY.value
+                    retained_primary = same_node
+                    db.add(same_node)
+                await db.delete(link)
+                continue
+            if (
+                link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value
+                and retained_primary is not None
+            ):
+                await db.delete(link)
+                continue
+            link.story_id = retained.id
+            retained_by_node[link.node_id] = link
+            if link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value:
+                retained_primary = link
+            db.add(link)
+        await db.flush()
+
+        for node in affected_nodes.values():
+            remaining_links = list(
+                (
+                    await db.scalars(
+                        select(MemoirChapterNodeStory).where(
+                            MemoirChapterNodeStory.project_id == node.project_id,
+                            MemoirChapterNodeStory.node_id == node.id,
+                        )
+                    )
+                ).all()
+            )
+            if not remaining_links:
+                node.required = False
+                node.status = MemoirChapterNodeStatus.EXCLUDED.value
+                node.updated_by = MemoirNarrativeActorType.USER.value
+                node.updated_by_user_id = actor_user_id
+                db.add(node)
+                continue
+            await chapter_nodes.recompute_story_node_status(
+                db,
+                node=node,
+                actor_user_id=actor_user_id,
+            )
+
+        if source.id in constraints.include_story_ids:
+            contract.constraints_json = constraints.model_copy(
+                update={
+                    "include_story_ids": list(
+                        dict.fromkeys(
+                            retained.id if story_id == source.id else story_id
+                            for story_id in constraints.include_story_ids
+                        )
+                    )
+                }
+            ).model_dump(mode="json")
+            db.add(contract)
+    await db.flush()
 
 
 async def merge_stories(
@@ -75,6 +237,12 @@ async def merge_stories(
 
     source_before = await story_revisions.story_snapshot(db, source)
     retained_before = await story_revisions.story_snapshot(db, retained)
+    await _rewire_draft_chapter_links(
+        db,
+        source=source,
+        retained=retained,
+        actor_user_id=actor_user_id,
+    )
     source_slots = await story_slots.ensure_story_slots(db, story=source)
     retained_slots = await story_slots.ensure_story_slots(db, story=retained)
     source_slots_by_key = {slot.slot_key: slot for slot in source_slots}

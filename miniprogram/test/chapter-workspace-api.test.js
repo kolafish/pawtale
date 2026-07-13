@@ -59,8 +59,12 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     enqueueMemoirChapterWorkspaceAudit,
     excludeMemoirStoryFromChapter,
     getMemoirChapterWorkspace,
+    mergeMemoirStory,
+    moveMemoirStoryBetweenChapterNodes,
+    reorderMemoirChapterNodes,
     resolveMemoirNarrativeGap,
     resolveMemoirStorySlot,
+    updateMemoirChapterNode,
   } = require("../services/memoir-chapter-workspace-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
@@ -97,6 +101,25 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     },
   );
   await confirmMemoirChapterContract("project/1", "contract/1");
+  await updateMemoirChapterNode("project/1", "contract/1", "node/1", {
+    title: "新的节点标题",
+    purpose: "新的叙事作用",
+    required: true,
+  });
+  await reorderMemoirChapterNodes("project/1", "contract/1", {
+    node_ids: ["node/2", "node/1"],
+  });
+  await moveMemoirStoryBetweenChapterNodes(
+    "project/1",
+    "contract/1",
+    "story/1",
+    { source_node_id: "node/1", target_node_id: "node/2" },
+  );
+  await mergeMemoirStory("project/1", "story/1", {
+    retained_story_id: "story/2",
+    idempotency_key: "merge-1",
+    reason: "确认是同一个故事",
+  });
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
@@ -133,5 +156,25 @@ test("chapter workspace API uses narrative resource routes and explicit action p
   });
   assert.equal(apiRequests[7].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/confirm");
   assert.deepEqual(apiRequests[7].data, {});
+  assert.equal(apiRequests[8].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/node%2F1");
+  assert.equal(apiRequests[8].method, "PATCH");
+  assert.deepEqual(apiRequests[8].data, {
+    title: "新的节点标题",
+    purpose: "新的叙事作用",
+    required: true,
+  });
+  assert.equal(apiRequests[9].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/reorder");
+  assert.deepEqual(apiRequests[9].data, { node_ids: ["node/2", "node/1"] });
+  assert.equal(apiRequests[10].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/move");
+  assert.deepEqual(apiRequests[10].data, {
+    source_node_id: "node/1",
+    target_node_id: "node/2",
+  });
+  assert.equal(apiRequests[11].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/merge");
+  assert.deepEqual(apiRequests[11].data, {
+    retained_story_id: "story/2",
+    idempotency_key: "merge-1",
+    reason: "确认是同一个故事",
+  });
   delete global.wx;
 });
