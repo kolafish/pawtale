@@ -14,6 +14,10 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirSessionGoal,
 )
+from app.migrations.sqlite_integrity import (
+    legacy_foreign_key_tables,
+    repair_sqlite_foreign_key_integrity,
+)
 
 
 REALTIME_VOICE_TABLES = (
@@ -377,7 +381,7 @@ async def _prune_transcript_versions(conn) -> int:
     return int(delete_result.rowcount or 0)
 
 
-async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str]]:
+async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
     """Repair known realtime voice schema drift in existing SQLite databases."""
     changed_tables: list[str] = []
     changed_columns: list[str] = []
@@ -516,6 +520,19 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
             )
             changed_columns.append("memoir_transcript_versions.source_artifact_id")
 
+        legacy_fk_tables = await legacy_foreign_key_tables(conn)
+        if "memoir_voice_utterances" in legacy_fk_tables:
+            await _drop_transcript_fts(conn)
+        foreign_key_result = await repair_sqlite_foreign_key_integrity(conn)
+        for table_name in foreign_key_result["rebuilt_tables"]:
+            if table_name not in changed_tables:
+                changed_tables.append(str(table_name))
+        deleted_source_cards = int(
+            foreign_key_result["deleted_derived_rows"].get("memoir_source_cards", 0)
+        )
+        if deleted_source_cards:
+            changed_rows.append(f"memoir_source_cards.orphans:{deleted_source_cards}")
+
         transcript_version_indexes = {
             "ix_memoir_transcript_versions_voice_session_id": "voice_session_id",
             "ix_memoir_transcript_versions_source_type_created": (
@@ -547,6 +564,7 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
         "changed_indexes": changed_indexes,
         "changed_triggers": changed_triggers,
         "changed_rows": changed_rows,
+        "foreign_keys": foreign_key_result,
     }
 
 

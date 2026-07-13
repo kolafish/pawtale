@@ -21,21 +21,31 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
-from app.database import engine
+from app.config import get_settings
+from app.database import create_database_engine
 from app.migrations.runtime import migrate_runtime_schema
-from backup_runtime_data import create_backup
+from backup_runtime_data import create_backup, sqlite_database_path
 
 
 async def run(skip_backup: bool) -> None:
+    settings = get_settings()
     backup_dir = None
     if not skip_backup:
-        try:
-            backup_dir = create_backup(prefix="runtime_schema_migration")
-        except FileNotFoundError:
-            backup_dir = None
+        database_path = sqlite_database_path(settings.database_url)
+        if database_path and database_path.exists():
+            backup_dir = create_backup(
+                prefix="runtime_schema_migration",
+                db_path=database_path,
+            )
 
-    result = await migrate_runtime_schema(engine)
-    await engine.dispose()
+    migration_engine = create_database_engine(
+        settings,
+        enforce_sqlite_foreign_keys=False,
+    )
+    try:
+        result = await migrate_runtime_schema(migration_engine)
+    finally:
+        await migration_engine.dispose()
 
     print("Runtime schema migration complete.")
     if backup_dir:
