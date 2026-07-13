@@ -743,6 +743,7 @@ class MemoirBookChapterDraftVersionResponse(BaseModel):
     model: str | None = None
     prompt_snapshot: str
     feedback: str | None = None
+    block_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
     created_at: datetime
 
 

@@ -22,6 +22,7 @@
     <view class="tab-bar">
       <view class="tab {{activeTab === 'structure' ? 'active' : ''}}" data-tab="structure" bindtap="changeTab">章节结构</view>
       <view class="tab {{activeTab === 'stories' ? 'active' : ''}}" data-tab="stories" bindtap="changeTab">故事与证据</view>
+      <view class="tab {{activeTab === 'drafts' ? 'active' : ''}}" data-tab="drafts" bindtap="changeTab">正文</view>
       <view class="tab {{activeTab === 'checks' ? 'active' : ''}}" data-tab="checks" bindtap="changeTab">检查报告</view>
       <view class="tab {{activeTab === 'followups' ? 'active' : ''}}" data-tab="followups" bindtap="changeTab">补访问题</view>
     </view>
@@ -91,6 +92,155 @@
         </view>
       </view>
       <view wx:else class="empty-state">本章还没有关联 Story</view>
+    </view>
+
+    <view wx:elif="{{activeTab === 'drafts'}}" class="content-section">
+      <view class="draft-toolbar">
+        <view class="draft-toolbar-copy">
+          <text class="section-title">结构化正文</text>
+          <text class="draft-toolbar-hint">{{draftBlocks.length}} 个正文块</text>
+        </view>
+        <view class="draft-toolbar-actions">
+          <button
+            class="secondary-action-button"
+            loading="{{draftGenerationBusy}}"
+            disabled="{{draftGenerationBusy || revisionBlockId || !workspace.contract || workspace.contract.status !== 'confirmed'}}"
+            bindtap="generateDraftBlocks"
+          >
+            {{draftBlocks.length ? "补齐正文" : "生成正文"}}
+          </button>
+          <button
+            class="primary-action-button"
+            loading="{{assemblingDraft}}"
+            disabled="{{assemblingDraft || !draftBlocks.length}}"
+            bindtap="assembleChapterDraft"
+          >
+            组装章节稿
+          </button>
+        </view>
+      </view>
+
+      <view wx:if="{{draftGenerationStatus}}" class="draft-job-state">{{draftGenerationStatus}}</view>
+      <view wx:if="{{draftError}}" class="message error-message">{{draftError}}</view>
+      <view wx:if="{{draftLoading}}" class="empty-state">正在加载正文</view>
+      <view wx:elif="{{draftBlocks.length}}" class="draft-block-list">
+        <view wx:for="{{draftBlocks}}" wx:for-item="block" wx:key="id" class="draft-block-row {{block.freshness_status === 'stale' ? 'stale' : ''}}">
+          <view class="draft-block-head">
+            <view class="draft-block-heading">
+              <text class="draft-block-role">{{block.roleText}}</text>
+              <text class="draft-block-node">{{block.nodeTitle}}</text>
+            </view>
+            <view class="draft-block-badges">
+              <text class="draft-status-label {{block.editorial_status}}">{{block.editorialStatusText}}</text>
+              <text class="draft-status-label {{block.freshness_status}}">{{block.freshnessStatusText}}</text>
+              <text wx:if="{{block.locked}}" class="draft-status-label locked">已锁定</text>
+            </view>
+          </view>
+
+          <block wx:if="{{editingBlockId === block.id}}">
+            <textarea
+              class="draft-block-editor"
+              value="{{editingBlockContent}}"
+              maxlength="-1"
+              auto-height
+              cursor-spacing="24"
+              bindinput="changeDraftBlockContent"
+            />
+            <view class="draft-inline-actions">
+              <button class="text-action-button" bindtap="cancelDraftBlockEdit">取消</button>
+              <button
+                class="primary-small-button"
+                data-block-id="{{block.id}}"
+                loading="{{block.busy}}"
+                disabled="{{block.busy}}"
+                bindtap="saveDraftBlockEdit"
+              >保存</button>
+            </view>
+          </block>
+          <text wx:else class="draft-block-content">{{block.current_version.content}}</text>
+
+          <view class="draft-block-meta">
+            <text>版本 {{block.current_version.version}} · {{block.sourceCountText}}</text>
+          </view>
+          <view class="draft-inline-actions wrap">
+            <button
+              class="text-action-button"
+              data-block-id="{{block.id}}"
+              bindtap="toggleDraftBlockSources"
+            >{{sourceBlockId === block.id ? "收起来源" : "查看来源"}}</button>
+            <button
+              wx:if="{{!block.isLegacy}}"
+              class="text-action-button"
+              data-block-id="{{block.id}}"
+              disabled="{{block.busy || editingBlockId === block.id}}"
+              bindtap="startDraftBlockEdit"
+            >编辑</button>
+            <button
+              wx:if="{{!block.isLegacy && block.editorial_status !== 'confirmed'}}"
+              class="text-action-button"
+              data-block-id="{{block.id}}"
+              loading="{{block.busy}}"
+              disabled="{{block.busy}}"
+              bindtap="confirmDraftBlock"
+            >确认</button>
+            <button
+              wx:if="{{!block.isLegacy}}"
+              class="text-action-button"
+              data-block-id="{{block.id}}"
+              loading="{{block.busy}}"
+              disabled="{{block.busy}}"
+              bindtap="toggleDraftBlockLock"
+            >{{block.locked ? "解锁" : "锁定"}}</button>
+          </view>
+
+          <view wx:if="{{sourceBlockId === block.id}}" class="draft-source-panel">
+            <text wx:if="{{!block.sourceClaims.length && !block.sourceStories.length}}" class="draft-source-empty">历史快照没有结构化 Story/Claim 来源</text>
+            <view wx:for="{{block.sourceStories}}" wx:for-item="sourceStory" wx:key="id" class="draft-source-story">
+              <text class="draft-source-kind">故事</text>
+              <text class="draft-source-title">{{sourceStory.title}}</text>
+            </view>
+            <view wx:for="{{block.sourceClaims}}" wx:for-item="sourceClaim" wx:key="id" class="draft-source-claim">
+              <text class="draft-source-kind">事实依据</text>
+              <text class="draft-source-statement">{{sourceClaim.statement}}</text>
+              <text wx:if="{{sourceClaim.evidenceText}}" class="draft-source-evidence">{{sourceClaim.evidenceText}}</text>
+            </view>
+          </view>
+
+          <view wx:if="{{!block.isLegacy}}" class="draft-revision-panel">
+            <input
+              class="draft-revision-input"
+              value="{{block.revisionFeedback}}"
+              placeholder="例如：把‘单位’改成具体名称，只调整这一段"
+              maxlength="4000"
+              data-block-id="{{block.id}}"
+              bindinput="changeDraftRevisionFeedback"
+            />
+            <button
+              class="secondary-action-button revision-button"
+              data-block-id="{{block.id}}"
+              loading="{{revisionBlockId === block.id && !revisionSuggestion}}"
+              disabled="{{block.locked || block.busy || revisionBlockId || draftGenerationBusy}}"
+              bindtap="requestDraftBlockRevision"
+            >生成本段修改建议</button>
+            <text wx:if="{{revisionBlockId === block.id && revisionStatus}}" class="draft-revision-status">{{revisionStatus}}</text>
+            <view wx:if="{{revisionBlockId === block.id && revisionSuggestion}}" class="draft-suggestion">
+              <text class="draft-suggestion-label">建议版本</text>
+              <text class="draft-suggestion-content">{{revisionSuggestion}}</text>
+              <view class="draft-inline-actions">
+                <button class="text-action-button" bindtap="discardDraftBlockRevision">放弃</button>
+                <button
+                  class="primary-small-button"
+                  data-block-id="{{block.id}}"
+                  loading="{{block.busy}}"
+                  disabled="{{block.busy}}"
+                  bindtap="applyDraftBlockSuggestion"
+                >采用建议</button>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view wx:else class="empty-state">本章还没有结构化正文块</view>
     </view>
 
     <view wx:elif="{{activeTab === 'checks'}}" class="content-section">

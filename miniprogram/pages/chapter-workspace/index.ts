@@ -8,13 +8,30 @@ import type {
   MemoirNarrativeGapAction,
 } from "../../domain/chapter-workspace";
 import type { MemoirFollowupTask } from "../../domain/voice-chat";
+import type {
+  MemoirDraftBlock,
+  MemoirDraftBlockJob,
+} from "../../domain/draft-blocks";
 import { trackAuditAction } from "../../services/audit-tracker";
+import {
+  clearMemoirDraftJobCursor,
+  readMemoirDraftJobCursor,
+  writeMemoirDraftJobCursor,
+} from "../../services/memoir-draft-job-state";
 import { definePage } from "../../services/page-definition";
 import {
   createMemoirVoiceSession,
+  applyMemoirDraftBlockRevision,
+  assembleMemoirChapterDraftBlocks,
+  decideMemoirDraftBlock,
+  enqueueMemoirDraftBlockGeneration,
+  enqueueMemoirDraftBlockRevision,
   enqueueMemoirChapterWorkspaceAudit,
+  getMemoirDraftBlockJob,
   getMemoirChapterWorkspace,
+  listMemoirDraftBlocks,
   listMemoirFollowupTasks,
+  manuallyReviseMemoirDraftBlock,
   resolveMemoirNarrativeGap,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
@@ -29,9 +46,10 @@ import {
 } from "../../services/page-input";
 
 
-const TAB_VALUES = ["structure", "stories", "checks", "followups"] as const;
+const TAB_VALUES = ["structure", "stories", "drafts", "checks", "followups"] as const;
 const GAP_ACTIONS = ["resolve", "accept-incomplete", "not-applicable", "dismiss"] as const;
 const AUDIT_POLL_INTERVAL_MS = 1500;
+const DRAFT_JOB_POLL_INTERVAL_MS = 1500;
 
 type WorkspaceTab = (typeof TAB_VALUES)[number];
 
@@ -40,6 +58,7 @@ interface WorkspaceDataset {
   gapId?: string;
   action?: string;
   taskId?: string;
+  blockId?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
@@ -86,6 +105,30 @@ interface FollowupTaskView extends MemoirFollowupTask {
   actionText: string;
 }
 
+interface DraftBlockSourceClaimView {
+  id: string;
+  statement: string;
+  evidenceText: string;
+}
+
+interface DraftBlockSourceStoryView {
+  id: string;
+  title: string;
+}
+
+interface DraftBlockView extends MemoirDraftBlock {
+  roleText: string;
+  nodeTitle: string;
+  editorialStatusText: string;
+  freshnessStatusText: string;
+  sourceCountText: string;
+  sourceClaims: DraftBlockSourceClaimView[];
+  sourceStories: DraftBlockSourceStoryView[];
+  revisionFeedback: string;
+  isLegacy: boolean;
+  busy: boolean;
+}
+
 interface ChapterWorkspacePageData {
   loading: boolean;
   error: string;
@@ -105,6 +148,20 @@ interface ChapterWorkspacePageData {
   followupLoading: boolean;
   followupError: string;
   startingFollowupTaskId: string;
+  draftBlocks: DraftBlockView[];
+  draftLoading: boolean;
+  draftError: string;
+  draftGenerationBusy: boolean;
+  draftGenerationJobId: string;
+  draftGenerationStatus: string;
+  assemblingDraft: boolean;
+  editingBlockId: string;
+  editingBlockContent: string;
+  sourceBlockId: string;
+  revisionBlockId: string;
+  revisionJobId: string;
+  revisionSuggestion: string;
+  revisionStatus: string;
 }
 
 const SLOT_LABELS: Record<string, string> = {
@@ -228,9 +285,70 @@ export function followupTaskView(task: MemoirFollowupTask): FollowupTaskView {
   };
 }
 
+function draftRoleText(role: MemoirDraftBlock["block_role"]): string {
+  return ({
+    factual: "叙事正文",
+    transition: "段落过渡",
+    reflection: "回望与感受",
+    opening: "章节开头",
+    closing: "章节结尾",
+    legacy_snapshot: "历史整章快照",
+  })[role];
+}
+
+function firstEvidenceText(claim: MemoirChapterWorkspaceClaim): string {
+  const evidence = claim.evidence.find((item) => item.evidence_role === "supports");
+  return (evidence?.quote || evidence?.evidence_note || "").trim();
+}
+
+export function draftBlockViews(
+  blocks: MemoirDraftBlock[],
+  workspace: MemoirChapterWorkspace | null,
+  existing: DraftBlockView[] = [],
+): DraftBlockView[] {
+  const nodeTitles = new Map(
+    (workspace?.contract?.nodes || []).map((node) => [node.id, node.title]),
+  );
+  const stories = new Map((workspace?.stories || []).map((story) => [story.id, story]));
+  const claims = new Map(
+    (workspace?.stories || []).flatMap((story) => story.claims.map((claim) => [claim.id, claim] as const)),
+  );
+  const feedback = new Map(existing.map((block) => [block.id, block.revisionFeedback]));
+  return blocks.map((block) => {
+    const sourceClaims = block.current_version.claims.flatMap((source) => {
+      const claim = claims.get(source.claim_id);
+      return claim ? [{
+        id: claim.id,
+        statement: claim.statement,
+        evidenceText: firstEvidenceText(claim),
+      }] : [];
+    });
+    const sourceStories = block.current_version.stories.flatMap((source) => {
+      const story = stories.get(source.story_id);
+      return story ? [{ id: story.id, title: story.title }] : [];
+    });
+    const sourceCount = sourceClaims.length + sourceStories.length;
+    return {
+      ...block,
+      roleText: draftRoleText(block.block_role),
+      nodeTitle: (block.node_id && nodeTitles.get(block.node_id)) || "历史正文",
+      editorialStatusText: ({ draft: "待确认", confirmed: "已确认", excluded: "不收录" })[block.editorial_status],
+      freshnessStatusText: block.freshness_status === "stale" ? "来源已变化" : "来源有效",
+      sourceCountText: sourceCount ? `${sourceCount} 项来源` : "无结构化来源",
+      sourceClaims,
+      sourceStories,
+      revisionFeedback: feedback.get(block.id) || "",
+      isLegacy: block.block_role === "legacy_snapshot",
+      busy: existing.find((item) => item.id === block.id)?.busy || false,
+    };
+  });
+}
+
 definePage<ChapterWorkspacePageData>()({
   auditPollTimer: null as ReturnType<typeof setTimeout> | null,
   auditPollToken: 0,
+  draftPollTimer: null as ReturnType<typeof setTimeout> | null,
+  draftPollToken: 0,
   loadedOnce: false,
 
   data: {
@@ -252,6 +370,20 @@ definePage<ChapterWorkspacePageData>()({
     followupLoading: false,
     followupError: "",
     startingFollowupTaskId: "",
+    draftBlocks: [],
+    draftLoading: false,
+    draftError: "",
+    draftGenerationBusy: false,
+    draftGenerationJobId: "",
+    draftGenerationStatus: "",
+    assemblingDraft: false,
+    editingBlockId: "",
+    editingBlockContent: "",
+    sourceBlockId: "",
+    revisionBlockId: "",
+    revisionJobId: "",
+    revisionSuggestion: "",
+    revisionStatus: "",
   },
 
   async onLoad(query: PageQuery = {}) {
@@ -264,6 +396,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     await this.loadWorkspace();
+    await this.restoreDraftJob();
     this.loadedOnce = true;
   },
 
@@ -329,6 +462,7 @@ definePage<ChapterWorkspacePageData>()({
           items: workspace.gaps.accepted_incomplete.map(openGap),
         },
       ],
+      draftBlocks: draftBlockViews(this.data.draftBlocks, workspace, this.data.draftBlocks),
     });
     this.startAuditPollingIfNeeded();
   },
@@ -343,7 +477,10 @@ definePage<ChapterWorkspacePageData>()({
     try {
       const workspace = await getMemoirChapterWorkspace(this.data.projectId, this.data.chapterId);
       this.applyWorkspace(workspace);
-      await this.loadFollowupTasks(true);
+      await Promise.all([
+        this.loadFollowupTasks(true),
+        this.loadDraftBlocks(true),
+      ]);
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
@@ -380,6 +517,31 @@ definePage<ChapterWorkspacePageData>()({
     } finally {
       if (!silent) {
         this.setData({ followupLoading: false });
+      }
+    }
+  },
+
+  async loadDraftBlocks(silent = false) {
+    if (!this.data.projectId || !this.data.chapterId || (this.data.draftLoading && !silent)) {
+      return;
+    }
+    if (!silent) {
+      this.setData({ draftLoading: true, draftError: "" });
+    }
+    try {
+      const response = await listMemoirDraftBlocks(this.data.projectId, this.data.chapterId);
+      this.setData({
+        draftBlocks: draftBlockViews(response.blocks, this.data.workspace, this.data.draftBlocks),
+        draftError: "",
+      });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "正文块加载失败" });
+    } finally {
+      if (!silent) {
+        this.setData({ draftLoading: false });
       }
     }
   },
@@ -487,6 +649,391 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
+  patchDraftBlock(blockId: string, patch: Partial<DraftBlockView>) {
+    this.setData({
+      draftBlocks: this.data.draftBlocks.map((block) => (
+        block.id === blockId ? { ...block, ...patch } : block
+      )),
+    });
+  },
+
+  stopDraftPolling() {
+    this.draftPollToken += 1;
+    if (this.draftPollTimer !== null) {
+      clearTimeout(this.draftPollTimer);
+      this.draftPollTimer = null;
+    }
+  },
+
+  scheduleDraftJobPoll(jobId: string, mode: "generate" | "revise", blockId = "") {
+    if (this.draftPollTimer !== null) {
+      return;
+    }
+    const token = this.draftPollToken;
+    this.draftPollTimer = setTimeout(() => {
+      this.draftPollTimer = null;
+      void this.pollDraftJob(jobId, mode, blockId, token);
+    }, DRAFT_JOB_POLL_INTERVAL_MS);
+  },
+
+  rememberDraftJob(jobId: string, mode: "generate" | "revise", blockId = "") {
+    writeMemoirDraftJobCursor({
+      projectId: this.data.projectId,
+      chapterId: this.data.chapterId,
+      jobId,
+      mode,
+      blockId,
+    });
+  },
+
+  forgetDraftJob(jobId: string) {
+    clearMemoirDraftJobCursor(this.data.projectId, this.data.chapterId, jobId);
+  },
+
+  async restoreDraftJob() {
+    if (this.data.draftGenerationJobId || this.data.revisionJobId) {
+      return;
+    }
+    const cursor = readMemoirDraftJobCursor(this.data.projectId, this.data.chapterId);
+    if (!cursor) {
+      return;
+    }
+    try {
+      const job = await getMemoirDraftBlockJob(this.data.projectId, cursor.jobId);
+      await this.applyDraftJobState(job, cursor.mode, cursor.blockId);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        draftError: error instanceof Error ? error.message : "正文任务状态恢复失败",
+      });
+    }
+  },
+
+  async applyDraftJobState(job: MemoirDraftBlockJob, mode: "generate" | "revise", blockId = "") {
+    if (job.status === "pending" || job.status === "running") {
+      this.rememberDraftJob(job.id, mode, blockId);
+      if (mode === "generate") {
+        this.setData({
+          draftGenerationBusy: true,
+          draftGenerationJobId: job.id,
+          draftGenerationStatus: job.status === "pending" ? "正文生成已排队" : "正在按章节结构生成正文",
+        });
+      } else {
+        this.setData({
+          revisionBlockId: blockId,
+          revisionJobId: job.id,
+          revisionStatus: job.status === "pending" ? "修改建议已排队" : "正在生成当前段的修改建议",
+        });
+      }
+      this.scheduleDraftJobPoll(job.id, mode, blockId);
+      return;
+    }
+    if (job.status === "failed" || job.status === "skipped") {
+      this.forgetDraftJob(job.id);
+      const message = job.error_message || (mode === "generate" ? "正文块生成失败" : "修改建议生成失败");
+      if (mode === "generate") {
+        this.setData({ draftGenerationBusy: false, draftGenerationJobId: "", draftGenerationStatus: "", draftError: message });
+      } else {
+        this.setData({ revisionBlockId: "", revisionJobId: "", revisionStatus: "", draftError: message });
+      }
+      return;
+    }
+    if (mode === "generate") {
+      this.forgetDraftJob(job.id);
+      const created = job.result_json.created_block_ids;
+      const count = Array.isArray(created) ? created.length : 0;
+      this.setData({
+        draftGenerationBusy: false,
+        draftGenerationJobId: "",
+        draftGenerationStatus: count ? `已生成 ${count} 个正文块` : "现有正文块已保留",
+        draftError: "",
+      });
+      await this.loadDraftBlocks(true);
+      return;
+    }
+    const suggestion = typeof job.result_json.content === "string" ? job.result_json.content.trim() : "";
+    this.rememberDraftJob(job.id, mode, blockId);
+    this.setData({
+      revisionBlockId: blockId,
+      revisionJobId: job.id,
+      revisionSuggestion: suggestion,
+      revisionStatus: suggestion ? "修改建议已生成，确认后才会替换当前版本" : "修改建议没有返回正文",
+      draftError: suggestion ? "" : "修改建议内容为空",
+    });
+  },
+
+  async pollDraftJob(
+    jobId: string,
+    mode: "generate" | "revise",
+    blockId: string,
+    token: number,
+  ) {
+    if (token !== this.draftPollToken) {
+      return;
+    }
+    try {
+      const job = await getMemoirDraftBlockJob(this.data.projectId, jobId);
+      if (token === this.draftPollToken) {
+        await this.applyDraftJobState(job, mode, blockId);
+      }
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      if (token === this.draftPollToken) {
+        this.setData({
+          draftError: error instanceof Error ? error.message : "正文任务状态读取失败",
+        });
+        this.scheduleDraftJobPoll(jobId, mode, blockId);
+      }
+    }
+  },
+
+  async generateDraftBlocks() {
+    if (!this.data.projectId || !this.data.chapterId || this.data.draftGenerationBusy || this.data.revisionBlockId) {
+      return;
+    }
+    this.stopDraftPolling();
+    this.setData({
+      activeTab: "drafts",
+      draftGenerationBusy: true,
+      draftGenerationStatus: "正在提交正文生成",
+      draftError: "",
+    });
+    try {
+      const job = await enqueueMemoirDraftBlockGeneration(this.data.projectId, this.data.chapterId);
+      await this.applyDraftJobState(job, "generate");
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        draftGenerationBusy: false,
+        draftGenerationJobId: "",
+        draftGenerationStatus: "",
+        draftError: error instanceof Error ? error.message : "正文生成提交失败",
+      });
+    }
+  },
+
+  startDraftBlockEdit(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    if (!block || block.isLegacy || block.busy) {
+      return;
+    }
+    this.setData({
+      editingBlockId: block.id,
+      editingBlockContent: block.current_version.content,
+      draftError: "",
+    });
+  },
+
+  changeDraftBlockContent(event: PageTextInputEvent) {
+    this.setData({ editingBlockContent: event.detail.value });
+  },
+
+  cancelDraftBlockEdit() {
+    this.setData({ editingBlockId: "", editingBlockContent: "" });
+  },
+
+  async saveDraftBlockEdit(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    const content = this.data.editingBlockContent.trim();
+    if (!block || block.busy || this.data.editingBlockId !== block.id || !content) {
+      if (!content) {
+        this.setData({ draftError: "正文内容不能为空" });
+      }
+      return;
+    }
+    this.patchDraftBlock(block.id, { busy: true });
+    try {
+      await manuallyReviseMemoirDraftBlock(this.data.projectId, block.id, {
+        expected_current_version_id: block.current_version_id,
+        content,
+      });
+      this.setData({ editingBlockId: "", editingBlockContent: "", draftError: "" });
+      await this.loadDraftBlocks(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "正文保存失败" });
+    } finally {
+      this.patchDraftBlock(block.id, { busy: false });
+    }
+  },
+
+  toggleDraftBlockSources(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    this.setData({ sourceBlockId: this.data.sourceBlockId === blockId ? "" : blockId });
+  },
+
+  async confirmDraftBlock(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    if (!block || block.busy || block.editorial_status === "confirmed") {
+      return;
+    }
+    this.patchDraftBlock(block.id, { busy: true });
+    try {
+      await decideMemoirDraftBlock(this.data.projectId, block.id, "confirm", {
+        expected_current_version_id: block.current_version_id,
+        idempotency_key: `workspace:confirm:${block.id}:${Date.now()}`,
+        reason: "在章节工作台确认正文块",
+      });
+      await this.loadDraftBlocks(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "正文确认失败" });
+    } finally {
+      this.patchDraftBlock(block.id, { busy: false });
+    }
+  },
+
+  async toggleDraftBlockLock(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    if (!block || block.busy || block.isLegacy) {
+      return;
+    }
+    const action = block.locked ? "unlock" : "lock";
+    this.patchDraftBlock(block.id, { busy: true });
+    try {
+      await decideMemoirDraftBlock(this.data.projectId, block.id, action, {
+        expected_current_version_id: block.current_version_id,
+        idempotency_key: `workspace:${action}:${block.id}:${Date.now()}`,
+        reason: block.locked ? "继续编辑当前正文块" : "保护已经认可的正文措辞",
+      });
+      await this.loadDraftBlocks(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "正文锁定状态保存失败" });
+    } finally {
+      this.patchDraftBlock(block.id, { busy: false });
+    }
+  },
+
+  changeDraftRevisionFeedback(event: PageTextInputEvent & DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    if (blockId) {
+      this.patchDraftBlock(blockId, { revisionFeedback: event.detail.value });
+    }
+  },
+
+  async requestDraftBlockRevision(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    const feedback = block?.revisionFeedback.trim() || "";
+    if (
+      !block
+      || block.isLegacy
+      || block.locked
+      || block.busy
+      || this.data.revisionBlockId
+      || this.data.draftGenerationBusy
+    ) {
+      return;
+    }
+    if (!feedback) {
+      this.setData({ draftError: "请先写明想怎样修改这一段" });
+      return;
+    }
+    this.stopDraftPolling();
+    this.setData({
+      revisionBlockId: block.id,
+      revisionJobId: "",
+      revisionSuggestion: "",
+      revisionStatus: "正在提交修改建议",
+      draftError: "",
+    });
+    try {
+      const job = await enqueueMemoirDraftBlockRevision(this.data.projectId, block.id, {
+        expected_current_version_id: block.current_version_id,
+        feedback,
+      });
+      await this.applyDraftJobState(job, "revise", block.id);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        revisionBlockId: "",
+        revisionJobId: "",
+        revisionStatus: "",
+        draftError: error instanceof Error ? error.message : "修改建议提交失败",
+      });
+    }
+  },
+
+  discardDraftBlockRevision() {
+    this.stopDraftPolling();
+    this.forgetDraftJob(this.data.revisionJobId);
+    this.setData({
+      revisionBlockId: "",
+      revisionJobId: "",
+      revisionSuggestion: "",
+      revisionStatus: "",
+    });
+  },
+
+  async applyDraftBlockSuggestion(event: DatasetEvent) {
+    const blockId = datasetString(event, "blockId");
+    const block = this.data.draftBlocks.find((item) => item.id === blockId);
+    if (!block || block.busy || this.data.revisionBlockId !== block.id || !this.data.revisionJobId) {
+      return;
+    }
+    this.patchDraftBlock(block.id, { busy: true });
+    try {
+      await applyMemoirDraftBlockRevision(this.data.projectId, block.id, {
+        expected_current_version_id: block.current_version_id,
+        generation_job_id: this.data.revisionJobId,
+      });
+      this.forgetDraftJob(this.data.revisionJobId);
+      this.setData({
+        revisionBlockId: "",
+        revisionJobId: "",
+        revisionSuggestion: "",
+        revisionStatus: "",
+        draftError: "",
+      });
+      await this.loadDraftBlocks(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "修改建议应用失败" });
+    } finally {
+      this.patchDraftBlock(block.id, { busy: false });
+    }
+  },
+
+  async assembleChapterDraft() {
+    if (!this.data.projectId || !this.data.chapterId || this.data.assemblingDraft) {
+      return;
+    }
+    this.setData({ assemblingDraft: true, draftError: "" });
+    try {
+      const result = await assembleMemoirChapterDraftBlocks(this.data.projectId, this.data.chapterId);
+      this.setData({ draftGenerationStatus: `已组装章节稿 v${result.version}` });
+      wx.showToast({ title: "章节稿已组装", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ draftError: error instanceof Error ? error.message : "章节稿组装失败" });
+    } finally {
+      this.setData({ assemblingDraft: false });
+    }
+  },
+
   async startHumanFollowupInterview(event: DatasetEvent) {
     const taskId = datasetString(event, "taskId");
     if (!taskId || this.data.startingFollowupTaskId) {
@@ -550,14 +1097,21 @@ definePage<ChapterWorkspacePageData>()({
       void this.loadWorkspace(true);
     }
     this.startAuditPollingIfNeeded();
+    if (this.data.draftGenerationBusy && this.data.draftGenerationJobId) {
+      this.scheduleDraftJobPoll(this.data.draftGenerationJobId, "generate");
+    } else if (this.data.revisionBlockId && this.data.revisionJobId && !this.data.revisionSuggestion) {
+      this.scheduleDraftJobPoll(this.data.revisionJobId, "revise", this.data.revisionBlockId);
+    }
   },
 
   onHide() {
     this.stopAuditPolling();
+    this.stopDraftPolling();
   },
 
   onUnload() {
     this.stopAuditPolling();
+    this.stopDraftPolling();
   },
 
   goBack() {

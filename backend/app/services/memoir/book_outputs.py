@@ -296,6 +296,9 @@ def _chapter_snapshot(
         "draft_id": chapter.draft.id if chapter.draft else "",
         "draft_version_id": version.id,
         "draft_version": version.version,
+        "block_snapshot": [
+            item for item in (version.block_snapshot_json or []) if isinstance(item, dict)
+        ],
         "content_char_count": len(content),
         "source_count": len(source_ref_snapshot),
         "source_refs": source_ref_snapshot,

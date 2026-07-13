@@ -59,6 +59,7 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
 
         assert first == {
             "changed_tables": list(MEMOIR_NARRATIVE_TABLES),
+            "changed_columns": [],
             "changed_indexes": [],
             "changed_triggers": list(MEMOIR_NARRATIVE_TRIGGERS),
             "legacy_backfill": {
@@ -69,6 +70,7 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
         }
         assert second == {
             "changed_tables": [],
+            "changed_columns": [],
             "changed_indexes": [],
             "changed_triggers": [],
             "legacy_backfill": {
@@ -95,6 +97,7 @@ async def test_narrative_migration_upgrades_pr2_tables_in_place():
 
         assert changed == {
             "changed_tables": ["memoir_narrative_decisions"],
+            "changed_columns": [],
             "changed_indexes": [
                 "uq_memoir_claim_evidence_transcript_quote",
             ],
@@ -105,6 +108,41 @@ async def test_narrative_migration_upgrades_pr2_tables_in_place():
                 "drafts_without_versions": 0,
             },
         }
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_adds_structured_block_snapshot_column_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_book_chapter_draft_versions "
+                    "DROP COLUMN block_snapshot_json"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_book_chapter_draft_versions.block_snapshot_json"
+        ]
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            columns = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_book_chapter_draft_versions)")
+                    )
+                ).fetchall()
+            }
+        assert "block_snapshot_json" in columns
     finally:
         await engine.dispose()
 

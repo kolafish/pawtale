@@ -98,6 +98,25 @@ async def _table_column_schema(conn, table_name: str) -> list[dict[str, object]]
     ]
 
 
+async def _ensure_structured_draft_snapshot_column(conn) -> list[str]:
+    table_name = "memoir_book_chapter_draft_versions"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    if "block_snapshot_json" in columns:
+        return []
+    await conn.execute(
+        text(
+            "ALTER TABLE memoir_book_chapter_draft_versions "
+            "ADD COLUMN block_snapshot_json JSON NOT NULL DEFAULT '[]'"
+        )
+    )
+    return ["memoir_book_chapter_draft_versions.block_snapshot_json"]
+
+
 async def _table_sql(conn, table_name: str) -> str:
     result = await conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
@@ -291,6 +310,7 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
 async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, object]:
     """Create and advance the narrative fact schema."""
     changed_tables: list[str] = []
+    changed_columns: list[str] = []
     changed_indexes: list[str] = []
     changed_triggers: list[str] = []
     legacy_backfill: dict[str, int]
@@ -306,12 +326,14 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                     continue
                 await conn.run_sync(lambda sync_conn, index=index: index.create(sync_conn, checkfirst=True))
                 changed_indexes.append(index.name)
+        changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
         legacy_backfill = await backfill_legacy_chapter_drafts(conn)
     return {
         "changed_tables": changed_tables,
+        "changed_columns": changed_columns,
         "changed_indexes": changed_indexes,
         "changed_triggers": changed_triggers,
         "legacy_backfill": legacy_backfill,
