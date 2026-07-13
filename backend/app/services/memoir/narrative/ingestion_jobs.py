@@ -21,6 +21,24 @@ from app.services.memoir.narrative.ingestion import (
 )
 
 
+def narrative_ingestion_dedupe_key(
+    *,
+    project_id: str,
+    utterance_id: str,
+    transcript_version_id: str,
+) -> str:
+    return ":".join(
+        (
+            "ingest_narrative",
+            project_id,
+            utterance_id,
+            transcript_version_id,
+            NARRATIVE_INGESTION_ENGINE,
+            NARRATIVE_EXTRACTION_SCHEMA_VERSION,
+        )
+    )
+
+
 async def _load_ingestion_source(
     db: AsyncSession,
     *,
@@ -100,12 +118,18 @@ async def schedule_narrative_ingestion_job(
     }
     if ai_model:
         payload["ai_model"] = ai_model
+    dedupe_key = narrative_ingestion_dedupe_key(
+        project_id=project_id,
+        utterance_id=utterance.id,
+        transcript_version_id=version.id,
+    )
     return await enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
         payload_json=payload,
-        dedupe_key=f"ingest_narrative:{utterance.id}:{version.id}",
+        dedupe_key=dedupe_key,
+        retry_failed=True,
     )
 
 

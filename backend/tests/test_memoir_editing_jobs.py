@@ -66,6 +66,40 @@ async def test_enqueue_editing_job_deduplicates_pending_job(test_db):
     assert second.payload_json == {"utterance_ids": ["u1"], "source": "updated"}
 
 
+async def test_enqueue_editing_job_deduplicates_concurrent_insert(tmp_path):
+    register_models()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-enqueue.db'}", echo=False)
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_maker() as db:
+            project = Project(title="并发排队", type=ProjectType.MEMOIR.value)
+            db.add(project)
+            await db.commit()
+            project_id = project.id
+
+        async def enqueue_once() -> str:
+            async with session_maker() as db:
+                job = await enqueue_editing_job(
+                    db,
+                    project_id=project_id,
+                    job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+                    dedupe_key="ingest:concurrent",
+                )
+                await db.commit()
+                return job.id
+
+        job_ids = await asyncio.gather(enqueue_once(), enqueue_once())
+
+        assert job_ids[0] == job_ids[1]
+        async with session_maker() as db:
+            jobs = (await db.scalars(select(MemoirEditingJob))).all()
+            assert len(jobs) == 1
+    finally:
+        await engine.dispose()
+
+
 async def test_enqueue_editing_job_does_not_reset_running_job(test_db):
     project = await _create_project(test_db)
     job = await enqueue_editing_job(

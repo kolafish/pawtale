@@ -597,6 +597,8 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
     )
 
     assert first_response.events[0].id == second_response.events[0].id
+    assert len(first_response.narrative_ingestion_job_ids) == 1
+    assert second_response.narrative_ingestion_job_ids == first_response.narrative_ingestion_job_ids
     events = (
         await test_db.execute(
             select(MemoirAutomationEvent).where(

@@ -19,6 +19,7 @@ from app.domain.memoir.narrative_types import (
 from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirChatMessageRole,
+    MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
@@ -34,6 +35,7 @@ from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarra
 from app.schemas.memoir_narrative import (
     MemoirClaimCreate,
     MemoirClaimEvidenceCreate,
+    MemoirNarrativeExtraction,
     MemoirNarrativeEntityCreate,
 )
 from app.services.memoir.narrative.backfill import run_narrative_ingestion_backfill
@@ -147,6 +149,14 @@ def _extraction_payload(source_text: str) -> dict:
             },
         ],
     }
+
+
+def test_extraction_rejects_non_place_entity_as_place_reference():
+    payload = _extraction_payload("七二年前后，我搬到了成都。我和外婆一起生活。")
+    payload["entities"][2]["entity_type"] = "person"
+
+    with pytest.raises(ValueError, match="place_entity_key must reference a place entity"):
+        MemoirNarrativeExtraction.model_validate(payload)
 
 
 async def _load_source(test_db, created: dict):
@@ -359,6 +369,50 @@ async def test_ingestion_job_skips_stale_transcript_without_calling_ai(client, t
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
 
 
+async def test_ingestion_scheduler_retries_failures_but_keeps_success_idempotent(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
+    project, utterance, _version = await _load_source(test_db, created)
+    job = await schedule_narrative_ingestion_job(
+        test_db,
+        project_id=project.id,
+        utterance=utterance,
+        source="initial",
+    )
+    assert job is not None
+    job.status = MemoirEditingJobStatus.FAILED.value
+    job.attempts = 3
+    job.error_message = "provider unavailable"
+    await test_db.flush()
+
+    retried = await schedule_narrative_ingestion_job(
+        test_db,
+        project_id=project.id,
+        utterance=utterance,
+        source="retry",
+    )
+
+    assert retried is job
+    assert retried.status == MemoirEditingJobStatus.PENDING.value
+    assert retried.attempts == 0
+    assert retried.error_message == ""
+    assert retried.payload_json["source"] == "retry"
+
+    retried.status = MemoirEditingJobStatus.SUCCEEDED.value
+    retried.result_json = {"created_claim_ids": ["claim-1"]}
+    await test_db.flush()
+    repeated = await schedule_narrative_ingestion_job(
+        test_db,
+        project_id=project.id,
+        utterance=utterance,
+        source="should-not-replace-success",
+    )
+
+    assert repeated is job
+    assert repeated.status == MemoirEditingJobStatus.SUCCEEDED.value
+    assert repeated.payload_json["source"] == "retry"
+    assert repeated.result_json == {"created_claim_ids": ["claim-1"]}
+
+
 async def test_claim_confirmation_requires_evidence_and_decisions_are_append_only(client, test_db):
     project_id = await create_test_voice_transcript(client, test_db, text="测试素材")
     user = (await client.get("/api/auth/me")).json()
@@ -551,10 +605,31 @@ async def test_backfill_dry_run_does_not_write_and_execute_only_queues(client, t
     assert job is not None
     assert job.payload_json["transcript_version_id"] == created["transcript_version_id"]
 
-    repeated = await run_narrative_ingestion_backfill(
+    job.status = MemoirEditingJobStatus.FAILED.value
+    await test_db.commit()
+    failed_retry = await run_narrative_ingestion_backfill(
         test_db,
         project_id=project_id,
         dry_run=True,
     )
-    assert repeated["candidate_count"] == 0
-    assert repeated["skipped_existing_job_count"] == 1
+    assert failed_retry["candidate_count"] == 1
+    assert failed_retry["skipped_existing_job_count"] == 0
+
+    retried = await run_narrative_ingestion_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert retried["enqueued_count"] == 1
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.PENDING.value
+
+    job.status = MemoirEditingJobStatus.SUCCEEDED.value
+    await test_db.commit()
+    completed = await run_narrative_ingestion_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=True,
+    )
+    assert completed["candidate_count"] == 0
+    assert completed["skipped_existing_job_count"] == 1

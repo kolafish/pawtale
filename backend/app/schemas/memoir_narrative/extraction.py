@@ -107,7 +107,8 @@ class MemoirNarrativeExtraction(BaseModel):
         claim_keys = [claim.key for claim in self.claims]
         if len(claim_keys) != len(set(claim_keys)):
             raise ValueError("claim keys must be unique")
-        known_entities = set(entity_keys)
+        entity_types = {entity.key: entity.entity_type for entity in self.entities}
+        known_entities = set(entity_types)
         for claim in self.claims:
             references = {
                 claim.subject_entity_key,
@@ -116,4 +117,9 @@ class MemoirNarrativeExtraction(BaseModel):
             } - {None}
             if not references.issubset(known_entities):
                 raise ValueError("claim references an unknown entity key")
+            if (
+                claim.place_entity_key
+                and entity_types[claim.place_entity_key] != MemoirNarrativeEntityType.PLACE
+            ):
+                raise ValueError("place_entity_key must reference a place entity")
         return self

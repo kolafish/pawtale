@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-from sqlalchemy import exists, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.types import MemoirEditingJobStatus
 from app.domain.projects.types import ProjectType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
-from app.models.memoir_narrative import MemoirClaimEvidence
 from app.models.projects import Project
-from app.services.memoir.narrative.ingestion_jobs import schedule_narrative_ingestion_job
+from app.services.memoir.narrative.ingestion_jobs import (
+    narrative_ingestion_dedupe_key,
+    schedule_narrative_ingestion_job,
+)
 from app.services.memoir.source_disposition import (
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
     is_ignored_non_memoir_source,
@@ -31,14 +34,6 @@ async def run_narrative_ingestion_backfill(
         .where(
             Project.type == ProjectType.MEMOIR.value,
             MemoirVoiceUtterance.chat_message_id.is_not(None),
-            ~exists(
-                select(MemoirClaimEvidence.id).where(
-                    MemoirClaimEvidence.project_id == Project.id,
-                    MemoirClaimEvidence.utterance_id == MemoirVoiceUtterance.id,
-                    MemoirClaimEvidence.transcript_version_id
-                    == MemoirChatMessage.transcript_version_id,
-                )
-            ),
         )
         .options(selectinload(MemoirVoiceUtterance.chat_message))
         .order_by(
@@ -51,21 +46,34 @@ async def run_narrative_ingestion_backfill(
         statement = statement.where(Project.id == project_id)
     rows = (await db.execute(statement)).all()
     dedupe_keys = {
-        f"ingest_narrative:{utterance.id}:{utterance.chat_message.transcript_version_id}"
-        for utterance, _current_project_id in rows
+        narrative_ingestion_dedupe_key(
+            project_id=current_project_id,
+            utterance_id=utterance.id,
+            transcript_version_id=utterance.chat_message.transcript_version_id,
+        )
+        for utterance, current_project_id in rows
         if utterance.chat_message and utterance.chat_message.transcript_version_id
     }
-    existing_job_keys: set[str | None] = set()
+    completed_or_active_job_keys: set[str] = set()
     if dedupe_keys:
-        existing_job_keys = set(
-            (
-                await db.scalars(
-                    select(MemoirEditingJob.dedupe_key).where(
-                        MemoirEditingJob.dedupe_key.in_(dedupe_keys)
-                    )
+        existing_jobs = (
+            await db.execute(
+                select(MemoirEditingJob.dedupe_key, MemoirEditingJob.status).where(
+                    MemoirEditingJob.dedupe_key.in_(dedupe_keys)
                 )
-            ).all()
-        )
+            )
+        ).all()
+        completed_or_active_job_keys = {
+            dedupe_key
+            for dedupe_key, status in existing_jobs
+            if dedupe_key
+            and status
+            in {
+                MemoirEditingJobStatus.PENDING.value,
+                MemoirEditingJobStatus.RUNNING.value,
+                MemoirEditingJobStatus.SUCCEEDED.value,
+            }
+        }
     candidates: list[tuple[str, MemoirVoiceUtterance]] = []
     skipped_existing = 0
     skipped_without_version = 0
@@ -77,11 +85,12 @@ async def run_narrative_ingestion_backfill(
         if not utterance.chat_message or not utterance.chat_message.transcript_version_id:
             skipped_without_version += 1
             continue
-        dedupe_key = (
-            f"ingest_narrative:{utterance.id}:"
-            f"{utterance.chat_message.transcript_version_id}"
+        dedupe_key = narrative_ingestion_dedupe_key(
+            project_id=current_project_id,
+            utterance_id=utterance.id,
+            transcript_version_id=utterance.chat_message.transcript_version_id,
         )
-        if dedupe_key in existing_job_keys:
+        if dedupe_key in completed_or_active_job_keys:
             skipped_existing += 1
             continue
         if (
