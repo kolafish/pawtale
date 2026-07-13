@@ -8,8 +8,13 @@ import json
 import os
 from pathlib import Path
 import secrets
+import sys
 from typing import Callable
 from uuid import uuid4
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from app.services.memoir.narrative.quality_evaluation import (
     BLIND_CANDIDATE_LABELS,

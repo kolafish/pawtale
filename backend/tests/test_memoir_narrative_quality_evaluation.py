@@ -1,4 +1,7 @@
 from copy import deepcopy
+from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -10,6 +13,28 @@ from app.services.memoir.narrative.quality_evaluation import (
 from scripts.prepare_memoir_narrative_blind_review import (
     build_blind_review_artifacts,
 )
+
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    "script_name",
+    [
+        "prepare_memoir_narrative_blind_review.py",
+        "evaluate_memoir_narrative_quality.py",
+    ],
+)
+def test_quality_gate_scripts_run_directly_from_backend(script_name: str):
+    result = subprocess.run(
+        [sys.executable, f"scripts/{script_name}", "--help"],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def _scores(*, structure: int, chronology: int, people: int) -> dict[str, int]:
