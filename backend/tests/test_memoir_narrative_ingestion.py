@@ -52,9 +52,11 @@ class FakeNarrativeAI:
     provider_name = "fake"
     model_name = "fake-narrative"
 
-    def __init__(self, responses: list[dict]):
+    def __init__(self, responses: list[dict | str]):
         self.responses = list(responses)
         self.calls = 0
+        self.user_prompts: list[str] = []
+        self.max_tokens: list[int] = []
 
     async def _call_llm(
         self,
@@ -66,7 +68,12 @@ class FakeNarrativeAI:
         return_raw: bool = False,
     ) -> str:
         self.calls += 1
-        return json.dumps(self.responses.pop(0), ensure_ascii=False)
+        self.user_prompts.append(user_prompt)
+        self.max_tokens.append(max_tokens)
+        response = self.responses.pop(0)
+        if isinstance(response, str):
+            return response
+        return json.dumps(response, ensure_ascii=False)
 
 
 def _extraction_payload(source_text: str) -> dict:
@@ -227,10 +234,113 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
 
 
-async def test_invalid_ai_schema_creates_no_narrative_state(client, test_db):
+async def test_real_provider_schema_errors_are_repaired_once(client, test_db):
+    source_text = "八十年代初，我搬到了成都。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    invalid = {
+        "schema_version": "1",
+        "entities": [
+            {
+                "key": "narrator",
+                "entity_type": "person",
+                "canonical_name": "讲述者",
+                "aliases": ["我"],
+                "description": "讲述者本人",
+                "is_narrator": True,
+            }
+        ],
+        "claims": [
+            {
+                "key": "move",
+                "claim_type": "event",
+                "statement": "讲述者在八十年代初搬到成都。",
+                "subject_entity_key": "narrator",
+                "predicate_code": "occurred_at",
+                "object_entity_key": None,
+                "object_text": None,
+                "place_entity_key": None,
+                "time_text": "八十年代初",
+                "time_start": "1982-01-01",
+                "time_end": "1982-12-31",
+                "time_precision": "decade",
+                "certainty": "approximate",
+                "evidence_quotes": [source_text],
+            }
+        ],
+        "stories": [
+            {
+                "key": "move_story",
+                "title": "搬到成都",
+                "story_type": "theme",
+                "summary": "讲述者搬到成都。",
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "unknown",
+                "primary_place_entity_key": None,
+                "existing_story_id": None,
+                "match_confidence": 0.0,
+                "claims": [
+                    {
+                        "claim_key": "move",
+                        "narrative_role": "theme_definition",
+                        "slot_keys": ["theme_definition"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    }
+                ],
+            }
+        ],
+    }
+    repaired = {
+        **invalid,
+        "claims": [
+            {
+                **invalid["claims"][0],
+                "time_start": "1982-01-01T00:00:00",
+                "time_end": "1982-12-31T23:59:59",
+                "time_precision": "period",
+            }
+        ],
+        "stories": [
+            {
+                **invalid["stories"][0],
+                "claims": [
+                    {
+                        **invalid["stories"][0]["claims"][0],
+                        "narrative_role": "background",
+                    }
+                ],
+            }
+        ],
+    }
+    fake_ai = FakeNarrativeAI([invalid, repaired])
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert fake_ai.calls == 2
+    assert fake_ai.max_tokens == [6000, 6000]
+    assert "narrative_role 和 slot_keys 是两个不同维度" in fake_ai.user_prompts[1]
+    assert len(result.created_claim_ids) == 1
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics["repair_attempted"] is True
+
+
+async def test_invalid_ai_schema_after_repair_creates_no_narrative_state(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
     project, utterance, version = await _load_source(test_db, created)
-    fake_ai = FakeNarrativeAI([{"schema_version": "1", "claims": "not-a-list"}])
+    fake_ai = FakeNarrativeAI(
+        [
+            "not-json",
+            {"schema_version": "1", "claims": "still-not-a-list"},
+        ]
+    )
 
     with pytest.raises(ValueError, match="did not match schema"):
         await ingest_transcript_version(
@@ -242,9 +352,136 @@ async def test_invalid_ai_schema_creates_no_narrative_state(client, test_db):
         )
     await test_db.rollback()
 
+    assert fake_ai.calls == 2
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaimEvidence)) == 0
     assert await test_db.scalar(select(func.count()).select_from(MemoirNarrativeEntity)) == 0
+
+
+async def test_repair_retains_valid_items_without_coercing_invalid_semantics(
+    client,
+    test_db,
+):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    repaired = _extraction_payload(source_text)
+    repaired["claims"].append(
+        {
+            "key": "invalid_relationship",
+            "claim_type": "relationship",
+            "statement": "关系不完整。",
+            "subject_entity_key": "narrator",
+            "predicate_code": "social_relationship",
+            "object_entity_key": None,
+            "object_text": None,
+            "place_entity_key": None,
+            "time_text": None,
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "certainty": "uncertain",
+            "evidence_quotes": ["我和外婆一起生活"],
+        }
+    )
+    repaired["stories"] = [
+        {
+            "key": "move_story",
+            "title": "搬到成都",
+            "story_type": "event",
+            "summary": "搬到成都。",
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "primary_place_entity_key": "chengdu",
+            "existing_story_id": None,
+            "match_confidence": 0.0,
+            "claims": [
+                {
+                    "claim_key": "move",
+                    "narrative_role": "action",
+                    "slot_keys": ["actions", "theme_definition"],
+                    "evidence_role": "supports",
+                    "is_core": True,
+                }
+            ],
+        }
+    ]
+    fake_ai = FakeNarrativeAI(
+        [
+            {"schema_version": "1", "claims": "not-a-list"},
+            repaired,
+        ]
+    )
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert len(result.created_claim_ids) == 2
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics == {
+        "repair_attempted": True,
+        "discarded_entity_count": 0,
+        "discarded_claim_count": 1,
+        "discarded_story_count": 0,
+        "discarded_story_slot_key_count": 1,
+        "used_initial_response_after_repair": False,
+    }
+
+
+async def test_repair_does_not_replace_more_informative_valid_initial_items(
+    client,
+    test_db,
+):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    initial = _extraction_payload(source_text)
+    initial["stories"] = [
+        {
+            "key": "move_story",
+            "title": "搬到成都",
+            "story_type": "event",
+            "summary": "搬到成都。",
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "primary_place_entity_key": "chengdu",
+            "existing_story_id": None,
+            "match_confidence": 0.0,
+            "claims": [
+                {
+                    "claim_key": "move",
+                    "narrative_role": "action",
+                    "slot_keys": ["actions", "theme_definition"],
+                    "evidence_role": "supports",
+                    "is_core": True,
+                }
+            ],
+        }
+    ]
+    repaired = _extraction_payload(source_text)
+    repaired["claims"] = repaired["claims"][:1]
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=FakeNarrativeAI([initial, repaired]),
+    )
+
+    assert len(result.created_claim_ids) == 2
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics[
+        "used_initial_response_after_repair"
+    ] is True
+    assert result.extraction_diagnostics["discarded_story_slot_key_count"] == 1
 
 
 async def test_interviewer_fact_preserves_speaker_and_requires_review(client, test_db):
