@@ -52,6 +52,7 @@ from app.services.memoir.book_plan_sources import (
     DRAFT_STATUS_REASON_KEY,
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
     metadata_without_keys,
+    sorted_chapters,
     source_change_metadata_keys,
 )
 from app.services.memoir.book_source_links import mark_chapter_sources_merged
@@ -385,7 +386,7 @@ async def assemble_book_output(
         raise ValueError("book plan does not belong to the project")
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("confirm the book plan before assembling the book output")
-    chapters = sorted(plan.chapters, key=lambda chapter: (chapter.sort_order, chapter.id))
+    chapters = sorted_chapters(plan)
     if not chapters:
         raise ValueError("book plan has no chapters")
     chapter_versions: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]] = []

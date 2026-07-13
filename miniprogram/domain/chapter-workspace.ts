@@ -75,14 +75,67 @@ export interface MemoirChapterWorkspaceNode {
   stories: MemoirChapterWorkspaceNodeStory[];
 }
 
+export interface MemoirChapterCoreQuestion {
+  key: string;
+  question: string;
+}
+
+export interface MemoirChapterContractConstraints {
+  include_story_ids: string[];
+  exclude_story_ids: string[];
+  include_topics: string[];
+  exclude_topics: string[];
+}
+
 export interface MemoirChapterWorkspaceContract {
   id: string;
+  project_id: string;
+  chapter_id: string;
   version: number;
   objective: string;
   reader_takeaway: string;
   time_scope_text: string;
+  time_start: string | null;
+  time_end: string | null;
+  core_questions: MemoirChapterCoreQuestion[];
+  constraints: MemoirChapterContractConstraints;
   status: string;
   nodes: MemoirChapterWorkspaceNode[];
+}
+
+export interface MemoirChapterContractRevisionRequest {
+  idempotency_key: string;
+  objective: string;
+  reader_takeaway: string;
+  time_scope_text: string;
+  time_start: string | null;
+  time_end: string | null;
+  core_questions: MemoirChapterCoreQuestion[];
+  constraints: MemoirChapterContractConstraints;
+  copy_from_contract_id: string | null;
+  copy_nodes: boolean;
+}
+
+export interface MemoirChapterStructureSplitRequest {
+  idempotency_key: string;
+  source_contract_id: string;
+  node_ids: string[];
+  target_title: string;
+  target_objective: string;
+  target_reader_takeaway: string;
+  target_time_scope_text: string;
+  target_core_questions: MemoirChapterCoreQuestion[];
+}
+
+export interface MemoirChapterStructureMergeRequest {
+  idempotency_key: string;
+  source_contract_id: string;
+  target_chapter_id: string;
+}
+
+export interface MemoirChapterStructureMutationResponse {
+  source: MemoirChapterWorkspaceContract;
+  target: MemoirChapterWorkspaceContract;
 }
 
 export interface MemoirNarrativeGap {

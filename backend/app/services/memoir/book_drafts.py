@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirBookPlanChapterStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
 )
@@ -121,6 +122,7 @@ async def _load_chapter(
         .where(
             MemoirBookPlan.project_id == project_id,
             MemoirBookPlanChapter.id == chapter_id,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         )
         .options(
             selectinload(MemoirBookPlanChapter.plan),

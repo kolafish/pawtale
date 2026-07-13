@@ -27,6 +27,7 @@ import {
   assembleMemoirChapterDraftBlocks,
   confirmMemoirBookChapterDraft,
   confirmMemoirChapterContract,
+  createMemoirChapterContractRevision,
   decideMemoirClaim,
   decideMemoirDraftBlock,
   decideMemoirStory,
@@ -34,16 +35,19 @@ import {
   enqueueMemoirDraftBlockRevision,
   enqueueMemoirChapterWorkspaceAudit,
   excludeMemoirStoryFromChapter,
+  getMemoirBookPlan,
   getMemoirDraftBlockJob,
   getMemoirChapterWorkspace,
   listMemoirDraftBlocks,
   listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
+  mergeMemoirChapterStructures,
   mergeMemoirStory,
   moveMemoirStoryBetweenChapterNodes,
   reorderMemoirChapterNodes,
   resolveMemoirNarrativeGap,
   resolveMemoirStorySlot,
+  splitMemoirChapterStructure,
   updateMemoirChapterNode,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
@@ -56,6 +60,8 @@ import {
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import { createChapterStructureActions } from "./chapter-structure-actions";
+import type { ChapterMergeOption } from "./chapter-structure-editor";
 
 
 const TAB_VALUES = ["structure", "stories", "drafts", "checks", "followups"] as const;
@@ -89,6 +95,7 @@ interface NodeView extends MemoirChapterWorkspaceNode {
   storyText: string;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  selectedForSplit: boolean;
 }
 
 interface StorySlotView extends MemoirChapterWorkspaceStorySlot {
@@ -181,7 +188,25 @@ interface ChapterWorkspacePageData {
   auditBusy: boolean;
   actionBusyGapId: string;
   contractActionBusy: boolean;
+  contractActionStatus: string;
+  contractEditorOpen: boolean;
+  contractObjective: string;
+  contractReaderTakeaway: string;
+  contractTimeScopeText: string;
+  contractQuestionsText: string;
   structureActionBusy: boolean;
+  topologyActionStatus: string;
+  topologyError: string;
+  splitEditorOpen: boolean;
+  splitNodeIds: string[];
+  splitTitle: string;
+  splitObjective: string;
+  splitReaderTakeaway: string;
+  splitTimeScopeText: string;
+  splitQuestionsText: string;
+  mergeOptions: ChapterMergeOption[];
+  mergeTargetChapterId: string;
+  mergeTargetTitle: string;
   editingNodeId: string;
   editingNodeTitle: string;
   editingNodePurpose: string;
@@ -297,6 +322,13 @@ function confirmDialog(title: string, content: string, confirmText: string): Pro
     });
   });
 }
+
+const chapterStructureActions = createChapterStructureActions(confirmDialog, {
+  createContractRevision: createMemoirChapterContractRevision,
+  getBookPlan: getMemoirBookPlan,
+  splitChapter: splitMemoirChapterStructure,
+  mergeChapters: mergeMemoirChapterStructures,
+});
 
 function gapStatusText(status: string): string {
   return ({
@@ -433,6 +465,7 @@ definePage<ChapterWorkspacePageData>()({
   draftPollTimer: null as ReturnType<typeof setTimeout> | null,
   draftPollToken: 0,
   loadedOnce: false,
+  ...chapterStructureActions,
 
   data: {
     loading: false,
@@ -447,7 +480,25 @@ definePage<ChapterWorkspacePageData>()({
     auditBusy: false,
     actionBusyGapId: "",
     contractActionBusy: false,
+    contractActionStatus: "",
+    contractEditorOpen: false,
+    contractObjective: "",
+    contractReaderTakeaway: "",
+    contractTimeScopeText: "",
+    contractQuestionsText: "",
     structureActionBusy: false,
+    topologyActionStatus: "",
+    topologyError: "",
+    splitEditorOpen: false,
+    splitNodeIds: [],
+    splitTitle: "",
+    splitObjective: "",
+    splitReaderTakeaway: "",
+    splitTimeScopeText: "",
+    splitQuestionsText: "",
+    mergeOptions: [],
+    mergeTargetChapterId: "",
+    mergeTargetTitle: "",
     editingNodeId: "",
     editingNodeTitle: "",
     editingNodePurpose: "",
@@ -488,6 +539,15 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     await this.loadWorkspace();
+    if (
+      queryParam(query, "editContract") === "1"
+      && this.data.workspace?.contract?.status === "draft"
+    ) {
+      this.openContractEditor(this.data.workspace.contract);
+      this.setData({
+        contractActionStatus: "请核对合并后的章节目标、范围和核心问题，再确认结构",
+      });
+    }
     await this.restoreDraftJob();
     this.loadedOnce = true;
   },
@@ -510,6 +570,7 @@ definePage<ChapterWorkspacePageData>()({
     const busyStoryIds = new Set(this.data.busyStoryIds);
     const busyClaimIds = new Set(this.data.busyClaimIds);
     const busySlotKeys = new Set(this.data.busySlotKeys);
+    const splitNodeIds = new Set(this.data.splitNodeIds);
     const notes = new Map(
       this.data.gapGroups.flatMap((group) => group.items.map((gap) => [gap.id, gap.note] as const)),
     );
@@ -531,6 +592,7 @@ definePage<ChapterWorkspacePageData>()({
           : "尚未关联故事",
         canMoveUp: Boolean(contractDraft && index > 0),
         canMoveDown: Boolean(contractDraft && index < nodes.length - 1),
+        selectedForSplit: this.data.splitEditorOpen && splitNodeIds.has(node.id),
       })),
       stories: workspace.stories.map((story) => {
         const currentNodeIds = linkedNodeIds.get(story.id) || [];
@@ -616,6 +678,7 @@ definePage<ChapterWorkspacePageData>()({
       await Promise.all([
         this.loadFollowupTasks(true),
         this.loadDraftBlocks(true),
+        this.loadChapterOptions(),
       ]);
     } catch (error) {
       if (routeAuthError(error, "me")) {
@@ -704,8 +767,8 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({ editingNodePurpose: event.detail.value });
   },
 
-  changeNodeRequired(event: { detail: { value: string[] } }) {
-    this.setData({ editingNodeRequired: event.detail.value.includes("required") });
+  changeNodeRequired(event: { detail: { value: boolean } }) {
+    this.setData({ editingNodeRequired: event.detail.value });
   },
 
   cancelNodeEdit() {
@@ -921,18 +984,24 @@ definePage<ChapterWorkspacePageData>()({
     if (!confirmed) {
       return;
     }
-    this.setData({ contractActionBusy: true, error: "" });
+    this.setData({
+      contractActionBusy: true,
+      contractActionStatus: "正在确认章节结构",
+      error: "",
+    });
     let saved = false;
     try {
       await confirmMemoirChapterContract(this.data.projectId, contract.id);
       saved = true;
       await this.refreshWorkspaceOnly();
+      this.setData({ contractActionStatus: "章节结构已确认" });
       wx.showToast({ title: "章节结构已确认", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({
+        contractActionStatus: "",
         error: saved
           ? "章节结构已保存，但页面刷新失败，请重新进入本页查看最新状态"
           : (error instanceof Error ? error.message : "章节结构确认失败"),

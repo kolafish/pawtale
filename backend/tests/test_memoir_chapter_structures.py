@@ -17,6 +17,11 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimType,
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
+    MemoirFollowupTaskStatus,
+    MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapScopeType,
+    MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
@@ -24,7 +29,24 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.models.memoir import MemoirBookPlanChapter
+from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
+    MemoirBookImagePlacementType,
+    MemoirBookPlanChapterStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+    MemoirImageAssetSourceType,
+    MemoirImageAssetStatus,
+)
+from app.models.memoir import (
+    MemoirAutomationEvent,
+    MemoirBookImagePlacement,
+    MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
+    MemoirEditingJob,
+    MemoirImageAsset,
+)
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -32,6 +54,8 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirNarrativeDecision,
+    MemoirFollowupTask,
+    MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
 )
@@ -747,18 +771,27 @@ async def test_split_and_merge_move_structure_without_copying_story_or_claim(
         test_db,
         project_id=project_id,
         chapter_titles=["童年", "离家"],
+        source_refs_by_chapter=[[memoir_source_ref(created)], []],
     )
+    first_chapter_id = chapters[0].id
     story, _ = await _create_ready_story(test_db, created=created)
     story_id = story.id
     contracts = []
     for index, chapter in enumerate(chapters):
+        contract_payload = _draft_payload(
+            f"structure-{index}",
+            objective=f"组织第 {index + 1} 章。",
+            include_story_ids=[story_id] if index == 0 else [],
+        )
+        contract_payload["core_questions"] = [
+            {
+                "key": f"chapter_{index + 1}",
+                "question": f"第 {index + 1} 章必须回答什么？",
+            }
+        ]
         response = await client.post(
             f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/contract/revisions",
-            json=_draft_payload(
-                f"structure-{index}",
-                objective=f"组织第 {index + 1} 章。",
-                include_story_ids=[story_id] if index == 0 else [],
-            ),
+            json=contract_payload,
         )
         assert response.status_code == 200, response.text
         contracts.append(response.json())
@@ -828,19 +861,32 @@ async def test_split_and_merge_move_structure_without_copying_story_or_claim(
     )
     assert target_link.status_code == 200
 
-    duplicate_primary = await client.post(
-        f"/api/memoir/projects/{project_id}/chapter-structures/split",
-        json={
-            "source_contract_id": contracts[0]["id"],
-            "target_contract_id": contracts[1]["id"],
-            "node_ids": [story_node_id],
-        },
+    stale_gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        primary_chapter_id=chapters[0].id,
+        gap_type=MemoirNarrativeGapType.MISSING_SLOT.value,
+        severity=MemoirNarrativeGapSeverity.HIGH.value,
+        target_slot="chapter_contract",
+        title="拆分前的章节问题",
+        description="章节结构变化后需要重新审计。",
+        fingerprint="s" * 64,
+        detected_by=MemoirNarrativeGapDetectedBy.RULES.value,
     )
-    assert duplicate_primary.status_code == 409
-    detached = await client.delete(
-        f"/api/memoir/projects/{project_id}/chapter-contracts/{contracts[1]['id']}/nodes/{target_story_node_id}/stories/{story_id}"
+    test_db.add(stale_gap)
+    await test_db.flush()
+    stale_task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=stale_gap.id,
+        chapter_id=chapters[0].id,
+        question="这段经历还缺少什么？",
+        purpose="补齐拆分前识别出的章节问题。",
+        priority=80,
+        status=MemoirFollowupTaskStatus.PENDING.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
     )
-    assert detached.status_code == 200
+    test_db.add(stale_task)
+    await test_db.commit()
 
     story_count = await test_db.scalar(select(func.count()).select_from(MemoirStory))
     claim_count = await test_db.scalar(select(func.count()).select_from(MemoirClaim))
@@ -849,18 +895,197 @@ async def test_split_and_merge_move_structure_without_copying_story_or_claim(
             MemoirChapterNodeStory.node_id == story_node_id
         )
     )
+    split_payload = {
+        "idempotency_key": "split-departure-chapter",
+        "source_contract_id": contracts[0]["id"],
+        "node_ids": [story_node_id],
+        "target_title": "第一次离家",
+        "target_objective": "完整讲述第一次离家的经过。",
+        "target_reader_takeaway": "读者理解离家如何改变了讲述者。",
+        "target_time_scope_text": "十八岁第一次离家期间",
+        "target_core_questions": [
+            {"key": "departure", "question": "为什么离家，又经历了什么？"}
+        ],
+    }
     split = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-structures/split",
-        json={
-            "source_contract_id": contracts[0]["id"],
-            "target_contract_id": contracts[1]["id"],
-            "node_ids": [story_node_id],
-        },
+        json=split_payload,
     )
     assert split.status_code == 200, split.text
-    assert story_node_id in {node["id"] for node in split.json()["target"]["nodes"]}
-    assert story_id not in split.json()["source"]["constraints"]["include_story_ids"]
-    assert story_id in split.json()["target"]["constraints"]["include_story_ids"]
+    split_body = split.json()
+    split_contract = split_body["target"]
+    split_chapter_id = split_contract["chapter_id"]
+    assert split_chapter_id not in {chapter.id for chapter in chapters}
+    assert story_node_id in {node["id"] for node in split_contract["nodes"]}
+    assert story_id not in split_body["source"]["constraints"]["include_story_ids"]
+    assert story_id in split_contract["constraints"]["include_story_ids"]
+    assert await test_db.scalar(select(func.count()).select_from(MemoirStory)) == story_count
+    assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == claim_count
+    assert await test_db.scalar(
+        select(MemoirChapterNodeStory.id).where(
+            MemoirChapterNodeStory.node_id == story_node_id
+        )
+    ) == link_id
+    moved_node = await test_db.get(MemoirChapterNode, story_node_id)
+    assert moved_node is not None
+    assert moved_node.chapter_id == split_chapter_id
+    assert moved_node.contract_id == split_contract["id"]
+
+    plan_after_split = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert plan_after_split.status_code == 200
+    assert [chapter["title"] for chapter in plan_after_split.json()["chapters"]] == [
+        "童年",
+        "第一次离家",
+        "离家",
+    ]
+    copied_source = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.chapter_id == split_chapter_id,
+            MemoirChapterSourceLink.utterance_id == created["utterance_id"],
+        )
+    )
+    assert copied_source is not None
+    assert copied_source.status == "active"
+    assert copied_source.assigned_by == "user"
+    await test_db.refresh(stale_gap)
+    await test_db.refresh(stale_task)
+    assert stale_gap.status == "resolved"
+    assert "拆分" in stale_gap.resolution_note
+    assert stale_task.status == MemoirFollowupTaskStatus.CANCELLED.value
+    assert stale_task.completed_at is not None
+
+    repeated_split = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/split",
+        json=split_payload,
+    )
+    assert repeated_split.status_code == 200, repeated_split.text
+    assert repeated_split.json()["target"]["id"] == split_contract["id"]
+    assert await test_db.scalar(
+        select(func.count()).select_from(MemoirBookPlanChapter)
+    ) == 3
+
+    confirmed_split_source = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contracts[0]['id']}/confirm"
+    )
+    assert confirmed_split_source.status_code == 200, confirmed_split_source.text
+    repeated_after_source_confirmation = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/split",
+        json=split_payload,
+    )
+    assert repeated_after_source_confirmation.status_code == 200
+    assert repeated_after_source_confirmation.json()["target"]["id"] == split_contract["id"]
+    assert await test_db.scalar(
+        select(func.count()).select_from(MemoirBookPlanChapter)
+    ) == 3
+
+    image = MemoirImageAsset(
+        project_id=project_id,
+        user_id=created["user_id"],
+        status=MemoirImageAssetStatus.READY.value,
+        source_type=MemoirImageAssetSourceType.MANUAL_UPLOAD.value,
+        source_signature="split-chapter-image",
+    )
+    test_db.add(image)
+    await test_db.flush()
+    placement = MemoirBookImagePlacement(
+        project_id=project_id,
+        image_asset_id=image.id,
+        placement_type=MemoirBookImagePlacementType.CHAPTER_OPENING.value,
+        chapter_id=split_chapter_id,
+    )
+    pending_review = MemoirAutomationEvent(
+        project_id=project_id,
+        chapter_id=split_chapter_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[created["utterance_id"]],
+        summary_text="建议归入拆分出的章节。",
+        metadata_json={
+            "route": {
+                "target_chapter_id": split_chapter_id,
+                "target_chapter_title": "第一次离家",
+            }
+        },
+    )
+    pending_job = MemoirEditingJob(
+        project_id=project_id,
+        chapter_id=split_chapter_id,
+        job_type=MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+        status=MemoirEditingJobStatus.PENDING.value,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add_all([placement, pending_review, pending_job])
+    await test_db.commit()
+
+    removed_target_link = MemoirChapterSourceLink(
+        project_id=project_id,
+        plan_id=chapters[1].plan_id,
+        chapter_id=chapters[1].id,
+        utterance_id=created["utterance_id"],
+        status="removed",
+        assigned_by="user",
+        assignment_reason="previously_removed",
+        quote="过期的来源摘录",
+        merged_draft_version_id="old-draft-version",
+        removed_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add(removed_target_link)
+    await test_db.commit()
+    removed_target_link_id = removed_target_link.id
+
+    conflicting_merge_payload = {
+        "idempotency_key": "merge-departure-chapter",
+        "source_contract_id": split_contract["id"],
+        "target_chapter_id": chapters[1].id,
+    }
+    duplicate_primary = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/merge",
+        json=conflicting_merge_payload,
+    )
+    assert duplicate_primary.status_code == 409
+    split_chapter = await test_db.get(MemoirBookPlanChapter, split_chapter_id)
+    assert split_chapter is not None
+    assert split_chapter.status == "active"
+    assert await test_db.scalar(
+        select(MemoirChapterNode.contract_id).where(
+            MemoirChapterNode.id == story_node_id
+        )
+    ) == split_contract["id"]
+
+    detached = await client.delete(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contracts[1]['id']}/nodes/{target_story_node_id}/stories/{story_id}"
+    )
+    assert detached.status_code == 200
+
+    merged = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/merge",
+        json=conflicting_merge_payload,
+    )
+    assert merged.status_code == 200, merged.text
+    assert merged.json()["source"]["status"] == "superseded"
+    assert merged.json()["source"]["nodes"] == []
+    assert len(merged.json()["target"]["nodes"]) == 3
+    assert {
+        question["key"] for question in merged.json()["target"]["core_questions"]
+    } == {"chapter_2", "departure"}
+    assert merged.json()["target"]["constraints"]["include_story_ids"] == [story_id]
+    assert merged.json()["target"]["time_scope_text"] == "十八岁第一次离家期间"
+    await test_db.refresh(split_chapter)
+    assert split_chapter.status == "archived"
+    assert split_chapter.archived_sort_order == 1
+    assert split_chapter.archived_at is not None
+    assert split_chapter.archived_by_user_id == created["user_id"]
+    assert split_chapter.merged_into_chapter_id == chapters[1].id
+    await test_db.refresh(placement)
+    await test_db.refresh(pending_review)
+    await test_db.refresh(pending_job)
+    assert placement.chapter_id == chapters[1].id
+    assert pending_review.chapter_id == chapters[1].id
+    assert pending_review.metadata_json["route"]["target_chapter_id"] == chapters[1].id
+    assert pending_job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert pending_job.result_json["merged_into_chapter_id"] == chapters[1].id
     assert await test_db.scalar(select(func.count()).select_from(MemoirStory)) == story_count
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == claim_count
     assert await test_db.scalar(
@@ -869,17 +1094,157 @@ async def test_split_and_merge_move_structure_without_copying_story_or_claim(
         )
     ) == link_id
 
+    plan_after_merge = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert plan_after_merge.status_code == 200
+    assert [chapter["id"] for chapter in plan_after_merge.json()["chapters"]] == [
+        chapters[0].id,
+        chapters[1].id,
+    ]
+    assert [chapter["sort_order"] for chapter in plan_after_merge.json()["chapters"]] == [
+        0,
+        1,
+    ]
+    merged_source = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.chapter_id == chapters[1].id,
+            MemoirChapterSourceLink.utterance_id == created["utterance_id"],
+        )
+    )
+    assert merged_source is not None
+    assert merged_source.id == removed_target_link_id
+    assert merged_source.status == "active"
+    assert merged_source.transcript_version_id == created["transcript_version_id"]
+    assert merged_source.quote != "过期的来源摘录"
+    assert merged_source.removed_at is None
+    assert merged_source.merged_draft_version_id is None
+
+    repeated_merge = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/merge",
+        json=conflicting_merge_payload,
+    )
+    assert repeated_merge.status_code == 200, repeated_merge.text
+    assert repeated_merge.json()["target"]["id"] == merged.json()["target"]["id"]
+    migration_report = await project_migration_report(test_db, project_id=project_id)
+    assert migration_report["chapter_count"] == 2
+
+    second_merge = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/merge",
+        json={
+            "idempotency_key": "merge-retained-chapter-again",
+            "source_contract_id": merged.json()["target"]["id"],
+            "target_chapter_id": first_chapter_id,
+        },
+    )
+    assert second_merge.status_code == 200, second_merge.text
+    assert {
+        question["key"] for question in second_merge.json()["target"]["core_questions"]
+    } == {"chapter_1", "chapter_2", "departure"}
+    await test_db.refresh(split_chapter)
+    await test_db.refresh(chapters[1])
+    await test_db.refresh(placement)
+    assert split_chapter.status == MemoirBookPlanChapterStatus.ARCHIVED.value
+    assert chapters[1].status == MemoirBookPlanChapterStatus.ARCHIVED.value
+    assert split_chapter.merged_into_chapter_id == first_chapter_id
+    assert chapters[1].merged_into_chapter_id == first_chapter_id
+    assert placement.chapter_id == first_chapter_id
+
+    final_plan = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-plan")
+    assert final_plan.status_code == 200
+    assert [chapter["id"] for chapter in final_plan.json()["chapters"]] == [
+        first_chapter_id
+    ]
+    final_migration_report = await project_migration_report(test_db, project_id=project_id)
+    assert final_migration_report["chapter_count"] == 1
+
+    repeated_first_merge = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/merge",
+        json=conflicting_merge_payload,
+    )
+    assert repeated_first_merge.status_code == 200, repeated_first_merge.text
+    assert repeated_first_merge.json()["target"]["chapter_id"] == first_chapter_id
+
+    repeated_split_after_merge = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-structures/split",
+        json=split_payload,
+    )
+    assert repeated_split_after_merge.status_code == 200, repeated_split_after_merge.text
+    assert repeated_split_after_merge.json()["target"]["chapter_id"] == first_chapter_id
+
+
+async def test_merge_into_confirmed_chapter_creates_draft_without_mutating_confirmed_structure(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["乡村童年", "求学生涯"],
+    )
+    contracts: list[dict] = []
+    node_ids: list[str] = []
+    for index, chapter in enumerate(chapters):
+        contract = await client.post(
+            f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/contract/revisions",
+            json=_draft_payload(
+                f"confirmed-target-contract-{index}",
+                objective=f"组织第 {index + 1} 章。",
+            ),
+        )
+        assert contract.status_code == 200, contract.text
+        contracts.append(contract.json())
+        node = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract.json()['id']}/nodes",
+            json={
+                "idempotency_key": f"confirmed-target-node-{index}",
+                "node_type": "opening",
+                "title": f"第 {index + 1} 章开场",
+                "purpose": "用具体场景进入本章。",
+                "required": True,
+                "status": "ready",
+            },
+        )
+        assert node.status_code == 200, node.text
+        node_ids.append(node.json()["nodes"][0]["id"])
+
+    confirmed = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contracts[1]['id']}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+
     merged = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-structures/merge",
         json={
+            "idempotency_key": "merge-into-confirmed-target",
             "source_contract_id": contracts[0]["id"],
-            "target_contract_id": contracts[1]["id"],
+            "target_chapter_id": chapters[1].id,
         },
     )
     assert merged.status_code == 200, merged.text
-    assert merged.json()["source"]["status"] == "superseded"
-    assert merged.json()["source"]["nodes"] == []
-    assert len(merged.json()["target"]["nodes"]) == 4
+    target = merged.json()["target"]
+    assert target["status"] == "draft"
+    assert target["version"] == 2
+    assert target["id"] != contracts[1]["id"]
+    assert node_ids[0] in {node["id"] for node in target["nodes"]}
+    assert node_ids[1] not in {node["id"] for node in target["nodes"]}
+
+    original = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contracts[1]['id']}"
+    )
+    assert original.status_code == 200, original.text
+    assert original.json()["status"] == "confirmed"
+    assert [node["id"] for node in original.json()["nodes"]] == [node_ids[1]]
+    moved_source_node = await test_db.get(MemoirChapterNode, node_ids[0])
+    original_target_node = await test_db.get(MemoirChapterNode, node_ids[1])
+    assert moved_source_node is not None
+    assert moved_source_node.contract_id == target["id"]
+    assert moved_source_node.chapter_id == chapters[1].id
+    assert original_target_node is not None
+    assert original_target_node.contract_id == contracts[1]["id"]
+    assert original_target_node.chapter_id == chapters[1].id
 
 
 async def test_chapter_structure_backfill_is_dry_run_by_default_and_never_confirms(

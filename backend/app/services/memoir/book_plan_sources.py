@@ -7,7 +7,11 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirBookPlanStatus, MemoirCreatedBy
+from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
+    MemoirBookPlanStatus,
+    MemoirCreatedBy,
+)
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
@@ -102,8 +106,22 @@ def as_dict(ref: MemoirBookChapterSourceRef) -> dict[str, object]:
     return ref.model_dump(mode="json")
 
 
+def _is_active_chapter(chapter: object) -> bool:
+    status = getattr(chapter, "status", None)
+    return (status or MemoirBookPlanChapterStatus.ACTIVE.value) == (
+        MemoirBookPlanChapterStatus.ACTIVE.value
+    )
+
+
 def sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
-    return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
+    return sorted(
+        (
+            chapter
+            for chapter in plan.chapters
+            if _is_active_chapter(chapter)
+        ),
+        key=lambda chapter: chapter.sort_order,
+    )
 
 
 def find_chapter_by_id(
@@ -316,7 +334,7 @@ async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPla
                 source_refs=refs_by_chapter.get(chapter.id, []),
                 source_change_state=source_change_states.get(chapter.id),
             )
-            for chapter in plan.chapters
+            for chapter in sorted_chapters(plan)
         ],
         created_at=plan.created_at,
         updated_at=plan.updated_at,

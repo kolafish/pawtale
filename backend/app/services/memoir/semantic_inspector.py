@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
+    MemoirBookPlanChapterStatus,
     MemoirChapterSourceLinkStatus,
     MemoirSemanticCacheStatus,
 )
@@ -382,7 +383,12 @@ async def inspect_project_semantic_state(db: AsyncSession, project: Project) -> 
             source_cards_missing += 1
 
     plans = await _project_plans(db, project.id)
-    chapters = [chapter for plan in plans for chapter in plan.chapters]
+    chapters = [
+        chapter
+        for plan in plans
+        for chapter in plan.chapters
+        if chapter.status == MemoirBookPlanChapterStatus.ACTIVE.value
+    ]
     link_status_counts, _, _ = await _link_counts(db, project.id)
     source_status_counts = await _source_card_status_counts(db, project.id)
     chapter_status_counts = await _chapter_card_status_counts(db, project.id)

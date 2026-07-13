@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.projects.types import ProjectType
+from app.domain.memoir.types import MemoirBookPlanChapterStatus
 from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import MemoirChapterContract
 from app.models.projects import Project
@@ -20,7 +21,10 @@ async def run_chapter_structure_backfill(
     statement = (
         select(MemoirBookPlanChapter)
         .join(Project, Project.id == MemoirBookPlanChapter.project_id)
-        .where(Project.type == ProjectType.MEMOIR.value)
+        .where(
+            Project.type == ProjectType.MEMOIR.value,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
+        )
         .order_by(
             MemoirBookPlanChapter.project_id,
             MemoirBookPlanChapter.sort_order,

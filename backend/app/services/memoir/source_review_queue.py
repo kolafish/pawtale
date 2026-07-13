@@ -24,6 +24,7 @@ from app.services.memoir import book_plan_write_workflow
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_router
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_plan_sources import sorted_chapters
 
 
 SOURCE_REVIEW_EVENT_TYPE = MemoirAutomationEventType.SOURCE_HELD
@@ -133,9 +134,9 @@ def _resolved_chapter_from_plan(
     preferred_chapter_id: str | None,
 ) -> tuple[str | None, str | None]:
     if preferred_chapter_id:
-        chapter = next((item for item in plan.chapters if item.id == preferred_chapter_id), None)
+        chapter = next((item for item in sorted_chapters(plan) if item.id == preferred_chapter_id), None)
         return (chapter.id, chapter.title) if chapter else (preferred_chapter_id, None)
-    for chapter in plan.chapters:
+    for chapter in sorted_chapters(plan):
         if any(ref.utterance_id == utterance_id for ref in chapter.source_refs):
             return chapter.id, chapter.title
     return None, None

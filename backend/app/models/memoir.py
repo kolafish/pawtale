@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
+    MemoirBookPlanChapterStatus,
     MemoirBookPlanStatus,
     MemoirChapterSourceAssignedBy,
     MemoirChapterSourceLinkStatus,
@@ -484,6 +485,21 @@ class MemoirBookPlanChapter(Base):
     __tablename__ = "memoir_book_plan_chapters"
     __table_args__ = (
         UniqueConstraint("plan_id", "sort_order", name="uq_memoir_book_plan_chapters_plan_order"),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirBookPlanChapterStatus)})",
+            name="ck_memoir_book_plan_chapters_status",
+        ),
+        CheckConstraint(
+            "(status = 'active' AND archived_at IS NULL AND archived_by_user_id IS NULL "
+            "AND merged_into_chapter_id IS NULL AND archived_sort_order IS NULL) OR "
+            "(status = 'archived' AND archived_at IS NOT NULL "
+            "AND archived_by_user_id IS NOT NULL AND archived_sort_order IS NOT NULL)",
+            name="ck_memoir_book_plan_chapters_archive_shape",
+        ),
+        CheckConstraint(
+            "merged_into_chapter_id IS NULL OR merged_into_chapter_id != id",
+            name="ck_memoir_book_plan_chapters_merge_target",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -491,6 +507,23 @@ class MemoirBookPlanChapter(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16),
+        default=MemoirBookPlanChapterStatus.ACTIVE.value,
+        nullable=False,
+    )
+    archived_sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_by_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    merged_into_chapter_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id"),
+        nullable=True,
+    )
     source_refs_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

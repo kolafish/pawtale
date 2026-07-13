@@ -28,6 +28,7 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -83,7 +84,7 @@ def _auto_assignment_item(
 
 
 def _chapter_titles(plan: MemoirBookPlanResponse) -> dict[str, str]:
-    return {chapter.id: chapter.title for chapter in plan.chapters}
+    return {chapter.id: chapter.title for chapter in sorted_chapters(plan)}
 
 
 def _route_metadata(

@@ -54,16 +54,19 @@ test("chapter workspace API uses narrative resource routes and explicit action p
   resetModules();
   const {
     confirmMemoirChapterContract,
+    createMemoirChapterContractRevision,
     decideMemoirClaim,
     decideMemoirStory,
     enqueueMemoirChapterWorkspaceAudit,
     excludeMemoirStoryFromChapter,
     getMemoirChapterWorkspace,
     mergeMemoirStory,
+    mergeMemoirChapterStructures,
     moveMemoirStoryBetweenChapterNodes,
     reorderMemoirChapterNodes,
     resolveMemoirNarrativeGap,
     resolveMemoirStorySlot,
+    splitMemoirChapterStructure,
     updateMemoirChapterNode,
   } = require("../services/memoir-chapter-workspace-api.ts");
 
@@ -120,6 +123,38 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     idempotency_key: "merge-1",
     reason: "确认是同一个故事",
   });
+  await createMemoirChapterContractRevision("project/1", "chapter/1", {
+    idempotency_key: "contract-revision-2",
+    objective: "讲清离家的原因和影响",
+    reader_takeaway: "理解人生选择",
+    time_scope_text: "青年时期",
+    time_start: null,
+    time_end: null,
+    core_questions: [{ key: "reason", question: "为什么离家？" }],
+    constraints: {
+      include_story_ids: ["story/1"],
+      exclude_story_ids: [],
+      include_topics: [],
+      exclude_topics: [],
+    },
+    copy_from_contract_id: "contract/1",
+    copy_nodes: true,
+  });
+  await splitMemoirChapterStructure("project/1", {
+    idempotency_key: "split-1",
+    source_contract_id: "contract/1",
+    node_ids: ["node/2"],
+    target_title: "第一次离家",
+    target_objective: "完整讲述离家经过",
+    target_reader_takeaway: "理解离家的改变",
+    target_time_scope_text: "十八岁",
+    target_core_questions: [{ key: "departure", question: "离家发生了什么？" }],
+  });
+  await mergeMemoirChapterStructures("project/1", {
+    idempotency_key: "merge-chapter-1",
+    source_contract_id: "contract/1",
+    target_chapter_id: "chapter/2",
+  });
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
@@ -175,6 +210,20 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     retained_story_id: "story/2",
     idempotency_key: "merge-1",
     reason: "确认是同一个故事",
+  });
+  assert.equal(apiRequests[12].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/revisions");
+  assert.equal(apiRequests[12].method, "POST");
+  assert.deepEqual(apiRequests[12].data.core_questions, [
+    { key: "reason", question: "为什么离家？" },
+  ]);
+  assert.equal(apiRequests[13].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/split");
+  assert.deepEqual(apiRequests[13].data.node_ids, ["node/2"]);
+  assert.equal(apiRequests[13].data.target_title, "第一次离家");
+  assert.equal(apiRequests[14].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/merge");
+  assert.deepEqual(apiRequests[14].data, {
+    idempotency_key: "merge-chapter-1",
+    source_contract_id: "contract/1",
+    target_chapter_id: "chapter/2",
   });
   delete global.wx;
 });

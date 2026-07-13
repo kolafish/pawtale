@@ -25,6 +25,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStorySlotStatus,
     MemoirStoryVerificationStatus,
 )
+from app.domain.memoir.types import MemoirBookPlanChapterStatus
 from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -89,6 +90,7 @@ async def load_chapter_audit_context(
         select(MemoirBookPlanChapter).where(
             MemoirBookPlanChapter.project_id == project_id,
             MemoirBookPlanChapter.id == chapter_id,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         )
     )
     if chapter is None:

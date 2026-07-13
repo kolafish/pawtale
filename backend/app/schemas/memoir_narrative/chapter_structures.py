@@ -200,9 +200,17 @@ class MemoirChapterNodeStoryMoveRequest(BaseModel):
 class MemoirChapterStructureSplitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    idempotency_key: str = Field(min_length=1, max_length=160)
     source_contract_id: str = Field(min_length=1, max_length=36)
-    target_contract_id: str = Field(min_length=1, max_length=36)
     node_ids: list[str] = Field(min_length=1, max_length=100)
+    target_title: str = Field(min_length=1, max_length=200)
+    target_objective: str = Field(min_length=1, max_length=2000)
+    target_reader_takeaway: str = Field(min_length=1, max_length=2000)
+    target_time_scope_text: str = Field(default="", max_length=1000)
+    target_core_questions: list[MemoirChapterCoreQuestion] = Field(
+        min_length=1,
+        max_length=20,
+    )
 
     @field_validator("node_ids")
     @classmethod
@@ -212,12 +220,36 @@ class MemoirChapterStructureSplitRequest(BaseModel):
             raise ValueError("chapter split contains duplicate nodes")
         return normalized
 
+    @field_validator(
+        "idempotency_key",
+        "target_title",
+        "target_objective",
+        "target_reader_takeaway",
+        "target_time_scope_text",
+    )
+    @classmethod
+    def strip_split_text(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def validate_question_keys(self):
+        keys = [question.key for question in self.target_core_questions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("chapter split question keys must be unique")
+        return self
+
 
 class MemoirChapterStructureMergeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    idempotency_key: str = Field(min_length=1, max_length=160)
     source_contract_id: str = Field(min_length=1, max_length=36)
-    target_contract_id: str = Field(min_length=1, max_length=36)
+    target_chapter_id: str = Field(min_length=1, max_length=36)
+
+    @field_validator("idempotency_key", "source_contract_id", "target_chapter_id")
+    @classmethod
+    def strip_merge_text(cls, value: str) -> str:
+        return value.strip()
 
 
 class MemoirChapterNodeStoryResponse(BaseModel):

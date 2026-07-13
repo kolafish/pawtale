@@ -1,11 +1,15 @@
 import type {
   MemoirChapterGapAuditJob,
   MemoirChapterGapAuditRequest,
+  MemoirChapterContractRevisionRequest,
   MemoirChapterNodeReorderRequest,
   MemoirChapterNodeStoryMoveRequest,
   MemoirChapterNodeUpdateRequest,
   MemoirChapterWorkspace,
   MemoirChapterWorkspaceContract,
+  MemoirChapterStructureMergeRequest,
+  MemoirChapterStructureMutationResponse,
+  MemoirChapterStructureSplitRequest,
   MemoirNarrativeDecision,
   MemoirNarrativeDecisionRequest,
   MemoirNarrativeGap,
@@ -154,6 +158,40 @@ export function confirmMemoirChapterContract(
   return memoirRequest<MemoirChapterWorkspaceContract>(
     narrativeTargetPath(projectId, "chapter-contracts", contractId, "/confirm"),
     { method: "POST", data: {} },
+  );
+}
+
+export function createMemoirChapterContractRevision(
+  projectId: string,
+  chapterId: string,
+  data: MemoirChapterContractRevisionRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/contract/revisions`,
+    ),
+    { method: "POST", data },
+  );
+}
+
+export function splitMemoirChapterStructure(
+  projectId: string,
+  data: MemoirChapterStructureSplitRequest,
+): Promise<MemoirChapterStructureMutationResponse> {
+  return memoirRequest<MemoirChapterStructureMutationResponse>(
+    memoirNarrativeProjectPath(projectId, "/chapter-structures/split"),
+    { method: "POST", data },
+  );
+}
+
+export function mergeMemoirChapterStructures(
+  projectId: string,
+  data: MemoirChapterStructureMergeRequest,
+): Promise<MemoirChapterStructureMutationResponse> {
+  return memoirRequest<MemoirChapterStructureMutationResponse>(
+    memoirNarrativeProjectPath(projectId, "/chapter-structures/merge"),
+    { method: "POST", data },
   );
 }
 

@@ -14,6 +14,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import DATA_DIR
 from app.domain.memoir.types import (
     MemoirBookImagePlacementType,
+    MemoirBookPlanChapterStatus,
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
 )
@@ -312,6 +313,7 @@ async def create_image_placement(
             .where(
                 MemoirBookPlanChapter.id == req.chapter_id,
                 MemoirBookPlanChapter.project_id == project_id,
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
         )
         if not chapter:

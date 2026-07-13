@@ -451,6 +451,15 @@ updated_at
 
 `core_questions_json` 中每个问题必须有稳定 question key；问题是否已回答由 Node/Story/Claim 和 Gap 计算，不能在 JSON 中维护第二套完成状态。
 
+章节拆分和合并属于版本化结构操作，不允许退回目录 JSON 或原始素材列表上做破坏性改写：
+
+- 拆分必须创建真实的 `MemoirBookPlanChapter` 和新的 draft `ChapterContract`，移动选定的 Node ID 及其 NodeStory 关系；Story、Claim、Evidence 不复制，未移动节点继续留在原章节。
+- 合并必须把来源章节的 draft Node 移入目标章节当前 draft Contract；目标只有 confirmed Contract 时先复制成新 draft version，confirmed Contract、历史 Node 和 DraftBlockVersion 不得原地修改。
+- 被合并章节只进入 `archived` 状态，不硬删除。其原目录顺序、操作用户、操作时间和最终 `merged_into_chapter_id` 必须可追溯；连续合并时所有历史来源都直接指向最终有效章节，不能保留悬空链。
+- 正式目录、审计、补访、生成、图片放置和素材归章只使用 active 章节；历史书稿、审计快照和来源证据仍可按原章节追溯。
+- 拆分或合并会使旧 Gap 的章节坐标失效。操作必须关闭这些旧 Gap、取消对应补访任务并等待新结构重新审计；合并还要改指待确认素材项、跳过尚未开始的旧章节后台任务。
+- 结构请求必须有稳定幂等键。网络重试不得重复创建章节、Contract、Node、Story 或 Claim，也不得把客户端导航到已经归档的中间章节。
+
 ### 5.6 ChapterNode：章节结构节点
 
 `MemoirChapterNode` 表达章节的叙事结构，而不是正文段落样式。

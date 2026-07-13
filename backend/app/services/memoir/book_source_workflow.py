@@ -38,6 +38,7 @@ from app.services.memoir.book_plan_sources import (
     removed_source_ids as _removed_source_ids,
     set_source_assignment_metadata as _set_source_assignment_metadata,
     set_source_change_metadata as _set_source_change_metadata,
+    sorted_chapters as _sorted_chapters,
     source_coverage_item as _source_coverage_item,
     source_ref_utterance_id as _source_ref_utterance_id,
     source_segments as _source_segments,
@@ -186,7 +187,7 @@ async def assign_book_sources_to_chapters(
     )
     source_by_utterance = {source.utterance_id: source for source in sources}
     covered_ids = await _covered_utterance_ids(db, plan)
-    chapter_by_id = {chapter.id: chapter for chapter in plan.chapters}
+    chapter_by_id = {chapter.id: chapter for chapter in _sorted_chapters(plan)}
     refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
 
     affected_chapter_ids: set[str] = set()

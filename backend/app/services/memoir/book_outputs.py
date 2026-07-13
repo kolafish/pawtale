@@ -61,6 +61,7 @@ from app.services.memoir.book_output_manuscript import (
     updated_manuscript_payload as _updated_manuscript_payload,
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
@@ -226,7 +227,7 @@ async def _current_book_snapshot(
 ) -> tuple[list[dict[str, object]], list[str]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         return [], ["章节规划"]
-    chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
+    chapters = sorted_chapters(plan)
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
     for index, chapter in enumerate(chapters, start=1):

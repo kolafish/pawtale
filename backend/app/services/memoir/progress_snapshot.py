@@ -172,7 +172,7 @@ def _latest_draft_word_counts(plan: MemoirBookPlan | None) -> dict[str, int]:
     if not plan:
         return {}
     counts: dict[str, int] = {}
-    for chapter in plan.chapters:
+    for chapter in sorted_chapters(plan):
         draft = chapter.draft
         if not draft:
             continue

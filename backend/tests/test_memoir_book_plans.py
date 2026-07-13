@@ -21,6 +21,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChapterSourceLink,
 )
+from app.models.memoir_narrative import MemoirChapterContract
 from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
 from app.services.memoir.book_plan_sources import (
     find_chapter_by_id,
@@ -870,6 +871,84 @@ async def test_mobile_memoir_book_plan_structure_command_creates_source_chapter(
         chapter_title="后来我又讲了一个认识很多年的朋友",
     )
 
+
+async def test_versioned_chapter_structure_rejects_legacy_chapter_creation_and_replacement(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    later = await create_test_voice_transcript(client, test_db, "后来第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    confirmed = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "回忆录目录",
+            "chapters": [
+                {"title": "童年", "source_refs": [memoir_source_ref(first)]}
+            ],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    chapter = confirmed.json()["chapters"][0]
+    contract = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter['id']}/contract/revisions",
+        json={
+            "idempotency_key": "enable-versioned-structure",
+            "objective": "讲清童年生活如何塑造了讲述者。",
+            "reader_takeaway": "读者理解童年经历的长期影响。",
+            "core_questions": [
+                {"key": "childhood", "question": "童年最重要的经历是什么？"}
+            ],
+        },
+    )
+    assert contract.status_code == 200, contract.text
+
+    replacement = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": "整体替换",
+            "chapters": [
+                {"title": "替换后的童年", "source_refs": [memoir_source_ref(first)]}
+            ],
+        },
+    )
+    assert replacement.status_code == 409
+
+    create_from_source = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "create_chapter_from_source",
+            "utterance_id": later["utterance_id"],
+        },
+    )
+    assert create_from_source.status_code == 400
+
+    patch_add = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {
+                    "id": chapter["id"],
+                    "title": chapter["title"],
+                    "source_refs": chapter["source_refs"],
+                },
+                {"title": "离家", "source_refs": [memoir_source_ref(later)]},
+            ],
+        },
+    )
+    assert patch_add.status_code == 400
+
+    unchanged = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert unchanged.status_code == 200
+    assert [item["id"] for item in unchanged.json()["chapters"]] == [chapter["id"]]
+    assert await test_db.scalar(
+        select(MemoirChapterContract.id).where(
+            MemoirChapterContract.id == contract.json()["id"]
+        )
+    ) == contract.json()["id"]
+
 async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts(
     client,
     test_db,
@@ -945,7 +1024,7 @@ async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts
     ) is None
 
 
-async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_remaining_draft(
+async def test_mobile_memoir_book_plan_patch_cannot_delete_chapter_or_draft(
     client,
     test_db,
     monkeypatch,
@@ -1028,20 +1107,27 @@ async def test_mobile_memoir_book_plan_patch_deletes_chapter_without_replacing_r
         },
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["title"] == "调整后的章节"
-    assert [chapter["id"] for chapter in data["chapters"]] == [first_chapter["id"]]
+    assert response.status_code == 400
+    assert response.json()["detail"] == "目录保存不能删除章节，请使用章节结构操作"
+    unchanged = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["title"] == "用户确认后的章节"
+    assert [chapter["id"] for chapter in unchanged.json()["chapters"]] == [
+        first_chapter["id"],
+        second_chapter["id"],
+    ]
     assert await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == first_draft.id)
     ) is not None
     assert await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == second_draft.id)
-    ) is None
+    ) is not None
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
-    assert [item["utterance_id"] for item in coverage.json()["uncovered_sources"]] == [second["utterance_id"]]
+    assert coverage.json()["uncovered_sources"] == []
 
 
 async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
@@ -1111,7 +1197,7 @@ async def test_mobile_memoir_book_plan_patch_adds_chapter_from_uncovered_source(
     assert coverage.json()["uncovered_source_count"] == 0
 
 
-async def test_mobile_memoir_book_plan_patch_updates_draft_plan_structure(
+async def test_mobile_memoir_book_plan_patch_cannot_collapse_draft_chapters(
     client,
     test_db,
     monkeypatch,
@@ -1149,14 +1235,16 @@ async def test_mobile_memoir_book_plan_patch_updates_draft_plan_structure(
         },
     )
 
-    assert response.status_code == 200, response.json()
-    data = response.json()
-    assert data["status"] == "draft"
-    assert data["title"] == "草稿目录调整"
-    assert [chapter["title"] for chapter in data["chapters"]] == ["童年和离家"]
-    assert [ref["utterance_id"] for ref in data["chapters"][0]["source_refs"]] == [
-        first["utterance_id"],
-        second["utterance_id"],
+    assert response.status_code == 400
+    assert response.json()["detail"] == "目录保存不能删除章节，请使用章节结构操作"
+    unchanged = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert unchanged.status_code == 200
+    assert unchanged.json()["status"] == "draft"
+    assert [chapter["id"] for chapter in unchanged.json()["chapters"]] == [
+        first_chapter["id"],
+        second_chapter["id"],
     ]
 
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")

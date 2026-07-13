@@ -29,6 +29,7 @@ from app.models.memoir_narrative import (
     MemoirNarrativeEntity,
     MemoirNarrativeDecision,
 )
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
     load_chapter_audit_context,
@@ -85,7 +86,7 @@ async def load_book_consistency_context(
     )
     chapter_contexts: list[ChapterAuditContext] = []
     if plan is not None:
-        for chapter in sorted(plan.chapters, key=lambda item: (item.sort_order, item.id)):
+        for chapter in sorted_chapters(plan):
             chapter_contexts.append(
                 await load_chapter_audit_context(
                     db,

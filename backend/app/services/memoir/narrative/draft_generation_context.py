@@ -20,6 +20,8 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryPublicationStatus,
     MemoirStoryVerificationStatus,
 )
+from app.domain.memoir.types import MemoirBookPlanChapterStatus
+from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -132,10 +134,16 @@ async def load_confirmed_contract_nodes(
     chapter_id: str,
 ) -> tuple[MemoirChapterContract, list[MemoirChapterNode]]:
     contract = await db.scalar(
-        select(MemoirChapterContract).where(
+        select(MemoirChapterContract)
+        .join(
+            MemoirBookPlanChapter,
+            MemoirBookPlanChapter.id == MemoirChapterContract.chapter_id,
+        )
+        .where(
             MemoirChapterContract.project_id == project_id,
             MemoirChapterContract.chapter_id == chapter_id,
             MemoirChapterContract.status == MemoirChapterContractStatus.CONFIRMED.value,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         )
     )
     if contract is None:

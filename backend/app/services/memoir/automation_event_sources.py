@@ -6,7 +6,7 @@ import re
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirBookPlanStatus
+from app.domain.memoir.types import MemoirBookPlanChapterStatus, MemoirBookPlanStatus
 from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookPlan,
@@ -94,6 +94,7 @@ async def load_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> list[Mem
             .where(
                 MemoirBookPlanChapter.project_id == plan.project_id,
                 MemoirBookPlanChapter.plan_id == plan.id,
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
             .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
         )

@@ -51,9 +51,14 @@ MEMOIR_CHAPTER_STRUCTURE_TRIGGERS = (
     "memoir_chapter_node_stories_immutable_update",
     "memoir_chapter_node_stories_immutable_delete",
 )
+MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_TRIGGERS = (
+    "memoir_book_plan_chapters_archive_shape_insert",
+    "memoir_book_plan_chapters_archive_shape_update",
+)
 MEMOIR_NARRATIVE_TRIGGERS = (
     *MEMOIR_NARRATIVE_DECISION_TRIGGERS,
     *MEMOIR_CHAPTER_STRUCTURE_TRIGGERS,
+    *MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_TRIGGERS,
     *MEMOIR_DRAFT_BLOCK_TRIGGERS,
 )
 MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
@@ -61,6 +66,15 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
     "formal_audit_job_id": "VARCHAR(36)",
     "formalized_by_user_id": "VARCHAR(36)",
     "formalized_at": "DATETIME",
+}
+MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_COLUMNS = {
+    "status": "VARCHAR(16) NOT NULL DEFAULT 'active'",
+    "archived_sort_order": "INTEGER",
+    "archived_at": "DATETIME",
+    "archived_by_user_id": "VARCHAR(36) REFERENCES users(id)",
+    "merged_into_chapter_id": (
+        "VARCHAR(36) REFERENCES memoir_book_plan_chapters(id)"
+    ),
 }
 
 
@@ -133,6 +147,25 @@ async def _ensure_book_output_formal_columns(conn) -> list[str]:
     }
     changed: list[str] = []
     for column_name, column_type in MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        )
+        changed.append(f"{table_name}.{column_name}")
+    return changed
+
+
+async def _ensure_book_plan_chapter_archive_columns(conn) -> list[str]:
+    table_name = "memoir_book_plan_chapters"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    changed: list[str] = []
+    for column_name, column_type in MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_COLUMNS.items():
         if column_name in columns:
             continue
         await conn.execute(
@@ -360,6 +393,78 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
     return changed
 
 
+async def _ensure_book_plan_chapter_archive_triggers(conn) -> list[str]:
+    if not await _table_exists(conn, "memoir_book_plan_chapters"):
+        return []
+    invalid_shape = """
+        NOT (
+            (
+                NEW.status = 'active'
+                AND NEW.archived_sort_order IS NULL
+                AND NEW.archived_at IS NULL
+                AND NEW.archived_by_user_id IS NULL
+                AND NEW.merged_into_chapter_id IS NULL
+            )
+            OR
+            (
+                NEW.status = 'archived'
+                AND NEW.archived_sort_order IS NOT NULL
+                AND NEW.archived_at IS NOT NULL
+                AND NEW.archived_by_user_id IS NOT NULL
+            )
+        )
+        OR NEW.merged_into_chapter_id IS NEW.id
+        OR (
+            NEW.merged_into_chapter_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM memoir_book_plan_chapters AS target
+                WHERE target.id = NEW.merged_into_chapter_id
+                  AND target.project_id = NEW.project_id
+                  AND target.plan_id = NEW.plan_id
+                  AND target.status = 'active'
+            )
+        )
+    """
+    statements = {
+        "memoir_book_plan_chapters_archive_shape_insert": f"""
+            CREATE TRIGGER memoir_book_plan_chapters_archive_shape_insert
+            BEFORE INSERT ON memoir_book_plan_chapters
+            WHEN {invalid_shape}
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid memoir chapter archive state');
+            END
+        """,
+        "memoir_book_plan_chapters_archive_shape_update": f"""
+            CREATE TRIGGER memoir_book_plan_chapters_archive_shape_update
+            BEFORE UPDATE ON memoir_book_plan_chapters
+            WHEN {invalid_shape}
+            BEGIN
+                SELECT RAISE(ABORT, 'invalid memoir chapter archive state');
+            END
+        """,
+    }
+    changed: list[str] = []
+    for trigger_name, statement in statements.items():
+        existing = await conn.execute(
+            text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'trigger' AND name = :trigger_name"
+            ),
+            {"trigger_name": trigger_name},
+        )
+        existing_sql = str(existing.scalar_one_or_none() or "")
+        normalized_existing = " ".join(existing_sql.split()).rstrip(";")
+        normalized_expected = " ".join(statement.split()).rstrip(";")
+        if normalized_existing == normalized_expected:
+            continue
+        if existing_sql:
+            await conn.execute(text(f"DROP TRIGGER {trigger_name}"))
+        await conn.execute(text(statement))
+        changed.append(trigger_name)
+    return changed
+
+
 async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, object]:
     """Create and advance the narrative fact schema."""
     changed_tables: list[str] = []
@@ -381,8 +486,10 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 changed_indexes.append(index.name)
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
+        changed_columns.extend(await _ensure_book_plan_chapter_archive_columns(conn))
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
+        changed_triggers.extend(await _ensure_book_plan_chapter_archive_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
         legacy_backfill = await backfill_legacy_chapter_drafts(conn)
     return {
@@ -417,6 +524,20 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
                 f"memoir_book_outputs.{column_name}"
                 for column_name in sorted(
                     set(MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS) - output_columns
+                )
+            )
+        if await _table_exists(conn, "memoir_book_plan_chapters"):
+            chapter_columns = {
+                str(column["name"])
+                for column in await _table_column_schema(
+                    conn,
+                    "memoir_book_plan_chapters",
+                )
+            }
+            missing_columns.extend(
+                f"memoir_book_plan_chapters.{column_name}"
+                for column_name in sorted(
+                    set(MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_COLUMNS) - chapter_columns
                 )
             )
         for table_name, expected in expected_columns.items():

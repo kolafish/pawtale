@@ -18,6 +18,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapStatus,
 )
+from app.domain.memoir.types import MemoirBookPlanChapterStatus
 from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import (
     MemoirClaim,
@@ -145,6 +146,7 @@ async def _validate_candidate_relations(
             select(func.count(MemoirBookPlanChapter.id)).where(
                 MemoirBookPlanChapter.project_id == project_id,
                 MemoirBookPlanChapter.id.in_(chapter_ids),
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
         )
         if count != len(chapter_ids):
@@ -538,7 +540,7 @@ async def resolve_gap_by_system(
         db,
         project_id=project_id,
         gap_id=gap.id,
-        reason="gap was resolved by new narrative evidence",
+        reason=note.strip(),
         decision_identity=idempotency_key,
     )
     await db.flush()
