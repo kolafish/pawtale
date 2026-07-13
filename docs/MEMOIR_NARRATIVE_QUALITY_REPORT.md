@@ -1,6 +1,6 @@
 # 回忆录叙事质量切换报告
 
-更新日期：2026-07-13
+更新日期：2026-07-14
 
 ## 当前结论
 
@@ -19,15 +19,15 @@
 - PR12 全量工具已在受控真实数据库副本上完成备份、schema 修复、dry-run、摄取任务执行、Story/Contract 回填、重复执行和回滚演练。
 - 受控副本的自动迁移报告为 `migration_complete=true`、`cutover_data_ready=true`，无待处理或失败摄取任务，Claim evidence 缺失数为零。
 - SQLite 恢复工具已验证会保留迁移后调查快照并清理 WAL/SHM/journal，恢复后 `integrity_check=ok`。
-- 盲审准备工具会随机分配 A/B，将候选正文与答案/版本来源物理分离，并用 SHA-256 绑定正文、确定性指标和叙述者复核。
-- 质量 evaluator 已拒绝空候选、正文换包、身份泄露、无版本来源、无人工评审来源和无审计来源的手填指标。
+- 盲审准备工具会随机分配 A/B，将候选正文与答案/版本来源物理分离，并用 SHA-256 绑定正文、完整私有测量 artifact、确定性指标和叙述者复核。
+- 质量 evaluator 已拒绝空候选、正文换包、身份泄露、无版本来源、无人工评审来源和无审计来源的手填指标；最终评估会重新校验完整 artifact、候选版本、正文逐句来源及汇总指标的一致性。
 
 仍需完成：
 
 - 从受控数据路径选择至少两个脱敏真实章节，且三类样本整体覆盖事件型、关系型、生涯型。
 - 隐藏 A/B 的新旧链路身份，由项目所有者或主要编辑完成评分。
 - 条件允许时增加一名不参与实现的独立评审者。
-- 叙述者本人核对事实和个人声音；该意见优先于自动指标。
+- 每个完成样本都由叙述者本人核对事实和个人声音；缺少复核或任一项未通过都会阻止切换。
 - 样本 Story 和 ChapterContract 必须由项目所有者按产品工作流确认后才能生成新链路正文；不得为制作盲评包而伪造确认人或绕过 `needs_work` 状态。
 - 在本地受控路径先从数据库生成新稿测量 artifact，再建立只引用该 artifact 的 manifest，由准备脚本生成相互隔离的盲审包和答案文件；评审完成前不得查看答案文件。
 
@@ -55,6 +55,7 @@
 4. 结构、时间逻辑、人物清晰度中至少两个维度的中位数提升。
 5. locked block 变化数为 0，局部修订导致的无关 block 变化数为 0。
 6. 至少两个样本完成成对人工盲评，并包含项目所有者或主要编辑。
+7. 每个完成样本均有绑定新稿 SHA-256 的叙述者复核，且事实和个人声音均通过。
 
 ## 运行方式
 
@@ -99,7 +100,7 @@ DATABASE_URL=sqlite+aiosqlite:////controlled/memoir.sqlite \
   --artifact-output /controlled/memoir-quality/new-chapter.measurement.json
 ```
 
-测量 artifact 会逐句列出 DraftBlock、Claim 和 Evidence 映射，统计时间/因果、人物和证据/完整性相关的未解决 high gap，并从前后两个结构化快照自动识别 intended、locked 和 unrelated block 变化。测量失败或指标不满足门禁时不能手改 artifact，必须回到章节工作台处理事实、缺口或局部修订。
+测量 artifact 会逐句列出 DraftBlock、Claim 和 Evidence 映射，统计时间/因果、人物和证据/完整性相关的未解决 high gap，并从前后两个结构化快照自动识别 intended、locked 和 unrelated block 变化。准备脚本把完整 artifact 放入私有答案文件，最终 evaluator 再次校验其完整性、候选身份、正文来源和汇总值。测量失败或指标不满足门禁时不能手改 artifact，必须回到章节工作台处理事实、缺口或局部修订。
 
 再生成盲审材料：
 
@@ -111,7 +112,7 @@ PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_blind_review.py \
   --answer-key /controlled/memoir-quality/answer-key.json
 ```
 
-准备脚本生成的 `reviews` 初始为空。主要编辑在不知道 A/B 身份的情况下，为同一条 review 同时填写两份稿件的七维评分，并记录匿名 `reviewer_id`、`reviewer_type=human`、`role`、`independent` 和带时区 `reviewed_at`。完成评审并锁定正文后再运行：
+准备脚本生成的 `reviews` 初始为空。主要编辑在不知道 A/B 身份的情况下，为同一条 review 同时填写两份稿件的七维评分，并记录匿名 `reviewer_id`、`reviewer_type=human`、`role`、`independent` 和带时区 `reviewed_at`。评审完成后，由叙述者对新稿事实和个人声音逐章确认，并在私有答案文件写入绑定新稿 SHA-256 的 `narrator_review`。完成这些复核并锁定正文后再运行：
 
 ```bash
 cd backend

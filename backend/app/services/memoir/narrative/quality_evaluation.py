@@ -4,6 +4,11 @@ from datetime import datetime
 from hashlib import sha256
 from statistics import median
 
+from app.services.memoir.narrative.quality_artifact import (
+    QUALITY_MEASUREMENT_ENGINE,
+    validate_measurement_artifact,
+)
+
 
 QUALITY_DIMENSIONS = (
     "focus",
@@ -202,6 +207,7 @@ def _valid_new_candidate_metrics(
     *,
     sample_id: str,
     new_label: str,
+    new_content: str,
     new_content_hash: str,
     reasons: list[str],
 ) -> dict[str, object] | None:
@@ -216,7 +222,7 @@ def _valid_new_candidate_metrics(
         "unrelated_block_changes",
         "measurement_provenance",
     }
-    if not isinstance(metrics, dict) or not required_fields.issubset(metrics):
+    if not isinstance(metrics, dict) or set(metrics) != required_fields:
         reasons.append(f"{sample_id} has no measured metrics for the new candidate")
         return None
     integer_fields = (
@@ -252,12 +258,61 @@ def _valid_new_candidate_metrics(
     provenance = metrics.get("measurement_provenance")
     if (
         not isinstance(provenance, dict)
-        or _nonempty_string(provenance.get("engine")) is None
+        or provenance.get("engine") != QUALITY_MEASUREMENT_ENGINE
         or _nonempty_string(provenance.get("artifact_id")) is None
         or not _valid_review_timestamp(provenance.get("measured_at"))
         or provenance.get("content_sha256") != new_content_hash
     ):
         reasons.append(f"{sample_id} candidate metrics have invalid provenance")
+        return None
+
+    artifacts_by_label = mapping.get("measurement_artifacts")
+    artifact = (
+        artifacts_by_label.get(new_label)
+        if isinstance(artifacts_by_label, dict)
+        else None
+    )
+    try:
+        validate_measurement_artifact(artifact)
+    except ValueError:
+        reasons.append(f"{sample_id} has an invalid deterministic measurement artifact")
+        return None
+    assert isinstance(artifact, dict)
+    sources = mapping.get("source_versions")
+    new_source = sources.get("new") if isinstance(sources, dict) else None
+    if not isinstance(new_source, dict) or any(
+        artifact.get(artifact_field) != new_source.get(source_field)
+        for artifact_field, source_field in (
+            ("project_id", "project_id"),
+            ("chapter_id", "chapter_id"),
+            ("draft_version_id", "version_id"),
+        )
+    ) or artifact.get("content_sha256") != new_content_hash:
+        reasons.append(f"{sample_id} measurement artifact is not bound to the new candidate")
+        return None
+    artifact_metrics = artifact["metrics"]
+    measured_metrics = {
+        field: value
+        for field, value in metrics.items()
+        if field != "measurement_provenance"
+    }
+    if artifact_metrics != measured_metrics:
+        reasons.append(f"{sample_id} candidate metrics do not match the measurement artifact")
+        return None
+    expected_provenance = {
+        "engine": artifact["engine"],
+        "artifact_id": artifact["artifact_id"],
+        "measured_at": artifact["measured_at"],
+        "content_sha256": artifact["content_sha256"],
+    }
+    if provenance != expected_provenance:
+        reasons.append(f"{sample_id} candidate metric provenance does not match the artifact")
+        return None
+    if any(
+        source["sentence"] not in new_content
+        for source in artifact["sentence_sources"]
+    ):
+        reasons.append(f"{sample_id} measurement artifact cites text outside the new candidate")
         return None
     return metrics
 
@@ -399,6 +454,7 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
             mapping,
             sample_id=display_id,
             new_label=new_label,
+            new_content=sample["candidates"][new_label]["content"],
             new_content_hash=candidate_hashes[new_label],
             reasons=reasons,
         )
@@ -443,6 +499,8 @@ def evaluate_quality_packet(packet: dict, answer_key: dict) -> dict:
         reasons.append("at least two samples need paired human reviews")
     if not owner_or_editor_reviewed:
         reasons.append("project owner or primary editor review is required")
+    if completed_samples and narrator_reviewed_count != completed_samples:
+        reasons.append("every completed sample requires narrator fact and voice review")
     if new_fact_sentence_count < 1 or new_mapped_fact_sentence_count != new_fact_sentence_count:
         reasons.append("new pipeline factual sentence source coverage is not 100%")
     if new_unmapped_facts:

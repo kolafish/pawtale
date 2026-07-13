@@ -60,6 +60,48 @@ def _sample(sample_id: str, categories: list[str], *, reviewer_type: str = "huma
         "A": candidate_content_sha256(old_content),
         "B": candidate_content_sha256(new_content),
     }
+    measurement_body = {
+        "project_id": "project-1",
+        "chapter_id": f"chapter-{sample_id}",
+        "draft_version_id": f"narrative-{sample_id}",
+        "baseline_draft_version_id": f"baseline-{sample_id}",
+        "content_sha256": candidate_hashes["B"],
+        "metrics": {
+            "fact_sentence_count": 1,
+            "mapped_fact_sentence_count": 1,
+            "unmapped_fact_ids": [],
+            "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
+            "locked_block_changes": 0,
+            "unrelated_block_changes": 0,
+        },
+        "source_mapping_granularity": "draft_block_claim_set",
+        "sentence_sources": [
+            {
+                "sentence_id": f"sentence-{sample_id}",
+                "sentence": new_content,
+                "block_id": f"block-{sample_id}",
+                "block_version_id": f"block-version-{sample_id}",
+                "claim_ids": [f"claim-{sample_id}"],
+                "evidence_ids": [f"evidence-{sample_id}"],
+                "mapped": True,
+            }
+        ],
+        "high_gap_details": [],
+        "comparison": {
+            "changed_block_ids": [f"block-{sample_id}"],
+            "intended_block_ids": [f"block-{sample_id}"],
+            "locked_changed_block_ids": [],
+            "unrelated_block_ids": [],
+        },
+    }
+    measurement_artifact = {
+        "engine": QUALITY_MEASUREMENT_ENGINE,
+        "artifact_id": measurement_artifact_id(
+            {"engine": QUALITY_MEASUREMENT_ENGINE, **measurement_body}
+        ),
+        "measured_at": "2026-07-14T08:00:00+08:00",
+        **measurement_body,
+    }
     return (
         {
             "id": sample_id,
@@ -108,19 +150,22 @@ def _sample(sample_id: str, categories: list[str], *, reviewer_type: str = "huma
             },
             "candidate_metrics": {
                 "B": {
-                    "fact_sentence_count": 4,
-                    "mapped_fact_sentence_count": 4,
-                    "unmapped_fact_ids": [],
-                    "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
-                    "locked_block_changes": 0,
-                    "unrelated_block_changes": 0,
+                    **measurement_artifact["metrics"],
                     "measurement_provenance": {
-                        "engine": "deterministic-quality-audit-v1",
-                        "artifact_id": f"audit-{sample_id}",
-                        "measured_at": "2026-07-14T08:00:00+08:00",
+                        "engine": measurement_artifact["engine"],
+                        "artifact_id": measurement_artifact["artifact_id"],
+                        "measured_at": measurement_artifact["measured_at"],
                         "content_sha256": candidate_hashes["B"],
                     },
                 }
+            },
+            "measurement_artifacts": {"B": measurement_artifact},
+            "narrator_review": {
+                "reviewer_id": "narrator-1",
+                "reviewed_at": "2026-07-14T11:00:00+08:00",
+                "content_sha256": candidate_hashes["B"],
+                "facts_confirmed": True,
+                "voice_acceptable": True,
             },
         },
     )
@@ -228,6 +273,72 @@ def test_quality_gate_rejects_internally_inconsistent_deterministic_metrics():
 
     assert result["passed"] is False
     assert "event-1 factual sentence metrics are internally inconsistent" in result["reasons"]
+
+
+def test_quality_gate_revalidates_the_full_measurement_artifact():
+    packet, answer_key = _passing_artifacts()
+    answer_key["samples"]["event-1"]["measurement_artifacts"]["B"]["metrics"][
+        "mapped_fact_sentence_count"
+    ] = 0
+
+    result = evaluate_quality_packet(packet, answer_key)
+
+    assert result["passed"] is False
+    assert (
+        "event-1 has an invalid deterministic measurement artifact" in result["reasons"]
+    )
+
+
+def test_quality_gate_rejects_summary_metrics_that_differ_from_the_artifact():
+    packet, answer_key = _passing_artifacts()
+    answer_key["samples"]["event-1"]["candidate_metrics"]["B"][
+        "locked_block_changes"
+    ] = 1
+
+    result = evaluate_quality_packet(packet, answer_key)
+
+    assert result["passed"] is False
+    assert (
+        "event-1 candidate metrics do not match the measurement artifact"
+        in result["reasons"]
+    )
+
+
+def test_quality_gate_rejects_artifact_sentences_outside_the_candidate():
+    packet, answer_key = _passing_artifacts()
+    artifact = answer_key["samples"]["event-1"]["measurement_artifacts"]["B"]
+    artifact["sentence_sources"][0]["sentence"] = "不属于候选正文的句子。"
+    artifact["artifact_id"] = measurement_artifact_id(
+        {
+            key: value
+            for key, value in artifact.items()
+            if key not in {"artifact_id", "measured_at"}
+        }
+    )
+    answer_key["samples"]["event-1"]["candidate_metrics"]["B"][
+        "measurement_provenance"
+    ]["artifact_id"] = artifact["artifact_id"]
+
+    result = evaluate_quality_packet(packet, answer_key)
+
+    assert result["passed"] is False
+    assert (
+        "event-1 measurement artifact cites text outside the new candidate"
+        in result["reasons"]
+    )
+
+
+def test_every_completed_sample_requires_narrator_fact_and_voice_review():
+    packet, answer_key = _passing_artifacts()
+    answer_key["samples"]["event-1"].pop("narrator_review")
+
+    result = evaluate_quality_packet(packet, answer_key)
+
+    assert result["passed"] is False
+    assert (
+        "every completed sample requires narrator fact and voice review"
+        in result["reasons"]
+    )
 
 
 def test_quality_gate_rejects_identity_leaks_in_blind_candidates():
@@ -379,6 +490,7 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
     assert "narrative" not in serialized_packet
     assert "version-old" not in serialized_packet
     assert "candidate_metrics" not in serialized_packet
+    assert "measurement_artifacts" not in serialized_packet
     assert packet["samples"][0]["candidates"]["A"]["content"] == "新链路正文"
     assert answer_key["samples"]["sample-1"]["new"] == "A"
     prepared_metrics = answer_key["samples"]["sample-1"]["candidate_metrics"]["A"]
@@ -386,6 +498,16 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
     assert prepared_metrics["measurement_provenance"]["content_sha256"] == packet[
         "samples"
     ][0]["candidates"]["A"]["content_sha256"]
+    prepared_artifact = answer_key["samples"]["sample-1"]["measurement_artifacts"][
+        "A"
+    ]
+    assert prepared_artifact["artifact_id"] == measurement_artifact_id(
+        {
+            key: value
+            for key, value in prepared_artifact.items()
+            if key not in {"artifact_id", "measured_at"}
+        }
+    )
 
     tampered_artifact = json.loads(measurement_paths[0].read_text(encoding="utf-8"))
     tampered_artifact["metrics"]["mapped_fact_sentence_count"] = 0

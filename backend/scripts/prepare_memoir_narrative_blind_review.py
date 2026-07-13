@@ -92,7 +92,7 @@ def _measured_candidate_metrics(
     manifest_dir: Path,
     sample_id: str,
     content_sha256: str,
-) -> dict:
+) -> tuple[dict, dict]:
     artifact_path = _content_path(
         source.get("measurement_artifact_path"),
         manifest_dir=manifest_dir,
@@ -123,15 +123,18 @@ def _measured_candidate_metrics(
     metrics = artifact.get("metrics")
     if not isinstance(metrics, dict) or "measurement_provenance" in metrics:
         raise ValueError(f"{sample_id} measurement artifact metrics are invalid")
-    return {
-        **metrics,
-        "measurement_provenance": {
-            "engine": QUALITY_MEASUREMENT_ENGINE,
-            "artifact_id": artifact_id,
-            "measured_at": measured_at,
-            "content_sha256": content_sha256,
+    return (
+        {
+            **metrics,
+            "measurement_provenance": {
+                "engine": QUALITY_MEASUREMENT_ENGINE,
+                "artifact_id": artifact_id,
+                "measured_at": measured_at,
+                "content_sha256": content_sha256,
+            },
         },
-    }
+        artifact,
+    )
 
 
 def build_blind_review_artifacts(
@@ -178,6 +181,7 @@ def build_blind_review_artifacts(
         contents: dict[str, str] = {}
         hashes: dict[str, str] = {}
         metrics: dict[str, dict] = {}
+        measurement_artifacts: dict[str, dict] = {}
         for pipeline, expected_name in (("old", "legacy"), ("new", "narrative")):
             source = raw_sample.get(pipeline)
             if not isinstance(source, dict):
@@ -213,11 +217,13 @@ def build_blind_review_artifacts(
                     "chapter_id": sources[pipeline]["chapter_id"],
                     "version_id": sources[pipeline]["version_id"],
                 }
-                metrics[pipeline] = _measured_candidate_metrics(
-                    measured_source,
-                    manifest_dir=manifest_dir,
-                    sample_id=sample_id,
-                    content_sha256=hashes[pipeline],
+                metrics[pipeline], measurement_artifacts[pipeline] = (
+                    _measured_candidate_metrics(
+                        measured_source,
+                        manifest_dir=manifest_dir,
+                        sample_id=sample_id,
+                        content_sha256=hashes[pipeline],
+                    )
                 )
 
         if sources["old"]["project_id"] != sources["new"]["project_id"]:
@@ -248,6 +254,10 @@ def build_blind_review_artifacts(
             label_by_pipeline[pipeline]: value
             for pipeline, value in metrics.items()
         }
+        artifacts_by_label = {
+            label_by_pipeline[pipeline]: value
+            for pipeline, value in measurement_artifacts.items()
+        }
         packet_samples.append(
             {
                 "id": sample_id,
@@ -268,6 +278,7 @@ def build_blind_review_artifacts(
             },
             "source_versions": sources,
             "candidate_metrics": metrics_by_label,
+            "measurement_artifacts": artifacts_by_label,
         }
 
     missing_categories = QUALITY_SAMPLE_CATEGORIES - covered_categories
