@@ -1,6 +1,9 @@
 import type {
   MemoirChapterGapAuditJob,
   MemoirChapterGapAuditRequest,
+  MemoirChapterNodeReorderRequest,
+  MemoirChapterNodeStoryMoveRequest,
+  MemoirChapterNodeUpdateRequest,
   MemoirChapterWorkspace,
   MemoirChapterWorkspaceContract,
   MemoirNarrativeDecision,
@@ -10,6 +13,7 @@ import type {
   MemoirNarrativeGapResolutionRequest,
   MemoirStorySlotResolutionRequest,
   MemoirStorySlotResolutionStatus,
+  MemoirStoryMergeRequest,
   MemoirVerificationDecision,
 } from "../domain/chapter-workspace";
 import {
@@ -150,5 +154,61 @@ export function confirmMemoirChapterContract(
   return memoirRequest<MemoirChapterWorkspaceContract>(
     narrativeTargetPath(projectId, "chapter-contracts", contractId, "/confirm"),
     { method: "POST", data: {} },
+  );
+}
+
+export function updateMemoirChapterNode(
+  projectId: string,
+  contractId: string,
+  nodeId: string,
+  data: MemoirChapterNodeUpdateRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    narrativeTargetPath(
+      projectId,
+      "chapter-contracts",
+      contractId,
+      `/nodes/${encodeURIComponent(nodeId)}`,
+    ),
+    { method: "PATCH", data },
+  );
+}
+
+export function reorderMemoirChapterNodes(
+  projectId: string,
+  contractId: string,
+  data: MemoirChapterNodeReorderRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    narrativeTargetPath(projectId, "chapter-contracts", contractId, "/nodes/reorder"),
+    { method: "POST", data },
+  );
+}
+
+export function moveMemoirStoryBetweenChapterNodes(
+  projectId: string,
+  contractId: string,
+  storyId: string,
+  data: MemoirChapterNodeStoryMoveRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    narrativeTargetPath(
+      projectId,
+      "chapter-contracts",
+      contractId,
+      `/stories/${encodeURIComponent(storyId)}/move`,
+    ),
+    { method: "POST", data },
+  );
+}
+
+export function mergeMemoirStory(
+  projectId: string,
+  sourceStoryId: string,
+  data: MemoirStoryMergeRequest,
+): Promise<MemoirNarrativeDecision> {
+  return memoirRequest<MemoirNarrativeDecision>(
+    narrativeTargetPath(projectId, "stories", sourceStoryId, "/merge"),
+    { method: "POST", data },
   );
 }

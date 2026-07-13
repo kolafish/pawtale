@@ -35,7 +35,7 @@
             wx:if="{{workspace.contract.status !== 'confirmed'}}"
             class="compact-primary-button"
             loading="{{contractActionBusy}}"
-            disabled="{{contractActionBusy}}"
+            disabled="{{contractActionBusy || structureActionBusy}}"
             bindtap="confirmContract"
           >确认章节结构</button>
         </view>
@@ -52,12 +52,67 @@
         <view wx:for="{{nodes}}" wx:for-item="node" wx:key="id" class="node-row">
           <view class="node-order">{{index + 1}}</view>
           <view class="node-main">
-            <view class="row-title-line">
-              <text class="row-title">{{node.title}}</text>
-              <text class="status-label">{{node.statusText}}</text>
-            </view>
-            <text class="row-copy">{{node.purpose}}</text>
-            <text class="row-meta">{{node.storyText}}</text>
+            <block wx:if="{{editingNodeId === node.id}}">
+              <input
+                class="node-edit-input"
+                value="{{editingNodeTitle}}"
+                maxlength="120"
+                placeholder="节点标题"
+                bindinput="changeNodeTitle"
+              />
+              <textarea
+                class="node-edit-purpose"
+                value="{{editingNodePurpose}}"
+                maxlength="500"
+                auto-height
+                placeholder="说明这一节点在章节中的作用"
+                bindinput="changeNodePurpose"
+              ></textarea>
+              <checkbox-group class="node-required-control" bindchange="changeNodeRequired">
+                <checkbox value="required" checked="{{editingNodeRequired}}" color="#a7483c" />
+                <text>关键节点</text>
+              </checkbox-group>
+              <view class="node-edit-actions">
+                <button disabled="{{structureActionBusy || contractActionBusy}}" bindtap="cancelNodeEdit">取消</button>
+                <button
+                  class="compact-primary-button"
+                  loading="{{structureActionBusy}}"
+                  disabled="{{structureActionBusy || contractActionBusy}}"
+                  bindtap="saveNodeEdit"
+                >保存节点</button>
+              </view>
+            </block>
+            <block wx:else>
+              <view class="row-title-line">
+                <text class="row-title">{{node.title}}</text>
+                <text class="status-label">{{node.statusText}}</text>
+              </view>
+              <text class="row-copy">{{node.purpose}}</text>
+              <text class="row-meta">{{node.storyText}}</text>
+              <view wx:if="{{workspace.contract.status === 'draft'}}" class="node-actions">
+                <button
+                  class="icon-action-button"
+                  aria-label="节点上移"
+                  data-node-id="{{node.id}}"
+                  data-direction="up"
+                  disabled="{{structureActionBusy || contractActionBusy || !node.canMoveUp}}"
+                  bindtap="moveNode"
+                >↑</button>
+                <button
+                  class="icon-action-button"
+                  aria-label="节点下移"
+                  data-node-id="{{node.id}}"
+                  data-direction="down"
+                  disabled="{{structureActionBusy || contractActionBusy || !node.canMoveDown}}"
+                  bindtap="moveNode"
+                >↓</button>
+                <button
+                  data-node-id="{{node.id}}"
+                  disabled="{{structureActionBusy || contractActionBusy}}"
+                  bindtap="startNodeEdit"
+                >编辑节点</button>
+              </view>
+            </block>
           </view>
         </view>
       </view>
@@ -97,9 +152,29 @@
             <button
               wx:if="{{story.canExcludeFromChapter}}"
               data-story-id="{{story.id}}"
-              disabled="{{story.busy}}"
+              disabled="{{story.busy || structureActionBusy || contractActionBusy}}"
               bindtap="excludeStoryFromChapter"
             >移出本章</button>
+            <picker
+              wx:if="{{story.canMoveWithinChapter}}"
+              mode="selector"
+              range="{{story.moveTargetNodeTitles}}"
+              data-story-id="{{story.id}}"
+              disabled="{{story.busy || structureActionBusy || contractActionBusy}}"
+              bindchange="moveStoryToNode"
+            >
+              <view class="picker-action {{story.busy || structureActionBusy || contractActionBusy ? 'disabled' : ''}}">移动节点</view>
+            </picker>
+            <picker
+              wx:if="{{story.canMerge}}"
+              mode="selector"
+              range="{{story.mergeTargetTitles}}"
+              data-story-id="{{story.id}}"
+              disabled="{{story.busy || structureActionBusy || contractActionBusy}}"
+              bindchange="mergeStory"
+            >
+              <view class="picker-action danger {{story.busy || structureActionBusy || contractActionBusy ? 'disabled' : ''}}">合并重复</view>
+            </picker>
           </view>
 
           <view class="slot-grid">

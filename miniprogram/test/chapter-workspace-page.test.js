@@ -159,6 +159,18 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     confirmMemoirChapterContract: async () => {
       throw new Error("confirmMemoirChapterContract was not mocked");
     },
+    updateMemoirChapterNode: async () => {
+      throw new Error("updateMemoirChapterNode was not mocked");
+    },
+    reorderMemoirChapterNodes: async () => {
+      throw new Error("reorderMemoirChapterNodes was not mocked");
+    },
+    moveMemoirStoryBetweenChapterNodes: async () => {
+      throw new Error("moveMemoirStoryBetweenChapterNodes was not mocked");
+    },
+    mergeMemoirStory: async () => {
+      throw new Error("mergeMemoirStory was not mocked");
+    },
     decideMemoirClaim: async () => {
       throw new Error("decideMemoirClaim was not mocked");
     },
@@ -211,6 +223,45 @@ function deferred() {
     resolve = done;
   });
   return { promise, resolve };
+}
+
+function draftWorkspaceWithTwoStoryNodes() {
+  const workspace = sampleWorkspace();
+  const secondStory = {
+    ...workspace.stories[0],
+    id: "story-2",
+    title: "离家前的决定",
+    summary: "家人商量后决定外出求学。",
+    slots: [],
+    claims: [],
+  };
+  return {
+    ...workspace,
+    contract: {
+      ...workspace.contract,
+      status: "draft",
+      nodes: [
+        workspace.contract.nodes[0],
+        {
+          id: "node-2",
+          node_type: "story",
+          title: "离家前的决定",
+          purpose: "交代做出决定的过程。",
+          sort_order: 1,
+          required: true,
+          status: "needs_work",
+          stories: [{
+            id: "link-2",
+            story_id: "story-2",
+            story_role: "primary",
+            sort_order: 0,
+            required: true,
+          }],
+        },
+      ],
+    },
+    stories: [workspace.stories[0], secondStory],
+  };
 }
 
 test("chapter workspace maps draft block sources and keeps AI revision as a visible pending suggestion", async () => {
@@ -320,6 +371,231 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   ]);
   assert.equal(context.data.gapGroups[0].items[0].severityText, "重要");
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
+});
+
+test("editing a draft chapter node persists its narrative purpose without locking story review", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = draftWorkspaceWithTwoStoryNodes();
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      updateMemoirChapterNode: async (projectId, contractId, nodeId, data) => {
+        calls.push({ projectId, contractId, nodeId, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            nodes: workspace.contract.nodes.map((node) => (
+              node.id === nodeId ? { ...node, ...data } : node
+            )),
+          },
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  page.startNodeEdit.call(context, {
+    currentTarget: { dataset: { nodeId: "node-1" } },
+  });
+  page.changeNodeTitle.call(context, { detail: { value: "第一次独自远行" } });
+  page.changeNodePurpose.call(context, { detail: { value: "呈现离家决定和行动的因果关系。" } });
+  page.changeNodeRequired.call(context, { detail: { value: [] } });
+  const request = page.saveNodeEdit.call(context);
+
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+  pending.resolve();
+  await request;
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    contractId: "contract-1",
+    nodeId: "node-1",
+    data: {
+      title: "第一次独自远行",
+      purpose: "呈现离家决定和行动的因果关系。",
+      required: false,
+    },
+  });
+  assert.equal(context.data.nodes[0].title, "第一次独自远行");
+  assert.equal(context.data.editingNodeId, "");
+  assert.equal(context.data.structureActionBusy, false);
+  delete global.wx;
+});
+
+test("reordering draft chapter nodes sends the complete intended order", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = draftWorkspaceWithTwoStoryNodes();
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      reorderMemoirChapterNodes: async (projectId, contractId, data) => {
+        calls.push({ projectId, contractId, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            nodes: [...workspace.contract.nodes].reverse().map((node, index) => ({
+              ...node,
+              sort_order: index,
+            })),
+          },
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.moveNode.call(context, {
+    currentTarget: { dataset: { nodeId: "node-1", direction: "down" } },
+  });
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories.some((story) => story.busy), false);
+  pending.resolve();
+  await request;
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    contractId: "contract-1",
+    data: { node_ids: ["node-2", "node-1"] },
+  });
+  assert.deepEqual(context.data.nodes.map((node) => node.id), ["node-2", "node-1"]);
+});
+
+test("moving a story between draft nodes only locks that story", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = draftWorkspaceWithTwoStoryNodes();
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      moveMemoirStoryBetweenChapterNodes: async (projectId, contractId, storyId, data) => {
+        calls.push({ projectId, contractId, storyId, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            nodes: workspace.contract.nodes.map((node) => {
+              if (node.id === data.source_node_id) {
+                return { ...node, required: false, status: "excluded", stories: [] };
+              }
+              if (node.id === data.target_node_id) {
+                return {
+                  ...node,
+                  stories: [...node.stories, {
+                    id: "link-moved",
+                    story_id: storyId,
+                    story_role: "primary",
+                    sort_order: 1,
+                    required: true,
+                  }],
+                };
+              }
+              return node;
+            }),
+          },
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.moveStoryToNode.call(context, {
+    currentTarget: { dataset: { storyId: "story-1" } },
+    detail: { value: "0" },
+  });
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories[0].busy, true);
+  assert.equal(context.data.stories[1].busy, false);
+  pending.resolve();
+  await request;
+
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    contractId: "contract-1",
+    storyId: "story-1",
+    data: { source_node_id: "node-1", target_node_id: "node-2" },
+  });
+  assert.equal(context.data.stories[0].moveSourceNodeId, "node-2");
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.structureActionBusy, false);
+  delete global.wx;
+});
+
+test("merging a duplicate story requires confirmation and locks both affected stories", async () => {
+  const pending = deferred();
+  const calls = [];
+  let workspace = draftWorkspaceWithTwoStoryNodes();
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    showToast() {},
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      mergeMemoirStory: async (projectId, sourceStoryId, data) => {
+        calls.push({ projectId, sourceStoryId, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            nodes: workspace.contract.nodes.map((node) => (
+              node.id === "node-1"
+                ? { ...node, required: false, status: "excluded", stories: [] }
+                : node
+            )),
+          },
+          stories: workspace.stories.filter((story) => story.id !== sourceStoryId),
+        };
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  const request = page.mergeStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-1" } },
+    detail: { value: "0" },
+  });
+  await Promise.resolve();
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories[0].busy, true);
+  assert.equal(context.data.stories[1].busy, true);
+  pending.resolve();
+  await request;
+
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].sourceStoryId, "story-1");
+  assert.equal(calls[0].data.retained_story_id, "story-2");
+  assert.match(calls[0].data.idempotency_key, /^workspace:story:story-1:merge:story-2:/);
+  assert.equal(calls[0].data.reason, "章节工作台人工确认重复故事");
+  assert.deepEqual(context.data.stories.map((story) => story.id), ["story-2"]);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.structureActionBusy, false);
+  delete global.wx;
 });
 
 test("chapter workspace assembles confirmed blocks before confirming the chapter", async () => {

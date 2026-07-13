@@ -39,8 +39,12 @@ import {
   listMemoirDraftBlocks,
   listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
+  mergeMemoirStory,
+  moveMemoirStoryBetweenChapterNodes,
+  reorderMemoirChapterNodes,
   resolveMemoirNarrativeGap,
   resolveMemoirStorySlot,
+  updateMemoirChapterNode,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -73,13 +77,18 @@ interface WorkspaceDataset {
   claimId?: string;
   slotKey?: string;
   decision?: string;
+  direction?: string;
+  nodeId?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
+type PickerDatasetEvent = DatasetEvent & { detail: { value: string | number } };
 
 interface NodeView extends MemoirChapterWorkspaceNode {
   statusText: string;
   storyText: string;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }
 
 interface StorySlotView extends MemoirChapterWorkspaceStorySlot {
@@ -102,6 +111,13 @@ interface StoryView extends MemoirChapterWorkspaceStory {
   statusText: string;
   canDecide: boolean;
   canExcludeFromChapter: boolean;
+  canMerge: boolean;
+  canMoveWithinChapter: boolean;
+  mergeTargetIds: string[];
+  mergeTargetTitles: string[];
+  moveSourceNodeId: string;
+  moveTargetNodeIds: string[];
+  moveTargetNodeTitles: string[];
   busy: boolean;
   slots: StorySlotView[];
   claims: ClaimView[];
@@ -165,6 +181,11 @@ interface ChapterWorkspacePageData {
   auditBusy: boolean;
   actionBusyGapId: string;
   contractActionBusy: boolean;
+  structureActionBusy: boolean;
+  editingNodeId: string;
+  editingNodeTitle: string;
+  editingNodePurpose: string;
+  editingNodeRequired: boolean;
   busyStoryIds: string[];
   busyClaimIds: string[];
   busySlotKeys: string[];
@@ -426,6 +447,11 @@ definePage<ChapterWorkspacePageData>()({
     auditBusy: false,
     actionBusyGapId: "",
     contractActionBusy: false,
+    structureActionBusy: false,
+    editingNodeId: "",
+    editingNodeTitle: "",
+    editingNodePurpose: "",
+    editingNodeRequired: false,
     busyStoryIds: [],
     busyClaimIds: [],
     busySlotKeys: [],
@@ -468,6 +494,19 @@ definePage<ChapterWorkspacePageData>()({
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
     const storyTitles = new Map(workspace.stories.map((story) => [story.id, story.title]));
+    const contractDraft = workspace.contract?.status === "draft";
+    const storyNodes = (workspace.contract?.nodes || []).filter(
+      (node) => node.node_type === "story",
+    );
+    const linkedNodeIds = new Map<string, string[]>();
+    for (const node of workspace.contract?.nodes || []) {
+      for (const link of node.stories) {
+        linkedNodeIds.set(link.story_id, [
+          ...(linkedNodeIds.get(link.story_id) || []),
+          node.id,
+        ]);
+      }
+    }
     const busyStoryIds = new Set(this.data.busyStoryIds);
     const busyClaimIds = new Set(this.data.busyClaimIds);
     const busySlotKeys = new Set(this.data.busySlotKeys);
@@ -484,40 +523,58 @@ definePage<ChapterWorkspacePageData>()({
       auditStatusText: state.text,
       auditError: state.error,
       auditBusy: state.busy,
-      nodes: (workspace.contract?.nodes || []).map((node) => ({
+      nodes: (workspace.contract?.nodes || []).map((node, index, nodes) => ({
         ...node,
         statusText: nodeStatusText(node.status),
         storyText: node.stories.length
           ? node.stories.map((link) => storyTitles.get(link.story_id) || "未知故事").join("、")
           : "尚未关联故事",
+        canMoveUp: Boolean(contractDraft && index > 0),
+        canMoveDown: Boolean(contractDraft && index < nodes.length - 1),
       })),
-      stories: workspace.stories.map((story) => ({
-        ...story,
-        statusText: storyStatusText(story),
-        canDecide: story.publication_status === "eligible",
-        canExcludeFromChapter: workspace.contract?.status === "draft",
-        busy: busyStoryIds.has(story.id),
-        slots: story.slots.map((slot) => {
-          const status = slotStatus(slot.status);
-          const actionKey = `${story.id}:${slot.slot_key}`;
-          return {
-            ...slot,
-            labelText: SLOT_LABELS[slot.slot_key] || slot.slot_key,
-            statusText: status.text,
-            statusClass: status.className,
-            actionKey,
-            canResolve: ["missing", "partial"].includes(slot.status),
-            busy: busySlotKeys.has(actionKey),
-          };
-        }),
-        claims: story.claims.map((claim) => ({
-          ...claim,
-          evidenceCountText: `${claim.evidence.length} 条证据`,
-          statusText: claimStatusText(claim.verification_status),
-          canDecide: claim.publication_status === "eligible",
-          busy: busyClaimIds.has(claim.id),
-        })),
-      })),
+      stories: workspace.stories.map((story) => {
+        const currentNodeIds = linkedNodeIds.get(story.id) || [];
+        const moveTargets = storyNodes.filter((node) => !currentNodeIds.includes(node.id));
+        const mergeTargets = workspace.stories.filter(
+          (candidate) => candidate.id !== story.id && candidate.story_type === story.story_type,
+        );
+        return {
+          ...story,
+          statusText: storyStatusText(story),
+          canDecide: story.publication_status === "eligible",
+          canExcludeFromChapter: Boolean(contractDraft),
+          canMerge: Boolean(contractDraft && mergeTargets.length),
+          canMoveWithinChapter: Boolean(
+            contractDraft && currentNodeIds.length === 1 && moveTargets.length,
+          ),
+          mergeTargetIds: mergeTargets.map((candidate) => candidate.id),
+          mergeTargetTitles: mergeTargets.map((candidate) => candidate.title),
+          moveSourceNodeId: currentNodeIds.length === 1 ? currentNodeIds[0] : "",
+          moveTargetNodeIds: moveTargets.map((node) => node.id),
+          moveTargetNodeTitles: moveTargets.map((node) => node.title),
+          busy: busyStoryIds.has(story.id),
+          slots: story.slots.map((slot) => {
+            const status = slotStatus(slot.status);
+            const actionKey = `${story.id}:${slot.slot_key}`;
+            return {
+              ...slot,
+              labelText: SLOT_LABELS[slot.slot_key] || slot.slot_key,
+              statusText: status.text,
+              statusClass: status.className,
+              actionKey,
+              canResolve: ["missing", "partial"].includes(slot.status),
+              busy: busySlotKeys.has(actionKey),
+            };
+          }),
+          claims: story.claims.map((claim) => ({
+            ...claim,
+            evidenceCountText: `${claim.evidence.length} 条证据`,
+            statusText: claimStatusText(claim.verification_status),
+            canDecide: claim.publication_status === "eligible",
+            busy: busyClaimIds.has(claim.id),
+          })),
+        };
+      }),
       gapGroups: [
         {
           key: "must_handle",
@@ -619,9 +676,241 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
+  startNodeEdit(event: DatasetEvent) {
+    const nodeId = datasetString(event, "nodeId");
+    const node = this.data.nodes.find((candidate) => candidate.id === nodeId);
+    if (
+      !node
+      || this.data.workspace?.contract?.status !== "draft"
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
+    ) {
+      return;
+    }
+    this.setData({
+      editingNodeId: node.id,
+      editingNodeTitle: node.title,
+      editingNodePurpose: node.purpose,
+      editingNodeRequired: node.required,
+      error: "",
+    });
+  },
+
+  changeNodeTitle(event: PageTextInputEvent) {
+    this.setData({ editingNodeTitle: event.detail.value });
+  },
+
+  changeNodePurpose(event: PageTextInputEvent) {
+    this.setData({ editingNodePurpose: event.detail.value });
+  },
+
+  changeNodeRequired(event: { detail: { value: string[] } }) {
+    this.setData({ editingNodeRequired: event.detail.value.includes("required") });
+  },
+
+  cancelNodeEdit() {
+    this.setData({
+      editingNodeId: "",
+      editingNodeTitle: "",
+      editingNodePurpose: "",
+      editingNodeRequired: false,
+    });
+  },
+
+  async saveNodeEdit() {
+    const contract = this.data.workspace?.contract;
+    const title = this.data.editingNodeTitle.trim();
+    const purpose = this.data.editingNodePurpose.trim();
+    if (
+      !contract
+      || contract.status !== "draft"
+      || !this.data.editingNodeId
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
+    ) {
+      return;
+    }
+    if (!title || !purpose) {
+      this.setData({ error: "节点标题和作用都不能为空" });
+      return;
+    }
+    this.setData({ structureActionBusy: true, error: "" });
+    let saved = false;
+    try {
+      await updateMemoirChapterNode(
+        this.data.projectId,
+        contract.id,
+        this.data.editingNodeId,
+        { title, purpose, required: this.data.editingNodeRequired },
+      );
+      saved = true;
+      this.cancelNodeEdit();
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "节点已更新", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "节点已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "节点保存失败"),
+      });
+    } finally {
+      this.setData({ structureActionBusy: false });
+    }
+  },
+
+  async moveNode(event: DatasetEvent) {
+    const contract = this.data.workspace?.contract;
+    const nodeId = datasetString(event, "nodeId");
+    const direction = datasetString(event, "direction");
+    const index = this.data.nodes.findIndex((node) => node.id === nodeId);
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (
+      !contract
+      || contract.status !== "draft"
+      || !nodeId
+      || !["up", "down"].includes(direction)
+      || targetIndex < 0
+      || targetIndex >= this.data.nodes.length
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
+    ) {
+      return;
+    }
+    const ordered = this.data.nodes.map((node) => node.id);
+    [ordered[index], ordered[targetIndex]] = [ordered[targetIndex], ordered[index]];
+    this.setData({ structureActionBusy: true, error: "" });
+    let saved = false;
+    try {
+      await reorderMemoirChapterNodes(this.data.projectId, contract.id, {
+        node_ids: ordered,
+      });
+      saved = true;
+      await this.refreshWorkspaceOnly();
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "节点顺序已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "节点排序失败"),
+      });
+    } finally {
+      this.setData({ structureActionBusy: false });
+    }
+  },
+
+  async moveStoryToNode(event: PickerDatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    const story = this.data.stories.find((candidate) => candidate.id === storyId);
+    const targetNodeId = story?.moveTargetNodeIds[Number(event.detail.value)] || "";
+    const contract = this.data.workspace?.contract;
+    if (
+      !story
+      || !contract
+      || contract.status !== "draft"
+      || !story.moveSourceNodeId
+      || !targetNodeId
+      || story.busy
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
+    ) {
+      return;
+    }
+    this.setStoryBusy(story.id, true);
+    this.setData({ structureActionBusy: true, error: "" });
+    let saved = false;
+    try {
+      await moveMemoirStoryBetweenChapterNodes(
+        this.data.projectId,
+        contract.id,
+        story.id,
+        {
+          source_node_id: story.moveSourceNodeId,
+          target_node_id: targetNodeId,
+        },
+      );
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "故事节点已调整", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "故事节点已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "故事节点调整失败"),
+      });
+    } finally {
+      this.setStoryBusy(story.id, false);
+      this.setData({ structureActionBusy: false });
+    }
+  },
+
+  async mergeStory(event: PickerDatasetEvent) {
+    const sourceStoryId = datasetString(event, "storyId");
+    const source = this.data.stories.find((story) => story.id === sourceStoryId);
+    const retainedStoryId = source?.mergeTargetIds[Number(event.detail.value)] || "";
+    const retained = this.data.stories.find((story) => story.id === retainedStoryId);
+    if (
+      !source
+      || !retained
+      || this.data.workspace?.contract?.status !== "draft"
+      || source.busy
+      || retained.busy
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
+    ) {
+      return;
+    }
+    if (!await confirmDialog(
+      "合并重复故事",
+      `“${source.title}”的事实和来源会并入“${retained.title}”，所有章节都会受影响。`,
+      "确认合并",
+    )) {
+      return;
+    }
+    this.setData({ structureActionBusy: true, error: "" });
+    this.setStoryBusy(source.id, true);
+    this.setStoryBusy(retained.id, true);
+    let saved = false;
+    try {
+      await mergeMemoirStory(this.data.projectId, source.id, {
+        retained_story_id: retained.id,
+        idempotency_key: `workspace:story:${source.id}:merge:${retained.id}:${Date.now()}`,
+        reason: "章节工作台人工确认重复故事",
+      });
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "重复故事已合并", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "故事已合并，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "故事合并失败"),
+      });
+    } finally {
+      this.setStoryBusy(source.id, false);
+      this.setStoryBusy(retained.id, false);
+      this.setData({ structureActionBusy: false });
+    }
+  },
+
   async confirmContract() {
     const contract = this.data.workspace?.contract;
-    if (!contract || contract.status === "confirmed" || this.data.contractActionBusy) {
+    if (
+      !contract
+      || contract.status === "confirmed"
+      || this.data.contractActionBusy
+      || this.data.structureActionBusy
+    ) {
       return;
     }
     const confirmed = await confirmDialog(
@@ -706,6 +995,8 @@ definePage<ChapterWorkspacePageData>()({
       || !contract
       || contract.status !== "draft"
       || this.data.busyStoryIds.includes(storyId)
+      || this.data.structureActionBusy
+      || this.data.contractActionBusy
     ) {
       return;
     }
@@ -717,7 +1008,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     this.setStoryBusy(storyId, true);
-    this.setData({ error: "" });
+    this.setData({ structureActionBusy: true, error: "" });
     let saved = false;
     try {
       await excludeMemoirStoryFromChapter(
@@ -743,6 +1034,7 @@ definePage<ChapterWorkspacePageData>()({
       });
     } finally {
       this.setStoryBusy(storyId, false);
+      this.setData({ structureActionBusy: false });
     }
   },
 
