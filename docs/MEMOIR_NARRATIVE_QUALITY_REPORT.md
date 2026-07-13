@@ -29,7 +29,7 @@
 - 条件允许时增加一名不参与实现的独立评审者。
 - 叙述者本人核对事实和个人声音；该意见优先于自动指标。
 - 样本 Story 和 ChapterContract 必须由项目所有者按产品工作流确认后才能生成新链路正文；不得为制作盲评包而伪造确认人或绕过 `needs_work` 状态。
-- 在本地受控路径建立 manifest，由准备脚本生成相互隔离的盲审包和答案文件；评审完成前不得查看答案文件。
+- 在本地受控路径先从数据库生成新稿测量 artifact，再建立只引用该 artifact 的 manifest，由准备脚本生成相互隔离的盲审包和答案文件；评审完成前不得查看答案文件。
 
 ## 人工量表
 
@@ -58,7 +58,7 @@
 
 ## 运行方式
 
-真实原始录音、未脱敏正文、A/B 对照答案和评审人信息只放在本地受控路径，不提交仓库。受控 manifest 中每个样本使用以下结构；`candidate_metrics` 必须来自绑定该新稿的确定性审计 artifact，不是人工估计：
+真实原始录音、未脱敏正文、A/B 对照答案和评审人信息只放在本地受控路径，不提交仓库。受控 manifest 中每个样本使用以下结构；新稿指标不允许直接写进 manifest，只能引用绑定该正文和版本的确定性测量 artifact：
 
 ```json
 {
@@ -78,26 +78,30 @@
         "project_id": "...",
         "chapter_id": "...",
         "version_id": "...",
-        "candidate_metrics": {
-          "fact_sentence_count": 12,
-          "mapped_fact_sentence_count": 12,
-          "unmapped_fact_ids": [],
-          "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
-          "locked_block_changes": 0,
-          "unrelated_block_changes": 0,
-          "measurement_provenance": {
-            "engine": "deterministic-quality-audit-v1",
-            "artifact_id": "...",
-            "measured_at": "2026-07-14T09:00:00+08:00"
-          }
-        }
+        "measurement_artifact_path": "new-chapter.measurement.json"
       }
     }
   ]
 }
 ```
 
-先生成盲审材料：
+先在停止写入的受控数据库副本上生成新稿正文和 `0600` 测量 artifact。baseline 必须是局部修订前已经组装的结构化章节版本，candidate 必须是至少完成一次带 feedback 的单块修订后重新组装的版本：
+
+```bash
+cd backend
+DATABASE_URL=sqlite+aiosqlite:////controlled/memoir.sqlite \
+  PYTHONPATH=. venv/bin/python scripts/measure_memoir_narrative_candidate.py \
+  --project-id ... \
+  --chapter-id ... \
+  --baseline-draft-version-id ... \
+  --candidate-draft-version-id ... \
+  --content-output /controlled/memoir-quality/new-chapter.txt \
+  --artifact-output /controlled/memoir-quality/new-chapter.measurement.json
+```
+
+测量 artifact 会逐句列出 DraftBlock、Claim 和 Evidence 映射，统计时间/因果、人物和证据/完整性相关的未解决 high gap，并从前后两个结构化快照自动识别 intended、locked 和 unrelated block 变化。测量失败或指标不满足门禁时不能手改 artifact，必须回到章节工作台处理事实、缺口或局部修订。
+
+再生成盲审材料：
 
 ```bash
 cd backend

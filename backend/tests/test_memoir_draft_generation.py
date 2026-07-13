@@ -48,6 +48,9 @@ from app.schemas.memoir_narrative import (
     MemoirDraftBlockRevisionJobRequest,
 )
 from app.services.memoir.narrative import draft_assembly, draft_blocks, draft_generation_jobs
+from app.services.memoir.narrative.quality_measurement import (
+    measure_narrative_candidate,
+)
 from tests.memoir_helpers import create_test_book_plan_with_chapters, ensure_mobile_memoir_project
 
 
@@ -469,6 +472,24 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
     assert second_assembly.blocks[0].block_version_id != first_snapshot_ids[0]
     assert second_assembly.version == first_assembly.version + 1
     assert second_assembly.content.startswith(first_version_content)
+    measured_content, quality_artifact = await measure_narrative_candidate(
+        test_db,
+        project_id=created["project_id"],
+        chapter_id=created["chapter"].id,
+        baseline_draft_version_id=first_assembly.draft_version_id,
+        candidate_draft_version_id=second_assembly.draft_version_id,
+    )
+    assert measured_content == second_assembly.content
+    assert quality_artifact["metrics"] == {
+        "fact_sentence_count": 3,
+        "mapped_fact_sentence_count": 3,
+        "unmapped_fact_ids": [],
+        "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
+        "locked_block_changes": 0,
+        "unrelated_block_changes": 0,
+    }
+    assert quality_artifact["comparison"]["changed_block_ids"] == [first.id]
+    assert quality_artifact["comparison"]["intended_block_ids"] == [first.id]
     repeated_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,
         project_id=created["project_id"],

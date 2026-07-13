@@ -1,4 +1,5 @@
 from copy import deepcopy
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -9,6 +10,10 @@ from app.services.memoir.narrative.quality_evaluation import (
     QUALITY_DIMENSIONS,
     candidate_content_sha256,
     evaluate_quality_packet,
+)
+from app.services.memoir.narrative.quality_artifact import (
+    QUALITY_MEASUREMENT_ENGINE,
+    measurement_artifact_id,
 )
 from scripts.prepare_memoir_narrative_blind_review import (
     build_blind_review_artifacts,
@@ -23,6 +28,7 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
     [
         "prepare_memoir_narrative_blind_review.py",
         "evaluate_memoir_narrative_quality.py",
+        "measure_memoir_narrative_candidate.py",
     ],
 )
 def test_quality_gate_scripts_run_directly_from_backend(script_name: str):
@@ -274,12 +280,54 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
         "unresolved_high_gaps": {"time": 0, "people": 0, "evidence": 0},
         "locked_block_changes": 0,
         "unrelated_block_changes": 0,
-        "measurement_provenance": {
-            "engine": "deterministic-quality-audit-v1",
-            "artifact_id": "audit-builder-1",
-            "measured_at": "2026-07-14T08:00:00+08:00",
-        },
     }
+    measurement_paths = []
+    for index, (content, chapter_id, version_id) in enumerate(
+        [
+            ("新链路正文", "chapter-1", "version-new"),
+            ("第二章新链路正文", "chapter-2", "version-new-2"),
+        ],
+        start=1,
+    ):
+        body = {
+            "project_id": "project-1",
+            "chapter_id": chapter_id,
+            "draft_version_id": version_id,
+            "baseline_draft_version_id": f"baseline-{index}",
+            "content_sha256": candidate_content_sha256(content),
+            "metrics": metrics,
+            "source_mapping_granularity": "draft_block_claim_set",
+            "sentence_sources": [
+                {
+                    "sentence_id": f"sentence-{index}",
+                    "sentence": content,
+                    "block_id": f"block-{index}",
+                    "block_version_id": f"block-version-{index}",
+                    "claim_ids": [f"claim-{index}"],
+                    "evidence_ids": [f"evidence-{index}"],
+                    "mapped": True,
+                }
+            ],
+            "high_gap_details": [],
+            "comparison": {
+                "changed_block_ids": [f"block-{index}"],
+                "intended_block_ids": [f"block-{index}"],
+                "locked_changed_block_ids": [],
+                "unrelated_block_ids": [],
+            },
+        }
+        artifact = {
+            "engine": QUALITY_MEASUREMENT_ENGINE,
+            "artifact_id": measurement_artifact_id(
+                {"engine": QUALITY_MEASUREMENT_ENGINE, **body}
+            ),
+            "measured_at": "2026-07-14T08:00:00+08:00",
+            **body,
+        }
+        path = tmp_path / f"measurement-{index}.json"
+        path.write_text(json.dumps(artifact), encoding="utf-8")
+        path.chmod(0o600)
+        measurement_paths.append(path)
     manifest = {
         "rubric_version": "1",
         "samples": [
@@ -297,7 +345,7 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
                     "project_id": "project-1",
                     "chapter_id": "chapter-1",
                     "version_id": "version-new",
-                    "candidate_metrics": metrics,
+                    "measurement_artifact_path": measurement_paths[0].name,
                 },
             },
             {
@@ -314,7 +362,7 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
                     "project_id": "project-1",
                     "chapter_id": "chapter-2",
                     "version_id": "version-new-2",
-                    "candidate_metrics": metrics,
+                    "measurement_artifact_path": measurement_paths[1].name,
                 },
             },
         ],
@@ -338,6 +386,30 @@ def test_blind_review_builder_keeps_pipeline_identity_out_of_packet(tmp_path):
     assert prepared_metrics["measurement_provenance"]["content_sha256"] == packet[
         "samples"
     ][0]["candidates"]["A"]["content_sha256"]
+
+    tampered_artifact = json.loads(measurement_paths[0].read_text(encoding="utf-8"))
+    tampered_artifact["metrics"]["mapped_fact_sentence_count"] = 0
+    measurement_paths[0].write_text(json.dumps(tampered_artifact), encoding="utf-8")
+    with pytest.raises(ValueError, match="integrity check failed"):
+        build_blind_review_artifacts(
+            manifest,
+            manifest_dir=tmp_path,
+            choose_new_label=lambda _sample_id: "A",
+        )
+
+    tampered_body = {
+        key: value
+        for key, value in tampered_artifact.items()
+        if key not in {"artifact_id", "measured_at"}
+    }
+    tampered_artifact["artifact_id"] = measurement_artifact_id(tampered_body)
+    measurement_paths[0].write_text(json.dumps(tampered_artifact), encoding="utf-8")
+    with pytest.raises(ValueError, match="sentence metrics are inconsistent"):
+        build_blind_review_artifacts(
+            manifest,
+            manifest_dir=tmp_path,
+            choose_new_label=lambda _sample_id: "A",
+        )
 
 
 def test_blind_review_builder_rejects_an_incomplete_sample_set(tmp_path):
