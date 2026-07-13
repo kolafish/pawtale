@@ -135,6 +135,7 @@ ChapterNode -> Story -> Claim -> ClaimEvidence -> TranscriptVersion / Utterance 
 - 来源版本变化时，旧 Claim 不删除，标记为 superseded 或 needs_review，并重新计算依赖状态。
 - 已被 ClaimEvidence、历史 DraftBlockVersion 或正式书稿引用的 transcript version 必须被 pin，不能继续按普通保留窗口裁剪。
 - 实时 ASR、离线双模型 ASR、方言校正和人工编辑只通过新增/选择有效 transcript version 改变叙事输入；后台增强不能覆盖人工编辑版本。
+- ready/confirmed Claim 的 statement、实体关系和时间内容不可原地改写；事实修正创建新 Claim，并用 `superseded_by_claim_id` 保留因果链。verification/publication 状态可以受控更新，但必须写审计记录。
 
 ### 4.2 不确定性不变量
 
@@ -181,7 +182,8 @@ ChapterNode -> Story -> Claim -> ClaimEvidence -> TranscriptVersion / Utterance 
 
 - 所有可被用户确认、修改、合并、排除或锁定的领域对象都必须记录 `created_by/updated_by` 和可用时的 `actor_user_id`。
 - AI、system 和 user 行为使用受控 actor type；不能只从自由文本 reason 推断操作来源。
-- 用户状态变更写入 append-only revision/event 记录，当前表保存最新查询状态，二者职责分开。
+- 用户状态变更写入 append-only `MemoirNarrativeDecision` 或聚合专用 version/revision，当前表保存最新查询状态，二者职责分开。
+- 现有 `AuditEvent` 是客户端产品使用分析，`MemoirAutomationEvent` 是后台进度展示，二者都不能替代领域决策记录。
 - 后台重算不能把用户状态更新伪装成 system 或 AI 创建的新结论。
 
 ## 五、目标领域模型
@@ -484,8 +486,8 @@ required
 id
 project_id
 scope_type              # story / chapter / book
-story_id                # scope_type=story 时必填
-chapter_id              # scope_type=chapter 时必填；book scope 两者均为空
+primary_story_id        # scope_type=story 时必填
+primary_chapter_id      # scope_type=chapter 时必填；book scope 两者均为空
 gap_type                # missing_slot / chronology / relationship / causality / contradiction / repetition / unclear_reference / unsupported_fact
 severity                # high / medium / low
 target_slot
@@ -501,12 +503,23 @@ created_at
 updated_at
 ```
 
-涉及具体事实的 Gap 通过 `MemoirNarrativeGapClaim` 关联 Claim：
+Gap 通过显式关系表记录涉及的 Claim、Story 和 Chapter，支持一个全书矛盾同时指向多个章节：
 
 ```text
+MemoirNarrativeGapClaim
 gap_id
 claim_id
 claim_role              # supporting / conflicting / unsupported_candidate
+
+MemoirNarrativeGapStory
+gap_id
+story_id
+scope_role              # primary / involved
+
+MemoirNarrativeGapChapter
+gap_id
+chapter_id
+scope_role              # primary / involved
 ```
 
 规则：
@@ -612,6 +625,7 @@ MemoirDraftBlockClaim
 MemoirDraftBlockStory
   block_version_id
   story_id
+  story_revision_id      # 固定生成时使用的 Story version
   usage_role             # primary / supporting / contrast
 ```
 
@@ -621,8 +635,38 @@ MemoirDraftBlockStory
 - 用户手动编辑、语音修改和 AI 局部重写都创建 block version。
 - `locked=true` 后任何自动生成任务必须跳过该 block。
 - factual block version 必须直接记录 Story 和 Claim 引用，不能只通过可能变化的 ChapterNode 间接推导来源。
+- DraftBlockStory 必须引用生成时的 StoryRevision；后续 Story summary、槽位或 Claim 关系变化不能改变历史块的生成依据。
 - Story/Claim 更新只把实际依赖的 block 标记 `freshness_status=stale`，不得丢失原 editorial confirmation。
 - ChapterDraftVersion 可以保存组装后的 content 和 block version ID 快照，用于现有导出和历史回滚。
+
+### 5.10 NarrativeDecision：用户和系统决策审计
+
+`MemoirNarrativeDecision` 只保存不可变的领域决策历史，不作为当前状态主表。
+
+第一版目标字段：
+
+```text
+id
+project_id
+target_type             # entity / claim / story / story_slot / gap / followup_task / chapter_contract / draft_block
+target_id
+action                  # confirm / reject / merge / resolve / accept_incomplete / exclude / mark_private / lock / unlock
+actor_type              # user / ai / system
+actor_user_id
+before_state_json       # 审计快照，不承载当前业务真相
+after_state_json
+reason
+idempotency_key
+created_at
+```
+
+约束：
+
+- decision 只允许 insert，不允许 update/delete。
+- 用户动作必须记录 `actor_user_id`；AI/system 动作必须记录对应 actor type。
+- `target_type + target_id` 是审计定位，不替代目标表的 project ownership 和外键校验。
+- idempotency key 防止客户端重试重复记录同一决策。
+- 内容版本仍由 Claim supersede、StoryRevision、ChapterContract version 和 DraftBlockVersion 表达，不能把完整领域模型长期塞进 decision JSON。
 
 ## 六、完整性与逻辑审校
 
@@ -828,7 +872,7 @@ schema_version
 
 - 当前 ChapterContract 的必要部分。
 - 当前 ChapterNode 的 purpose。
-- 节点关联 Story 的已选 Claim。
+- 节点关联 Story 的已选 revision 和 Claim。
 - ClaimEvidence 的必要引用。
 - 前后相邻块的短上下文。
 - 用户明确写作反馈。
@@ -925,15 +969,19 @@ API 要求：
 
 ```text
 backend/app/models/memoir_narrative/
+  entities.py
   claims.py
+  decisions.py
   stories.py
   chapters.py
+  gaps.py
   followups.py
   drafts.py
 backend/app/domain/memoir/narrative_types.py
 backend/app/schemas/memoir_narrative/
 backend/app/services/memoir/narrative/
   claims.py
+  decisions.py
   entities.py
   stories.py
   story_slots.py
@@ -986,6 +1034,7 @@ PostgreSQL 迁移单独立项，触发条件包括：
 - ChapterContract 的低频结构化约束。
 - 任务的非 ID、非状态类 Prompt 提示；known/do-not-repeat Claim 和结果 utterance 关系仍使用关系表。
 - 历史输出快照和派生 AI 结果。
+- append-only NarrativeDecision 的 before/after 审计快照。
 
 禁止 JSON 承载：
 
@@ -1085,9 +1134,11 @@ EventCluster 不能直接成为 confirmed Story；同一事件可能在不同章
 - ClaimEvidence quote 与 transcript version 的一致性。
 - 转写版本变化后 Claim supersede 和依赖重算。
 - Entity alias 合并和跨项目隔离。
+- NarrativeDecision 幂等、append-only 和 actor 归属。
 - 多次访谈归入同一 Story，低置信度进入 review。
 - 每种 Story schema 的槽位计算和 schema migration。
 - Gap fingerprint 幂等、accepted incomplete 和 not applicable。
+- 全书 Gap 可以显式关联多个 Story、Chapter 和 Claim。
 - FollowupTask 只有在新证据补足槽位后才 answered。
 - `cannot_recall`、excluded/private publication 和跑题事件序列。
 - ChapterContract/Node/Story 关系和拆并章。
@@ -1173,6 +1224,7 @@ review 必须对照本文档检查范围和不变量。测试通过但违反领�
 范围：
 
 - typed AI extraction、evidence quote 校验和幂等写入。
+- 新增 NarrativeDecision 模型/迁移，并用于 Entity/Claim 人工确认和合并决策。
 - 转写变化后的 supersede/needs_review 处理。
 - 人物、地点和机构候选匹配；低置信度进入 review。
 - 接入现有 EditingJob 和最小 backfill dry-run。
@@ -1235,7 +1287,7 @@ review 必须对照本文档检查范围和不变量。测试通过但违反领�
 
 范围：
 
-- 新增 NarrativeGap、NarrativeGapClaim 模型、迁移和 resolution 状态机。
+- 新增 NarrativeGap、GapClaim、GapStory、GapChapter 模型、迁移和 resolution 状态机。
 - 确定性规则、LLM 语义检查和 NarrativeGap upsert。
 - Gap resolve/accept/not-applicable API。
 - 新增独立章节工作台，展示结构、Story、证据和三类检查结果。
