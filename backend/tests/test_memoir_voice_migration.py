@@ -558,7 +558,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
                         payload_json, result_json, error_message, created_at, updated_at
                     )
                     VALUES (
-                        'job-2', 'project-1', 'correct_transcript', 'pending',
+                        'job-2', 'project-1', 'recompute_chapter_structure_audit', 'pending',
                         '2026-06-27 16:00:00', 0, '{}', '{}', '',
                         '2026-06-27 16:00:00', '2026-06-27 16:00:00'
                     )
@@ -569,6 +569,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
         assert "memoir_editing_jobs" in result["changed_tables"]
         assert "memoir_editing_jobs" not in second_result["changed_tables"]
         assert "correct_transcript" in str(table_sql)
+        assert "recompute_chapter_structure_audit" in str(table_sql)
         assert rows == [("job-1", "route_sources")]
     finally:
         await engine.dispose()

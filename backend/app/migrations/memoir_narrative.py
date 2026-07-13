@@ -20,6 +20,10 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_chapter_contracts",
     "memoir_chapter_nodes",
     "memoir_chapter_node_stories",
+    "memoir_narrative_gaps",
+    "memoir_narrative_gap_claims",
+    "memoir_narrative_gap_stories",
+    "memoir_narrative_gap_chapters",
 )
 MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
     "memoir_narrative_decisions_no_update",

@@ -200,3 +200,51 @@ class MemoirChapterNodeStoryRole(str, Enum):
     SUPPORTING = "supporting"
     CONTRAST = "contrast"
     TRANSITION_CONTEXT = "transition_context"
+
+
+class MemoirNarrativeGapScopeType(str, Enum):
+    STORY = "story"
+    CHAPTER = "chapter"
+    BOOK = "book"
+
+
+class MemoirNarrativeGapType(str, Enum):
+    MISSING_SLOT = "missing_slot"
+    CHRONOLOGY = "chronology"
+    RELATIONSHIP = "relationship"
+    CAUSALITY = "causality"
+    CONTRADICTION = "contradiction"
+    REPETITION = "repetition"
+    UNCLEAR_REFERENCE = "unclear_reference"
+    UNSUPPORTED_FACT = "unsupported_fact"
+
+
+class MemoirNarrativeGapSeverity(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class MemoirNarrativeGapStatus(str, Enum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    ACCEPTED_INCOMPLETE = "accepted_incomplete"
+    NOT_APPLICABLE = "not_applicable"
+    DISMISSED = "dismissed"
+
+
+class MemoirNarrativeGapDetectedBy(str, Enum):
+    RULES = "rules"
+    AI = "ai"
+    USER = "user"
+
+
+class MemoirNarrativeGapClaimRole(str, Enum):
+    SUPPORTING = "supporting"
+    CONFLICTING = "conflicting"
+    UNSUPPORTED_CANDIDATE = "unsupported_candidate"
+
+
+class MemoirNarrativeGapRelationRole(str, Enum):
+    PRIMARY = "primary"
+    INVOLVED = "involved"

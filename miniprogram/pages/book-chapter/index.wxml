@@ -208,6 +208,14 @@
 
       <view class="chapter-action-groups">
         <view class="chapter-action-group">
+          <text class="chapter-action-label">章节结构与检查</text>
+          <text class="chapter-action-hint">查看故事、事实证据和待处理问题</text>
+          <button class="primary-button" bindtap="openChapterWorkspace">
+            打开章节工作台
+          </button>
+        </view>
+
+        <view class="chapter-action-group">
           <text class="chapter-action-label">移动章节顺序</text>
           <view class="actions-row compact">
             <button

@@ -46,6 +46,10 @@ export function memoirProjectPath(projectId: string, suffix = ""): string {
   return `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}${suffix}`;
 }
 
+export function memoirNarrativeProjectPath(projectId: string, suffix = ""): string {
+  return `/api/memoir/projects/${encodeURIComponent(projectId)}${suffix}`;
+}
+
 export function memoirVoiceSessionPath(voiceSessionId: string, suffix = ""): string {
   return `/api/mobile/memoir/voice-sessions/${encodeURIComponent(voiceSessionId)}${suffix}`;
 }

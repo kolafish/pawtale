@@ -56,6 +56,7 @@ EDITING_JOB_FAILURE_EVENT_SOURCE = "editing_job_failure"
 
 _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
+    MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
     MemoirEditingJobType.REVISE_CHAPTER: MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
     MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
@@ -66,6 +67,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
 
 _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: "素材事实整理失败，原始转写未受影响，可稍后重试。",
+    MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT: "章节完整性检查失败，已有事实和正文未受影响，可稍后重试。",
     MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
     MemoirEditingJobType.REVISE_CHAPTER: "章节自动补写失败，稍后可重试。",
     MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
