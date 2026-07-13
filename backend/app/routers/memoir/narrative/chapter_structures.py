@@ -23,7 +23,11 @@ from app.schemas.memoir_narrative import (
     MemoirChapterStructureSplitRequest,
     MemoirNarrativeDecisionRequest,
 )
-from app.services.memoir.narrative import chapter_contracts, chapter_nodes
+from app.services.memoir.narrative import (
+    chapter_contracts,
+    chapter_nodes,
+    chapter_topology,
+)
 
 from .common import authorize_project, decision_error
 
@@ -429,7 +433,7 @@ async def split_memoir_chapter_structure(
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
-        source, target = await chapter_nodes.split_structure(
+        source, target = await chapter_topology.split_structure(
             db,
             project_id=project_id,
             request=req,
@@ -456,7 +460,7 @@ async def merge_memoir_chapter_structures(
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
-        source, target = await chapter_nodes.merge_structures(
+        source, target = await chapter_topology.merge_structures(
             db,
             project_id=project_id,
             request=req,

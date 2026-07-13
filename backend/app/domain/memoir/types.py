@@ -67,6 +67,11 @@ class MemoirBookPlanStatus(str, Enum):
     CONFIRMED = "confirmed"
 
 
+class MemoirBookPlanChapterStatus(str, Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
 class MemoirBookChapterDraftStatus(str, Enum):
     DRAFT = "draft"
     CONFIRMED = "confirmed"

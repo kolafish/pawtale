@@ -18,6 +18,7 @@ from app.schemas.memoir_voice import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
 
 
@@ -91,7 +92,7 @@ async def _included_chapter_titles(
     titles: list[str] = []
     for plan in plans:
         refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
-        for chapter in sorted(plan.chapters, key=lambda item: item.sort_order):
+        for chapter in sorted_chapters(plan):
             refs = refs_by_chapter.get(chapter.id, [])
             if any(source_ref_utterance_id(ref) == utterance_id for ref in refs):
                 titles.append(chapter.title)

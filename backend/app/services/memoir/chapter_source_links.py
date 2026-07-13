@@ -6,7 +6,11 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirChapterSourceAssignedBy, MemoirChapterSourceLinkStatus
+from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
+    MemoirChapterSourceAssignedBy,
+    MemoirChapterSourceLinkStatus,
+)
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -131,6 +135,7 @@ async def _load_plan_chapters(
             .where(
                 MemoirBookPlanChapter.project_id == plan.project_id,
                 MemoirBookPlanChapter.plan_id == plan.id,
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
             .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
         )

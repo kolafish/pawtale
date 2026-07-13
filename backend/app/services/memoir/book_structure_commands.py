@@ -12,6 +12,7 @@ from app.services.memoir.book_plan_sources import (
     SourceSegment,
     as_dict,
     find_chapter_by_id,
+    sorted_chapters,
     text_or_empty,
 )
 
@@ -35,7 +36,7 @@ def source_utterance_id(req: MemoirBookPlanStructureCommandRequest) -> str:
 
 
 def chapter_by_id(plan: MemoirBookPlan, chapter_id: str) -> MemoirBookPlanChapter:
-    chapter = find_chapter_by_id(plan.chapters, chapter_id)
+    chapter = find_chapter_by_id(sorted_chapters(plan), chapter_id)
     if chapter:
         return chapter
     raise HTTPException(status_code=404, detail="章节不存在")

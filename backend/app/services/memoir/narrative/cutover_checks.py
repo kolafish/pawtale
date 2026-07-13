@@ -7,7 +7,11 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
     MemoirDraftBlockRole,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+)
 from app.domain.projects.types import ProjectType
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
@@ -90,7 +94,8 @@ async def project_migration_report(
     chapter_count = await _count(
         db,
         select(func.count(MemoirBookPlanChapter.id)).where(
-            MemoirBookPlanChapter.project_id == project_id
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         ),
     )
     missing_contract_count = await _count(
@@ -105,14 +110,21 @@ async def project_migration_report(
         )
         .where(
             MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             MemoirChapterContract.id.is_(None),
         ),
     )
     confirmed_contract_count = await _count(
         db,
-        select(func.count(func.distinct(MemoirChapterContract.chapter_id))).where(
+        select(func.count(func.distinct(MemoirChapterContract.chapter_id)))
+        .join(
+            MemoirBookPlanChapter,
+            MemoirBookPlanChapter.id == MemoirChapterContract.chapter_id,
+        )
+        .where(
             MemoirChapterContract.project_id == project_id,
             MemoirChapterContract.status == MemoirChapterContractStatus.CONFIRMED.value,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         ),
     )
     claim_count = await _count(
@@ -149,9 +161,15 @@ async def project_migration_report(
     )
     chapters_with_structured_blocks = await _count(
         db,
-        select(func.count(func.distinct(MemoirDraftBlock.chapter_id))).where(
+        select(func.count(func.distinct(MemoirDraftBlock.chapter_id)))
+        .join(
+            MemoirBookPlanChapter,
+            MemoirBookPlanChapter.id == MemoirDraftBlock.chapter_id,
+        )
+        .where(
             MemoirDraftBlock.project_id == project_id,
             MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         ),
     )
     story_count = await _count(

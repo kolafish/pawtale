@@ -147,6 +147,70 @@ async def test_narrative_migration_adds_structured_block_snapshot_column_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_and_enforces_chapter_archive_lifecycle():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_book_plan_chapters (
+                        id VARCHAR(36) PRIMARY KEY,
+                        plan_id VARCHAR(36) NOT NULL,
+                        project_id VARCHAR(36) NOT NULL,
+                        title VARCHAR(200) NOT NULL,
+                        sort_order INTEGER NOT NULL
+                    )
+                    """
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_book_plan_chapters.status",
+            "memoir_book_plan_chapters.archived_sort_order",
+            "memoir_book_plan_chapters.archived_at",
+            "memoir_book_plan_chapters.archived_by_user_id",
+            "memoir_book_plan_chapters.merged_into_chapter_id",
+        ]
+        assert second["changed_columns"] == []
+
+        async with engine.connect() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_book_plan_chapters "
+                    "(id, plan_id, project_id, title, sort_order) "
+                    "VALUES ('target', 'plan', 'project', '目标章', 0), "
+                    "('source', 'plan', 'project', '来源章', 1)"
+                )
+            )
+            await conn.commit()
+            with pytest.raises(IntegrityError, match="invalid memoir chapter archive state"):
+                await conn.execute(
+                    text(
+                        "UPDATE memoir_book_plan_chapters "
+                        "SET status = 'archived' WHERE id = 'source'"
+                    )
+                )
+            await conn.rollback()
+            await conn.execute(
+                text(
+                    "UPDATE memoir_book_plan_chapters SET "
+                    "status = 'archived', archived_sort_order = 1, "
+                    "archived_at = CURRENT_TIMESTAMP, archived_by_user_id = 'user', "
+                    "merged_into_chapter_id = 'target', sort_order = -1 "
+                    "WHERE id = 'source'"
+                )
+            )
+            await conn.commit()
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_migration_replaces_stale_chapter_node_trigger_once():
     register_models()
     engine = _sqlite_engine()

@@ -47,6 +47,7 @@ from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.book_plan_sources import sorted_chapters
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
     IGNORED_SOURCE_ROUTE_ACTION,
@@ -726,7 +727,7 @@ async def _book_inclusions_by_utterance_ids(
     inclusions: dict[str, list[MemoirVoiceTranscriptIncludedChapterResponse]] = {}
     for plan in plans:
         refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
-        chapters = sorted(plan.chapters, key=lambda item: (item.sort_order, item.created_at, item.id))
+        chapters = sorted_chapters(plan)
         for chapter in chapters:
             included_chapter = MemoirVoiceTranscriptIncludedChapterResponse(
                 chapter_id=chapter.id,

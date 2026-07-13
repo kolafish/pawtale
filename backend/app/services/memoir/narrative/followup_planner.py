@@ -24,7 +24,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStorySlotStatus,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirSessionGoal
+from app.domain.memoir.types import MemoirBookPlanChapterStatus, MemoirSessionGoal
 from app.models.memoir import MemoirBookPlanChapter, MemoirVoiceSession
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -294,6 +294,8 @@ async def generate_followup_tasks(
                 select(MemoirBookPlanChapter).where(
                     MemoirBookPlanChapter.project_id == project_id,
                     MemoirBookPlanChapter.id.in_(chapter_ids),
+                    MemoirBookPlanChapter.status
+                    == MemoirBookPlanChapterStatus.ACTIVE.value,
                 )
             )
         ).all()
@@ -386,11 +388,15 @@ async def generate_followup_tasks(
                 if claim is not None and _safe_claim(claim):
                     claim_roles.setdefault(claim_id, MemoirFollowupTaskClaimRole.DO_NOT_REPEAT)
 
+        gap_chapter_id = _gap_chapter_id(gap)
+        chapter = chapters.get(gap_chapter_id or "")
         actionable = gap_type not in NON_INTERVIEW_GAP_TYPES and (
             bool(story and slot_key)
             or bool(claim_roles)
             or (story is not None and gap_type != MemoirNarrativeGapType.MISSING_SLOT)
         )
+        if gap_chapter_id and chapter is None:
+            actionable = False
         if story is not None and (
             story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
             or story.verification_status == MemoirStoryVerificationStatus.REJECTED.value
@@ -420,7 +426,6 @@ async def generate_followup_tasks(
             skipped.append(gap.id)
             continue
 
-        chapter = chapters.get(_gap_chapter_id(gap) or "")
         related_claims = [claims[claim_id] for claim_id in claim_roles if claim_id in claims]
         values = {
             "chapter_id": chapter.id if chapter else None,

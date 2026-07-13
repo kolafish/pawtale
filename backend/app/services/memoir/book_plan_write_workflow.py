@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
 )
+from app.models.memoir_narrative import MemoirChapterContract
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookChapterTitleGenerateRequest,
@@ -85,6 +86,19 @@ def _link_assigned_by_for_created_by(created_by: MemoirCreatedBy) -> MemoirChapt
     if created_by == MemoirCreatedBy.USER:
         return MemoirChapterSourceAssignedBy.USER
     return MemoirChapterSourceAssignedBy.SYSTEM
+
+
+async def _uses_versioned_chapter_structure(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> bool:
+    contract_id = await db.scalar(
+        select(MemoirChapterContract.id)
+        .where(MemoirChapterContract.project_id == project_id)
+        .limit(1)
+    )
+    return contract_id is not None
 
 
 async def _mark_chapter_drafts_sources_changed(
@@ -164,6 +178,11 @@ async def _replace_plan(
         db.add(plan)
         await db.flush()
     else:
+        if await _uses_versioned_chapter_structure(db, project_id=project_id):
+            raise HTTPException(
+                status_code=409,
+                detail="章节已进入版本化编辑，不能重新生成或整体替换目录",
+            )
         await _delete_plan_chapters(db, plan)
 
     plan.title = title[:200]
@@ -455,14 +474,25 @@ async def update_book_plan(
         allow_admin=allow_admin,
     )
     chapter_updates = _validated_chapter_updates(req, sources)
-    existing_by_id = {chapter.id: chapter for chapter in plan.chapters}
+    creates_chapter = any(chapter.id is None for chapter in chapter_updates)
+    if creates_chapter and await _uses_versioned_chapter_structure(
+        db, project_id=project_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="版本化章节不能从目录表单新增，请使用章节拆分",
+        )
+    active_chapters = _sorted_plan_chapters(plan)
+    existing_by_id = {chapter.id: chapter for chapter in active_chapters}
     current_refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
     retained_ids = {chapter.id for chapter in chapter_updates if chapter.id}
     unknown_ids = retained_ids - set(existing_by_id)
     if unknown_ids:
         raise HTTPException(status_code=404, detail="章节不存在")
+    if set(existing_by_id) - retained_ids:
+        raise HTTPException(status_code=400, detail="目录保存不能删除章节，请使用章节结构操作")
 
-    for index, chapter in enumerate(plan.chapters):
+    for index, chapter in enumerate(active_chapters):
         chapter.sort_order = 10000 + index
         db.add(chapter)
     await db.flush()
@@ -503,17 +533,7 @@ async def update_book_plan(
             db.add(chapter)
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
 
-    removed_chapters = [
-        chapter for chapter_id, chapter in existing_by_id.items()
-        if chapter_id not in retained_ids
-    ]
-    for chapter in removed_chapters:
-        if chapter in plan.chapters:
-            plan.chapters.remove(chapter)
-        else:
-            await db.delete(chapter)
-
-    if changed_chapter_ids or newly_assigned_utterance_ids or removed_chapters:
+    if changed_chapter_ids or newly_assigned_utterance_ids:
         await db.flush()
         refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
         await _sync_plan_chapter_source_links(
@@ -563,6 +583,14 @@ async def apply_book_plan_structure_command(
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
+
+    if req.type == "create_chapter_from_source" and await _uses_versioned_chapter_structure(
+        db, project_id=project_id
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="版本化章节不能从单条素材新增，请使用章节拆分",
+        )
 
     if req.type == "rename_chapter":
         chapter_id = _require_command_chapter_id(req)

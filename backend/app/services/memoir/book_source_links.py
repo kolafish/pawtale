@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirChapterSourceLinkStatus
+from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
+    MemoirChapterSourceLinkStatus,
+)
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
@@ -33,7 +36,15 @@ class ChapterSourceChangeState:
 
 
 def _sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
-    return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
+    return sorted(
+        (
+            chapter
+            for chapter in plan.chapters
+            if (chapter.status or MemoirBookPlanChapterStatus.ACTIVE.value)
+            == MemoirBookPlanChapterStatus.ACTIVE.value
+        ),
+        key=lambda chapter: chapter.sort_order,
+    )
 
 
 async def _load_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
@@ -43,6 +54,7 @@ async def _load_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> list[Me
             .where(
                 MemoirBookPlanChapter.project_id == plan.project_id,
                 MemoirBookPlanChapter.plan_id == plan.id,
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
             .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
         )

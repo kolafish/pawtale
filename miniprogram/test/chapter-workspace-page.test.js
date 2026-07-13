@@ -5,6 +5,9 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  chapterStructureIntentKey,
+} = require("../pages/chapter-workspace/chapter-structure-editor.ts");
 
 
 function sampleGap(overrides = {}) {
@@ -45,10 +48,23 @@ function sampleWorkspace(overrides = {}) {
     chapter_title: "第一次离家",
     contract: {
       id: "contract-1",
+      project_id: "project/1",
+      chapter_id: "chapter-1",
       version: 1,
       objective: "说明第一次离家的原因和影响。",
       reader_takeaway: "理解这次经历如何改变了叙述者。",
       time_scope_text: "青年时期",
+      time_start: null,
+      time_end: null,
+      core_questions: [
+        { key: "meaning", question: "这次离家为什么重要？" },
+      ],
+      constraints: {
+        include_story_ids: ["story-1"],
+        exclude_story_ids: [],
+        include_topics: [],
+        exclude_topics: [],
+      },
       status: "confirmed",
       nodes: [{
         id: "node-1",
@@ -159,6 +175,24 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     confirmMemoirChapterContract: async () => {
       throw new Error("confirmMemoirChapterContract was not mocked");
     },
+    createMemoirChapterContractRevision: async () => {
+      throw new Error("createMemoirChapterContractRevision was not mocked");
+    },
+    splitMemoirChapterStructure: async () => {
+      throw new Error("splitMemoirChapterStructure was not mocked");
+    },
+    mergeMemoirChapterStructures: async () => {
+      throw new Error("mergeMemoirChapterStructures was not mocked");
+    },
+    getMemoirBookPlan: async () => ({
+      id: "plan-1",
+      project_id: workspace.project_id,
+      chapters: [{
+        id: workspace.chapter_id,
+        title: workspace.chapter_title,
+        sort_order: 0,
+      }],
+    }),
     updateMemoirChapterNode: async () => {
       throw new Error("updateMemoirChapterNode was not mocked");
     },
@@ -373,6 +407,223 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
 });
 
+test("chapter structure intent keys are stable for retries and change with user intent", () => {
+  const first = chapterStructureIntentKey(
+    "chapter-split",
+    "contract-1",
+    ["node-2"],
+    { title: "离家前的决定" },
+  );
+  assert.equal(first, chapterStructureIntentKey(
+    "chapter-split",
+    "contract-1",
+    ["node-2"],
+    { title: "离家前的决定" },
+  ));
+  assert.notEqual(first, chapterStructureIntentKey(
+    "chapter-split",
+    "contract-1",
+    ["node-2"],
+    { title: "第一次远行" },
+  ));
+});
+
+test("opening a confirmed contract is read-only until save creates one draft revision", async () => {
+  const calls = [];
+  let workspace = sampleWorkspace();
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    showToast() {},
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      createMemoirChapterContractRevision: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            id: `contract-${calls.length + 1}`,
+            version: calls.length + 1,
+            status: "draft",
+            objective: data.objective,
+            reader_takeaway: data.reader_takeaway,
+            time_scope_text: data.time_scope_text,
+            core_questions: data.core_questions,
+            constraints: data.constraints,
+          },
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  await page.startContractEdit.call(context);
+
+  assert.equal(calls.length, 0);
+  assert.equal(context.data.workspace.contract.version, 1);
+  assert.equal(context.data.contractEditorOpen, true);
+
+  page.cancelContractEdit.call(context);
+  assert.equal(calls.length, 0);
+  assert.equal(context.data.contractEditorOpen, false);
+
+  await page.startContractEdit.call(context);
+
+  page.changeContractObjective.call(context, {
+    detail: { value: "讲清第一次离家如何改变了后来的选择。" },
+  });
+  await page.saveContractRevision.call(context);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].data.copy_from_contract_id, "contract-1");
+  assert.equal(calls[0].data.copy_nodes, true);
+  assert.equal(calls[0].data.objective, "讲清第一次离家如何改变了后来的选择。");
+  assert.deepEqual(calls[0].data.core_questions, [
+    { key: "meaning", question: "这次离家为什么重要？" },
+  ]);
+  assert.deepEqual(calls[0].data.constraints.include_story_ids, ["story-1"]);
+  assert.equal(context.data.workspace.contract.version, 2);
+  assert.equal(context.data.contractEditorOpen, false);
+  assert.equal(context.data.contractActionBusy, false);
+  delete global.wx;
+});
+
+test("splitting a draft chapter creates a new chapter without locking story review", async () => {
+  const pending = deferred();
+  const calls = [];
+  const redirects = [];
+  const workspace = draftWorkspaceWithTwoStoryNodes();
+  global.wx = {
+    redirectTo(options) {
+      redirects.push(options.url);
+    },
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirBookPlan: async () => ({
+        chapters: [
+          { id: "chapter-1", title: "第一次离家", sort_order: 0 },
+          { id: "chapter-2", title: "求学生涯", sort_order: 1 },
+        ],
+      }),
+      splitMemoirChapterStructure: async (projectId, data) => {
+        calls.push({ projectId, data });
+        await pending.promise;
+        return {
+          source: workspace.contract,
+          target: {
+            ...workspace.contract,
+            id: "contract-new",
+            chapter_id: "chapter-new",
+            objective: data.target_objective,
+            reader_takeaway: data.target_reader_takeaway,
+            time_scope_text: data.target_time_scope_text,
+            core_questions: data.target_core_questions,
+            nodes: [workspace.contract.nodes[1]],
+          },
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+  page.openSplitEditor.call(context);
+  page.changeSplitNodeSelection.call(context, { detail: { value: ["node-2"] } });
+  page.changeSplitTitle.call(context, { detail: { value: "离家前的决定" } });
+  page.changeSplitObjective.call(context, { detail: { value: "讲清离家决定是如何形成的。" } });
+  page.changeSplitReaderTakeaway.call(context, { detail: { value: "理解家人的考虑和取舍。" } });
+  page.changeSplitQuestions.call(context, { detail: { value: "谁参与了决定？\n为什么最终选择离家？" } });
+
+  const request = page.submitChapterSplit.call(context);
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+  pending.resolve();
+  await request;
+
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].data.source_contract_id, "contract-1");
+  assert.deepEqual(calls[0].data.node_ids, ["node-2"]);
+  assert.equal(calls[0].data.target_title, "离家前的决定");
+  assert.deepEqual(calls[0].data.target_core_questions.map((item) => item.question), [
+    "谁参与了决定？",
+    "为什么最终选择离家？",
+  ]);
+  assert.match(calls[0].data.target_core_questions[0].key, /^q_1_/);
+  assert.match(redirects[0], /chapterId=chapter-new/);
+  assert.equal(context.data.structureActionBusy, false);
+  delete global.wx;
+});
+
+test("merging a draft chapter confirms archival semantics and opens the retained chapter", async () => {
+  const pending = deferred();
+  const calls = [];
+  const dialogs = [];
+  const redirects = [];
+  const workspace = draftWorkspaceWithTwoStoryNodes();
+  global.wx = {
+    showModal(options) {
+      dialogs.push(options);
+      options.success({ confirm: true, cancel: false });
+    },
+    redirectTo(options) {
+      redirects.push(options.url);
+    },
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirBookPlan: async () => ({
+        chapters: [
+          { id: "chapter-1", title: "第一次离家", sort_order: 0 },
+          { id: "chapter-2", title: "求学生涯", sort_order: 1 },
+        ],
+      }),
+      mergeMemoirChapterStructures: async (projectId, data) => {
+        calls.push({ projectId, data });
+        await pending.promise;
+        return {
+          source: { ...workspace.contract, status: "superseded", nodes: [] },
+          target: { ...workspace.contract, id: "target-contract", chapter_id: "chapter-2" },
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+  page.changeMergeTarget.call(context, { detail: { value: "0" } });
+
+  const request = page.mergeCurrentChapter.call(context);
+  await Promise.resolve();
+  assert.equal(context.data.structureActionBusy, true);
+  assert.equal(context.data.stories[0].busy, false);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+  pending.resolve();
+  await request;
+
+  assert.match(dialogs[0].content, /归档/);
+  assert.match(dialogs[0].content, /历史版本会保留/);
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].data.source_contract_id, "contract-1");
+  assert.equal(calls[0].data.target_chapter_id, "chapter-2");
+  assert.equal(
+    calls[0].data.idempotency_key,
+    chapterStructureIntentKey("chapter-merge", "contract-1", "chapter-2"),
+  );
+  assert.match(redirects[0], /chapterId=chapter-2/);
+  assert.match(redirects[0], /editContract=1/);
+  assert.equal(context.data.structureActionBusy, false);
+  delete global.wx;
+});
+
 test("editing a draft chapter node persists its narrative purpose without locking story review", async () => {
   const pending = deferred();
   const calls = [];
@@ -406,7 +657,7 @@ test("editing a draft chapter node persists its narrative purpose without lockin
   });
   page.changeNodeTitle.call(context, { detail: { value: "第一次独自远行" } });
   page.changeNodePurpose.call(context, { detail: { value: "呈现离家决定和行动的因果关系。" } });
-  page.changeNodeRequired.call(context, { detail: { value: [] } });
+  page.changeNodeRequired.call(context, { detail: { value: false } });
   const request = page.saveNodeEdit.call(context);
 
   assert.equal(context.data.structureActionBusy, true);

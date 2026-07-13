@@ -17,7 +17,10 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryPublicationStatus,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirChapterSourceLinkStatus
+from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
+    MemoirChapterSourceLinkStatus,
+)
 from app.models.memoir import MemoirBookPlanChapter, MemoirChapterSourceLink
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -58,6 +61,8 @@ async def load_chapter(
     )
     if chapter is None:
         raise ValueError("chapter does not belong to the project")
+    if chapter.status != MemoirBookPlanChapterStatus.ACTIVE.value:
+        raise ValueError("chapter is archived")
     return chapter
 
 
@@ -94,6 +99,77 @@ async def _contract_nodes(
                 .order_by(MemoirChapterNode.sort_order, MemoirChapterNode.id)
             )
         ).all()
+    )
+
+
+async def current_contract_for_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirChapterContract | None:
+    return await db.scalar(
+        select(MemoirChapterContract)
+        .where(
+            MemoirChapterContract.project_id == project_id,
+            MemoirChapterContract.chapter_id == chapter_id,
+            MemoirChapterContract.status.in_(
+                {
+                    MemoirChapterContractStatus.DRAFT.value,
+                    MemoirChapterContractStatus.CONFIRMED.value,
+                }
+            ),
+        )
+        .order_by(
+            (MemoirChapterContract.status == MemoirChapterContractStatus.DRAFT.value).desc(),
+            MemoirChapterContract.version.desc(),
+        )
+    )
+
+
+async def ensure_draft_contract_revision(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    actor_user_id: str,
+    idempotency_key: str,
+) -> MemoirChapterContract:
+    await load_chapter(db, project_id=project_id, chapter_id=chapter_id)
+    current = await current_contract_for_chapter(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if current is None:
+        return await create_legacy_contract_suggestion(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            idempotency_key=f"{idempotency_key}:suggestion",
+        )
+    if current.status == MemoirChapterContractStatus.DRAFT.value:
+        return current
+    return await create_contract_revision(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        request=MemoirChapterContractDraftRequest(
+            idempotency_key=idempotency_key,
+            objective=current.objective,
+            reader_takeaway=current.reader_takeaway,
+            time_scope_text=current.time_scope_text,
+            time_start=current.time_start,
+            time_end=current.time_end,
+            core_questions=[
+                MemoirChapterCoreQuestion.model_validate(item)
+                for item in current.core_questions_json
+            ],
+            constraints=contract_constraints(current),
+            copy_from_contract_id=current.id,
+            copy_nodes=True,
+        ),
+        actor_user_id=actor_user_id,
     )
 
 

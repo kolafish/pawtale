@@ -10,6 +10,7 @@ from app.domain.memoir.narrative_types import MemoirNarrativeGapStatus
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
+    MemoirBookPlanChapterStatus,
     MemoirEditingJobType,
 )
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
@@ -71,6 +72,7 @@ async def schedule_followup_task_generation(
             select(MemoirBookPlanChapter.id).where(
                 MemoirBookPlanChapter.project_id == project_id,
                 MemoirBookPlanChapter.id == chapter_id,
+                MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
             )
         )
         if chapter_exists is None:

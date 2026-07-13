@@ -24,6 +24,7 @@ from app.services.memoir.book_audio import (
 from app.services.memoir.book_plan_sources import (
     load_plan_with_chapters as _load_plan,
     plan_response as _plan_response,
+    sorted_chapters,
 )
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
@@ -108,7 +109,7 @@ def build_book_outline_audio_text(
     *,
     source_counts_by_chapter: dict[str, int] | None = None,
 ) -> str:
-    chapters = sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
+    chapters = sorted_chapters(plan)
     title = (plan.title or "回忆录章节规划").strip() or "回忆录章节规划"
     if not chapters:
         raise HTTPException(status_code=400, detail="章节规划为空，无法朗读")

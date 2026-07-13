@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirSemanticCacheStatus
+from app.domain.memoir.types import MemoirBookPlanChapterStatus, MemoirSemanticCacheStatus
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -163,6 +163,7 @@ async def _load_chapter(
         .where(
             MemoirBookPlanChapter.id == chapter_id,
             MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.status == MemoirBookPlanChapterStatus.ACTIVE.value,
         )
         .options(
             selectinload(MemoirBookPlanChapter.plan),

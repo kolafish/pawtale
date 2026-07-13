@@ -32,6 +32,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import (
+    MemoirBookPlanChapterStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -327,6 +328,32 @@ async def _add_narrative_evidence(
     test_db.add_all(relations)
     await test_db.flush()
     return utterance, version
+
+
+async def test_followup_planner_skips_open_gap_for_archived_chapter(client, test_db):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    chapter = fixture["chapter"]
+    chapter.status = MemoirBookPlanChapterStatus.ARCHIVED.value
+    chapter.archived_sort_order = chapter.sort_order
+    chapter.archived_at = datetime.now(UTC).replace(tzinfo=None)
+    chapter.archived_by_user_id = fixture["user_id"]
+    test_db.add(chapter)
+    await test_db.commit()
+
+    result = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=chapter.id,
+    )
+
+    assert result.created_task_ids == ()
+    assert result.updated_task_ids == ()
+    assert result.skipped_gap_ids == (fixture["gap"].id,)
+    assert await test_db.scalar(
+        select(func.count(MemoirFollowupTask.id)).where(
+            MemoirFollowupTask.project_id == fixture["project_id"]
+        )
+    ) == 0
 
 
 async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_db):
