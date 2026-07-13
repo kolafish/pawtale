@@ -17,9 +17,10 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
+    MemoirStory,
+    MemoirStoryClaim,
 )
-from app.repositories.memoir_narrative import MemoirNarrativeDecisionRepository
-from app.schemas.memoir_narrative import MemoirNarrativeDecisionCreate
+from app.services.memoir.narrative import decision_log, stories as story_service
 
 
 def _entity_state(entity: MemoirNarrativeEntity) -> dict[str, object]:
@@ -39,65 +40,6 @@ def _claim_state(claim: MemoirClaim) -> dict[str, object]:
     }
 
 
-async def _existing_decision(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    idempotency_key: str,
-    target_type: MemoirNarrativeDecisionTargetType,
-    target_id: str,
-    action: MemoirNarrativeDecisionAction,
-    actor_type: MemoirNarrativeActorType,
-    actor_user_id: str | None,
-) -> MemoirNarrativeDecision | None:
-    decision = await MemoirNarrativeDecisionRepository(db).get_by_idempotency_key(
-        project_id=project_id,
-        idempotency_key=idempotency_key,
-    )
-    if decision is None:
-        return None
-    if (
-        decision.target_type != target_type.value
-        or decision.target_id != target_id
-        or decision.action != action.value
-        or decision.actor_type != actor_type.value
-        or decision.actor_user_id != actor_user_id
-    ):
-        raise ValueError("idempotency key was already used for another decision")
-    return decision
-
-
-async def _record(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    target_type: MemoirNarrativeDecisionTargetType,
-    target_id: str,
-    action: MemoirNarrativeDecisionAction,
-    actor_type: MemoirNarrativeActorType,
-    actor_user_id: str | None,
-    before_state: dict,
-    after_state: dict,
-    reason: str,
-    idempotency_key: str,
-) -> MemoirNarrativeDecision:
-    decision, _created = await MemoirNarrativeDecisionRepository(db).create(
-        MemoirNarrativeDecisionCreate(
-            project_id=project_id,
-            target_type=target_type,
-            target_id=target_id,
-            action=action,
-            actor_type=actor_type,
-            actor_user_id=actor_user_id,
-            before_state=before_state,
-            after_state=after_state,
-            reason=reason,
-            idempotency_key=idempotency_key,
-        )
-    )
-    return decision
-
-
 async def decide_entity_verification(
     db: AsyncSession,
     *,
@@ -109,7 +51,7 @@ async def decide_entity_verification(
     reason: str = "",
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
-    existing = await _existing_decision(
+    existing = await decision_log.existing_decision(
         db,
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -140,7 +82,7 @@ async def decide_entity_verification(
     entity.updated_by = MemoirNarrativeActorType.USER.value
     entity.updated_by_user_id = actor_user_id
     db.add(entity)
-    return await _record(
+    return await decision_log.record_decision(
         db,
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.ENTITY,
@@ -165,7 +107,7 @@ async def merge_entities(
     idempotency_key: str,
     reason: str = "",
 ) -> MemoirNarrativeDecision:
-    existing = await _existing_decision(
+    existing = await decision_log.existing_decision(
         db,
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -214,7 +156,7 @@ async def merge_entities(
     source.updated_by = MemoirNarrativeActorType.USER.value
     source.updated_by_user_id = actor_user_id
     db.add_all([source, retained])
-    return await _record(
+    return await decision_log.record_decision(
         db,
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.ENTITY,
@@ -243,7 +185,7 @@ async def decide_claim_verification(
     reason: str = "",
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
-    existing = await _existing_decision(
+    existing = await decision_log.existing_decision(
         db,
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -284,7 +226,7 @@ async def decide_claim_verification(
     claim.updated_by = MemoirNarrativeActorType.USER.value
     claim.updated_by_user_id = actor_user_id
     db.add(claim)
-    return await _record(
+    decision = await decision_log.record_decision(
         db,
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.CLAIM,
@@ -297,7 +239,12 @@ async def decide_claim_verification(
         reason=reason,
         idempotency_key=idempotency_key,
     )
-
+    await _recompute_stories_for_claim(
+        db,
+        claim=claim,
+        reason=f"claim verification changed by user decision {decision.id}",
+    )
+    return decision
 
 async def decide_claim_publication(
     db: AsyncSession,
@@ -316,7 +263,7 @@ async def decide_claim_publication(
         if publication_status == MemoirClaimPublicationStatus.PRIVATE
         else MemoirNarrativeDecisionAction.EXCLUDE
     )
-    existing = await _existing_decision(
+    existing = await decision_log.existing_decision(
         db,
         project_id=project_id,
         idempotency_key=idempotency_key,
@@ -341,7 +288,7 @@ async def decide_claim_publication(
     claim.updated_by = MemoirNarrativeActorType.USER.value
     claim.updated_by_user_id = actor_user_id
     db.add(claim)
-    return await _record(
+    decision = await decision_log.record_decision(
         db,
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.CLAIM,
@@ -354,6 +301,12 @@ async def decide_claim_publication(
         reason=reason,
         idempotency_key=idempotency_key,
     )
+    await _recompute_stories_for_claim(
+        db,
+        claim=claim,
+        reason=f"claim publication changed by user decision {decision.id}",
+    )
+    return decision
 
 
 async def mark_claim_needs_review(
@@ -363,7 +316,7 @@ async def mark_claim_needs_review(
     reason: str,
     idempotency_key: str,
 ) -> MemoirNarrativeDecision:
-    existing = await _existing_decision(
+    existing = await decision_log.existing_decision(
         db,
         project_id=claim.project_id,
         idempotency_key=idempotency_key,
@@ -380,7 +333,7 @@ async def mark_claim_needs_review(
     claim.updated_by = MemoirNarrativeActorType.SYSTEM.value
     claim.updated_by_user_id = None
     db.add(claim)
-    return await _record(
+    return await decision_log.record_decision(
         db,
         project_id=claim.project_id,
         target_type=MemoirNarrativeDecisionTargetType.CLAIM,
@@ -393,3 +346,35 @@ async def mark_claim_needs_review(
         reason=reason,
         idempotency_key=idempotency_key,
     )
+
+
+async def _recompute_stories_for_claim(
+    db: AsyncSession,
+    *,
+    claim: MemoirClaim,
+    reason: str,
+) -> None:
+    story_ids = set(
+        (
+            await db.scalars(
+                select(MemoirStoryClaim.story_id).where(
+                    MemoirStoryClaim.project_id == claim.project_id,
+                    MemoirStoryClaim.claim_id == claim.id,
+                )
+            )
+        ).all()
+    )
+    if not story_ids:
+        return
+    linked_stories = list(
+        (
+            await db.scalars(
+                select(MemoirStory).where(
+                    MemoirStory.project_id == claim.project_id,
+                    MemoirStory.id.in_(story_ids),
+                )
+            )
+        ).all()
+    )
+    for story in linked_stories:
+        await story_service.recompute_story_with_revision(db, story=story, reason=reason)

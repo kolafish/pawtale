@@ -7,6 +7,8 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
+    MemoirStory,
+    MemoirStorySlot,
 )
 from app.models.projects import Project
 from app.models.users import User
@@ -96,6 +98,20 @@ class MemoirNarrativeDecisionRepository:
                 select(MemoirClaim.id).where(
                     MemoirClaim.project_id == data.project_id,
                     MemoirClaim.id == data.target_id,
+                )
+            )
+        elif data.target_type == MemoirNarrativeDecisionTargetType.STORY:
+            target_exists = await self._db.scalar(
+                select(MemoirStory.id).where(
+                    MemoirStory.project_id == data.project_id,
+                    MemoirStory.id == data.target_id,
+                )
+            )
+        elif data.target_type == MemoirNarrativeDecisionTargetType.STORY_SLOT:
+            target_exists = await self._db.scalar(
+                select(MemoirStorySlot.id).where(
+                    MemoirStorySlot.project_id == data.project_id,
+                    MemoirStorySlot.id == data.target_id,
                 )
             )
         else:
