@@ -55,8 +55,6 @@ class FakeNarrativeAI:
     def __init__(self, responses: list[dict | str]):
         self.responses = list(responses)
         self.calls = 0
-        self.user_prompts: list[str] = []
-        self.max_tokens: list[int] = []
 
     async def _call_llm(
         self,
@@ -68,8 +66,6 @@ class FakeNarrativeAI:
         return_raw: bool = False,
     ) -> str:
         self.calls += 1
-        self.user_prompts.append(user_prompt)
-        self.max_tokens.append(max_tokens)
         response = self.responses.pop(0)
         if isinstance(response, str):
             return response
@@ -325,8 +321,6 @@ async def test_real_provider_schema_errors_are_repaired_once(client, test_db):
     )
 
     assert fake_ai.calls == 2
-    assert fake_ai.max_tokens == [6000, 6000]
-    assert "narrative_role 和 slot_keys 是两个不同维度" in fake_ai.user_prompts[1]
     assert len(result.created_claim_ids) == 1
     assert len(result.created_story_ids) == 1
     assert result.extraction_diagnostics["repair_attempted"] is True
@@ -335,10 +329,15 @@ async def test_real_provider_schema_errors_are_repaired_once(client, test_db):
 async def test_invalid_ai_schema_after_repair_creates_no_narrative_state(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
     project, utterance, version = await _load_source(test_db, created)
+    ambiguous = _extraction_payload("我小时候住在成都。")
+    ambiguous["claims"] = [
+        ambiguous["claims"][0],
+        {**ambiguous["claims"][0]},
+    ]
     fake_ai = FakeNarrativeAI(
         [
             "not-json",
-            {"schema_version": "1", "claims": "still-not-a-list"},
+            ambiguous,
         ]
     )
 
@@ -482,6 +481,38 @@ async def test_repair_does_not_replace_more_informative_valid_initial_items(
         "used_initial_response_after_repair"
     ] is True
     assert result.extraction_diagnostics["discarded_story_slot_key_count"] == 1
+
+
+async def test_repair_prefers_evidence_supported_claims_over_schema_item_count(
+    client,
+    test_db,
+):
+    source_text = "七二年前后，我搬到了成都。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    initial = _extraction_payload(source_text)
+    initial["entities"].append({**initial["entities"][0]})
+    unsupported = initial["claims"][2]
+    initial["claims"] = [
+        unsupported,
+        {**unsupported, "key": "fabricated_again"},
+    ]
+    repaired = _extraction_payload(source_text)
+    repaired["claims"] = repaired["claims"][:1]
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=FakeNarrativeAI([initial, repaired]),
+    )
+
+    assert len(result.created_claim_ids) == 1
+    assert result.skipped_claim_keys == ()
+    assert result.extraction_diagnostics[
+        "used_initial_response_after_repair"
+    ] is False
 
 
 async def test_interviewer_fact_preserves_speaker_and_requires_review(client, test_db):

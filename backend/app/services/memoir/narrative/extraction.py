@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from copy import deepcopy
 import json
 import logging
@@ -102,6 +103,15 @@ def _filter_story_slot_keys(raw_story: object) -> tuple[object, int]:
     return normalized_story, removed_count
 
 
+def _duplicate_item_keys(raw_items: list[object]) -> set[str]:
+    keys = [
+        raw_item.get("key")
+        for raw_item in raw_items
+        if isinstance(raw_item, dict) and isinstance(raw_item.get("key"), str)
+    ]
+    return {key for key, count in Counter(keys).items() if count > 1}
+
+
 def _salvage_valid_extraction_items(
     content: str,
 ) -> tuple[MemoirNarrativeExtraction, dict[str, int]] | None:
@@ -118,8 +128,11 @@ def _salvage_valid_extraction_items(
         return None
 
     entities: list[MemoirNarrativeExtractedEntity] = []
+    duplicate_entity_keys = _duplicate_item_keys(raw_entities)
     entity_keys: set[str] = set()
     for raw_entity in raw_entities:
+        if isinstance(raw_entity, dict) and raw_entity.get("key") in duplicate_entity_keys:
+            continue
         try:
             entity = MemoirNarrativeExtractedEntity.model_validate(raw_entity)
         except ValidationError:
@@ -130,8 +143,11 @@ def _salvage_valid_extraction_items(
         entities.append(entity)
 
     claims: list[MemoirNarrativeExtractedClaim] = []
+    duplicate_claim_keys = _duplicate_item_keys(raw_claims)
     claim_keys: set[str] = set()
     for raw_claim in raw_claims:
+        if isinstance(raw_claim, dict) and raw_claim.get("key") in duplicate_claim_keys:
+            continue
         try:
             claim = MemoirNarrativeExtractedClaim.model_validate(raw_claim)
             MemoirNarrativeExtraction(
@@ -150,9 +166,12 @@ def _salvage_valid_extraction_items(
         return None
 
     stories: list[MemoirNarrativeExtractedStory] = []
+    duplicate_story_keys = _duplicate_item_keys(raw_stories)
     story_keys: set[str] = set()
     discarded_story_slot_key_count = 0
     for raw_story in raw_stories:
+        if isinstance(raw_story, dict) and raw_story.get("key") in duplicate_story_keys:
+            continue
         normalized_story, removed_slot_count = _filter_story_slot_keys(raw_story)
         try:
             story = MemoirNarrativeExtractedStory.model_validate(normalized_story)
@@ -195,12 +214,29 @@ def _try_salvage_extraction_items(
 
 def _candidate_score(
     candidate: tuple[MemoirNarrativeExtraction, dict[str, int]],
+    *,
+    source_text: str,
 ) -> tuple[int, int, int, int]:
     extraction, discarded_counts = candidate
+    supported_claims = [
+        claim
+        for claim in extraction.claims
+        if any(quote in source_text for quote in claim.evidence_quotes)
+    ]
+    supported_claim_keys = {claim.key for claim in supported_claims}
+    supported_stories = [
+        story
+        for story in extraction.stories
+        if any(link.claim_key in supported_claim_keys for link in story.claims)
+    ]
     return (
-        len(extraction.claims),
-        len(extraction.stories),
-        len(extraction.entities),
+        len(supported_claims),
+        len(supported_stories),
+        sum(
+            quote in source_text
+            for claim in supported_claims
+            for quote in claim.evidence_quotes
+        ),
         -sum(discarded_counts.values()),
     )
 
@@ -385,7 +421,7 @@ async def extract_narrative_state(
         ]
         source, selected = max(
             usable_candidates,
-            key=lambda item: _candidate_score(item[1]),
+            key=lambda item: _candidate_score(item[1], source_text=source_text),
         )
         extraction, discarded_counts = selected
         diagnostics.update(discarded_counts)
