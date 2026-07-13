@@ -7,6 +7,10 @@ from app.migrations.audit import migrate_audit_schema
 from app.migrations.auth import migrate_auth_schema
 from app.migrations.git_sync import migrate_git_sync_schema
 from app.migrations.memoir_images import assert_memoir_image_schema, migrate_memoir_image_schema
+from app.migrations.memoir_narrative import (
+    assert_memoir_narrative_schema,
+    migrate_memoir_narrative_schema,
+)
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
@@ -24,6 +28,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     memoir_voice = await migrate_memoir_voice_schema(engine)
     memoir_semantic = await migrate_memoir_semantic_schema(engine)
     memoir_images = await migrate_memoir_image_schema(engine)
+    memoir_narrative = await migrate_memoir_narrative_schema(engine)
     await assert_runtime_schema(engine)
     return {
         "auth": auth,
@@ -32,6 +37,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
         "memoir_voice": memoir_voice,
         "memoir_semantic": memoir_semantic,
         "memoir_images": memoir_images,
+        "memoir_narrative": memoir_narrative,
     }
 
 
@@ -40,3 +46,4 @@ async def assert_runtime_schema(engine: AsyncEngine) -> None:
     await assert_base_runtime_schema(engine)
     await assert_memoir_voice_schema(engine)
     await assert_memoir_image_schema(engine)
+    await assert_memoir_narrative_schema(engine)
