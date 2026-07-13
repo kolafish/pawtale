@@ -1,4 +1,9 @@
-import type { MemoirGuidanceMode, MemoirInterviewType, MemoirVoiceTranscriptItem } from "../../domain/voice-chat";
+import type {
+  MemoirGuidanceMode,
+  MemoirInterviewType,
+  MemoirSessionGoal,
+  MemoirVoiceTranscriptItem,
+} from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
@@ -244,7 +249,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
             : (
                 !state.hasProject
                   ? "创建回忆录"
-                  : (!state.voiceAuthorizationAgreed ? "同意协议后开始" : (state.creatingVoice ? "正在准备" : "我来说一段"))
+                  : (!state.voiceAuthorizationAgreed ? "同意协议后开始" : (state.creatingVoice ? "正在准备" : "随便讲一段"))
               )
         ),
     voiceStartNoteText: state.loading
@@ -459,6 +464,15 @@ definePage<HomeData>()({
     await this.startVoiceChatWithMode("free_narration", "home_resume");
   },
 
+  async startBookCompletion() {
+    await this.startVoiceChatWithMode(
+      "guided_interview",
+      "home_resume",
+      "ai_interview",
+      "book_completion",
+    );
+  },
+
   async startHumanInterview() {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
   },
@@ -467,6 +481,7 @@ definePage<HomeData>()({
     mode: MemoirGuidanceMode,
     entry: HomeVoiceEntry,
     interviewType: MemoirInterviewType = "ai_interview",
+    sessionGoal: MemoirSessionGoal = "open_narration",
   ) {
     if (this.data.loading || this.data.creatingVoice) {
       return;
@@ -490,11 +505,13 @@ definePage<HomeData>()({
       const detail = await createMemoirVoiceSession({
         guidance_mode: mode,
         interview_type: interviewType,
+        session_goal: sessionGoal,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: entry === "home" ? "miniprogram_home" : `miniprogram_${entry}`,
           interview_type: interviewType,
+          session_goal: sessionGoal,
           first_version: true,
           ...(this.data.launchVariant !== "none" ? { launch_variant: this.data.launchVariant } : {}),
           ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
@@ -504,7 +521,13 @@ definePage<HomeData>()({
       });
       trackAuditAction(
         "voice_chat.start",
-        { guidance_mode: mode, interview_type: interviewType, entry, launch_variant: this.data.launchVariant },
+        {
+          guidance_mode: mode,
+          interview_type: interviewType,
+          session_goal: sessionGoal,
+          entry,
+          launch_variant: this.data.launchVariant,
+        },
         { projectId: this.data.projectId, voiceSessionId: detail.session.id },
       );
       if (entry === "home_launch") {
@@ -515,6 +538,7 @@ definePage<HomeData>()({
           voiceSessionId: detail.session.id,
           mode,
           interviewType,
+          sessionGoal,
           projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
         }),
       });

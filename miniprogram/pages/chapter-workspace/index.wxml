@@ -23,6 +23,7 @@
       <view class="tab {{activeTab === 'structure' ? 'active' : ''}}" data-tab="structure" bindtap="changeTab">章节结构</view>
       <view class="tab {{activeTab === 'stories' ? 'active' : ''}}" data-tab="stories" bindtap="changeTab">故事与证据</view>
       <view class="tab {{activeTab === 'checks' ? 'active' : ''}}" data-tab="checks" bindtap="changeTab">检查报告</view>
+      <view class="tab {{activeTab === 'followups' ? 'active' : ''}}" data-tab="followups" bindtap="changeTab">补访问题</view>
     </view>
 
     <view wx:if="{{activeTab === 'structure'}}" class="content-section">
@@ -92,7 +93,7 @@
       <view wx:else class="empty-state">本章还没有关联 Story</view>
     </view>
 
-    <view wx:else class="content-section">
+    <view wx:elif="{{activeTab === 'checks'}}" class="content-section">
       <view wx:for="{{gapGroups}}" wx:for-item="group" wx:key="key" class="gap-section">
         <view class="section-heading">
           <text class="section-title">{{group.title}}</text>
@@ -127,6 +128,36 @@
         </view>
         <view wx:else class="empty-row">{{group.emptyText}}</view>
       </view>
+    </view>
+
+    <view wx:else class="content-section">
+      <view class="section-heading">
+        <text class="section-title">本章补访问题</text>
+        <text class="section-count">{{followupTasks.length}} 项</text>
+      </view>
+      <view wx:if="{{followupError}}" class="message error-message">{{followupError}}</view>
+      <view wx:if="{{followupLoading}}" class="empty-state">正在加载补访问题</view>
+      <view wx:elif="{{followupTasks.length}}" class="followup-list">
+        <view wx:for="{{followupTasks}}" wx:for-item="task" wx:key="id" class="followup-item">
+          <view class="row-title-line">
+            <text class="followup-priority">{{task.priorityText}}</text>
+            <text class="status-label">{{task.statusText}}</text>
+          </view>
+          <text class="followup-question">{{task.question}}</text>
+          <text wx:if="{{task.purpose}}" class="followup-purpose">{{task.purpose}}</text>
+          <button
+            wx:if="{{task.canInterview}}"
+            class="followup-interview-button"
+            data-task-id="{{task.id}}"
+            loading="{{startingFollowupTaskId === task.id}}"
+            disabled="{{startingFollowupTaskId === task.id}}"
+            bindtap="startHumanFollowupInterview"
+          >
+            {{task.actionText}}
+          </button>
+        </view>
+      </view>
+      <view wx:else class="empty-state">本章目前没有待补访的问题</view>
     </view>
   </block>
 </view>

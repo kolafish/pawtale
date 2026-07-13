@@ -181,6 +181,45 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
+test("book completion renders one task question without disabling unrelated recording controls", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    sessionGoal: "book_completion",
+    voiceAuthorizationAgreed: true,
+    assistantPromptText: "模型生成的另一个问法",
+    completionTaskAction: "switch",
+    completionTask: {
+      id: "task-1",
+      question: "爷爷退休以后为什么还一直忙公司的事？",
+      purpose: "补足退休后的动机和影响。",
+      status: "in_progress",
+    },
+  });
+
+  assert.equal(patch.showCompletionTaskPanel, true);
+  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.completionTaskQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
+  assert.equal(patch.showCompletionTaskActions, true);
+  assert.equal(patch.completionTaskControlsDisabled, true);
+  assert.equal(patch.micButtonDisabled, false);
+  assert.equal(patch.finishButtonText, "保存离开");
+});
+
+test("book completion without a task shows a terminal visible state", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    sessionGoal: "book_completion",
+    voiceAuthorizationAgreed: true,
+    completionTask: null,
+    completionTaskLoading: false,
+  });
+
+  assert.equal(patch.completionTaskStatusText, "目前没有待补的问题");
+  assert.equal(patch.liveDisplayText, "目前没有待补问题，可以保存离开");
+  assert.equal(patch.showCompletionTaskActions, false);
+  assert.equal(patch.showAssistantPanel, false);
+});
+
 test("voice chat view patch adds focused large text root classes", () => {
   const idlePatch = voiceChatViewPatch({
     ...initialVoiceChatData(),
@@ -314,6 +353,27 @@ test("voice chat session detail selector applies saved and assistant state", () 
   assert.equal(patch.latestTranscriptText, "我想讲外婆");
   assert.equal(patch.assistantPromptText, "外婆最常做的一件事是什么？");
   assert.equal(patch.followUpAudioFileId, "audio-assistant");
+});
+
+test("voice session detail selector carries the canonical completion task binding", () => {
+  const data = initialVoiceChatData();
+  const patch = voiceSessionDetailPatch({
+    session: {
+      project_id: "project-1",
+      status: "created",
+      guidance_mode: "guided_interview",
+      interview_type: "human_interview",
+      session_goal: "book_completion",
+      current_followup_task_id: "task-1",
+      error_message: "",
+    },
+    messages: [],
+    utterances: [],
+  }, data);
+
+  assert.equal(patch.projectId, "project-1");
+  assert.equal(patch.sessionGoal, "book_completion");
+  assert.equal(patch.currentFollowupTaskId, "task-1");
 });
 
 test("voice chat realtime selectors derive capture, gateway, status, and error patches", () => {

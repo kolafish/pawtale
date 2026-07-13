@@ -82,6 +82,13 @@
 
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <button
+        class="{{resumeAskButtonClass}} completion"
+        bindtap="startBookCompletion"
+        hover-class="{{resumeAskButtonHoverClass}}"
+      >
+        帮我补全这本书
+      </button>
+      <button
         class="{{resumeAskButtonClass}}"
         bindtap="startHumanInterview"
         hover-class="{{resumeAskButtonHoverClass}}"

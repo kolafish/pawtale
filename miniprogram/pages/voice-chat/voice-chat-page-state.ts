@@ -1,6 +1,8 @@
 import type {
+  MemoirFollowupTask,
   MemoirGuidanceMode,
   MemoirInterviewType,
+  MemoirSessionGoal,
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   TTSAlignmentSegment,
@@ -39,10 +41,18 @@ export interface VoiceChatTranscriptLineView extends VoiceChatTranscriptLine {
 
 export interface VoiceChatData {
   voiceSessionId: string;
+  projectId: string;
   projectTitle: string;
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule: string;
   interviewType: MemoirInterviewType;
+  sessionGoal: MemoirSessionGoal;
+  currentFollowupTaskId: string;
+  completionTask: MemoirFollowupTask | null;
+  completionTaskLoading: boolean;
+  completionTaskAction: string;
+  completionTaskError: string;
+  completionTaskNotice: string;
   speakerRole: MemoirSpeakerRole;
   status: VoiceChatConnectionStatus;
   statusText: string;
@@ -110,6 +120,15 @@ export interface VoiceChatData {
   showRecoveryActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   showAssistantPanel: boolean;
+  showCompletionTaskPanel: boolean;
+  completionTaskPanelClass: string;
+  completionTaskStatusText: string;
+  completionTaskQuestionText: string;
+  completionTaskPurposeText: string;
+  showCompletionTaskActions: boolean;
+  showCompletionTaskContinue: boolean;
+  completionTaskControlsDisabled: boolean;
+  completionTaskActionText: string;
   assistantPanelClass: string;
   assistantLabelText: string;
   showAssistantOpening: boolean;
@@ -161,10 +180,18 @@ export interface AutoListenGateSnapshot {
 export function initialVoiceChatData(): VoiceChatData {
   return {
     voiceSessionId: "",
+    projectId: "",
     projectTitle: "",
     guidanceMode: "free_narration",
     currentGuidanceModule: "",
     interviewType: "ai_interview",
+    sessionGoal: "open_narration",
+    currentFollowupTaskId: "",
+    completionTask: null,
+    completionTaskLoading: false,
+    completionTaskAction: "",
+    completionTaskError: "",
+    completionTaskNotice: "",
     speakerRole: "narrator",
     status: "idle",
     statusText: "未连接",
@@ -238,6 +265,15 @@ export function initialVoiceChatData(): VoiceChatData {
     showRecoveryActions: false,
     showVoiceAuthorizationPanel: true,
     showAssistantPanel: false,
+    showCompletionTaskPanel: false,
+    completionTaskPanelClass: "completion-task-panel",
+    completionTaskStatusText: "",
+    completionTaskQuestionText: "",
+    completionTaskPurposeText: "",
+    showCompletionTaskActions: false,
+    showCompletionTaskContinue: false,
+    completionTaskControlsDisabled: false,
+    completionTaskActionText: "",
     assistantPanelClass: "assistant-panel",
     assistantLabelText: "小余想听您讲讲",
     showAssistantOpening: true,
@@ -293,6 +329,15 @@ export type VoiceChatViewPatch = Pick<
   | "showRecoveryActions"
   | "showVoiceAuthorizationPanel"
   | "showAssistantPanel"
+  | "showCompletionTaskPanel"
+  | "completionTaskPanelClass"
+  | "completionTaskStatusText"
+  | "completionTaskQuestionText"
+  | "completionTaskPurposeText"
+  | "showCompletionTaskActions"
+  | "showCompletionTaskContinue"
+  | "completionTaskControlsDisabled"
+  | "completionTaskActionText"
   | "assistantPanelClass"
   | "assistantLabelText"
   | "showAssistantOpening"
@@ -345,11 +390,39 @@ function speakerRoleLabel(role: MemoirSpeakerRole): string {
   return role === "interviewer" ? "采访者" : "被访者";
 }
 
+function completionTaskStatusText(state: VoiceChatData): string {
+  if (state.completionTaskError) {
+    return "补访问题加载失败";
+  }
+  if (state.completionTaskLoading && !state.completionTask) {
+    return "正在准备要补的问题";
+  }
+  if (state.completionTaskNotice) {
+    return state.completionTaskNotice;
+  }
+  const status = state.completionTask?.status;
+  if (!status) {
+    return "目前没有待补的问题";
+  }
+  return ({
+    pending: "这项等待补充",
+    in_progress: "正在补这一项",
+    answered: "这项已经补上了",
+    deferred: "已留到以后再补",
+    cannot_recall: "已按暂时想不起来处理",
+    excluded: "已设为不收录",
+    cancelled: "这项已经取消",
+  })[status];
+}
+
 export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
   const isHumanInterview = state.interviewType === "human_interview";
+  const isBookCompletion = state.sessionGoal === "book_completion";
+  const showCompletionTaskPanel = isBookCompletion;
   const showAssistantPanel = !isHumanInterview
+    && !isBookCompletion
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview
@@ -388,9 +461,15 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
         isHumanInterview ? `点上方开始记录${speakerRoleLabel(state.speakerRole)}` : "点下方“我来说一段”"
       ));
   }
+  if (isBookCompletion && !state.recording && !assistantBusy) {
+    liveDisplayText = state.latestTranscriptText
+      || (state.completionTask
+        ? "回答上面这一个问题就好"
+        : (state.completionTaskLoading ? "正在准备要补的问题" : "目前没有待补问题，可以保存离开"));
+  }
   let controlHintText = isHumanInterview
     ? ""
-    : "说一两句也可以，我会帮您记下来。";
+    : (isBookCompletion ? "只说您记得的部分就可以。" : "说一两句也可以，我会帮您记下来。");
   if (state.recording) {
     controlHintText = isHumanInterview ? "" : "说完请点这里";
   } else if (!isHumanInterview && state.followUpLoading && !hasAssistantPrompt) {
@@ -418,6 +497,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (isHumanInterview) {
     pageClass.push("human-interview");
   }
+  if (isBookCompletion) {
+    pageClass.push("book-completion");
+  }
   if (!isHumanInterview && state.recording) {
     pageClass.push("ai-recording-focus");
   }
@@ -427,7 +509,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (!showControlBar) {
     pageClass.push("no-control-bar");
   }
-  const focusClass = largeTextFocusClass(state, showAssistantPanel);
+  const focusClass = largeTextFocusClass(state, showAssistantPanel || showCompletionTaskPanel);
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
   }
@@ -438,11 +520,22 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     state.recording ? "recording" : "",
     micButtonDisabled ? "disabled" : "",
   ].filter(Boolean).join(" ");
+  const completionTaskStatus = state.completionTask?.status;
+  const showCompletionTaskActions = completionTaskStatus === "pending" || completionTaskStatus === "in_progress";
+  const showCompletionTaskContinue = completionTaskStatus === "answered"
+    || completionTaskStatus === "cannot_recall"
+    || completionTaskStatus === "excluded";
+  const completionTaskControlsDisabled = Boolean(state.completionTaskAction) || state.recording;
+  const completionTaskPanelClass = [
+    "completion-task-panel",
+    state.completionTaskError ? "error-state" : "",
+    completionTaskStatus === "answered" ? "complete-state" : "",
+  ].filter(Boolean).join(" ");
   return {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
-    topModeLabel: isHumanInterview ? "人工访谈" : "AI 访谈",
-    topSubtitle: isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲",
+    topModeLabel: isBookCompletion ? (isHumanInterview ? "人工补访" : "补全成书") : (isHumanInterview ? "人工访谈" : "AI 访谈"),
+    topSubtitle: isBookCompletion ? "一次只补一个问题" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
@@ -453,6 +546,15 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
     showAssistantPanel,
+    showCompletionTaskPanel,
+    completionTaskPanelClass,
+    completionTaskStatusText: completionTaskStatusText(state),
+    completionTaskQuestionText: state.completionTask?.question || "这本书目前没有需要补充的问题",
+    completionTaskPurposeText: state.completionTask?.purpose || "",
+    showCompletionTaskActions,
+    showCompletionTaskContinue,
+    completionTaskControlsDisabled,
+    completionTaskActionText: state.completionTaskAction ? "正在处理" : "",
     assistantPanelClass: state.followUpError ? "assistant-panel error-state" : "assistant-panel",
     assistantLabelText: state.followUpError ? "小余没说好" : "小余想听您讲讲",
     showAssistantOpening: !state.latestTranscriptText
@@ -528,6 +630,9 @@ type VoiceSessionPatchCurrent = Pick<
   | "guidanceMode"
   | "currentGuidanceModule"
   | "interviewType"
+  | "projectId"
+  | "sessionGoal"
+  | "currentFollowupTaskId"
   | "transcriptLines"
   | "lastFollowUpSourceMessageId"
   | "dismissedFollowUpMessageId"
@@ -542,6 +647,7 @@ export function voiceChatSessionEntryPatch(options: {
   guidanceMode: MemoirGuidanceMode;
   currentGuidanceModule: string;
   interviewType: MemoirInterviewType;
+  sessionGoal: MemoirSessionGoal;
   voiceAuthorizationAgreed: boolean;
 }): VoiceChatPatch {
   const isHumanInterview = options.interviewType === "human_interview";
@@ -551,6 +657,7 @@ export function voiceChatSessionEntryPatch(options: {
     guidanceMode: options.guidanceMode,
     currentGuidanceModule: options.currentGuidanceModule,
     interviewType: options.interviewType,
+    sessionGoal: options.sessionGoal,
     modeLabel: voiceGuidanceLabel(options.guidanceMode, options.currentGuidanceModule),
     voiceAuthorizationAgreed: options.voiceAuthorizationAgreed,
     primaryActionText: options.voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
@@ -644,6 +751,10 @@ export function voiceSessionSnapshotPatch(
   const guidanceMode = snapshot.detail?.session.guidance_mode || current.guidanceMode;
   const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || current.currentGuidanceModule;
   const interviewType = snapshot.detail?.session.interview_type || current.interviewType;
+  const sessionGoal = snapshot.detail?.session.session_goal || current.sessionGoal;
+  const currentFollowupTaskId = snapshot.detail
+    ? (snapshot.detail.session.current_followup_task_id || "")
+    : current.currentFollowupTaskId;
   return {
     ...assistantSessionPatch(snapshot.transcriptLines, guidanceMode, {
       ...current,
@@ -652,6 +763,9 @@ export function voiceSessionSnapshotPatch(
     }),
     currentGuidanceModule,
     interviewType,
+    projectId: snapshot.detail?.session.project_id || current.projectId,
+    sessionGoal,
+    currentFollowupTaskId,
     recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的讲述记录" : current.recoveryNotice,
   };
 }
@@ -687,6 +801,7 @@ export function voiceSessionDetailPatch(
   const guidanceMode = detail.session.guidance_mode || current.guidanceMode;
   const currentGuidanceModule = detail.session.current_guidance_module || current.currentGuidanceModule;
   const interviewType = detail.session.interview_type || current.interviewType;
+  const sessionGoal = detail.session.session_goal || current.sessionGoal;
   const nextLines = detailLines.length >= current.transcriptLines.length
     ? detailLines
     : current.transcriptLines;
@@ -699,6 +814,9 @@ export function voiceSessionDetailPatch(
     }),
     currentGuidanceModule,
     interviewType,
+    projectId: detail.session.project_id || current.projectId,
+    sessionGoal,
+    currentFollowupTaskId: detail.session.current_followup_task_id || "",
   };
 }
 

@@ -76,6 +76,31 @@
     </checkbox-group>
   </view>
 
+  <view wx:if="{{showCompletionTaskPanel}}" class="{{completionTaskPanelClass}}">
+    <view class="completion-task-head">
+      <text class="completion-task-label">这次只补一件事</text>
+      <text class="completion-task-status">{{completionTaskStatusText}}</text>
+    </view>
+    <text class="completion-task-question">{{completionTaskQuestionText}}</text>
+    <text wx:if="{{completionTaskPurposeText}}" class="completion-task-purpose">{{completionTaskPurposeText}}</text>
+    <text wx:if="{{completionTaskError}}" class="completion-task-error">{{completionTaskError}}</text>
+    <text wx:if="{{completionTaskActionText}}" class="completion-task-action-state">{{completionTaskActionText}}</text>
+    <view wx:if="{{showCompletionTaskActions}}" class="completion-task-actions">
+      <button disabled="{{completionTaskControlsDisabled}}" bindtap="switchCompletionTask">换一个</button>
+      <button disabled="{{completionTaskControlsDisabled}}" bindtap="chooseCannotRecallResolution">想不起来</button>
+      <button disabled="{{completionTaskControlsDisabled}}" bindtap="deferCompletionTask">以后再说</button>
+      <button class="danger" disabled="{{completionTaskControlsDisabled}}" bindtap="confirmExcludeCompletionTask">不想收录</button>
+    </view>
+    <button
+      wx:if="{{showCompletionTaskContinue}}"
+      class="completion-task-continue"
+      disabled="{{completionTaskControlsDisabled}}"
+      bindtap="continueToNextCompletionTask"
+    >
+      继续下一项
+    </button>
+  </view>
+
   <view wx:if="{{showAssistantPanel}}" class="{{assistantPanelClass}}">
     <view class="assistant-head">
       <text class="assistant-label">{{assistantLabelText}}</text>

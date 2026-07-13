@@ -7,15 +7,20 @@ import type {
   MemoirNarrativeGap,
   MemoirNarrativeGapAction,
 } from "../../domain/chapter-workspace";
+import type { MemoirFollowupTask } from "../../domain/voice-chat";
+import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
+  createMemoirVoiceSession,
   enqueueMemoirChapterWorkspaceAudit,
   getMemoirChapterWorkspace,
+  listMemoirFollowupTasks,
   resolveMemoirNarrativeGap,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
+  pageUrl,
   queryChoice,
   queryParam,
   type PageDatasetEvent,
@@ -24,7 +29,7 @@ import {
 } from "../../services/page-input";
 
 
-const TAB_VALUES = ["structure", "stories", "checks"] as const;
+const TAB_VALUES = ["structure", "stories", "checks", "followups"] as const;
 const GAP_ACTIONS = ["resolve", "accept-incomplete", "not-applicable", "dismiss"] as const;
 const AUDIT_POLL_INTERVAL_MS = 1500;
 
@@ -34,6 +39,7 @@ interface WorkspaceDataset {
   tab?: string;
   gapId?: string;
   action?: string;
+  taskId?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
@@ -73,6 +79,13 @@ interface GapGroupView {
   items: GapView[];
 }
 
+interface FollowupTaskView extends MemoirFollowupTask {
+  statusText: string;
+  priorityText: string;
+  canInterview: boolean;
+  actionText: string;
+}
+
 interface ChapterWorkspacePageData {
   loading: boolean;
   error: string;
@@ -88,6 +101,10 @@ interface ChapterWorkspacePageData {
   nodes: NodeView[];
   stories: StoryView[];
   gapGroups: GapGroupView[];
+  followupTasks: FollowupTaskView[];
+  followupLoading: boolean;
+  followupError: string;
+  startingFollowupTaskId: string;
 }
 
 const SLOT_LABELS: Record<string, string> = {
@@ -188,6 +205,29 @@ function isGapAction(value: string): value is MemoirNarrativeGapAction {
   return GAP_ACTIONS.includes(value as MemoirNarrativeGapAction);
 }
 
+function followupTaskStatusText(status: MemoirFollowupTask["status"]): string {
+  return ({
+    pending: "待访谈",
+    in_progress: "访谈中",
+    answered: "已补充",
+    deferred: "以后再补",
+    cannot_recall: "暂时想不起",
+    excluded: "不收录",
+    cancelled: "已取消",
+  })[status];
+}
+
+export function followupTaskView(task: MemoirFollowupTask): FollowupTaskView {
+  const canInterview = task.status === "pending" || task.status === "deferred";
+  return {
+    ...task,
+    statusText: followupTaskStatusText(task.status),
+    priorityText: task.priority >= 3000 ? "优先补充" : (task.priority >= 2000 ? "建议补充" : "有空再补"),
+    canInterview,
+    actionText: task.status === "deferred" ? "继续采访这题" : "采访这题",
+  };
+}
+
 definePage<ChapterWorkspacePageData>()({
   auditPollTimer: null as ReturnType<typeof setTimeout> | null,
   auditPollToken: 0,
@@ -208,6 +248,10 @@ definePage<ChapterWorkspacePageData>()({
     nodes: [],
     stories: [],
     gapGroups: [],
+    followupTasks: [],
+    followupLoading: false,
+    followupError: "",
+    startingFollowupTaskId: "",
   },
 
   async onLoad(query: PageQuery = {}) {
@@ -299,6 +343,7 @@ definePage<ChapterWorkspacePageData>()({
     try {
       const workspace = await getMemoirChapterWorkspace(this.data.projectId, this.data.chapterId);
       this.applyWorkspace(workspace);
+      await this.loadFollowupTasks(true);
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
@@ -307,6 +352,34 @@ definePage<ChapterWorkspacePageData>()({
     } finally {
       if (!silent) {
         this.setData({ loading: false });
+      }
+    }
+  },
+
+  async loadFollowupTasks(silent = false) {
+    if (!this.data.projectId || !this.data.chapterId || (this.data.followupLoading && !silent)) {
+      return;
+    }
+    if (!silent) {
+      this.setData({ followupLoading: true, followupError: "" });
+    }
+    try {
+      const response = await listMemoirFollowupTasks(this.data.projectId, {
+        chapterId: this.data.chapterId,
+        limit: 100,
+      });
+      this.setData({
+        followupTasks: response.items.map(followupTaskView),
+        followupError: "",
+      });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ followupError: error instanceof Error ? error.message : "补访问题加载失败" });
+    } finally {
+      if (!silent) {
+        this.setData({ followupLoading: false });
       }
     }
   },
@@ -411,6 +484,59 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({ auditError: error instanceof Error ? error.message : "问题处理失败" });
     } finally {
       this.setData({ actionBusyGapId: "" });
+    }
+  },
+
+  async startHumanFollowupInterview(event: DatasetEvent) {
+    const taskId = datasetString(event, "taskId");
+    if (!taskId || this.data.startingFollowupTaskId) {
+      return;
+    }
+    const task = this.data.followupTasks.find((item) => item.id === taskId);
+    if (!task?.canInterview) {
+      return;
+    }
+    this.setData({ startingFollowupTaskId: taskId, followupError: "" });
+    try {
+      const detail = await createMemoirVoiceSession({
+        guidance_mode: "guided_interview",
+        interview_type: "human_interview",
+        session_goal: "book_completion",
+        current_followup_task_id: taskId,
+        provider: "volc_streaming_asr",
+        input_format: "pcm_s16le_16000_mono",
+        metadata_json: {
+          entry: "miniprogram_chapter_workspace",
+          chapter_id: this.data.chapterId,
+          followup_task_id: taskId,
+        },
+      }, { projectId: this.data.projectId });
+      trackAuditAction(
+        "voice_chat.start",
+        {
+          guidance_mode: "guided_interview",
+          interview_type: "human_interview",
+          session_goal: "book_completion",
+          entry: "chapter_workspace",
+        },
+        { projectId: this.data.projectId, voiceSessionId: detail.session.id },
+      );
+      wx.navigateTo({
+        url: pageUrl("/pages/voice-chat/index", {
+          voiceSessionId: detail.session.id,
+          mode: "guided_interview",
+          interviewType: "human_interview",
+          sessionGoal: "book_completion",
+          projectTitle: this.data.workspace?.chapter_title || "补访问题",
+        }),
+      });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({ followupError: error instanceof Error ? error.message : "人工访谈创建失败" });
+    } finally {
+      this.setData({ startingFollowupTaskId: "" });
     }
   },
 

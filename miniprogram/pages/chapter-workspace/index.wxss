@@ -118,7 +118,7 @@
 .tab-bar {
   margin-top: 26rpx;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-bottom: 1rpx solid #d8d0c7;
 }
 
@@ -129,7 +129,7 @@
   justify-content: center;
   border-bottom: 5rpx solid transparent;
   color: #756963;
-  font-size: 27rpx;
+  font-size: 25rpx;
   font-weight: 600;
   box-sizing: border-box;
 }
@@ -201,7 +201,8 @@
 
 .node-list,
 .story-list,
-.gap-list {
+.gap-list,
+.followup-list {
   border-top: 1rpx solid #d8d0c7;
 }
 
@@ -270,9 +271,66 @@
 }
 
 .story-item,
-.gap-item {
+.gap-item,
+.followup-item {
   padding: 26rpx 0;
   border-bottom: 1rpx solid #d8d0c7;
+}
+
+.followup-priority {
+  color: #8b5b43;
+  font-size: 23rpx;
+  font-weight: 700;
+  line-height: 34rpx;
+}
+
+.followup-question,
+.followup-purpose {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.followup-question {
+  margin-top: 14rpx;
+  color: #2b211e;
+  font-size: 31rpx;
+  font-weight: 700;
+  line-height: 46rpx;
+}
+
+.followup-purpose {
+  margin-top: 10rpx;
+  color: #675d58;
+  font-size: 25rpx;
+  line-height: 40rpx;
+}
+
+.followup-interview-button {
+  min-width: 220rpx;
+  min-height: 72rpx;
+  margin: 20rpx 0 0;
+  padding: 8rpx 24rpx;
+  border: 0;
+  border-radius: 10rpx;
+  background: #a64b3e;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+  transition-property: transform, background-color, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.followup-interview-button::after {
+  border: 0;
+}
+
+.followup-interview-button[disabled] {
+  opacity: 0.66;
 }
 
 .slot-grid {

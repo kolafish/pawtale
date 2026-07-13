@@ -57,9 +57,25 @@ function loadVoiceChatPage({
       messages: [],
       utterances: [],
     }),
+    getMemoirFollowupTask: async () => {
+      throw new Error("getMemoirFollowupTask was not mocked");
+    },
+    switchMemoirFollowupTask: async () => {
+      throw new Error("switchMemoirFollowupTask was not mocked");
+    },
+    deferMemoirFollowupTask: async () => {
+      throw new Error("deferMemoirFollowupTask was not mocked");
+    },
+    cannotRecallMemoirFollowupTask: async () => {
+      throw new Error("cannotRecallMemoirFollowupTask was not mocked");
+    },
+    excludeMemoirFollowupTask: async () => {
+      throw new Error("excludeMemoirFollowupTask was not mocked");
+    },
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
     ...voiceApiExports,
   });
+  clearModule("../pages/voice-chat/voice-chat-completion-task-runtime.ts");
   clearModule("../services/audio-playback.ts");
   mockModule("../services/tts-text-progress.ts", {
     splitTextByAudioPlaybackProgress: () => ({
@@ -242,6 +258,58 @@ test("voice chat blocks recording before voice authorization consent", () => {
   assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待声纹授权");
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
   delete global.wx;
+});
+
+test("switching a completion task leaves microphone and finish controls available", async () => {
+  let releaseSwitch;
+  const switchStarted = new Promise((resolve) => {
+    releaseSwitch = resolve;
+  });
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      switchMemoirFollowupTask: async () => {
+        await switchStarted;
+        return {
+          id: "task-2",
+          project_id: "project-1",
+          question: "后来这件事怎样影响了家里？",
+          purpose: "补足后续影响。",
+          status: "in_progress",
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      projectId: "project-1",
+      sessionGoal: "book_completion",
+      currentFollowupTaskId: "task-1",
+      voiceAuthorizationAgreed: true,
+      completionTask: {
+        id: "task-1",
+        question: "第一次离家后发生了什么？",
+        status: "in_progress",
+      },
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const request = page.switchCompletionTask.call(context);
+  assert.equal(context.data.completionTaskAction, "switch");
+  assert.equal(context.data.completionTaskControlsDisabled, true);
+  assert.equal(context.data.micButtonDisabled, false);
+  assert.equal(context.data.finishButtonText, "保存离开");
+
+  releaseSwitch();
+  await request;
+  assert.equal(context.data.currentFollowupTaskId, "task-2");
+  assert.equal(context.data.completionTask.question, "后来这件事怎样影响了家里？");
+  assert.equal(context.data.completionTaskAction, "");
 });
 
 test("human interview record action starts the selected speaker in one tap", async () => {
@@ -433,6 +501,28 @@ test("voice chat starts the opening assistant turn after a normal session load",
   assert.deepEqual(followUpCalls, [false]);
   assert.equal(connectCalls, 1);
   assert.equal(context.data.status, "ready");
+});
+
+test("book completion without a current task does not generate a generic opening question", () => {
+  const page = loadVoiceChatPage();
+  let followUpCalls = 0;
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      sessionGoal: "book_completion",
+      currentFollowupTaskId: "",
+      completionTask: null,
+    },
+    generateFollowUp() {
+      followUpCalls += 1;
+    },
+  };
+
+  page.maybeGenerateOpeningFollowUp.call(context);
+
+  assert.equal(followUpCalls, 0);
 });
 
 test("voice chat shows an error instead of continuing when session load fails", async () => {
@@ -1118,6 +1208,43 @@ test("voice chat does not request follow-up for non-final saved ASR events", () 
   assert.equal(context.data.transcriptLines[0].text, "先讲一段很长的童年经历。");
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(followUpCalls, 0);
+});
+
+test("human completion interview falls back to the selected speaker when provider final omits role", () => {
+  const page = loadVoiceChatPage();
+  let verificationCalls = 0;
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      interviewType: "human_interview",
+      sessionGoal: "book_completion",
+      speakerRole: "interviewer",
+      completionTask: { id: "task-1", status: "in_progress", question: "后来发生了什么？" },
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    startCompletionTaskVerification() {
+      verificationCalls += 1;
+    },
+  };
+
+  page.handleFinal.call(context, {
+    type: "asr.final",
+    text: "采访者补充说明问题背景。",
+    turn_final: true,
+  });
+  assert.equal(verificationCalls, 0);
+
+  context.data.speakerRole = "narrator";
+  page.handleFinal.call(context, {
+    type: "asr.final",
+    text: "被访者开始回答这个问题。",
+    turn_final: true,
+  });
+  assert.equal(verificationCalls, 1);
 });
 
 test("voice chat clears live transcript when a new recording session starts", () => {

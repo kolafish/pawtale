@@ -1,6 +1,8 @@
 import type {
+  MemoirFollowupCannotRecallResolution,
   MemoirGuidanceMode,
   MemoirInterviewType,
+  MemoirSessionGoal,
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
@@ -105,6 +107,7 @@ import {
   voiceRecordingStoppedPatch,
   voiceRecordingUnavailablePatch,
 } from "./voice-chat-recording-flow";
+import { VoiceChatCompletionTaskRuntime } from "./voice-chat-completion-task-runtime";
 import {
   datasetString,
   queryChoice,
@@ -135,6 +138,7 @@ const AUTO_LISTEN_NO_ANSWER_MS = 15000;
 const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
 const INTERVIEW_TYPE_VALUES: readonly MemoirInterviewType[] = ["ai_interview", "human_interview"];
+const SESSION_GOAL_VALUES: readonly MemoirSessionGoal[] = ["open_narration", "book_completion"];
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
 interface VoiceChatDataContext {
@@ -171,8 +175,24 @@ definePage<VoiceChatData>()({
   gatewayConnectPromise: null as Promise<boolean> | null,
   recordingStartPromise: null as Promise<boolean> | null,
   recordingStartGeneration: 0,
+  completionTaskRuntime: null as VoiceChatCompletionTaskRuntime | null,
 
   data: initialVoiceChatData(),
+
+  completionTasks() {
+    if (!this.completionTaskRuntime) {
+      this.completionTaskRuntime = new VoiceChatCompletionTaskRuntime({
+        readState: () => this.data,
+        applyPatch: (patch) => setVoiceChatData(this, patch),
+        isSuspended: () => this.pageSuspended,
+        cancelAssistant: (reason) => this.cancelFollowUpTTS(reason),
+        requestAssistant: () => {
+          void this.generateFollowUp(true);
+        },
+      });
+    }
+    return this.completionTaskRuntime;
+  },
 
   autoListenGateSnapshot() {
     const hasClient = this.voiceStreaming.hasClient();
@@ -195,6 +215,7 @@ definePage<VoiceChatData>()({
     const voiceSessionId = queryParam(query, "voiceSessionId");
     const guidanceMode = queryChoice(query, "mode", GUIDANCE_MODE_VALUES, "free_narration");
     const interviewType = queryChoice(query, "interviewType", INTERVIEW_TYPE_VALUES, "ai_interview");
+    const sessionGoal = queryChoice(query, "sessionGoal", SESSION_GOAL_VALUES, "open_narration");
     const currentGuidanceModule = queryParam(query, "module");
     const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
@@ -204,6 +225,7 @@ definePage<VoiceChatData>()({
       guidanceMode,
       currentGuidanceModule,
       interviewType,
+      sessionGoal,
       voiceAuthorizationAgreed,
     }));
     if (!voiceSessionId) {
@@ -263,6 +285,7 @@ definePage<VoiceChatData>()({
 
   suspendVoiceChat(reason: "hide" | "unload") {
     this.pageSuspended = true;
+    this.stopCompletionTaskRefresh();
     this.recordingStartGeneration += 1;
     followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
@@ -383,6 +406,7 @@ definePage<VoiceChatData>()({
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
+      await this.refreshCompletionTask();
       this.reconcilePendingClose(detail);
       if (detail.session.status !== "stopped" && detail.session.status !== "failed") {
         this.maybeGenerateOpeningFollowUp();
@@ -468,6 +492,70 @@ definePage<VoiceChatData>()({
     setVoiceChatData(this, voiceSessionDetailPatch(detail, this.data));
   },
 
+  async refreshCompletionTask(silent = false) {
+    return this.completionTasks().refresh(silent);
+  },
+
+  stopCompletionTaskRefresh() {
+    this.completionTaskRuntime?.stop();
+  },
+
+  startCompletionTaskVerification() {
+    this.completionTasks().startVerification();
+  },
+
+  async switchCompletionTask(note = "用户选择换一个补访问题") {
+    await this.completionTasks().switchTask(note);
+  },
+
+  async deferCompletionTask() {
+    await this.completionTasks().deferTask();
+  },
+
+  chooseCannotRecallResolution() {
+    if (this.data.completionTaskAction) {
+      return;
+    }
+    wx.showActionSheet({
+      itemList: ["接受暂时不完整", "问过家人以后再补"],
+      success: (result) => {
+        const resolution: MemoirFollowupCannotRecallResolution = result.tapIndex === 0
+          ? "accept_incomplete"
+          : "ask_family_later";
+        void this.applyCannotRecallResolution(resolution);
+      },
+    });
+  },
+
+  async applyCannotRecallResolution(resolution: MemoirFollowupCannotRecallResolution) {
+    await this.completionTasks().applyCannotRecall(resolution);
+  },
+
+  confirmExcludeCompletionTask() {
+    if (this.data.completionTaskAction) {
+      return;
+    }
+    wx.showModal({
+      title: "不把这项写进书里？",
+      content: "确认后，与这个问题关联的故事和事实将不再用于成书。",
+      confirmText: "不收录",
+      confirmColor: "#a64b3e",
+      success: (result) => {
+        if (result.confirm) {
+          void this.excludeCompletionTask();
+        }
+      },
+    });
+  },
+
+  async excludeCompletionTask() {
+    await this.completionTasks().excludeTask();
+  },
+
+  async continueToNextCompletionTask() {
+    await this.switchCompletionTask("当前补访问题已处理，用户继续下一项");
+  },
+
   persistCurrentTranscriptSnapshot() {
     if (!this.data.voiceSessionId) {
       return;
@@ -519,7 +607,16 @@ definePage<VoiceChatData>()({
   },
 
   maybeGenerateOpeningFollowUp() {
-    if (this.data.interviewType === "human_interview" || this.pageSuspended || this.data.followUpLoading) {
+    if (
+      this.data.interviewType === "human_interview"
+      || this.pageSuspended
+      || this.data.followUpLoading
+      || (
+        this.data.sessionGoal === "book_completion"
+        && this.data.completionTask?.status !== "in_progress"
+        && this.data.completionTask?.status !== "pending"
+      )
+    ) {
       return;
     }
     const hasAnyLine = this.data.transcriptLines.some((line) => line.text.trim());
@@ -534,6 +631,11 @@ definePage<VoiceChatData>()({
       || this.pageSuspended
       || !this.data.voiceSessionId
       || this.data.followUpLoading
+      || (
+        this.data.sessionGoal === "book_completion"
+        && this.data.completionTask?.status !== "in_progress"
+        && this.data.completionTask?.status !== "pending"
+      )
     ) {
       return;
     }
@@ -1673,6 +1775,7 @@ definePage<VoiceChatData>()({
       return;
     }
     this.recordingStartGeneration += 1;
+    this.stopCompletionTaskRefresh();
     this.cancelFollowUpTTS();
     setVoiceChatData(this, finishSessionStartPatch(this.data.recording));
     if (!this.voiceStreaming.hasClient()) {
@@ -1784,6 +1887,11 @@ definePage<VoiceChatData>()({
     );
     if (event.message_id && event.utterance_id) {
       void this.confirmSavedTranscriptSnapshot(event);
+    }
+    const finalSpeakerRole = event.speaker_role
+      || (this.data.interviewType === "human_interview" ? this.data.speakerRole : "narrator");
+    if (finalSpeakerRole !== "interviewer") {
+      this.startCompletionTaskVerification();
     }
     if (
       this.data.interviewType !== "human_interview"

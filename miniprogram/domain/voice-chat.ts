@@ -1,5 +1,6 @@
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirInterviewType = "ai_interview" | "human_interview";
+export type MemoirSessionGoal = "open_narration" | "book_completion";
 export type MemoirSpeakerRole = "narrator" | "interviewer";
 export type MemoirGuidanceModule = "person" | "event" | "place" | "period" | "theme";
 export type MemoirVoiceTranscriptIncludedFilter = "all" | "included" | "not_included";
@@ -20,6 +21,75 @@ export type MemoirBookChapterDraftStatus = "draft" | "confirmed";
 export type MemoirOutputStatus = "draft" | "accepted" | "archived";
 export type VoiceGatewayState = "ready" | "listening" | "finishing" | "stopped" | "failed";
 export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" | "persistence" | "timeout" | "unknown";
+export type MemoirFollowupTaskStatus =
+  | "pending"
+  | "in_progress"
+  | "answered"
+  | "deferred"
+  | "cannot_recall"
+  | "excluded"
+  | "cancelled";
+export type MemoirFollowupTaskClaimRole = "known" | "do_not_repeat" | "expected_evidence";
+export type MemoirFollowupTaskUtteranceRole = "target_answer" | "related_context";
+export type MemoirFollowupCannotRecallResolution = "accept_incomplete" | "ask_family_later";
+export type MemoirNarrativeActorType = "ai" | "user" | "system";
+
+export interface MemoirFollowupTaskClaim {
+  claim_id: string;
+  context_role: MemoirFollowupTaskClaimRole;
+}
+
+export interface MemoirFollowupTaskUtterance {
+  utterance_id: string;
+  result_role: MemoirFollowupTaskUtteranceRole;
+  created_at: string;
+}
+
+export interface MemoirFollowupTask {
+  id: string;
+  project_id: string;
+  gap_id: string;
+  chapter_id?: string | null;
+  story_id?: string | null;
+  target_slot: string;
+  question: string;
+  purpose: string;
+  known_context_summary: string;
+  priority: number;
+  status: MemoirFollowupTaskStatus;
+  assigned_session_id?: string | null;
+  defer_until?: string | null;
+  defer_reason: string;
+  created_by: MemoirNarrativeActorType;
+  started_at?: string | null;
+  completed_at?: string | null;
+  claims: MemoirFollowupTaskClaim[];
+  utterances: MemoirFollowupTaskUtterance[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirFollowupTaskListResponse {
+  items: MemoirFollowupTask[];
+  total: number;
+}
+
+export interface MemoirFollowupTaskActionRequest {
+  idempotency_key: string;
+  note?: string;
+}
+
+export interface MemoirFollowupTaskDeferRequest extends MemoirFollowupTaskActionRequest {
+  defer_until?: string | null;
+}
+
+export interface MemoirFollowupTaskCannotRecallRequest extends MemoirFollowupTaskActionRequest {
+  resolution: MemoirFollowupCannotRecallResolution;
+}
+
+export interface MemoirFollowupTaskSwitchRequest extends MemoirFollowupTaskActionRequest {
+  current_task_id: string;
+}
 
 export interface MemoirVoiceSession {
   id: string;
@@ -27,6 +97,8 @@ export interface MemoirVoiceSession {
   status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
   interview_type: MemoirInterviewType;
+  session_goal: MemoirSessionGoal;
+  current_followup_task_id?: string | null;
   current_guidance_module?: string | null;
   provider?: string | null;
   input_format?: string | null;
@@ -81,6 +153,8 @@ export interface MemoirVoiceSessionSummary {
   status: MemoirVoiceSessionStatus;
   guidance_mode: MemoirGuidanceMode;
   interview_type: MemoirInterviewType;
+  session_goal: MemoirSessionGoal;
+  current_followup_task_id?: string | null;
   current_guidance_module?: string | null;
   started_at?: string | null;
   stopped_at?: string | null;
@@ -202,6 +276,8 @@ export interface MemoirVoiceProgressResponse {
 export interface MemoirVoiceSessionCreate {
   guidance_mode: MemoirGuidanceMode;
   interview_type?: MemoirInterviewType;
+  session_goal?: MemoirSessionGoal;
+  current_followup_task_id?: string;
   current_guidance_module?: string;
   provider?: string;
   input_format?: string;
