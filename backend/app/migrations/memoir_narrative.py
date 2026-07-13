@@ -12,6 +12,11 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_claims",
     "memoir_claim_evidence",
     "memoir_narrative_decisions",
+    "memoir_stories",
+    "memoir_story_revisions",
+    "memoir_story_claims",
+    "memoir_story_slots",
+    "memoir_story_slot_claims",
 )
 MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
     "memoir_narrative_decisions_no_update",

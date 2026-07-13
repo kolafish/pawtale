@@ -22,11 +22,13 @@ def build_narrative_extraction_prompt(
     speaker_role: MemoirClaimEvidenceSpeakerRole,
     narrator_name: str,
     narrator_origin: str,
+    existing_story_candidates: list[dict[str, object]],
 ) -> str:
     context = {
         "speaker_role": speaker_role.value,
         "narrator_name": narrator_name,
         "narrator_origin": narrator_origin,
+        "existing_story_candidates": existing_story_candidates,
     }
     return f"""请从下面一条回忆录转写中抽取人物、地点、机构和事实命题。
 
@@ -67,6 +69,29 @@ source_text:
       "certainty": "exact|approximate|uncertain",
       "evidence_quotes": ["必须逐字、连续地出现在 source_text 中"]
     }}
+  ],
+  "stories": [
+    {{
+      "key": "story_1",
+      "title": "概括同一件事或同一段关系的稳定标题",
+      "story_type": "event|relationship|life_stage|theme",
+      "summary": "只概括本条 source_text 可支持的内容",
+      "time_start": null,
+      "time_end": null,
+      "time_precision": "exact|day|month|year|period|relative|unknown",
+      "primary_place_entity_key": null,
+      "existing_story_id": null,
+      "match_confidence": 0.0,
+      "claims": [
+        {{
+          "claim_key": "claim_1",
+          "narrative_role": "background|trigger|action|turning_point|outcome|reflection|context",
+          "slot_keys": ["必须来自对应 story_type 的槽位 key"],
+          "evidence_role": "supports|contradicts",
+          "is_core": true
+        }}
+      ]
+    }}
   ]
 }}
 
@@ -77,6 +102,12 @@ source_text:
 - 时间不确定时保留 time_text，certainty 使用 approximate 或 uncertain，不猜具体日期。
 - speaker_role=interviewer 时，采访者提出的问题不是叙述者事实；采访者自己陈述的新事实可以抽取，但会由系统进入人工核实。
 - aliases 只能来自原文，不能因为名称相似自行判断是同一个人。
+- story 必须引用本次 claims，不能脱离有逐字证据的 claim 创建。
+- event 槽位：background, trigger, people, difficulty, actions, turning_point, outcome, reflection。
+- relationship 槽位：meeting, person_portrait, shared_experience, relationship_change, representative_scene, reflection。
+- life_stage 槽位：entry_reason, responsibilities, representative_events, ability_and_character, transition, reflection。
+- theme 槽位：theme_definition, supporting_cases, contrast_or_failure, continuity, reflection。
+- 只有明确是同一件事时才填写 existing_story_id；它只是候选提示，不会绕过服务端校验。
 """
 
 
@@ -86,6 +117,7 @@ async def extract_narrative_state(
     speaker_role: MemoirClaimEvidenceSpeakerRole,
     narrator_name: str,
     narrator_origin: str,
+    existing_story_candidates: list[dict[str, object]] | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> tuple[MemoirNarrativeExtraction, str | None, str | None]:
@@ -97,9 +129,10 @@ async def extract_narrative_state(
             speaker_role=speaker_role,
             narrator_name=narrator_name,
             narrator_origin=narrator_origin,
+            existing_story_candidates=existing_story_candidates or [],
         ),
         temperature=0.0,
-        max_tokens=2600,
+        max_tokens=3600,
         timeout=60.0,
     )
     try:

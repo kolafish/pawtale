@@ -312,7 +312,7 @@ time_precision
 primary_place_entity_id
 lifecycle_status        # active / merged / archived
 completion_status       # incomplete / sufficient / accepted_incomplete
-verification_status     # unreviewed / confirmed / needs_verification / disputed
+verification_status     # unreviewed / confirmed / needs_verification / disputed / rejected
 publication_status      # eligible / private / excluded
 slot_schema_version
 merged_into_story_id
@@ -346,7 +346,8 @@ MemoirStorySlot
   status                  # missing / partial / sufficient / accepted_incomplete / not_applicable
   assessment_summary
   user_resolution_note
-  resolved_by
+  resolution_actor_type
+  resolved_by_user_id
   resolved_at
   updated_at
 
@@ -397,6 +398,15 @@ entry_reason -> responsibilities -> representative_events -> ability_and_charact
 ```text
 theme_definition -> supporting_cases -> contrast_or_failure -> continuity -> reflection
 ```
+
+第一版 schema 的 required 槽位是明确、版本化的产品约束：
+
+- event：`background`、`trigger`、`people`、`actions`、`outcome`。
+- relationship：`person_portrait`、`shared_experience`、`representative_scene`。
+- life_stage：`entry_reason`、`responsibilities`、`representative_events`、`transition`。
+- theme：`theme_definition`、`supporting_cases`、`continuity`。
+
+未列入 required 的槽位为 optional。Story 的 `completion_status` 只根据 required 槽位确定；optional 槽位缺失不会阻塞 sufficient。已有充分证据的槽位不能直接降级为 `accepted_incomplete` 或 `not_applicable`，需要先处理其 Claim/Evidence 冲突或确认状态。
 
 ### 5.5 ChapterContract：章节契约
 

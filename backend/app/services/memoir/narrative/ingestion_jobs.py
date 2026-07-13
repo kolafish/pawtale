@@ -197,6 +197,13 @@ async def run_narrative_ingestion_job(
                 entity_id: list(candidate_ids)
                 for entity_id, candidate_ids in result.entity_review_candidates.items()
             },
+            "created_story_ids": list(result.created_story_ids),
+            "reused_story_ids": list(result.reused_story_ids),
+            "story_review_candidates": {
+                story_id: list(candidate_ids)
+                for story_id, candidate_ids in result.story_review_candidates.items()
+            },
+            "changed_story_ids": list(result.changed_story_ids),
             "provider": result.provider,
             "model": result.model,
             "engine": NARRATIVE_INGESTION_ENGINE,

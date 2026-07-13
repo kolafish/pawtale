@@ -107,3 +107,67 @@ class MemoirNarrativeDecisionAction(str, Enum):
     LOCK = "lock"
     UNLOCK = "unlock"
     NEEDS_REVIEW = "needs_review"
+
+
+class MemoirStoryType(str, Enum):
+    EVENT = "event"
+    RELATIONSHIP = "relationship"
+    LIFE_STAGE = "life_stage"
+    THEME = "theme"
+
+
+class MemoirStoryLifecycleStatus(str, Enum):
+    ACTIVE = "active"
+    MERGED = "merged"
+    ARCHIVED = "archived"
+
+
+class MemoirStoryCompletionStatus(str, Enum):
+    INCOMPLETE = "incomplete"
+    SUFFICIENT = "sufficient"
+    ACCEPTED_INCOMPLETE = "accepted_incomplete"
+
+
+class MemoirStoryVerificationStatus(str, Enum):
+    UNREVIEWED = "unreviewed"
+    CONFIRMED = "confirmed"
+    NEEDS_VERIFICATION = "needs_verification"
+    DISPUTED = "disputed"
+    REJECTED = "rejected"
+
+
+class MemoirStoryPublicationStatus(str, Enum):
+    ELIGIBLE = "eligible"
+    PRIVATE = "private"
+    EXCLUDED = "excluded"
+
+
+class MemoirStoryNarrativeRole(str, Enum):
+    BACKGROUND = "background"
+    TRIGGER = "trigger"
+    ACTION = "action"
+    TURNING_POINT = "turning_point"
+    OUTCOME = "outcome"
+    REFLECTION = "reflection"
+    CONTEXT = "context"
+
+
+class MemoirStorySlotStatus(str, Enum):
+    MISSING = "missing"
+    PARTIAL = "partial"
+    SUFFICIENT = "sufficient"
+    ACCEPTED_INCOMPLETE = "accepted_incomplete"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class MemoirStoryRevisionChangeType(str, Enum):
+    CREATED = "created"
+    CLAIMS_UPDATED = "claims_updated"
+    SLOTS_RECOMPUTED = "slots_recomputed"
+    NEEDS_REVIEW = "needs_review"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
+    MERGED = "merged"
+    SLOT_RESOLVED = "slot_resolved"
+    PUBLICATION_CHANGED = "publication_changed"
+    BACKFILL_CANDIDATE = "backfill_candidate"

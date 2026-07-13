@@ -4,11 +4,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.domain.memoir.narrative_types import (
     MemoirClaimCertainty,
+    MemoirClaimEvidenceRole,
     MemoirClaimPredicate,
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirNarrativeEntityType,
+    MemoirStoryNarrativeRole,
+    MemoirStoryType,
 )
+from app.schemas.memoir_narrative.story_slots import story_slot_schema
 
 
 class MemoirNarrativeExtractedEntity(BaseModel):
@@ -92,12 +96,69 @@ class MemoirNarrativeExtractedClaim(BaseModel):
         return self
 
 
+class MemoirNarrativeExtractedStoryClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    claim_key: str = Field(min_length=1, max_length=80)
+    narrative_role: MemoirStoryNarrativeRole
+    slot_keys: list[str] = Field(default_factory=list, max_length=8)
+    evidence_role: MemoirClaimEvidenceRole = MemoirClaimEvidenceRole.SUPPORTS
+    is_core: bool = False
+
+    @field_validator("claim_key")
+    @classmethod
+    def strip_claim_key(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("slot_keys")
+    @classmethod
+    def normalize_slot_keys(cls, values: list[str]) -> list[str]:
+        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+class MemoirNarrativeExtractedStory(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
+    title: str = Field(min_length=1, max_length=240)
+    story_type: MemoirStoryType
+    summary: str = Field(default="", max_length=4000)
+    time_start: datetime | None = None
+    time_end: datetime | None = None
+    time_precision: MemoirClaimTimePrecision = MemoirClaimTimePrecision.UNKNOWN
+    primary_place_entity_key: str | None = Field(default=None, max_length=80)
+    existing_story_id: str | None = Field(default=None, max_length=36)
+    match_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    claims: list[MemoirNarrativeExtractedStoryClaim] = Field(min_length=1, max_length=30)
+
+    @field_validator("key", "title", "summary", "primary_place_entity_key", "existing_story_id")
+    @classmethod
+    def strip_text(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_shape(self):
+        if (self.time_start is None) != (self.time_end is None):
+            raise ValueError("story normalized time requires both time_start and time_end")
+        if self.time_start and self.time_end and self.time_end < self.time_start:
+            raise ValueError("story time_end must not precede time_start")
+        schema = story_slot_schema(self.story_type)
+        claim_keys = [claim.claim_key for claim in self.claims]
+        if len(claim_keys) != len(set(claim_keys)):
+            raise ValueError("story claim references must be unique")
+        referenced_slots = {slot_key for claim in self.claims for slot_key in claim.slot_keys}
+        if not referenced_slots.issubset(set(schema.slot_keys)):
+            raise ValueError("story claim references a slot outside the story schema")
+        return self
+
+
 class MemoirNarrativeExtraction(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     schema_version: str = Field(pattern=r"^1$")
     entities: list[MemoirNarrativeExtractedEntity] = Field(default_factory=list, max_length=30)
     claims: list[MemoirNarrativeExtractedClaim] = Field(default_factory=list, max_length=30)
+    stories: list[MemoirNarrativeExtractedStory] = Field(default_factory=list, max_length=12)
 
     @model_validator(mode="after")
     def validate_keys(self):
@@ -107,6 +168,9 @@ class MemoirNarrativeExtraction(BaseModel):
         claim_keys = [claim.key for claim in self.claims]
         if len(claim_keys) != len(set(claim_keys)):
             raise ValueError("claim keys must be unique")
+        story_keys = [story.key for story in self.stories]
+        if len(story_keys) != len(set(story_keys)):
+            raise ValueError("story keys must be unique")
         entity_types = {entity.key: entity.entity_type for entity in self.entities}
         known_entities = set(entity_types)
         for claim in self.claims:
@@ -122,4 +186,13 @@ class MemoirNarrativeExtraction(BaseModel):
                 and entity_types[claim.place_entity_key] != MemoirNarrativeEntityType.PLACE
             ):
                 raise ValueError("place_entity_key must reference a place entity")
+        known_claims = set(claim_keys)
+        for story in self.stories:
+            if not {link.claim_key for link in story.claims}.issubset(known_claims):
+                raise ValueError("story references an unknown claim key")
+            if story.primary_place_entity_key:
+                if story.primary_place_entity_key not in known_entities:
+                    raise ValueError("story references an unknown place entity key")
+                if entity_types[story.primary_place_entity_key] != MemoirNarrativeEntityType.PLACE:
+                    raise ValueError("story primary place must reference a place entity")
         return self
