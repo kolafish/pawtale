@@ -41,17 +41,6 @@ async def execute_confirmed_book_voice_command(
                 title=_required_operation_text(operation.new_title, "缺少新的章节名"),
             ),
         )
-    elif intent == "merge_chapters":
-        plan = await memoir_book_plan_write_workflow.apply_book_plan_structure_command(
-            db,
-            user_id=user_id,
-            project_id=project_id,
-            req=MemoirBookPlanStructureCommandRequest(
-                type="merge_chapters",
-                chapter_id=_required_operation_text(operation.chapter_id, "缺少要合并的章节"),
-                target_chapter_id=_required_operation_text(operation.target_chapter_id, "缺少合并目标章节"),
-            ),
-        )
     elif intent == "move_chapter":
         if not _has_move_target(operation):
             raise HTTPException(status_code=400, detail="缺少章节移动目标")
@@ -123,11 +112,6 @@ def _has_move_target(operation: MemoirBookVoiceCommandOperationResponse) -> bool
 def _executed_summary(intent: str, operation: MemoirBookVoiceCommandOperationResponse) -> str:
     if intent == "rename_chapter":
         return f"已把「{operation.chapter_title or '该章节'}」改名为「{operation.new_title or '新章名'}」。"
-    if intent == "merge_chapters":
-        return (
-            f"已把「{operation.chapter_title or '该章节'}」"
-            f"合并到「{operation.target_chapter_title or '目标章节'}」。"
-        )
     if intent == "move_chapter":
         title = operation.chapter_title or "该章节"
         if operation.direction:

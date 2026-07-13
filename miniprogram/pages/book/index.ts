@@ -104,10 +104,7 @@ import {
   bookExportPageUrl,
   chapterMoveCommand,
   findBookChapter,
-  removeLocalChapterPatch,
-  splitSelectedChapterSourcesPlan,
   toggleBookChapterSourcesPatch,
-  toggleBookSplitSourcePatch,
 } from "./book-page-plan-helpers";
 import {
   NEW_CHAPTER_PICKER_VALUE,
@@ -224,7 +221,6 @@ definePage<BookPageData>()({
     stageText: "等待生成章节",
     chapters: [],
     chapterStructureEditing: false,
-    splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
     allChaptersConfirmed: false,
@@ -500,7 +496,7 @@ definePage<BookPageData>()({
 
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
     const chapters = plan
-      ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage, this.data.splitSourceSelections)
+      ? buildChapterViews(plan, draftsByChapterId, this.data.sourceCoverage)
       : [];
     const stage = planStage(plan);
     const shouldResetVoiceStatus = !this.data.bookVoiceAssistantConversationActive || !plan;
@@ -516,7 +512,7 @@ definePage<BookPageData>()({
         clearReply: true,
         clearTranscript: true,
       }) : {}),
-      ...chapterCollectionData(chapters, stage, this.data.sourceCoverage, this.data.splitSourceSelections),
+      ...chapterCollectionData(chapters, stage, this.data.sourceCoverage),
       ...sourceCoverageData(plan, this.data.sourceCoverage),
       ...(stage === "drafting" ? {} : bookHomeOutputData(null)),
     });
@@ -828,21 +824,6 @@ definePage<BookPageData>()({
     }
   },
 
-  async removeChapter(event: DatasetEvent) {
-    const id = datasetString(event, "id");
-    if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
-      return;
-    }
-    if (this.data.projectId && this.data.plan) {
-      await this.applyPlanStructureCommand({ type: "delete_chapter", chapter_id: id }, "章节已删除");
-      return;
-    }
-    const patch = removeLocalChapterPatch(this.data, id);
-    if (patch) {
-      this.setData(patch);
-    }
-  },
-
   async moveChapter(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
     const direction = datasetChoice(event, "direction", CHAPTER_MOVE_DIRECTIONS, "down");
@@ -854,75 +835,6 @@ definePage<BookPageData>()({
       return;
     }
     await this.applyPlanStructureCommand(command, "章节顺序已调整");
-  },
-
-  async mergeChapterInto(event: PickerEvent) {
-    const sourceChapterId = datasetString(event, "id");
-    const optionIndex = pickerIndex(event);
-    const sourceChapter = findBookChapter(this.data.chapters, sourceChapterId);
-    const option = sourceChapter?.mergeTargetOptions[optionIndex];
-    const targetChapter = option
-      ? findBookChapter(this.data.chapters, option.value)
-      : null;
-    if (!sourceChapter || !targetChapter || this.data.updatingPlanStructure) {
-      return;
-    }
-    const confirmed = await new Promise<boolean>((resolve) => {
-      wx.showModal({
-        title: "合并章节",
-        content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，本章素材会保留在合并后的章节中。`,
-        confirmText: "合并",
-        confirmColor: "#a64b3e",
-        success: (result) => resolve(Boolean(result.confirm)),
-        fail: () => resolve(false),
-      });
-    });
-    if (!confirmed) {
-      return;
-    }
-    const plan = await this.applyPlanStructureCommand({
-      type: "merge_chapters",
-      chapter_id: sourceChapter.id,
-      target_chapter_id: targetChapter.id,
-    }, "章节已合并");
-    if (plan?.status === "confirmed") {
-      await this.regenerateMergedChapter(targetChapter.id);
-    } else if (plan) {
-      await this.generateChapterTitleById(targetChapter.id, "已重写章名");
-    }
-  },
-
-  toggleSplitSource(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    const utteranceId = datasetString(event, "utteranceId");
-    if (this.data.updatingPlanStructure) {
-      return;
-    }
-    const patch = toggleBookSplitSourcePatch(this.data, chapterId, utteranceId);
-    if (patch) {
-      this.setData(patch);
-    }
-  },
-
-  async splitSelectedChapterSources(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (this.data.updatingPlanStructure) {
-      return;
-    }
-    const plan = splitSelectedChapterSourcesPlan(this.data, chapterId);
-    if (!plan) {
-      return;
-    }
-    if (plan.error) {
-      this.setData({ error: plan.error });
-      return;
-    }
-    if (plan.patch) {
-      this.setData(plan.patch);
-    }
-    if (plan.command) {
-      await this.applyPlanStructureCommand(plan.command, "章节已拆分");
-    }
   },
 
   toggleChapterSources(event: DatasetEvent) {
@@ -1025,19 +937,6 @@ definePage<BookPageData>()({
     } finally {
       this.setData({ updatingPlanStructure: false });
     }
-  },
-
-  async regenerateMergedChapter(chapterId: string) {
-    const renamed = await this.generateChapterTitleById(chapterId, "已重写章名");
-    if (!renamed) {
-      this.patchChapter(chapterId, {
-        draftError: "章节已合并，请检查章名后进入章节工作台整理正文",
-      });
-      return;
-    }
-    this.patchChapter(chapterId, {
-      draftError: "章节已合并，请进入章节工作台检查结构并重新整理正文",
-    });
   },
 
   async generateBook() {
@@ -2047,7 +1946,6 @@ definePage<BookPageData>()({
         chapters,
         this.data.stage,
         this.data.sourceCoverage,
-        this.data.splitSourceSelections,
       ),
     });
   },

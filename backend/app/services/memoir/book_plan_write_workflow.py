@@ -611,16 +611,11 @@ async def apply_book_plan_structure_command(
         source=source,
     )
     chapters = mutation.chapters
-    for chapter in mutation.deleted_chapters:
-        if chapter in plan.chapters:
-            plan.chapters.remove(chapter)
-        else:
-            await db.delete(chapter)
 
     _renumber_chapters(chapters)
     for chapter in chapters:
         db.add(chapter)
-    if mutation.changed_chapter_ids or source or mutation.deleted_chapters:
+    if source:
         await db.flush()
         await _sync_plan_chapter_source_links(
             db,
@@ -633,12 +628,6 @@ async def apply_book_plan_structure_command(
             db,
             project_id=project_id,
             utterance_ids=[source.utterance_id] if source else None,
-        )
-    if mutation.changed_chapter_ids:
-        await _handle_chapter_source_changes(
-            db,
-            project_id=project_id,
-            chapter_ids=mutation.changed_chapter_ids,
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)

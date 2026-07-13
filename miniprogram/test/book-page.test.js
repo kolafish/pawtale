@@ -290,14 +290,6 @@ function planFromStructureCommand(status, command) {
       ],
     };
   }
-  if (command.type === "delete_chapter") {
-    return {
-      ...base,
-      chapters: base.chapters
-        .filter((chapter) => chapter.id !== command.chapter_id)
-        .map((chapter, index) => ({ ...chapter, sort_order: index })),
-    };
-  }
   if (command.type === "move_chapter") {
     const chapters = [...base.chapters];
     const fromIndex = chapters.findIndex((chapter) => chapter.id === command.chapter_id);
@@ -319,50 +311,6 @@ function planFromStructureCommand(status, command) {
     }
     remaining.splice(toIndex, 0, moving);
     return { ...base, chapters: remaining.map((chapter, index) => ({ ...chapter, sort_order: index })) };
-  }
-  if (command.type === "merge_chapters") {
-    const source = base.chapters.find((chapter) => chapter.id === command.chapter_id);
-    return {
-      ...base,
-      chapters: base.chapters
-        .filter((chapter) => chapter.id !== command.chapter_id)
-        .map((chapter, index) => (
-          chapter.id === command.target_chapter_id && source
-            ? {
-              ...chapter,
-              sort_order: index,
-              source_refs: [...chapter.source_refs, ...source.source_refs],
-            }
-            : { ...chapter, sort_order: index }
-        )),
-    };
-  }
-  if (command.type === "split_chapter") {
-    const source = base.chapters.find((chapter) => chapter.id === command.chapter_id);
-    if (!source) {
-      return base;
-    }
-    const selected = new Set(command.utterance_ids || []);
-    const keptRefs = source.source_refs.filter((ref) => !selected.has(ref.utterance_id));
-    const splitRefs = source.source_refs.filter((ref) => selected.has(ref.utterance_id));
-    return {
-      ...base,
-      chapters: [
-        { ...source, source_refs: keptRefs, sort_order: 0 },
-        {
-          id: "chapter-3",
-          plan_id: "plan-1",
-          project_id: "project/1",
-          title: command.title,
-          sort_order: 1,
-          source_refs: splitRefs,
-          metadata_json: {},
-          created_at: "2026-06-17T00:00:00.000Z",
-          updated_at: "2026-06-17T00:00:00.000Z",
-        },
-        { ...base.chapters[1], sort_order: 2 },
-      ],
-    };
   }
   if (command.type === "rename_chapter") {
     return {
@@ -717,7 +665,7 @@ test("book page builds outline narration for saved chapter titles", () => {
       "《外婆回忆录章节规划》现在有 2 章。",
       "第 1 章，外婆家的童年。本章收录 1 条语音素材。",
       "第 2 章，第一次离家。本章收录 1 条语音素材。",
-      "你可以继续调整章节顺序、合并章节，或者说出想修改的地方。",
+      "你可以继续调整章节顺序，或者说出想修改的地方。",
     ].join("\n"),
   );
 });
@@ -1330,12 +1278,6 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[0].sourceViews[0].recordNumber, 1);
   assert.equal(chapters[0].sourceViews[0].labelText, "语音记录 1 · 素材 1 · 06-17 08:00 · 6 字");
   assert.equal(chapters[0].sourceToggleText, "查看 2 条");
-  assert.deepEqual(chapters[0].mergeTargetOptions, [
-    { label: "第 2 章 第一次离家", value: "chapter-2" },
-  ]);
-  assert.equal(chapters[0].splitSelectedCount, 0);
-  assert.equal(chapters[0].splitActionText, "拆出所选");
-  assert.equal(chapters[0].canSplitSelectedSources, false);
 });
 
 test("book page toggles chapter source details", () => {
@@ -1645,107 +1587,6 @@ test("book page reorders chapters through structure command", async () => {
     direction: "down",
   });
   assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
-  delete global.wx;
-});
-
-test("book page splits selected chapter sources into a new chapter", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].source_refs = [
-    sampleRef("utterance-1", "外婆家的院子"),
-    sampleRef("utterance-3", "春节做年糕"),
-  ];
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return planFromStructureCommand("confirmed", data);
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, plan);
-
-  page.toggleSplitSource.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  assert.equal(context.data.chapters[0].splitSelectedCount, 0);
-
-  page.toggleSplitSource.call(context, {
-    currentTarget: { dataset: { id: "chapter-1", utteranceId: "utterance-3" } },
-  });
-
-  assert.equal(context.data.chapters[0].sourceViews[1].splitSelected, true);
-  assert.equal(context.data.chapters[0].splitSelectedCount, 1);
-  assert.equal(context.data.chapters[0].canSplitSelectedSources, true);
-
-  await page.splitSelectedChapterSources.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].data, {
-    type: "split_chapter",
-    chapter_id: "chapter-1",
-    title: "外婆家的童年（拆出）",
-    utterance_ids: ["utterance-3"],
-  });
-  assert.equal(context.data.splitSourceSelections["chapter-1"], undefined);
-  delete global.wx;
-});
-
-test("book page merges chapters and directs the changed chapter to its workspace", async () => {
-  const calls = [];
-  global.wx = {
-    showModal(options) {
-      options.success({ confirm: true });
-    },
-    showToast() {},
-    switchTab() {},
-  };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
-        calls.push({ kind: "update", projectId, data });
-        return planFromStructureCommand("confirmed", data);
-      },
-      generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        calls.push({ kind: "title", projectId, chapterId, data });
-        const updated = planFromStructureCommand("confirmed", calls[0].data);
-        updated.chapters[0].title = "童年里的离别";
-        return updated;
-      },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
-      getMemoirBookOutput: async () => null,
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed", "童年正文"),
-    "chapter-2": sampleDraft(1, "confirmed", "离家正文"),
-  });
-
-  await page.mergeChapterInto.call(context, {
-    currentTarget: { dataset: { id: "chapter-2" } },
-    detail: { value: 0 },
-  });
-
-  assert.deepEqual(calls.map((call) => call.kind), ["update", "title"]);
-  assert.deepEqual(calls[0].data, {
-    type: "merge_chapters",
-    chapter_id: "chapter-2",
-    target_chapter_id: "chapter-1",
-  });
-  assert.equal(context.data.chapters[0].title, "童年里的离别");
-  assert.equal(
-    context.data.chapters[0].draftError,
-    "章节已合并，请进入章节工作台检查结构并重新整理正文",
-  );
   delete global.wx;
 });
 

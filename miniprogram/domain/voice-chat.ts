@@ -785,16 +785,12 @@ export interface MemoirBookPlanUpdateRequest {
 
 export type MemoirBookPlanStructureCommandType =
   | "create_chapter_from_source"
-  | "delete_chapter"
-  | "merge_chapters"
   | "move_chapter"
-  | "rename_chapter"
-  | "split_chapter";
+  | "rename_chapter";
 
 export interface MemoirBookPlanStructureCommandRequest {
   type: MemoirBookPlanStructureCommandType;
   chapter_id?: string;
-  target_chapter_id?: string;
   direction?: "up" | "down";
   target_position?: "first" | "last";
   target_index?: number;
@@ -802,7 +798,6 @@ export interface MemoirBookPlanStructureCommandRequest {
   relative_position?: "before" | "after";
   title?: string;
   utterance_id?: string;
-  utterance_ids?: string[];
 }
 
 export interface MemoirBookChapterDraftVersion {

@@ -1417,10 +1417,6 @@
   border-top: 0;
 }
 
-.source-ref-row.selected {
-  background: #fff9f3;
-}
-
 .source-ref-main {
   flex: 1 1 auto;
   min-width: 0;
@@ -1443,37 +1439,6 @@
   font-size: 25rpx;
   line-height: 1.38;
   word-break: break-word;
-}
-
-.source-split-toggle {
-  flex: 0 0 112rpx;
-  width: 112rpx;
-  height: 58rpx;
-  margin: 2rpx 0 0;
-  padding: 0;
-  border: 0;
-  border-radius: 16rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #f4efe8;
-  color: #6d4d40;
-  font-size: 23rpx;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.source-split-toggle.selected {
-  background: #a64b3e;
-  color: #ffffff;
-}
-
-.source-split-toggle::after {
-  border: 0;
-}
-
-.source-split-toggle[disabled] {
-  opacity: 0.56;
 }
 
 .draft-pending {
@@ -1574,8 +1539,7 @@
   gap: 12rpx;
 }
 
-.structure-action-row .structure-button,
-.structure-picker {
+.structure-action-row .structure-button {
   flex: 1 1 0;
   min-width: 0;
 }
@@ -1602,14 +1566,8 @@
 }
 
 .structure-button[disabled],
-.structure-button.disabled,
-.picker-button.disabled {
+.structure-button.disabled {
   opacity: 0.5;
-}
-
-.picker-button {
-  background: #fff3ef;
-  color: #8f3e35;
 }
 
 .sticky-actions {
@@ -1619,8 +1577,7 @@
 }
 
 .primary-button,
-.ghost-button,
-.danger-button {
+.ghost-button {
   min-width: 0;
   height: 80rpx;
   margin: 0;
@@ -1637,8 +1594,7 @@
 }
 
 .primary-button.small,
-.ghost-button.small,
-.danger-button.small {
+.ghost-button.small {
   height: 80rpx;
   min-height: 40px;
   padding: 0 14rpx;
@@ -1647,8 +1603,7 @@
 }
 
 .actions-row .primary-button,
-.actions-row .ghost-button,
-.actions-row .danger-button {
+.actions-row .ghost-button {
   flex: 1 1 180rpx;
 }
 
@@ -1658,8 +1613,7 @@
 }
 
 .primary-button::after,
-.ghost-button::after,
-.danger-button::after {
+.ghost-button::after {
   border: 0;
 }
 
@@ -1672,11 +1626,6 @@
   background: #ffffff;
   color: #7b4a40;
   border: 1rpx solid #d8c4b2;
-}
-
-.danger-button {
-  background: #fff1f3;
-  color: #b84a5a;
 }
 
 .image-assets-entry {
@@ -1753,8 +1702,7 @@
 }
 
 .primary-button[disabled],
-.ghost-button[disabled],
-.danger-button[disabled] {
+.ghost-button[disabled] {
   opacity: 0.62;
 }
 
@@ -1852,7 +1800,6 @@
 .book-page.large-text .chapter-audio-status,
 .book-page.large-text .chapter-index,
 .book-page.large-text .source-ref-label,
-.book-page.large-text .source-split-toggle,
 .book-page.large-text .draft-pending,
 .book-page.large-text .image-assets-entry-count {
   font-size: 28rpx;
@@ -1883,7 +1830,6 @@
 
 .book-page.large-text .primary-button,
 .book-page.large-text .ghost-button,
-.book-page.large-text .danger-button,
 .book-page.large-text .section-head-action,
 .book-page.large-text .source-toggle-button,
 .book-page.large-text .structure-button,

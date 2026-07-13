@@ -471,7 +471,7 @@ definePage<BookExportData>()({
   },
 
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
-    const chapters = plan ? buildChapterViews(plan, {}, null, {}) : [];
+    const chapters = plan ? buildChapterViews(plan, {}, null) : [];
     const stage = planStage(plan);
     const outputData = bookOutputData(output);
     if (!output && !outputData.bookTitleInput) {
