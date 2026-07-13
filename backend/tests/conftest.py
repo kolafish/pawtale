@@ -10,6 +10,7 @@ from app.main import app
 from app.database import Base, get_db, register_models
 from app.migrations.audit import migrate_audit_schema
 from app.migrations.memoir_images import migrate_memoir_image_schema
+from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 
@@ -30,6 +31,7 @@ async def test_db():
     await migrate_memoir_voice_schema(engine)
     await migrate_memoir_semantic_schema(engine)
     await migrate_memoir_image_schema(engine)
+    await migrate_memoir_narrative_schema(engine)
     await migrate_audit_schema(engine)
 
     async with async_session() as session:
