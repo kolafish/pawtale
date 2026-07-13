@@ -588,6 +588,22 @@ class MemoirBookOutput(Base):
     plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=MemoirOutputStatus.DRAFT.value, nullable=False)
+    formal_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "memoir_book_output_versions.id",
+            name="fk_memoir_book_outputs_formal_version",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    formal_audit_job_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("memoir_editing_jobs.id"), nullable=True
+    )
+    formalized_by_user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    formalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -599,6 +615,7 @@ class MemoirBookOutput(Base):
         back_populates="output",
         cascade="all, delete-orphan",
         order_by="MemoirBookOutputVersion.version",
+        foreign_keys="MemoirBookOutputVersion.output_id",
     )
 
 
@@ -619,7 +636,11 @@ class MemoirBookOutputVersion(Base):
     created_by: Mapped[str] = mapped_column(String(20), default=MemoirCreatedBy.SYSTEM.value, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    output: Mapped[MemoirBookOutput] = orm_relationship("MemoirBookOutput", back_populates="versions")
+    output: Mapped[MemoirBookOutput] = orm_relationship(
+        "MemoirBookOutput",
+        back_populates="versions",
+        foreign_keys=[output_id],
+    )
 
 
 class MemoirSourceCard(Base):

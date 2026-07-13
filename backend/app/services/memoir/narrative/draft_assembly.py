@@ -38,6 +38,7 @@ from app.schemas.memoir_narrative import (
 from app.services.memoir.narrative.draft_generation_context import (
     load_confirmed_contract_nodes,
 )
+from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
 
 
 def _utcnow() -> datetime:
@@ -345,7 +346,7 @@ async def assemble_book_output(
             )
         output.plan_id = plan.id
         output.title = title
-        output.status = MemoirOutputStatus.DRAFT.value
+        invalidate_formal_book_output(output)
         output.metadata_json = {
             **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
             "source": "draft_blocks",

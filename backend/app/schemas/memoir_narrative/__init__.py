@@ -1,3 +1,14 @@
+from .book_consistency import (
+    MemoirBookConsistencyAuditJobResponse,
+    MemoirBookConsistencyAuditRequest,
+    MemoirBookFormalizeRequest,
+    MemoirBookFormalizeResponse,
+    MemoirBookReadinessBlocker,
+    MemoirBookReadinessGroups,
+    MemoirBookReadinessResponse,
+    MemoirBookSemanticGapAuditOutput,
+    MemoirBookSemanticGapCandidate,
+)
 from .claims import MemoirClaimCreate, MemoirClaimEvidenceCreate
 from .chapter_structures import (
     MemoirChapterContractConstraints,
@@ -89,6 +100,15 @@ from .stories import (
 )
 
 __all__ = [
+    "MemoirBookConsistencyAuditJobResponse",
+    "MemoirBookConsistencyAuditRequest",
+    "MemoirBookFormalizeRequest",
+    "MemoirBookFormalizeResponse",
+    "MemoirBookReadinessBlocker",
+    "MemoirBookReadinessGroups",
+    "MemoirBookReadinessResponse",
+    "MemoirBookSemanticGapAuditOutput",
+    "MemoirBookSemanticGapCandidate",
     "MemoirClaimCreate",
     "MemoirClaimEvidenceCreate",
     "MemoirChapterContractConstraints",

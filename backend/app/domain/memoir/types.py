@@ -79,6 +79,7 @@ class MemoirEditingJobType(str, Enum):
     RECOMPUTE_CHAPTER_STRUCTURE_AUDIT = "recompute_chapter_structure_audit"
     GENERATE_FOLLOWUP_TASKS = "generate_followup_tasks"
     GENERATE_DRAFT_BLOCKS = "generate_draft_blocks"
+    AUDIT_BOOK_CONSISTENCY = "audit_book_consistency"
     ROUTE_SOURCES = "route_sources"
     GENERATE_SOURCE_CARD = "generate_source_card"
     REVISE_CHAPTER = "revise_chapter"

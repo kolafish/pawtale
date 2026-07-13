@@ -1159,6 +1159,10 @@ export interface MemoirBookOutput {
   plan_id: string;
   title: string;
   status: MemoirOutputStatus;
+  formal_version_id?: string | null;
+  formal_audit_job_id?: string | null;
+  formalized_by_user_id?: string | null;
+  formalized_at?: string | null;
   metadata_json: Record<string, unknown>;
   is_stale: boolean;
   stale_chapter_titles: string[];
@@ -1166,4 +1170,57 @@ export interface MemoirBookOutput {
   versions: MemoirBookOutputVersion[];
   created_at: string;
   updated_at: string;
+}
+
+export interface MemoirBookConsistencyAuditRequest {
+  include_semantic_audit?: boolean;
+  ai_model?: string | null;
+}
+
+export type MemoirEditingJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
+
+export interface MemoirBookConsistencyAuditJob {
+  id: string;
+  project_id: string;
+  status: MemoirEditingJobStatus;
+  payload_json: Record<string, unknown>;
+  result_json: Record<string, unknown>;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookReadinessBlocker {
+  code: string;
+  title: string;
+  detail: string;
+  chapter_id?: string | null;
+  story_id?: string | null;
+  claim_id?: string | null;
+  draft_block_id?: string | null;
+  gap_id?: string | null;
+}
+
+export interface MemoirBookReadiness {
+  project_id: string;
+  ready_for_formal: boolean;
+  current_signature: string;
+  output_status?: MemoirOutputStatus | null;
+  output_version_id?: string | null;
+  latest_audit_job?: MemoirBookConsistencyAuditJob | null;
+  audit_is_current: boolean;
+  groups: {
+    must_handle: MemoirBookReadinessBlocker[];
+    suggested: MemoirBookReadinessBlocker[];
+    accepted_incomplete: MemoirBookReadinessBlocker[];
+  };
+}
+
+export interface MemoirBookFormalizeResponse {
+  project_id: string;
+  output_id: string;
+  output_version_id: string;
+  audit_job_id: string;
+  status: MemoirOutputStatus;
+  formalized_at: string;
 }

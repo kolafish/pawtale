@@ -1,14 +1,19 @@
 from PIL import Image
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirImageAssetSourceType,
+    MemoirOutputStatus,
     MemoirShareVideoJobStatus,
 )
 from app.migrations.runtime import migrate_runtime_schema
-from app.models.memoir import MemoirImageAsset, MemoirMaterialShareVideo
+from app.models.memoir import (
+    MemoirBookOutput,
+    MemoirImageAsset,
+    MemoirMaterialShareVideo,
+)
 from app.schemas.memoir_book import MemoirBookOutputGenerateRequest
 from app.services.memoir import book_output_export, book_outputs, image_assets
 from app.services.memoir.image_assets import (
@@ -94,6 +99,12 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
         project_id=project_id,
         req=MemoirBookOutputGenerateRequest(force_regenerate=True),
     )
+    output = await test_db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    assert output is not None
+    output.status = MemoirOutputStatus.ACCEPTED.value
+    await test_db.commit()
 
     list_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")
     assert list_response.status_code == 200
@@ -123,6 +134,7 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
 
     output_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
     assert output_response.status_code == 200
+    assert output_response.json()["status"] == MemoirOutputStatus.DRAFT.value
     manuscript = output_response.json()["latest_version"]["manuscript"]
     illustrations = manuscript["chapters"][0]["illustrations"]
     assert illustrations[0]["image_asset_id"] == asset_id

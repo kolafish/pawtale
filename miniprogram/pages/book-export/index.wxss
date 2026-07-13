@@ -25,6 +25,149 @@
   box-shadow: 0 10rpx 24rpx rgba(93, 59, 40, 0.06);
 }
 
+.book-consistency-panel {
+  box-sizing: border-box;
+  padding: 26rpx;
+  border: 1rpx solid #ead9c8;
+  border-radius: 12rpx;
+  background: #fffaf3;
+  box-shadow: 0 10rpx 24rpx rgba(93, 59, 40, 0.06);
+}
+
+.book-consistency-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.book-consistency-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.book-consistency-title,
+.book-consistency-meta,
+.book-consistency-status,
+.book-consistency-group-title,
+.book-consistency-item-title,
+.book-consistency-item-detail {
+  display: block;
+}
+
+.book-consistency-title {
+  color: #332822;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.book-consistency-meta {
+  margin-top: 6rpx;
+  color: #756861;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.book-consistency-status {
+  flex-shrink: 0;
+  padding: 8rpx 14rpx;
+  border-radius: 8rpx;
+  background: #f1e1d2;
+  color: #775447;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.book-consistency-status.formal {
+  background: #e6f0e8;
+  color: #426348;
+}
+
+.book-consistency-error {
+  display: block;
+  margin-top: 18rpx;
+  padding: 16rpx 18rpx;
+  border-left: 4rpx solid #b14f43;
+  background: #fff0ed;
+  color: #973f35;
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.book-consistency-group {
+  margin-top: 20rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 10rpx;
+  background: #f8f0e7;
+}
+
+.book-consistency-group.must {
+  background: #fff0ed;
+}
+
+.book-consistency-group.accepted {
+  background: #eef3eb;
+}
+
+.book-consistency-group-title {
+  color: #79594c;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.book-consistency-group.must .book-consistency-group-title {
+  color: #a64b3e;
+}
+
+.book-consistency-group.accepted .book-consistency-group-title {
+  color: #4f6c53;
+}
+
+.book-consistency-item {
+  margin-top: 14rpx;
+}
+
+.book-consistency-item-title {
+  color: #382b25;
+  font-size: 26rpx;
+  line-height: 1.45;
+}
+
+.book-consistency-item-detail {
+  margin-top: 4rpx;
+  color: #756861;
+  font-size: 23rpx;
+  line-height: 1.5;
+}
+
+.book-consistency-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+  margin-top: 22rpx;
+}
+
+.book-consistency-actions .primary-button:active,
+.book-consistency-actions .ghost-button:active {
+  transform: scale(0.96);
+}
+
+.book-consistency-actions .primary-button,
+.book-consistency-actions .ghost-button {
+  transition-property: transform;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.book-consistency-actions button:only-child {
+  grid-column: 1 / -1;
+}
+
 .export-hero {
   display: flex;
   align-items: flex-start;
