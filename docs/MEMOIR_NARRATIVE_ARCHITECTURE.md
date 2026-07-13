@@ -1147,15 +1147,19 @@ PYTHONPATH=. venv/bin/python scripts/migrate_runtime_schema.py --skip-backup
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py inventory
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest \
-  --execute --backup-manifest /controlled/backup/manifest.json
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py process-ingestion \
-  --execute --backup-manifest /controlled/backup/manifest.json
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories \
-  --execute --backup-manifest /controlled/backup/manifest.json
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures
 PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures \
-  --execute --backup-manifest /controlled/backup/manifest.json
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
 ```
 
 `cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、Story/Contract 建议已物化且没有失败的摄取任务。`chapter_workflow_ready` 单独表示用户已确认 Contract 且章节已有结构化 DraftBlock；它必须通过真实章节工作台操作达成，不能由迁移脚本伪造确认人或产品决策。两者都不能替代第十五章的人工盲评门禁。

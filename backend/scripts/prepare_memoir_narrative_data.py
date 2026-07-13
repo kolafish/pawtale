@@ -57,6 +57,11 @@ def _args() -> argparse.Namespace:
         type=Path,
         help="manifest.json produced by backup_runtime_data.py; required for writes",
     )
+    parser.add_argument(
+        "--application-writers-stopped",
+        action="store_true",
+        help="Required with --execute after the API and background workers are stopped.",
+    )
     return parser.parse_args()
 
 
@@ -65,10 +70,16 @@ def _validate_run_args(args: argparse.Namespace) -> None:
         raise RuntimeError(
             "execute mode is only valid for ingest, process-ingestion, stories, or structures"
         )
+    if args.execute and not args.application_writers_stopped:
+        raise RuntimeError(
+            "execute mode requires explicit confirmation that application writers are stopped"
+        )
 def _runtime_sqlite_database() -> Path:
     path = sqlite_database_path(get_settings().database_url)
     if path is None:
-        raise RuntimeError("memoir narrative cutover currently requires a file-backed SQLite database")
+        raise RuntimeError(
+            "memoir narrative preparation requires a file-backed SQLite database"
+        )
     return path
 
 

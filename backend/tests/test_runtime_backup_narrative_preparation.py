@@ -22,9 +22,26 @@ def _sha256(path) -> str:
 
 
 def test_process_ingestion_is_an_executable_data_preparation_stage():
-    args = Namespace(stage="process-ingestion", project_id=None, execute=True)
+    args = Namespace(
+        stage="process-ingestion",
+        project_id=None,
+        execute=True,
+        application_writers_stopped=True,
+    )
 
     _validate_run_args(args)
+
+
+def test_data_preparation_execute_requires_stopped_application_writers():
+    args = Namespace(
+        stage="ingest",
+        project_id=None,
+        execute=True,
+        application_writers_stopped=False,
+    )
+
+    with pytest.raises(RuntimeError, match="application writers are stopped"):
+        _validate_run_args(args)
 
 
 def test_runtime_backup_manifest_is_bound_to_its_source_database(tmp_path):
@@ -87,7 +104,7 @@ def test_runtime_backup_checksums_are_stable_for_wal_database(tmp_path):
         )
 
 
-def test_cutover_rejects_wrong_or_modified_backup(tmp_path):
+def test_data_preparation_rejects_wrong_or_modified_backup(tmp_path):
     database = tmp_path / "pawtale.db"
     with sqlite3.connect(database) as conn:
         conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)")

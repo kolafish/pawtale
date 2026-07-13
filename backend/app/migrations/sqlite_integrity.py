@@ -5,7 +5,7 @@ from sqlalchemy import text
 from app.database import Base, register_models
 
 
-REBUILD_SUFFIX = "__pr12_rebuild"
+REBUILD_SUFFIX = "__foreign_key_rebuild"
 
 
 async def _table_exists(conn, table_name: str) -> bool:
