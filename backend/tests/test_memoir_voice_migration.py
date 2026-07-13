@@ -580,6 +580,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
         assert "correct_transcript" in str(table_sql)
         assert "recompute_chapter_structure_audit" in str(table_sql)
         assert "generate_followup_tasks" in str(table_sql)
+        assert "audit_book_consistency" in str(table_sql)
         assert rows == [("job-1", "route_sources")]
     finally:
         await engine.dispose()

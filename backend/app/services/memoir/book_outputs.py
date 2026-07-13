@@ -71,6 +71,7 @@ from app.services.memoir.book_output_export import (
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.image_assets import manuscript_image_snapshots
+from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -159,6 +160,10 @@ def _output_response(
         plan_id=output.plan_id,
         title=output.title,
         status=MemoirOutputStatus(output.status),
+        formal_version_id=output.formal_version_id,
+        formal_audit_job_id=output.formal_audit_job_id,
+        formalized_by_user_id=output.formalized_by_user_id,
+        formalized_at=output.formalized_at,
         metadata_json=output.metadata_json or {},
         is_stale=bool(stale_titles),
         stale_chapter_titles=stale_titles,
@@ -515,7 +520,7 @@ async def generate_book_output(
     else:
         output.plan_id = plan.id
         output.title = title
-        output.status = MemoirOutputStatus.DRAFT.value
+        invalidate_formal_book_output(output)
         output.metadata_json = {
             **(output.metadata_json or {}),
             BOOK_TTS_CACHE_KEY: None,
@@ -581,6 +586,7 @@ async def update_book_output(
         metadata_patch=metadata_patch,
     )
     output.title = title
+    invalidate_formal_book_output(output)
     output.metadata_json = {
         **(output.metadata_json or {}),
         BOOK_TTS_CACHE_KEY: None,
@@ -638,6 +644,7 @@ async def regenerate_book_output_editorial_copy(
         chapter_ids=chapter_ids,
     )
     latest.manuscript_json = manuscript.model_dump(mode="json")
+    invalidate_formal_book_output(output)
     output.metadata_json = {
         **(output.metadata_json or {}),
         BOOK_TTS_CACHE_KEY: None,
@@ -682,6 +689,7 @@ async def update_book_output_chapter_editorial_copy(
     )
 
     latest.manuscript_json = manuscript.model_dump(mode="json")
+    invalidate_formal_book_output(output)
     output.metadata_json = {
         **(output.metadata_json or {}),
         BOOK_TTS_CACHE_KEY: None,

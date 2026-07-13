@@ -14,6 +14,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
     MemoirNarrativeGapClaimRole,
+    MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapStatus,
 )
@@ -39,6 +40,7 @@ TERMINAL_GAP_STATUSES = {
     MemoirNarrativeGapStatus.NOT_APPLICABLE,
     MemoirNarrativeGapStatus.DISMISSED,
 }
+AUTO_RULE_RESOLUTION_NOTE = "系统规则复查：触发条件已不再成立。"
 
 
 def _utcnow() -> datetime:
@@ -68,6 +70,42 @@ def _gap_state(gap: MemoirNarrativeGap) -> dict[str, object]:
         "resolved_by_user_id": gap.resolved_by_user_id,
         "resolved_at": gap.resolved_at.isoformat() if gap.resolved_at else None,
     }
+
+
+def _was_auto_resolved_rule_gap(gap: MemoirNarrativeGap) -> bool:
+    return bool(
+        gap.detected_by == MemoirNarrativeGapDetectedBy.RULES.value
+        and gap.status == MemoirNarrativeGapStatus.RESOLVED.value
+        and gap.resolved_by == MemoirNarrativeActorType.SYSTEM.value
+        and gap.resolution_note == AUTO_RULE_RESOLUTION_NOTE
+    )
+
+
+async def _reopen_auto_resolved_rule_gap(
+    db: AsyncSession,
+    *,
+    gap: MemoirNarrativeGap,
+) -> None:
+    before = _gap_state(gap)
+    next_detection_count = gap.detection_count + 1
+    gap.status = MemoirNarrativeGapStatus.OPEN.value
+    gap.resolution_note = ""
+    gap.resolved_by = None
+    gap.resolved_by_user_id = None
+    gap.resolved_at = None
+    await decision_log.record_decision(
+        db,
+        project_id=gap.project_id,
+        target_type=MemoirNarrativeDecisionTargetType.GAP,
+        target_id=gap.id,
+        action=MemoirNarrativeDecisionAction.NEEDS_REVIEW,
+        actor_type=MemoirNarrativeActorType.SYSTEM,
+        actor_user_id=None,
+        before_state=before,
+        after_state=_gap_state(gap),
+        reason="系统规则再次检测到该问题",
+        idempotency_key=f"rule-gap-reopened:{gap.id}:{next_detection_count}",
+    )
 
 
 async def _validate_candidate_relations(
@@ -225,6 +263,8 @@ async def upsert_gap(
                 raise
             created = False
     if not created:
+        if _was_auto_resolved_rule_gap(gap):
+            await _reopen_auto_resolved_rule_gap(db, gap=gap)
         gap.severity = candidate.severity.value
         gap.title = candidate.title
         gap.description = candidate.description
@@ -255,6 +295,42 @@ async def upsert_gaps(
         gaps.append(gap)
         created_count += int(created)
     return gaps, created_count
+
+
+async def reconcile_project_rule_gaps(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    complete_candidates: list[MemoirNarrativeGapCandidate],
+) -> int:
+    """Resolve obsolete rule Gaps after a complete project-wide deterministic audit."""
+    active_fingerprints = {
+        gap_fingerprint(candidate)
+        for candidate in complete_candidates
+        if candidate.detected_by == MemoirNarrativeGapDetectedBy.RULES
+    }
+    open_rule_gaps = (
+        await db.scalars(
+            select(MemoirNarrativeGap).where(
+                MemoirNarrativeGap.project_id == project_id,
+                MemoirNarrativeGap.detected_by == MemoirNarrativeGapDetectedBy.RULES.value,
+                MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+            )
+        )
+    ).all()
+    resolved_count = 0
+    for gap in open_rule_gaps:
+        if gap.fingerprint in active_fingerprints:
+            continue
+        await resolve_gap_by_system(
+            db,
+            project_id=project_id,
+            gap_id=gap.id,
+            idempotency_key=f"rule-gap-obsolete:{gap.id}:{gap.detection_count}",
+            note=AUTO_RULE_RESOLUTION_NOTE,
+        )
+        resolved_count += 1
+    return resolved_count
 
 
 def _with_relations():

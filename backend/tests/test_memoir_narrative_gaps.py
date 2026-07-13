@@ -167,6 +167,12 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     assert repeated[0].id == gap_id
     assert repeated[0].status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
     assert repeated[0].detection_count == 2
+    assert await gaps.reconcile_project_rule_gaps(
+        test_db,
+        project_id=project_id,
+        complete_candidates=[],
+    ) == 0
+    assert repeated[0].status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
     assert await test_db.scalar(
         select(func.count(MemoirNarrativeGap.id)).where(
             MemoirNarrativeGap.project_id == project_id
@@ -187,6 +193,59 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     assert body["gaps"]["must_handle"] == []
     assert [item["id"] for item in body["gaps"]["accepted_incomplete"]] == [gap_id]
     assert "percentage" not in str(body).lower()
+
+
+async def test_project_rule_audit_resolves_obsolete_gap_and_reopens_it_if_condition_returns(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["童年"],
+    )
+    context = await load_chapter_audit_context(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+    )
+    candidates = evaluate_deterministic_gaps(context)
+    created_gaps, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=candidates,
+    )
+    gap_id = created_gaps[0].id
+
+    assert await gaps.reconcile_project_rule_gaps(
+        test_db,
+        project_id=project_id,
+        complete_candidates=[],
+    ) == 1
+    await test_db.flush()
+    resolved = await test_db.get(MemoirNarrativeGap, gap_id)
+    assert resolved is not None
+    assert resolved.status == MemoirNarrativeGapStatus.RESOLVED.value
+    assert resolved.resolved_by == MemoirNarrativeActorType.SYSTEM.value
+
+    reopened, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=candidates,
+    )
+    await test_db.commit()
+    assert created_count == 0
+    assert reopened[0].status == MemoirNarrativeGapStatus.OPEN.value
+    assert reopened[0].resolved_by is None
+    assert reopened[0].resolution_note == ""
+    assert await test_db.scalar(
+        select(func.count(MemoirNarrativeDecision.id)).where(
+            MemoirNarrativeDecision.project_id == project_id,
+            MemoirNarrativeDecision.target_id == gap_id,
+        )
+    ) == 2
 
 
 async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_db):

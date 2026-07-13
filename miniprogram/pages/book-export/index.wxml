@@ -23,6 +23,66 @@
     <view wx:elif="{{exportNotice}}" class="notice">{{exportNotice}}</view>
     <view wx:if="{{bookVersionNotice}}" class="notice subtle">{{bookVersionNotice}}</view>
 
+    <view wx:if="{{bookContent}}" class="book-consistency-panel">
+      <view class="book-consistency-head">
+        <view class="book-consistency-copy">
+          <text class="book-consistency-title">全书审校</text>
+          <text class="book-consistency-meta">{{bookConsistencyMetaText}}</text>
+        </view>
+        <text class="book-consistency-status {{bookOutput && bookOutput.status === 'accepted' && bookReadiness && bookReadiness.audit_is_current ? 'formal' : ''}}">
+          {{bookConsistencyLoading ? "同步中" : bookConsistencyStatusText}}
+        </text>
+      </view>
+
+      <text wx:if="{{bookConsistencyError}}" class="book-consistency-error">
+        {{bookConsistencyError}}
+      </text>
+
+      <view wx:if="{{bookConsistencyMustItems.length}}" class="book-consistency-group must">
+        <text class="book-consistency-group-title">必须处理 · {{bookConsistencyMustItems.length}}</text>
+        <view wx:for="{{bookConsistencyMustItems}}" wx:key="id" class="book-consistency-item">
+          <text class="book-consistency-item-title">{{item.title}}</text>
+          <text wx:if="{{item.detail}}" class="book-consistency-item-detail">{{item.detail}}</text>
+        </view>
+      </view>
+
+      <view wx:if="{{bookConsistencySuggestedItems.length}}" class="book-consistency-group suggested">
+        <text class="book-consistency-group-title">建议补充 · {{bookConsistencySuggestedItems.length}}</text>
+        <view wx:for="{{bookConsistencySuggestedItems}}" wx:key="id" class="book-consistency-item">
+          <text class="book-consistency-item-title">{{item.title}}</text>
+          <text wx:if="{{item.detail}}" class="book-consistency-item-detail">{{item.detail}}</text>
+        </view>
+      </view>
+
+      <view wx:if="{{bookConsistencyAcceptedItems.length}}" class="book-consistency-group accepted">
+        <text class="book-consistency-group-title">可以接受的不完整 · {{bookConsistencyAcceptedItems.length}}</text>
+        <view wx:for="{{bookConsistencyAcceptedItems}}" wx:key="id" class="book-consistency-item">
+          <text class="book-consistency-item-title">{{item.title}}</text>
+          <text wx:if="{{item.detail}}" class="book-consistency-item-detail">{{item.detail}}</text>
+        </view>
+      </view>
+
+      <view class="book-consistency-actions">
+        <button
+          class="ghost-button"
+          loading="{{bookConsistencyAuditRunning}}"
+          disabled="{{bookConsistencyAuditRunning || bookConsistencyFormalizing || bookTitleSaving || bookViewingHistoricalVersion}}"
+          bindtap="startBookConsistencyAudit"
+        >
+          {{bookConsistencyAuditRunning ? "正在审校" : (bookReadiness ? "重新审校" : "开始全书审校")}}
+        </button>
+        <button
+          wx:if="{{bookOutput && bookOutput.status !== 'accepted'}}"
+          class="primary-button"
+          loading="{{bookConsistencyFormalizing}}"
+          disabled="{{!bookConsistencyCanFormalize || bookConsistencyAuditRunning || bookConsistencyFormalizing || bookTitleSaving || bookViewingHistoricalVersion}}"
+          bindtap="formalizeBookOutput"
+        >
+          标记为正式书稿
+        </button>
+      </view>
+    </view>
+
     <view wx:if="{{!bookContent}}" class="state-card">
       <text>回到书稿页生成全书后，可以在这里预览和导出。</text>
     </view>

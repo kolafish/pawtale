@@ -8,6 +8,10 @@ import type {
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
   MemoirBookOutput,
+  MemoirBookConsistencyAuditJob,
+  MemoirBookConsistencyAuditRequest,
+  MemoirBookFormalizeResponse,
+  MemoirBookReadiness,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -31,6 +35,7 @@ import type {
   MemoirImageAssetUpdateRequest,
 } from "../domain/voice-chat";
 import {
+  memoirNarrativeProjectPath,
   memoirProjectPath,
   memoirRequest,
   withSelectedAIModel,
@@ -347,6 +352,47 @@ export function bookVoiceAssistantTurnStreamUrl(projectId: string): string {
 
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
+}
+
+export function getMemoirBookReadiness(projectId: string): Promise<MemoirBookReadiness> {
+  return memoirRequest<MemoirBookReadiness>(
+    memoirNarrativeProjectPath(projectId, "/book-readiness"),
+  );
+}
+
+export function enqueueMemoirBookConsistencyAudit(
+  projectId: string,
+  data: MemoirBookConsistencyAuditRequest = {},
+): Promise<MemoirBookConsistencyAuditJob> {
+  return memoirRequest<MemoirBookConsistencyAuditJob>(
+    memoirNarrativeProjectPath(projectId, "/book-consistency-audits"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+    },
+  );
+}
+
+export function getMemoirBookConsistencyAudit(
+  projectId: string,
+  jobId: string,
+): Promise<MemoirBookConsistencyAuditJob> {
+  return memoirRequest<MemoirBookConsistencyAuditJob>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/book-consistency-audits/${encodeURIComponent(jobId)}`,
+    ),
+  );
+}
+
+export function formalizeMemoirBookOutput(
+  projectId: string,
+  data: { audit_job_id: string; output_version_id: string },
+): Promise<MemoirBookFormalizeResponse> {
+  return memoirRequest<MemoirBookFormalizeResponse>(
+    memoirNarrativeProjectPath(projectId, "/book-output/formalize"),
+    { method: "POST", data },
+  );
 }
 
 export function enqueueMemoirBookOutputGeneration(

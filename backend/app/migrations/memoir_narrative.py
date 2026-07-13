@@ -56,6 +56,12 @@ MEMOIR_NARRATIVE_TRIGGERS = (
     *MEMOIR_CHAPTER_STRUCTURE_TRIGGERS,
     *MEMOIR_DRAFT_BLOCK_TRIGGERS,
 )
+MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
+    "formal_version_id": "VARCHAR(36)",
+    "formal_audit_job_id": "VARCHAR(36)",
+    "formalized_by_user_id": "VARCHAR(36)",
+    "formalized_at": "DATETIME",
+}
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -115,6 +121,25 @@ async def _ensure_structured_draft_snapshot_column(conn) -> list[str]:
         )
     )
     return ["memoir_book_chapter_draft_versions.block_snapshot_json"]
+
+
+async def _ensure_book_output_formal_columns(conn) -> list[str]:
+    table_name = "memoir_book_outputs"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    changed: list[str] = []
+    for column_name, column_type in MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        )
+        changed.append(f"{table_name}.{column_name}")
+    return changed
 
 
 async def _table_sql(conn, table_name: str) -> str:
@@ -327,6 +352,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 await conn.run_sync(lambda sync_conn, index=index: index.create(sync_conn, checkfirst=True))
                 changed_indexes.append(index.name)
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
+        changed_columns.extend(await _ensure_book_output_formal_columns(conn))
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
@@ -354,6 +380,17 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
     missing_triggers: list[str] = []
 
     async with engine.begin() as conn:
+        if await _table_exists(conn, "memoir_book_outputs"):
+            output_columns = {
+                str(column["name"])
+                for column in await _table_column_schema(conn, "memoir_book_outputs")
+            }
+            missing_columns.extend(
+                f"memoir_book_outputs.{column_name}"
+                for column_name in sorted(
+                    set(MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS) - output_columns
+                )
+            )
         for table_name, expected in expected_columns.items():
             if not await _table_exists(conn, table_name):
                 missing_tables.append(table_name)

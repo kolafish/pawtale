@@ -5,14 +5,15 @@ from app.services.memoir import book_auto_revision
 from app.services.memoir import book_generation_jobs
 from app.services.memoir import book_quality_audit
 from app.services.memoir import material_offline_asr_jobs
-from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
-from app.services.memoir.narrative import gap_audit
-from app.services.memoir.narrative import followup_jobs
-from app.services.memoir.narrative import draft_generation_jobs
 from app.services.memoir import source_cards
 from app.services.memoir import source_auto_assignment
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.editing_jobs import register_editing_job_handler
+from app.services.memoir.narrative import book_consistency_audit
+from app.services.memoir.narrative import draft_generation_jobs
+from app.services.memoir.narrative import followup_jobs
+from app.services.memoir.narrative import gap_audit
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 
 
 def register_memoir_editing_job_handlers() -> None:
@@ -39,6 +40,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,
         draft_generation_jobs.run_draft_block_generation_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY,
+        book_consistency_audit.run_book_consistency_audit_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.ROUTE_SOURCES,

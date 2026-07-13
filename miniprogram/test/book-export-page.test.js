@@ -48,10 +48,38 @@ function sampleBookOutput() {
   };
 }
 
+function sampleBookReadiness(overrides = {}) {
+  return {
+    project_id: "project/1",
+    ready_for_formal: false,
+    current_signature: "signature-1",
+    output_status: "draft",
+    output_version_id: "book-output-version-2",
+    latest_audit_job: null,
+    audit_is_current: false,
+    groups: {
+      must_handle: [
+        {
+          code: "book_consistency_audit_required",
+          title: "需要运行全书一致性检查",
+          detail: "",
+        },
+      ],
+      suggested: [],
+      accepted_incomplete: [],
+    },
+    ...overrides,
+  };
+}
+
 function loadBookExportPage(voiceApiExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookPlan: async () => samplePlan(),
     getMemoirBookOutput: async () => sampleBookOutput(),
+    getMemoirBookReadiness: async () => sampleBookReadiness(),
+    enqueueMemoirBookConsistencyAudit: async () => ({ id: "audit-job-1", status: "pending" }),
+    getMemoirBookConsistencyAudit: async () => ({ id: "audit-job-1", status: "succeeded" }),
+    formalizeMemoirBookOutput: async () => ({ status: "accepted" }),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
     updateMemoirBookOutput: async () => sampleBookOutput(),
@@ -101,6 +129,141 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
   assert.equal(context.data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
   assert.equal(context.data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
+  assert.equal(context.data.bookConsistencyStatusText, "1 条必须处理");
+});
+
+test("book export page runs consistency audit in background and then enables formalization", async () => {
+  const calls = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const ready = sampleBookReadiness({
+    ready_for_formal: true,
+    audit_is_current: true,
+    latest_audit_job: { id: "audit-job-1", status: "succeeded" },
+    groups: { must_handle: [], suggested: [], accepted_incomplete: [] },
+  });
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookConsistencyAudit: async (projectId, payload) => {
+      calls.push({ kind: "enqueue", projectId, payload });
+      return { id: "audit-job-1", status: "pending" };
+    },
+    getMemoirBookConsistencyAudit: async (projectId, jobId) => {
+      calls.push({ kind: "poll", projectId, jobId });
+      return { id: jobId, status: "succeeded", error_message: "" };
+    },
+    getMemoirBookReadiness: async () => ready,
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.applyBookReadiness.call(context, sampleBookReadiness(), sampleBookOutput());
+
+  await page.startBookConsistencyAudit.call(context);
+  page.clearBookConsistencyPoll.call(context);
+  assert.equal(context.data.bookConsistencyAuditRunning, true);
+  assert.equal(context.data.bookConsistencyStatusText, "检查中");
+  await page.pollBookConsistencyAudit.call(context);
+
+  assert.deepEqual(calls, [
+    {
+      kind: "enqueue",
+      projectId: "project/1",
+      payload: { include_semantic_audit: true },
+    },
+    { kind: "poll", projectId: "project/1", jobId: "audit-job-1" },
+  ]);
+  assert.equal(context.data.bookConsistencyAuditRunning, false);
+  assert.equal(context.data.bookConsistencyCanFormalize, true);
+  assert.equal(toasts[0].title, "全书审校已完成");
+  delete global.wx;
+});
+
+test("book export page resumes polling an unfinished consistency audit after reopening", async () => {
+  const pending = sampleBookReadiness({
+    latest_audit_job: { id: "audit-job-pending", status: "running" },
+  });
+  const { page } = loadBookExportPage({
+    getMemoirBookReadiness: async () => pending,
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project/1" });
+  page.clearBookConsistencyPoll.call(context);
+
+  assert.equal(context.data.bookConsistencyAuditRunning, true);
+  assert.equal(context.data.bookConsistencyJobId, "audit-job-pending");
+  assert.equal(context.data.bookConsistencyStatusText, "检查中");
+});
+
+test("book consistency failure stays scoped and leaves the export page usable", async () => {
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookConsistencyAudit: async () => ({
+      id: "audit-job-failed",
+      status: "pending",
+    }),
+    getMemoirBookConsistencyAudit: async () => ({
+      id: "audit-job-failed",
+      status: "failed",
+      error_message: "语义审校服务暂时不可用",
+    }),
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.applyBookReadiness.call(context, sampleBookReadiness(), sampleBookOutput());
+
+  await page.startBookConsistencyAudit.call(context);
+  page.clearBookConsistencyPoll.call(context);
+  await page.pollBookConsistencyAudit.call(context);
+
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.bookConsistencyError, "语义审校服务暂时不可用");
+  assert.equal(context.data.bookConsistencyAuditRunning, false);
+  assert.equal(context.data.bookContent, "全书第二版正文");
+});
+
+test("book export page formalizes only the audited current output version", async () => {
+  const requests = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const ready = sampleBookReadiness({
+    ready_for_formal: true,
+    audit_is_current: true,
+    latest_audit_job: { id: "audit-job-1", status: "succeeded" },
+    groups: { must_handle: [], suggested: [], accepted_incomplete: [] },
+  });
+  const acceptedOutput = { ...sampleBookOutput(), status: "accepted" };
+  const { page } = loadBookExportPage({
+    getMemoirBookReadiness: async () => ready,
+    formalizeMemoirBookOutput: async (projectId, payload) => {
+      requests.push({ projectId, payload });
+      return { status: "accepted" };
+    },
+    getMemoirBookOutput: async () => acceptedOutput,
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.applyBookReadiness.call(context, ready, sampleBookOutput());
+
+  await page.formalizeBookOutput.call(context);
+
+  assert.deepEqual(requests, [{
+    projectId: "project/1",
+    payload: {
+      audit_job_id: "audit-job-1",
+      output_version_id: "book-output-version-2",
+    },
+  }]);
+  assert.equal(context.data.bookOutput.status, "accepted");
+  assert.equal(context.data.bookConsistencyStatusText, "正式书稿");
+  assert.equal(toasts[0].title, "已标记为正式书稿");
+  delete global.wx;
 });
 
 test("book export page explains the selected export action", () => {

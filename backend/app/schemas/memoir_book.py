@@ -1081,6 +1081,10 @@ class MemoirBookOutputResponse(BaseModel):
     plan_id: str
     title: str
     status: MemoirOutputStatus
+    formal_version_id: str | None = None
+    formal_audit_job_id: str | None = None
+    formalized_by_user_id: str | None = None
+    formalized_at: datetime | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
     is_stale: bool = False
     stale_chapter_titles: list[str] = Field(default_factory=list)

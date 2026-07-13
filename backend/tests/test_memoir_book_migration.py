@@ -25,8 +25,15 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
 
         async with engine.begin() as conn:
             columns = await _table_columns(conn, "memoir_book_plan_chapters")
+            output_columns = await _table_columns(conn, "memoir_book_outputs")
 
         assert "summary" in columns
+        assert {
+            "formal_version_id",
+            "formal_audit_job_id",
+            "formalized_by_user_id",
+            "formalized_at",
+        }.issubset(output_columns)
     finally:
         await engine.dispose()
 
