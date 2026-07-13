@@ -76,7 +76,7 @@
             <text class="status-label">{{story.statusText}}</text>
           </view>
           <text class="story-summary">{{story.summary || "暂无故事摘要"}}</text>
-          <view wx:if="{{story.canDecide}}" class="decision-actions">
+          <view wx:if="{{story.canDecide || story.canExcludeFromChapter}}" class="decision-actions">
             <button
               wx:if="{{story.verification_status !== 'confirmed'}}"
               class="compact-primary-button"
@@ -93,7 +93,13 @@
               data-decision="reject"
               disabled="{{story.busy}}"
               bindtap="decideStory"
-            >不采用</button>
+            >故事有误</button>
+            <button
+              wx:if="{{story.canExcludeFromChapter}}"
+              data-story-id="{{story.id}}"
+              disabled="{{story.busy}}"
+              bindtap="excludeStoryFromChapter"
+            >移出本章</button>
           </view>
 
           <view class="slot-grid">

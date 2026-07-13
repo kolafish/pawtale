@@ -165,6 +165,9 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     decideMemoirStory: async () => {
       throw new Error("decideMemoirStory was not mocked");
     },
+    excludeMemoirStoryFromChapter: async () => {
+      throw new Error("excludeMemoirStoryFromChapter was not mocked");
+    },
     resolveMemoirStorySlot: async () => {
       throw new Error("resolveMemoirStorySlot was not mocked");
     },
@@ -564,6 +567,69 @@ test("confirming one story keeps unrelated review controls available and refresh
   assert.match(calls[0].data.idempotency_key, /^workspace:story:story-1:confirm:/);
   assert.equal(context.data.stories[0].verification_status, "confirmed");
   assert.equal(context.data.stories[0].busy, false);
+  delete global.wx;
+});
+
+test("moving a story out of a draft chapter preserves the story and only locks its controls", async () => {
+  const pending = deferred();
+  const calls = [];
+  const initial = sampleWorkspace();
+  let workspace = {
+    ...initial,
+    contract: { ...initial.contract, status: "draft" },
+  };
+  global.wx = {
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    showToast() {},
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => workspace,
+      excludeMemoirStoryFromChapter: async (projectId, contractId, storyId, data) => {
+        calls.push({ projectId, contractId, storyId, data });
+        await pending.promise;
+        workspace = {
+          ...workspace,
+          contract: {
+            ...workspace.contract,
+            nodes: workspace.contract.nodes.map((node) => ({
+              ...node,
+              required: false,
+              status: "excluded",
+              stories: [],
+            })),
+          },
+          stories: [],
+        };
+        return workspace.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+  assert.equal(context.data.stories[0].canExcludeFromChapter, true);
+
+  const request = page.excludeStoryFromChapter.call(context, {
+    currentTarget: { dataset: { storyId: "story-1" } },
+  });
+  await Promise.resolve();
+  assert.equal(context.data.stories[0].busy, true);
+  assert.equal(context.data.stories[0].claims[0].busy, false);
+
+  pending.resolve();
+  await request;
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].contractId, "contract-1");
+  assert.equal(calls[0].storyId, "story-1");
+  assert.match(
+    calls[0].data.idempotency_key,
+    /^workspace:contract:contract-1:exclude:story-1:/,
+  );
+  assert.equal(context.data.stories.length, 0);
+  assert.equal(context.data.nodes[0].status, "excluded");
   delete global.wx;
 });
 

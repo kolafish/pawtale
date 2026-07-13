@@ -105,6 +105,23 @@ export function decideMemoirStory(
   );
 }
 
+export function excludeMemoirStoryFromChapter(
+  projectId: string,
+  contractId: string,
+  storyId: string,
+  data: MemoirNarrativeDecisionRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    narrativeTargetPath(
+      projectId,
+      "chapter-contracts",
+      contractId,
+      `/stories/${encodeURIComponent(storyId)}/exclude`,
+    ),
+    { method: "POST", data },
+  );
+}
+
 export function resolveMemoirStorySlot(
   projectId: string,
   storyId: string,

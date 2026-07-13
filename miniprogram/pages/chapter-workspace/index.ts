@@ -33,6 +33,7 @@ import {
   enqueueMemoirDraftBlockGeneration,
   enqueueMemoirDraftBlockRevision,
   enqueueMemoirChapterWorkspaceAudit,
+  excludeMemoirStoryFromChapter,
   getMemoirDraftBlockJob,
   getMemoirChapterWorkspace,
   listMemoirDraftBlocks,
@@ -100,6 +101,7 @@ interface ClaimView extends MemoirChapterWorkspaceClaim {
 interface StoryView extends MemoirChapterWorkspaceStory {
   statusText: string;
   canDecide: boolean;
+  canExcludeFromChapter: boolean;
   busy: boolean;
   slots: StorySlotView[];
   claims: ClaimView[];
@@ -493,6 +495,7 @@ definePage<ChapterWorkspacePageData>()({
         ...story,
         statusText: storyStatusText(story),
         canDecide: story.publication_status === "eligible",
+        canExcludeFromChapter: workspace.contract?.status === "draft",
         busy: busyStoryIds.has(story.id),
         slots: story.slots.map((slot) => {
           const status = slotStatus(slot.status);
@@ -662,7 +665,11 @@ definePage<ChapterWorkspacePageData>()({
     }
     if (
       decision === "reject"
-      && !await confirmDialog("不采用这个故事", "该故事将不再用于当前成书结构。", "不采用")
+      && !await confirmDialog(
+        "确认故事有误",
+        "这会将故事标记为有误，并影响所有引用它的章节。",
+        "故事有误",
+      )
     ) {
       return;
     }
@@ -685,6 +692,54 @@ definePage<ChapterWorkspacePageData>()({
         error: saved
           ? "故事状态已保存，但页面刷新失败，请重新进入本页查看最新状态"
           : (error instanceof Error ? error.message : "故事状态保存失败"),
+      });
+    } finally {
+      this.setStoryBusy(storyId, false);
+    }
+  },
+
+  async excludeStoryFromChapter(event: DatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    const contract = this.data.workspace?.contract;
+    if (
+      !storyId
+      || !contract
+      || contract.status !== "draft"
+      || this.data.busyStoryIds.includes(storyId)
+    ) {
+      return;
+    }
+    if (!await confirmDialog(
+      "移出本章",
+      "故事本身会保留，只是不再用于当前章节。",
+      "移出本章",
+    )) {
+      return;
+    }
+    this.setStoryBusy(storyId, true);
+    this.setData({ error: "" });
+    let saved = false;
+    try {
+      await excludeMemoirStoryFromChapter(
+        this.data.projectId,
+        contract.id,
+        storyId,
+        {
+          idempotency_key: `workspace:contract:${contract.id}:exclude:${storyId}:${Date.now()}`,
+          reason: "用户从当前章节移除故事",
+        },
+      );
+      saved = true;
+      await this.refreshWorkspaceOnly();
+      wx.showToast({ title: "已移出本章", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: saved
+          ? "章节结构已保存，但页面刷新失败，请重新进入本页查看最新状态"
+          : (error instanceof Error ? error.message : "移出本章失败"),
       });
     } finally {
       this.setStoryBusy(storyId, false);

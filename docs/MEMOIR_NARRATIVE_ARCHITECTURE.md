@@ -488,6 +488,7 @@ required
 约束：
 
 - 一个核心 Story 通常由一个 primary 节点承载，避免同章重复。
+- “移出本章”只修改当前 draft contract：移除该 Story 的 NodeStory 关联并写入契约排除约束；Story 作为项目级资产继续保留，不得等同于全局 reject。关联移除后为空的节点保留审计痕迹，但转为非必选 `excluded`。confirmed contract 必须先创建新 revision，不能原地排除。
 - 过渡节点必须说明连接哪两个节点，不允许借过渡引入未经引用的新事实。
 - 开场和结尾必须服务 contract objective，不使用通用抒情模板填充。
 - 拆章、并章和拖拽顺序只修改结构关系，不复制 Story 或 Claim。

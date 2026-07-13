@@ -31,6 +31,7 @@ from app.models.memoir_narrative import (
     MemoirChapterNodeStory,
     MemoirClaim,
     MemoirClaimEvidence,
+    MemoirNarrativeDecision,
     MemoirStory,
     MemoirStoryClaim,
 )
@@ -146,6 +147,130 @@ async def _create_ready_story(
     )
     await test_db.commit()
     return story, claim
+
+
+async def test_excluding_story_is_contract_scoped_audited_and_keeps_story(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["第一次离家"],
+    )
+    excluded_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="离家前夜",
+    )
+    retained_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="抵达成都",
+    )
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload(
+            "exclude-story-contract",
+            objective="讲清离家和抵达的经过。",
+            include_story_ids=[excluded_story.id, retained_story.id],
+        ),
+    )
+    assert draft.status_code == 200, draft.text
+    contract_id = draft.json()["id"]
+
+    node_ids: list[str] = []
+    for index, story in enumerate([excluded_story, retained_story]):
+        node = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes",
+            json={
+                "idempotency_key": f"story-node-{index}",
+                "node_type": "story",
+                "title": story.title,
+                "purpose": f"讲述{story.title}。",
+                "required": True,
+            },
+        )
+        assert node.status_code == 200, node.text
+        node_id = node.json()["nodes"][-1]["id"]
+        node_ids.append(node_id)
+        linked = await client.post(
+            f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes/{node_id}/stories",
+            json={
+                "story_id": story.id,
+                "story_role": "primary",
+                "sort_order": 0,
+                "required": True,
+            },
+        )
+        assert linked.status_code == 200, linked.text
+
+    decision_payload = {
+        "idempotency_key": "exclude-story-from-current-chapter",
+        "reason": "这段经历放到下一章",
+    }
+    excluded = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{excluded_story.id}/exclude",
+        json=decision_payload,
+    )
+    assert excluded.status_code == 200, excluded.text
+    contract = excluded.json()
+    assert excluded_story.id not in contract["constraints"]["include_story_ids"]
+    assert excluded_story.id in contract["constraints"]["exclude_story_ids"]
+    excluded_node = next(node for node in contract["nodes"] if node["id"] == node_ids[0])
+    assert excluded_node["stories"] == []
+    assert excluded_node["required"] is False
+    assert excluded_node["status"] == "excluded"
+
+    persisted_story = await test_db.get(MemoirStory, excluded_story.id)
+    assert persisted_story is not None
+    assert persisted_story.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value
+    assert persisted_story.verification_status == MemoirStoryVerificationStatus.CONFIRMED.value
+    assert persisted_story.publication_status == MemoirStoryPublicationStatus.ELIGIBLE.value
+    decisions = list(
+        (
+            await test_db.scalars(
+                select(MemoirNarrativeDecision).where(
+                    MemoirNarrativeDecision.project_id == project_id,
+                    MemoirNarrativeDecision.idempotency_key
+                    == decision_payload["idempotency_key"],
+                )
+            )
+        ).all()
+    )
+    assert len(decisions) == 1
+    assert decisions[0].target_type == "chapter_contract"
+    assert decisions[0].target_id == contract_id
+    assert decisions[0].action == "exclude"
+    assert decisions[0].after_state_json["excluded_story_id"] == excluded_story.id
+
+    replay = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{excluded_story.id}/exclude",
+        json=decision_payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert await test_db.scalar(
+        select(func.count()).select_from(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.project_id == project_id,
+            MemoirNarrativeDecision.idempotency_key
+            == decision_payload["idempotency_key"],
+        )
+    ) == 1
+
+    confirmed = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    immutable = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{retained_story.id}/exclude",
+        json={
+            "idempotency_key": "exclude-after-confirmation",
+            "reason": "不应原地修改",
+        },
+    )
+    assert immutable.status_code == 409
 
 
 async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generation_gate(

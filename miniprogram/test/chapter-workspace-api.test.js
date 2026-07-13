@@ -57,6 +57,7 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     decideMemoirClaim,
     decideMemoirStory,
     enqueueMemoirChapterWorkspaceAudit,
+    excludeMemoirStoryFromChapter,
     getMemoirChapterWorkspace,
     resolveMemoirNarrativeGap,
     resolveMemoirStorySlot,
@@ -76,6 +77,15 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     idempotency_key: "story-decision-1",
     reason: "不用于成书",
   });
+  await excludeMemoirStoryFromChapter(
+    "project/1",
+    "contract/1",
+    "story/1",
+    {
+      idempotency_key: "chapter-exclusion-1",
+      reason: "移到下一章",
+    },
+  );
   await resolveMemoirStorySlot(
     "project/1",
     "story/1",
@@ -110,13 +120,18 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     idempotency_key: "story-decision-1",
     reason: "不用于成书",
   });
-  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/slots/time%2Fplace/resolve");
+  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/exclude");
   assert.deepEqual(apiRequests[5].data, {
+    idempotency_key: "chapter-exclusion-1",
+    reason: "移到下一章",
+  });
+  assert.equal(apiRequests[6].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/slots/time%2Fplace/resolve");
+  assert.deepEqual(apiRequests[6].data, {
     idempotency_key: "slot-decision-1",
     note: "叙述者暂时无法补充",
     status: "accepted_incomplete",
   });
-  assert.equal(apiRequests[6].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/confirm");
-  assert.deepEqual(apiRequests[6].data, {});
+  assert.equal(apiRequests[7].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/confirm");
+  assert.deepEqual(apiRequests[7].data, {});
   delete global.wx;
 });

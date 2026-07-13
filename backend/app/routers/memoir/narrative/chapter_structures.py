@@ -20,6 +20,7 @@ from app.schemas.memoir_narrative import (
     MemoirChapterStructureMutationResponse,
     MemoirChapterStructureResponse,
     MemoirChapterStructureSplitRequest,
+    MemoirNarrativeDecisionRequest,
 )
 from app.services.memoir.narrative import chapter_contracts, chapter_nodes
 
@@ -337,6 +338,33 @@ async def detach_story_from_memoir_chapter_node(
             db,
             project_id=project_id,
             contract_id=contract_id,
+        )
+        return await _commit_contract_response(db, contract=contract)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/exclude",
+    response_model=MemoirChapterContractResponse,
+)
+async def exclude_story_from_memoir_chapter_contract(
+    project_id: str,
+    contract_id: str,
+    story_id: str,
+    req: MemoirNarrativeDecisionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        contract = await chapter_nodes.exclude_story_from_contract(
+            db,
+            project_id=project_id,
+            contract_id=contract_id,
+            story_id=story_id,
+            request=req,
+            actor_user_id=current_user.id,
         )
         return await _commit_contract_response(db, contract=contract)
     except (ValueError, IntegrityError) as exc:
