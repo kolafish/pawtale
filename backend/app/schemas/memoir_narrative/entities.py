@@ -45,4 +45,13 @@ class MemoirNarrativeEntityCreate(BaseModel):
     def validate_actor(self):
         if self.created_by == MemoirNarrativeActorType.USER and not self.created_by_user_id:
             raise ValueError("user-created entity requires created_by_user_id")
+        if (
+            self.verification_status
+            in {
+                MemoirNarrativeEntityVerificationStatus.CONFIRMED,
+                MemoirNarrativeEntityVerificationStatus.REJECTED,
+            }
+            and self.created_by != MemoirNarrativeActorType.USER
+        ):
+            raise ValueError("confirmed or rejected entity requires an explicit user decision")
         return self

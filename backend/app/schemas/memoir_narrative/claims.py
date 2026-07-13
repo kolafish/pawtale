@@ -66,6 +66,20 @@ class MemoirClaimCreate(BaseModel):
             raise ValueError("time_end must not precede time_start")
         if self.created_by == MemoirNarrativeActorType.USER and not self.created_by_user_id:
             raise ValueError("user-created claim requires created_by_user_id")
+        if (
+            self.verification_status
+            in {
+                MemoirClaimVerificationStatus.CONFIRMED,
+                MemoirClaimVerificationStatus.REJECTED,
+            }
+            and self.created_by != MemoirNarrativeActorType.USER
+        ):
+            raise ValueError("confirmed or rejected claim requires an explicit user decision")
+        if (
+            self.publication_status != MemoirClaimPublicationStatus.ELIGIBLE
+            and self.created_by != MemoirNarrativeActorType.USER
+        ):
+            raise ValueError("private or excluded claim requires an explicit user decision")
         return self
 
 

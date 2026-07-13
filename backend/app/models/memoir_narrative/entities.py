@@ -49,6 +49,11 @@ class MemoirNarrativeEntity(Base):
             name="ck_memoir_narrative_entities_updated_actor",
         ),
         CheckConstraint(
+            "verification_status NOT IN ('confirmed', 'rejected') OR "
+            "(updated_by = 'user' AND updated_by_user_id IS NOT NULL)",
+            name="ck_memoir_narrative_entities_user_decision",
+        ),
+        CheckConstraint(
             "length(trim(canonical_name)) > 0",
             name="ck_memoir_narrative_entities_name",
         ),

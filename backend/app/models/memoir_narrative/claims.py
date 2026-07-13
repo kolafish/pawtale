@@ -100,6 +100,16 @@ class MemoirClaim(Base):
             "updated_by != 'user' OR updated_by_user_id IS NOT NULL",
             name="ck_memoir_claims_updated_actor",
         ),
+        CheckConstraint(
+            "verification_status NOT IN ('confirmed', 'rejected') OR "
+            "(updated_by = 'user' AND updated_by_user_id IS NOT NULL)",
+            name="ck_memoir_claims_user_verification_decision",
+        ),
+        CheckConstraint(
+            "publication_status = 'eligible' OR "
+            "(updated_by = 'user' AND updated_by_user_id IS NOT NULL)",
+            name="ck_memoir_claims_user_publication_decision",
+        ),
         CheckConstraint("length(trim(statement)) > 0", name="ck_memoir_claims_statement"),
         CheckConstraint(
             "(time_start IS NULL AND time_end IS NULL) OR "

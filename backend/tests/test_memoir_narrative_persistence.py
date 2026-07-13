@@ -1,16 +1,20 @@
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import event, text
+from pydantic import ValidationError
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import Base, register_models
+from app.config import Settings
+from app.database import Base, create_database_engine, register_models
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirClaimEvidenceSourceType,
     MemoirClaimPredicate,
+    MemoirClaimPublicationStatus,
     MemoirClaimType,
+    MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeEntityType,
 )
@@ -37,15 +41,12 @@ from app.schemas.memoir_narrative import (
 
 
 def _sqlite_engine():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-
-    @event.listens_for(engine.sync_engine, "connect")
-    def _enable_foreign_keys(dbapi_connection, _connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    return engine
+    return create_database_engine(
+        Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+            sqlite_journal_mode="memory",
+        )
+    )
 
 
 async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
@@ -275,3 +276,23 @@ async def test_claim_entity_foreign_key_rejects_cross_project_relation():
                 )
     finally:
         await engine.dispose()
+
+
+def test_ai_cannot_create_user_decision_states():
+    with pytest.raises(ValidationError, match="explicit user decision"):
+        MemoirClaimCreate(
+            project_id="project-id",
+            claim_type=MemoirClaimType.EVENT,
+            statement="AI 不能把抽取结果直接标记为用户已确认。",
+            verification_status=MemoirClaimVerificationStatus.CONFIRMED,
+            created_by=MemoirNarrativeActorType.AI,
+        )
+
+    with pytest.raises(ValidationError, match="explicit user decision"):
+        MemoirClaimCreate(
+            project_id="project-id",
+            claim_type=MemoirClaimType.EVENT,
+            statement="AI 不能替用户决定隐藏事实。",
+            publication_status=MemoirClaimPublicationStatus.PRIVATE,
+            created_by=MemoirNarrativeActorType.AI,
+        )
