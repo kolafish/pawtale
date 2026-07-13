@@ -16,6 +16,7 @@ from app.models.memoir_narrative import (
     MemoirStorySlot,
     MemoirStorySlotClaim,
 )
+from app.services.memoir.narrative import draft_blocks
 
 
 def _datetime_value(value: datetime | None) -> str | None:
@@ -137,6 +138,12 @@ async def create_initial_story_revision(
     )
     db.add(revision)
     await db.flush()
+    await draft_blocks.mark_blocks_stale_for_story_revision(
+        db,
+        project_id=story.project_id,
+        story_id=story.id,
+        current_story_revision_id=revision.id,
+    )
     return revision
 
 
@@ -182,4 +189,10 @@ async def record_story_revision(
     )
     db.add(revision)
     await db.flush()
+    await draft_blocks.mark_blocks_stale_for_story_revision(
+        db,
+        project_id=story.project_id,
+        story_id=story.id,
+        current_story_revision_id=revision.id,
+    )
     return revision

@@ -185,6 +185,13 @@ class MemoirStoryRevision(Base):
             name="ck_memoir_story_revisions_created_actor",
         ),
         CheckConstraint("story_version >= 1", name="ck_memoir_story_revisions_version"),
+        Index(
+            "uq_memoir_story_revisions_project_story_id",
+            "project_id",
+            "story_id",
+            "id",
+            unique=True,
+        ),
         Index("ix_memoir_story_revisions_project_story", "project_id", "story_id", "story_version"),
     )
 

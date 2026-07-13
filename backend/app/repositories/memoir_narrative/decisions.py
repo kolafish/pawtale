@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.narrative_types import MemoirNarrativeDecisionTargetType
 from app.models.memoir_narrative import (
     MemoirClaim,
+    MemoirDraftBlock,
     MemoirFollowupTask,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
@@ -128,6 +129,13 @@ class MemoirNarrativeDecisionRepository:
                 select(MemoirFollowupTask.id).where(
                     MemoirFollowupTask.project_id == data.project_id,
                     MemoirFollowupTask.id == data.target_id,
+                )
+            )
+        elif data.target_type == MemoirNarrativeDecisionTargetType.DRAFT_BLOCK:
+            target_exists = await self._db.scalar(
+                select(MemoirDraftBlock.id).where(
+                    MemoirDraftBlock.project_id == data.project_id,
+                    MemoirDraftBlock.id == data.target_id,
                 )
             )
         else:

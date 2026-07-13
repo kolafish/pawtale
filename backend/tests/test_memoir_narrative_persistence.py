@@ -61,11 +61,21 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
             "changed_tables": list(MEMOIR_NARRATIVE_TABLES),
             "changed_indexes": [],
             "changed_triggers": list(MEMOIR_NARRATIVE_TRIGGERS),
+            "legacy_backfill": {
+                "blocks": 0,
+                "versions": 0,
+                "drafts_without_versions": 0,
+            },
         }
         assert second == {
             "changed_tables": [],
             "changed_indexes": [],
             "changed_triggers": [],
+            "legacy_backfill": {
+                "blocks": 0,
+                "versions": 0,
+                "drafts_without_versions": 0,
+            },
         }
     finally:
         await engine.dispose()
@@ -85,8 +95,15 @@ async def test_narrative_migration_upgrades_pr2_tables_in_place():
 
         assert changed == {
             "changed_tables": ["memoir_narrative_decisions"],
-            "changed_indexes": ["uq_memoir_claim_evidence_transcript_quote"],
+            "changed_indexes": [
+                "uq_memoir_claim_evidence_transcript_quote",
+            ],
             "changed_triggers": list(MEMOIR_NARRATIVE_TRIGGERS),
+            "legacy_backfill": {
+                "blocks": 0,
+                "versions": 0,
+                "drafts_without_versions": 0,
+            },
         }
     finally:
         await engine.dispose()
