@@ -115,7 +115,7 @@
             disabled="{{assemblingDraft || !draftBlocks.length}}"
             bindtap="assembleChapterDraft"
           >
-            组装章节稿
+            组装并确认本章
           </button>
         </view>
       </view>

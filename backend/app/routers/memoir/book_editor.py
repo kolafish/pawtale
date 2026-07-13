@@ -6,14 +6,11 @@ from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_book import (
-    MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
-    MemoirBookChapterDraftUpdateRequest,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
-    MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookPlanConfirmRequest,
@@ -178,48 +175,6 @@ async def get_memoir_book_editor_chapter_draft(
 
 
 @router.post(
-    "/projects/{project_id}/book-editor/chapters/{chapter_id}/draft/generate",
-    response_model=MemoirBookChapterDraftResponse,
-)
-async def generate_memoir_book_editor_chapter_draft(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_drafts.generate_chapter_draft(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
-        allow_admin=is_admin_user(current_user),
-    )
-
-
-@router.patch(
-    "/projects/{project_id}/book-editor/chapters/{chapter_id}/draft",
-    response_model=MemoirBookChapterDraftResponse,
-)
-async def update_memoir_book_editor_chapter_draft(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_drafts.update_chapter_draft(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
-        allow_admin=is_admin_user(current_user),
-    )
-
-
-@router.post(
     "/projects/{project_id}/book-editor/chapters/{chapter_id}/draft/confirm",
     response_model=MemoirBookChapterDraftResponse,
 )
@@ -234,22 +189,6 @@ async def confirm_memoir_book_editor_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
-        allow_admin=is_admin_user(current_user),
-    )
-
-
-@router.post("/projects/{project_id}/book-editor/output/generate", response_model=MemoirBookOutputResponse)
-async def generate_memoir_book_editor_output(
-    project_id: str,
-    req: MemoirBookOutputGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_outputs.generate_book_output(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
         allow_admin=is_admin_user(current_user),
     )
 

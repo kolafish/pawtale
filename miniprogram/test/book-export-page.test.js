@@ -83,7 +83,7 @@ function loadBookExportPage(voiceApiExports = {}) {
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
     updateMemoirBookOutput: async () => sampleBookOutput(),
-    enqueueMemoirBookOutputGeneration: async () => ({ id: "event-book-output" }),
+    assembleMemoirBookDraftBlocks: async () => ({ version: 1 }),
     enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
     ...voiceApiExports,
   });
@@ -467,7 +467,7 @@ test("book export page downloads reading PDF with the standard layout", async ()
   delete global.wx;
 });
 
-test("book export page submits full-book regeneration as a new version", async () => {
+test("book export page assembles a new version from confirmed chapter blocks", async () => {
   const requests = [];
   const toasts = [];
   global.wx = {
@@ -476,9 +476,9 @@ test("book export page submits full-book regeneration as a new version", async (
     },
   };
   const { page } = loadBookExportPage({
-    enqueueMemoirBookOutputGeneration: async (projectId, payload) => {
-      requests.push({ projectId, payload });
-      return { id: "event-book-output" };
+    assembleMemoirBookDraftBlocks: async (projectId) => {
+      requests.push({ projectId });
+      return { version: 3 };
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -486,22 +486,9 @@ test("book export page submits full-book regeneration as a new version", async (
 
   await page.generateBook.call(context);
 
-  assert.deepEqual(requests[0], {
-    projectId: "project/1",
-    payload: {
-      force_regenerate: true,
-      title: "外婆回忆录",
-      subtitle: "根据口述访谈整理",
-      narrator_name: "外婆",
-      prepared_by: "家人整理",
-      preface: "这些故事来自家里的讲述。",
-      afterword: "这些故事还可以继续补充。",
-      back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "classic_plain",
-    },
-  });
+  assert.deepEqual(requests[0], { projectId: "project/1" });
   assert.equal(context.data.generatingBook, false);
-  assert.equal(context.data.exportNotice, "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。");
-  assert.equal(toasts[0].title, "已后台生成");
+  assert.equal(context.data.exportNotice, "已按确认的结构化章节组装最新版，历史版本保持不变。");
+  assert.equal(toasts[0].title, "全书已组装");
   delete global.wx;
 });

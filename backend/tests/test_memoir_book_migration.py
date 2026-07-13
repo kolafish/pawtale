@@ -21,7 +21,7 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
                 text("ALTER TABLE memoir_book_plan_chapters ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
             )
 
-        await assert_runtime_schema(engine)
+        await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
 
         async with engine.begin() as conn:
             columns = await _table_columns(conn, "memoir_book_plan_chapters")

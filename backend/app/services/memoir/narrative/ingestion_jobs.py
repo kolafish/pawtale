@@ -209,6 +209,7 @@ async def run_narrative_ingestion_job(
             "answered_followup_task_ids": list(result.answered_followup_task_ids),
             "provider": result.provider,
             "model": result.model,
+            "extraction_diagnostics": result.extraction_diagnostics,
             "engine": NARRATIVE_INGESTION_ENGINE,
             "schema_version": NARRATIVE_EXTRACTION_SCHEMA_VERSION,
         }

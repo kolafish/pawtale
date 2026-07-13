@@ -37,6 +37,7 @@ from app.models.memoir_narrative import (
 from app.services.memoir.narrative.chapter_structure_backfill import (
     run_chapter_structure_backfill,
 )
+from app.services.memoir.narrative.cutover_checks import project_migration_report
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -576,3 +577,13 @@ async def test_chapter_structure_backfill_is_dry_run_by_default_and_never_confir
         ).all()
     )
     assert stored_titles == {"第一章", "第二章"}
+
+    migration = await project_migration_report(test_db, project_id=project_id)
+    assert "chapter contracts still require user confirmation" not in migration[
+        "cutover_data_blockers"
+    ]
+    assert migration["chapter_workflow_ready"] is False
+    assert migration["chapter_workflow_blockers"] == [
+        "chapter contracts still require user confirmation",
+        "chapters do not all have structured draft blocks",
+    ]

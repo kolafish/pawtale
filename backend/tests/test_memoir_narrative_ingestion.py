@@ -227,10 +227,38 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
 
 
-async def test_invalid_ai_schema_creates_no_narrative_state(client, test_db):
+async def test_invalid_ai_schema_is_repaired_once(client, test_db):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    fake_ai = FakeNarrativeAI(
+        [
+            {"schema_version": "1", "claims": "not-a-list"},
+            _extraction_payload(source_text),
+        ]
+    )
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert fake_ai.calls == 2
+    assert len(result.created_claim_ids) == 2
+
+
+async def test_invalid_ai_schema_after_repair_creates_no_narrative_state(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
     project, utterance, version = await _load_source(test_db, created)
-    fake_ai = FakeNarrativeAI([{"schema_version": "1", "claims": "not-a-list"}])
+    fake_ai = FakeNarrativeAI(
+        [
+            {"schema_version": "1", "claims": "not-a-list"},
+            {"schema_version": "1", "claims": "still-not-a-list"},
+        ]
+    )
 
     with pytest.raises(ValueError, match="did not match schema"):
         await ingest_transcript_version(
@@ -242,9 +270,134 @@ async def test_invalid_ai_schema_creates_no_narrative_state(client, test_db):
         )
     await test_db.rollback()
 
+    assert fake_ai.calls == 2
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaimEvidence)) == 0
     assert await test_db.scalar(select(func.count()).select_from(MemoirNarrativeEntity)) == 0
+
+
+async def test_repair_retains_valid_claims_without_coercing_invalid_items(client, test_db):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    repaired = _extraction_payload(source_text)
+    repaired["claims"].append(
+        {
+            "key": "invalid_relationship",
+            "claim_type": "relationship",
+            "statement": "关系不完整。",
+            "subject_entity_key": "narrator",
+            "predicate_code": "social_relationship",
+            "object_entity_key": None,
+            "object_text": None,
+            "place_entity_key": None,
+            "time_text": None,
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "certainty": "uncertain",
+            "evidence_quotes": ["我和外婆一起生活"],
+        }
+    )
+    repaired["stories"] = [
+        {
+            "key": "invalid_story",
+            "title": "搬到成都",
+            "story_type": "event",
+            "summary": "搬到成都。",
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "primary_place_entity_key": "chengdu",
+            "existing_story_id": None,
+            "match_confidence": 0.0,
+            "claims": [
+                {
+                    "claim_key": "move",
+                    "narrative_role": "action",
+                    "slot_keys": ["theme_definition"],
+                    "evidence_role": "supports",
+                    "is_core": True,
+                }
+            ],
+        }
+    ]
+    fake_ai = FakeNarrativeAI(
+        [
+            {"schema_version": "1", "claims": "not-a-list"},
+            repaired,
+        ]
+    )
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert len(result.created_claim_ids) == 2
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics == {
+        "repair_attempted": True,
+        "discarded_entity_count": 0,
+        "discarded_claim_count": 1,
+        "discarded_story_count": 0,
+        "discarded_story_slot_key_count": 1,
+        "used_initial_response_after_repair": False,
+    }
+
+
+async def test_repair_cannot_replace_initial_response_with_less_valid_information(
+    client,
+    test_db,
+):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    initial = _extraction_payload(source_text)
+    initial["stories"] = [
+        {
+            "key": "move_story",
+            "title": "搬到成都",
+            "story_type": "event",
+            "summary": "搬到成都。",
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "unknown",
+            "primary_place_entity_key": "chengdu",
+            "existing_story_id": None,
+            "match_confidence": 0.0,
+            "claims": [
+                {
+                    "claim_key": "move",
+                    "narrative_role": "action",
+                    "slot_keys": ["theme_definition"],
+                    "evidence_role": "supports",
+                    "is_core": True,
+                }
+            ],
+        }
+    ]
+    repaired = _extraction_payload(source_text)
+    repaired["claims"] = repaired["claims"][:1]
+    fake_ai = FakeNarrativeAI([initial, repaired])
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert len(result.created_claim_ids) == 2
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics[
+        "used_initial_response_after_repair"
+    ] is True
+    assert result.extraction_diagnostics["discarded_story_slot_key_count"] == 1
 
 
 async def test_interviewer_fact_preserves_speaker_and_requires_review(client, test_db):

@@ -23,6 +23,7 @@ import {
   createMemoirVoiceSession,
   applyMemoirDraftBlockRevision,
   assembleMemoirChapterDraftBlocks,
+  confirmMemoirBookChapterDraft,
   decideMemoirDraftBlock,
   enqueueMemoirDraftBlockGeneration,
   enqueueMemoirDraftBlockRevision,
@@ -1022,13 +1023,14 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({ assemblingDraft: true, draftError: "" });
     try {
       const result = await assembleMemoirChapterDraftBlocks(this.data.projectId, this.data.chapterId);
-      this.setData({ draftGenerationStatus: `已组装章节稿 v${result.version}` });
-      wx.showToast({ title: "章节稿已组装", icon: "success" });
+      await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
+      this.setData({ draftGenerationStatus: `章节稿 v${result.version} 已确认` });
+      wx.showToast({ title: "本章已确认", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ draftError: error instanceof Error ? error.message : "章节稿组装失败" });
+      this.setData({ draftError: error instanceof Error ? error.message : "章节稿确认失败" });
     } finally {
       this.setData({ assemblingDraft: false });
     }

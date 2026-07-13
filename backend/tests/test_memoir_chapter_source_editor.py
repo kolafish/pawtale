@@ -99,14 +99,12 @@ async def test_memoir_chapter_source_editor_assignment_marks_existing_draft_for_
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "new_sources_assigned"
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter_id)
+    obsolete_revision_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"revise_chapter:{chapter_id}"
+        )
     )
-    assert job is not None
-    assert job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert job.status == MemoirEditingJobStatus.PENDING.value
-    assert job.payload_json["pending_source_utterance_ids"] == [later["utterance_id"]]
-    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
+    assert obsolete_revision_job is None
 
 
 async def test_memoir_chapter_source_editor_move_returns_updated_current_chapter(client, test_db):
@@ -191,8 +189,9 @@ async def test_memoir_chapter_source_editor_removal_marks_removed_link_and_revis
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "sources_changed"
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter_id)
+    obsolete_revision_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"revise_chapter:{chapter_id}"
+        )
     )
-    assert job is not None
-    assert job.payload_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+    assert obsolete_revision_job is None

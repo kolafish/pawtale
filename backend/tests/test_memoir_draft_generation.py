@@ -204,6 +204,7 @@ async def _create_generation_fixture(client, test_db):
     await test_db.commit()
     return {
         "project_id": project_id,
+        "user_id": user_id,
         "plan": plan,
         "chapter": chapter,
         "contract": contract,
@@ -401,6 +402,23 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
             ),
         )
 
+    with pytest.raises(ValueError, match="confirm every included draft block"):
+        await draft_assembly.assemble_chapter_draft(
+            test_db,
+            project_id=created["project_id"],
+            chapter_id=created["chapter"].id,
+        )
+    for index, block in enumerate(blocks):
+        await draft_blocks.confirm_block(
+            test_db,
+            project_id=created["project_id"],
+            block_id=block.id,
+            expected_current_version_id=str(block.current_version_id),
+            actor_user_id=created["user_id"],
+            idempotency_key=f"confirm-before-first-assembly-{index}",
+            reason="reviewed for chapter assembly",
+        )
+
     first_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,
         project_id=created["project_id"],
@@ -422,6 +440,27 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         content=first_version_content + " 我也第一次学会独自面对陌生环境。",
         feedback="补充这次离家带来的变化。",
     )
+    with pytest.raises(ValueError, match="confirm every included draft block"):
+        await draft_assembly.assemble_chapter_draft(
+            test_db,
+            project_id=created["project_id"],
+            chapter_id=created["chapter"].id,
+        )
+    await draft_blocks.confirm_block(
+        test_db,
+        project_id=created["project_id"],
+        block_id=first.id,
+        expected_current_version_id=str(first.current_version_id),
+        actor_user_id=created["user_id"],
+        idempotency_key="confirm-edited-block-before-second-assembly",
+        reason="reviewed edited block",
+    )
+    stale_confirm_response = await client.post(
+        f"/api/mobile/memoir/projects/{created['project_id']}"
+        f"/book-plan/chapters/{created['chapter'].id}/draft/confirm"
+    )
+    assert stale_confirm_response.status_code == 409
+    assert stale_confirm_response.json()["detail"] == "正文块在组装后发生变化，请重新组装本章"
     second_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,
         project_id=created["project_id"],
@@ -444,7 +483,12 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         )
     )
     assert draft is not None
-    draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
+    confirm_response = await client.post(
+        f"/api/mobile/memoir/projects/{created['project_id']}"
+        f"/book-plan/chapters/{created['chapter'].id}/draft/confirm"
+    )
+    assert confirm_response.status_code == 200, confirm_response.text
+    assert confirm_response.json()["status"] == MemoirBookChapterDraftStatus.CONFIRMED.value
     book = await draft_assembly.assemble_book_output(
         test_db,
         project_id=created["project_id"],
@@ -471,3 +515,37 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
     )
     assert len(history) == 2
     assert history[0].block_snapshot_json != history[1].block_snapshot_json
+
+    current_first_version = await test_db.get(
+        MemoirDraftBlockVersion,
+        first.current_version_id,
+    )
+    assert current_first_version is not None
+    await draft_blocks.manually_edit_block(
+        test_db,
+        project_id=created["project_id"],
+        block_id=first.id,
+        expected_current_version_id=str(first.current_version_id),
+        content=current_first_version.content + " 后来回想起来，这一步很重要。",
+        feedback="补充后来的理解。",
+    )
+    await draft_blocks.confirm_block(
+        test_db,
+        project_id=created["project_id"],
+        block_id=first.id,
+        expected_current_version_id=str(first.current_version_id),
+        actor_user_id=created["user_id"],
+        idempotency_key="confirm-edit-after-book-assembly",
+        reason="reviewed later edit",
+    )
+
+    stale_output_response = await client.get(
+        f"/api/mobile/memoir/projects/{created['project_id']}/book-output"
+    )
+    assert stale_output_response.status_code == 200
+    assert stale_output_response.json()["is_stale"] is True
+    with pytest.raises(ValueError, match="confirmed structured chapter snapshots"):
+        await draft_assembly.assemble_book_output(
+            test_db,
+            project_id=created["project_id"],
+        )

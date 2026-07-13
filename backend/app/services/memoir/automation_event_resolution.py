@@ -165,7 +165,7 @@ def _audit_event_matches_revised_chapter(event: MemoirAutomationEvent, *, chapte
 
     primary_action = _metadata_dict(metadata.get("primary_action"))
     action_chapter_id = _metadata_chapter_id(primary_action.get("chapter_id"))
-    if primary_action.get("type") == "revise_chapter" and action_chapter_id == chapter_id:
+    if primary_action.get("type") == "open_chapter_workspace" and action_chapter_id == chapter_id:
         return metadata.get("overall_status") == "needs_updates"
 
     primary_chapter = _metadata_dict(metadata.get("primary_chapter"))

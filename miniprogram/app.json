@@ -9,7 +9,6 @@
     "pages/transcript-detail/index",
     "pages/book/index",
     "pages/image-assets/index",
-    "pages/book-chapter/index",
     "pages/chapter-workspace/index",
     "pages/book-export/index",
     "pages/book-reader/index",

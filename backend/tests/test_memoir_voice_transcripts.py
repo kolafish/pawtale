@@ -62,6 +62,7 @@ from app.services.memoir.utterance_editing_pipeline import (
     source_text_hash,
 )
 from tests.memoir_helpers import (
+    attach_test_structured_block_snapshot,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     post_mobile_memoir_voice_session,
@@ -2164,14 +2165,10 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
     )
     assert route_job is None
-    revision_job = await test_db.scalar(
+    obsolete_revision_job = await test_db.scalar(
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapter.id}")
     )
-    assert revision_job is not None
-    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
-    assert revision_job.payload_json["base_version_id"] == draft_version_id
-    assert revision_job.payload_json["pending_source_utterance_ids"] == [created["utterance_id"]]
+    assert obsolete_revision_job is None
     source_card_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
@@ -2425,7 +2422,16 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         )
     )
     await test_db.commit()
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    await attach_test_structured_block_snapshot(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    await test_db.commit()
+    generated = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble-from-draft-blocks",
+        json={},
+    )
     assert generated.status_code == 200
 
     response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{second['utterance_id']}")

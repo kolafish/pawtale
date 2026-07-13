@@ -487,8 +487,7 @@ class MemoirBookQualityAuditPrimaryActionResponse(BaseModel):
         "generate_plan",
         "assign_sources",
         "continue_interview",
-        "revise_chapter",
-        "generate_chapter_draft",
+        "open_chapter_workspace",
         "review_book",
         "none",
     ]
@@ -706,32 +705,6 @@ class MemoirBookSourceRemoveRequest(BaseModel):
         return list(dict.fromkeys(utterance_ids))
 
 
-class MemoirBookChapterDraftGenerateRequest(BaseModel):
-    ai_model: str | None = None
-    force_regenerate: bool = False
-    feedback: str | None = None
-
-    @field_validator("feedback")
-    @classmethod
-    def _valid_feedback(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        feedback = value.strip()
-        return feedback or None
-
-
-class MemoirBookChapterDraftUpdateRequest(BaseModel):
-    content: str
-
-    @field_validator("content")
-    @classmethod
-    def _valid_content(cls, value: str) -> str:
-        content = value.strip()
-        if not content:
-            raise ValueError("章节稿内容不能为空")
-        return content
-
-
 class MemoirBookChapterDraftVersionResponse(BaseModel):
     id: str
     draft_id: str
@@ -796,36 +769,6 @@ class MemoirBookAudioResponse(BaseModel):
 
 
 MemoirBookCoverStyle = Literal["classic_plain", "warm_gray", "dark_album", "moonlit_courtyard", "navy_gilt"]
-
-
-class MemoirBookOutputGenerateRequest(BaseModel):
-    ai_model: str | None = None
-    title: str | None = None
-    subtitle: str | None = None
-    narrator_name: str | None = None
-    prepared_by: str | None = None
-    preface: str | None = None
-    afterword: str | None = None
-    back_cover_quote: str | None = None
-    cover_style: MemoirBookCoverStyle | None = None
-    force_regenerate: bool = False
-
-    @field_validator(
-        "ai_model",
-        "title",
-        "subtitle",
-        "narrator_name",
-        "prepared_by",
-        "preface",
-        "afterword",
-        "back_cover_quote",
-    )
-    @classmethod
-    def _valid_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        text = value.strip()
-        return text or None
 
 
 class MemoirBookOutputUpdateRequest(BaseModel):

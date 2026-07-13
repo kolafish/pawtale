@@ -321,6 +321,15 @@ async def _create_ready_structured_book(client, test_db):
             )
         ],
     )
+    await draft_blocks.confirm_block(
+        test_db,
+        project_id=project_id,
+        block_id=block.id,
+        expected_current_version_id=block.current_version_id,
+        actor_user_id=user_id,
+        idempotency_key=f"test-confirm:{block.id}",
+        reason="test fixture",
+    )
     await test_db.commit()
     assembled_chapter = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/draft-blocks/assemble"

@@ -67,6 +67,7 @@ class NarrativeIngestionResult:
     answered_followup_task_ids: tuple[str, ...]
     provider: str | None
     model: str | None
+    extraction_diagnostics: dict[str, int | bool]
 
 
 def transcript_text_hash(content: str) -> str:
@@ -192,7 +193,7 @@ async def ingest_transcript_version(
         db,
         project_id=project.id,
     )
-    extraction, provider, model = await extract_narrative_state(
+    extraction, provider, model, extraction_diagnostics = await extract_narrative_state(
         source_text=source_text,
         speaker_role=speaker_role,
         narrator_name=str(profile.get("narrator_name") or "").strip(),
@@ -429,4 +430,5 @@ async def ingest_transcript_version(
         answered_followup_task_ids=task_completion.answered_task_ids,
         provider=provider,
         model=model,
+        extraction_diagnostics=extraction_diagnostics,
     )

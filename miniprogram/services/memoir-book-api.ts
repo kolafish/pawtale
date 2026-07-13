@@ -2,8 +2,6 @@ import type {
   MemoirBookAudioRequest,
   MemoirBookAudioResponse,
   MemoirBookChapterDraft,
-  MemoirBookChapterDraftGenerateRequest,
-  MemoirBookChapterDraftUpdateRequest,
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
@@ -15,7 +13,6 @@ import type {
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
-  MemoirBookOutputGenerateRequest,
   MemoirBookOutputUpdateRequest,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
@@ -252,34 +249,6 @@ export function getMemoirBookChapterDraft(
   return memoirRequest<MemoirBookChapterDraft>(bookPlanChapterPath(projectId, chapterId, "/draft"));
 }
 
-export function enqueueMemoirBookChapterDraftGeneration(
-  projectId: string,
-  chapterId: string,
-  data: MemoirBookChapterDraftGenerateRequest = {},
-): Promise<MemoirAutomationEvent> {
-  return memoirRequest<MemoirAutomationEvent>(
-    bookPlanChapterPath(projectId, chapterId, "/draft/jobs"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
-export function updateMemoirBookChapterDraft(
-  projectId: string,
-  chapterId: string,
-  data: MemoirBookChapterDraftUpdateRequest,
-): Promise<MemoirBookChapterDraft> {
-  return memoirRequest<MemoirBookChapterDraft>(
-    bookPlanChapterPath(projectId, chapterId, "/draft"),
-    {
-      method: "PATCH",
-      data,
-    },
-  );
-}
-
 export function confirmMemoirBookChapterDraft(
   projectId: string,
   chapterId: string,
@@ -392,19 +361,6 @@ export function formalizeMemoirBookOutput(
   return memoirRequest<MemoirBookFormalizeResponse>(
     memoirNarrativeProjectPath(projectId, "/book-output/formalize"),
     { method: "POST", data },
-  );
-}
-
-export function enqueueMemoirBookOutputGeneration(
-  projectId: string,
-  data: MemoirBookOutputGenerateRequest = {},
-): Promise<MemoirAutomationEvent> {
-  return memoirRequest<MemoirAutomationEvent>(
-    memoirProjectPath(projectId, "/book-output/generate/jobs"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
   );
 }
 

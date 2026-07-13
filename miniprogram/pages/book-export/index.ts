@@ -9,7 +9,7 @@ import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
   enqueueMemoirBookConsistencyAudit,
-  enqueueMemoirBookOutputGeneration,
+  assembleMemoirBookDraftBlocks,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
   getMemoirBookConsistencyAudit,
@@ -759,17 +759,13 @@ definePage<BookExportData>()({
     if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
       return;
     }
-    const metadata = currentBookMetadataPayload(this.data, false);
     this.setData({ generatingBook: true, error: "" });
     try {
-      await enqueueMemoirBookOutputGeneration(this.data.projectId, {
-        force_regenerate: true,
-        title: trimText(this.data.bookTitleInput) || undefined,
-        ...metadata,
-        cover_style: this.data.bookCoverStyle,
-      });
-      this.setData({ exportNotice: "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。" });
-      wx.showToast({ title: "已后台生成", icon: "success" });
+      await assembleMemoirBookDraftBlocks(this.data.projectId);
+      const output = await this.loadBookOutput(this.data.projectId);
+      this.applyBookExportData(this.data.plan, output);
+      this.setData({ exportNotice: "已按确认的结构化章节组装最新版，历史版本保持不变。" });
+      wx.showToast({ title: "全书已组装", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;

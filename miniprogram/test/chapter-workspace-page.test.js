@@ -182,6 +182,9 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     assembleMemoirChapterDraftBlocks: async () => {
       throw new Error("assembleMemoirChapterDraftBlocks was not mocked");
     },
+    confirmMemoirBookChapterDraft: async () => {
+      throw new Error("confirmMemoirBookChapterDraft was not mocked");
+    },
     ...voiceApiExports,
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
@@ -294,6 +297,43 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   ]);
   assert.equal(context.data.gapGroups[0].items[0].severityText, "重要");
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
+});
+
+test("chapter workspace assembles confirmed blocks before confirming the chapter", async () => {
+  const calls = [];
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadWorkspacePage({
+    draftBlocks: [sampleDraftBlock({ editorial_status: "confirmed" })],
+    voiceApiExports: {
+      assembleMemoirChapterDraftBlocks: async (projectId, chapterId) => {
+        calls.push(["assemble", projectId, chapterId]);
+        return { version: 2 };
+      },
+      confirmMemoirBookChapterDraft: async (projectId, chapterId) => {
+        calls.push(["confirm", projectId, chapterId]);
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+  });
+
+  await page.assembleChapterDraft.call(context);
+
+  assert.deepEqual(calls, [
+    ["assemble", "project/1", "chapter-1"],
+    ["confirm", "project/1", "chapter-1"],
+  ]);
+  assert.equal(context.data.draftGenerationStatus, "章节稿 v2 已确认");
+  assert.equal(context.data.assemblingDraft, false);
+  assert.equal(toasts[0].title, "本章已确认");
+  delete global.wx;
 });
 
 test("chapter workspace lists follow-up questions and starts a task-bound human interview", async () => {

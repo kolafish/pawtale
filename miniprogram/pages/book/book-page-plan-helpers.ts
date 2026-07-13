@@ -9,7 +9,16 @@ export const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
 export type ChapterMoveDirection = typeof CHAPTER_MOVE_DIRECTIONS[number];
 
 export function bookChapterDetailUrl(projectId: string, chapterId: string, tab = "content"): string {
-  return pageUrl("/pages/book-chapter/index", { projectId, chapterId, tab });
+  const workspaceTab = ({
+    content: "drafts",
+    more: "structure",
+    sources: "stories",
+  } as const)[tab as "content" | "more" | "sources"];
+  return pageUrl("/pages/chapter-workspace/index", {
+    projectId,
+    chapterId,
+    tab: workspaceTab,
+  });
 }
 
 export function bookExportPageUrl(projectId: string, action = "preview"): string {

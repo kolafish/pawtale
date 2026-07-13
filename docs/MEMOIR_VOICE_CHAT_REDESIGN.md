@@ -87,7 +87,7 @@ backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 s
 backend/app/services/memoir/book_drafts.py    # 逐章成稿、版本追加和正文确认
 backend/app/services/memoir/book_outputs.py   # 全书稿合成、版本追加和全书朗读
 backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片、缓存和音频落库
-backend/app/services/memoir/book_auto_revision.py # 已归章新增 source 的后台章节补写
+backend/app/services/memoir/narrative/draft_assembly.py # 已确认结构化正文块的章节/全书快照组装
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
@@ -383,7 +383,7 @@ AI 访谈只允许播报这些结构化快照和事件里的事实。为了避�
 
 ### Background Source Routing And Auto Editing
 
-现有 `book_auto_revision.py` 负责“章节已有新增 source refs 后如何补写正文”。下一阶段缺的是前置判断：新记录到底应该进入哪一章，还是暂缓处理。
+旧的 `book_auto_revision.py` 整章补写链路已移除。新记录归章后必须进入叙事摄取链路，形成可追溯的 Claim、Evidence、Story、Contract、ChapterNode 和 DraftBlock；正文块变化会使章节稿和全书稿快照失效，随后只能从已确认的当前正文块重新组装，不能直接重写整章。
 
 建议新增 `source_router.py`，输入是新讲述记录、现有章节标题和 source 摘要、最近几条归章事件、当前项目画像；输出是结构化决策：
 
@@ -690,10 +690,10 @@ AI 下一轮追问当前走单独的 WebSocket：
    - 高置信度才自动写入章节 source refs；不确定或明显换话题时进入待确认。
    - 所有判断写入 automation event，保证能解释和回溯。
 
-5. PR 5: Auto Assignment To Auto Revision
-   - 把 PR 4 的高置信度归章结果接到现有 `book_auto_revision.py`。
-   - 自动归章后触发章节补写，并把补写完成事件暴露给成书页和 AI 访谈。
-   - 支持 AI 播报“新增记录已补进某章”这类具体进展。
+5. PR 5: Auto Assignment To Structured Draft Refresh
+   - 把 PR 4 的高置信度归章结果接到叙事摄取任务，不再调用整章补写。
+   - 新事实完成证据绑定和结构化审核后，更新对应 DraftBlock，并使旧章节稿/全书稿快照失效。
+   - 重新组装和确认后再发布完成事件，AI 只能播报已经进入当前正式快照的具体进展。
 
 6. PR 6: Book Quality Audit
    - 后台生成章节完整度和项目进度审计快照。

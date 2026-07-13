@@ -1,7 +1,17 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select
 
+from app.domain.memoir.narrative_types import (
+    MemoirChapterContractStatus,
+    MemoirChapterNodeStatus,
+    MemoirChapterNodeType,
+    MemoirDraftBlockEditorialStatus,
+    MemoirDraftBlockFreshnessStatus,
+    MemoirDraftBlockRole,
+    MemoirNarrativeActorType,
+)
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
@@ -22,6 +32,13 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.models.memoir_narrative import (
+    MemoirChapterContract,
+    MemoirChapterNode,
+    MemoirDraftBlock,
+    MemoirDraftBlockVersion,
+)
+from app.models.projects import Project
 
 
 async def ensure_mobile_memoir_project(client, title: str = "测试回忆录") -> str:
@@ -238,6 +255,107 @@ async def add_test_chapter_source_links(
     if links:
         await test_db.flush()
     return links
+
+
+async def attach_test_structured_block_snapshot(
+    test_db,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirDraftBlock:
+    project = await test_db.get(Project, project_id)
+    assert project is not None
+    draft = await test_db.scalar(
+        select(MemoirBookChapterDraft).where(
+            MemoirBookChapterDraft.project_id == project_id,
+            MemoirBookChapterDraft.chapter_id == chapter_id,
+        )
+    )
+    assert draft is not None
+    draft_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+        .limit(1)
+    )
+    assert draft_version is not None
+
+    contract = MemoirChapterContract(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        version=1,
+        objective="保留测试章节的叙事主线",
+        reader_takeaway="读者能理解本章的核心经历",
+        time_scope_text="",
+        core_questions_json=[],
+        constraints_json={},
+        status=MemoirChapterContractStatus.DRAFT.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(contract)
+    await test_db.flush()
+    node = MemoirChapterNode(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        contract_id=contract.id,
+        node_type=MemoirChapterNodeType.OPENING.value,
+        title="章节正文",
+        purpose="承载测试章节已经确认的正文",
+        sort_order=0,
+        required=True,
+        status=MemoirChapterNodeStatus.READY.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+        updated_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(node)
+    await test_db.flush()
+    contract.status = MemoirChapterContractStatus.CONFIRMED.value
+    contract.confirmed_by_user_id = project.user_id
+    contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
+    test_db.add(contract)
+    await test_db.flush()
+
+    block = MemoirDraftBlock(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        node_id=node.id,
+        block_role=MemoirDraftBlockRole.OPENING.value,
+        sort_order=0,
+        editorial_status=MemoirDraftBlockEditorialStatus.CONFIRMED.value,
+        freshness_status=MemoirDraftBlockFreshnessStatus.CURRENT.value,
+        locked=False,
+    )
+    test_db.add(block)
+    await test_db.flush()
+    block_version = MemoirDraftBlockVersion(
+        project_id=project_id,
+        block_id=block.id,
+        version=1,
+        content=draft_version.content,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+        prompt_snapshot="",
+    )
+    test_db.add(block_version)
+    await test_db.flush()
+    block.current_version_id = block_version.id
+    draft_version.block_snapshot_json = [
+        {
+            "block_id": block.id,
+            "block_version_id": block_version.id,
+            "node_id": node.id,
+            "block_role": block.block_role,
+            "node_sort_order": node.sort_order,
+            "block_sort_order": block.sort_order,
+            "editorial_status": block.editorial_status,
+            "freshness_status": block.freshness_status,
+            "locked": block.locked,
+            "content_char_count": len(block_version.content.strip()),
+        }
+    ]
+    test_db.add(block)
+    test_db.add(draft_version)
+    await test_db.flush()
+    return block
 
 
 async def create_test_book_plan_with_chapters(

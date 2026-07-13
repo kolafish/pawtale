@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.database import Base, register_models
 from app.migrations.memoir_voice import (
     assert_memoir_voice_schema,
     describe_memoir_voice_schema,
@@ -582,6 +583,79 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
         assert "generate_followup_tasks" in str(table_sql)
         assert "audit_book_consistency" in str(table_sql)
         assert rows == [("job-1", "route_sources")]
+    finally:
+        await engine.dispose()
+
+
+async def test_memoir_voice_migration_repairs_legacy_foreign_key_targets():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            for table_name in ("memoir_chat_messages", "memoir_voice_sessions"):
+                old_table_name = f"{table_name}_old"
+                table = Base.metadata.tables[table_name]
+                await conn.execute(
+                    text(f'ALTER TABLE "{table_name}" RENAME TO "{old_table_name}"')
+                )
+                indexes = (
+                    await conn.execute(text(f'PRAGMA index_list("{old_table_name}")'))
+                ).fetchall()
+                for index in indexes:
+                    index_name = str(index[1])
+                    if index_name and not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+                await conn.run_sync(
+                    lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True)
+                )
+                await conn.execute(text(f'DROP TABLE "{old_table_name}"'))
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO memoir_source_cards (
+                        id, project_id, utterance_id, source_text_hash, engine,
+                        status, card_json, error_message, created_at, updated_at
+                    ) VALUES (
+                        'orphan-card', 'project-1', 'missing-utterance', 'hash',
+                        'test', 'ready', '{}', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
+        first = await migrate_memoir_voice_schema(engine)
+        second = await migrate_memoir_voice_schema(engine)
+
+        assert set(first["foreign_keys"]["rebuilt_tables"]) == {
+            "memoir_chat_messages",
+            "memoir_followup_tasks",
+            "memoir_transcript_versions",
+            "memoir_voice_authorization_consents",
+            "memoir_voice_utterances",
+        }
+        assert first["foreign_keys"]["deleted_derived_rows"] == {
+            "memoir_source_cards": 1
+        }
+        assert second["foreign_keys"] == {
+            "rebuilt_tables": [],
+            "preserved_rows": {},
+            "deleted_derived_rows": {"memoir_source_cards": 0},
+        }
+        async with engine.connect() as conn:
+            old_refs = await conn.scalar(
+                text(
+                    """
+                    SELECT COUNT(*)
+                    FROM sqlite_master
+                    WHERE type = 'table' AND instr(sql, '_old') > 0
+                    """
+                )
+            )
+            violations = (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall()
+        assert old_refs == 0
+        assert violations == []
     finally:
         await engine.dispose()
 

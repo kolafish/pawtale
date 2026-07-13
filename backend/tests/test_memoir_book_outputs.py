@@ -13,7 +13,6 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirChatMessage,
@@ -21,6 +20,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.models.memoir_narrative import MemoirDraftBlock, MemoirDraftBlockVersion
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
 from app.services.memoir.book_audio import split_tts_text
@@ -30,6 +30,7 @@ from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
+    attach_test_structured_block_snapshot,
     create_test_book_plan_with_chapters,
     ensure_mobile_memoir_project,
     run_test_editing_job,
@@ -316,7 +317,7 @@ async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_cha
             MemoirBookChapterDraftStatus.CONFIRMED,
             MemoirBookChapterDraftStatus.DRAFT,
         ]
-    return await create_test_book_plan_with_chapters(
+    plan, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
         draft_contents=[
@@ -325,6 +326,84 @@ async def _create_confirmed_book_plan(test_db, *, project_id: str, confirmed_cha
         ],
         draft_statuses=draft_statuses,
     )
+    for chapter in chapters:
+        await attach_test_structured_block_snapshot(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
+    await test_db.flush()
+    return plan, chapters
+
+
+async def _assemble_book(client, project_id: str):
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble-from-draft-blocks",
+        json={},
+    )
+    if assembled.status_code != 200:
+        return assembled
+    return await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+
+
+async def _replace_structured_block_and_reassemble_chapter(
+    client,
+    test_db,
+    *,
+    project_id: str,
+    chapter_id: str,
+    content: str,
+) -> None:
+    block = await test_db.scalar(
+        select(MemoirDraftBlock).where(
+            MemoirDraftBlock.project_id == project_id,
+            MemoirDraftBlock.chapter_id == chapter_id,
+        )
+    )
+    assert block is not None
+    latest_version_number = await test_db.scalar(
+        select(MemoirDraftBlockVersion.version)
+        .where(MemoirDraftBlockVersion.block_id == block.id)
+        .order_by(MemoirDraftBlockVersion.version.desc())
+        .limit(1)
+    )
+    block_version = MemoirDraftBlockVersion(
+        project_id=project_id,
+        block_id=block.id,
+        version=int(latest_version_number or 0) + 1,
+        content=content,
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
+    )
+    test_db.add(block_version)
+    await test_db.flush()
+    block.current_version_id = block_version.id
+    test_db.add(block)
+    await test_db.commit()
+
+    await _assemble_and_confirm_chapter(
+        client,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+
+
+async def _assemble_and_confirm_chapter(
+    client,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> None:
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/draft-blocks/assemble",
+        json={},
+    )
+    assert assembled.status_code == 200, assembled.text
+    confirmed = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}"
+        f"/book-plan/chapters/{chapter_id}/draft/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
 
 
 async def _add_output_source_link(
@@ -382,7 +461,7 @@ async def _add_output_source_link(
 
 async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
-        "/api/mobile/memoir/projects/project-1/book-output/generate",
+        "/api/memoir/projects/project-1/book-output/assemble-from-draft-blocks",
         json={},
     )
 
@@ -393,13 +472,10 @@ async def test_mobile_memoir_book_output_requires_all_chapters_confirmed(client,
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id, confirmed_chapters=False)
 
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-output/generate",
-        json={},
-    )
+    response = await _assemble_book(client, project_id)
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "请先确认所有章节：第一次离家"
+    assert response.status_code == 409
+    assert "confirmed structured chapter snapshots" in response.json()["detail"]
 
 
 async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(client, test_db):
@@ -415,10 +491,7 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     )
     await test_db.commit()
 
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-output/generate",
-        json={},
-    )
+    response = await _assemble_book(client, project_id)
 
     assert response.status_code == 200
     data = response.json()
@@ -479,50 +552,6 @@ async def test_mobile_memoir_book_output_generate_combines_confirmed_chapters(cl
     assert stored_versions[0].manuscript_json["profile"]["title"] == "外婆的回忆录"
 
 
-async def test_mobile_memoir_book_output_generation_job_runs_in_background(client, test_db):
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    project_id = await ensure_mobile_memoir_project(client)
-    await _create_confirmed_book_plan(test_db, project_id=project_id)
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-output/generate/jobs",
-        json={"title": "外婆的回忆录", "force_regenerate": True},
-    )
-
-    assert response.status_code == 200
-    event_data = response.json()
-    assert event_data["event_type"] == MemoirAutomationEventType.BOOK_OUTPUT_GENERATED.value
-    assert event_data["status"] == "pending"
-    assert event_data["summary_text"] == "全书已提交后台生成。"
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_BOOK_OUTPUT.value,
-        )
-    )
-    assert job is not None
-    assert job.status == MemoirEditingJobStatus.PENDING.value
-    assert job.payload_json["request"]["title"] == "外婆的回忆录"
-    assert job.payload_json["automation_event_id"] == event_data["id"]
-
-    assert await run_test_editing_job(test_db, job.id) is True
-
-    refreshed_job = await test_db.scalar(select(MemoirEditingJob).where(MemoirEditingJob.id == job.id))
-    assert refreshed_job.status == MemoirEditingJobStatus.SUCCEEDED.value
-    output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-    assert output is not None
-    version = await test_db.scalar(
-        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
-    )
-    assert version is not None
-    assert "第1章 外婆家的童年" in version.content
-    event = await test_db.get(MemoirAutomationEvent, event_data["id"])
-    assert event.status == "completed"
-    assert event.summary_text == "全书已生成，可以预览或导出。"
-    assert event.metadata_json["result_version_id"] == version.id
-
-
 async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_ai(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -545,7 +574,7 @@ async def test_mobile_memoir_book_output_title_suggestions_use_fallback_without_
 async def test_mobile_memoir_book_output_update_title_and_cover_style(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
 
     response = await client.patch(
@@ -596,7 +625,7 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
         text="讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
     )
     await test_db.commit()
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
     fake_ai = FakeEditorialAI()
     monkeypatch.setattr("app.services.memoir.book_manuscript_ai._text_ai_configured", lambda ai_model: True)
@@ -650,7 +679,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
         text="讲述小时候在院子里晒太阳。",
     )
     await test_db.commit()
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
     fake_ai = FakeEditorialAI()
     monkeypatch.setattr("app.services.memoir.book_manuscript_ai._text_ai_configured", lambda ai_model: True)
@@ -716,7 +745,7 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
         quote="那棵葡萄树我到现在都记得。",
     )
     await test_db.commit()
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
 
     response = await client.patch(
@@ -747,11 +776,11 @@ async def test_mobile_memoir_book_output_updates_chapter_editorial_copy(client, 
     assert invalid.json()["detail"] == "章首引语来源不属于当前章节"
 
 
-async def test_mobile_memoir_book_output_generate_returns_existing_without_force(client, test_db):
+async def test_mobile_memoir_book_output_assembly_is_idempotent(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
-    first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
-    second = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    first = await _assemble_book(client, project_id)
+    second = await _assemble_book(client, project_id)
 
     assert first.status_code == 200
     assert second.status_code == 200
@@ -762,7 +791,7 @@ async def test_mobile_memoir_book_output_generate_returns_existing_without_force
 async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
 
     txt = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt")
@@ -818,30 +847,20 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    first = await _assemble_book(client, project_id)
     assert first.status_code == 200
     first_version_id = first.json()["latest_version"]["id"]
 
-    draft = await test_db.scalar(
-        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
+    await _replace_structured_block_and_reassemble_chapter(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        content="新版第一章正文。",
     )
-    test_db.add(
-        MemoirBookChapterDraftVersion(
-            draft_id=draft.id,
-            project_id=project_id,
-            chapter_id=chapters[0].id,
-            version=2,
-            content="新版第一章正文。",
-            created_by=MemoirCreatedBy.USER.value,
-            prompt_snapshot="",
-        )
-    )
-    await test_db.commit()
-    second = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-output/generate",
-        json={"force_regenerate": True},
-    )
+    second = await _assemble_book(client, project_id)
     assert second.status_code == 200
+    assert second.json()["latest_version"]["version"] == 2
 
     exported = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt&version_id={first_version_id}"
@@ -855,23 +874,28 @@ async def test_mobile_memoir_book_output_exports_selected_version(client, test_d
 async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_versions(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    first = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    chapter_id = chapters[0].id
+    first = await _assemble_book(client, project_id)
     assert first.status_code == 200
 
-    draft = await test_db.scalar(
-        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapters[0].id)
-    )
-    test_db.add(
-        MemoirBookChapterDraftVersion(
-            draft_id=draft.id,
-            project_id=project_id,
-            chapter_id=chapters[0].id,
-            version=2,
-            content="我小时候常在外婆家的院子里晒太阳，也常听外婆讲老屋的事。",
-            created_by=MemoirCreatedBy.USER.value,
-            prompt_snapshot="",
+    block = await test_db.scalar(
+        select(MemoirDraftBlock).where(
+            MemoirDraftBlock.project_id == project_id,
+            MemoirDraftBlock.chapter_id == chapter_id,
         )
     )
+    assert block is not None
+    block_version = MemoirDraftBlockVersion(
+        project_id=project_id,
+        block_id=block.id,
+        version=2,
+        content="我小时候常在外婆家的院子里晒太阳，也常听外婆讲老屋的事。",
+        created_by=MemoirCreatedBy.USER.value,
+        prompt_snapshot="",
+    )
+    test_db.add(block_version)
+    await test_db.flush()
+    block.current_version_id = block_version.id
     await test_db.commit()
 
     stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
@@ -882,7 +906,15 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_v
     assert stale_data["is_stale"] is True
     assert stale_data["stale_chapter_titles"] == ["外婆家的童年"]
 
-    regenerated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    blocked = await _assemble_book(client, project_id)
+    assert blocked.status_code == 409
+
+    await _assemble_and_confirm_chapter(
+        client,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    regenerated = await _assemble_book(client, project_id)
 
     assert regenerated.status_code == 200
     regenerated_data = regenerated.json()
@@ -894,7 +926,7 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_stale_chapter_v
 async def test_mobile_memoir_book_output_detects_and_regenerates_reordered_chapters(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
 
     reordered = await client.post(
@@ -909,7 +941,7 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_reordered_chapt
     assert stale_data["is_stale"] is True
     assert stale_data["stale_chapter_titles"] == ["第一次离家", "外婆家的童年"]
 
-    regenerated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    regenerated = await _assemble_book(client, project_id)
     assert regenerated.status_code == 200
     regenerated_data = regenerated.json()
     assert regenerated_data["is_stale"] is False
@@ -922,7 +954,7 @@ async def test_mobile_memoir_book_output_detects_and_regenerates_reordered_chapt
 async def test_mobile_memoir_book_output_marks_unconfirmed_plan_as_stale(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    generated = await _assemble_book(client, project_id)
     assert generated.status_code == 200
     plan.status = MemoirBookPlanStatus.DRAFT.value
     await test_db.commit()
@@ -1046,7 +1078,7 @@ async def test_mobile_memoir_book_output_tts_generates_full_book_audio(
     monkeypatch.setattr("app.services.memoir.audio_files.MEMOIR_AUDIO_DIR", tmp_path / "audio")
     project_id = await ensure_mobile_memoir_project(client)
     await _create_confirmed_book_plan(test_db, project_id=project_id)
-    await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
+    await _assemble_book(client, project_id)
     fake_tts = FakeBookTTS()
     monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)
 

@@ -17,7 +17,6 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterCard,
-    MemoirChapterEventClusterSnapshot,
     MemoirChapterSourceLink,
     MemoirSourceCard,
     MemoirVoiceSession,
@@ -27,7 +26,6 @@ from app.models.projects import Project
 from app.services.memoir.semantic_state import (
     upsert_book_quality_audit_snapshot,
     upsert_chapter_card,
-    upsert_chapter_event_cluster_snapshot,
     upsert_source_card,
 )
 
@@ -296,42 +294,6 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
         card_json={"summary": "更新后的章节摘要"},
     )
 
-    cluster_snapshot = await upsert_chapter_event_cluster_snapshot(
-        test_db,
-        project_id=project.id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        engine="llm_event_cluster_v1",
-        input_signature="cluster-signature-1",
-        clusters_json=[
-            {
-                "title": "厨房回忆",
-                "source_ids": [utterance.id],
-                "summary": "一条素材讲外婆家厨房。",
-            }
-        ],
-        source_ids_json=[utterance.id],
-        source_fingerprints_json={utterance.id: "fingerprint-1"},
-    )
-    cluster_snapshot_again = await upsert_chapter_event_cluster_snapshot(
-        test_db,
-        project_id=project.id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        engine="llm_event_cluster_v1",
-        input_signature="cluster-signature-1",
-        status=MemoirSemanticCacheStatus.STALE,
-        clusters_json=[
-            {
-                "title": "更新后的厨房回忆",
-                "source_ids": [utterance.id],
-                "summary": "更新后的聚类摘要。",
-            }
-        ],
-        source_ids_json=[utterance.id],
-        source_fingerprints_json={utterance.id: "fingerprint-2"},
-    )
-
     snapshot = await upsert_book_quality_audit_snapshot(
         test_db,
         project_id=project.id,
@@ -359,15 +321,10 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
     assert source_card_again.card_json["summary"] == "更新后的厨房回忆"
     assert chapter_card_again.id == chapter_card.id
     assert chapter_card_again.card_json["summary"] == "更新后的章节摘要"
-    assert cluster_snapshot_again.id == cluster_snapshot.id
-    assert cluster_snapshot_again.status == MemoirSemanticCacheStatus.STALE.value
-    assert cluster_snapshot_again.clusters_json[0]["title"] == "更新后的厨房回忆"
-    assert cluster_snapshot_again.source_fingerprints_json == {utterance.id: "fingerprint-2"}
     assert snapshot_again.id == snapshot.id
     assert snapshot_again.overall_status == "healthy"
 
     assert await test_db.scalar(select(func.count()).select_from(MemoirSourceCard)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirChapterCard)) == 1
-    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterEventClusterSnapshot)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirBookQualityAuditSnapshot)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirChapterSourceLink)) == 0

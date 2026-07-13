@@ -64,7 +64,6 @@ from app.services.memoir.book_plan_sources import (
     set_deleted_source_metadata as _set_deleted_source_metadata,
     set_source_change_metadata as _set_source_change_metadata,
 )
-from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids as _source_ref_utterance_ids,
@@ -1070,13 +1069,6 @@ async def _apply_edited_text(
         source=f"transcript_{version_type.value}",
         include_routing=not changed_chapter_ids,
     )
-    if changed_chapter_ids:
-        await schedule_chapter_auto_revisions(
-            db,
-            project_id=utterance.voice_session.project_id,
-            chapter_ids=changed_chapter_ids,
-            ai_model=ai_model,
-        )
     if commit:
         await db.commit()
     inclusions = await _book_inclusions_by_utterance_ids(

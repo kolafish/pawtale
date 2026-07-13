@@ -313,15 +313,10 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
     ]
     assert target_chapter["pending_source_count"] == 1
 
-    revision_job = await test_db.scalar(
+    obsolete_revision_job = await test_db.scalar(
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapters[1].id}")
     )
-    assert revision_job is not None
-    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
-    assert revision_job.chapter_id == chapters[1].id
-    assert revision_job.payload_json["base_version_id"] == base_version_id
-    assert revision_job.payload_json["pending_source_utterance_ids"] == [first["utterance_id"]]
+    assert obsolete_revision_job is None
 
 
 async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):

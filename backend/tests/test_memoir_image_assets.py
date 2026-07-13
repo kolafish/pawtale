@@ -14,14 +14,15 @@ from app.models.memoir import (
     MemoirImageAsset,
     MemoirMaterialShareVideo,
 )
-from app.schemas.memoir_book import MemoirBookOutputGenerateRequest
 from app.services.memoir import book_output_export, book_outputs, image_assets
+from app.services.memoir.narrative import draft_assembly
 from app.services.memoir.image_assets import (
     RegisteredShareVideoBackground,
     register_share_video_background_asset,
 )
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 from tests.memoir_helpers import (
+    attach_test_structured_block_snapshot,
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
@@ -46,6 +47,11 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
         source_refs_by_chapter=[[memoir_source_ref(created, "小时候院子里有一棵葡萄树。")]],
         draft_contents=["夏天的时候，院子里的葡萄树撑起一片阴凉，家人常坐在下面聊天。"],
         draft_statuses=[MemoirBookChapterDraftStatus.CONFIRMED],
+    )
+    await attach_test_structured_block_snapshot(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
     )
     image_path = tmp_path / "memoir" / "share-video-backgrounds" / "old_album" / "fake" / "asset.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,11 +99,9 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
 async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, test_db, tmp_path, monkeypatch):
     user, project_id, chapter_id, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
 
-    await book_outputs.generate_book_output(
+    await draft_assembly.assemble_book_output(
         test_db,
-        user_id=user["id"],
         project_id=project_id,
-        req=MemoirBookOutputGenerateRequest(force_regenerate=True),
     )
     output = await test_db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)

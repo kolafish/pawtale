@@ -123,3 +123,13 @@ export interface MemoirChapterDraftBlockAssembly {
   }>;
   created_at: string;
 }
+
+export interface MemoirBookDraftBlockAssembly {
+  project_id: string;
+  output_id: string;
+  output_version_id: string;
+  version: number;
+  content: string;
+  chapter_snapshot_json: Array<Record<string, unknown>>;
+  created_at: string;
+}

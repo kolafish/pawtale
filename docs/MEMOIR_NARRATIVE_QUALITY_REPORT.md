@@ -16,6 +16,9 @@
 - 语义审校只提交有 Chapter、Story、Claim 证据 ID 的 Gap，不直接改稿。
 - locked block 变化数和局部重写无关 block 变化数进入质量门禁。
 - 模型评分不能计入人工盲评。
+- PR12 全量工具已在受控真实数据库副本上完成备份、schema 修复、dry-run、摄取任务执行、Story/Contract 回填、重复执行和回滚演练。
+- 受控副本的自动迁移报告为 `migration_complete=true`、`cutover_data_ready=true`，无待处理或失败摄取任务，Claim evidence 缺失数为零。
+- SQLite 恢复工具已验证会保留迁移后调查快照并清理 WAL/SHM/journal，恢复后 `integrity_check=ok`。
 
 仍需完成：
 
@@ -23,6 +26,7 @@
 - 隐藏 A/B 的新旧链路身份，由项目所有者或主要编辑完成评分。
 - 条件允许时增加一名不参与实现的独立评审者。
 - 叙述者本人核对事实和个人声音；该意见优先于自动指标。
+- 样本 Story 和 ChapterContract 必须由项目所有者按产品工作流确认后才能生成新链路正文；不得为制作盲评包而伪造确认人或绕过 `needs_work` 状态。
 
 ## 人工量表
 

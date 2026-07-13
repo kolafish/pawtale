@@ -17,8 +17,6 @@ from app.domain.projects.types import ProjectType
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.services.ai_types import AITextClient
-from app.services.memoir import source_cards
-from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
 from app.services.memoir.multi_asr_verification import (
     MultiASRVerificationRequest,
     verify_multi_asr_transcripts,
@@ -40,7 +38,7 @@ from app.services.memoir.offline_asr import (
     run_offline_asr,
 )
 from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE, clear_source_route_disposition
-from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 from app.services.memoir.voice_transcripts import (
     _sync_included_transcript_edit,
     prune_transcript_versions_for_utterance,
@@ -337,28 +335,14 @@ async def _apply_corrected_reprocess_text(
         transcript_version_id=version.id,
     )
     project_id = utterance.voice_session.project_id
-    await source_cards.schedule_source_card_generation_job(
+    await schedule_source_processing_for_ready_utterance(
         db,
         project_id=project_id,
-        utterance_id=utterance.id,
+        utterance=utterance,
+        source=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
         ai_model=ai_model,
-        reason=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
+        include_routing=not changed_chapter_ids,
     )
-    if changed_chapter_ids:
-        await schedule_chapter_auto_revisions(
-            db,
-            project_id=project_id,
-            chapter_ids=changed_chapter_ids,
-            ai_model=ai_model,
-        )
-    else:
-        await schedule_source_routing_for_ready_utterance(
-            db,
-            project_id=project_id,
-            utterance=utterance,
-            source=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
-            ai_model=ai_model,
-        )
 
 
 def _compact_result_payload(results: Sequence[OfflineASRResult]) -> list[dict[str, object]]:

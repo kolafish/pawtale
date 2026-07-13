@@ -86,42 +86,30 @@ async def test_web_book_editor_admin_workflow_preserves_user_and_project_scope(c
     assert loaded_data["chapter_source_editor"]["covered_source_count"] == 2
     assert loaded_data["output"] is None
 
-    mismatched = await client.patch(
+    mismatched = await client.get(
         f"/api/memoir/projects/{owner_project_id}/book-editor/chapters/{other_chapters[0].id}/draft",
-        json={"content": "不应跨项目修改。"},
     )
     assert mismatched.status_code == 404
 
-    updated_draft = await client.patch(
-        f"/api/memoir/projects/{owner_project_id}/book-editor/chapters/{owner_chapters[0].id}/draft",
-        json={"content": "管理员校正后的童年章节稿。"},
-    )
-    confirmed_draft = await client.post(
-        f"/api/memoir/projects/{owner_project_id}/book-editor/chapters/{owner_chapters[0].id}/draft/confirm"
+    updated_title = await client.patch(
+        f"/api/memoir/projects/{owner_project_id}/book-editor/chapters/{owner_chapters[0].id}/title",
+        json={"title": "管理员校正后的童年"},
     )
     moved = await client.post(
         f"/api/memoir/projects/{owner_project_id}/book-editor/plan/structure-commands",
         json={"type": "move_chapter", "chapter_id": owner_chapters[1].id, "direction": "up"},
     )
-    generated = await client.post(
-        f"/api/memoir/projects/{owner_project_id}/book-editor/output/generate",
-        json={},
-    )
-
-    assert updated_draft.status_code == 200
-    assert updated_draft.json()["latest_version"]["version"] == 2
-    assert confirmed_draft.status_code == 200
-    assert confirmed_draft.json()["status"] == "confirmed"
+    assert updated_title.status_code == 200
+    assert updated_title.json()["chapters"][0]["title"] == "管理员校正后的童年"
     assert moved.status_code == 200
     assert [chapter["id"] for chapter in moved.json()["chapters"]] == [
         owner_chapters[1].id,
         owner_chapters[0].id,
     ]
-    assert generated.status_code == 200
-    generated_content = generated.json()["latest_version"]["content"]
-    assert "目录\n1. 第一次离家\n2. 老屋里的童年" in generated_content
-    assert "管理员校正后的童年章节稿。" in generated_content
-
     refreshed = await client.get(f"/api/memoir/projects/{owner_project_id}/book-editor")
     assert refreshed.status_code == 200
-    assert refreshed.json()["output"]["latest_version"]["version"] == 1
+    assert [chapter["title"] for chapter in refreshed.json()["plan"]["chapters"]] == [
+        "第一次离家",
+        "管理员校正后的童年",
+    ]
+    assert refreshed.json()["output"] is None

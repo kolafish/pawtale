@@ -43,28 +43,11 @@ export interface BookAutomationEventDetailView {
 }
 
 function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
-  return (
-    event.event_type === "chapter_draft_generated"
-    || event.event_type === "book_output_generated"
-    || event.event_type === "book_editorial_copy_generated"
-  );
+  return event.event_type === "book_editorial_copy_generated";
 }
 
 export function pendingBookGenerationEvents(events: MemoirAutomationEvent[]): MemoirAutomationEvent[] {
   return events.filter((event) => isBookGenerationEvent(event) && event.status === "pending");
-}
-
-export function pendingChapterDraftGenerationIds(events: MemoirAutomationEvent[]): Set<string> {
-  return new Set(
-    pendingBookGenerationEvents(events)
-      .filter((event) => event.event_type === "chapter_draft_generated")
-      .map((event) => trimText(event.chapter_id || ""))
-      .filter(Boolean),
-  );
-}
-
-export function hasPendingBookOutputGeneration(events: MemoirAutomationEvent[]): boolean {
-  return pendingBookGenerationEvents(events).some((event) => event.event_type === "book_output_generated");
 }
 
 export function mergeAutomationEvent(
@@ -218,8 +201,8 @@ function chapterTextFromAuditItem(item: Record<string, unknown>, fallback = ""):
 }
 
 function actionSuggestionLabel(actionType: string): string {
-  if (actionType === "revise_chapter") {
-    return "建议补写";
+  if (actionType === "open_chapter_workspace") {
+    return "建议整理";
   }
   if (actionType === "continue_interview") {
     return "建议补问";

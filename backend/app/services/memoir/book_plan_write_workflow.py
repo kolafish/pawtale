@@ -33,9 +33,6 @@ from app.schemas.memoir_book import (
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_auto_revision import (
-    schedule_chapter_auto_revisions as _schedule_chapter_auto_revisions,
-)
 from app.services.memoir.book_plan_ai import (
     ChapterTitleSourceDigest,
     generate_book_plan_from_sources as _generate_book_plan_from_sources,
@@ -117,7 +114,6 @@ async def _handle_chapter_source_changes(
     *,
     project_id: str,
     chapter_ids: set[str],
-    ai_model: str | None = None,
 ) -> None:
     if not chapter_ids:
         return
@@ -125,12 +121,6 @@ async def _handle_chapter_source_changes(
         db,
         project_id=project_id,
         chapter_ids=chapter_ids,
-    )
-    await _schedule_chapter_auto_revisions(
-        db,
-        project_id=project_id,
-        chapter_ids=chapter_ids,
-        ai_model=ai_model,
     )
 
 

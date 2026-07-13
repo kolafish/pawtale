@@ -36,10 +36,8 @@ export type {
 } from "./book-automation-view-model";
 export {
   buildAutomationEventViews,
-  hasPendingBookOutputGeneration,
   mergeAutomationEvent,
   pendingBookGenerationEvents,
-  pendingChapterDraftGenerationIds,
 } from "./book-automation-view-model";
 export { trimText } from "./book-view-model-utils";
 

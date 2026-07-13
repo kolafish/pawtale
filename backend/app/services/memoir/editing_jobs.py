@@ -61,10 +61,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
-    MemoirEditingJobType.REVISE_CHAPTER: MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
     MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
-    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
     MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
 }
 
@@ -75,10 +72,7 @@ _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: "正文块生成失败，已有正文和锁定内容未受影响，可稍后重试。",
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: "全书一致性检查失败，已有事实和正文未受影响，可稍后重试。",
     MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
-    MemoirEditingJobType.REVISE_CHAPTER: "章节自动补写失败，稍后可重试。",
     MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: "章节初稿生成失败，稍后可重试。",
-    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: "全书稿生成失败，稍后可重试。",
     MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: "成书文案生成失败，稍后可重试。",
 }
 
@@ -313,17 +307,24 @@ async def claim_due_editing_jobs(
     now: datetime | None = None,
     limit: int | None = None,
     lease_seconds: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
 ) -> list[JobLease]:
     settings = get_settings()
     due_at = now or _utcnow()
     batch_size = limit or max(1, settings.memoir_editing_batch_size)
     lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
+    statement = select(MemoirEditingJob.id).where(_claimable_editing_job(due_at))
+    if job_type is not None:
+        statement = statement.where(MemoirEditingJob.job_type == job_type.value)
+    if project_id is not None:
+        statement = statement.where(MemoirEditingJob.project_id == project_id)
     candidate_ids = (
         await db.scalars(
-            select(MemoirEditingJob.id)
-            .where(_claimable_editing_job(due_at))
-            .order_by(MemoirEditingJob.run_after, MemoirEditingJob.created_at)
-            .limit(batch_size)
+            statement.order_by(
+                MemoirEditingJob.run_after,
+                MemoirEditingJob.created_at,
+            ).limit(batch_size)
         )
     ).all()
     await db.commit()
@@ -508,9 +509,16 @@ async def run_due_editing_jobs(
     session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
     *,
     limit: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
 ) -> int:
     async with session_maker() as db:
-        leases = await claim_due_editing_jobs(db, limit=limit)
+        leases = await claim_due_editing_jobs(
+            db,
+            limit=limit,
+            job_type=job_type,
+            project_id=project_id,
+        )
     results = await asyncio.gather(
         *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
     )

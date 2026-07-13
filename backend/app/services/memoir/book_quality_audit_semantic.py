@@ -36,8 +36,7 @@ VALID_PRIMARY_ACTION_TYPES = {
     "generate_plan",
     "assign_sources",
     "continue_interview",
-    "revise_chapter",
-    "generate_chapter_draft",
+    "open_chapter_workspace",
     "review_book",
     "none",
 }
@@ -304,7 +303,7 @@ def _semantic_prompt(
   "overall_status": "needs_updates/collecting/healthy 等规则状态之一",
   "summary_text": "一句审计摘要",
   "display": {{"title": "展示标题", "summary": "展示摘要", "detail": "展示详情"}},
-  "primary_action": {{"type": "continue_interview", "cta_text": "继续追问", "chapter_id": "可选章节 id", "utterance_count": 0}},
+  "primary_action": {{"type": "open_chapter_workspace", "cta_text": "整理本章", "chapter_id": "可选章节 id", "utterance_count": 0}},
   "chapter_audits": [
     {{
       "chapter_id": "章节 id",
