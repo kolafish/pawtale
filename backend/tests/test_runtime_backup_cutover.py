@@ -5,7 +5,11 @@ from argparse import Namespace
 
 import pytest
 
-from scripts.backup_runtime_data import create_backup
+from scripts.backup_runtime_data import (
+    SQLITE_SIDECAR_SUFFIXES,
+    create_backup,
+    validate_backup_checksums,
+)
 from scripts.cutover_memoir_narrative import (
     _validate_backup_manifest,
     _validate_run_args,
@@ -55,6 +59,39 @@ def test_runtime_backup_manifest_is_bound_to_its_source_database(tmp_path):
         manifest_path,
         runtime_database=database,
     ) == manifest
+
+
+def test_runtime_backup_checksums_are_stable_for_wal_database(tmp_path):
+    database = tmp_path / "pawtale.db"
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO projects (id) VALUES ('project-1')")
+        conn.commit()
+
+        backup_dir = create_backup(
+            db_path=database,
+            projects_dir=tmp_path / "projects",
+            backend_data_dir=tmp_path / "backend-data",
+            backups_dir=tmp_path / "backups",
+        )
+
+    backup_database = backup_dir / "pawtale.db"
+    with sqlite3.connect(backup_database) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        assert conn.execute("SELECT id FROM projects").fetchall() == [("project-1",)]
+    assert all(
+        not (backup_dir / f"pawtale.db{suffix}").exists()
+        for suffix in SQLITE_SIDECAR_SUFFIXES
+    )
+    assert validate_backup_checksums(backup_dir) > 0
+
+    (backup_dir / "object-references.json").write_text("[{}]\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="backup checksum does not match"):
+        _validate_backup_manifest(
+            backup_dir / "manifest.json",
+            runtime_database=database,
+        )
 
 
 def test_cutover_rejects_wrong_or_modified_backup(tmp_path):

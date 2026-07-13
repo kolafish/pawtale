@@ -27,6 +27,7 @@ BACKEND_DATA_DIR = REPO_ROOT / "backend" / "data"
 DB_PATH = DATA_DIR / "pawtale.db"
 PROJECTS_DIR = DATA_DIR / "projects"
 BACKUPS_DIR = DATA_DIR / "backups"
+SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 
 
 TABLES_TO_COUNT = [
@@ -89,6 +90,23 @@ def dump_database(db_path: Path, dump_path: Path) -> None:
 def backup_database(source: Path, destination: Path) -> None:
     with sqlite3.connect(source) as source_db, sqlite3.connect(destination) as backup_db:
         source_db.backup(backup_db)
+
+
+def normalize_backup_database(db_path: Path) -> None:
+    """Make the standalone backup independent from transient SQLite sidecars."""
+    with sqlite3.connect(db_path) as conn:
+        current_mode = str(conn.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if current_mode == "wal":
+            checkpoint = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if checkpoint and int(checkpoint[0]):
+                raise RuntimeError("backup database WAL checkpoint is busy")
+        journal_mode = str(
+            conn.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+        ).lower()
+        if journal_mode != "delete":
+            raise RuntimeError("backup database could not switch to DELETE journal mode")
+    for suffix in SQLITE_SIDECAR_SUFFIXES:
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
 
 
 def write_schema(db_path: Path, schema_path: Path) -> None:
@@ -178,6 +196,45 @@ def write_checksums(backup_dir: Path) -> None:
     checksum_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
+def validate_backup_checksums(backup_dir: Path) -> int:
+    backup_root = backup_dir.expanduser().resolve()
+    checksum_path = backup_root / "checksums.sha256"
+    if not checksum_path.is_file():
+        raise RuntimeError("backup checksum manifest is missing")
+    lines = checksum_path.read_text(encoding="utf-8").splitlines()
+    if not lines:
+        raise RuntimeError("backup checksum manifest is empty")
+    validated = 0
+    for line in lines:
+        expected, separator, relative_text = line.partition("  ")
+        try:
+            valid_digest = len(expected) == 64 and int(expected, 16) >= 0
+        except ValueError:
+            valid_digest = False
+        relative_path = Path(relative_text)
+        if (
+            not separator
+            or not valid_digest
+            or not relative_text
+            or relative_path.is_absolute()
+            or ".." in relative_path.parts
+        ):
+            raise RuntimeError("backup checksum manifest contains an invalid entry")
+        artifact = (backup_root / relative_path).resolve()
+        try:
+            artifact.relative_to(backup_root)
+        except ValueError as exc:
+            raise RuntimeError(
+                "backup checksum manifest contains a path outside the backup"
+            ) from exc
+        if not artifact.is_file():
+            raise RuntimeError(f"backup checksum artifact is missing: {relative_text}")
+        if sha256_file(artifact) != expected:
+            raise RuntimeError(f"backup checksum does not match: {relative_text}")
+        validated += 1
+    return validated
+
+
 def sqlite_database_path(database_url: str) -> Path | None:
     url = make_url(database_url)
     if url.get_backend_name() != "sqlite" or not url.database or url.database == ":memory:":
@@ -208,6 +265,7 @@ def validate_backup_manifest(
         raise RuntimeError("backup database SHA-256 does not match the manifest")
     if integrity_check(backup_database) != "ok":
         raise RuntimeError("backup database failed SQLite integrity_check")
+    validate_backup_checksums(manifest_path.parent)
     return payload
 
 
@@ -234,6 +292,7 @@ def create_backup(
 
     db_backup = backup_dir / "pawtale.db"
     backup_database(db_path, db_backup)
+    normalize_backup_database(db_backup)
     dump_database(db_backup, backup_dir / "pawtale.dump.sql")
     write_schema(db_backup, backup_dir / "schema.sql")
     object_reference_counts = write_object_references(
@@ -269,6 +328,7 @@ def create_backup(
     )
 
     write_checksums(backup_dir)
+    validate_backup_checksums(backup_dir)
     return backup_dir
 
 
