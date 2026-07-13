@@ -92,6 +92,9 @@ async def run_transcript_correction_job(
                 "source_card_job_id": (
                     processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
                 ),
+                "narrative_ingestion_job_id": (
+                    processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
+                ),
             },
             error_message="transcript already edited",
         )
@@ -109,6 +112,9 @@ async def run_transcript_correction_job(
                 "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
                 "source_card_job_id": (
                     processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
+                ),
+                "narrative_ingestion_job_id": (
+                    processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
                 ),
             },
             error_message="transcript version changed",
@@ -169,5 +175,8 @@ async def run_transcript_correction_job(
             "created_by": cleaned.created_by.value,
             "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
             "source_card_job_id": processing_jobs.source_card_job.id if processing_jobs.source_card_job else None,
+            "narrative_ingestion_job_id": (
+                processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
+            ),
         }
     )

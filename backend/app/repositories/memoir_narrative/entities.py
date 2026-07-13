@@ -14,13 +14,19 @@ class MemoirNarrativeEntityRepository:
     def __init__(self, db: AsyncSession):
         self._db = db
 
-    async def create(self, data: MemoirNarrativeEntityCreate) -> MemoirNarrativeEntity:
+    async def create(
+        self,
+        data: MemoirNarrativeEntityCreate,
+        *,
+        entity_id: str | None = None,
+    ) -> MemoirNarrativeEntity:
         project_exists = await self._db.scalar(
             select(Project.id).where(Project.id == data.project_id)
         )
         if project_exists is None:
             raise ValueError("entity project does not exist")
         entity = MemoirNarrativeEntity(
+            id=entity_id,
             project_id=data.project_id,
             entity_type=data.entity_type.value,
             canonical_name=data.canonical_name,

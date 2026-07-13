@@ -83,3 +83,27 @@ class MemoirClaimEvidenceSpeakerRole(str, Enum):
     NARRATOR = "narrator"
     INTERVIEWER = "interviewer"
     OTHER = "other"
+
+
+class MemoirNarrativeDecisionTargetType(str, Enum):
+    ENTITY = "entity"
+    CLAIM = "claim"
+    STORY = "story"
+    STORY_SLOT = "story_slot"
+    GAP = "gap"
+    FOLLOWUP_TASK = "followup_task"
+    CHAPTER_CONTRACT = "chapter_contract"
+    DRAFT_BLOCK = "draft_block"
+
+
+class MemoirNarrativeDecisionAction(str, Enum):
+    CONFIRM = "confirm"
+    REJECT = "reject"
+    MERGE = "merge"
+    RESOLVE = "resolve"
+    ACCEPT_INCOMPLETE = "accept_incomplete"
+    EXCLUDE = "exclude"
+    MARK_PRIVATE = "mark_private"
+    LOCK = "lock"
+    UNLOCK = "unlock"
+    NEEDS_REVIEW = "needs_review"

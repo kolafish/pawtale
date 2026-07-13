@@ -11,6 +11,11 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_narrative_entities",
     "memoir_claims",
     "memoir_claim_evidence",
+    "memoir_narrative_decisions",
+)
+MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
+    "memoir_narrative_decisions_no_update",
+    "memoir_narrative_decisions_no_delete",
 )
 
 
@@ -67,15 +72,63 @@ async def _index_names(conn, table_name: str) -> set[str]:
     return {str(row[1]) for row in rows}
 
 
+async def _trigger_exists(conn, trigger_name: str) -> bool:
+    result = await conn.execute(
+        text("SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = :trigger_name"),
+        {"trigger_name": trigger_name},
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _ensure_decision_triggers(conn) -> list[str]:
+    changed: list[str] = []
+    statements = {
+        "memoir_narrative_decisions_no_update": """
+            CREATE TRIGGER memoir_narrative_decisions_no_update
+            BEFORE UPDATE ON memoir_narrative_decisions
+            BEGIN
+                SELECT RAISE(ABORT, 'memoir narrative decisions are append-only');
+            END
+        """,
+        "memoir_narrative_decisions_no_delete": """
+            CREATE TRIGGER memoir_narrative_decisions_no_delete
+            BEFORE DELETE ON memoir_narrative_decisions
+            BEGIN
+                SELECT RAISE(ABORT, 'memoir narrative decisions are append-only');
+            END
+        """,
+    }
+    for trigger_name, statement in statements.items():
+        if await _trigger_exists(conn, trigger_name):
+            continue
+        await conn.execute(text(statement))
+        changed.append(trigger_name)
+    return changed
+
+
 async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, list[str]]:
-    """Create the narrative fact tables without changing existing product reads or writes."""
+    """Create and advance the narrative fact schema."""
     changed_tables: list[str] = []
+    changed_indexes: list[str] = []
+    changed_triggers: list[str] = []
     async with engine.begin() as conn:
         for table in _narrative_tables_from_metadata():
             if not await _table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
                 changed_tables.append(table.name)
-    return {"changed_tables": changed_tables}
+                continue
+            existing_indexes = await _index_names(conn, table.name)
+            for index in table.indexes:
+                if not index.name or index.name in existing_indexes:
+                    continue
+                await conn.run_sync(lambda sync_conn, index=index: index.create(sync_conn, checkfirst=True))
+                changed_indexes.append(index.name)
+        changed_triggers.extend(await _ensure_decision_triggers(conn))
+    return {
+        "changed_tables": changed_tables,
+        "changed_indexes": changed_indexes,
+        "changed_triggers": changed_triggers,
+    }
 
 
 async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
@@ -89,6 +142,7 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
     column_mismatches: list[str] = []
     missing_indexes: list[str] = []
     missing_constraints: list[str] = []
+    missing_triggers: list[str] = []
 
     async with engine.begin() as conn:
         for table_name, expected in expected_columns.items():
@@ -126,8 +180,18 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
                 for constraint in table.constraints
                 if constraint.name and constraint.name not in actual_sql
             )
+        for trigger_name in MEMOIR_NARRATIVE_DECISION_TRIGGERS:
+            if not await _trigger_exists(conn, trigger_name):
+                missing_triggers.append(trigger_name)
 
-    if missing_tables or missing_columns or column_mismatches or missing_indexes or missing_constraints:
+    if (
+        missing_tables
+        or missing_columns
+        or column_mismatches
+        or missing_indexes
+        or missing_constraints
+        or missing_triggers
+    ):
         details: list[str] = []
         if missing_tables:
             details.append(f"missing tables: {', '.join(sorted(missing_tables))}")
@@ -139,6 +203,8 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
             details.append(f"missing indexes: {', '.join(sorted(missing_indexes))}")
         if missing_constraints:
             details.append(f"missing constraints: {', '.join(sorted(missing_constraints))}")
+        if missing_triggers:
+            details.append(f"missing triggers: {', '.join(sorted(missing_triggers))}")
         raise RuntimeError(
             "Memoir narrative schema mismatch; "
             + "; ".join(details)

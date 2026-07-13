@@ -32,6 +32,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
+from app.models.memoir_narrative import MemoirClaimEvidence
 from app.schemas.memoir_voice import (
     MemoirMaterialOfflineASRStateResponse,
     MemoirVoiceTranscriptIncludedChapterResponse,
@@ -558,6 +559,11 @@ async def prune_transcript_versions_for_utterance(
             .where(
                 MemoirTranscriptVersion.source_artifact_id == utterance_id,
                 MemoirTranscriptVersion.version_type == version_value,
+                ~MemoirTranscriptVersion.id.in_(
+                    select(MemoirClaimEvidence.transcript_version_id).where(
+                        MemoirClaimEvidence.transcript_version_id.is_not(None)
+                    )
+                ),
             )
             .order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc())
             .offset(max(1, keep))

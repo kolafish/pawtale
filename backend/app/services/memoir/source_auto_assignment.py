@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -27,10 +28,15 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
-from app.services.memoir.source_disposition import apply_source_route_disposition
+from app.services.memoir.source_disposition import (
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    apply_source_route_disposition,
+    is_ignored_non_memoir_source,
+)
 from app.services.memoir.utterance_editing_pipeline import (
     source_routing_lineage_by_utterance,
     validate_source_routing_transcript_guard,
@@ -451,12 +457,42 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
             project_id=job.project_id,
             reason="source_routing_completed",
         )
+    routed_utterances = list(
+        (
+            await db.scalars(
+                select(MemoirVoiceUtterance)
+                .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
+                .where(
+                    MemoirVoiceSession.project_id == job.project_id,
+                    MemoirVoiceUtterance.id.in_(utterance_ids),
+                )
+                .options(selectinload(MemoirVoiceUtterance.chat_message))
+            )
+        ).all()
+    )
+    narrative_jobs = []
+    for utterance in routed_utterances:
+        if (
+            is_ignored_non_memoir_source(utterance)
+            and utterance.source_material_type != INTERVIEWER_SOURCE_MATERIAL_TYPE
+        ):
+            continue
+        narrative_job = await narrative_ingestion.schedule_narrative_ingestion_job(
+            db,
+            project_id=job.project_id,
+            utterance=utterance,
+            source="source_routing_completed",
+            ai_model=payload.get("ai_model") if isinstance(payload.get("ai_model"), str) else None,
+        )
+        if narrative_job is not None:
+            narrative_jobs.append(narrative_job)
     return EditingJobResult(
         result_json={
             "evaluated_source_count": response.evaluated_source_count,
             "assigned_source_count": response.assigned_source_count,
             "skipped_source_count": response.skipped_source_count,
             "event_ids": [event.id for event in response.events],
+            "narrative_ingestion_job_ids": [item.id for item in narrative_jobs],
         },
     )
 
