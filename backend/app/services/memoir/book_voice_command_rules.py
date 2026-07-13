@@ -52,7 +52,7 @@ CONSULTATION_INTENTS = {"review_chapter_title", "review_chapter_length", "review
 ANSWER_INTENTS = {"read_uncovered_source", "answer_book_question", "capability_help"}
 CLARIFICATION_INTENTS = {"clarify_previous", "unknown"}
 NON_CONFIRMATION_INTENTS = READ_INTENTS | CONSULTATION_INTENTS | ANSWER_INTENTS | CLARIFICATION_INTENTS
-EXECUTABLE_MUTATION_INTENTS = {"rename_chapter", "merge_chapters", "move_chapter", "assign_source"}
+EXECUTABLE_MUTATION_INTENTS = {"rename_chapter", "move_chapter", "assign_source"}
 CHINESE_NUMBERS = {
     "一": 1,
     "二": 2,

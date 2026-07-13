@@ -78,7 +78,6 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
   createdAtText: string;
   charCount: number;
   previewText: string;
-  splitSelected: boolean;
 }
 
 export interface BookChapterView extends MemoirBookPlanChapter {
@@ -91,10 +90,6 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   sourceViews: BookChapterSourceView[];
   sourceListExpanded: boolean;
   sourceToggleText: string;
-  mergeTargetOptions: ChapterPickerOption[];
-  splitSelectedCount: number;
-  splitActionText: string;
-  canSplitSelectedSources: boolean;
   canMoveUp: boolean;
   canMoveDown: boolean;
   pendingSourceCount: number;
@@ -235,7 +230,6 @@ export interface BookData {
   chapters: BookChapterView[];
   chapterStructureEditing: boolean;
   editingChapterId: string;
-  splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
   totalChapterCount: number;
   allChaptersConfirmed: boolean;
@@ -1169,7 +1163,6 @@ function chapterSourceView(
   index: number,
   recordNumbers: Record<string, number>,
   fallbackRecordNumbers: Record<string, number>,
-  selectedSourceIds: Set<string>,
 ): BookChapterSourceView {
   const previewText = sourcePreviewText(ref);
   const createdAtText = sourceCreatedAtText(ref);
@@ -1185,33 +1178,23 @@ function chapterSourceView(
     createdAtText,
     charCount,
     previewText,
-    splitSelected: selectedSourceIds.has(ref.utterance_id),
   };
 }
 
 function decorateChapterStructureOptions(
   chapters: BookChapterView[],
   coverage: MemoirBookSourceCoverage | null = null,
-  splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
-  const options = chapters.map(chapterOption);
   const recordNumbers = coverageSourceRecordNumbers(coverage);
   const fallbackRecordNumbers = planSourceRecordNumbers(chapters);
   return chapters.map((chapter, index) => {
-    const targetOptions = options.filter((option) => option.value !== chapter.id);
-    const selectedSourceIds = new Set(splitSelections[chapter.id] || []);
-    const selectedCount = chapter.source_refs.filter((ref) => selectedSourceIds.has(ref.utterance_id)).length;
     return {
       ...chapter,
       chapterSummaryMetaText: chapterSummaryMetaText(chapter),
       sourceViews: chapter.source_refs.map((ref, sourceIndex) => (
-        chapterSourceView(ref, sourceIndex, recordNumbers, fallbackRecordNumbers, selectedSourceIds)
+        chapterSourceView(ref, sourceIndex, recordNumbers, fallbackRecordNumbers)
       )),
       sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${chapter.source_refs.length} 条`,
-      mergeTargetOptions: targetOptions,
-      splitSelectedCount: selectedCount,
-      splitActionText: selectedCount ? `拆出所选 ${selectedCount} 条` : "拆出所选",
-      canSplitSelectedSources: selectedCount > 0 && selectedCount < chapter.source_refs.length,
       canMoveUp: index > 0,
       canMoveDown: index < chapters.length - 1,
     };
@@ -1238,7 +1221,6 @@ export function chapterCollectionData(
   chapters: BookChapterView[],
   stage: BookStage,
   coverage: MemoirBookSourceCoverage | null = null,
-  splitSelections: Record<string, string[]> = {},
 ): Pick<
   BookData,
   | "chapters"
@@ -1249,7 +1231,7 @@ export function chapterCollectionData(
   | "progressText"
   | "chapterPickerOptions"
 > {
-  const decorated = decorateChapterStructureOptions(chapters, coverage, splitSelections);
+  const decorated = decorateChapterStructureOptions(chapters, coverage);
   return {
     chapters: decorated,
     ...chapterStateData(decorated),
@@ -1283,7 +1265,7 @@ export function bookOutlineNarrationText(
     const chapterTitle = trimText(chapter.title) || "未命名章节";
     lines.push(`第 ${index + 1} 章，${chapterTitle}。本章收录 ${chapter.sourceCount} 条语音素材。`);
   });
-  lines.push("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。");
+  lines.push("你可以继续调整章节顺序，或者说出想修改的地方。");
   return lines.join("\n");
 }
 
@@ -1291,7 +1273,6 @@ export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
   coverage: MemoirBookSourceCoverage | null = null,
-  splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
   const chapters = [...plan.chapters]
     .sort((left, right) => left.sort_order - right.sort_order)
@@ -1319,10 +1300,6 @@ export function buildChapterViews(
         sourceViews: [],
         sourceListExpanded: false,
         sourceToggleText: "",
-        mergeTargetOptions: [],
-        splitSelectedCount: 0,
-        splitActionText: "拆出所选",
-        canSplitSelectedSources: false,
         canMoveUp: false,
         canMoveDown: false,
         pendingSourceCount: assignedPendingCount,
@@ -1341,7 +1318,7 @@ export function buildChapterViews(
         draftError: "",
       };
     });
-  return decorateChapterStructureOptions(chapters, coverage, splitSelections);
+  return decorateChapterStructureOptions(chapters, coverage);
 }
 
 export function bookProgressText(chapters: BookChapterView[]): string {
@@ -1387,7 +1364,6 @@ export function guestBookData(): Partial<BookHomeData> {
     allChaptersConfirmed: false,
     canGenerateBook: false,
     progressText: "登录后可以开始整理",
-    splitSourceSelections: {},
     sourceCoverage: null,
     sourceCoverageNotice: "",
     uncoveredSourceCount: 0,

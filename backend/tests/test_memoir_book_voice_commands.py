@@ -2,21 +2,11 @@ import json
 
 from sqlalchemy import select
 
-from app.domain.memoir.types import (
-    MemoirEditingJobStatus,
-    MemoirEditingJobType,
-)
-from app.models.memoir import (
-    MemoirEditingJob,
-    MemoirChapterSourceLink,
-)
+from app.models.memoir import MemoirBookPlanChapter
 from tests.memoir_helpers import (
-    add_test_chapter_source_links,
     create_test_book_plan_with_chapters,
-    create_test_chapter_draft,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
-    memoir_source_ref,
 )
 
 
@@ -216,7 +206,7 @@ async def test_mobile_memoir_book_voice_command_execute_moves_chapter_to_last(cl
     ]
 
 
-async def test_mobile_memoir_book_voice_command_execute_merges_chapters(client, test_db):
+async def test_mobile_memoir_book_voice_command_execute_rejects_legacy_merge(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     _, chapters = await _create_two_chapter_plan(
         test_db,
@@ -238,85 +228,16 @@ async def test_mobile_memoir_book_voice_command_execute_merges_chapters(client, 
         },
     )
 
-    assert response.status_code == 200, response.json()
-    data = response.json()
-    assert data["intent"] == "merge_chapters"
-    assert data["summary"] == "已把「童年友情」合并到「童年年节欢趣」。"
-    assert [chapter["id"] for chapter in data["plan"]["chapters"]] == [chapters[1].id]
-
-
-async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_revision(client, test_db):
-    first = await create_test_voice_transcript(client, test_db, "小时候放学后，我常和同学去河边玩。")
-    second = await create_test_voice_transcript(
-        client,
-        test_db,
-        "春节那几天，家里总会做很多年菜。",
-        project_id=first["session"]["project_id"],
-    )
-    project_id = first["session"]["project_id"]
-    _, chapters = await _create_two_chapter_plan(
-        test_db,
-        project_id=project_id,
-        titles=["童年友情", "童年年节欢趣"],
-    )
-    await add_test_chapter_source_links(
-        test_db,
-        project_id=project_id,
-        plan_id=chapters[0].plan_id,
-        chapter_id=chapters[0].id,
-        source_refs=[memoir_source_ref(first)],
-    )
-    await add_test_chapter_source_links(
-        test_db,
-        project_id=project_id,
-        plan_id=chapters[1].plan_id,
-        chapter_id=chapters[1].id,
-        source_refs=[memoir_source_ref(second)],
-    )
-    await create_test_chapter_draft(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapters[1].id,
-        content="春节那几天，家里总会做很多年菜。",
-    )
-    second_link = await test_db.scalar(
-        select(MemoirChapterSourceLink).where(
-            MemoirChapterSourceLink.chapter_id == chapters[1].id,
-            MemoirChapterSourceLink.utterance_id == second["utterance_id"],
+    assert response.status_code == 400, response.json()
+    assert response.json()["detail"] == "这个语音操作暂时只能预览"
+    persisted_chapter_ids = list(
+        await test_db.scalars(
+            select(MemoirBookPlanChapter.id).where(
+                MemoirBookPlanChapter.id.in_([chapter.id for chapter in chapters])
+            )
         )
     )
-    assert second_link is not None
-    base_version_id = second_link.merged_draft_version_id
-    assert base_version_id is not None
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-voice-command/execute",
-        json={
-            "intent": "merge_chapters",
-            "operation": {
-                "type": "merge_chapters",
-                "chapter_id": chapters[0].id,
-                "chapter_title": "童年友情",
-                "target_chapter_id": chapters[1].id,
-                "target_chapter_title": "童年年节欢趣",
-            },
-        },
-    )
-
-    assert response.status_code == 200, response.json()
-    data = response.json()
-    target_chapter = data["plan"]["chapters"][0]
-    assert target_chapter["id"] == chapters[1].id
-    assert [ref["utterance_id"] for ref in target_chapter["source_refs"]] == [
-        second["utterance_id"],
-        first["utterance_id"],
-    ]
-    assert target_chapter["pending_source_count"] == 1
-
-    obsolete_revision_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapters[1].id}")
-    )
-    assert obsolete_revision_job is None
+    assert set(persisted_chapter_ids) == {chapter.id for chapter in chapters}
 
 
 async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):

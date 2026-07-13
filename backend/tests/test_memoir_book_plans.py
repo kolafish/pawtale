@@ -789,10 +789,7 @@ async def test_mobile_memoir_book_plan_structure_command_moves_and_renames_chapt
     assert chapters_by_id[first_chapter["id"]]["title"] == "院子里的童年"
 
 
-async def test_mobile_memoir_book_plan_structure_command_merges_chapters_and_marks_target_draft(
-    client,
-    test_db,
-):
+async def test_mobile_memoir_book_plan_rejects_removed_destructive_structure_commands(client, test_db):
     first = await create_test_voice_transcript(client, test_db, "第一条年节记忆。")
     second = await create_test_voice_transcript(client, test_db, "第二条年节记忆。")
     project_id = first["session"]["project_id"]
@@ -806,87 +803,44 @@ async def test_mobile_memoir_book_plan_structure_command_merges_chapters_and_mar
         },
     )
     assert confirm_response.status_code == 200
-    target_chapter, source_chapter = confirm_response.json()["chapters"]
-    target_draft = await create_test_chapter_draft(
+    original_chapters = confirm_response.json()["chapters"]
+    draft = await create_test_chapter_draft(
         test_db,
         project_id=project_id,
-        chapter_id=target_chapter["id"],
+        chapter_id=original_chapters[0]["id"],
     )
-    source_draft = await create_test_chapter_draft(
-        test_db,
-        project_id=project_id,
-        chapter_id=source_chapter["id"],
-    )
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
-        json={
+    commands = [
+        {"type": "delete_chapter", "chapter_id": original_chapters[0]["id"]},
+        {
             "type": "merge_chapters",
-            "chapter_id": source_chapter["id"],
-            "target_chapter_id": target_chapter["id"],
+            "chapter_id": original_chapters[0]["id"],
+            "target_chapter_id": original_chapters[1]["id"],
         },
-    )
-
-    assert response.status_code == 200, response.json()
-    data = response.json()
-    assert [chapter["id"] for chapter in data["chapters"]] == [target_chapter["id"]]
-    assert [ref["utterance_id"] for ref in data["chapters"][0]["source_refs"]] == [
-        first["utterance_id"],
-        second["utterance_id"],
-    ]
-    assert data["chapters"][0]["metadata_json"]["pending_source_utterance_ids"] == [second["utterance_id"]]
-    assert data["chapters"][0]["pending_source_count"] == 1
-    assert data["chapters"][0]["removed_source_count"] == 0
-    refreshed_target_draft = await test_db.scalar(
-        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == target_draft.id)
-    )
-    assert refreshed_target_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-    assert refreshed_target_draft.metadata_json["status_reason"] == "sources_changed"
-    assert await test_db.scalar(
-        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == source_draft.id)
-    ) is None
-
-
-async def test_mobile_memoir_book_plan_structure_command_splits_chapter_sources(client, test_db):
-    first = await create_test_voice_transcript(client, test_db, "第一条年节记忆。")
-    second = await create_test_voice_transcript(client, test_db, "第二条年节记忆。")
-    project_id = first["session"]["project_id"]
-    confirm_response = await client.put(
-        f"/api/mobile/memoir/projects/{project_id}/book-plan",
-        json={
-            "chapters": [
-                {
-                    "title": "岁首欢聚记",
-                    "source_refs": [memoir_source_ref(first), memoir_source_ref(second)],
-                },
-            ],
-        },
-    )
-    assert confirm_response.status_code == 200
-    chapter = confirm_response.json()["chapters"][0]
-    draft = await create_test_chapter_draft(test_db, project_id=project_id, chapter_id=chapter["id"])
-
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
-        json={
+        {
             "type": "split_chapter",
-            "chapter_id": chapter["id"],
-            "title": "年节旧事（拆出）",
-            "utterance_ids": [second["utterance_id"]],
+            "chapter_id": original_chapters[0]["id"],
+            "utterance_ids": [first["utterance_id"]],
         },
-    )
+    ]
 
-    assert response.status_code == 200, response.json()
-    data = response.json()
-    assert [chapter["title"] for chapter in data["chapters"]] == ["岁首欢聚记", "年节旧事（拆出）"]
-    assert [ref["utterance_id"] for ref in data["chapters"][0]["source_refs"]] == [first["utterance_id"]]
-    assert [ref["utterance_id"] for ref in data["chapters"][1]["source_refs"]] == [second["utterance_id"]]
-    refreshed_draft = await test_db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id))
-    assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-    assert refreshed_draft.metadata_json["status_reason"] == "sources_changed"
+    for command in commands:
+        response = await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+            json=command,
+        )
+        assert response.status_code == 422, response.json()
+
+    plan_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-plan")
+    assert plan_response.status_code == 200
+    assert [chapter["id"] for chapter in plan_response.json()["chapters"]] == [
+        chapter["id"] for chapter in original_chapters
+    ]
+    assert await test_db.scalar(
+        select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
+    ) is not None
 
 
-async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_source_chapter(client, test_db):
+async def test_mobile_memoir_book_plan_structure_command_creates_source_chapter(client, test_db):
     first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
     later = await create_test_voice_transcript(client, test_db, "后来我又讲了一个认识很多年的朋友。")
     project_id = first["session"]["project_id"]
@@ -915,18 +869,6 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
         held_event.id,
         chapter_title="后来我又讲了一个认识很多年的朋友",
     )
-
-    delete_response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
-        json={"type": "delete_chapter", "chapter_id": created_chapter["id"]},
-    )
-
-    assert delete_response.status_code == 200, delete_response.json()
-    assert [chapter["title"] for chapter in delete_response.json()["chapters"]] == ["童年和外婆家"]
-    coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
-    assert coverage.status_code == 200
-    assert [item["utterance_id"] for item in coverage.json()["uncovered_sources"]] == [later["utterance_id"]]
-
 
 async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts(
     client,

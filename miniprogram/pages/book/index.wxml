@@ -409,7 +409,7 @@
       </view>
 
       <view wx:if="{{item.sourceViews.length && item.sourceListExpanded}}" class="source-ref-list">
-        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row {{source.splitSelected ? 'selected' : ''}}">
+        <view wx:for="{{item.sourceViews}}" wx:for-item="source" wx:key="utterance_id" class="source-ref-row">
           <view
             class="source-ref-main"
             data-id="{{source.utterance_id}}"
@@ -419,16 +419,6 @@
             <text class="source-ref-label">{{source.labelText}}</text>
             <text class="source-ref-text">{{source.previewText}}</text>
           </view>
-          <button
-            wx:if="{{item.sourceViews.length > 1}}"
-            class="source-split-toggle {{source.splitSelected ? 'selected' : ''}}"
-            data-id="{{item.id}}"
-            data-utterance-id="{{source.utterance_id}}"
-            bindtap="toggleSplitSource"
-            disabled="{{confirmingPlan || updatingPlanStructure}}"
-          >
-            {{source.splitSelected ? "已选" : "选择"}}
-          </button>
         </view>
       </view>
 
@@ -453,28 +443,6 @@
             下移
           </button>
         </view>
-        <view class="structure-action-row">
-          <picker
-            class="structure-picker"
-            range="{{item.mergeTargetOptions}}"
-            range-key="label"
-            data-id="{{item.id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length}}"
-            bindchange="mergeChapterInto"
-          >
-            <view class="structure-button picker-button {{confirmingPlan || updatingPlanStructure || !item.mergeTargetOptions.length ? 'disabled' : ''}}">
-              合并到
-            </view>
-          </picker>
-          <button
-            class="structure-button picker-button"
-            data-id="{{item.id}}"
-            disabled="{{confirmingPlan || updatingPlanStructure || !item.canSplitSelectedSources}}"
-            bindtap="splitSelectedChapterSources"
-          >
-            {{item.splitActionText}}
-          </button>
-        </view>
       </view>
 
       <view class="actions-row compact">
@@ -486,14 +454,6 @@
           disabled="{{confirmingPlan || generatingPlan || titleBusyTarget || updatingPlanStructure}}"
         >
             {{titleBusyTarget === item.id ? "起名中" : "小余起名"}}
-        </button>
-        <button
-          class="danger-button"
-          data-id="{{item.id}}"
-          bindtap="removeChapter"
-          disabled="{{confirmingPlan || updatingPlanStructure || chapters.length <= 1}}"
-        >
-          删除本章，保留讲述
         </button>
       </view>
     </view>
