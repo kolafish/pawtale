@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
 import pytest
@@ -102,6 +102,8 @@ async def _create_ready_story(
     *,
     created: dict,
     title: str = "离开家乡",
+    is_core: bool = True,
+    verification_status: MemoirStoryVerificationStatus = MemoirStoryVerificationStatus.CONFIRMED,
 ) -> tuple[MemoirStory, MemoirClaim]:
     project_id = created["session"]["project_id"]
     user_id = created["user_id"]
@@ -129,8 +131,16 @@ async def _create_ready_story(
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
         completion_status=MemoirStoryCompletionStatus.SUFFICIENT.value,
-        verification_status=MemoirStoryVerificationStatus.CONFIRMED.value,
-        verification_decided_by_user_id=user_id,
+        verification_status=verification_status.value,
+        verification_decided_by_user_id=(
+            user_id
+            if verification_status
+            in {
+                MemoirStoryVerificationStatus.CONFIRMED,
+                MemoirStoryVerificationStatus.REJECTED,
+            }
+            else None
+        ),
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
         slot_schema_version="1",
         created_by=MemoirNarrativeActorType.USER.value,
@@ -163,7 +173,7 @@ async def _create_ready_story(
                 claim_id=claim.id,
                 narrative_role=MemoirStoryNarrativeRole.ACTION.value,
                 sort_order=0,
-                is_core=True,
+                is_core=is_core,
                 created_by=MemoirNarrativeActorType.USER.value,
                 created_by_user_id=user_id,
             ),
@@ -1315,3 +1325,202 @@ async def test_chapter_structure_backfill_is_dry_run_by_default_and_never_confir
         "chapter contracts still require user confirmation",
         "chapters do not all have structured draft blocks",
     ]
+
+
+async def test_chapter_structure_backfill_requires_first_confirmable_story_and_repairs_legacy_draft(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["工作经历"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+    )
+    confirmable_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="储备粮食成为先进乡",
+    )
+    non_core_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="一生担任一把手领导职务",
+        is_core=False,
+        verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION,
+    )
+    confirmable_story.updated_at = datetime(2026, 1, 1)
+    non_core_story.updated_at = confirmable_story.updated_at + timedelta(seconds=1)
+    test_db.add_all([confirmable_story, non_core_story])
+    await test_db.commit()
+
+    created_report = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    contract = await test_db.get(
+        MemoirChapterContract,
+        created_report["created_contract_ids"][0],
+    )
+    assert contract is not None
+    assert contract.constraints_json["include_story_ids"] == [confirmable_story.id]
+    nodes = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNode).where(
+                    MemoirChapterNode.contract_id == contract.id
+                )
+            )
+        ).all()
+    )
+    links = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNodeStory).where(
+                    MemoirChapterNodeStory.node_id.in_([node.id for node in nodes])
+                )
+            )
+        ).all()
+    )
+    nodes_by_id = {node.id: node for node in nodes}
+    links_by_story = {link.story_id: link for link in links}
+    assert links_by_story[confirmable_story.id].required is True
+    assert nodes_by_id[links_by_story[confirmable_story.id].node_id].required is True
+    assert links_by_story[non_core_story.id].required is False
+    assert nodes_by_id[links_by_story[non_core_story.id].node_id].required is False
+
+    contract.constraints_json = {
+        **contract.constraints_json,
+        "include_story_ids": [non_core_story.id],
+    }
+    links_by_story[confirmable_story.id].required = False
+    nodes_by_id[links_by_story[confirmable_story.id].node_id].required = False
+    links_by_story[non_core_story.id].required = True
+    nodes_by_id[links_by_story[non_core_story.id].node_id].required = True
+    await test_db.commit()
+
+    repaired = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert repaired["repaired_contract_ids"] == [contract.id]
+    await test_db.refresh(contract)
+    await test_db.refresh(links_by_story[confirmable_story.id])
+    await test_db.refresh(links_by_story[non_core_story.id])
+    assert contract.constraints_json["include_story_ids"] == [confirmable_story.id]
+    assert links_by_story[confirmable_story.id].required is True
+    assert links_by_story[non_core_story.id].required is False
+
+    repeated = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert repeated["repaired_count"] == 0
+    assert repeated["unchanged_contract_ids"] == [contract.id]
+
+
+async def test_chapter_structure_backfill_uses_placeholder_and_skips_user_modified_draft(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["工作经历"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+    )
+    non_core_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="一生担任一把手领导职务",
+        is_core=False,
+        verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION,
+    )
+
+    report = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    contract = await test_db.get(
+        MemoirChapterContract,
+        report["created_contract_ids"][0],
+    )
+    assert contract is not None
+    assert contract.constraints_json["include_story_ids"] == []
+    nodes = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNode)
+                .where(MemoirChapterNode.contract_id == contract.id)
+                .order_by(MemoirChapterNode.sort_order)
+            )
+        ).all()
+    )
+    assert [node.title for node in nodes[:3]] == [
+        "开场",
+        "待补充核心故事",
+        non_core_story.title,
+    ]
+    assert nodes[1].required is True
+    assert nodes[1].status == "needs_work"
+    assert nodes[2].required is False
+
+    story_link = await test_db.scalar(
+        select(MemoirChapterNodeStory).where(
+            MemoirChapterNodeStory.story_id == non_core_story.id
+        )
+    )
+    assert story_link is not None
+    await test_db.delete(nodes[1])
+    contract.constraints_json = {
+        **contract.constraints_json,
+        "include_story_ids": [non_core_story.id],
+    }
+    nodes[2].required = True
+    story_link.required = True
+    test_db.add_all([contract, nodes[2], story_link])
+    await test_db.commit()
+
+    repaired = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert repaired["repaired_contract_ids"] == [contract.id]
+    repaired_nodes = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNode)
+                .where(MemoirChapterNode.contract_id == contract.id)
+                .order_by(MemoirChapterNode.sort_order)
+            )
+        ).all()
+    )
+    assert [node.title for node in repaired_nodes[:3]] == [
+        "开场",
+        "待补充核心故事",
+        non_core_story.title,
+    ]
+    assert repaired_nodes[1].required is True
+    assert repaired_nodes[2].required is False
+    await test_db.refresh(story_link)
+    assert story_link.required is False
+
+    repaired_nodes[2].updated_by = MemoirNarrativeActorType.USER.value
+    repaired_nodes[2].updated_by_user_id = created["user_id"]
+    test_db.add(repaired_nodes[2])
+    await test_db.commit()
+    skipped = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert skipped["skipped_modified_contract_ids"] == [contract.id]

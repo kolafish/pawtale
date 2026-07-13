@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -46,6 +47,42 @@ def story_state(story: MemoirStory) -> dict[str, object]:
         "merged_into_story_id": story.merged_into_story_id,
         "version": story.version,
     }
+
+
+async def confirmable_story_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    story_ids: Collection[str],
+) -> set[str]:
+    if not story_ids:
+        return set()
+    return set(
+        (
+            await db.scalars(
+                select(MemoirStoryClaim.story_id)
+                .join(MemoirClaim, MemoirClaim.id == MemoirStoryClaim.claim_id)
+                .join(
+                    MemoirClaimEvidence, MemoirClaimEvidence.claim_id == MemoirClaim.id
+                )
+                .where(
+                    MemoirStoryClaim.project_id == project_id,
+                    MemoirStoryClaim.story_id.in_(story_ids),
+                    MemoirStoryClaim.is_core.is_(True),
+                    MemoirClaim.project_id == project_id,
+                    MemoirClaim.superseded_by_claim_id.is_(None),
+                    MemoirClaim.verification_status
+                    != MemoirClaimVerificationStatus.REJECTED.value,
+                    MemoirClaim.publication_status
+                    == MemoirClaimPublicationStatus.ELIGIBLE.value,
+                    MemoirClaimEvidence.project_id == project_id,
+                    MemoirClaimEvidence.evidence_role
+                    == MemoirClaimEvidenceRole.SUPPORTS.value,
+                )
+                .distinct()
+            )
+        ).all()
+    )
 
 
 def _slot_state(slot: MemoirStorySlot) -> dict[str, object]:
@@ -157,25 +194,15 @@ async def decide_story_verification(
     if story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value:
         raise ValueError("only an active story can be confirmed or rejected")
     if confirmed:
-        supporting_core_claim = await db.scalar(
-            select(MemoirStoryClaim.id)
-            .join(MemoirClaim, MemoirClaim.id == MemoirStoryClaim.claim_id)
-            .join(MemoirClaimEvidence, MemoirClaimEvidence.claim_id == MemoirClaim.id)
-            .where(
-                MemoirStoryClaim.project_id == project_id,
-                MemoirStoryClaim.story_id == story_id,
-                MemoirStoryClaim.is_core.is_(True),
-                MemoirClaim.project_id == project_id,
-                MemoirClaim.superseded_by_claim_id.is_(None),
-                MemoirClaim.verification_status != MemoirClaimVerificationStatus.REJECTED.value,
-                MemoirClaim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value,
-                MemoirClaimEvidence.project_id == project_id,
-                MemoirClaimEvidence.evidence_role == MemoirClaimEvidenceRole.SUPPORTS.value,
-            )
-            .limit(1)
+        confirmable_ids = await confirmable_story_ids(
+            db,
+            project_id=project_id,
+            story_ids={story_id},
         )
-        if supporting_core_claim is None:
-            raise ValueError("story requires a core claim with supporting evidence before confirmation")
+        if story_id not in confirmable_ids:
+            raise ValueError(
+                "story requires a core claim with supporting evidence before confirmation"
+            )
     before_snapshot = await story_revisions.story_snapshot(db, story)
     before = story_state(story)
     story.verification_status = (

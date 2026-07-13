@@ -41,6 +41,11 @@ from app.schemas.memoir_narrative import (
     MemoirChapterNodeStoryResponse,
     MemoirChapterStructureResponse,
 )
+from app.services.memoir.narrative import story_decisions
+
+
+LEGACY_SUGGESTION_IDEMPOTENCY_KEY = "chapter-structure-backfill-v1"
+LEGACY_CORE_STORY_PLACEHOLDER_TITLE = "待补充核心故事"
 
 
 def _utcnow() -> datetime:
@@ -350,6 +355,15 @@ def _contract_id(
     )
 
 
+def legacy_contract_suggestion_id(*, project_id: str, chapter_id: str) -> str:
+    return _contract_id(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        actor_key="legacy-suggestion",
+        idempotency_key=LEGACY_SUGGESTION_IDEMPOTENCY_KEY,
+    )
+
+
 async def _next_contract_version(
     db: AsyncSession,
     *,
@@ -611,6 +625,43 @@ async def legacy_story_candidates(
     )
 
 
+async def _required_legacy_story(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    candidates: list[MemoirStory],
+) -> MemoirStory | None:
+    confirmable_ids = await story_decisions.confirmable_story_ids(
+        db,
+        project_id=project_id,
+        story_ids={story.id for story in candidates},
+    )
+    return next(
+        (story for story in candidates if story.id in confirmable_ids),
+        None,
+    )
+
+
+def _legacy_core_questions(
+    *,
+    chapter: MemoirBookPlanChapter,
+    candidates: list[MemoirStory],
+) -> list[MemoirChapterCoreQuestion]:
+    return [
+        MemoirChapterCoreQuestion(
+            key="chapter_meaning",
+            question=f"“{chapter.title}”这段经历中，最重要的变化和意义是什么？",
+        ),
+        *[
+            MemoirChapterCoreQuestion(
+                key=f"story_{story.id.replace('-', '')}",
+                question=f"“{story.title}”的背景、过程、结果和感受分别是什么？",
+            )
+            for story in candidates[:5]
+        ],
+    ]
+
+
 async def create_legacy_contract_suggestion(
     db: AsyncSession,
     *,
@@ -645,19 +696,12 @@ async def create_legacy_contract_suggestion(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    questions = [
-        MemoirChapterCoreQuestion(
-            key="chapter_meaning",
-            question=f"“{chapter.title}”这段经历中，最重要的变化和意义是什么？",
-        ),
-        *[
-            MemoirChapterCoreQuestion(
-                key=f"story_{story.id.replace('-', '')}",
-                question=f"“{story.title}”的背景、过程、结果和感受分别是什么？",
-            )
-            for story in candidates[:5]
-        ],
-    ]
+    required_story = await _required_legacy_story(
+        db,
+        project_id=project_id,
+        candidates=candidates,
+    )
+    questions = _legacy_core_questions(chapter=chapter, candidates=candidates)
     contract = MemoirChapterContract(
         id=contract_id,
         project_id=project_id,
@@ -669,9 +713,11 @@ async def create_legacy_contract_suggestion(
         ),
         objective=f"梳理“{chapter.title}”所覆盖的经历、变化和个人意义。",
         reader_takeaway=f"读者能够理解“{chapter.title}”中的关键经历及其影响。",
-        core_questions_json=[question.model_dump(mode="json") for question in questions],
+        core_questions_json=[
+            question.model_dump(mode="json") for question in questions
+        ],
         constraints_json=MemoirChapterContractConstraints(
-            include_story_ids=[story.id for story in candidates[:1]]
+            include_story_ids=[required_story.id] if required_story is not None else []
         ).model_dump(mode="json"),
         status=MemoirChapterContractStatus.DRAFT.value,
         created_by=MemoirNarrativeActorType.SYSTEM.value,
@@ -679,7 +725,9 @@ async def create_legacy_contract_suggestion(
     db.add(contract)
     await db.flush()
 
-    node_specs: list[tuple[MemoirChapterNodeType, str, str, bool, MemoirStory | None]] = [
+    node_specs: list[
+        tuple[MemoirChapterNodeType, str, str, bool, MemoirStory | None]
+    ] = [
         (
             MemoirChapterNodeType.OPENING,
             "开场",
@@ -692,10 +740,10 @@ async def create_legacy_contract_suggestion(
                 MemoirChapterNodeType.STORY,
                 story.title,
                 f"完整讲述“{story.title}”在本章中的叙事作用。",
-                index == 0,
+                story.id == required_story.id if required_story is not None else False,
                 story,
             )
-            for index, story in enumerate(candidates)
+            for story in candidates
         ],
         (
             MemoirChapterNodeType.REFLECTION,
@@ -712,12 +760,12 @@ async def create_legacy_contract_suggestion(
             None,
         ),
     ]
-    if not candidates:
+    if required_story is None:
         node_specs.insert(
             1,
             (
                 MemoirChapterNodeType.STORY,
-                "待补充核心故事",
+                LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
                 "选择一个有证据支撑的 Story 作为本章叙事核心。",
                 True,
                 None,
@@ -761,6 +809,155 @@ async def create_legacy_contract_suggestion(
             )
     await db.flush()
     return contract
+
+
+async def repair_legacy_contract_suggestion(
+    db: AsyncSession,
+    *,
+    contract: MemoirChapterContract,
+) -> str:
+    if (
+        contract.id
+        != legacy_contract_suggestion_id(
+            project_id=contract.project_id,
+            chapter_id=contract.chapter_id,
+        )
+        or contract.status != MemoirChapterContractStatus.DRAFT.value
+        or contract.created_by != MemoirNarrativeActorType.SYSTEM.value
+    ):
+        return "not_applicable"
+
+    nodes = await _contract_nodes(db, contract=contract)
+    links_by_node = await node_story_links(
+        db,
+        project_id=contract.project_id,
+        node_ids=[node.id for node in nodes],
+    )
+    links = [link for node_links in links_by_node.values() for link in node_links]
+    constraints = contract_constraints(contract)
+    if (
+        any(
+            node.created_by != MemoirNarrativeActorType.SYSTEM.value
+            or node.updated_by != MemoirNarrativeActorType.SYSTEM.value
+            for node in nodes
+        )
+        or any(
+            link.created_by != MemoirNarrativeActorType.SYSTEM.value for link in links
+        )
+        or len(constraints.include_story_ids) > 1
+        or constraints.exclude_story_ids
+        or constraints.include_topics
+        or constraints.exclude_topics
+    ):
+        return "skipped_modified"
+
+    story_nodes = [
+        node for node in nodes if node.node_type == MemoirChapterNodeType.STORY.value
+    ]
+    placeholder_nodes = [
+        node
+        for node in story_nodes
+        if node.title == LEGACY_CORE_STORY_PLACEHOLDER_TITLE
+        and not links_by_node.get(node.id)
+    ]
+    if len(placeholder_nodes) > 1 or any(
+        len(links_by_node.get(node.id, [])) != 1
+        for node in story_nodes
+        if node not in placeholder_nodes
+    ):
+        return "skipped_modified"
+
+    candidates = await legacy_story_candidates(
+        db,
+        project_id=contract.project_id,
+        chapter_id=contract.chapter_id,
+    )
+    linked_story_ids = {link.story_id for link in links}
+    required_story = await _required_legacy_story(
+        db,
+        project_id=contract.project_id,
+        candidates=[story for story in candidates if story.id in linked_story_ids],
+    )
+    required_story_id = required_story.id if required_story is not None else None
+    desired_include_ids = [required_story_id] if required_story_id else []
+    changed = constraints.include_story_ids != desired_include_ids
+    if changed:
+        contract.constraints_json = constraints.model_copy(
+            update={"include_story_ids": desired_include_ids}
+        ).model_dump(mode="json")
+        db.add(contract)
+
+    placeholder = placeholder_nodes[0] if placeholder_nodes else None
+    for node in story_nodes:
+        node_links = links_by_node.get(node.id, [])
+        node_required = (node is placeholder and required_story_id is None) or any(
+            link.story_id == required_story_id for link in node_links
+        )
+        if node.required != node_required:
+            node.required = node_required
+            db.add(node)
+            changed = True
+        for link in node_links:
+            link_required = link.story_id == required_story_id
+            if link.required != link_required:
+                link.required = link_required
+                db.add(link)
+                changed = True
+
+    if required_story_id is None and placeholder is None:
+        insertion_index = next(
+            (
+                index
+                for index, node in enumerate(nodes)
+                if node.node_type == MemoirChapterNodeType.STORY.value
+            ),
+            min(1, len(nodes)),
+        )
+        placeholder = MemoirChapterNode(
+            project_id=contract.project_id,
+            chapter_id=contract.chapter_id,
+            contract_id=contract.id,
+            node_type=MemoirChapterNodeType.STORY.value,
+            title=LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+            purpose="选择一个有证据支撑的 Story 作为本章叙事核心。",
+            sort_order=20000,
+            required=True,
+            status=MemoirChapterNodeStatus.NEEDS_WORK.value,
+            created_by=MemoirNarrativeActorType.SYSTEM.value,
+            updated_by=MemoirNarrativeActorType.SYSTEM.value,
+        )
+        nodes.insert(insertion_index, placeholder)
+        db.add(placeholder)
+        changed = True
+    elif required_story_id is not None and placeholder is not None:
+        nodes.remove(placeholder)
+        await db.delete(placeholder)
+        changed = True
+
+    if not changed:
+        return "unchanged"
+
+    for index, node in enumerate(nodes):
+        if node is placeholder and required_story_id is not None:
+            continue
+        node.sort_order = 10000 + index
+        db.add(node)
+    await db.flush()
+    for index, node in enumerate(nodes):
+        node.sort_order = index
+        db.add(node)
+    chapter = await load_chapter(
+        db,
+        project_id=contract.project_id,
+        chapter_id=contract.chapter_id,
+    )
+    contract.core_questions_json = [
+        question.model_dump(mode="json")
+        for question in _legacy_core_questions(chapter=chapter, candidates=candidates)
+    ]
+    db.add(contract)
+    await db.flush()
+    return "repaired"
 
 
 async def confirm_contract(
