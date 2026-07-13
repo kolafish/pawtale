@@ -23,6 +23,7 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
 )
 from app.migrations.memoir_narrative import (
+    MEMOIR_NARRATIVE_DECISION_TRIGGERS,
     MEMOIR_NARRATIVE_TABLES,
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
@@ -56,8 +57,37 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
         second = await migrate_memoir_narrative_schema(engine)
         await assert_memoir_narrative_schema(engine)
 
-        assert first == {"changed_tables": list(MEMOIR_NARRATIVE_TABLES)}
-        assert second == {"changed_tables": []}
+        assert first == {
+            "changed_tables": list(MEMOIR_NARRATIVE_TABLES),
+            "changed_indexes": [],
+            "changed_triggers": list(MEMOIR_NARRATIVE_DECISION_TRIGGERS),
+        }
+        assert second == {
+            "changed_tables": [],
+            "changed_indexes": [],
+            "changed_triggers": [],
+        }
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_upgrades_pr2_tables_in_place():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_narrative_decisions"))
+            await conn.execute(text("DROP INDEX uq_memoir_claim_evidence_transcript_quote"))
+
+        changed = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert changed == {
+            "changed_tables": ["memoir_narrative_decisions"],
+            "changed_indexes": ["uq_memoir_claim_evidence_transcript_quote"],
+            "changed_triggers": list(MEMOIR_NARRATIVE_DECISION_TRIGGERS),
+        }
     finally:
         await engine.dispose()
 
@@ -166,6 +196,32 @@ async def test_narrative_repositories_enforce_project_scoping_and_source_shapes(
                     created_by=MemoirNarrativeActorType.AI,
                 )
             )
+            with pytest.raises(ValueError, match="quote is not present"):
+                await claim_repository.add_evidence(
+                    MemoirClaimEvidenceCreate(
+                        project_id=first_project.id,
+                        claim_id=claim.id,
+                        evidence_role=MemoirClaimEvidenceRole.SUPPORTS,
+                        evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT,
+                        transcript_version_id=transcript.id,
+                        quote="原文里不存在的句子",
+                        source_text_hash=transcript_hash,
+                        created_by=MemoirNarrativeActorType.AI,
+                    )
+                )
+            with pytest.raises(ValueError, match="source hash does not match"):
+                await claim_repository.add_evidence(
+                    MemoirClaimEvidenceCreate(
+                        project_id=first_project.id,
+                        claim_id=claim.id,
+                        evidence_role=MemoirClaimEvidenceRole.SUPPORTS,
+                        evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT,
+                        transcript_version_id=transcript.id,
+                        quote=transcript.content,
+                        source_text_hash=sha256(b"stale transcript").hexdigest(),
+                        created_by=MemoirNarrativeActorType.AI,
+                    )
+                )
             await claim_repository.add_evidence(
                 MemoirClaimEvidenceCreate(
                     project_id=first_project.id,

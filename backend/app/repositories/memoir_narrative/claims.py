@@ -1,3 +1,5 @@
+from hashlib import sha256
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -144,6 +146,7 @@ class MemoirClaimRepository:
                     select(
                         MemoirTranscriptVersion.voice_session_id,
                         MemoirTranscriptVersion.answer_id,
+                        MemoirTranscriptVersion.content,
                         MemoirVoiceSession.project_id,
                     )
                     .outerjoin(
@@ -155,13 +158,18 @@ class MemoirClaimRepository:
             ).one_or_none()
             if source is None:
                 raise ValueError("transcript evidence source does not exist")
-            voice_session_id, _answer_id, source_project_id = source
+            voice_session_id, _answer_id, source_content, source_project_id = source
             if voice_session_id is None:
                 raise ValueError(
                     "legacy transcript ownership must be resolved before creating narrative evidence"
                 )
             if source_project_id != data.project_id:
                 raise ValueError("transcript evidence source belongs to another project")
+            if data.quote not in source_content:
+                raise ValueError("transcript evidence quote is not present in the source version")
+            expected_hash = sha256(source_content.encode("utf-8")).hexdigest()
+            if data.source_text_hash != expected_hash:
+                raise ValueError("transcript evidence source hash does not match the source version")
 
             if data.utterance_id is not None:
                 utterance = (

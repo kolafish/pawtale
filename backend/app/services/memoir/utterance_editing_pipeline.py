@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.services.memoir import editing_jobs, source_cards
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.source_disposition import is_ignored_non_memoir_source
 
 
@@ -40,6 +41,7 @@ class TranscriptMutationGuard:
 class SourceProcessingJobs:
     source_card_job: MemoirEditingJob | None
     route_job: MemoirEditingJob | None
+    narrative_job: MemoirEditingJob | None
 
 
 def current_utterance_text(utterance: MemoirVoiceUtterance) -> str:
@@ -148,7 +150,7 @@ async def schedule_source_processing_for_ready_utterance(
     include_routing: bool = True,
 ) -> SourceProcessingJobs:
     if not current_utterance_text(utterance) or is_ignored_non_memoir_source(utterance):
-        return SourceProcessingJobs(source_card_job=None, route_job=None)
+        return SourceProcessingJobs(source_card_job=None, route_job=None, narrative_job=None)
     source_card_job = await source_cards.schedule_source_card_generation_job(
         db,
         project_id=project_id,
@@ -167,7 +169,22 @@ async def schedule_source_processing_for_ready_utterance(
         if include_routing
         else None
     )
-    return SourceProcessingJobs(source_card_job=source_card_job, route_job=route_job)
+    narrative_job = (
+        await narrative_ingestion.schedule_narrative_ingestion_job(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source=source,
+            ai_model=ai_model,
+        )
+        if not include_routing
+        else None
+    )
+    return SourceProcessingJobs(
+        source_card_job=source_card_job,
+        route_job=route_job,
+        narrative_job=narrative_job,
+    )
 
 
 async def validate_source_routing_transcript_guard(

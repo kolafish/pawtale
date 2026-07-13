@@ -650,7 +650,7 @@ id
 project_id
 target_type             # entity / claim / story / story_slot / gap / followup_task / chapter_contract / draft_block
 target_id
-action                  # confirm / reject / merge / resolve / accept_incomplete / exclude / mark_private / lock / unlock
+action                  # confirm / reject / merge / resolve / accept_incomplete / exclude / mark_private / lock / unlock / needs_review
 actor_type              # user / ai / system
 actor_user_id
 before_state_json       # 审计快照，不承载当前业务真相
@@ -980,6 +980,11 @@ backend/app/models/memoir_narrative/
 backend/app/domain/memoir/narrative_types.py
 backend/app/schemas/memoir_narrative/
 backend/app/services/memoir/narrative/
+  extraction.py
+  ingestion.py
+  ingestion_jobs.py
+  backfill.py
+  queries.py
   claims.py
   decisions.py
   entities.py

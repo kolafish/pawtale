@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Awaitable, Callable
 
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import get_settings
@@ -54,6 +55,7 @@ _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
 EDITING_JOB_FAILURE_EVENT_SOURCE = "editing_job_failure"
 
 _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
+    MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
     MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
     MemoirEditingJobType.REVISE_CHAPTER: MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
     MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
@@ -63,6 +65,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
 }
 
 _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
+    MemoirEditingJobType.INGEST_NARRATIVE_STATE: "素材事实整理失败，原始转写未受影响，可稍后重试。",
     MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
     MemoirEditingJobType.REVISE_CHAPTER: "章节自动补写失败，稍后可重试。",
     MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
@@ -166,6 +169,7 @@ async def enqueue_editing_job(
     run_after: datetime | None = None,
     dedupe_key: str | None = None,
     replace_completed: bool = False,
+    retry_failed: bool = False,
 ) -> MemoirEditingJob:
     scheduled_at = run_after or _utcnow()
     payload = payload_json or {}
@@ -175,27 +179,51 @@ async def enqueue_editing_job(
             select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == dedupe_key)
         )
     if existing:
-        can_replace_completed = existing.status in {
-            MemoirEditingJobStatus.SUCCEEDED.value,
-            MemoirEditingJobStatus.FAILED.value,
-            MemoirEditingJobStatus.SKIPPED.value,
-        } and replace_completed
-        if existing.status == MemoirEditingJobStatus.PENDING.value or can_replace_completed:
-            existing.project_id = project_id
-            existing.chapter_id = chapter_id
-            existing.job_type = job_type.value
-            existing.status = MemoirEditingJobStatus.PENDING.value
-            existing.run_after = scheduled_at
-            existing.locked_at = None
-            existing.lease_token = None
-            existing.lease_expires_at = None
-            existing.error_message = ""
-            existing.payload_json = payload
-            existing.result_json = {}
-            if replace_completed:
-                existing.attempts = 0
-            db.add(existing)
-            await db.flush()
+        replaceable_statuses: set[str] = set()
+        if replace_completed:
+            replaceable_statuses = {
+                MemoirEditingJobStatus.SUCCEEDED.value,
+                MemoirEditingJobStatus.FAILED.value,
+                MemoirEditingJobStatus.SKIPPED.value,
+            }
+        elif retry_failed:
+            replaceable_statuses = {
+                MemoirEditingJobStatus.FAILED.value,
+                MemoirEditingJobStatus.SKIPPED.value,
+            }
+        expected_statuses: set[str] = set()
+        reset_attempts = False
+        if existing.status == MemoirEditingJobStatus.PENDING.value:
+            expected_statuses = {MemoirEditingJobStatus.PENDING.value}
+        elif existing.status in replaceable_statuses:
+            expected_statuses = replaceable_statuses
+            reset_attempts = True
+        if expected_statuses:
+            values: dict[str, object] = {
+                "project_id": project_id,
+                "chapter_id": chapter_id,
+                "job_type": job_type.value,
+                "status": MemoirEditingJobStatus.PENDING.value,
+                "run_after": scheduled_at,
+                "locked_at": None,
+                "lease_token": None,
+                "lease_expires_at": None,
+                "error_message": "",
+                "payload_json": payload,
+                "result_json": {},
+            }
+            if reset_attempts:
+                values["attempts"] = 0
+            await db.execute(
+                update(MemoirEditingJob)
+                .where(
+                    MemoirEditingJob.id == existing.id,
+                    MemoirEditingJob.status.in_(expected_statuses),
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            )
+            await db.refresh(existing)
         return existing
 
     job = MemoirEditingJob(
@@ -207,9 +235,20 @@ async def enqueue_editing_job(
         dedupe_key=dedupe_key,
         payload_json=payload,
     )
-    db.add(job)
-    await db.flush()
-    return job
+    try:
+        async with db.begin_nested():
+            db.add(job)
+            await db.flush()
+        return job
+    except IntegrityError:
+        if not dedupe_key:
+            raise
+        concurrent = await db.scalar(
+            select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == dedupe_key)
+        )
+        if concurrent is None:
+            raise
+        return concurrent
 
 
 def _claimable_editing_job(due_at: datetime):

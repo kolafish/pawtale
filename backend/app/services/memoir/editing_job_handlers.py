@@ -5,6 +5,7 @@ from app.services.memoir import book_auto_revision
 from app.services.memoir import book_generation_jobs
 from app.services.memoir import book_quality_audit
 from app.services.memoir import material_offline_asr_jobs
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir import source_cards
 from app.services.memoir import source_auto_assignment
 from app.services.memoir import voice_transcript_correction
@@ -19,6 +20,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.REPROCESS_MATERIAL_OFFLINE_ASR,
         material_offline_asr_jobs.run_material_offline_asr_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        narrative_ingestion.run_narrative_ingestion_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.ROUTE_SOURCES,

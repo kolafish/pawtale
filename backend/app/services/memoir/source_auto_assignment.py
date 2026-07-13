@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -27,10 +28,15 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir import source_router
-from app.services.memoir.source_disposition import apply_source_route_disposition
+from app.services.memoir.source_disposition import (
+    INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    apply_source_route_disposition,
+    is_ignored_non_memoir_source,
+)
 from app.services.memoir.utterance_editing_pipeline import (
     source_routing_lineage_by_utterance,
     validate_source_routing_transcript_guard,
@@ -140,10 +146,11 @@ async def _record_route_dispositions(
     *,
     project_id: str,
     routes: list[MemoirBookSourceRouteResponse],
-) -> None:
+    ai_model: str | None,
+) -> list[MemoirEditingJob]:
     route_by_utterance = {route.utterance_id: route for route in routes}
     if not route_by_utterance:
-        return
+        return []
     result = await db.execute(
         select(MemoirVoiceUtterance)
         .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
@@ -151,11 +158,28 @@ async def _record_route_dispositions(
             MemoirVoiceSession.project_id == project_id,
             MemoirVoiceUtterance.id.in_(list(route_by_utterance)),
         )
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
     )
+    narrative_jobs: list[MemoirEditingJob] = []
     for utterance in result.scalars().all():
         apply_source_route_disposition(utterance, route_by_utterance[utterance.id])
         db.add(utterance)
+        if (
+            is_ignored_non_memoir_source(utterance)
+            and utterance.source_material_type != INTERVIEWER_SOURCE_MATERIAL_TYPE
+        ):
+            continue
+        narrative_job = await narrative_ingestion.schedule_narrative_ingestion_job(
+            db,
+            project_id=project_id,
+            utterance=utterance,
+            source="source_routing_completed",
+            ai_model=ai_model,
+        )
+        if narrative_job is not None:
+            narrative_jobs.append(narrative_job)
     await db.flush()
+    return narrative_jobs
 
 
 async def _record_assignment_events(
@@ -318,7 +342,12 @@ async def run_source_auto_assignment_for_utterances(
             )
         )
 
-    await _record_route_dispositions(db, project_id=project_id, routes=routes)
+    narrative_jobs = await _record_route_dispositions(
+        db,
+        project_id=project_id,
+        routes=routes,
+        ai_model=ai_model,
+    )
 
     assignment_inputs = _group_assignment_inputs(routes, threshold=confidence_threshold)
     assigned_ids = {
@@ -388,6 +417,7 @@ async def run_source_auto_assignment_for_utterances(
         skipped_source_count=len(routes) - len(assigned_ids),
         items=items,
         events=events,
+        narrative_ingestion_job_ids=[job.id for job in narrative_jobs],
         plan=plan,
     )
 
@@ -457,6 +487,7 @@ async def run_source_routing_job(db: AsyncSession, job: MemoirEditingJob) -> Edi
             "assigned_source_count": response.assigned_source_count,
             "skipped_source_count": response.skipped_source_count,
             "event_ids": [event.id for event in response.events],
+            "narrative_ingestion_job_ids": response.narrative_ingestion_job_ids,
         },
     )
 

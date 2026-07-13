@@ -291,6 +291,15 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 1
+    assert len(job.result_json["narrative_ingestion_job_ids"]) == 1
+    narrative_job = await test_db.get(
+        MemoirEditingJob,
+        job.result_json["narrative_ingestion_job_ids"][0],
+    )
+    assert narrative_job is not None
+    assert narrative_job.job_type == MemoirEditingJobType.INGEST_NARRATIVE_STATE.value
+    assert narrative_job.payload_json["transcript_version_id"] == uncovered["transcript_version_id"]
+    assert narrative_job.payload_json["ai_model"] == "deepseek-v4-pro"
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(
@@ -530,6 +539,7 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 0
     assert job.result_json["skipped_source_count"] == 1
+    assert len(job.result_json["narrative_ingestion_job_ids"]) == 1
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(
@@ -587,6 +597,8 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
     )
 
     assert first_response.events[0].id == second_response.events[0].id
+    assert len(first_response.narrative_ingestion_job_ids) == 1
+    assert second_response.narrative_ingestion_job_ids == first_response.narrative_ingestion_job_ids
     events = (
         await test_db.execute(
             select(MemoirAutomationEvent).where(
@@ -624,6 +636,7 @@ async def test_source_routing_job_ignores_non_memoir_source_without_review_event
     assert job.status == MemoirEditingJobStatus.SUCCEEDED.value
     assert job.result_json["assigned_source_count"] == 0
     assert job.result_json["skipped_source_count"] == 1
+    assert job.result_json["narrative_ingestion_job_ids"] == []
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(

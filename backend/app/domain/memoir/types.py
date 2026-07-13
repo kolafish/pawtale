@@ -70,6 +70,7 @@ class MemoirBookChapterDraftStatus(str, Enum):
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
+    INGEST_NARRATIVE_STATE = "ingest_narrative_state"
     ROUTE_SOURCES = "route_sources"
     GENERATE_SOURCE_CARD = "generate_source_card"
     REVISE_CHAPTER = "revise_chapter"
@@ -121,6 +122,7 @@ class MemoirBookImagePlacementType(str, Enum):
 class MemoirAutomationEventType(str, Enum):
     SOURCE_ASSIGNED = "source_assigned"
     SOURCE_HELD = "source_held"
+    NARRATIVE_INGESTED = "narrative_ingested"
     CHAPTER_AUTO_REVISED = "chapter_auto_revised"
     AUDIT_COMPLETED = "audit_completed"
     CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"

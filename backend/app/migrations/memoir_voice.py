@@ -340,9 +340,16 @@ async def _backfill_transcript_version_source_artifacts(conn) -> int:
 async def _prune_transcript_versions(conn) -> int:
     if not await _table_exists(conn, "memoir_transcript_versions"):
         return 0
+    evidence_filter = ""
+    if await _table_exists(conn, "memoir_claim_evidence"):
+        evidence_filter = (
+            "AND id NOT IN ("
+            "SELECT transcript_version_id FROM memoir_claim_evidence "
+            "WHERE transcript_version_id IS NOT NULL)"
+        )
     delete_result = await conn.execute(
         text(
-            """
+            f"""
             DELETE FROM memoir_transcript_versions
             WHERE id IN (
                 SELECT id
@@ -355,6 +362,7 @@ async def _prune_transcript_versions(conn) -> int:
                         ) AS version_rank
                     FROM memoir_transcript_versions
                     WHERE source_artifact_id IS NOT NULL
+                    {evidence_filter}
                 )
                 WHERE version_rank > :retention_limit
             )

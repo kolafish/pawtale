@@ -444,6 +444,7 @@ class MemoirBookSourceAutoAssignmentRunResponse(BaseModel):
     skipped_source_count: int
     items: list[MemoirBookSourceAutoAssignmentItemResponse] = Field(default_factory=list)
     events: list[MemoirAutomationEventResponse] = Field(default_factory=list)
+    narrative_ingestion_job_ids: list[str] = Field(default_factory=list)
     plan: MemoirBookPlanResponse
 
 

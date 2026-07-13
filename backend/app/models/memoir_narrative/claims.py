@@ -270,6 +270,15 @@ class MemoirClaimEvidence(Base):
         Index("ix_memoir_claim_evidence_transcript", "transcript_version_id"),
         Index("ix_memoir_claim_evidence_utterance", "utterance_id"),
         Index("ix_memoir_claim_evidence_image", "image_asset_id"),
+        Index(
+            "uq_memoir_claim_evidence_transcript_quote",
+            "project_id",
+            "claim_id",
+            "transcript_version_id",
+            "evidence_role",
+            "quote",
+            unique=True,
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
