@@ -4,10 +4,9 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.config import Settings
-from app.database import Base, create_database_engine, register_models
+from app.database import Base, register_models
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirClaimEvidenceSourceType,
@@ -41,12 +40,7 @@ from app.schemas.memoir_narrative import (
 
 
 def _sqlite_engine():
-    return create_database_engine(
-        Settings(
-            database_url="sqlite+aiosqlite:///:memory:",
-            sqlite_journal_mode="memory",
-        )
-    )
+    return create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 
 
 async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
@@ -97,6 +91,14 @@ async def test_narrative_repositories_enforce_project_scoping_and_source_shapes(
                     aliases=["我", "讲述者", "我"],
                     created_by=MemoirNarrativeActorType.USER,
                     created_by_user_id=user.id,
+                )
+            )
+            other_project_speaker = await entity_repository.create(
+                MemoirNarrativeEntityCreate(
+                    project_id=second_project.id,
+                    entity_type=MemoirNarrativeEntityType.PERSON,
+                    canonical_name="另一个项目的讲述者",
+                    created_by=MemoirNarrativeActorType.SYSTEM,
                 )
             )
             claim = await claim_repository.create(
@@ -200,6 +202,20 @@ async def test_narrative_repositories_enforce_project_scoping_and_source_shapes(
                         created_by=MemoirNarrativeActorType.AI,
                     )
                 )
+            with pytest.raises(ValueError, match="speaker entity"):
+                await claim_repository.add_evidence(
+                    MemoirClaimEvidenceCreate(
+                        project_id=first_project.id,
+                        claim_id=claim.id,
+                        evidence_role=MemoirClaimEvidenceRole.SUPPORTS,
+                        evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT,
+                        transcript_version_id=transcript.id,
+                        speaker_entity_id=other_project_speaker.id,
+                        quote=transcript.content,
+                        source_text_hash=transcript_hash,
+                        created_by=MemoirNarrativeActorType.AI,
+                    )
+                )
             with pytest.raises(ValueError, match="generated images"):
                 await claim_repository.add_evidence(
                     MemoirClaimEvidenceCreate(
@@ -264,7 +280,7 @@ async def test_claim_entity_foreign_key_rejects_cross_project_relation():
                 )
             )
 
-            with pytest.raises(IntegrityError, match="FOREIGN KEY"):
+            with pytest.raises(ValueError, match="entity reference"):
                 await MemoirClaimRepository(db).create(
                     MemoirClaimCreate(
                         project_id=target_project.id,

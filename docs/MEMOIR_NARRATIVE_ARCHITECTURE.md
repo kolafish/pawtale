@@ -1017,6 +1017,13 @@ router -> application service -> repository/model
 
 当前 SQLite 足以完成模型验证和单实例产品迭代。新增模型使用 SQLAlchemy 标准关系、外键、唯一约束和索引，保持未来迁移 PostgreSQL 的可行性。
 
+现有运行库曾在关闭外键检查时重建语音表，部分历史外键目标被 SQLite 改写为已经删除的 `*_old` 表，同时旧派生缓存中存在源素材删除后留下的孤儿引用。在这些历史问题清理完成前，不得仅通过连接级 `PRAGMA foreign_keys=ON` 全局开启外键执行，否则会把本阶段的 shadow 表迁移变成现有语音和素材链路的行为变更。过渡期要求：
+
+- 新叙事表仍声明标准外键和项目级复合外键，保持 schema 语义和未来数据库迁移能力。
+- narrative repository 在写入前显式校验项目、Entity、Claim、transcript、utterance、audio 和 image 的归属；不能依赖当前 SQLite 连接级外键开关保证隔离。
+- PR12 删除旧主链路时修复所有指向 `*_old` 的外键定义，清理可重建派生缓存的孤儿引用，并对必须保留的原始音频、转写和书稿引用逐条核对。
+- 只有迁移报告确认 `PRAGMA foreign_key_check` 为零，且现有删除、回填和 worker smoke 通过后，才能统一开启 SQLite 外键执行。
+
 PostgreSQL 迁移单独立项，触发条件包括：
 
 - 多实例 worker 和写并发成为真实瓶颈。
@@ -1421,6 +1428,7 @@ review 必须对照本文档检查范围和不变量。测试通过但违反领�
 验收：
 
 - 所有活跃项目通过迁移完整性检查。
+- 不再存在指向 `*_old` 的外键，`PRAGMA foreign_key_check` 为零，并已统一开启 SQLite 外键执行。
 - 新链路部署和 smoke 通过。
 - 代码库中不存在未声明的永久双写和死分支。
 - 历史音频、转写和书稿版本完整保留。
