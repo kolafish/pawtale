@@ -204,6 +204,9 @@ async def run_narrative_ingestion_job(
                 for story_id, candidate_ids in result.story_review_candidates.items()
             },
             "changed_story_ids": list(result.changed_story_ids),
+            "followup_task_id": result.followup_task_id,
+            "followup_task_status": result.followup_task_status,
+            "answered_followup_task_ids": list(result.answered_followup_task_ids),
             "provider": result.provider,
             "model": result.model,
             "engine": NARRATIVE_INGESTION_ENGINE,

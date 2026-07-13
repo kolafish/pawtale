@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirGuidanceMode,
     MemoirImageAssetStatus,
     MemoirInterviewType,
+    MemoirSessionGoal,
     MemoirShareVideoJobStatus,
     MemoirVoiceSessionStatus,
 )
@@ -19,10 +20,18 @@ from app.domain.memoir.types import (
 class MemoirVoiceSessionCreate(BaseModel):
     guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.FREE_NARRATION
     interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
+    session_goal: MemoirSessionGoal = MemoirSessionGoal.OPEN_NARRATION
+    current_followup_task_id: str | None = Field(default=None, max_length=36)
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_followup_goal(self):
+        if self.current_followup_task_id and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION:
+            raise ValueError("current_followup_task_id requires book_completion session_goal")
+        return self
 
 class MemoirVoiceSessionStopRequest(BaseModel):
     error_message: str | None = None
@@ -86,6 +95,8 @@ class MemoirVoiceSessionResponse(BaseModel):
     status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
     interview_type: MemoirInterviewType
+    session_goal: MemoirSessionGoal
+    current_followup_task_id: str | None = None
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
@@ -147,6 +158,8 @@ class MemoirVoiceSessionSummaryResponse(BaseModel):
     status: MemoirVoiceSessionStatus
     guidance_mode: MemoirGuidanceMode
     interview_type: MemoirInterviewType
+    session_goal: MemoirSessionGoal
+    current_followup_task_id: str | None = None
     current_guidance_module: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None

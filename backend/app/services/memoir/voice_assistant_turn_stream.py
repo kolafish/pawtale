@@ -11,12 +11,17 @@ import uuid
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
+from app.domain.memoir.types import (
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+    MemoirSessionGoal,
+)
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
+from app.services.memoir.narrative import followup_planner
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
@@ -289,6 +294,10 @@ class VoiceAssistantTurnStreamSession:
                 voice_unannounced_events_only=True,
             )
         )
+        followup_context = await followup_planner.prompt_context_for_session(
+            self.db,
+            voice_session=voice_session,
+        )
         tts_client = self.tts_client_factory()
         persona = interviewer_persona_for_voice(req.voice or tts_client.default_voice)
         prompt = _build_stream_turn_prompt(
@@ -297,6 +306,7 @@ class VoiceAssistantTurnStreamSession:
             regenerate=req.regenerate,
             progress_context=project_progress_context,
             persona=persona,
+            followup_context=followup_context,
         )
         ai_client = self.ai_client_factory(req.ai_model)
         artifacts = AssistantTurnArtifacts()
@@ -314,6 +324,9 @@ class VoiceAssistantTurnStreamSession:
                 "host_name": persona.host_name,
                 "audio_protocol": req.audio_protocol,
                 "max_tokens": max_tokens,
+                "current_followup_task_id": (
+                    followup_context.task_id if followup_context else None
+                ),
             }
         )
 
@@ -342,6 +355,7 @@ class VoiceAssistantTurnStreamSession:
             max_tokens=max_tokens,
             req=req,
             progress_context=project_progress_context,
+            followup_context=followup_context,
         )
         await automation_events.mark_automation_events_voice_selected(
             self.db,
@@ -371,6 +385,9 @@ class VoiceAssistantTurnStreamSession:
                 "progress_update_used": project_progress_context.progress_update is not None,
                 "progress_spoken_text": project_progress_context.speech_prefix,
                 "progress_voice_selected_event_ids": project_progress_context.voice_announcement_event_ids or [],
+                "current_followup_task_id": (
+                    followup_context.task_id if followup_context else None
+                ),
             }
         )
 
@@ -540,6 +557,7 @@ class VoiceAssistantTurnStreamSession:
         max_tokens: int,
         req: AssistantTurnStartRequest,
         progress_context: ProgressPromptContext,
+        followup_context: followup_planner.FollowupPromptContext | None,
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -578,6 +596,9 @@ class VoiceAssistantTurnStreamSession:
                     "progress_automation_event_ids": progress_context.automation_event_ids or [],
                     "progress_voice_selected_event_ids": progress_context.voice_announcement_event_ids or [],
                     "progress_spoken_text": progress_context.speech_prefix,
+                    "current_followup_task_id": (
+                        followup_context.task_id if followup_context else None
+                    ),
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
@@ -621,6 +642,7 @@ def _build_stream_turn_prompt(
     regenerate: bool,
     progress_context: ProgressPromptContext,
     persona: InterviewerPersona,
+    followup_context: followup_planner.FollowupPromptContext | None,
 ) -> str:
     messages = list(voice_session.messages)
     has_user_message = _has_user_message(messages)
@@ -631,7 +653,22 @@ def _build_stream_turn_prompt(
     topic_hint = _requested_topic_hint(messages)
     host_name = persona.host_name
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
-    if voice_session.guidance_mode == "guided_interview":
+    if (
+        voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+        and followup_context is not None
+    ):
+        if has_user_message:
+            mode_instruction = """当前是成书补访，只围绕“当前补访任务”推进。
+- 先承接叙述者刚才真正回答到的内容，再补问目标中仍缺的一点
+- 不要因为用户说完一段话就宣布任务完成；任务完成由后台事实和证据校验决定
+- 如果回答跑题，先自然接住，再温和带回当前唯一目标
+- 不要重复询问已经列为“不要重复追问”的事实"""
+        else:
+            mode_instruction = f"""当前是成书补访首次开场。
+- 最多两句，第一句简短说明今天只补一件事
+- 第二句自然地提出这个具体问题：{followup_context.question}
+- 不要展示任务 ID，不要念系统说明，不要扩展成多个问题"""
+    elif voice_session.guidance_mode == "guided_interview":
         if has_user_message:
             mode_instruction = f"""当前是主题讲述，当前主题线索是“{module_label}”；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
 - 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
@@ -687,6 +724,9 @@ def _build_stream_turn_prompt(
 {progress_context.prompt_text}
 
 {mode_instruction}
+
+当前补访任务：
+{followup_context.prompt_text if followup_context else "本轮没有已领取的补访任务，按当前引导模式继续。"}
 
 访谈上下文：
 {context}

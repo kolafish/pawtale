@@ -1,0 +1,289 @@
+from typing import NoReturn
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth import get_current_user
+from app.database import get_db
+from app.domain.memoir.narrative_types import MemoirFollowupTaskStatus
+from app.models.users import User
+from app.schemas.memoir_narrative import (
+    MemoirFollowupTaskActionRequest,
+    MemoirFollowupTaskCannotRecallRequest,
+    MemoirFollowupTaskDeferRequest,
+    MemoirFollowupTaskGenerateRequest,
+    MemoirFollowupTaskGenerationJobResponse,
+    MemoirFollowupTaskListResponse,
+    MemoirFollowupTaskResponse,
+    MemoirFollowupTaskSwitchRequest,
+)
+from app.services.memoir.narrative import (
+    followup_actions,
+    followup_jobs,
+    followup_tasks as task_service,
+)
+
+from .common import authorize_project, decision_error
+
+
+router = APIRouter()
+
+
+async def _raise_mutation_error(
+    db: AsyncSession,
+    exc: ValueError | IntegrityError,
+) -> NoReturn:
+    await db.rollback()
+    if isinstance(exc, ValueError):
+        raise decision_error(exc) from exc
+    raise HTTPException(
+        status_code=409,
+        detail="follow-up task state changed concurrently; reload and retry",
+    ) from exc
+
+
+async def _commit_task(
+    db: AsyncSession,
+    task,
+) -> MemoirFollowupTaskResponse:
+    await db.commit()
+    loaded = await task_service.get_task(
+        db,
+        project_id=task.project_id,
+        task_id=task.id,
+    )
+    if loaded is None:
+        raise ValueError("follow-up task does not belong to the project")
+    return await task_service.task_response(db, task=loaded)
+
+
+@router.get(
+    "/projects/{project_id}/followup-tasks",
+    response_model=MemoirFollowupTaskListResponse,
+)
+async def list_memoir_followup_tasks(
+    project_id: str,
+    task_status: list[MemoirFollowupTaskStatus] | None = Query(default=None, alias="status"),
+    chapter_id: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    items, total = await task_service.list_tasks(
+        db,
+        project_id=project_id,
+        statuses=set(task_status) if task_status else None,
+        chapter_id=chapter_id,
+        limit=limit,
+        offset=offset,
+    )
+    return MemoirFollowupTaskListResponse(
+        items=[await task_service.task_response(db, task=item) for item in items],
+        total=total,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/followup-tasks/{task_id}",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def get_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    task = await task_service.get_task(db, project_id=project_id, task_id=task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="补访任务不存在")
+    return await task_service.task_response(db, task=task)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/generation-jobs",
+    response_model=MemoirFollowupTaskGenerationJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def generate_memoir_followup_tasks(
+    project_id: str,
+    req: MemoirFollowupTaskGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        job = await followup_jobs.schedule_followup_task_generation(
+            db,
+            project_id=project_id,
+            chapter_id=req.chapter_id,
+            source="followup_task_api",
+        )
+        await db.commit()
+        await db.refresh(job)
+        return MemoirFollowupTaskGenerationJobResponse.model_validate(job)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/{task_id}/defer",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def defer_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    req: MemoirFollowupTaskDeferRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.defer_task(
+            db,
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+            defer_until=req.defer_until,
+        )
+        return await _commit_task(db, task)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/{task_id}/resume",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def resume_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    req: MemoirFollowupTaskActionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.resume_task(
+            db,
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+        )
+        return await _commit_task(db, task)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/{task_id}/cannot-recall",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def cannot_recall_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    req: MemoirFollowupTaskCannotRecallRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.cannot_recall_task(
+            db,
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+            resolution=req.resolution,
+        )
+        return await _commit_task(db, task)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/{task_id}/exclude",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def exclude_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    req: MemoirFollowupTaskActionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.exclude_task(
+            db,
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+        )
+        return await _commit_task(db, task)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/followup-tasks/{task_id}/cancel",
+    response_model=MemoirFollowupTaskResponse,
+)
+async def cancel_memoir_followup_task(
+    project_id: str,
+    task_id: str,
+    req: MemoirFollowupTaskActionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.cancel_task(
+            db,
+            project_id=project_id,
+            task_id=task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+        )
+        return await _commit_task(db, task)
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)
+
+
+@router.post(
+    "/projects/{project_id}/voice-sessions/{voice_session_id}/followup-task/switch",
+    response_model=MemoirFollowupTaskResponse | None,
+)
+async def switch_memoir_followup_task(
+    project_id: str,
+    voice_session_id: str,
+    req: MemoirFollowupTaskSwitchRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        task = await followup_actions.switch_session_task(
+            db,
+            project_id=project_id,
+            voice_session_id=voice_session_id,
+            current_task_id=req.current_task_id,
+            actor_user_id=current_user.id,
+            idempotency_key=req.idempotency_key,
+            reason=req.note,
+        )
+        await db.commit()
+        return await task_service.task_response(db, task=task) if task else None
+    except (ValueError, IntegrityError) as exc:
+        await _raise_mutation_error(db, exc)

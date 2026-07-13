@@ -7,7 +7,11 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.types import MemoirChatMessageRole, MemoirVoiceSessionStatus
+from app.domain.memoir.types import (
+    MemoirChatMessageRole,
+    MemoirSessionGoal,
+    MemoirVoiceSessionStatus,
+)
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
@@ -19,6 +23,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import progress_snapshot
+from app.services.memoir.narrative import followup_planner, followup_tasks
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
@@ -64,6 +69,7 @@ async def create_voice_session(
         status=MemoirVoiceSessionStatus.CREATED.value,
         guidance_mode=req.guidance_mode.value,
         interview_type=req.interview_type.value,
+        session_goal=req.session_goal.value,
         current_guidance_module=req.current_guidance_module,
         provider=req.provider,
         input_format=req.input_format,
@@ -71,6 +77,31 @@ async def create_voice_session(
         metadata_json=req.metadata_json,
     )
     db.add(voice_session)
+    await db.flush()
+    if req.session_goal == MemoirSessionGoal.BOOK_COMPLETION:
+        task = (
+            await followup_tasks.get_task(
+                db,
+                project_id=project.id,
+                task_id=req.current_followup_task_id,
+            )
+            if req.current_followup_task_id
+            else await followup_planner.select_next_task(db, project_id=project.id)
+        )
+        if req.current_followup_task_id and task is None:
+            await db.rollback()
+            raise HTTPException(status_code=404, detail="补访任务不存在")
+        if task is not None:
+            try:
+                await followup_planner.start_task_for_session(
+                    db,
+                    task=task,
+                    voice_session=voice_session,
+                    actor_user_id=user_id,
+                )
+            except ValueError as exc:
+                await db.rollback()
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)
 
@@ -150,6 +181,8 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         status=voice_session.status,
         guidance_mode=voice_session.guidance_mode,
         interview_type=voice_session.interview_type,
+        session_goal=voice_session.session_goal,
+        current_followup_task_id=voice_session.current_followup_task_id,
         current_guidance_module=voice_session.current_guidance_module,
         started_at=voice_session.started_at,
         stopped_at=voice_session.stopped_at,
@@ -244,6 +277,11 @@ async def stop_voice_session(
         MemoirVoiceSessionStatus.STOPPED.value,
         MemoirVoiceSessionStatus.FAILED.value,
     }:
+        await followup_planner.release_session_task(
+            db,
+            voice_session=voice_session,
+            reason="voice session ended before new evidence completed the task",
+        )
         voice_session.status = (
             MemoirVoiceSessionStatus.FAILED.value
             if req.error_message

@@ -7,6 +7,7 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import material_offline_asr_jobs
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.narrative import gap_audit
+from app.services.memoir.narrative import followup_jobs
 from app.services.memoir import source_cards
 from app.services.memoir import source_auto_assignment
 from app.services.memoir import voice_transcript_correction
@@ -29,6 +30,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
         gap_audit.run_chapter_gap_audit_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
+        followup_jobs.run_followup_task_generation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.ROUTE_SOURCES,

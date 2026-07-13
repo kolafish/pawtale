@@ -396,5 +396,74 @@ async def resolve_gap(
         reason=note.strip(),
         idempotency_key=idempotency_key,
     )
+    from app.services.memoir.narrative import followup_tasks
+
+    await followup_tasks.cancel_active_tasks_for_gap(
+        db,
+        project_id=project_id,
+        gap_id=gap.id,
+        reason=f"gap resolved as {status.value}",
+        decision_identity=idempotency_key,
+    )
+    await db.flush()
+    return gap
+
+
+async def resolve_gap_by_system(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    gap_id: str,
+    idempotency_key: str,
+    note: str,
+) -> MemoirNarrativeGap:
+    action = MemoirNarrativeDecisionAction.RESOLVE
+    existing = await decision_log.existing_decision(
+        db,
+        project_id=project_id,
+        idempotency_key=idempotency_key,
+        target_type=MemoirNarrativeDecisionTargetType.GAP,
+        target_id=gap_id,
+        action=action,
+        actor_type=MemoirNarrativeActorType.SYSTEM,
+        actor_user_id=None,
+    )
+    gap = await get_gap(db, project_id=project_id, gap_id=gap_id)
+    if gap is None:
+        raise ValueError("gap does not belong to the project")
+    if existing is not None:
+        return gap
+    if gap.status in {status.value for status in TERMINAL_GAP_STATUSES}:
+        return gap
+
+    before = _gap_state(gap)
+    gap.status = MemoirNarrativeGapStatus.RESOLVED.value
+    gap.resolution_note = note.strip()
+    gap.resolved_by = MemoirNarrativeActorType.SYSTEM.value
+    gap.resolved_by_user_id = None
+    gap.resolved_at = _utcnow()
+    db.add(gap)
+    await decision_log.record_decision(
+        db,
+        project_id=project_id,
+        target_type=MemoirNarrativeDecisionTargetType.GAP,
+        target_id=gap.id,
+        action=action,
+        actor_type=MemoirNarrativeActorType.SYSTEM,
+        actor_user_id=None,
+        before_state=before,
+        after_state=_gap_state(gap),
+        reason=note.strip(),
+        idempotency_key=idempotency_key,
+    )
+    from app.services.memoir.narrative import followup_tasks
+
+    await followup_tasks.cancel_active_tasks_for_gap(
+        db,
+        project_id=project_id,
+        gap_id=gap.id,
+        reason="gap was resolved by new narrative evidence",
+        decision_identity=idempotency_key,
+    )
     await db.flush()
     return gap

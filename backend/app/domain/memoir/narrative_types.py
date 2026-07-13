@@ -248,3 +248,24 @@ class MemoirNarrativeGapClaimRole(str, Enum):
 class MemoirNarrativeGapRelationRole(str, Enum):
     PRIMARY = "primary"
     INVOLVED = "involved"
+
+
+class MemoirFollowupTaskStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    ANSWERED = "answered"
+    DEFERRED = "deferred"
+    CANNOT_RECALL = "cannot_recall"
+    EXCLUDED = "excluded"
+    CANCELLED = "cancelled"
+
+
+class MemoirFollowupTaskClaimRole(str, Enum):
+    KNOWN = "known"
+    DO_NOT_REPEAT = "do_not_repeat"
+    EXPECTED_EVIDENCE = "expected_evidence"
+
+
+class MemoirFollowupTaskUtteranceRole(str, Enum):
+    TARGET_ANSWER = "target_answer"
+    RELATED_CONTEXT = "related_context"

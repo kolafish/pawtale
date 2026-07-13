@@ -454,7 +454,10 @@ async def test_memoir_voice_migration_adds_interview_type_to_voice_sessions():
         async with engine.begin() as conn:
             rows = (
                 await conn.execute(
-                    text("SELECT id, interview_type FROM memoir_voice_sessions")
+                    text(
+                        "SELECT id, interview_type, session_goal, current_followup_task_id "
+                        "FROM memoir_voice_sessions"
+                    )
                 )
             ).fetchall()
             columns = {
@@ -465,9 +468,15 @@ async def test_memoir_voice_migration_adds_interview_type_to_voice_sessions():
             }
 
         assert "memoir_voice_sessions.interview_type" in result["changed_columns"]
+        assert "memoir_voice_sessions.session_goal" in result["changed_columns"]
+        assert "memoir_voice_sessions.current_followup_task_id" in result["changed_columns"]
         assert "memoir_voice_sessions.interview_type" not in second_result["changed_columns"]
+        assert "memoir_voice_sessions.session_goal" not in second_result["changed_columns"]
+        assert "memoir_voice_sessions.current_followup_task_id" not in second_result["changed_columns"]
         assert "interview_type" in columns
-        assert rows == [("voice-session-1", "ai_interview")]
+        assert "session_goal" in columns
+        assert "current_followup_task_id" in columns
+        assert rows == [("voice-session-1", "ai_interview", "open_narration", None)]
     finally:
         await engine.dispose()
 
@@ -558,7 +567,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
                         payload_json, result_json, error_message, created_at, updated_at
                     )
                     VALUES (
-                        'job-2', 'project-1', 'recompute_chapter_structure_audit', 'pending',
+                        'job-2', 'project-1', 'generate_followup_tasks', 'pending',
                         '2026-06-27 16:00:00', 0, '{}', '{}', '',
                         '2026-06-27 16:00:00', '2026-06-27 16:00:00'
                     )
@@ -570,6 +579,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
         assert "memoir_editing_jobs" not in second_result["changed_tables"]
         assert "correct_transcript" in str(table_sql)
         assert "recompute_chapter_structure_audit" in str(table_sql)
+        assert "generate_followup_tasks" in str(table_sql)
         assert rows == [("job-1", "route_sources")]
     finally:
         await engine.dispose()
