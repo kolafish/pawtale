@@ -112,7 +112,42 @@ function sampleWorkspace(overrides = {}) {
   };
 }
 
-function loadWorkspacePage({ workspace = sampleWorkspace(), voiceApiExports = {} } = {}) {
+function sampleDraftBlock(overrides = {}) {
+  return {
+    id: "block-1",
+    project_id: "project/1",
+    chapter_id: "chapter-1",
+    node_id: "node-1",
+    block_role: "factual",
+    sort_order: 0,
+    editorial_status: "draft",
+    freshness_status: "current",
+    locked: false,
+    current_version_id: "block-version-1",
+    legacy_draft_id: null,
+    current_version: {
+      id: "block-version-1",
+      project_id: "project/1",
+      block_id: "block-1",
+      version: 1,
+      content: "十八岁那年，我第一次离开家。",
+      created_by: "ai",
+      model: "test-model",
+      prompt_snapshot: "",
+      feedback: null,
+      legacy_draft_version_id: null,
+      claims: [{ claim_id: "claim-1", usage_role: "core" }],
+      stories: [{ story_id: "story-1", story_revision_id: "story-revision-1", usage_role: "primary" }],
+      created_at: "2026-07-13T10:00:00",
+    },
+    version_count: 1,
+    created_at: "2026-07-13T10:00:00",
+    updated_at: "2026-07-13T10:00:00",
+    ...overrides,
+  };
+}
+
+function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], voiceApiExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => workspace,
     enqueueMemoirChapterWorkspaceAudit: async () => {
@@ -125,10 +160,120 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), voiceApiExports = {}
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
     },
+    listMemoirDraftBlocks: async () => ({ chapter_id: workspace.chapter_id, blocks: draftBlocks }),
+    enqueueMemoirDraftBlockGeneration: async () => {
+      throw new Error("enqueueMemoirDraftBlockGeneration was not mocked");
+    },
+    getMemoirDraftBlockJob: async () => {
+      throw new Error("getMemoirDraftBlockJob was not mocked");
+    },
+    manuallyReviseMemoirDraftBlock: async () => {
+      throw new Error("manuallyReviseMemoirDraftBlock was not mocked");
+    },
+    decideMemoirDraftBlock: async () => {
+      throw new Error("decideMemoirDraftBlock was not mocked");
+    },
+    enqueueMemoirDraftBlockRevision: async () => {
+      throw new Error("enqueueMemoirDraftBlockRevision was not mocked");
+    },
+    applyMemoirDraftBlockRevision: async () => {
+      throw new Error("applyMemoirDraftBlockRevision was not mocked");
+    },
+    assembleMemoirChapterDraftBlocks: async () => {
+      throw new Error("assembleMemoirChapterDraftBlocks was not mocked");
+    },
     ...voiceApiExports,
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
 }
+
+test("chapter workspace maps draft block sources and keeps AI revision as a visible pending suggestion", async () => {
+  const pendingJob = {
+    id: "job-1",
+    project_id: "project/1",
+    chapter_id: "chapter-1",
+    job_type: "generate_draft_blocks",
+    status: "pending",
+    result_json: {},
+    error_message: "",
+    created_at: "2026-07-13T10:00:00",
+    updated_at: "2026-07-13T10:00:00",
+  };
+  const { page } = loadWorkspacePage({
+    draftBlocks: [sampleDraftBlock()],
+    voiceApiExports: {
+      enqueueMemoirDraftBlockRevision: async () => pendingJob,
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "drafts" });
+
+  const block = context.data.draftBlocks[0];
+  assert.equal(block.nodeTitle, "离家经过");
+  assert.equal(block.sourceStories[0].title, "第一次离家");
+  assert.equal(block.sourceClaims[0].statement, "十八岁时离开家乡。");
+  assert.equal(block.sourceClaims[0].evidenceText, "十八岁那年，我第一次离开家。");
+
+  page.changeDraftRevisionFeedback.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+    detail: { value: "只把第一句改得更自然" },
+  });
+  await page.requestDraftBlockRevision.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+  });
+
+  assert.equal(context.data.revisionBlockId, "block-1");
+  assert.equal(context.data.revisionStatus, "修改建议已排队");
+  assert.equal(context.data.draftGenerationBusy, false);
+  assert.equal(context.data.draftBlocks[0].busy, false);
+  assert.equal(context.data.draftBlocks[0].current_version.content, "十八岁那年，我第一次离开家。");
+  page.stopDraftPolling.call(context);
+});
+
+test("chapter workspace restores a completed draft suggestion after the page is recreated", async () => {
+  const storage = new Map();
+  global.wx = {
+    getStorageSync(key) { return storage.get(key); },
+    setStorageSync(key, value) { storage.set(key, value); },
+    removeStorageSync(key) { storage.delete(key); },
+  };
+  const { writeMemoirDraftJobCursor } = require("../services/memoir-draft-job-state.ts");
+  writeMemoirDraftJobCursor({
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    jobId: "job-restored",
+    mode: "revise",
+    blockId: "block-1",
+  });
+  const { page } = loadWorkspacePage({
+    draftBlocks: [sampleDraftBlock()],
+    voiceApiExports: {
+      getMemoirDraftBlockJob: async () => ({
+        id: "job-restored",
+        project_id: "project/1",
+        chapter_id: "chapter-1",
+        job_type: "generate_draft_blocks",
+        status: "succeeded",
+        result_json: { content: "十八岁那年，我独自离开了家。" },
+        error_message: "",
+        created_at: "2026-07-13T10:00:00",
+        updated_at: "2026-07-13T10:01:00",
+      }),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project%2F1",
+    chapterId: "chapter-1",
+    tab: "drafts",
+  });
+
+  assert.equal(context.data.revisionBlockId, "block-1");
+  assert.equal(context.data.revisionJobId, "job-restored");
+  assert.equal(context.data.revisionSuggestion, "十八岁那年，我独自离开了家。");
+  assert.equal(context.data.revisionStatus, "修改建议已生成，确认后才会替换当前版本");
+  delete global.wx;
+});
 
 test("chapter workspace page is registered and exposes structure, evidence, and three gap groups", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));

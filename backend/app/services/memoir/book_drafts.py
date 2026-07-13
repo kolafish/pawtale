@@ -257,6 +257,9 @@ def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapt
         model=version.model,
         prompt_snapshot=version.prompt_snapshot,
         feedback=version.feedback,
+        block_snapshot_json=[
+            item for item in (version.block_snapshot_json or []) if isinstance(item, dict)
+        ],
         created_at=version.created_at,
     )
 

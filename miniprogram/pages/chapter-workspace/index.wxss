@@ -118,7 +118,7 @@
 .tab-bar {
   margin-top: 26rpx;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border-bottom: 1rpx solid #d8d0c7;
 }
 
@@ -129,7 +129,7 @@
   justify-content: center;
   border-bottom: 5rpx solid transparent;
   color: #756963;
-  font-size: 25rpx;
+  font-size: 23rpx;
   font-weight: 600;
   box-sizing: border-box;
 }
@@ -202,8 +202,328 @@
 .node-list,
 .story-list,
 .gap-list,
-.followup-list {
+.followup-list,
+.draft-block-list {
   border-top: 1rpx solid #d8d0c7;
+}
+
+.draft-toolbar,
+.draft-block-head,
+.draft-block-meta,
+.draft-inline-actions {
+  display: flex;
+  align-items: center;
+}
+
+.draft-toolbar,
+.draft-block-head,
+.draft-block-meta {
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.draft-toolbar {
+  padding-bottom: 22rpx;
+  border-bottom: 1rpx solid #d8d0c7;
+}
+
+.draft-toolbar-copy {
+  min-width: 0;
+}
+
+.draft-toolbar-hint {
+  display: block;
+  margin-top: 6rpx;
+  color: #756963;
+  font-size: 23rpx;
+  line-height: 32rpx;
+}
+
+.draft-toolbar-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10rpx;
+}
+
+.primary-action-button,
+.secondary-action-button,
+.primary-small-button,
+.text-action-button {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 8rpx;
+  font-weight: 600;
+}
+
+.primary-action-button,
+.secondary-action-button {
+  min-height: 68rpx;
+  padding: 8rpx 18rpx;
+  font-size: 23rpx;
+  line-height: 32rpx;
+}
+
+.primary-action-button,
+.primary-small-button {
+  border: 1rpx solid #a64b3e;
+  background: #a64b3e;
+  color: #ffffff;
+}
+
+.secondary-action-button {
+  border: 1rpx solid #b99e91;
+  background: #ffffff;
+  color: #7e3c32;
+}
+
+.primary-action-button::after,
+.secondary-action-button::after,
+.primary-small-button::after,
+.text-action-button::after {
+  border: 0;
+}
+
+.primary-action-button[disabled],
+.secondary-action-button[disabled],
+.primary-small-button[disabled],
+.text-action-button[disabled] {
+  border-color: #d5cdc6;
+  background: #eeeae5;
+  color: #a29a94;
+}
+
+.draft-job-state {
+  margin-top: 18rpx;
+  padding: 16rpx 20rpx;
+  border-left: 5rpx solid #527a6a;
+  background: #edf5f0;
+  color: #345b4c;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.draft-block-row {
+  padding: 28rpx 0 30rpx;
+  border-bottom: 1rpx solid #d8d0c7;
+}
+
+.draft-block-row.stale {
+  border-left: 5rpx solid #b67a20;
+  padding-left: 18rpx;
+}
+
+.draft-block-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.draft-block-role,
+.draft-block-node,
+.draft-block-content,
+.draft-source-title,
+.draft-source-statement,
+.draft-source-evidence,
+.draft-revision-status,
+.draft-suggestion-label,
+.draft-suggestion-content {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.draft-block-role {
+  color: #8b5b43;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 30rpx;
+}
+
+.draft-block-node {
+  margin-top: 4rpx;
+  color: #2b211e;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.draft-block-badges {
+  flex: 0 1 auto;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6rpx;
+}
+
+.draft-status-label {
+  padding: 4rpx 9rpx;
+  border-radius: 6rpx;
+  background: #eee8df;
+  color: #645a54;
+  font-size: 20rpx;
+  line-height: 28rpx;
+}
+
+.draft-status-label.confirmed,
+.draft-status-label.current {
+  background: #e7f1eb;
+  color: #35604e;
+}
+
+.draft-status-label.stale {
+  background: #fff2dd;
+  color: #8c5b12;
+}
+
+.draft-status-label.locked {
+  background: #e8e3ef;
+  color: #5e4d73;
+}
+
+.draft-block-content {
+  margin-top: 20rpx;
+  color: #332824;
+  font-size: 29rpx;
+  line-height: 48rpx;
+  white-space: pre-wrap;
+}
+
+.draft-block-editor {
+  width: 100%;
+  min-height: 220rpx;
+  margin-top: 18rpx;
+  padding: 18rpx 20rpx;
+  border: 1rpx solid #bdaea4;
+  border-radius: 8rpx;
+  background: #ffffff;
+  color: #332824;
+  font-size: 28rpx;
+  line-height: 46rpx;
+  box-sizing: border-box;
+}
+
+.draft-block-meta {
+  margin-top: 16rpx;
+  color: #7a706a;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
+.draft-inline-actions {
+  margin-top: 14rpx;
+  justify-content: flex-end;
+  gap: 10rpx;
+}
+
+.draft-inline-actions.wrap {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.text-action-button,
+.primary-small-button {
+  min-width: 108rpx;
+  min-height: 60rpx;
+  padding: 6rpx 16rpx;
+  font-size: 22rpx;
+  line-height: 30rpx;
+}
+
+.text-action-button {
+  border: 1rpx solid #cabdb4;
+  background: #ffffff;
+  color: #6e3b32;
+}
+
+.draft-source-panel,
+.draft-revision-panel {
+  margin-top: 20rpx;
+  padding: 20rpx 22rpx;
+  border-left: 5rpx solid #608273;
+  background: #f1f5f2;
+}
+
+.draft-source-story,
+.draft-source-claim {
+  padding: 12rpx 0;
+}
+
+.draft-source-story + .draft-source-story,
+.draft-source-claim + .draft-source-claim,
+.draft-source-story + .draft-source-claim {
+  border-top: 1rpx solid #d7e2dc;
+}
+
+.draft-source-kind,
+.draft-suggestion-label {
+  color: #315947;
+  font-size: 21rpx;
+  font-weight: 700;
+  line-height: 30rpx;
+}
+
+.draft-source-title,
+.draft-source-statement {
+  margin-top: 5rpx;
+  color: #332824;
+  font-size: 25rpx;
+  line-height: 38rpx;
+}
+
+.draft-source-evidence {
+  margin-top: 8rpx;
+  color: #68706c;
+  font-size: 23rpx;
+  line-height: 36rpx;
+}
+
+.draft-source-empty {
+  color: #756963;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.draft-revision-panel {
+  border-left-color: #8b5b43;
+  background: #f8f1e9;
+}
+
+.draft-revision-input {
+  width: 100%;
+  height: 72rpx;
+  padding: 0 18rpx;
+  border: 1rpx solid #cdbcae;
+  border-radius: 8rpx;
+  background: #ffffff;
+  color: #332824;
+  font-size: 24rpx;
+  box-sizing: border-box;
+}
+
+.revision-button {
+  margin-top: 12rpx;
+}
+
+.draft-revision-status {
+  margin-top: 14rpx;
+  color: #795748;
+  font-size: 23rpx;
+  line-height: 36rpx;
+}
+
+.draft-suggestion {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #ddcfc3;
+}
+
+.draft-suggestion-content {
+  margin-top: 8rpx;
+  color: #332824;
+  font-size: 27rpx;
+  line-height: 44rpx;
+  white-space: pre-wrap;
 }
 
 .node-row {
@@ -506,5 +826,19 @@
 
   .slot-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .draft-toolbar,
+  .draft-block-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .draft-toolbar-actions {
+    width: 100%;
+  }
+
+  .draft-toolbar-actions button {
+    flex: 1 1 0;
   }
 }

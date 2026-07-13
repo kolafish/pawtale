@@ -14,7 +14,10 @@ from app.schemas.memoir_narrative import (
     MemoirDraftBlockResponse,
     MemoirDraftBlockVersionResponse,
 )
-from app.services.memoir.narrative import draft_block_queries, draft_blocks
+from app.services.memoir.narrative import (
+    draft_block_queries,
+    draft_blocks,
+)
 
 from .common import authorize_project, decision_error
 

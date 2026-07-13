@@ -567,6 +567,7 @@ class MemoirBookChapterDraftVersion(Base):
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     prompt_snapshot: Mapped[str] = mapped_column(Text, default="", nullable=False)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    block_snapshot_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     draft: Mapped[MemoirBookChapterDraft] = orm_relationship("MemoirBookChapterDraft", back_populates="versions")
