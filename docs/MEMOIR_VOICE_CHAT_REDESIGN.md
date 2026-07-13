@@ -4,6 +4,8 @@
 
 这是回忆录小程序的新主线文档。此前的固定问题、整段录音上传、离线转写、整理稿确认路线只作为 legacy 参考，不再作为下一阶段产品目标。
 
+回忆录“事实命题、跨访谈故事、章节契约、成书缺口、补访任务和结构化正文块”的下一阶段设计统一由 [回忆录叙事架构与成书质量演进方案](MEMOIR_NARRATIVE_ARCHITECTURE.md) 约束。本文继续负责实时录音、Streaming ASR、LLM 动态追问、Streaming TTS 和 voice session 状态机；不在本文重复维护叙事领域模型和成书 PR 计划。
+
 当前实现已经从 Streaming ASR MVP 进入语音聊天第一版闭环：
 
 - 小程序已通过 `home` / `voice-chat` 进入 voice session，实时发送 PCM 帧并显示 ASR partial/final。
@@ -125,6 +127,8 @@ Git 上建议用以下边界区分：
 free_narration      # 弱引导 / 自由叙述
 guided_interview    # 强引导 / AI 模块化引导
 ```
+
+以上是当前已实现的会话模式。后续成书驱动访谈不会新建第二套语音技术链路，而是在现有 `interview_type`、`guidance_mode` 和 voice session 基础上按叙事架构文档引入 `session_goal=open_narration/book_completion` 与持久 `followup_task`。`guidance_mode` 继续表达交互强度，`session_goal` 表达业务目标；当前 `guided_interview` 的主题菜单继续作为冷启动和引导策略使用，不承担章节完整度状态本身。
 
 弱引导适合已经知道自己想讲什么的人。叙述者可以按自己的时间顺序从小到大讲，也可以围绕某段经历连续讲。AI 不主动切换主题，不强行打断，只在明显停顿、听不清、信息断裂或用户请求帮助时做轻量提示，例如确认是否继续、复述刚才讲到的线索、提醒可以补充时间地点人物。
 
@@ -524,7 +528,7 @@ memoir_voice_utterances_fts
 
 FTS 使用 `trigram` tokenizer，适合中文三字以上片段检索；两字或更短的中文关键词仍保留普通 `LIKE` fallback，避免“外婆”“老师”这类常见短词搜不到。FTS 表通过 SQLite trigger 跟随 `memoir_voice_utterances` 的 insert/update/delete 自动同步。
 
-`memoir_transcript_versions` 只保留必要追溯窗口：每条转写记录、每种 `version_type` 最多保留最近 3 个版本。写入新版本时必须设置 `source_artifact_id = utterance.id`，再裁剪同一 `source_artifact_id + version_type` 下更旧的版本。`memoir_voice_utterances.transcript_raw` 和 `transcript_edited` 仍保存当前可展示文本，成书证据链继续引用当前有效转写记录和音频时间段。
+`memoir_transcript_versions` 当前只保留必要追溯窗口：每条转写记录、每种 `version_type` 最多保留最近 3 个版本。写入新版本时必须设置 `source_artifact_id = utterance.id`，再裁剪同一 `source_artifact_id + version_type` 下更旧的版本。`memoir_voice_utterances.transcript_raw` 和 `transcript_edited` 仍保存当前可展示文本，成书证据链继续引用当前有效转写记录和音频时间段。叙事架构落地 `ClaimEvidence` 后，被 Claim、DraftBlock 历史版本或正式书稿引用的 transcript version 必须 pin 并排除在裁剪范围之外，具体由叙事架构文档约束。
 
 ### PostgreSQL Migration Roadmap
 
