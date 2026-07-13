@@ -318,6 +318,10 @@ slot_schema_version
 merged_into_story_id
 version
 created_by
+created_by_user_id
+confirmed_by_user_id
+confirmed_at
+superseded_at
 created_at
 updated_at
 ```
@@ -443,6 +447,8 @@ updated_at
 
 已确认的 contract version 及其 ChapterNode 集合不可原地改写。结构编辑创建新的 contract version 并从上一版本显式复制或调整节点，历史 DraftBlockVersion 继续引用原 contract/node，保证旧书稿可解释。
 
+确认和替代必须记录执行用户与时间。数据库层同时保护已确认 contract、Node 和 NodeStory，除 `confirmed -> superseded` 生命周期迁移外不允许原地更新或删除，不能只依赖 API 约定维持历史可解释性。
+
 `core_questions_json` 中每个问题必须有稳定 question key；问题是否已回答由 Node/Story/Claim 和 Gap 计算，不能在 JSON 中维护第二套完成状态。
 
 ### 5.6 ChapterNode：章节结构节点
@@ -485,6 +491,8 @@ required
 - 过渡节点必须说明连接哪两个节点，不允许借过渡引入未经引用的新事实。
 - 开场和结尾必须服务 contract objective，不使用通用抒情模板填充。
 - 拆章、并章和拖拽顺序只修改结构关系，不复制 Story 或 Claim。
+- 拆章和并章只允许操作 draft contract；移动 Node 时保留 NodeStory 主键关系，并同步调整两个 draft contract 的 Story 收录约束。目标 contract 已排除的 Story 或会造成同章重复 primary 的移动必须拒绝。
+- 旧章节迁移只生成 draft 建议；候选 Story 必须能通过 ChapterSourceLink、ClaimEvidence 和 StoryClaim 回溯到章节素材，确认由独立用户 API 完成。
 
 ### 5.7 NarrativeGap：持久内容缺口
 

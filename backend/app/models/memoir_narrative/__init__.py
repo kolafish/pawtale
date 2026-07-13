@@ -1,4 +1,9 @@
 from .claims import MemoirClaim, MemoirClaimEvidence
+from .chapter_structures import (
+    MemoirChapterContract,
+    MemoirChapterNode,
+    MemoirChapterNodeStory,
+)
 from .decisions import MemoirNarrativeDecision
 from .entities import MemoirNarrativeEntity
 from .stories import (
@@ -12,6 +17,9 @@ from .stories import (
 __all__ = [
     "MemoirClaim",
     "MemoirClaimEvidence",
+    "MemoirChapterContract",
+    "MemoirChapterNode",
+    "MemoirChapterNodeStory",
     "MemoirNarrativeDecision",
     "MemoirNarrativeEntity",
     "MemoirStory",

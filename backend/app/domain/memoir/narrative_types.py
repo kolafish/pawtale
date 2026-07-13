@@ -171,3 +171,32 @@ class MemoirStoryRevisionChangeType(str, Enum):
     SLOT_RESOLVED = "slot_resolved"
     PUBLICATION_CHANGED = "publication_changed"
     BACKFILL_CANDIDATE = "backfill_candidate"
+
+
+class MemoirChapterContractStatus(str, Enum):
+    DRAFT = "draft"
+    CONFIRMED = "confirmed"
+    SUPERSEDED = "superseded"
+
+
+class MemoirChapterNodeType(str, Enum):
+    OPENING = "opening"
+    BACKGROUND = "background"
+    STORY = "story"
+    TRANSITION = "transition"
+    REFLECTION = "reflection"
+    CLOSING = "closing"
+
+
+class MemoirChapterNodeStatus(str, Enum):
+    PLANNED = "planned"
+    READY = "ready"
+    NEEDS_WORK = "needs_work"
+    EXCLUDED = "excluded"
+
+
+class MemoirChapterNodeStoryRole(str, Enum):
+    PRIMARY = "primary"
+    SUPPORTING = "supporting"
+    CONTRAST = "contrast"
+    TRANSITION_CONTEXT = "transition_context"

@@ -17,10 +17,27 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_story_claims",
     "memoir_story_slots",
     "memoir_story_slot_claims",
+    "memoir_chapter_contracts",
+    "memoir_chapter_nodes",
+    "memoir_chapter_node_stories",
 )
 MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
     "memoir_narrative_decisions_no_update",
     "memoir_narrative_decisions_no_delete",
+)
+MEMOIR_CHAPTER_STRUCTURE_TRIGGERS = (
+    "memoir_chapter_contracts_immutable_update",
+    "memoir_chapter_contracts_immutable_delete",
+    "memoir_chapter_nodes_immutable_insert",
+    "memoir_chapter_nodes_immutable_update",
+    "memoir_chapter_nodes_immutable_delete",
+    "memoir_chapter_node_stories_immutable_insert",
+    "memoir_chapter_node_stories_immutable_update",
+    "memoir_chapter_node_stories_immutable_delete",
+)
+MEMOIR_NARRATIVE_TRIGGERS = (
+    *MEMOIR_NARRATIVE_DECISION_TRIGGERS,
+    *MEMOIR_CHAPTER_STRUCTURE_TRIGGERS,
 )
 
 
@@ -111,6 +128,149 @@ async def _ensure_decision_triggers(conn) -> list[str]:
     return changed
 
 
+async def _ensure_chapter_structure_triggers(conn) -> list[str]:
+    changed: list[str] = []
+    statements = {
+        "memoir_chapter_contracts_immutable_update": """
+            CREATE TRIGGER memoir_chapter_contracts_immutable_update
+            BEFORE UPDATE ON memoir_chapter_contracts
+            WHEN OLD.confirmed_at IS NOT NULL
+              AND NOT (
+                OLD.status = 'confirmed'
+                AND NEW.status = 'superseded'
+                AND NEW.superseded_at IS NOT NULL
+                AND NEW.id IS OLD.id
+                AND NEW.project_id IS OLD.project_id
+                AND NEW.chapter_id IS OLD.chapter_id
+                AND NEW.version IS OLD.version
+                AND NEW.objective IS OLD.objective
+                AND NEW.reader_takeaway IS OLD.reader_takeaway
+                AND NEW.time_scope_text IS OLD.time_scope_text
+                AND NEW.time_start IS OLD.time_start
+                AND NEW.time_end IS OLD.time_end
+                AND NEW.core_questions_json IS OLD.core_questions_json
+                AND NEW.constraints_json IS OLD.constraints_json
+                AND NEW.created_by IS OLD.created_by
+                AND NEW.created_by_user_id IS OLD.created_by_user_id
+                AND NEW.confirmed_by_user_id IS OLD.confirmed_by_user_id
+                AND NEW.confirmed_at IS OLD.confirmed_at
+                AND NEW.created_at IS OLD.created_at
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter contracts are immutable');
+            END
+        """,
+        "memoir_chapter_contracts_immutable_delete": """
+            CREATE TRIGGER memoir_chapter_contracts_immutable_delete
+            BEFORE DELETE ON memoir_chapter_contracts
+            WHEN OLD.confirmed_at IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter contracts are immutable');
+            END
+        """,
+        "memoir_chapter_nodes_immutable_insert": """
+            CREATE TRIGGER memoir_chapter_nodes_immutable_insert
+            BEFORE INSERT ON memoir_chapter_nodes
+            WHEN EXISTS (
+                SELECT 1 FROM memoir_chapter_contracts
+                WHERE id = NEW.contract_id
+                  AND project_id = NEW.project_id
+                  AND confirmed_at IS NOT NULL
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
+            END
+        """,
+        "memoir_chapter_nodes_immutable_update": """
+            CREATE TRIGGER memoir_chapter_nodes_immutable_update
+            BEFORE UPDATE ON memoir_chapter_nodes
+            WHEN EXISTS (
+                SELECT 1 FROM memoir_chapter_contracts
+                WHERE confirmed_at IS NOT NULL
+                  AND (
+                    (id = OLD.contract_id AND project_id = OLD.project_id)
+                    OR (id = NEW.contract_id AND project_id = NEW.project_id)
+                  )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
+            END
+        """,
+        "memoir_chapter_nodes_immutable_delete": """
+            CREATE TRIGGER memoir_chapter_nodes_immutable_delete
+            BEFORE DELETE ON memoir_chapter_nodes
+            WHEN EXISTS (
+                SELECT 1 FROM memoir_chapter_contracts
+                WHERE id = OLD.contract_id
+                  AND project_id = OLD.project_id
+                  AND confirmed_at IS NOT NULL
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
+            END
+        """,
+        "memoir_chapter_node_stories_immutable_insert": """
+            CREATE TRIGGER memoir_chapter_node_stories_immutable_insert
+            BEFORE INSERT ON memoir_chapter_node_stories
+            WHEN EXISTS (
+                SELECT 1
+                FROM memoir_chapter_nodes AS node
+                JOIN memoir_chapter_contracts AS contract
+                  ON contract.id = node.contract_id
+                 AND contract.project_id = node.project_id
+                WHERE node.id = NEW.node_id
+                  AND node.project_id = NEW.project_id
+                  AND contract.confirmed_at IS NOT NULL
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter node stories are immutable');
+            END
+        """,
+        "memoir_chapter_node_stories_immutable_update": """
+            CREATE TRIGGER memoir_chapter_node_stories_immutable_update
+            BEFORE UPDATE ON memoir_chapter_node_stories
+            WHEN EXISTS (
+                SELECT 1
+                FROM memoir_chapter_nodes AS node
+                JOIN memoir_chapter_contracts AS contract
+                  ON contract.id = node.contract_id
+                 AND contract.project_id = node.project_id
+                WHERE contract.confirmed_at IS NOT NULL
+                  AND (
+                    (node.id = OLD.node_id AND node.project_id = OLD.project_id)
+                    OR (node.id = NEW.node_id AND node.project_id = NEW.project_id)
+                  )
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter node stories are immutable');
+            END
+        """,
+        "memoir_chapter_node_stories_immutable_delete": """
+            CREATE TRIGGER memoir_chapter_node_stories_immutable_delete
+            BEFORE DELETE ON memoir_chapter_node_stories
+            WHEN EXISTS (
+                SELECT 1
+                FROM memoir_chapter_nodes AS node
+                JOIN memoir_chapter_contracts AS contract
+                  ON contract.id = node.contract_id
+                 AND contract.project_id = node.project_id
+                WHERE node.id = OLD.node_id
+                  AND node.project_id = OLD.project_id
+                  AND contract.confirmed_at IS NOT NULL
+            )
+            BEGIN
+                SELECT RAISE(ABORT, 'confirmed chapter node stories are immutable');
+            END
+        """,
+    }
+    for trigger_name, statement in statements.items():
+        if await _trigger_exists(conn, trigger_name):
+            continue
+        await conn.execute(text(statement))
+        changed.append(trigger_name)
+    return changed
+
+
 async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, list[str]]:
     """Create and advance the narrative fact schema."""
     changed_tables: list[str] = []
@@ -129,6 +289,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, list
                 await conn.run_sync(lambda sync_conn, index=index: index.create(sync_conn, checkfirst=True))
                 changed_indexes.append(index.name)
         changed_triggers.extend(await _ensure_decision_triggers(conn))
+        changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
     return {
         "changed_tables": changed_tables,
         "changed_indexes": changed_indexes,
@@ -185,7 +346,7 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
                 for constraint in table.constraints
                 if constraint.name and constraint.name not in actual_sql
             )
-        for trigger_name in MEMOIR_NARRATIVE_DECISION_TRIGGERS:
+        for trigger_name in MEMOIR_NARRATIVE_TRIGGERS:
             if not await _trigger_exists(conn, trigger_name):
                 missing_triggers.append(trigger_name)
 
