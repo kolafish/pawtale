@@ -23,8 +23,8 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
 )
 from app.migrations.memoir_narrative import (
-    MEMOIR_NARRATIVE_DECISION_TRIGGERS,
     MEMOIR_NARRATIVE_TABLES,
+    MEMOIR_NARRATIVE_TRIGGERS,
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
@@ -60,7 +60,7 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
         assert first == {
             "changed_tables": list(MEMOIR_NARRATIVE_TABLES),
             "changed_indexes": [],
-            "changed_triggers": list(MEMOIR_NARRATIVE_DECISION_TRIGGERS),
+            "changed_triggers": list(MEMOIR_NARRATIVE_TRIGGERS),
         }
         assert second == {
             "changed_tables": [],
@@ -86,7 +86,7 @@ async def test_narrative_migration_upgrades_pr2_tables_in_place():
         assert changed == {
             "changed_tables": ["memoir_narrative_decisions"],
             "changed_indexes": ["uq_memoir_claim_evidence_transcript_quote"],
-            "changed_triggers": list(MEMOIR_NARRATIVE_DECISION_TRIGGERS),
+            "changed_triggers": list(MEMOIR_NARRATIVE_TRIGGERS),
         }
     finally:
         await engine.dispose()
