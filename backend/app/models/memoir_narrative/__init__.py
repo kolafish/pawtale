@@ -12,6 +12,11 @@ from .gaps import (
     MemoirNarrativeGapClaim,
     MemoirNarrativeGapStory,
 )
+from .followup_tasks import (
+    MemoirFollowupTask,
+    MemoirFollowupTaskClaim,
+    MemoirFollowupTaskUtterance,
+)
 from .stories import (
     MemoirStory,
     MemoirStoryClaim,
@@ -32,6 +37,9 @@ __all__ = [
     "MemoirNarrativeGapChapter",
     "MemoirNarrativeGapClaim",
     "MemoirNarrativeGapStory",
+    "MemoirFollowupTask",
+    "MemoirFollowupTaskClaim",
+    "MemoirFollowupTaskUtterance",
     "MemoirStory",
     "MemoirStoryClaim",
     "MemoirStoryRevision",

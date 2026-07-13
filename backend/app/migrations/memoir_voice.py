@@ -12,6 +12,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirEditingJobType,
     MemoirInterviewType,
+    MemoirSessionGoal,
 )
 
 
@@ -201,11 +202,14 @@ async def _ensure_chat_messages_role_constraint(conn) -> bool:
     )
 
 
-async def _ensure_voice_sessions_interview_type_constraint(conn) -> bool:
+async def _ensure_voice_sessions_enum_constraints(conn) -> bool:
     return await _ensure_enum_check_constraint(
         conn,
         "memoir_voice_sessions",
-        {item.value for item in MemoirInterviewType},
+        {
+            *(item.value for item in MemoirInterviewType),
+            *(item.value for item in MemoirSessionGoal),
+        },
     )
 
 
@@ -410,15 +414,22 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, list[str
 
         if await _table_exists(conn, "memoir_voice_sessions"):
             voice_session_columns = await _table_columns(conn, "memoir_voice_sessions")
-            if "interview_type" not in voice_session_columns:
+            voice_session_column_definitions = {
+                "interview_type": "VARCHAR(30) NOT NULL DEFAULT 'ai_interview'",
+                "session_goal": "VARCHAR(30) NOT NULL DEFAULT 'open_narration'",
+                "current_followup_task_id": "VARCHAR(36)",
+            }
+            for column_name, column_type in voice_session_column_definitions.items():
+                if column_name in voice_session_columns:
+                    continue
                 await conn.execute(
                     text(
-                        "ALTER TABLE memoir_voice_sessions "
-                        "ADD COLUMN interview_type VARCHAR(30) NOT NULL DEFAULT 'ai_interview'"
+                        f"ALTER TABLE memoir_voice_sessions "
+                        f"ADD COLUMN {column_name} {column_type}"
                     )
                 )
-                changed_columns.append("memoir_voice_sessions.interview_type")
-            if await _ensure_voice_sessions_interview_type_constraint(conn):
+                changed_columns.append(f"memoir_voice_sessions.{column_name}")
+            if await _ensure_voice_sessions_enum_constraints(conn):
                 changed_tables.append("memoir_voice_sessions")
 
         if await _ensure_chat_messages_role_constraint(conn):

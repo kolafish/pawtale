@@ -24,6 +24,11 @@ class MemoirGuidanceMode(str, Enum):
     GUIDED_INTERVIEW = "guided_interview"
 
 
+class MemoirSessionGoal(str, Enum):
+    OPEN_NARRATION = "open_narration"
+    BOOK_COMPLETION = "book_completion"
+
+
 class MemoirChatMessageRole(str, Enum):
     USER = "user"
     ASSISTANT = "assistant"
@@ -72,6 +77,7 @@ class MemoirEditingJobType(str, Enum):
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
     INGEST_NARRATIVE_STATE = "ingest_narrative_state"
     RECOMPUTE_CHAPTER_STRUCTURE_AUDIT = "recompute_chapter_structure_audit"
+    GENERATE_FOLLOWUP_TASKS = "generate_followup_tasks"
     ROUTE_SOURCES = "route_sources"
     GENERATE_SOURCE_CARD = "generate_source_card"
     REVISE_CHAPTER = "revise_chapter"
@@ -124,6 +130,7 @@ class MemoirAutomationEventType(str, Enum):
     SOURCE_ASSIGNED = "source_assigned"
     SOURCE_HELD = "source_held"
     NARRATIVE_INGESTED = "narrative_ingested"
+    FOLLOWUP_TASKS_GENERATED = "followup_tasks_generated"
     CHAPTER_AUTO_REVISED = "chapter_auto_revised"
     AUDIT_COMPLETED = "audit_completed"
     CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"

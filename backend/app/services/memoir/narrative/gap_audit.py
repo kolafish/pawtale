@@ -15,7 +15,7 @@ from app.models.memoir import MemoirEditingJob
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import gap_semantic, gaps
+from app.services.memoir.narrative import followup_jobs, gap_semantic, gaps
 from app.services.memoir.narrative.gap_rules import (
     evaluate_deterministic_gaps,
     load_chapter_audit_context,
@@ -133,6 +133,12 @@ async def run_chapter_gap_audit_job(
                 candidates=semantic_candidates,
             )
         except Exception as exc:
+            await followup_jobs.schedule_followup_task_generation(
+                db,
+                project_id=job.project_id,
+                chapter_id=chapter_id,
+                source="chapter_gap_audit_partial",
+            )
             return EditingJobResult(
                 status=MemoirEditingJobStatus.FAILED,
                 result_json={
@@ -147,6 +153,12 @@ async def run_chapter_gap_audit_job(
                 error_message=str(exc),
             )
 
+    await followup_jobs.schedule_followup_task_generation(
+        db,
+        project_id=job.project_id,
+        chapter_id=chapter_id,
+        source="chapter_gap_audit",
+    )
     result = {
         "chapter_id": chapter_id,
         "deterministic_gap_count": len(deterministic_candidates),

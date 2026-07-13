@@ -24,6 +24,7 @@ from app.domain.memoir.types import (
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
     MemoirInterviewType,
+    MemoirSessionGoal,
     MemoirOutputStatus,
     MemoirSemanticCacheStatus,
     MemoirShareVideoJobStatus,
@@ -48,6 +49,14 @@ class MemoirVoiceSession(Base):
             f"interview_type IN ({_enum_values(MemoirInterviewType)})",
             name="ck_memoir_voice_sessions_interview_type",
         ),
+        CheckConstraint(
+            f"session_goal IN ({_enum_values(MemoirSessionGoal)})",
+            name="ck_memoir_voice_sessions_session_goal",
+        ),
+        CheckConstraint(
+            "current_followup_task_id IS NULL OR session_goal = 'book_completion'",
+            name="ck_memoir_voice_sessions_followup_goal",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -68,6 +77,14 @@ class MemoirVoiceSession(Base):
         String(30),
         default=MemoirInterviewType.AI_INTERVIEW.value,
         nullable=False,
+    )
+    session_goal: Mapped[str] = mapped_column(
+        String(30),
+        default=MemoirSessionGoal.OPEN_NARRATION.value,
+        nullable=False,
+    )
+    current_followup_task_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
     )
     current_guidance_module: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)

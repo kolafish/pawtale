@@ -39,6 +39,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir.narrative import (
     decisions,
     entities,
+    followup_completion,
     stories,
     story_decisions,
     story_matching,
@@ -61,6 +62,9 @@ class NarrativeIngestionResult:
     reused_story_ids: tuple[str, ...]
     story_review_candidates: dict[str, tuple[str, ...]]
     changed_story_ids: tuple[str, ...]
+    followup_task_id: str | None
+    followup_task_status: str | None
+    answered_followup_task_ids: tuple[str, ...]
     provider: str | None
     model: str | None
 
@@ -401,6 +405,13 @@ async def ingest_transcript_version(
         ):
             changed_story_ids.add(story.id)
 
+    task_completion = await followup_completion.evaluate_after_narrative_ingestion(
+        db,
+        project_id=project.id,
+        utterance=utterance,
+        transcript_version=version,
+    )
+
     return NarrativeIngestionResult(
         created_claim_ids=tuple(created_claim_ids),
         reused_claim_ids=tuple(dict.fromkeys(reused_claim_ids)),
@@ -411,6 +422,11 @@ async def ingest_transcript_version(
         reused_story_ids=tuple(dict.fromkeys(reused_story_ids)),
         story_review_candidates=story_review_candidates,
         changed_story_ids=tuple(sorted(changed_story_ids)),
+        followup_task_id=task_completion.task_id,
+        followup_task_status=(
+            task_completion.status.value if task_completion.status else None
+        ),
+        answered_followup_task_ids=task_completion.answered_task_ids,
         provider=provider,
         model=model,
     )

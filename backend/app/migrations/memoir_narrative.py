@@ -24,6 +24,9 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_narrative_gap_claims",
     "memoir_narrative_gap_stories",
     "memoir_narrative_gap_chapters",
+    "memoir_followup_tasks",
+    "memoir_followup_task_claims",
+    "memoir_followup_task_utterances",
 )
 MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
     "memoir_narrative_decisions_no_update",
