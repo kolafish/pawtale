@@ -127,8 +127,9 @@ async def test_enqueue_editing_job_does_not_reset_running_job(test_db):
     assert duplicate.payload_json == {"utterance_ids": ["u1"]}
 
 
-async def test_claim_due_editing_jobs_can_filter_by_job_type(test_db):
+async def test_claim_due_editing_jobs_can_filter_by_job_type_and_project(test_db):
     project = await _create_project(test_db)
+    other_project = await _create_project(test_db)
     ingestion = await enqueue_editing_job(
         test_db,
         project_id=project.id,
@@ -141,6 +142,12 @@ async def test_claim_due_editing_jobs_can_filter_by_job_type(test_db):
         job_type=MemoirEditingJobType.ROUTE_SOURCES,
         run_after=_utcnow() - timedelta(seconds=1),
     )
+    other_ingestion = await enqueue_editing_job(
+        test_db,
+        project_id=other_project.id,
+        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        run_after=_utcnow() - timedelta(seconds=1),
+    )
     await test_db.commit()
 
     claimed = await claim_due_editing_jobs(
@@ -148,11 +155,14 @@ async def test_claim_due_editing_jobs_can_filter_by_job_type(test_db):
         now=_utcnow(),
         limit=5,
         job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        project_id=project.id,
     )
 
     assert [lease.job_id for lease in claimed] == [ingestion.id]
     await test_db.refresh(routing)
     assert routing.status == MemoirEditingJobStatus.PENDING.value
+    await test_db.refresh(other_ingestion)
+    assert other_ingestion.status == MemoirEditingJobStatus.PENDING.value
 
 
 async def test_claim_and_run_editing_job_with_registered_handler(test_db):

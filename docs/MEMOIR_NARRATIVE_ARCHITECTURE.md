@@ -1137,43 +1137,44 @@ EventCluster 不能直接成为 confirmed Story；同一事件可能在不同章
 - 回滚切换只切读路径；已经生成的新叙事数据保留用于排查，不反向污染旧事实层。
 - PR12 删除旧代码前必须确认所有活跃项目已完成迁移检查。
 
-### 14.4 PR12 实际切换运行手册
+### 14.4 PR12 前置安全迁移
 
-正式环境执行时必须停止 API 和后台 worker，且以下命令必须使用同一个文件型 SQLite 数据库。`inventory`、`ingest`、`process-ingestion`、`stories`、`structures` 和 `check` 默认只读或 dry-run；所有写阶段都要求由备份工具生成且与当前数据库路径、完整性检查和 SHA-256 匹配的 `manifest.json`。
+章节工作台的真实数据准备必须先于 PR12 正式切流，并保持 14.2 的旧成书链可用。该阶段只做三件事：修复 SQLite 历史表重建遗留的外键目标、创建可验证且可恢复的完整备份、按阶段新增 Claim/Story/Contract 建议和 legacy DraftBlock 快照。不得在该阶段删除旧生成任务、停止旧成书事件或改变正式成书读路径。
+
+正式环境执行时必须先停止 API 和后台 worker。备份、迁移和所有写入阶段必须指向同一个文件型 SQLite 数据库；每个写入阶段必须使用同一份由备份工具生成的 `manifest.json`。manifest 必须绑定源数据库绝对路径、独立备份库 SHA-256、`PRAGMA integrity_check`、核心表行数、对象引用清单和目录校验和，不能用手工复制的 SQLite 主文件代替。
 
 ```bash
 cd backend
 
-# 1. API/worker 停止后创建数据库、对象引用和文件目录清单。
+# 1. 停止所有数据库写进程后创建可恢复备份。
 PYTHONPATH=. venv/bin/python scripts/backup_runtime_data.py \
-  --label pre-narrative-cutover
+  --label pre-narrative-backfill
 
-# 2. 修复历史外键并创建最终 narrative schema。仅在上一步备份成功后跳过重复备份。
+# 2. 使用迁移专用连接修复历史外键并校验完整 runtime schema。
 PYTHONPATH=. venv/bin/python scripts/migrate_runtime_schema.py --skip-backup
 
-# 3. 每一阶段先 dry-run，再带同一份 manifest 执行。
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py inventory
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py ingest
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py ingest \
-  --execute --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py process-ingestion \
-  --execute --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py stories
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py stories \
-  --execute --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py structures
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py structures \
-  --execute --backup-manifest /controlled/backup/manifest.json
-
-# 4. 只有受控人工盲审通过时 check 才返回 0。
-PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py check \
-  --quality-packet /controlled/quality/blind-packet.json \
-  --answer-key /controlled/quality/answer-key.json
+# 3. 每个阶段先 dry-run，再带同一份 manifest 执行。
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py inventory
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest \
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py process-ingestion \
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories \
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures
+PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures \
+  --execute --application-writers-stopped \
+  --backup-manifest /controlled/backup/manifest.json
 ```
 
-`migration_complete/cutover_data_ready` 表示历史素材已完成摄取、所有 Claim 都有 evidence、Story/Contract 建议已物化且无失败任务。它不代替项目所有者的章节编辑决策。`chapter_workflow_ready` 单独表示该项目的 Contract 已确认且章节已有结构化 DraftBlock；未就绪时只阻止该项目成书，不阻止已经完成数据迁移的系统部署。全局 `cutover_ready` 仍同时要求数据迁移和第十五章定义的人工盲审通过。
+`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、Story/Contract 建议已物化且没有失败的摄取任务。`chapter_workflow_ready` 单独表示用户已确认 Contract 且章节已有结构化 DraftBlock；它必须通过真实章节工作台操作达成，不能由迁移脚本伪造确认人或产品决策。两者都不能替代第十五章的人工盲评门禁。
 
-回滚默认只预检。确需恢复 schema/data 时，先停止所有数据库写进程；工具会先把迁移后数据库保存为调查快照，再删除目标库的 `-wal`、`-shm`、`-journal` 侧车，恢复已校验备份并重新执行 SHA-256 和 `PRAGMA integrity_check`。不得只复制主 `.sqlite` 文件而保留旧侧车。
+恢复操作默认只做预检。只有确认所有写进程仍处于停止状态时才允许执行；工具会先保存当前数据库调查快照，再清理目标库侧车并原子替换为经过 SHA-256 和完整性校验的备份。
 
 ```bash
 PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
@@ -1183,6 +1184,18 @@ PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
   --backup-manifest /controlled/backup/manifest.json \
   --execute --database-writers-stopped
 ```
+
+### 14.5 PR12 最终切换检查
+
+前置数据迁移完成后，必须使用第十五章定义的受控盲评材料执行全局检查。`cutover_memoir_narrative.py` 只负责只读的最终门禁，不再复制或执行 `ingest`、`stories`、`structures` 等写阶段。
+
+```bash
+PYTHONPATH=. venv/bin/python scripts/cutover_memoir_narrative.py check \
+  --quality-packet /controlled/quality/blind-packet.json \
+  --answer-key /controlled/quality/answer-key.json
+```
+
+只有全部活跃项目 `cutover_data_ready=true` 且人工盲评、确定性指标和叙述者复核同时通过时，命令才返回 0。`chapter_workflow_ready` 是项目级成书门禁：未确认 Contract 或缺少结构化 DraftBlock 的项目必须继续阻止成书，但不阻止其他已就绪项目使用新链路。
 
 PR12 切换后，正式成书只从 confirmed/current DraftBlock 快照组装；旧 source 到整章 prompt、旧 EventCluster 主读、旧自动整章修订和永久 fallback 已删除。`MemoirChapterSourceLink` 只保留为来源投影，EventCluster 只保留历史数据和一次性 Story 回填输入，legacy DraftBlock 只保留历史书稿回溯。
 

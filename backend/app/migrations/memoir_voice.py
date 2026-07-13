@@ -588,6 +588,19 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
             )
             changed_columns.append("memoir_transcript_versions.source_artifact_id")
 
+        legacy_fk_tables = await legacy_foreign_key_tables(conn)
+        if "memoir_voice_utterances" in legacy_fk_tables:
+            await _drop_transcript_fts(conn)
+        foreign_key_result = await repair_sqlite_foreign_key_integrity(conn)
+        for table_name in foreign_key_result["rebuilt_tables"]:
+            if table_name not in changed_tables:
+                changed_tables.append(str(table_name))
+        deleted_source_cards = int(
+            foreign_key_result["deleted_derived_rows"].get("memoir_source_cards", 0)
+        )
+        if deleted_source_cards:
+            changed_rows.append(f"memoir_source_cards.orphans:{deleted_source_cards}")
+
         transcript_version_indexes = {
             "ix_memoir_transcript_versions_voice_session_id": "voice_session_id",
             "ix_memoir_transcript_versions_source_type_created": (
@@ -601,19 +614,6 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
                 text(f"CREATE INDEX {index_name} ON memoir_transcript_versions ({columns_sql})")
             )
             changed_indexes.append(index_name)
-
-        legacy_fk_tables = await legacy_foreign_key_tables(conn)
-        if "memoir_voice_utterances" in legacy_fk_tables:
-            await _drop_transcript_fts(conn)
-        foreign_key_result = await repair_sqlite_foreign_key_integrity(conn)
-        for table_name in foreign_key_result["rebuilt_tables"]:
-            if table_name not in changed_tables:
-                changed_tables.append(str(table_name))
-        deleted_source_cards = int(
-            foreign_key_result["deleted_derived_rows"].get("memoir_source_cards", 0)
-        )
-        if deleted_source_cards:
-            changed_rows.append(f"memoir_source_cards.orphans:{deleted_source_cards}")
 
         fts_result = await _ensure_transcript_fts(conn)
         changed_tables.extend(fts_result["changed_tables"])

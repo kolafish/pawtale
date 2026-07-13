@@ -38,6 +38,18 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
         await engine.dispose()
 
 
+async def test_runtime_schema_assert_rejects_disabled_sqlite_foreign_keys():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+
+        with pytest.raises(RuntimeError, match="foreign-key enforcement is disabled"):
+            await assert_runtime_schema(engine)
+    finally:
+        await engine.dispose()
+
+
 async def test_runtime_schema_assert_reports_missing_columns_without_mutating_schema():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)

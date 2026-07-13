@@ -643,6 +643,7 @@ async def test_memoir_voice_migration_repairs_legacy_foreign_key_targets():
             "preserved_rows": {},
             "deleted_derived_rows": {"memoir_source_cards": 0},
         }
+        assert second["changed_indexes"] == []
         async with engine.connect() as conn:
             old_refs = await conn.scalar(
                 text(
