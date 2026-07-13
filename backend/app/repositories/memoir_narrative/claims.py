@@ -15,7 +15,8 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
-from app.models.memoir_narrative import MemoirClaim, MemoirClaimEvidence
+from app.models.memoir_narrative import MemoirClaim, MemoirClaimEvidence, MemoirNarrativeEntity
+from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirClaimCreate, MemoirClaimEvidenceCreate
 
 
@@ -24,6 +25,7 @@ class MemoirClaimRepository:
         self._db = db
 
     async def create(self, data: MemoirClaimCreate) -> MemoirClaim:
+        await self._validate_claim_references(data)
         claim = MemoirClaim(
             project_id=data.project_id,
             claim_type=data.claim_type.value,
@@ -50,6 +52,46 @@ class MemoirClaimRepository:
         self._db.add(claim)
         await self._db.flush()
         return claim
+
+    async def _validate_claim_references(self, data: MemoirClaimCreate) -> None:
+        project_exists = await self._db.scalar(
+            select(Project.id).where(Project.id == data.project_id)
+        )
+        if project_exists is None:
+            raise ValueError("claim project does not exist")
+
+        entity_ids = {
+            entity_id
+            for entity_id in (
+                data.subject_entity_id,
+                data.object_entity_id,
+                data.place_entity_id,
+            )
+            if entity_id is not None
+        }
+        if entity_ids:
+            existing_entity_ids = set(
+                (
+                    await self._db.scalars(
+                        select(MemoirNarrativeEntity.id).where(
+                            MemoirNarrativeEntity.project_id == data.project_id,
+                            MemoirNarrativeEntity.id.in_(entity_ids),
+                        )
+                    )
+                ).all()
+            )
+            if existing_entity_ids != entity_ids:
+                raise ValueError("claim entity reference does not belong to the claim project")
+
+        if data.time_anchor_claim_id is not None:
+            anchor_exists = await self._db.scalar(
+                select(MemoirClaim.id).where(
+                    MemoirClaim.project_id == data.project_id,
+                    MemoirClaim.id == data.time_anchor_claim_id,
+                )
+            )
+            if anchor_exists is None:
+                raise ValueError("time anchor claim does not belong to the claim project")
 
     async def add_evidence(self, data: MemoirClaimEvidenceCreate) -> MemoirClaimEvidence:
         await self._validate_evidence_references(data)
@@ -85,6 +127,16 @@ class MemoirClaimRepository:
         )
         if claim_exists is None:
             raise ValueError("claim does not belong to the evidence project")
+
+        if data.speaker_entity_id is not None:
+            speaker_exists = await self._db.scalar(
+                select(MemoirNarrativeEntity.id).where(
+                    MemoirNarrativeEntity.project_id == data.project_id,
+                    MemoirNarrativeEntity.id == data.speaker_entity_id,
+                )
+            )
+            if speaker_exists is None:
+                raise ValueError("speaker entity does not belong to the evidence project")
 
         if data.evidence_source_type == MemoirClaimEvidenceSourceType.TRANSCRIPT:
             source = (

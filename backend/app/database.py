@@ -46,7 +46,6 @@ def configure_sqlite_connection(dbapi_connection: Any, current_settings: Setting
 
     cursor = dbapi_connection.cursor()
     try:
-        cursor.execute("PRAGMA foreign_keys = ON")
         cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
         cursor.execute(f"PRAGMA journal_mode = {journal_mode}")
         cursor.execute(f"PRAGMA synchronous = {synchronous}")

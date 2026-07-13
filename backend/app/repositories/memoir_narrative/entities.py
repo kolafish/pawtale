@@ -6,6 +6,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeEntityVerificationStatus,
 )
 from app.models.memoir_narrative import MemoirNarrativeEntity
+from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirNarrativeEntityCreate
 
 
@@ -14,6 +15,11 @@ class MemoirNarrativeEntityRepository:
         self._db = db
 
     async def create(self, data: MemoirNarrativeEntityCreate) -> MemoirNarrativeEntity:
+        project_exists = await self._db.scalar(
+            select(Project.id).where(Project.id == data.project_id)
+        )
+        if project_exists is None:
+            raise ValueError("entity project does not exist")
         entity = MemoirNarrativeEntity(
             project_id=data.project_id,
             entity_type=data.entity_type.value,

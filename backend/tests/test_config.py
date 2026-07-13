@@ -104,7 +104,6 @@ def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
     database.configure_sqlite_connection(connection, settings)
 
     assert connection.cursor_obj.statements == [
-        "PRAGMA foreign_keys = ON",
         "PRAGMA busy_timeout = 3000",
         "PRAGMA journal_mode = WAL",
         "PRAGMA synchronous = NORMAL",
