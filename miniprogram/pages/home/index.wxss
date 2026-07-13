@@ -390,6 +390,14 @@
     0 4rpx 10rpx rgba(93, 61, 42, 0.05);
 }
 
+.resume-ask-button.completion {
+  background: #fff4ee;
+  color: #8f3e35;
+  box-shadow:
+    0 0 0 1rpx rgba(166, 75, 62, 0.16),
+    0 6rpx 14rpx rgba(93, 61, 42, 0.06);
+}
+
 .voice-auth-panel {
   margin-top: 32rpx;
   padding: 24rpx;

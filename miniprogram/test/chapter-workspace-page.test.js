@@ -121,6 +121,10 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), voiceApiExports = {}
     resolveMemoirNarrativeGap: async () => {
       throw new Error("resolveMemoirNarrativeGap was not mocked");
     },
+    listMemoirFollowupTasks: async () => ({ items: [], total: 0 }),
+    createMemoirVoiceSession: async () => {
+      throw new Error("createMemoirVoiceSession was not mocked");
+    },
     ...voiceApiExports,
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
@@ -145,6 +149,67 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   ]);
   assert.equal(context.data.gapGroups[0].items[0].severityText, "重要");
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
+});
+
+test("chapter workspace lists follow-up questions and starts a task-bound human interview", async () => {
+  const createdSessions = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const followupTask = {
+    id: "task/1",
+    project_id: "project/1",
+    gap_id: "gap-1",
+    chapter_id: "chapter-1",
+    story_id: "story-1",
+    target_slot: "outcome",
+    question: "第一次离家以后，生活发生了什么变化？",
+    purpose: "补足故事结果和影响。",
+    known_context_summary: "十八岁离开家乡。",
+    priority: 3200,
+    status: "deferred",
+    assigned_session_id: null,
+    defer_until: null,
+    defer_reason: "之前暂缓",
+    created_by: "system",
+    started_at: null,
+    completed_at: null,
+    claims: [],
+    utterances: [],
+    created_at: "2026-07-13T10:00:00",
+    updated_at: "2026-07-13T10:00:00",
+  };
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      listMemoirFollowupTasks: async () => ({ items: [followupTask], total: 1 }),
+      createMemoirVoiceSession: async (input, options) => {
+        createdSessions.push({ input, options });
+        return { session: { id: "voice/1" } };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "followups" });
+
+  assert.equal(context.data.followupTasks[0].statusText, "以后再补");
+  assert.equal(context.data.followupTasks[0].canInterview, true);
+  const starting = page.startHumanFollowupInterview.call(context, {
+    currentTarget: { dataset: { taskId: "task/1" } },
+  });
+  assert.equal(context.data.startingFollowupTaskId, "task/1");
+  assert.equal(context.data.auditBusy, false);
+  await starting;
+
+  assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
+  assert.equal(createdSessions[0].input.interview_type, "human_interview");
+  assert.equal(createdSessions[0].input.session_goal, "book_completion");
+  assert.equal(createdSessions[0].input.current_followup_task_id, "task/1");
+  assert.match(navigations[0], /sessionGoal=book_completion/);
+  assert.equal(context.data.startingFollowupTaskId, "");
+  delete global.wx;
 });
 test("starting an audit only marks the audit control busy while the background job is submitted", async () => {
   let releaseAudit;

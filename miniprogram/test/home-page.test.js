@@ -179,7 +179,7 @@ test("home view patch keeps first-screen template state simple", () => {
       panelLabelText: "今天接着聊",
       projectHeadingText: "爷爷的故事",
       projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
-      primaryVoiceButtonTitle: "我来说一段",
+      primaryVoiceButtonTitle: "随便讲一段",
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
@@ -444,10 +444,11 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.equal(createdSessions.length, 1);
   assert.equal(syncedConsents.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
+  assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
+  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
   assert.equal(context.data.creatingVoice, false);
   delete global.wx;
 });
@@ -491,8 +492,9 @@ test("home creates free narration voice sessions without a guidance module", asy
 
   assert.equal(createdSessions.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
+  assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&interviewType=ai_interview&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
+  assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
   delete global.wx;
 });
 
@@ -544,6 +546,46 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
   assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
   assert.equal(navigations.length, 2);
+  delete global.wx;
+});
+
+test("home book completion entrance creates a guided session with an explicit completion goal", async () => {
+  const createdSessions = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async (input, options) => {
+        createdSessions.push({ input, options });
+        return { session: { id: "voice/completion" } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project/1",
+      projectTitle: "爷爷的故事",
+      projectDisplayTitle: "爷爷的故事",
+      hasProject: true,
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startBookCompletion.call(context);
+
+  assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
+  assert.equal(createdSessions[0].input.interview_type, "ai_interview");
+  assert.equal(createdSessions[0].input.session_goal, "book_completion");
+  assert.match(navigations[0], /sessionGoal=book_completion/);
   delete global.wx;
 });
 
