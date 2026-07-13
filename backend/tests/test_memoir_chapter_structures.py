@@ -734,9 +734,50 @@ async def test_chapter_structure_backfill_uses_placeholder_and_skips_user_modifi
     assert nodes[1].status == "needs_work"
     assert nodes[2].required is False
 
-    nodes[2].updated_by = MemoirNarrativeActorType.USER.value
-    nodes[2].updated_by_user_id = created["user_id"]
-    test_db.add(nodes[2])
+    story_link = await test_db.scalar(
+        select(MemoirChapterNodeStory).where(
+            MemoirChapterNodeStory.story_id == non_core_story.id
+        )
+    )
+    assert story_link is not None
+    await test_db.delete(nodes[1])
+    contract.constraints_json = {
+        **contract.constraints_json,
+        "include_story_ids": [non_core_story.id],
+    }
+    nodes[2].required = True
+    story_link.required = True
+    test_db.add_all([contract, nodes[2], story_link])
+    await test_db.commit()
+
+    repaired = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    assert repaired["repaired_contract_ids"] == [contract.id]
+    repaired_nodes = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNode)
+                .where(MemoirChapterNode.contract_id == contract.id)
+                .order_by(MemoirChapterNode.sort_order)
+            )
+        ).all()
+    )
+    assert [node.title for node in repaired_nodes[:3]] == [
+        "开场",
+        "待补充核心故事",
+        non_core_story.title,
+    ]
+    assert repaired_nodes[1].required is True
+    assert repaired_nodes[2].required is False
+    await test_db.refresh(story_link)
+    assert story_link.required is False
+
+    repaired_nodes[2].updated_by = MemoirNarrativeActorType.USER.value
+    repaired_nodes[2].updated_by_user_id = created["user_id"]
+    test_db.add(repaired_nodes[2])
     await test_db.commit()
     skipped = await run_chapter_structure_backfill(
         test_db,
