@@ -104,11 +104,20 @@ def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
     database.configure_sqlite_connection(connection, settings)
 
     assert connection.cursor_obj.statements == [
+        "PRAGMA foreign_keys = ON",
         "PRAGMA busy_timeout = 3000",
         "PRAGMA journal_mode = WAL",
         "PRAGMA synchronous = NORMAL",
     ]
     assert connection.cursor_obj.closed
+
+    migration_connection = FakeDBAPIConnection()
+    database.configure_sqlite_connection(
+        migration_connection,
+        settings,
+        enforce_foreign_keys=False,
+    )
+    assert migration_connection.cursor_obj.statements[0] == "PRAGMA foreign_keys = OFF"
 
 
 def test_configure_sqlite_connection_rejects_invalid_pragma_values():

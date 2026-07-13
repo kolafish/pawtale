@@ -21,7 +21,7 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
                 text("ALTER TABLE memoir_book_plan_chapters ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
             )
 
-        await assert_runtime_schema(engine)
+        await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
 
         async with engine.begin() as conn:
             columns = await _table_columns(conn, "memoir_book_plan_chapters")
@@ -34,6 +34,18 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
             "formalized_by_user_id",
             "formalized_at",
         }.issubset(output_columns)
+    finally:
+        await engine.dispose()
+
+
+async def test_runtime_schema_assert_rejects_disabled_sqlite_foreign_keys():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+
+        with pytest.raises(RuntimeError, match="foreign-key enforcement is disabled"):
+            await assert_runtime_schema(engine)
     finally:
         await engine.dispose()
 

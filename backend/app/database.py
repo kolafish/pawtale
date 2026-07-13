@@ -31,7 +31,12 @@ def _sqlite_pragma_value(value: str, allowed: set[str], setting_name: str) -> st
     return normalized
 
 
-def configure_sqlite_connection(dbapi_connection: Any, current_settings: Settings) -> None:
+def configure_sqlite_connection(
+    dbapi_connection: Any,
+    current_settings: Settings,
+    *,
+    enforce_foreign_keys: bool = True,
+) -> None:
     busy_timeout_ms = max(0, int(current_settings.sqlite_busy_timeout_ms))
     journal_mode = _sqlite_pragma_value(
         current_settings.sqlite_journal_mode,
@@ -46,6 +51,9 @@ def configure_sqlite_connection(dbapi_connection: Any, current_settings: Setting
 
     cursor = dbapi_connection.cursor()
     try:
+        cursor.execute(
+            f"PRAGMA foreign_keys = {'ON' if enforce_foreign_keys else 'OFF'}"
+        )
         cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
         cursor.execute(f"PRAGMA journal_mode = {journal_mode}")
         cursor.execute(f"PRAGMA synchronous = {synchronous}")
@@ -53,7 +61,11 @@ def configure_sqlite_connection(dbapi_connection: Any, current_settings: Setting
         cursor.close()
 
 
-def create_database_engine(current_settings: Settings) -> AsyncEngine:
+def create_database_engine(
+    current_settings: Settings,
+    *,
+    enforce_sqlite_foreign_keys: bool = True,
+) -> AsyncEngine:
     engine = create_async_engine(
         current_settings.database_url,
         echo=current_settings.app_env == "development",
@@ -62,7 +74,11 @@ def create_database_engine(current_settings: Settings) -> AsyncEngine:
     if is_sqlite_database_url(current_settings.database_url):
         @event.listens_for(engine.sync_engine, "connect")
         def _set_sqlite_pragmas(dbapi_connection: Any, _connection_record: Any) -> None:
-            configure_sqlite_connection(dbapi_connection, current_settings)
+            configure_sqlite_connection(
+                dbapi_connection,
+                current_settings,
+                enforce_foreign_keys=enforce_sqlite_foreign_keys,
+            )
 
     return engine
 

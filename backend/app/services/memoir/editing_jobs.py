@@ -313,17 +313,24 @@ async def claim_due_editing_jobs(
     now: datetime | None = None,
     limit: int | None = None,
     lease_seconds: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
 ) -> list[JobLease]:
     settings = get_settings()
     due_at = now or _utcnow()
     batch_size = limit or max(1, settings.memoir_editing_batch_size)
     lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
+    statement = select(MemoirEditingJob.id).where(_claimable_editing_job(due_at))
+    if job_type is not None:
+        statement = statement.where(MemoirEditingJob.job_type == job_type.value)
+    if project_id is not None:
+        statement = statement.where(MemoirEditingJob.project_id == project_id)
     candidate_ids = (
         await db.scalars(
-            select(MemoirEditingJob.id)
-            .where(_claimable_editing_job(due_at))
-            .order_by(MemoirEditingJob.run_after, MemoirEditingJob.created_at)
-            .limit(batch_size)
+            statement.order_by(
+                MemoirEditingJob.run_after,
+                MemoirEditingJob.created_at,
+            ).limit(batch_size)
         )
     ).all()
     await db.commit()
@@ -508,9 +515,16 @@ async def run_due_editing_jobs(
     session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
     *,
     limit: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
 ) -> int:
     async with session_maker() as db:
-        leases = await claim_due_editing_jobs(db, limit=limit)
+        leases = await claim_due_editing_jobs(
+            db,
+            limit=limit,
+            job_type=job_type,
+            project_id=project_id,
+        )
     results = await asyncio.gather(
         *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
     )

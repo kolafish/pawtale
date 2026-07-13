@@ -14,6 +14,7 @@ from app.migrations.memoir_narrative import (
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
+from app.migrations.sqlite_integrity import assert_sqlite_foreign_key_integrity
 
 
 async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
@@ -29,7 +30,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     memoir_semantic = await migrate_memoir_semantic_schema(engine)
     memoir_images = await migrate_memoir_image_schema(engine)
     memoir_narrative = await migrate_memoir_narrative_schema(engine)
-    await assert_runtime_schema(engine)
+    await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
     return {
         "auth": auth,
         "audit": audit,
@@ -41,9 +42,17 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     }
 
 
-async def assert_runtime_schema(engine: AsyncEngine) -> None:
+async def assert_runtime_schema(
+    engine: AsyncEngine,
+    *,
+    require_sqlite_foreign_keys: bool = True,
+) -> None:
     """Validate runtime schema without creating tables or altering columns."""
     await assert_base_runtime_schema(engine)
     await assert_memoir_voice_schema(engine)
     await assert_memoir_image_schema(engine)
     await assert_memoir_narrative_schema(engine)
+    await assert_sqlite_foreign_key_integrity(
+        engine,
+        require_enforcement=require_sqlite_foreign_keys,
+    )
