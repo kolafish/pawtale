@@ -20,6 +20,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
@@ -1126,3 +1127,46 @@ async def test_followup_prompt_drops_task_after_claim_becomes_private(client, te
         test_db,
         project_id=fixture["project_id"],
     ) is None
+
+
+async def test_followup_prompt_uses_the_pending_fact_confirmation_question(client, test_db):
+    fixture = await _create_story_gap(client, test_db)
+    confirmation_question = "您说的是比赛获奖了，还是只记得比赛结束了？"
+    test_db.add(
+        MemoirFollowupTaskUtterance(
+            project_id=fixture["project_id"],
+            task_id=fixture["task"].id,
+            utterance_id=fixture["created"]["utterance_id"],
+            result_role="related_context",
+            is_assignment_snapshot=True,
+            interpretation_status=(
+                MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
+            ),
+            confirmation_question=confirmation_question,
+        )
+    )
+    await test_db.commit()
+    started = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    voice_session = await test_db.get(
+        MemoirVoiceSession,
+        started.json()["session"]["id"],
+    )
+    assert voice_session is not None
+
+    context = await followup_planner.prompt_context_for_session(
+        test_db,
+        voice_session=voice_session,
+    )
+
+    assert context is not None
+    assert context.question == confirmation_question
+    assert f"本轮具体问题：{confirmation_question}" in context.prompt_text

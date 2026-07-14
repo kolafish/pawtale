@@ -8,6 +8,7 @@ export type ChapterNextActionKind =
   | "confirm_direction"
   | "start_audit"
   | "wait"
+  | "continue_fact_confirmation"
   | "open_followups"
   | "open_checks"
   | "generate_draft"
@@ -21,6 +22,7 @@ export interface ChapterNextAction {
   detail: string;
   actionText: string;
   disabled: boolean;
+  taskId?: string;
 }
 
 export const LOADING_NEXT_ACTION: ChapterNextAction = {
@@ -58,6 +60,20 @@ export function chapterNextAction(
       detail: workspace.contract.reader_takeaway || "确认后就可以按这个方向继续整理。",
       actionText: "这个方向可以",
       disabled: false,
+    };
+  }
+  const pendingFactConfirmation = workspace.answer_updates.find(
+    (item) => item.status === "needs_confirmation",
+  );
+  if (pendingFactConfirmation) {
+    return {
+      kind: "continue_fact_confirmation",
+      eyebrow: "还需要您说明一句",
+      title: pendingFactConfirmation.question,
+      detail: "刚才的回答还不能唯一对应到书里的人物或事实，直接再说明一句即可。",
+      actionText: "继续说明",
+      disabled: false,
+      taskId: pendingFactConfirmation.task_id,
     };
   }
   const audit = workspace.latest_audit_job;

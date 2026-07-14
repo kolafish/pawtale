@@ -19,6 +19,7 @@ function reviewItem() {
     followup_answer: {
       task_id: "task-1",
       status: "needs_confirmation",
+      confirmation_type: "answer_usage",
       answer_kind: null,
       direct_narrative_text: "",
       clarification_text: "",
@@ -32,17 +33,33 @@ function reviewItem() {
 }
 
 
-function loadSourceReviewPage(voiceApiExports = {}) {
+function loadSourceReviewPage(voiceApiExports = {}, followupTaskApiExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     listMemoirBookSourceReviewItems: async () => ({ items: [reviewItem()], total: 1 }),
     confirmMemoirBookSourceReviewItem: async () => {
       throw new Error("confirmMemoirBookSourceReviewItem was not mocked");
     },
+    createMemoirVoiceSession: async () => {
+      throw new Error("createMemoirVoiceSession was not mocked");
+    },
     ...voiceApiExports,
+  });
+  mockModule("../services/memoir-followup-task-api.ts", {
+    getMemoirFollowupTask: async () => ({
+      id: "task-1",
+      status: "pending",
+      assigned_session_id: null,
+    }),
+    ...followupTaskApiExports,
   });
   mockModule("../services/navigation.ts", {
     routeAuthError: () => false,
     switchToBook: () => {},
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsent: () => true,
+    syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
   });
   return loadPageModule("../pages/source-review/index.ts");
 }
@@ -79,6 +96,65 @@ test("source review page confirms the full answer as clarification", async () =>
   ]);
   assert.equal(context.data.success, true);
   assert.equal(context.data.saving, false);
+});
+
+test("source review continues fact confirmation through the existing AI voice chain", async () => {
+  const factItem = reviewItem();
+  factItem.followup_answer.confirmation_type = "fact_resolution";
+  factItem.followup_answer.confirmation_question = "这两个称呼说的是同一个人吗？";
+  const created = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo({ url }) { navigations.push(url); },
+  };
+  const { page } = loadSourceReviewPage({
+    listMemoirBookSourceReviewItems: async () => ({ items: [factItem], total: 1 }),
+    createMemoirVoiceSession: async (input, options) => {
+      created.push({ input, options });
+      return { session: { id: "voice-fact-1" } };
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project-1", eventId: "event-1" });
+  assert.equal(context.data.confirmationType, "fact_resolution");
+  assert.equal(context.data.questionText, "这两个称呼说的是同一个人吗？");
+  await page.startFactConfirmation.call(context);
+
+  assert.equal(created[0].input.interview_type, "ai_interview");
+  assert.equal(created[0].input.session_goal, "book_completion");
+  assert.equal(created[0].input.current_followup_task_id, "task-1");
+  assert.equal(created[0].options.projectId, "project-1");
+  assert.match(navigations[0], /voiceSessionId=voice-fact-1/);
+  delete global.wx;
+});
+
+test("source review resumes the existing fact confirmation voice session", async () => {
+  const factItem = reviewItem();
+  factItem.followup_answer.confirmation_type = "fact_resolution";
+  const navigations = [];
+  global.wx = {
+    navigateTo({ url }) { navigations.push(url); },
+  };
+  const { page } = loadSourceReviewPage({
+    listMemoirBookSourceReviewItems: async () => ({ items: [factItem], total: 1 }),
+    createMemoirVoiceSession: async () => {
+      throw new Error("existing session must be reused");
+    },
+  }, {
+    getMemoirFollowupTask: async () => ({
+      id: "task-1",
+      status: "in_progress",
+      assigned_session_id: "voice-existing-1",
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project-1", eventId: "event-1" });
+  await page.startFactConfirmation.call(context);
+
+  assert.match(navigations[0], /voiceSessionId=voice-existing-1/);
+  delete global.wx;
 });
 
 

@@ -31,6 +31,13 @@
         disabled="{{nextAction.disabled || contractRevisionBusy || auditBusy || draftGenerationBusy}}"
         bindtap="runNextAction"
       >{{nextAction.actionText}}</button>
+      <view wx:if="{{appliedAnswerUpdates.length}}" class="answer-update-band">
+        <text class="answer-update-label">最近已根据您的回答更新</text>
+        <view wx:for="{{appliedAnswerUpdates}}" wx:key="id" class="answer-update-row">
+          <text class="answer-update-question">{{item.question}}</text>
+          <text class="answer-update-summary">{{item.summaryText}}</text>
+        </view>
+      </view>
       <button class="overview-detail-action" data-tab="structure" bindtap="changeTab">查看详细内容</button>
     </view>
 
@@ -95,7 +102,8 @@
           <view class="claim-list">
             <view wx:for="{{story.claims}}" wx:for-item="claim" wx:key="id" class="claim-row">
               <view class="claim-head">
-                <text class="claim-label">事实</text>
+                <text class="claim-label">已记录的内容</text>
+                <text class="claim-status">{{claim.verificationStatusText}}</text>
                 <text class="claim-evidence-count">{{claim.evidenceCountText}}</text>
               </view>
               <text class="claim-statement">{{claim.statement}}</text>
@@ -358,7 +366,7 @@
             data-task-id="{{task.id}}"
             loading="{{startingFollowupTaskId === task.id}}"
             disabled="{{startingFollowupTaskId === task.id}}"
-            bindtap="startHumanFollowupInterview"
+            bindtap="startFollowupInterview"
           >
             {{task.actionText}}
           </button>

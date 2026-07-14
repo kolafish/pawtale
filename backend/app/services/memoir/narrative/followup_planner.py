@@ -13,6 +13,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimPublicationStatus,
     MemoirClaimEvidenceRole,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
@@ -36,6 +37,7 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirFollowupTask,
     MemoirFollowupTaskClaim,
+    MemoirFollowupTaskUtterance,
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStorySlot,
@@ -794,10 +796,27 @@ async def prompt_context_for_session(
         if relation.context_role == MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value
         and relation.claim_id in claims_by_id
     ]
+    pending_confirmation_question = await db.scalar(
+        select(MemoirFollowupTaskUtterance.confirmation_question)
+        .where(
+            MemoirFollowupTaskUtterance.project_id == task.project_id,
+            MemoirFollowupTaskUtterance.task_id == task.id,
+            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
+            MemoirFollowupTaskUtterance.interpretation_status
+            == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value,
+            MemoirFollowupTaskUtterance.confirmation_question != "",
+        )
+        .order_by(
+            MemoirFollowupTaskUtterance.created_at.desc(),
+            MemoirFollowupTaskUtterance.id.desc(),
+        )
+        .limit(1)
+    )
+    question = (pending_confirmation_question or task.question).strip()
     lines = [
         f"当前补访任务 ID：{task.id}",
         f"本轮唯一目标：{task.purpose}",
-        f"本轮具体问题：{task.question}",
+        f"本轮具体问题：{question}",
     ]
     if known:
         lines.append("可承接的已知事实：" + "；".join(dict.fromkeys(known)))
@@ -806,6 +825,6 @@ async def prompt_context_for_session(
     lines.append("只能围绕这一项补访；请邀请叙述者完整讲一段，不得拆成连续的细节盘问，也不得编造未给出的事实。")
     return FollowupPromptContext(
         task_id=task.id,
-        question=task.question,
+        question=question,
         prompt_text="\n".join(lines),
     )

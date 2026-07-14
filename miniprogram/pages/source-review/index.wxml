@@ -19,7 +19,7 @@
       <text class="source-copy">{{sourceText}}</text>
     </view>
 
-    <view wx:if="{{sourceText}}" class="choice-section">
+    <view wx:if="{{sourceText && confirmationType === 'answer_usage'}}" class="choice-section">
       <text class="section-title">请选择最符合的一项</text>
       <view class="choice-list">
         <view
@@ -36,6 +36,17 @@
           </view>
         </view>
       </view>
+    </view>
+
+    <view wx:if="{{confirmationType === 'fact_resolution'}}" class="fact-confirmation-section">
+      <text class="section-title">再说明一句就可以</text>
+      <text class="fact-confirmation-detail">我会继续使用现有的 AI 语音访谈来听您回答，不需要重新整理整段素材。</text>
+      <button
+        class="primary-button"
+        loading="{{startingVoice}}"
+        disabled="{{startingVoice}}"
+        bindtap="startFactConfirmation"
+      >{{startingVoice ? "正在准备" : "用语音继续说明"}}</button>
     </view>
 
     <view wx:if="{{selectedKind === 'mixed'}}" class="split-section">
@@ -78,7 +89,7 @@
 
     <text wx:if="{{error}}" class="error-message">{{error}}</text>
 
-    <view wx:if="{{sourceText}}" class="action-section">
+    <view wx:if="{{sourceText && confirmationType === 'answer_usage'}}" class="action-section">
       <button
         class="primary-button"
         loading="{{saving}}"

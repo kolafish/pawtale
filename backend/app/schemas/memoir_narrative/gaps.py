@@ -194,6 +194,16 @@ class MemoirChapterWorkspaceGapGroups(BaseModel):
     accepted_incomplete: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
 
 
+class MemoirChapterWorkspaceAnswerUpdateResponse(BaseModel):
+    id: str
+    task_id: str
+    status: Literal["applied", "needs_confirmation"]
+    question: str
+    answer_text: str = ""
+    summaries: list[str] = Field(default_factory=list)
+    created_at: datetime
+
+
 class MemoirChapterWorkspaceResponse(BaseModel):
     project_id: str
     chapter_id: str
@@ -201,6 +211,9 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     contract: MemoirChapterContractResponse | None = None
     stories: list[MemoirChapterWorkspaceStoryResponse] = Field(default_factory=list)
     available_stories: list[MemoirChapterWorkspaceAvailableStoryResponse] = Field(
+        default_factory=list
+    )
+    answer_updates: list[MemoirChapterWorkspaceAnswerUpdateResponse] = Field(
         default_factory=list
     )
     gaps: MemoirChapterWorkspaceGapGroups
