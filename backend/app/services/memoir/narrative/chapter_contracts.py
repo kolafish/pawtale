@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import NAMESPACE_URL, uuid5
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
@@ -11,9 +11,13 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
+    MemoirClaimEvidenceRole,
+    MemoirClaimPublicationStatus,
+    MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
+    MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
     MemoirStoryVerificationStatus,
 )
@@ -23,9 +27,11 @@ from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
     MemoirChapterNodeStory,
+    MemoirClaim,
     MemoirClaimEvidence,
     MemoirStory,
     MemoirStoryClaim,
+    MemoirStoryRevision,
 )
 from app.schemas.memoir_narrative import (
     MemoirChapterContractConstraints,
@@ -566,6 +572,155 @@ async def _required_legacy_story(
     )
 
 
+async def _eligible_story_claim_shapes(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    story_ids: set[str],
+) -> set[tuple[str, str, bool]]:
+    if not story_ids:
+        return set()
+    rows = (
+        await db.execute(
+            select(
+                MemoirStoryClaim.story_id,
+                MemoirStoryClaim.narrative_role,
+                MemoirStoryClaim.is_core,
+            )
+            .join(
+                MemoirStory,
+                (MemoirStory.project_id == MemoirStoryClaim.project_id)
+                & (MemoirStory.id == MemoirStoryClaim.story_id),
+            )
+            .join(
+                MemoirStoryRevision,
+                (MemoirStoryRevision.project_id == MemoirStory.project_id)
+                & (MemoirStoryRevision.story_id == MemoirStory.id)
+                & (MemoirStoryRevision.story_version == MemoirStory.version),
+            )
+            .join(
+                MemoirClaim,
+                (MemoirClaim.project_id == MemoirStoryClaim.project_id)
+                & (MemoirClaim.id == MemoirStoryClaim.claim_id),
+            )
+            .join(
+                MemoirClaimEvidence,
+                (MemoirClaimEvidence.project_id == MemoirStoryClaim.project_id)
+                & (MemoirClaimEvidence.claim_id == MemoirStoryClaim.claim_id),
+            )
+            .where(
+                MemoirStoryClaim.project_id == project_id,
+                MemoirStoryClaim.story_id.in_(story_ids),
+                MemoirStory.lifecycle_status
+                == MemoirStoryLifecycleStatus.ACTIVE.value,
+                MemoirStory.publication_status
+                == MemoirStoryPublicationStatus.ELIGIBLE.value,
+                MemoirStory.verification_status.not_in(
+                    {
+                        MemoirStoryVerificationStatus.DISPUTED.value,
+                        MemoirStoryVerificationStatus.REJECTED.value,
+                    }
+                ),
+                MemoirClaim.publication_status
+                == MemoirClaimPublicationStatus.ELIGIBLE.value,
+                MemoirClaim.verification_status.not_in(
+                    {
+                        MemoirClaimVerificationStatus.DISPUTED.value,
+                        MemoirClaimVerificationStatus.REJECTED.value,
+                    }
+                ),
+                MemoirClaim.superseded_by_claim_id.is_(None),
+                MemoirClaimEvidence.evidence_role
+                == MemoirClaimEvidenceRole.SUPPORTS.value,
+                or_(
+                    func.trim(func.coalesce(MemoirClaimEvidence.quote, "")) != "",
+                    func.trim(func.coalesce(MemoirClaimEvidence.evidence_note, ""))
+                    != "",
+                ),
+            )
+            .distinct()
+        )
+    ).all()
+    return {
+        (str(story_id), str(narrative_role), bool(is_core))
+        for story_id, narrative_role, is_core in rows
+    }
+
+
+async def _legacy_framing_story_ids(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    candidates: list[MemoirStory],
+    required_story: MemoirStory | None,
+) -> dict[str, str]:
+    shapes = await _eligible_story_claim_shapes(
+        db,
+        project_id=project_id,
+        story_ids={story.id for story in candidates},
+    )
+
+    def first_story_id(*, roles: set[str]) -> str | None:
+        return next(
+            (
+                story.id
+                for story in candidates
+                if any(
+                    story_id == story.id and narrative_role in roles
+                    for story_id, narrative_role, _ in shapes
+                )
+            ),
+            None,
+        )
+
+    framing: dict[str, str] = {}
+    if required_story is not None and any(
+        story_id == required_story.id and is_core
+        for story_id, _, is_core in shapes
+    ):
+        framing[MemoirChapterNodeType.OPENING.value] = required_story.id
+    reflection_story_id = first_story_id(
+        roles={MemoirStoryNarrativeRole.REFLECTION.value}
+    )
+    if reflection_story_id is not None:
+        framing[MemoirChapterNodeType.REFLECTION.value] = reflection_story_id
+    closing_story_id = first_story_id(
+        roles={
+            MemoirStoryNarrativeRole.OUTCOME.value,
+            MemoirStoryNarrativeRole.REFLECTION.value,
+        }
+    )
+    if closing_story_id is not None:
+        framing[MemoirChapterNodeType.CLOSING.value] = closing_story_id
+    return framing
+
+
+def _framing_node_has_supported_claim(
+    *,
+    node_type: str,
+    story_ids: set[str],
+    shapes: set[tuple[str, str, bool]],
+) -> bool:
+    if node_type == MemoirChapterNodeType.OPENING.value:
+        return any(
+            story_id in story_ids and is_core
+            for story_id, _, is_core in shapes
+        )
+    if node_type == MemoirChapterNodeType.REFLECTION.value:
+        roles = {MemoirStoryNarrativeRole.REFLECTION.value}
+    elif node_type == MemoirChapterNodeType.CLOSING.value:
+        roles = {
+            MemoirStoryNarrativeRole.OUTCOME.value,
+            MemoirStoryNarrativeRole.REFLECTION.value,
+        }
+    else:
+        return True
+    return any(
+        story_id in story_ids and narrative_role in roles
+        for story_id, narrative_role, _ in shapes
+    )
+
+
 def _legacy_core_questions(
     *,
     chapter: MemoirBookPlanChapter,
@@ -624,6 +779,12 @@ async def create_legacy_contract_suggestion(
         db,
         project_id=project_id,
         candidates=candidates,
+    )
+    framing_story_ids = await _legacy_framing_story_ids(
+        db,
+        project_id=project_id,
+        candidates=candidates,
+        required_story=required_story,
     )
     questions = _legacy_core_questions(chapter=chapter, candidates=candidates)
     contract = MemoirChapterContract(
@@ -695,6 +856,7 @@ async def create_legacy_contract_suggestion(
                 None,
             ),
         )
+    created_nodes: list[MemoirChapterNode] = []
     for index, (node_type, title, purpose, required, story) in enumerate(node_specs):
         node = MemoirChapterNode(
             project_id=project_id,
@@ -719,6 +881,7 @@ async def create_legacy_contract_suggestion(
         )
         db.add(node)
         await db.flush()
+        created_nodes.append(node)
         if story is not None:
             db.add(
                 MemoirChapterNodeStory(
@@ -728,6 +891,20 @@ async def create_legacy_contract_suggestion(
                     story_role=MemoirChapterNodeStoryRole.PRIMARY.value,
                     sort_order=0,
                     required=required,
+                    created_by=MemoirNarrativeActorType.SYSTEM.value,
+                )
+            )
+    for node in created_nodes:
+        framing_story_id = framing_story_ids.get(node.node_type)
+        if framing_story_id is not None:
+            db.add(
+                MemoirChapterNodeStory(
+                    project_id=project_id,
+                    node_id=node.id,
+                    story_id=framing_story_id,
+                    story_role=MemoirChapterNodeStoryRole.SUPPORTING.value,
+                    sort_order=0,
+                    required=False,
                     created_by=MemoirNarrativeActorType.SYSTEM.value,
                 )
             )
@@ -778,6 +955,16 @@ async def repair_legacy_contract_suggestion(
     story_nodes = [
         node for node in nodes if node.node_type == MemoirChapterNodeType.STORY.value
     ]
+    framing_nodes = [
+        node
+        for node in nodes
+        if node.node_type
+        in {
+            MemoirChapterNodeType.OPENING.value,
+            MemoirChapterNodeType.REFLECTION.value,
+            MemoirChapterNodeType.CLOSING.value,
+        }
+    ]
     placeholder_nodes = [
         node
         for node in story_nodes
@@ -790,17 +977,38 @@ async def repair_legacy_contract_suggestion(
         if node not in placeholder_nodes
     ):
         return "skipped_modified"
+    story_node_story_ids = {
+        link.story_id
+        for node in story_nodes
+        for link in links_by_node.get(node.id, [])
+    }
+    if any(
+        len(links_by_node.get(node.id, [])) > 1
+        or any(
+            link.story_role != MemoirChapterNodeStoryRole.SUPPORTING.value
+            or link.required
+            or link.story_id not in story_node_story_ids
+            for link in links_by_node.get(node.id, [])
+        )
+        for node in framing_nodes
+    ):
+        return "skipped_modified"
 
     candidates = await legacy_story_candidates(
         db,
         project_id=contract.project_id,
         chapter_id=contract.chapter_id,
     )
-    linked_story_ids = {link.story_id for link in links}
     required_story = await _required_legacy_story(
         db,
         project_id=contract.project_id,
-        candidates=[story for story in candidates if story.id in linked_story_ids],
+        candidates=[story for story in candidates if story.id in story_node_story_ids],
+    )
+    framing_story_ids = await _legacy_framing_story_ids(
+        db,
+        project_id=contract.project_id,
+        candidates=candidates,
+        required_story=required_story,
     )
     required_story_id = required_story.id if required_story is not None else None
     desired_include_ids = [required_story_id] if required_story_id else []
@@ -827,6 +1035,38 @@ async def repair_legacy_contract_suggestion(
                 link.required = link_required
                 db.add(link)
                 changed = True
+
+    for node in framing_nodes:
+        node_links = links_by_node.get(node.id, [])
+        expected_story_id = framing_story_ids.get(node.node_type)
+        expected_link = next(
+            (
+                link
+                for link in node_links
+                if link.story_id == expected_story_id
+                and link.story_role == MemoirChapterNodeStoryRole.SUPPORTING.value
+                and not link.required
+            ),
+            None,
+        )
+        if expected_story_id is not None and expected_link is not None:
+            continue
+        for link in node_links:
+            await db.delete(link)
+            changed = True
+        if expected_story_id is not None:
+            db.add(
+                MemoirChapterNodeStory(
+                    project_id=contract.project_id,
+                    node_id=node.id,
+                    story_id=expected_story_id,
+                    story_role=MemoirChapterNodeStoryRole.SUPPORTING.value,
+                    sort_order=0,
+                    required=False,
+                    created_by=MemoirNarrativeActorType.SYSTEM.value,
+                )
+            )
+            changed = True
 
     if required_story_id is None and placeholder is None:
         insertion_index = next(
@@ -904,6 +1144,23 @@ async def confirm_contract(
     if not nodes:
         raise ValueError("chapter contract requires at least one structure node")
 
+    from app.services.memoir.narrative import chapter_nodes
+
+    for node in nodes:
+        if node.node_type == MemoirChapterNodeType.STORY.value:
+            await chapter_nodes.recompute_story_node_status(
+                db,
+                node=node,
+                actor_user_id=actor_user_id,
+            )
+            continue
+        if node.required and node.status == MemoirChapterNodeStatus.PLANNED.value:
+            node.status = MemoirChapterNodeStatus.READY.value
+            node.updated_by = MemoirNarrativeActorType.USER.value
+            node.updated_by_user_id = actor_user_id
+            db.add(node)
+    await db.flush()
+
     previous = await db.scalar(
         select(MemoirChapterContract).where(
             MemoirChapterContract.project_id == project_id,
@@ -957,6 +1214,11 @@ async def validate_contract_for_generation(
             )
         ).all()
     } if story_ids else {}
+    eligible_claim_shapes = await _eligible_story_claim_shapes(
+        db,
+        project_id=project_id,
+        story_ids=set(stories),
+    )
 
     issues: list[MemoirChapterContractValidationIssue] = []
     if contract.status != MemoirChapterContractStatus.CONFIRMED.value:
@@ -1020,6 +1282,29 @@ async def validate_contract_for_generation(
                     )
                 )
 
+    for node in nodes:
+        if node.status == MemoirChapterNodeStatus.EXCLUDED.value:
+            continue
+        if not node.required and node.status != MemoirChapterNodeStatus.READY.value:
+            continue
+        node_story_ids = {
+            link.story_id for link in links_by_node.get(node.id, [])
+        }
+        if not _framing_node_has_supported_claim(
+            node_type=node.node_type,
+            story_ids=node_story_ids,
+            shapes=eligible_claim_shapes,
+        ):
+            issues.append(
+                MemoirChapterContractValidationIssue(
+                    code="framing_node_has_no_supported_claim",
+                    message=(
+                        f"结构节点“{node.title}”缺少与其作用匹配且有证据的 Claim。"
+                    ),
+                    node_id=node.id,
+                )
+            )
+
     linked_story_ids = set(stories)
     constraints = contract_constraints(contract)
     excluded_story_ids = set(constraints.exclude_story_ids)
@@ -1031,7 +1316,10 @@ async def validate_contract_for_generation(
                 or story.publication_status
                 != MemoirStoryPublicationStatus.ELIGIBLE.value
                 or story.verification_status
-                == MemoirStoryVerificationStatus.REJECTED.value
+                in {
+                    MemoirStoryVerificationStatus.DISPUTED.value,
+                    MemoirStoryVerificationStatus.REJECTED.value,
+                }
             ):
                 issues.append(
                     MemoirChapterContractValidationIssue(

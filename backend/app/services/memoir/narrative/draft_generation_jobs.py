@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
+    MemoirChapterNodeType,
     MemoirDraftBlockRole,
     MemoirNarrativeActorType,
 )
@@ -37,6 +38,14 @@ from app.services.memoir.narrative.draft_generation_context import (
 
 JOB_MODE_GENERATE = "generate"
 JOB_MODE_REVISE = "revise"
+GENERATION_PRIORITY = {
+    MemoirChapterNodeType.OPENING.value: 0,
+    MemoirChapterNodeType.BACKGROUND.value: 1,
+    MemoirChapterNodeType.STORY.value: 1,
+    MemoirChapterNodeType.REFLECTION.value: 2,
+    MemoirChapterNodeType.CLOSING.value: 3,
+    MemoirChapterNodeType.TRANSITION.value: 4,
+}
 
 
 def _signature(payload: dict[str, object]) -> str:
@@ -199,7 +208,7 @@ async def _run_initial_generation(
             )
         ).all()
     )
-    created_block_ids: list[str] = []
+    created_block_ids_by_node: dict[str, str] = {}
     skipped_node_ids = [node.id for node in selected_nodes if node.id in existing_node_ids]
     nodes_to_generate = [node for node in selected_nodes if node.id not in existing_node_ids]
     if not nodes_to_generate:
@@ -216,7 +225,15 @@ async def _run_initial_generation(
     client = ai_client or get_ai_service(
         str(payload.get("ai_model") or "").strip() or None
     )
-    for node in nodes_to_generate:
+    generation_order = sorted(
+        nodes_to_generate,
+        key=lambda node: (
+            GENERATION_PRIORITY[node.node_type],
+            node.sort_order,
+            node.id,
+        ),
+    )
+    for node in generation_order:
         context = await build_node_generation_context(
             db,
             project_id=job.project_id,
@@ -244,7 +261,12 @@ async def _run_initial_generation(
             model=getattr(client, "model_name", None),
             prompt_snapshot=generated.prompt_snapshot,
         )
-        created_block_ids.append(block.id)
+        created_block_ids_by_node[node.id] = block.id
+    created_block_ids = [
+        created_block_ids_by_node[node.id]
+        for node in selected_nodes
+        if node.id in created_block_ids_by_node
+    ]
     return EditingJobResult(
         result_json={
             "mode": JOB_MODE_GENERATE,
