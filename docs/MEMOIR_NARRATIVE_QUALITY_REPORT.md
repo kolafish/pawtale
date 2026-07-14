@@ -38,13 +38,14 @@
 - SQLite 恢复工具已验证会保留迁移后调查快照并清理 WAL/SHM/journal，恢复后 `integrity_check=ok`。
 - 盲审准备工具会随机分配 A/B，将候选正文与答案/版本来源物理分离，并用 SHA-256 绑定正文、完整私有测量 artifact、确定性指标和叙述者复核。
 - 质量 evaluator 已拒绝空候选、正文换包、身份泄露、无版本来源、无人工评审来源和无审计来源的手填指标；最终评估会重新校验完整 artifact、候选版本、正文逐句来源及汇总指标的一致性。
-- PR12 代码集成提交 `d6f5b558` 已同步 `main` `c4663591`；后端全量测试 746 项通过，小程序全量测试 484 项和类型检查均通过。
+- PR12 代码集成提交 `d6f5b558` 已同步 `main` `c4663591`；后端全量测试 746 项通过，小程序全量测试 485 项和类型检查均通过。
 - 当前 head 已在停止写入的受控真实数据库副本上完成三类 provider 工作流验证：生涯/事件章节事实句来源映射分别为 6/6、8/8，关系章节为 6/6；三章未解决的 time/people/evidence high gap、locked block 变化和 unrelated block 变化均为零，SQLite `integrity_check=ok` 且 `foreign_key_check` 无记录。
 - 关系章节验证使用项目级候选 Story“与李阅的关系”，先通过正式 owner include 应用服务加入章节，再执行 Claim/slot/contract、块生成、带 feedback 的局部修订和章节组装。测试夹具只把其他未确认 Story 移出该受控章节，不再把人物指代不同的关系 Story 静默合并。
 - 最新生产一致性快照先在 ECS 端停止 Pawtale writers、切换到独立 `DELETE` journal 并完成完整性、外键和 SHA-256 校验，再传回受控目录；本地 45,326,336 字节和 SHA-256 `5546d9018e68355fec92ed363f46f99451b73980e4c0ffc3a85c94e7a0e4981a` 与 ECS 完全一致。PR12 runtime schema 在该副本上迁移成功，87 张既有表中 84 张的行数和共同字段内容哈希未变化；`memoir_editing_jobs` 只清理了 17 条旧整章链路终态记录（16 条 `succeeded`、1 条 `skipped`），其余 684 条任务逐字段一致；另新增 1 个绑定历史章节版本的 legacy DraftBlock version，并只更新对应 DraftBlock 的 `current_version_id` 和 `updated_at`。迁移前后的 38 个项目、772 个音频、243 个 utterance、883 个 transcript version、59 个历史章节稿版本、12 个成书版本、779 个 Claim、794 条 Evidence 和 193 个 Story 均保留，迁移后 `integrity_check=ok`、`foreign_key_check=0`，且不存在指向 `*_old` 的外键。
 - 当前线程 review 补充了旧任务切换前置条件：只要旧整章生成任务仍为 `pending/running`，schema 迁移必须失败并保留全部任务；只有 `succeeded/failed/skipped` 终态记录可以在删除旧枚举约束时清理。真实事件序列回归测试同时覆盖“活跃任务阻断、事务不删除、终态后允许清理”。
 - 同步最新 `main` 时，当前线程 review 发现历史补全回答修复仍导入已删除的 `book_auto_revision`。该阻塞问题已修正为使结构化章节稿失效并要求显式重新组装，不再恢复旧整章重写任务；相关补全解释、迁移和素材归章回归测试均已通过。
 - 章节候选素材默认只展示 8 条，支持按人物或事情搜索及显式展开全部；当前线程 review 发现并修复了“加入素材期间搜索会丢失忙碌状态并可能重复提交”的事件序列问题。
+- 最新真实数据审计显示两个候选样本章节分别有 16/8 个 Story、86/27 个待核对 Claim，原页面默认展开全部 slot、Claim 和 Evidence，无法形成可执行的所有者门禁。章节工作台现改为先显示“本章准备讲的事”和 Story 核对进度，每条 Story 的具体缺失项、Claim 和 Evidence 只在用户明确展开时显示；展开状态在刷新后保留，Story 移出后清理，不改变任何确认语义或后端决策。
 - 最新增量检查发现活跃回忆录项目从 20 个增加到 21 个，其中“写给他的话”有 12 条新 utterance 尚未进入叙事摄取，且 1 个新增历史章节版本尚未形成 legacy 快照。生产环境在停止 Pawtale writers、生成并校验完整 manifest 备份后，通过正式 `ingest`、`process-ingestion`、`stories` 阶段使 12 个任务全部成功，新增 116 个带 Evidence 的未核对 Claim，以及 13 个 AI `unreviewed` Story 和 9 个系统 `needs_verification` Story。前后数据库对比确认 4 个 Contract、既有 Story 的人工决策字段和既有 slot 的人工 resolution 均为零变化，没有自动确认 Story、Claim、slot 或 Contract。`structures` 正确跳过 4 个已存在 Contract，PR12 runtime migration 随后在受控副本上补齐 1 个 legacy version。最终全局检查的 21 个活跃项目均为 `migration_complete=true`、`cutover_data_ready=true`，无数据阻塞项目；`chapter_workflow_ready=false` 仍由真实用户确认和结构化正文块门禁保持。
 - 当前 PR12 OpenAPI 的 98 个 memoir 路径全部已存在于 ECS 前置版本；生产只额外保留 `/book-editor/chapters/{chapter_id}/draft/generate` 和 `/book-editor/output/generate` 两个 PR12 将删除的旧生成入口。因此项目所有者可以在正式切流前完成 Story、Claim、slot、Contract 和 DraftBlock 决策，不需要临时部署 PR12 或兼容 API。
 

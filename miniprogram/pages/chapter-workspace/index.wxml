@@ -164,7 +164,7 @@
         <text wx:if="{{topologyError}}" class="structure-error">{{topologyError}}</text>
       </view>
 
-      <view class="section-heading">
+      <view class="section-heading story-review-heading">
         <text class="section-title">内容顺序</text>
         <text class="section-count">{{nodes.length}} 个</text>
       </view>
@@ -225,8 +225,8 @@
 
     <view wx:elif="{{activeTab === 'stories'}}" class="content-section">
       <view class="section-heading">
-        <text class="section-title">本章故事</text>
-        <text class="section-count">{{stories.length}} 个</text>
+        <text class="section-title">本章准备讲的事</text>
+        <text class="section-count story-review-progress">{{storyReviewProgressText}}</text>
       </view>
       <view wx:if="{{stories.length}}" class="story-list">
         <view wx:for="{{stories}}" wx:for-item="story" wx:key="id" class="story-item">
@@ -244,7 +244,7 @@
               loading="{{story.busy}}"
               disabled="{{story.busy}}"
               bindtap="decideStory"
-            >确认故事</button>
+            >这件事正确</button>
             <button
               wx:if="{{story.verification_status !== 'rejected'}}"
               class="compact-danger-button"
@@ -252,7 +252,7 @@
               data-decision="reject"
               disabled="{{story.busy}}"
               bindtap="decideStory"
-            >故事有误</button>
+            >内容有误</button>
             <button
               wx:if="{{story.canExcludeFromChapter}}"
               data-story-id="{{story.id}}"
@@ -281,65 +281,83 @@
             </picker>
           </view>
 
-          <view class="slot-grid">
-            <view wx:for="{{story.slots}}" wx:for-item="slot" wx:key="slot_key" class="slot-row">
-              <view class="slot-state">
-                <text class="slot-name">{{slot.labelText}}{{slot.required ? " *" : ""}}</text>
-                <text class="slot-status {{slot.statusClass}}">{{slot.statusText}}</text>
-              </view>
-              <view wx:if="{{slot.canResolve}}" class="slot-actions">
-                <button
-                  data-story-id="{{story.id}}"
-                  data-slot-key="{{slot.slot_key}}"
-                  data-decision="accepted_incomplete"
-                  loading="{{slot.busy}}"
-                  disabled="{{slot.busy}}"
-                  bindtap="resolveStorySlot"
-                >接受缺失</button>
-                <button
-                  data-story-id="{{story.id}}"
-                  data-slot-key="{{slot.slot_key}}"
-                  data-decision="not_applicable"
-                  disabled="{{slot.busy}}"
-                  bindtap="resolveStorySlot"
-                >不适用</button>
-              </view>
-            </view>
-          </view>
+          <button
+            class="story-detail-toggle"
+            data-story-id="{{story.id}}"
+            aria-label="{{story.expanded ? '收起具体内容' : '核对具体内容'}}"
+            bindtap="toggleStoryDetails"
+          >
+            <text>{{story.detailCountText}}</text>
+            <text class="story-detail-toggle-action">{{story.expanded ? "收起" : "核对具体内容"}}</text>
+          </button>
 
-          <view class="claim-list">
-            <view wx:for="{{story.claims}}" wx:for-item="claim" wx:key="id" class="claim-row">
-              <view class="claim-head">
-                <text class="claim-label">事实</text>
-                <view class="claim-meta">
-                  <text class="claim-review-status">{{claim.statusText}}</text>
-                  <text class="claim-evidence-count">{{claim.evidenceCountText}}</text>
+          <view wx:if="{{story.expanded}}" class="story-detail-body">
+            <view wx:if="{{story.slots.length}}" class="story-detail-section">
+              <text class="story-detail-heading">还缺哪些内容</text>
+              <view class="slot-grid">
+                <view wx:for="{{story.slots}}" wx:for-item="slot" wx:key="slot_key" class="slot-row">
+                  <view class="slot-state">
+                    <text class="slot-name">{{slot.labelText}}{{slot.required ? " *" : ""}}</text>
+                    <text class="slot-status {{slot.statusClass}}">{{slot.statusText}}</text>
+                  </view>
+                  <view wx:if="{{slot.canResolve}}" class="slot-actions">
+                    <button
+                      data-story-id="{{story.id}}"
+                      data-slot-key="{{slot.slot_key}}"
+                      data-decision="accepted_incomplete"
+                      loading="{{slot.busy}}"
+                      disabled="{{slot.busy}}"
+                      bindtap="resolveStorySlot"
+                    >暂时没有更多</button>
+                    <button
+                      data-story-id="{{story.id}}"
+                      data-slot-key="{{slot.slot_key}}"
+                      data-decision="not_applicable"
+                      disabled="{{slot.busy}}"
+                      bindtap="resolveStorySlot"
+                    >这项不适用</button>
+                  </view>
                 </view>
               </view>
-              <text class="claim-statement">{{claim.statement}}</text>
-              <view wx:if="{{claim.evidence.length}}" class="evidence-list">
-                <text wx:for="{{claim.evidence}}" wx:for-item="evidence" wx:key="id" class="evidence-quote">
-                  {{evidence.quote || evidence.evidence_note}}
-                </text>
-              </view>
-              <view wx:if="{{claim.canDecide}}" class="decision-actions claim-actions">
-                <button
-                  wx:if="{{claim.verification_status !== 'confirmed'}}"
-                  class="compact-primary-button"
-                  data-claim-id="{{claim.id}}"
-                  data-decision="confirm"
-                  loading="{{claim.busy}}"
-                  disabled="{{claim.busy}}"
-                  bindtap="decideClaim"
-                >事实正确</button>
-                <button
-                  wx:if="{{claim.verification_status !== 'rejected'}}"
-                  class="compact-danger-button"
-                  data-claim-id="{{claim.id}}"
-                  data-decision="reject"
-                  disabled="{{claim.busy}}"
-                  bindtap="decideClaim"
-                >事实有误</button>
+            </view>
+
+            <view wx:if="{{story.claims.length}}" class="story-detail-section">
+              <text class="story-detail-heading">具体事实</text>
+              <view class="claim-list">
+                <view wx:for="{{story.claims}}" wx:for-item="claim" wx:key="id" class="claim-row">
+                  <view class="claim-head">
+                    <text class="claim-label">事实</text>
+                    <view class="claim-meta">
+                      <text class="claim-review-status">{{claim.statusText}}</text>
+                      <text class="claim-evidence-count">{{claim.evidenceCountText}}</text>
+                    </view>
+                  </view>
+                  <text class="claim-statement">{{claim.statement}}</text>
+                  <view wx:if="{{claim.evidence.length}}" class="evidence-list">
+                    <text wx:for="{{claim.evidence}}" wx:for-item="evidence" wx:key="id" class="evidence-quote">
+                      {{evidence.quote || evidence.evidence_note}}
+                    </text>
+                  </view>
+                  <view wx:if="{{claim.canDecide}}" class="decision-actions claim-actions">
+                    <button
+                      wx:if="{{claim.verification_status !== 'confirmed'}}"
+                      class="compact-primary-button"
+                      data-claim-id="{{claim.id}}"
+                      data-decision="confirm"
+                      loading="{{claim.busy}}"
+                      disabled="{{claim.busy}}"
+                      bindtap="decideClaim"
+                    >事实正确</button>
+                    <button
+                      wx:if="{{claim.verification_status !== 'rejected'}}"
+                      class="compact-danger-button"
+                      data-claim-id="{{claim.id}}"
+                      data-decision="reject"
+                      disabled="{{claim.busy}}"
+                      bindtap="decideClaim"
+                    >事实有误</button>
+                  </view>
+                </view>
               </view>
             </view>
           </view>

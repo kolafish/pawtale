@@ -128,6 +128,8 @@ interface ClaimView extends MemoirChapterWorkspaceClaim {
 
 interface StoryView extends MemoirChapterWorkspaceStory {
   statusText: string;
+  detailCountText: string;
+  expanded: boolean;
   canDecide: boolean;
   canExcludeFromChapter: boolean;
   canMerge: boolean;
@@ -234,8 +236,10 @@ interface ChapterWorkspacePageData {
   busyStoryIds: string[];
   busyClaimIds: string[];
   busySlotKeys: string[];
+  expandedStoryIds: string[];
   nodes: NodeView[];
   stories: StoryView[];
+  storyReviewProgressText: string;
   availableStories: AvailableStoryView[];
   availableStoryQuery: string;
   availableStoryTotalCount: number;
@@ -557,8 +561,10 @@ definePage<ChapterWorkspacePageData>()({
     busyStoryIds: [],
     busyClaimIds: [],
     busySlotKeys: [],
+    expandedStoryIds: [],
     nodes: [],
     stories: [],
+    storyReviewProgressText: "0 / 0 已核对",
     availableStories: [],
     availableStoryQuery: "",
     availableStoryTotalCount: 0,
@@ -629,6 +635,10 @@ definePage<ChapterWorkspacePageData>()({
     const busyStoryIds = new Set(this.data.busyStoryIds);
     const busyClaimIds = new Set(this.data.busyClaimIds);
     const busySlotKeys = new Set(this.data.busySlotKeys);
+    const workspaceStoryIds = new Set(workspace.stories.map((story) => story.id));
+    const expandedStoryIds = new Set(
+      this.data.expandedStoryIds.filter((storyId) => workspaceStoryIds.has(storyId)),
+    );
     const splitNodeIds = new Set(this.data.splitNodeIds);
     const availableStoryQuery = this.data.availableStoryQuery.trim().toLocaleLowerCase();
     const allAvailableStories = workspace.available_stories.map((story) => ({
@@ -657,6 +667,7 @@ definePage<ChapterWorkspacePageData>()({
       auditStatusText: state.text,
       auditError: state.error,
       auditBusy: state.busy,
+      expandedStoryIds: [...expandedStoryIds],
       nodes: (workspace.contract?.nodes || []).map((node, index, nodes) => ({
         ...node,
         statusText: nodeStatusText(node.status),
@@ -673,9 +684,20 @@ definePage<ChapterWorkspacePageData>()({
         const mergeTargets = workspace.stories.filter(
           (candidate) => candidate.id !== story.id && candidate.story_type === story.story_type,
         );
+        const pendingClaimCount = story.claims.filter(
+          (claim) => !["confirmed", "rejected"].includes(claim.verification_status),
+        ).length;
+        const pendingSlotCount = story.slots.filter(
+          (slot) => ["missing", "partial"].includes(slot.status),
+        ).length;
+        const pendingDetailCount = pendingClaimCount + pendingSlotCount;
         return {
           ...story,
           statusText: storyStatusText(story),
+          detailCountText: pendingDetailCount
+            ? `${pendingDetailCount} 项待核对`
+            : "具体内容已核对",
+          expanded: expandedStoryIds.has(story.id),
           canDecide: story.publication_status === "eligible",
           canExcludeFromChapter: Boolean(contractDraft),
           canMerge: Boolean(contractDraft && mergeTargets.length),
@@ -710,6 +732,9 @@ definePage<ChapterWorkspacePageData>()({
           })),
         };
       }),
+      storyReviewProgressText: `${workspace.stories.filter(
+        (story) => ["confirmed", "rejected"].includes(story.verification_status),
+      ).length} / ${workspace.stories.length} 已核对`,
       availableStories: visibleAvailableStories,
       availableStoryTotalCount: allAvailableStories.length,
       availableStoryMatchCount: matchingAvailableStories.length,
@@ -784,6 +809,22 @@ definePage<ChapterWorkspacePageData>()({
       busyStoryIds,
       stories: this.data.stories.map((story) => (
         story.id === storyId ? { ...story, busy } : story
+      )),
+    });
+  },
+
+  toggleStoryDetails(event: DatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    if (!storyId || !this.data.stories.some((story) => story.id === storyId)) {
+      return;
+    }
+    const expandedStoryIds = this.data.expandedStoryIds.includes(storyId)
+      ? this.data.expandedStoryIds.filter((id) => id !== storyId)
+      : [...this.data.expandedStoryIds, storyId];
+    this.setData({
+      expandedStoryIds,
+      stories: this.data.stories.map((story) => (
+        story.id === storyId ? { ...story, expanded: !story.expanded } : story
       )),
     });
   },

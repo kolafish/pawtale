@@ -428,6 +428,38 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
 });
 
+test("chapter story details stay collapsed until the owner opens one story", async () => {
+  const workspace = sampleWorkspace();
+  const { page } = loadWorkspacePage({ workspace });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project%2F1",
+    chapterId: "chapter-1",
+    tab: "stories",
+  });
+
+  assert.equal(context.data.storyReviewProgressText, "0 / 1 已核对");
+  assert.equal(context.data.stories[0].expanded, false);
+  assert.equal(context.data.stories[0].detailCountText, "2 项待核对");
+
+  page.toggleStoryDetails.call(context, {
+    currentTarget: { dataset: { storyId: "story-1" } },
+  });
+
+  assert.equal(context.data.stories[0].expanded, true);
+  await page.loadWorkspace.call(context, true);
+  assert.equal(context.data.stories[0].expanded, true);
+
+  page.applyWorkspace.call(context, {
+    ...workspace,
+    contract: { ...workspace.contract, nodes: [] },
+    stories: [],
+  });
+  assert.deepEqual(context.data.expandedStoryIds, []);
+  assert.deepEqual(context.data.stories, []);
+});
+
 test("chapter overview turns current chapter state into one plain-language next action", () => {
   const { chapterNextAction } = loadWorkspacePage().mod;
   const workspace = sampleWorkspace({
