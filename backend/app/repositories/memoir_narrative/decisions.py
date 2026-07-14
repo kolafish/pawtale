@@ -3,10 +3,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import MemoirNarrativeDecisionTargetType
+from app.models.memoir import MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirClaim,
     MemoirDraftBlock,
+    MemoirFollowupTaskUtterance,
     MemoirFollowupTask,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
@@ -32,13 +34,7 @@ class MemoirNarrativeDecisionRepository:
             idempotency_key=data.idempotency_key,
         )
         if existing is not None:
-            if (
-                existing.target_type != data.target_type.value
-                or existing.target_id != data.target_id
-                or existing.action != data.action.value
-                or existing.actor_type != data.actor_type.value
-                or existing.actor_user_id != data.actor_user_id
-            ):
+            if not self._matches_create(existing, data):
                 raise ValueError("idempotency key was already used for another decision")
             return existing, False
 
@@ -50,6 +46,8 @@ class MemoirNarrativeDecisionRepository:
             action=data.action.value,
             actor_type=data.actor_type.value,
             actor_user_id=data.actor_user_id,
+            source_followup_task_utterance_id=data.source_followup_task_utterance_id,
+            source_transcript_version_id=data.source_transcript_version_id,
             before_state_json=data.before_state,
             after_state_json=data.after_state,
             reason=data.reason,
@@ -67,15 +65,25 @@ class MemoirNarrativeDecisionRepository:
             )
             if existing is None:
                 raise
-            if (
-                existing.target_type != data.target_type.value
-                or existing.target_id != data.target_id
-                or existing.action != data.action.value
-                or existing.actor_type != data.actor_type.value
-                or existing.actor_user_id != data.actor_user_id
-            ):
+            if not self._matches_create(existing, data):
                 raise ValueError("idempotency key was already used for another decision")
             return existing, False
+
+    @staticmethod
+    def _matches_create(
+        existing: MemoirNarrativeDecision,
+        data: MemoirNarrativeDecisionCreate,
+    ) -> bool:
+        return (
+            existing.target_type == data.target_type.value
+            and existing.target_id == data.target_id
+            and existing.action == data.action.value
+            and existing.actor_type == data.actor_type.value
+            and existing.actor_user_id == data.actor_user_id
+            and existing.source_followup_task_utterance_id
+            == data.source_followup_task_utterance_id
+            and existing.source_transcript_version_id == data.source_transcript_version_id
+        )
 
     async def _validate_references(self, data: MemoirNarrativeDecisionCreate) -> None:
         project_exists = await self._db.scalar(
@@ -89,6 +97,12 @@ class MemoirNarrativeDecisionRepository:
             )
             if actor_exists is None:
                 raise ValueError("decision actor does not exist")
+
+        await self.validate_followup_source(
+            project_id=data.project_id,
+            source_followup_task_utterance_id=data.source_followup_task_utterance_id,
+            source_transcript_version_id=data.source_transcript_version_id,
+        )
 
         if data.target_type == MemoirNarrativeDecisionTargetType.ENTITY:
             target_exists = await self._db.scalar(
@@ -150,6 +164,44 @@ class MemoirNarrativeDecisionRepository:
             raise ValueError(f"unsupported decision target type: {data.target_type.value}")
         if target_exists is None:
             raise ValueError("decision target does not belong to the decision project")
+
+    async def validate_followup_source(
+        self,
+        *,
+        project_id: str,
+        source_followup_task_utterance_id: str | None,
+        source_transcript_version_id: str | None,
+    ) -> None:
+        if bool(source_followup_task_utterance_id) != bool(source_transcript_version_id):
+            raise ValueError(
+                "follow-up decision source requires both task utterance and transcript version"
+            )
+        if source_followup_task_utterance_id is None:
+            return
+
+        relation = await self._db.scalar(
+            select(MemoirFollowupTaskUtterance).where(
+                MemoirFollowupTaskUtterance.project_id == project_id,
+                MemoirFollowupTaskUtterance.id
+                == source_followup_task_utterance_id,
+            )
+        )
+        if relation is None:
+            raise ValueError("decision follow-up source does not belong to the project")
+        utterance = await self._db.get(MemoirVoiceUtterance, relation.utterance_id)
+        if utterance is None:
+            raise ValueError("decision follow-up source utterance does not exist")
+        transcript_version = await self._db.scalar(
+            select(MemoirTranscriptVersion).where(
+                MemoirTranscriptVersion.id == source_transcript_version_id,
+                MemoirTranscriptVersion.voice_session_id == utterance.voice_session_id,
+                MemoirTranscriptVersion.source_artifact_id == utterance.id,
+            )
+        )
+        if transcript_version is None:
+            raise ValueError(
+                "decision transcript source does not belong to the follow-up utterance"
+            )
 
     async def get_by_idempotency_key(
         self,

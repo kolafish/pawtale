@@ -27,8 +27,11 @@ from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirV
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
+    MemoirFollowupTask,
+    MemoirFollowupTaskUtterance,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
+    MemoirNarrativeGap,
 )
 from app.models.projects import Project
 from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarrativeEntityRepository
@@ -39,6 +42,7 @@ from app.schemas.memoir_narrative import (
     MemoirNarrativeEntityCreate,
 )
 from app.services.memoir.narrative.backfill import run_narrative_ingestion_backfill
+from app.services.memoir.narrative import decisions
 from app.services.memoir.narrative.ingestion import ingest_transcript_version
 from app.services.memoir.narrative.ingestion_jobs import (
     run_narrative_ingestion_job,
@@ -973,6 +977,176 @@ async def test_entity_merge_keeps_historical_id_and_records_decision(client, tes
     await test_db.refresh(retained)
     assert source.merged_into_entity_id == retained_id
     assert "李主任" in retained.aliases_json
+
+
+async def test_entity_merge_rewires_claims_and_records_followup_provenance(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="经理和后来邀请我创业的是同一个人。",
+    )
+    project_id = created["session"]["project_id"]
+    user_id = created["user_id"]
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    transcript_version = await test_db.get(
+        MemoirTranscriptVersion,
+        created["transcript_version_id"],
+    )
+    assert utterance is not None and transcript_version is not None
+
+    entity_repository = MemoirNarrativeEntityRepository(test_db)
+    retained = await entity_repository.create(
+        MemoirNarrativeEntityCreate(
+            project_id=project_id,
+            entity_type=MemoirNarrativeEntityType.PERSON,
+            canonical_name="后来创业的经理",
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    duplicate = await entity_repository.create(
+        MemoirNarrativeEntityCreate(
+            project_id=project_id,
+            entity_type=MemoirNarrativeEntityType.PERSON,
+            canonical_name="前同事",
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    relationship_claim = await MemoirClaimRepository(test_db).create(
+        MemoirClaimCreate(
+            project_id=project_id,
+            claim_type=MemoirClaimType.RELATIONSHIP,
+            statement="前同事是后来创业的经理。",
+            subject_entity_id=duplicate.id,
+            object_entity_id=retained.id,
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    claim = await MemoirClaimRepository(test_db).create(
+        MemoirClaimCreate(
+            project_id=project_id,
+            claim_type=MemoirClaimType.EVENT,
+            statement="前同事后来邀请讲述者加入创业公司。",
+            subject_entity_id=duplicate.id,
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="book",
+        gap_type="contradiction",
+        severity="high",
+        title="经理和前同事是否为同一人",
+        description="两处讲述使用了不同人物称呼。",
+        fingerprint=sha256(b"manager-coworker-identity").hexdigest(),
+        status="open",
+        detected_by="rules",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        answer_use="fact_resolution",
+        question="经理和后来邀请您创业的人是同一个人吗？",
+        purpose="确认两处人物称呼是否指向同一人。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=utterance.id,
+        result_role="target_answer",
+        is_assignment_snapshot=True,
+    )
+    test_db.add(relation)
+    await test_db.flush()
+
+    mismatched_transcript = MemoirTranscriptVersion(
+        voice_session_id=utterance.voice_session_id,
+        source_artifact_id="another-utterance",
+        version_type=transcript_version.version_type,
+        content="不属于本次回答的转写。",
+        created_by=transcript_version.created_by,
+    )
+    test_db.add(mismatched_transcript)
+    await test_db.flush()
+    with pytest.raises(
+        ValueError,
+        match="decision transcript source does not belong to the follow-up utterance",
+    ):
+        await decisions.merge_entities(
+            test_db,
+            project_id=project_id,
+            source_entity_id=duplicate.id,
+            retained_entity_id=retained.id,
+            actor_user_id=user_id,
+            idempotency_key=f"followup-entity-merge-invalid:{relation.id}",
+            source_followup_task_utterance_id=relation.id,
+            source_transcript_version_id=mismatched_transcript.id,
+        )
+    assert duplicate.merged_into_entity_id is None
+    assert claim.subject_entity_id == duplicate.id
+
+    decision = await decisions.merge_entities(
+        test_db,
+        project_id=project_id,
+        source_entity_id=duplicate.id,
+        retained_entity_id=retained.id,
+        actor_user_id=user_id,
+        idempotency_key=f"followup-entity-merge:{relation.id}",
+        reason="用户明确确认两处人物称呼指向同一人。",
+        source_followup_task_utterance_id=relation.id,
+        source_transcript_version_id=transcript_version.id,
+    )
+    repeated = await decisions.merge_entities(
+        test_db,
+        project_id=project_id,
+        source_entity_id=duplicate.id,
+        retained_entity_id=retained.id,
+        actor_user_id=user_id,
+        idempotency_key=f"followup-entity-merge:{relation.id}",
+        reason="用户明确确认两处人物称呼指向同一人。",
+        source_followup_task_utterance_id=relation.id,
+        source_transcript_version_id=transcript_version.id,
+    )
+
+    await test_db.refresh(duplicate)
+    await test_db.refresh(claim)
+    await test_db.refresh(relationship_claim)
+    assert duplicate.merged_into_entity_id == retained.id
+    assert claim.subject_entity_id == retained.id
+    assert claim.updated_by == MemoirNarrativeActorType.USER.value
+    assert relationship_claim.subject_entity_id == retained.id
+    assert relationship_claim.object_entity_id == retained.id
+    assert (
+        relationship_claim.verification_status
+        == MemoirClaimVerificationStatus.NEEDS_VERIFICATION.value
+    )
+    assert decision.source_followup_task_utterance_id == relation.id
+    assert decision.source_transcript_version_id == transcript_version.id
+    assert repeated.id == decision.id
+    review_decision = await test_db.scalar(
+        select(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.target_id == relationship_claim.id,
+            MemoirNarrativeDecision.action == "needs_review",
+        )
+    )
+    assert review_decision is not None
+    assert review_decision.source_followup_task_utterance_id == relation.id
+    assert review_decision.source_transcript_version_id == transcript_version.id
+    assert decision.before_state_json["references"]["claims"][claim.id][
+        "subject_entity_id"
+    ] == duplicate.id
+    assert decision.after_state_json["references"]["claims"][claim.id][
+        "subject_entity_id"
+    ] == retained.id
 
 
 async def test_pruning_preserves_evidence_referenced_transcript(client, test_db):

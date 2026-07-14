@@ -256,10 +256,29 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
-async def _ensure_decision_include_action(conn) -> bool:
+async def _ensure_decision_schema(conn) -> bool:
     table_name = "memoir_narrative_decisions"
     table_sql = await _table_sql(conn, table_name)
-    if not table_sql or "'include'" in table_sql:
+    if not table_sql:
+        return False
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    required_columns = {
+        "source_followup_task_utterance_id",
+        "source_transcript_version_id",
+    }
+    required_constraints = {
+        "fk_memoir_narrative_decisions_followup_source_project",
+        "fk_memoir_narrative_decisions_transcript_source",
+        "ck_memoir_narrative_decisions_followup_source_shape",
+    }
+    if (
+        "'include'" in table_sql
+        and required_columns <= columns
+        and all(name in table_sql for name in required_constraints)
+    ):
         return False
 
     for trigger_name in MEMOIR_NARRATIVE_DECISION_TRIGGERS:
@@ -268,13 +287,20 @@ async def _ensure_decision_include_action(conn) -> bool:
         if not index_name.startswith("sqlite_autoindex"):
             await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
 
-    legacy_table_name = f"{table_name}_before_include_action"
+    legacy_table_name = f"{table_name}_before_schema_upgrade"
     await conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}"))
     table = Base.metadata.tables[table_name]
     await conn.run_sync(
         lambda sync_conn: table.create(sync_conn, checkfirst=False)
     )
-    column_names = ", ".join(f'"{column.name}"' for column in table.columns)
+    legacy_columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, legacy_table_name)
+    }
+    copied_columns = [
+        column.name for column in table.columns if column.name in legacy_columns
+    ]
+    column_names = ", ".join(f'"{name}"' for name in copied_columns)
     await conn.execute(
         text(
             f"INSERT INTO {table_name} ({column_names}) "
@@ -479,7 +505,9 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
             if not await _table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
                 changed_tables.append(table.name)
-                continue
+        if await _ensure_decision_schema(conn):
+            changed_tables.append("memoir_narrative_decisions")
+        for table in _narrative_tables_from_metadata():
             existing_indexes = await _index_names(conn, table.name)
             for index in table.indexes:
                 if not index.name or index.name in existing_indexes:
@@ -495,8 +523,6 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
             await _ensure_followup_task_utterance_interpretation_columns(conn)
         )
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
-        if await _ensure_decision_include_action(conn):
-            changed_tables.append("memoir_narrative_decisions")
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
