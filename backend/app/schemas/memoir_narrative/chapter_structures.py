@@ -184,6 +184,19 @@ class MemoirChapterNodeStoryAttachRequest(BaseModel):
     required: bool = False
 
 
+class MemoirChapterNodeStoryMoveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_node_id: str = Field(min_length=1, max_length=36)
+    target_node_id: str = Field(min_length=1, max_length=36)
+
+    @model_validator(mode="after")
+    def require_distinct_nodes(self):
+        if self.source_node_id == self.target_node_id:
+            raise ValueError("moving a Story requires two different chapter nodes")
+        return self
+
+
 class MemoirChapterStructureSplitRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
