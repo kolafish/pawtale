@@ -97,7 +97,7 @@
         <text class="section-title">可加入本章</text>
         <text class="section-count">{{availableStories.length}} 个</text>
       </view>
-      <view wx:if="{{storyActionError}}" class="message error-message">{{storyActionError}}</view>
+      <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
       <view wx:if="{{availableStories.length && workspace.contract && workspace.contract.status === 'confirmed'}}" class="story-edit-state">
         <view class="story-edit-copy">
           <text class="story-edit-title">章节结构已确认</text>
@@ -119,13 +119,14 @@
             </view>
             <text class="story-summary">{{story.summary || "暂无故事摘要"}}</text>
             <text wx:if="{{story.excluded_from_chapter}}" class="available-story-note">此前已从本章移出</text>
+            <text wx:if="{{story.error}}" class="available-story-error">{{story.error}}</text>
           </view>
           <button
             wx:if="{{workspace.contract && workspace.contract.status === 'draft'}}"
             class="primary-small-button available-story-action"
             data-story-id="{{story.id}}"
-            loading="{{storyActionBusyId === story.id}}"
-            disabled="{{storyActionBusyId === story.id}}"
+            loading="{{story.busy}}"
+            disabled="{{story.busy}}"
             bindtap="includeAvailableStory"
           >{{story.actionText}}</button>
         </view>

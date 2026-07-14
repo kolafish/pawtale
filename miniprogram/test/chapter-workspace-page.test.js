@@ -398,26 +398,28 @@ test("including a Story only marks that Story busy and exposes request failures"
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "stories" });
 
-  const request = page.includeAvailableStory.call(context, {
+  const firstRequest = page.includeAvailableStory.call(context, {
     currentTarget: { dataset: { storyId: "story-2" } },
   });
-  assert.equal(context.data.storyActionBusyId, "story-2");
+  assert.equal(context.data.availableStories[0].busy, true);
+  assert.equal(context.data.availableStories[1].busy, false);
   assert.equal(context.data.contractRevisionBusy, false);
-  assert.equal(context.data.availableStories.length, 2);
+  await page.includeAvailableStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-3" } },
+  });
+  assert.equal(context.data.availableStories[0].busy, true);
+  assert.equal(context.data.availableStories[1].busy, false);
+  assert.equal(context.data.availableStories[1].error, "章节结构已发生变化");
+
   releaseInclude();
-  await request;
+  await firstRequest;
 
   assert.equal(calls[0].contractId, "contract-1");
   assert.equal(calls[0].storyId, "story-2");
   assert.match(calls[0].data.idempotency_key, /^workspace:include:contract-1:story-2:/);
   assert.deepEqual(context.data.availableStories.map((story) => story.id), ["story-3"]);
-  assert.equal(context.data.storyActionBusyId, "");
-
-  await page.includeAvailableStory.call(context, {
-    currentTarget: { dataset: { storyId: "story-3" } },
-  });
-  assert.equal(context.data.storyActionError, "章节结构已发生变化");
-  assert.equal(context.data.storyActionBusyId, "");
+  assert.equal(context.data.availableStories[0].busy, false);
+  assert.equal(context.data.availableStories[0].error, "章节结构已发生变化");
   delete global.wx;
 });
 

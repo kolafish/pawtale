@@ -91,6 +91,8 @@ interface StoryView extends MemoirChapterWorkspaceStory {
 interface AvailableStoryView extends MemoirChapterWorkspaceAvailableStory {
   statusText: string;
   actionText: string;
+  busy: boolean;
+  error: string;
 }
 
 interface GapView extends MemoirNarrativeGap {
@@ -154,8 +156,7 @@ interface ChapterWorkspacePageData {
   stories: StoryView[];
   availableStories: AvailableStoryView[];
   contractRevisionBusy: boolean;
-  storyActionBusyId: string;
-  storyActionError: string;
+  contractRevisionError: string;
   gapGroups: GapGroupView[];
   followupTasks: FollowupTaskView[];
   followupLoading: boolean;
@@ -391,8 +392,7 @@ definePage<ChapterWorkspacePageData>()({
     stories: [],
     availableStories: [],
     contractRevisionBusy: false,
-    storyActionBusyId: "",
-    storyActionError: "",
+    contractRevisionError: "",
     gapGroups: [],
     followupTasks: [],
     followupLoading: false,
@@ -430,6 +430,9 @@ definePage<ChapterWorkspacePageData>()({
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
     const storyTitles = new Map(workspace.stories.map((story) => [story.id, story.title]));
+    const availableStoryState = new Map(
+      this.data.availableStories.map((story) => [story.id, { busy: story.busy, error: story.error }]),
+    );
     const notes = new Map(
       this.data.gapGroups.flatMap((group) => group.items.map((gap) => [gap.id, gap.note] as const)),
     );
@@ -471,6 +474,8 @@ definePage<ChapterWorkspacePageData>()({
         ...story,
         statusText: availableStoryStatusText(story),
         actionText: story.excluded_from_chapter ? "重新加入" : "加入本章",
+        busy: availableStoryState.get(story.id)?.busy || false,
+        error: availableStoryState.get(story.id)?.error || "",
       })),
       gapGroups: [
         {
@@ -592,7 +597,7 @@ definePage<ChapterWorkspacePageData>()({
     ) {
       return;
     }
-    this.setData({ contractRevisionBusy: true, storyActionError: "" });
+    this.setData({ contractRevisionBusy: true, contractRevisionError: "" });
     try {
       await createMemoirChapterContractRevision(
         this.data.projectId,
@@ -616,11 +621,19 @@ definePage<ChapterWorkspacePageData>()({
         return;
       }
       this.setData({
-        storyActionError: error instanceof Error ? error.message : "章节草稿创建失败",
+        contractRevisionError: error instanceof Error ? error.message : "章节草稿创建失败",
       });
     } finally {
       this.setData({ contractRevisionBusy: false });
     }
+  },
+
+  patchAvailableStory(storyId: string, patch: Partial<AvailableStoryView>) {
+    this.setData({
+      availableStories: this.data.availableStories.map((story) => (
+        story.id === storyId ? { ...story, ...patch } : story
+      )),
+    });
   },
 
   async includeAvailableStory(event: DatasetEvent) {
@@ -630,15 +643,14 @@ definePage<ChapterWorkspacePageData>()({
       !storyId
       || !contract
       || contract.status !== "draft"
-      || this.data.storyActionBusyId === storyId
     ) {
       return;
     }
     const story = this.data.availableStories.find((item) => item.id === storyId);
-    if (!story) {
+    if (!story || story.busy) {
       return;
     }
-    this.setData({ storyActionBusyId: storyId, storyActionError: "" });
+    this.patchAvailableStory(story.id, { busy: true, error: "" });
     try {
       await includeMemoirStoryInChapter(
         this.data.projectId,
@@ -655,11 +667,11 @@ definePage<ChapterWorkspacePageData>()({
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({
-        storyActionError: error instanceof Error ? error.message : "Story 加入本章失败",
+      this.patchAvailableStory(story.id, {
+        error: error instanceof Error ? error.message : "Story 加入本章失败",
       });
     } finally {
-      this.setData({ storyActionBusyId: "" });
+      this.patchAvailableStory(story.id, { busy: false });
     }
   },
 

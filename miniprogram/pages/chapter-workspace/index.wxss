@@ -622,7 +622,8 @@
 
 .story-edit-title,
 .story-edit-hint,
-.available-story-note {
+.available-story-note,
+.available-story-error {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -638,6 +639,13 @@
 .available-story-note {
   margin-top: 5rpx;
   color: #7a706a;
+  font-size: 22rpx;
+  line-height: 32rpx;
+}
+
+.available-story-error {
+  margin-top: 7rpx;
+  color: #a53e50;
   font-size: 22rpx;
   line-height: 32rpx;
 }
