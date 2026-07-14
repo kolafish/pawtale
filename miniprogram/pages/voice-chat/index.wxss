@@ -254,6 +254,25 @@
   transition-timing-function: ease-out;
 }
 
+.voice-chat-page.book-completion .completion-task-panel {
+  padding: 22rpx 24rpx;
+  border-left: 6rpx solid #bd7b6f;
+  border-radius: 8rpx;
+  background: #fffaf5;
+  box-shadow: none;
+}
+
+.voice-chat-page.book-completion .completion-task-question {
+  margin-top: 12rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 44rpx;
+}
+
+.voice-chat-page.book-completion .completion-task-actions {
+  margin-top: 18rpx;
+}
+
 .completion-task-actions button::after,
 .completion-task-continue::after {
   border: 0;

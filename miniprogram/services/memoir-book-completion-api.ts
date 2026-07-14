@@ -1,4 +1,7 @@
-import type { MemoirBookCompletion } from "../domain/voice-chat";
+import type {
+  MemoirBookCompletion,
+  MemoirBookCompletionOverview,
+} from "../domain/voice-chat";
 import { memoirNarrativeProjectPath, memoirRequest } from "./memoir-api-client";
 
 
@@ -6,12 +9,18 @@ function bookCompletionPath(projectId: string, suffix = ""): string {
   return memoirNarrativeProjectPath(projectId, `/book-completion${suffix}`);
 }
 
-export function getMemoirBookCompletion(projectId: string): Promise<MemoirBookCompletion> {
-  return memoirRequest<MemoirBookCompletion>(bookCompletionPath(projectId));
+export function getMemoirBookCompletionOverview(
+  projectId: string,
+): Promise<MemoirBookCompletionOverview> {
+  return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
 }
 
-export function prepareMemoirBookCompletion(projectId: string): Promise<MemoirBookCompletion> {
-  return memoirRequest<MemoirBookCompletion>(bookCompletionPath(projectId, "/prepare"), {
-    method: "POST",
-  });
+export function prepareMemoirBookCompletionChapter(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirBookCompletion> {
+  return memoirRequest<MemoirBookCompletion>(
+    bookCompletionPath(projectId, `/chapters/${encodeURIComponent(chapterId)}/prepare`),
+    { method: "POST" },
+  );
 }

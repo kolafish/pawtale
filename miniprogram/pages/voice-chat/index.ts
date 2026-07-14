@@ -553,7 +553,30 @@ definePage<VoiceChatData>()({
   },
 
   async continueToNextCompletionTask() {
-    await this.switchCompletionTask("当前补访问题已处理，用户继续下一项");
+    if (this.data.finishingSession || this.data.recording) {
+      return;
+    }
+    this.recordingStartGeneration += 1;
+    this.stopCompletionTaskRefresh();
+    this.cancelFollowUpTTS();
+    setVoiceChatData(this, finishSessionStartPatch(false));
+    try {
+      if (this.voiceStreaming.hasClient()) {
+        await this.voiceStreaming.finishSession();
+      }
+      trackAuditAction(
+        "voice_chat.finish",
+        { destination: "book_completion_overview" },
+        { voiceSessionId: this.data.voiceSessionId },
+      );
+      setVoiceChatData(this, finishSessionSavedPatch());
+      wx.navigateBack({ delta: 1 });
+    } catch (error) {
+      await this.refreshVoiceSessionSnapshot();
+      this.handleError(error instanceof Error ? error.message : "语音保存失败");
+    } finally {
+      setVoiceChatData(this, { finishingSession: false });
+    }
   },
 
   persistCurrentTranscriptSnapshot() {

@@ -16,11 +16,13 @@ from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.models.memoir_narrative import MemoirFollowupTask, MemoirNarrativeGap
 from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionAction,
+    MemoirBookCompletionChapterResponse,
+    MemoirBookCompletionOverviewResponse,
     MemoirBookCompletionResponse,
     MemoirBookCompletionState,
 )
 from app.services.memoir.book_plan_sources import load_plan_with_chapters, sorted_chapters
-from app.services.memoir.narrative import followup_jobs, followup_planner, gap_audit
+from app.services.memoir.narrative import followup_jobs, gap_audit
 from app.services.memoir.narrative.gap_rules import ChapterAuditContext, load_chapter_audit_context
 
 
@@ -75,9 +77,8 @@ async def _chapter_preparations(
     *,
     project_id: str,
     chapters: list[MemoirBookPlanChapter],
-) -> tuple[list[_ChapterPreparation], MemoirBookPlanChapter | None]:
+) -> list[_ChapterPreparation]:
     preparations: list[_ChapterPreparation] = []
-    first_needing_direction = None
     for chapter in chapters:
         context = await load_chapter_audit_context(
             db,
@@ -88,7 +89,6 @@ async def _chapter_preparations(
             context.contract is None
             or context.contract.status != MemoirChapterContractStatus.CONFIRMED.value
         ):
-            first_needing_direction = first_needing_direction or chapter
             continue
         preparations.append(
             _ChapterPreparation(
@@ -102,7 +102,7 @@ async def _chapter_preparations(
                 ),
             )
         )
-    return preparations, first_needing_direction
+    return preparations
 
 
 def _audit_problem(
@@ -197,82 +197,350 @@ def _generation_problem(
     return None
 
 
-async def _first_open_gap_chapter(
+async def _chapter_active_tasks(
     db: AsyncSession,
     *,
     project_id: str,
-    chapters: list[MemoirBookPlanChapter],
-) -> MemoirBookPlanChapter | None:
-    deferred_task_exists = (
-        select(MemoirFollowupTask.id)
-        .where(
-            MemoirFollowupTask.project_id == project_id,
-            MemoirFollowupTask.gap_id == MemoirNarrativeGap.id,
-            MemoirFollowupTask.status == MemoirFollowupTaskStatus.DEFERRED.value,
-        )
-        .exists()
-    )
-    for chapter in chapters:
-        gap_id = await db.scalar(
-            select(MemoirNarrativeGap.id)
-            .where(
-                MemoirNarrativeGap.project_id == project_id,
-                MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
-                MemoirNarrativeGap.gap_type != MemoirNarrativeGapType.REPETITION.value,
-                ~deferred_task_exists,
-                or_(
-                    MemoirNarrativeGap.primary_chapter_id == chapter.id,
-                    MemoirNarrativeGap.chapters.any(chapter_id=chapter.id),
-                ),
+    chapter_id: str,
+) -> list[MemoirFollowupTask]:
+    return list(
+        (
+            await db.scalars(
+                select(MemoirFollowupTask)
+                .where(
+                    MemoirFollowupTask.project_id == project_id,
+                    MemoirFollowupTask.chapter_id == chapter_id,
+                    MemoirFollowupTask.status.in_(
+                        [
+                            MemoirFollowupTaskStatus.PENDING.value,
+                            MemoirFollowupTaskStatus.IN_PROGRESS.value,
+                            MemoirFollowupTaskStatus.DEFERRED.value,
+                        ]
+                    ),
+                )
+                .order_by(
+                    (
+                        MemoirFollowupTask.status
+                        == MemoirFollowupTaskStatus.IN_PROGRESS.value
+                    ).desc(),
+                    (
+                        MemoirFollowupTask.status
+                        == MemoirFollowupTaskStatus.PENDING.value
+                    ).desc(),
+                    MemoirFollowupTask.priority.desc(),
+                    MemoirFollowupTask.created_at,
+                    MemoirFollowupTask.id,
+                )
             )
-            .limit(1)
-        )
-        if gap_id:
-            return chapter
-    return None
+        ).all()
+    )
 
 
-async def get_book_completion_status(
+async def _chapter_has_manual_review_gap(
     db: AsyncSession,
     *,
     project_id: str,
-) -> MemoirBookCompletionResponse:
+    chapter_id: str,
+) -> bool:
+    gap_id = await db.scalar(
+        select(MemoirNarrativeGap.id)
+        .where(
+            MemoirNarrativeGap.project_id == project_id,
+            MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+            MemoirNarrativeGap.gap_type.notin_(
+                [
+                    MemoirNarrativeGapType.MISSING_SLOT.value,
+                    MemoirNarrativeGapType.REPETITION.value,
+                ]
+            ),
+            or_(
+                MemoirNarrativeGap.primary_chapter_id == chapter_id,
+                MemoirNarrativeGap.chapters.any(chapter_id=chapter_id),
+            ),
+        )
+        .limit(1)
+    )
+    return gap_id is not None
+
+
+def _chapter_response_from_problem(
+    preparation: _ChapterPreparation,
+    problem: MemoirBookCompletionResponse,
+) -> MemoirBookCompletionChapterResponse:
+    return MemoirBookCompletionChapterResponse(
+        chapter_id=preparation.chapter.id,
+        title=preparation.chapter.title,
+        sort_order=preparation.chapter.sort_order,
+        state=problem.state,
+        headline=problem.headline,
+        detail=problem.detail,
+    )
+
+
+async def _chapter_completion_status(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter: MemoirBookPlanChapter,
+    preparation: _ChapterPreparation | None,
+    generation_job: MemoirEditingJob | None,
+) -> MemoirBookCompletionChapterResponse:
+    if preparation is None:
+        return MemoirBookCompletionChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="needs_review",
+            headline="先确认本章主要写什么",
+            detail="确认本章方向后，系统才能判断最值得补充的内容。",
+        )
+
+    tasks = await _chapter_active_tasks(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    in_progress = next(
+        (task for task in tasks if task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value),
+        None,
+    )
+    if in_progress is not None:
+        return MemoirBookCompletionChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="in_progress",
+            headline="这一章有一段正在补充",
+            detail="可以回到刚才的语音访谈继续讲。",
+            remaining_count=len(tasks),
+            focus_areas=[task.question for task in tasks[:3]],
+            task_id=in_progress.id,
+            active_session_id=in_progress.assigned_session_id,
+        )
+
+    audit_problem = _audit_problem(project_id, preparation)
+    if audit_problem:
+        return _chapter_response_from_problem(preparation, audit_problem)
+    generation_problem = _generation_problem(project_id, preparation, generation_job)
+    if generation_problem:
+        return _chapter_response_from_problem(preparation, generation_problem)
+
+    if tasks:
+        task = tasks[0]
+        deferred = task.status == MemoirFollowupTaskStatus.DEFERRED.value
+        return MemoirBookCompletionChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="ready",
+            headline=("有一段经历留到以后再补" if deferred else "还有一段重要经历值得补充"),
+            detail=(
+                "准备好后，可以从这里继续。"
+                if deferred
+                else "先讲完整经过，不需要逐个回答细节。"
+            ),
+            remaining_count=len(tasks),
+            focus_areas=[item.question for item in tasks[:3]],
+            task_id=task.id,
+        )
+
+    if await _chapter_has_manual_review_gap(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    ):
+        return MemoirBookCompletionChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="needs_review",
+            headline="有一处内容需要您确认",
+            detail="这不是靠继续录音能解决的问题，请到本章查看。",
+        )
+
+    return MemoirBookCompletionChapterResponse(
+        chapter_id=chapter.id,
+        title=chapter.title,
+        sort_order=chapter.sort_order,
+        state="complete",
+        headline="目前不需要再补",
+        detail="以后新增素材或调整本章后，系统会重新整理。",
+    )
+
+
+async def get_book_completion_overview(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> MemoirBookCompletionOverviewResponse:
     plan = await load_plan_with_chapters(db, project_id)
     chapters = sorted_chapters(plan) if plan else []
     if not chapters:
-        return _response(
-            project_id,
-            state="needs_review",
-            action="open_book",
-            headline="先整理这本书准备写哪些章节",
-            detail="有了章节后，系统才能判断下一件需要补充的事。",
+        return MemoirBookCompletionOverviewResponse(
+            project_id=project_id,
+            headline="先确定这本书准备写哪些章节",
+            detail="有了章节后，这里会按章显示还值得补充的内容。",
+            total_chapters=0,
+            completed_chapters=0,
+            chapters=[],
         )
 
-    preparations, first_needing_direction = await _chapter_preparations(
+    preparations = await _chapter_preparations(
         db,
         project_id=project_id,
         chapters=chapters,
     )
+    preparation_by_chapter = {item.chapter.id: item for item in preparations}
     generation_jobs = await _generation_jobs(
         db,
         project_id=project_id,
         preparations=preparations,
     )
-    prepared = [
-        item
-        for item in preparations
-        if item.audit_job is not None
-        and item.audit_job.status == MemoirEditingJobStatus.SUCCEEDED.value
-        and generation_jobs[item.chapter.id] is not None
-        and generation_jobs[item.chapter.id].status == MemoirEditingJobStatus.SUCCEEDED.value
+    chapter_items = [
+        await _chapter_completion_status(
+            db,
+            project_id=project_id,
+            chapter=chapter,
+            preparation=preparation_by_chapter.get(chapter.id),
+            generation_job=generation_jobs.get(chapter.id),
+        )
+        for chapter in chapters
     ]
-    prepared_chapter_ids = {item.chapter.id for item in prepared}
+    completed = sum(item.state == "complete" for item in chapter_items)
+    return MemoirBookCompletionOverviewResponse(
+        project_id=project_id,
+        headline="先看全书，再选择要补的章节",
+        detail=f"全书共 {len(chapter_items)} 章，其中 {completed} 章目前不需要再补。",
+        total_chapters=len(chapter_items),
+        completed_chapters=completed,
+        chapters=chapter_items,
+    )
 
-    task = await followup_planner.select_next_task(
+
+async def prepare_book_completion_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirBookCompletionResponse:
+    plan = await load_plan_with_chapters(db, project_id)
+    chapters = sorted_chapters(plan) if plan else []
+    chapter = next((item for item in chapters if item.id == chapter_id), None)
+    if chapter is None:
+        raise ValueError("chapter does not belong to the project")
+    preparations = await _chapter_preparations(
         db,
         project_id=project_id,
-        eligible_chapter_ids=prepared_chapter_ids,
-        release_deferred=False,
+        chapters=[chapter],
+    )
+    if not preparations:
+        return _response(
+            project_id,
+            state="needs_review",
+            action="open_chapter",
+            headline=f"先确定“{chapter.title}”主要写什么",
+            detail="确认本章方向后，系统才能判断最值得补充的内容。",
+            chapter_id=chapter.id,
+        )
+    preparation = preparations[0]
+    active_tasks = await _chapter_active_tasks(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    in_progress = next(
+        (
+            task
+            for task in active_tasks
+            if task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+        ),
+        None,
+    )
+    if in_progress is not None:
+        return _response(
+            project_id,
+            state="in_progress",
+            action="start_interview",
+            headline=in_progress.question,
+            detail="先讲完整经过，不需要逐个回答细节。",
+            task_id=in_progress.id,
+            chapter_id=chapter.id,
+        )
+
+    audit_job = preparation.audit_job
+    if audit_job is None or audit_job.status in _FAILED_JOB_STATUSES:
+        await gap_audit.enqueue_chapter_gap_audit(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            include_semantic_audit=False,
+            ai_model=None,
+            source="book_completion",
+        )
+        return _response(
+            project_id,
+            state="preparing",
+            action="wait",
+            headline="正在查看本章还缺什么",
+            detail="整理完成后，这里会显示最值得补充的一段经历。",
+            chapter_id=chapter.id,
+        )
+    if audit_job.status in _ACTIVE_JOB_STATUSES:
+        return _audit_problem(project_id, preparation) or _response(
+            project_id,
+            state="preparing",
+            action="wait",
+            headline="正在查看本章还缺什么",
+            detail="整理完成后，这里会自动更新。",
+            chapter_id=chapter.id,
+        )
+
+    generation_job = (await _generation_jobs(
+        db,
+        project_id=project_id,
+        preparations=[preparation],
+    ))[chapter.id]
+    if generation_job is None or generation_job.status in _FAILED_JOB_STATUSES:
+        await followup_jobs.schedule_followup_task_generation(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            source="book_completion",
+        )
+        return _response(
+            project_id,
+            state="preparing",
+            action="wait",
+            headline="正在准备本章最值得补充的内容",
+            detail="整理完成后，这里会自动更新。",
+            chapter_id=chapter.id,
+        )
+    if generation_job.status in _ACTIVE_JOB_STATUSES:
+        return _generation_problem(project_id, preparation, generation_job) or _response(
+            project_id,
+            state="preparing",
+            action="wait",
+            headline="正在准备本章最值得补充的内容",
+            detail="整理完成后，这里会自动更新。",
+            chapter_id=chapter.id,
+        )
+
+    active_tasks = await _chapter_active_tasks(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    task = next(
+        (
+            item
+            for item in active_tasks
+            if item.status
+            in {
+                MemoirFollowupTaskStatus.PENDING.value,
+                MemoirFollowupTaskStatus.DEFERRED.value,
+            }
+        ),
+        None,
     )
     if task is not None:
         return _response(
@@ -280,143 +548,16 @@ async def get_book_completion_status(
             state="ready",
             action="start_interview",
             headline=task.question,
-            detail="这次只补这一件事，记得多少就说多少。",
+            detail="先讲完整经过，不需要逐个回答细节。",
             task_id=task.id,
-            chapter_id=task.chapter_id,
+            chapter_id=chapter.id,
         )
 
-    if first_needing_direction:
-        return _response(
-            project_id,
-            state="needs_review",
-            action="open_chapter",
-            headline=f"先确定“{first_needing_direction.title}”主要写什么",
-            detail="确认本章方向后，系统才能判断还缺哪件事。",
-            chapter_id=first_needing_direction.id,
-        )
-
-    open_gap_chapter = await _first_open_gap_chapter(
-        db,
-        project_id=project_id,
-        chapters=[item.chapter for item in prepared],
-    )
-    if open_gap_chapter:
-        return _response(
-            project_id,
-            state="needs_review",
-            action="open_chapter",
-            headline=f"“{open_gap_chapter.title}”还有一件事需要确认",
-            detail="这件事不适合直接用语音补充，请先查看本章给出的下一步。",
-            chapter_id=open_gap_chapter.id,
-        )
-    incomplete_structure = next(
-        (
-            item
-            for item in prepared
-            if not item.context.nodes
-            or not item.context.links
-            or item.context.contract.status != MemoirChapterContractStatus.CONFIRMED.value
-        ),
-        None,
-    )
-    if incomplete_structure:
-        return _response(
-            project_id,
-            state="needs_review",
-            action="open_chapter",
-            headline=f"确认“{incomplete_structure.chapter.title}”主要写什么",
-            detail="本章方向和内容顺序确认后，才算完成当前整理。",
-            chapter_id=incomplete_structure.chapter.id,
-        )
-
-    for item in preparations:
-        problem = _audit_problem(project_id, item)
-        if problem:
-            return problem
-        problem = _generation_problem(
-            project_id,
-            item,
-            generation_jobs[item.chapter.id],
-        )
-        if problem:
-            return problem
-
-    deferred_exists = await db.scalar(
-        select(MemoirFollowupTask.id)
-        .where(
-            MemoirFollowupTask.project_id == project_id,
-            MemoirFollowupTask.status == MemoirFollowupTaskStatus.DEFERRED.value,
-        )
-        .limit(1)
-    )
     return _response(
         project_id,
         state="complete",
         action="none",
-        headline="现在没有需要回答的问题",
-        detail=(
-            "之前选择稍后再说的问题仍然保留，可以以后继续。"
-            if deferred_exists
-            else "以后新增素材或调整章节后，系统会再整理下一题。"
-        ),
+        headline="这一章目前不需要再补",
+        detail="以后新增素材或调整本章后，系统会重新整理。",
+        chapter_id=chapter.id,
     )
-
-
-async def prepare_book_completion(
-    db: AsyncSession,
-    *,
-    project_id: str,
-) -> MemoirBookCompletionResponse:
-    current = await get_book_completion_status(db, project_id=project_id)
-    if current.state in {"ready", "preparing"}:
-        return current
-    if current.state == "complete":
-        await followup_planner.select_next_task(db, project_id=project_id)
-        return await get_book_completion_status(db, project_id=project_id)
-    if current.action in {"open_book", "open_chapter"} or not current.chapter_id:
-        return current
-
-    plan = await load_plan_with_chapters(db, project_id)
-    chapters = sorted_chapters(plan) if plan else []
-    if not chapters:
-        return current
-    preparations, _ = await _chapter_preparations(
-        db,
-        project_id=project_id,
-        chapters=chapters,
-    )
-    item = next(
-        (preparation for preparation in preparations if preparation.chapter.id == current.chapter_id),
-        None,
-    )
-    if item is None:
-        return current
-
-    job = item.audit_job
-    if job is None or job.status in _FAILED_JOB_STATUSES:
-        await gap_audit.enqueue_chapter_gap_audit(
-            db,
-            project_id=project_id,
-            chapter_id=item.chapter.id,
-            include_semantic_audit=False,
-            ai_model=None,
-            source="book_completion",
-        )
-        return await get_book_completion_status(db, project_id=project_id)
-    if job.status in _ACTIVE_JOB_STATUSES:
-        return current
-
-    generation_jobs = await _generation_jobs(
-        db,
-        project_id=project_id,
-        preparations=[item],
-    )
-    generation_job = generation_jobs[item.chapter.id]
-    if generation_job is None or generation_job.status in _FAILED_JOB_STATUSES:
-        await followup_jobs.schedule_followup_task_generation(
-            db,
-            project_id=project_id,
-            chapter_id=item.chapter.id,
-            source="book_completion",
-        )
-    return await get_book_completion_status(db, project_id=project_id)

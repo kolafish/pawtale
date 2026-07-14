@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
+    MEMOIR_STORY_NARRATION_TARGET,
     MemoirClaimEvidenceRole,
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimPublicationStatus,
@@ -33,7 +34,7 @@ from app.models.memoir_narrative import (
     MemoirStorySlot,
     MemoirStorySlotClaim,
 )
-from app.services.memoir.narrative import followup_tasks, gaps
+from app.services.memoir.narrative import followup_tasks, gap_audit, gaps
 
 
 @dataclass(frozen=True)
@@ -342,6 +343,7 @@ async def evaluate_after_narrative_ingestion(
         ).unique().all()
     )
     answered_task_ids: list[str] = []
+    chapters_to_reaudit: set[str] = set()
     current_relation_role: MemoirFollowupTaskUtteranceRole | None = None
     for task in candidates:
         task_claim_roles = {
@@ -361,6 +363,7 @@ async def evaluate_after_narrative_ingestion(
         target_slot_completed = bool(
             task.story_id
             and task.target_slot
+            and task.target_slot != MEMOIR_STORY_NARRATION_TARGET
             and await _target_slot_received_evidence(
                 db,
                 project_id=project_id,
@@ -369,7 +372,12 @@ async def evaluate_after_narrative_ingestion(
                 claim_ids=new_claim_ids,
             )
         )
-        answered = expected_evidence_received or target_slot_completed
+        broad_story_answered = bool(
+            task.story_id
+            and task.target_slot == MEMOIR_STORY_NARRATION_TARGET
+            and (is_current_task or task.story_id in new_story_ids)
+        )
+        answered = expected_evidence_received or target_slot_completed or broad_story_answered
         if not answered and not is_current_task:
             continue
         relation_role = (
@@ -415,6 +423,21 @@ async def evaluate_after_narrative_ingestion(
             note="新的讲述者事实证据已补足目标缺口。",
         )
         answered_task_ids.append(task.id)
+        if (
+            task.target_slot == MEMOIR_STORY_NARRATION_TARGET
+            and task.chapter_id
+        ):
+            chapters_to_reaudit.add(task.chapter_id)
+
+    for chapter_id in sorted(chapters_to_reaudit):
+        await gap_audit.enqueue_chapter_gap_audit(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            include_semantic_audit=False,
+            ai_model=None,
+            source="book_completion_answer",
+        )
 
     if current_task is not None:
         latest_current = await followup_tasks.get_task(

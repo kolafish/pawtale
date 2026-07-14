@@ -85,8 +85,6 @@
         class="{{resumeAskButtonClass}} completion"
         bindtap="startBookCompletion"
         hover-class="{{resumeAskButtonHoverClass}}"
-        disabled="{{preparingBookCompletion}}"
-        aria-disabled="{{preparingBookCompletion}}"
       >
         {{completionButtonTitle}}
       </button>

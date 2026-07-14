@@ -28,12 +28,6 @@ function loadHomePage({
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
     },
-    getMemoirBookCompletion: async () => {
-      throw new Error("getMemoirBookCompletion was not mocked");
-    },
-    prepareMemoirBookCompletion: async () => {
-      throw new Error("prepareMemoirBookCompletion was not mocked");
-    },
     listMemoirVoiceTranscripts: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
     ...voiceApiExports,
   });
@@ -555,35 +549,14 @@ test("home daily actions create free narration and human interview sessions", as
   delete global.wx;
 });
 
-test("home book completion only creates a task-bound voice session after preparation", async () => {
-  const createdSessions = [];
+test("home opens the whole-book completion overview without waiting for background work", () => {
   const navigations = [];
-  const preparations = [];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
     },
   };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      prepareMemoirBookCompletion: async (projectId) => {
-        preparations.push(projectId);
-        return {
-          project_id: projectId,
-          state: "ready",
-          action: "start_interview",
-          headline: "比赛最后结果怎么样？",
-          detail: "这次只补这一件事。",
-          task_id: "task-1",
-          chapter_id: "chapter-1",
-        };
-      },
-      createMemoirVoiceSession: async (input, options) => {
-        createdSessions.push({ input, options });
-        return { session: { id: "voice/completion" } };
-      },
-    },
-  });
+  const { page } = loadHomePage();
   const context = {
     ...page,
     data: {
@@ -592,95 +565,6 @@ test("home book completion only creates a task-bound voice session after prepara
       projectTitle: "爷爷的故事",
       projectDisplayTitle: "爷爷的故事",
       hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  await page.startBookCompletion.call(context);
-
-  assert.deepEqual(preparations, ["project/1"]);
-  assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
-  assert.equal(createdSessions[0].input.interview_type, "ai_interview");
-  assert.equal(createdSessions[0].input.session_goal, "book_completion");
-  assert.equal(createdSessions[0].input.current_followup_task_id, "task-1");
-  assert.match(navigations[0], /sessionGoal=book_completion/);
-  delete global.wx;
-});
-
-test("home routes a non-interviewable completion item to one chapter without creating audio", async () => {
-  const navigations = [];
-  let createCalls = 0;
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      prepareMemoirBookCompletion: async () => ({
-        project_id: "project/1",
-        state: "needs_review",
-        action: "open_chapter",
-        headline: "先确认这一章主要写什么",
-        detail: "确认后再继续。",
-        task_id: null,
-        chapter_id: "chapter-1",
-      }),
-      createMemoirVoiceSession: async () => {
-        createCalls += 1;
-        return { session: { id: "voice/invalid" } };
-      },
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  await page.startBookCompletion.call(context);
-
-  assert.equal(createCalls, 0);
-  assert.match(navigations[0], /pages\/chapter-workspace\/index/);
-  assert.match(navigations[0], /chapterId=chapter-1/);
-  delete global.wx;
-});
-
-test("home can route a non-voice completion action before microphone consent", async () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      prepareMemoirBookCompletion: async () => ({
-        project_id: "project/1",
-        state: "needs_review",
-        action: "open_chapter",
-        headline: "先确认这一章主要写什么",
-        detail: "确认后再继续。",
-        chapter_id: "chapter-1",
-      }),
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
       voiceAuthorizationAgreed: false,
     },
     setData(patch) {
@@ -688,130 +572,12 @@ test("home can route a non-voice completion action before microphone consent", a
     },
   };
 
-  await page.startBookCompletion.call(context);
+  page.startBookCompletion.call(context);
 
-  assert.match(navigations[0], /pages\/chapter-workspace\/index/);
+  assert.match(navigations[0], /pages\/book-completion\/index/);
+  assert.match(navigations[0], /projectId=project%2F1/);
+  assert.match(navigations[0], /projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B/);
   assert.equal(context.data.error, "");
-  delete global.wx;
-});
-
-test("home waits for the background completion state instead of using an elapsed-time cutoff", async () => {
-  const originalSetTimeout = global.setTimeout;
-  global.setTimeout = (callback) => {
-    callback();
-    return 0;
-  };
-  const createdSessions = [];
-  let statusReads = 0;
-  global.wx = { navigateTo() {} };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      prepareMemoirBookCompletion: async () => ({
-        project_id: "project/1",
-        state: "preparing",
-        action: "wait",
-        headline: "正在整理",
-        detail: "稍等",
-      }),
-      getMemoirBookCompletion: async () => {
-        statusReads += 1;
-        return {
-          project_id: "project/1",
-          state: "ready",
-          action: "start_interview",
-          headline: "后来比赛结果怎么样？",
-          detail: "只补这一件事",
-          task_id: "task-after-worker",
-          chapter_id: "chapter-1",
-        };
-      },
-      createMemoirVoiceSession: async (input) => {
-        createdSessions.push(input);
-        return { session: { id: "voice/after-worker" } };
-      },
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  try {
-    await page.startBookCompletion.call(context);
-  } finally {
-    global.setTimeout = originalSetTimeout;
-    delete global.wx;
-  }
-
-  assert.equal(statusReads, 1);
-  assert.equal(createdSessions[0].current_followup_task_id, "task-after-worker");
-});
-
-test("home completion preparation keeps other interview actions available and cancels stale polling", async () => {
-  let resolvePreparation;
-  const preparation = new Promise((resolve) => {
-    resolvePreparation = resolve;
-  });
-  const createdSessions = [];
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadHomePage({
-    voiceApiExports: {
-      prepareMemoirBookCompletion: async () => preparation,
-      createMemoirVoiceSession: async (input) => {
-        createdSessions.push(input);
-        return { session: { id: "voice/human" } };
-      },
-    },
-  });
-  const context = {
-    ...page,
-    data: {
-      ...page.data,
-      projectId: "project/1",
-      hasProject: true,
-      voiceAuthorizationAgreed: true,
-    },
-    setData(patch) {
-      this.data = { ...this.data, ...patch };
-    },
-  };
-
-  const completion = page.startBookCompletion.call(context);
-  await Promise.resolve();
-
-  assert.equal(context.data.preparingBookCompletion, true);
-  assert.equal(context.data.creatingVoice, false);
-  assert.equal(context.data.primaryVoiceButtonTitle, "随便讲一段");
-  assert.doesNotMatch(context.data.resumeAskButtonClass, /button-blocked/);
-
-  await page.startHumanInterview.call(context);
-  resolvePreparation({
-    project_id: "project/1",
-    state: "preparing",
-    action: "wait",
-    headline: "正在整理",
-    detail: "稍后继续",
-    chapter_id: "chapter-1",
-  });
-  await completion;
-
-  assert.equal(context.data.preparingBookCompletion, false);
-  assert.equal(createdSessions.length, 1);
-  assert.equal(createdSessions[0].interview_type, "human_interview");
-  assert.equal(navigations.length, 1);
   delete global.wx;
 });
 
