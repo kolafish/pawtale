@@ -9,6 +9,7 @@ from app.schemas.memoir_book import MemoirBookSourceRouteResponse
 MEMOIR_SOURCE_MATERIAL_TYPE = "memoir_content"
 INTERVIEWER_SOURCE_MATERIAL_TYPE = "interviewer_prompt"
 IGNORED_SOURCE_ROUTE_ACTION = "ignore"
+CONTEXT_SOURCE_ROUTE_ACTION = "record_as_context"
 IGNORED_SOURCE_MATERIAL_TYPES = {
     "ai_interaction",
     INTERVIEWER_SOURCE_MATERIAL_TYPE,

@@ -5,9 +5,11 @@ from datetime import UTC, datetime
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
-from app.models.memoir import MemoirAutomationEvent
+from app.models.memoir import MemoirAutomationEvent, MemoirVoiceUtterance
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
     MemoirBookPlanStructureCommandRequest,
@@ -19,15 +21,26 @@ from app.schemas.memoir_book import (
     MemoirBookSourceReviewListResponse,
     MemoirBookSourceRouteEvidence,
     MemoirBookSourceRouteResponse,
+    MemoirFollowupAnswerInterpretationResponse,
 )
 from app.services.memoir import book_plan_write_workflow
+from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_router
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.narrative import followup_completion
+from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
+from app.services.memoir.source_disposition import apply_source_route_disposition
 
 
 SOURCE_REVIEW_EVENT_TYPE = MemoirAutomationEventType.SOURCE_HELD
-ROUTE_ACTIONS = {"assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"}
+ROUTE_ACTIONS = {
+    "assign_to_chapter",
+    "record_as_context",
+    "suggest_new_chapter",
+    "hold_for_review",
+    "ignore",
+}
 MATERIAL_TYPES = {"memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"}
 
 
@@ -82,6 +95,12 @@ def source_review_item_response(event: MemoirAutomationEvent) -> MemoirBookSourc
     target_chapter_title = route_metadata.get("target_chapter_title")
     suggested_title = route_metadata.get("suggested_title")
     reason = route_metadata.get("reason")
+    raw_followup_answer = route_metadata.get("followup_answer")
+    followup_answer = (
+        MemoirFollowupAnswerInterpretationResponse.model_validate(raw_followup_answer)
+        if isinstance(raw_followup_answer, dict)
+        else None
+    )
     return MemoirBookSourceReviewItemResponse(
         id=event.id,
         project_id=event.project_id,
@@ -96,6 +115,7 @@ def source_review_item_response(event: MemoirAutomationEvent) -> MemoirBookSourc
         confidence=event.confidence,
         reason=reason if isinstance(reason, str) else "",
         summary_text=event.summary_text,
+        followup_answer=followup_answer,
         evidence=_evidence_items(route_metadata),
         metadata_json=metadata,
         created_at=event.created_at,
@@ -122,6 +142,11 @@ def _route_metadata(route: MemoirBookSourceRouteResponse) -> dict[str, object]:
         "target_chapter_title": route.target_chapter_title or "",
         "suggested_title": route.suggested_title or "",
         "reason": route.reason,
+        "followup_answer": (
+            route.followup_answer.model_dump(mode="json")
+            if route.followup_answer is not None
+            else None
+        ),
         "evidence": [item.model_dump(mode="json") for item in route.evidence],
     }
 
@@ -263,8 +288,54 @@ async def confirm_source_review_item(
     event = await _load_review_event(db, user_id=user_id, project_id=project_id, event_id=event_id)
     item = source_review_item_response(event)
     utterance_id = item.utterance_id
+    resolved_followup_answer = None
+    if (
+        item.followup_answer is not None
+        and item.followup_answer.status
+        == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION
+    ):
+        if req.followup_answer_kind is None:
+            raise HTTPException(status_code=400, detail="请先确认这段回答在书中的用途")
+        try:
+            relation = await followup_completion.confirm_answer_interpretation(
+                db,
+                project_id=project_id,
+                task_id=item.followup_answer.task_id,
+                utterance_id=utterance_id,
+                answer_kind=req.followup_answer_kind,
+                direct_narrative_text=req.direct_narrative_text,
+                clarification_text=req.clarification_text,
+                fact_resolution_text=req.fact_resolution_text,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        resolved_followup_answer = MemoirFollowupAnswerInterpretationResponse(
+            task_id=relation.task_id,
+            status=MemoirFollowupAnswerInterpretationStatus.RESOLVED,
+            answer_kind=req.followup_answer_kind,
+            direct_narrative_text=relation.direct_narrative_text,
+            clarification_text=relation.clarification_text,
+            fact_resolution_text=relation.fact_resolution_text,
+            reason=relation.interpretation_reason,
+        )
+    elif req.followup_answer_kind is not None:
+        raise HTTPException(status_code=400, detail="该整理项不是待确认的补全回答")
+
     target_chapter_id = req.chapter_id or item.target_chapter_id
-    if target_chapter_id:
+    records_as_context = bool(
+        resolved_followup_answer
+        and (
+            resolved_followup_answer.clarification_text
+            or resolved_followup_answer.fact_resolution_text
+        )
+    )
+    if records_as_context:
+        plan = await book_plans.get_book_plan(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+        )
+    elif target_chapter_id:
         plan = await book_source_workflow.assign_book_sources_to_chapters(
             db,
             user_id=user_id,
@@ -300,13 +371,60 @@ async def confirm_source_review_item(
         preferred_chapter_id=target_chapter_id,
     )
 
+    if resolved_followup_answer is not None:
+        utterance = await db.scalar(
+            select(MemoirVoiceUtterance)
+            .where(MemoirVoiceUtterance.id == utterance_id)
+            .options(selectinload(MemoirVoiceUtterance.chat_message))
+        )
+        if utterance is None:
+            raise HTTPException(status_code=404, detail="讲述记录不存在")
+        confirmed_action = "record_as_context" if records_as_context else "assign_to_chapter"
+        confirmed_route = MemoirBookSourceRouteResponse(
+            material_type="memoir_content",
+            action=confirmed_action,
+            utterance_id=utterance_id,
+            source_index=item.source_index,
+            target_chapter_id=resolved_chapter_id,
+            target_chapter_title=resolved_chapter_title,
+            confidence=1,
+            reason="用户已确认补全回答用途。",
+            assignment_basis="completion_task",
+            followup_answer=resolved_followup_answer,
+            evidence=item.evidence,
+        )
+        apply_source_route_disposition(utterance, confirmed_route)
+        db.add(utterance)
+        if resolved_followup_answer.direct_narrative_text:
+            await narrative_ingestion.schedule_narrative_ingestion_job(
+                db,
+                project_id=project_id,
+                utterance=utterance,
+                source="followup_answer_confirmed",
+                ai_model=req.ai_model,
+            )
+
     event = await db.get(MemoirAutomationEvent, event_id)
     if not event:
         raise HTTPException(status_code=404, detail="待确认整理项不存在")
     event.chapter_id = resolved_chapter_id
     event.status = MemoirAutomationEventStatus.COMPLETED.value
+    metadata = dict(event.metadata_json or {})
+    route_metadata = _event_route_metadata(metadata)
+    if resolved_followup_answer is not None:
+        route_metadata.update(
+            {
+                "action": confirmed_action,
+                "route_action": confirmed_action,
+                "followup_answer": resolved_followup_answer.model_dump(mode="json"),
+            }
+        )
+        if isinstance(metadata.get("route"), dict):
+            metadata["route"] = route_metadata
+        else:
+            metadata.update(route_metadata)
     event.metadata_json = {
-        **(event.metadata_json or {}),
+        **metadata,
         "resolution": "confirmed",
         "resolved_at": _utcnow_iso(),
         "resolved_chapter_id": resolved_chapter_id or "",

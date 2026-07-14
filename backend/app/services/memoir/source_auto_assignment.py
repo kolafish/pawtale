@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirChapterSourceAssignedBy,
     MemoirEditingJobStatus,
 )
+from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.projects import Project
 from app.schemas.memoir_book import (
@@ -65,6 +66,8 @@ def _auto_assignment_item(
     if not assigned:
         if route.action == "assign_to_chapter":
             skip_reason = "confidence_below_threshold"
+        elif route.action == "record_as_context":
+            skip_reason = "recorded_as_completion_context"
         elif route.action == "ignore":
             skip_reason = "ignored_non_memoir_material"
         else:
@@ -103,6 +106,11 @@ def _route_metadata(
         "confidence": route.confidence,
         "reason": route.reason,
         "assignment_basis": route.assignment_basis,
+        "followup_answer": (
+            route.followup_answer.model_dump(mode="json")
+            if route.followup_answer is not None
+            else None
+        ),
         "evidence": [item.model_dump(mode="json") for item in route.evidence],
     }
     lineage = (source_lineage_by_utterance or {}).get(route.utterance_id)
@@ -168,11 +176,18 @@ async def _record_route_dispositions(
     )
     narrative_jobs: list[MemoirEditingJob] = []
     for utterance in result.scalars().all():
-        apply_source_route_disposition(utterance, route_by_utterance[utterance.id])
+        route = route_by_utterance[utterance.id]
+        apply_source_route_disposition(utterance, route)
         db.add(utterance)
         if (
             is_ignored_non_memoir_source(utterance)
             and utterance.source_material_type != INTERVIEWER_SOURCE_MATERIAL_TYPE
+        ):
+            continue
+        if route.followup_answer is not None and (
+            route.followup_answer.status
+            != MemoirFollowupAnswerInterpretationStatus.RESOLVED
+            or not route.followup_answer.direct_narrative_text
         ):
             continue
         narrative_job = await narrative_ingestion.schedule_narrative_ingestion_job(
@@ -235,6 +250,8 @@ async def _record_assignment_events(
 
 
 def _held_event_summary(route: MemoirBookSourceRouteResponse) -> str:
+    if route.followup_answer and route.followup_answer.confirmation_question:
+        return route.followup_answer.confirmation_question
     title = route.target_chapter_title or route.suggested_title or "待确认章节"
     if route.action == "suggest_new_chapter":
         return f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
@@ -291,7 +308,7 @@ async def _record_held_events(
     for route in routes:
         if _route_is_assignable(route, threshold=threshold):
             continue
-        if route.action == "ignore":
+        if route.action in {"ignore", "record_as_context"}:
             continue
         summary = _held_event_summary(route)
         metadata = _held_event_metadata(
@@ -348,18 +365,41 @@ async def run_source_auto_assignment_for_utterances(
             if utterance is not None
             else None
         )
-        routes.append(
-            await source_router.route_book_source(
+        route = await source_router.route_book_source(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+            utterance_id=utterance_id,
+            ai_model=ai_model,
+            followup_context=(
+                source_router.SourceRouteFollowupContext(
+                    task_id=completion_context.task_id,
+                    chapter_id=completion_context.chapter_id,
+                    question=completion_context.question,
+                    purpose=completion_context.purpose,
+                    expected_answer_use=completion_context.expected_answer_use,
+                    known_context_summary=completion_context.known_context_summary,
+                    story_id=completion_context.story_id,
+                    story_title=completion_context.story_title,
+                    story_summary=completion_context.story_summary,
+                )
+                if completion_context
+                else None
+            ),
+        )
+        if route.followup_answer is not None:
+            relation = await followup_completion.record_answer_interpretation(
                 db,
-                user_id=user_id,
                 project_id=project_id,
                 utterance_id=utterance_id,
-                ai_model=ai_model,
-                collection_chapter_id=(
-                    completion_context.chapter_id if completion_context else None
-                ),
+                interpretation=route.followup_answer,
             )
-        )
+            await followup_completion.complete_task_from_semantic_interpretation(
+                db,
+                project_id=project_id,
+                relation=relation,
+            )
+        routes.append(route)
 
     narrative_jobs = await _record_route_dispositions(
         db,

@@ -1,7 +1,7 @@
 import json
 from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
@@ -25,6 +25,7 @@ from app.models.memoir_narrative import (
     MemoirFollowupTask,
     MemoirFollowupTaskUtterance,
     MemoirNarrativeGap,
+    MemoirStory,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
@@ -117,6 +118,45 @@ def _ignore_route() -> dict[str, object]:
         "confidence": 0.94,
         "reason": "这是和 AI 的对话，不是回忆素材",
         "evidence": [{"quote": "你能不能别问了", "reason": "用户在回应 AI 交互"}],
+    }
+
+
+def _completion_route(
+    *,
+    answer_kind: str | None,
+    direct_narrative_text: str = "",
+    clarification_text: str = "",
+    fact_resolution_text: str = "",
+    confirmation_question: str = "",
+) -> dict[str, object]:
+    status = "needs_confirmation" if answer_kind is None else "resolved"
+    return {
+        "material_type": "memoir_content",
+        "action": "hold_for_review" if answer_kind is None else "suggest_new_chapter",
+        "target_chapter_id": None,
+        "suggested_title": None,
+        "confidence": 0.88,
+        "reason": "这是对当前补全问题的回答",
+        "evidence": [
+            {
+                "quote": (
+                    direct_narrative_text
+                    or clarification_text
+                    or fact_resolution_text
+                    or "我不确定"
+                ),
+                "reason": "来自回答原文",
+            }
+        ],
+        "followup_answer": {
+            "status": status,
+            "answer_kind": answer_kind,
+            "direct_narrative_text": direct_narrative_text,
+            "clarification_text": clarification_text,
+            "fact_resolution_text": fact_resolution_text,
+            "confirmation_question": confirmation_question,
+            "reason": "按回答在章节中的实际用途分类",
+        },
     }
 
 
@@ -568,7 +608,13 @@ async def test_completion_capture_assigns_memoir_content_to_task_chapter(
         )
     )
     await test_db.commit()
-    _patch_source_router_ai(monkeypatch, _new_chapter_route("另一段生活"))
+    _patch_source_router_ai(
+        monkeypatch,
+        _completion_route(
+            answer_kind="direct_narrative",
+            direct_narrative_text="外婆会带着我摘菜，夏天我们还会坐在屋檐下剥青豆。",
+        ),
+    )
 
     result = await run_source_auto_assignment_for_utterances(
         test_db,
@@ -591,6 +637,233 @@ async def test_completion_capture_assigns_memoir_content_to_task_chapter(
     )
     assert link is not None
     assert link.assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
+
+
+async def test_completion_clarification_updates_task_without_narrative_ingestion(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我去看望爷爷，还给他买了西瓜。",
+    )
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "看望爷爷并买西瓜"),
+        chapter_title="回成都后的疏离与克制",
+    )
+    answer_text = "我想说的其实是我想发给他的一句话。我想告诉他我今天去看了我爷爷的事情，但是我没有发给他，我忍住了。"
+    answer = await create_test_voice_transcript(client, test_db, answer_text)
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="causality",
+        severity="medium",
+        title="看望爷爷与章节主题的关联不明确",
+        description="需要解释这段内容为什么属于本章。",
+        fingerprint=sha256(b"watermelon-clarification-regression").hexdigest(),
+        status="open",
+        detected_by="ai",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        answer_use="clarification",
+        question="买西瓜这件事与本章想表达的克制有什么关系？",
+        purpose="解释已有事件与章节主题的关系。",
+        known_context_summary="已有素材写到看望爷爷并买西瓜。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=answer["utterance_id"],
+        result_role="related_context",
+        is_assignment_snapshot=True,
+    )
+    test_db.add(relation)
+    await test_db.commit()
+    stories_before = await test_db.scalar(
+        select(func.count(MemoirStory.id)).where(MemoirStory.project_id == project_id)
+    )
+    _patch_source_router_ai(
+        monkeypatch,
+        _completion_route(
+            answer_kind="clarification",
+            clarification_text=answer_text,
+        ),
+    )
+
+    result = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[answer["utterance_id"]],
+    )
+
+    assert result.assigned_source_count == 0
+    assert result.items[0].action == "record_as_context"
+    assert result.items[0].skip_reason == "recorded_as_completion_context"
+    assert result.narrative_ingestion_job_ids == []
+    await test_db.refresh(task)
+    await test_db.refresh(gap)
+    await test_db.refresh(relation)
+    assert task.status == "answered"
+    assert gap.status == "resolved"
+    assert relation.result_role == "target_answer"
+    assert relation.interpretation_status == "resolved"
+    assert relation.answer_kind == "clarification"
+    assert relation.clarification_text == answer_text
+    assert relation.direct_narrative_text == ""
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.utterance_id == answer["utterance_id"],
+        )
+    )
+    assert link is None
+    coverage = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-coverage"
+    )
+    assert coverage.status_code == 200
+    assert coverage.json()["uncovered_source_count"] == 0
+    stories_after = await test_db.scalar(
+        select(func.count(MemoirStory.id)).where(MemoirStory.project_id == project_id)
+    )
+    assert stories_after == stories_before
+
+
+async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_ingestion(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我去看望爷爷，还给他买了西瓜。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "看望爷爷并买西瓜"),
+        chapter_title="回成都后的疏离与克制",
+    )
+    answer_text = "我不确定这算解释，还是想补进书里的话。"
+    answer = await create_test_voice_transcript(client, test_db, answer_text)
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="causality",
+        severity="medium",
+        title="回答用途不明确",
+        description="需要用户确认回答用途。",
+        fingerprint=sha256(b"completion-needs-confirmation").hexdigest(),
+        status="open",
+        detected_by="ai",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        answer_use="clarification",
+        question="这件事与本章的关系是什么？",
+        purpose="确认章节关系。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=answer["utterance_id"],
+        result_role="related_context",
+        is_assignment_snapshot=True,
+    )
+    test_db.add(relation)
+    await test_db.commit()
+    confirmation_question = "这段话是在解释原有内容，还是希望作为新的回忆内容写进书里？"
+    _patch_source_router_ai(
+        monkeypatch,
+        _completion_route(
+            answer_kind=None,
+            confirmation_question=confirmation_question,
+        ),
+    )
+
+    result = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[answer["utterance_id"]],
+    )
+
+    assert result.assigned_source_count == 0
+    assert result.narrative_ingestion_job_ids == []
+    assert result.items[0].action == "hold_for_review"
+    await test_db.refresh(task)
+    await test_db.refresh(gap)
+    await test_db.refresh(relation)
+    assert task.status == "pending"
+    assert gap.status == "open"
+    assert relation.interpretation_status == "needs_confirmation"
+    assert relation.answer_kind is None
+    assert relation.confirmation_question == confirmation_question
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.utterance_id == answer["utterance_id"],
+        )
+    )
+    assert link is None
+    review_event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
+            MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        )
+    )
+    assert review_event is not None
+    assert review_event.summary_text == confirmation_question
+    assert review_event.metadata_json["route"]["followup_answer"]["status"] == "needs_confirmation"
+
+    confirmed = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-review-items/{review_event.id}/confirm",
+        json={
+            "followup_answer_kind": "clarification",
+            "clarification_text": answer_text,
+        },
+    )
+
+    assert confirmed.status_code == 200
+    assert confirmed.json()["item"]["status"] == "completed"
+    assert confirmed.json()["item"]["route_action"] == "record_as_context"
+    assert (
+        confirmed.json()["item"]["followup_answer"]["status"]
+        == "resolved"
+    )
+    await test_db.refresh(task)
+    await test_db.refresh(gap)
+    await test_db.refresh(relation)
+    assert task.status == "answered"
+    assert gap.status == "resolved"
+    assert relation.interpretation_status == "resolved"
+    assert relation.answer_kind == "clarification"
+    assert relation.clarification_text == answer_text
 
 
 async def test_source_routing_job_holds_new_topic_for_review(client, test_db, monkeypatch):
