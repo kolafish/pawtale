@@ -558,6 +558,7 @@ async def generate_or_reuse_chapter_card(
         )
     except Exception as exc:
         logger.exception("memoir chapter card generation failed chapter_id=%s", chapter_id)
+        await db.rollback()
         return await upsert_chapter_card(
             db,
             project_id=project_id,

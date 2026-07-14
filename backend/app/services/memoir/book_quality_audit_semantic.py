@@ -377,6 +377,7 @@ async def _semantic_snapshot_from_llm(
         )
     except Exception as exc:
         logger.exception("memoir semantic quality audit failed project_id=%s", project_id)
+        await db.rollback()
         await upsert_book_quality_audit_snapshot(
             db,
             project_id=project_id,
