@@ -26,6 +26,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
+    MemoirStoryRevisionChangeType,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
@@ -58,6 +59,7 @@ from app.models.memoir_narrative import (
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
+    MemoirStoryRevision,
 )
 from app.services.memoir.narrative.chapter_structure_backfill import (
     run_chapter_structure_backfill,
@@ -103,6 +105,7 @@ async def _create_ready_story(
     created: dict,
     title: str = "离开家乡",
     is_core: bool = True,
+    narrative_role: MemoirStoryNarrativeRole = MemoirStoryNarrativeRole.ACTION,
     verification_status: MemoirStoryVerificationStatus = MemoirStoryVerificationStatus.CONFIRMED,
 ) -> tuple[MemoirStory, MemoirClaim]:
     project_id = created["session"]["project_id"]
@@ -171,9 +174,20 @@ async def _create_ready_story(
                 project_id=project_id,
                 story_id=story.id,
                 claim_id=claim.id,
-                narrative_role=MemoirStoryNarrativeRole.ACTION.value,
+                narrative_role=narrative_role.value,
                 sort_order=0,
                 is_core=is_core,
+                created_by=MemoirNarrativeActorType.USER.value,
+                created_by_user_id=user_id,
+            ),
+            MemoirStoryRevision(
+                project_id=project_id,
+                story_id=story.id,
+                story_version=story.version,
+                change_type=MemoirStoryRevisionChangeType.CREATED.value,
+                before_state_json={},
+                after_state_json={"summary": story.summary},
+                reason="test fixture",
                 created_by=MemoirNarrativeActorType.USER.value,
                 created_by_user_id=user_id,
             ),
@@ -565,8 +579,19 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
     assert before_confirmation.json()["can_generate"] is False
     assert {issue["code"] for issue in before_confirmation.json()["issues"]} >= {
         "contract_not_confirmed",
+        "framing_node_has_no_supported_claim",
         "required_node_not_ready",
     }
+
+    reflection_node = next(
+        node for node in contract["nodes"] if node["node_type"] == "reflection"
+    )
+    excluded_reflection = await client.patch(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}"
+        f"/nodes/{reflection_node['id']}",
+        json={"required": False, "status": "excluded"},
+    )
+    assert excluded_reflection.status_code == 200, excluded_reflection.text
 
     confirmed = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/confirm"
@@ -577,6 +602,10 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
         for node in confirmed.json()["nodes"]
         if node["required"]
     )
+    closing_node = next(
+        node for node in confirmed.json()["nodes"] if node["node_type"] == "closing"
+    )
+    assert closing_node["status"] == "planned"
     validated = await client.get(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/generation-validation"
     )
@@ -632,9 +661,20 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
     await test_db.execute(
         update(MemoirStory)
         .where(MemoirStory.id == optional_story_id)
-        .values(publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value)
+        .values(
+            publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
+            verification_status=MemoirStoryVerificationStatus.DISPUTED.value,
+        )
     )
     await test_db.commit()
+    disputed_story_validation = await client.get(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/generation-validation"
+    )
+    assert disputed_story_validation.status_code == 200
+    assert disputed_story_validation.json()["can_generate"] is False
+    assert "linked_story_ineligible" in {
+        issue["code"] for issue in disputed_story_validation.json()["issues"]
+    }
 
     excluded_revision = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
@@ -1351,9 +1391,18 @@ async def test_chapter_structure_backfill_requires_first_confirmable_story_and_r
         is_core=False,
         verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION,
     )
+    reflection_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="回望基层工作经历",
+        is_core=False,
+        narrative_role=MemoirStoryNarrativeRole.REFLECTION,
+        verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION,
+    )
     confirmable_story.updated_at = datetime(2026, 1, 1)
     non_core_story.updated_at = confirmable_story.updated_at + timedelta(seconds=1)
-    test_db.add_all([confirmable_story, non_core_story])
+    reflection_story.updated_at = non_core_story.updated_at + timedelta(seconds=1)
+    test_db.add_all([confirmable_story, non_core_story, reflection_story])
     await test_db.commit()
 
     created_report = await run_chapter_structure_backfill(
@@ -1386,20 +1435,39 @@ async def test_chapter_structure_backfill_requires_first_confirmable_story_and_r
         ).all()
     )
     nodes_by_id = {node.id: node for node in nodes}
-    links_by_story = {link.story_id: link for link in links}
-    assert links_by_story[confirmable_story.id].required is True
-    assert nodes_by_id[links_by_story[confirmable_story.id].node_id].required is True
-    assert links_by_story[non_core_story.id].required is False
-    assert nodes_by_id[links_by_story[non_core_story.id].node_id].required is False
+    primary_links_by_story = {
+        link.story_id: link for link in links if link.story_role == "primary"
+    }
+    assert primary_links_by_story[confirmable_story.id].required is True
+    assert (
+        nodes_by_id[primary_links_by_story[confirmable_story.id].node_id].required
+        is True
+    )
+    assert primary_links_by_story[non_core_story.id].required is False
+    assert (
+        nodes_by_id[primary_links_by_story[non_core_story.id].node_id].required
+        is False
+    )
+    framing_links = [link for link in links if link.story_role == "supporting"]
+    assert len(framing_links) == 3
+    assert all(not link.required for link in framing_links)
+    framing_story_by_type = {
+        nodes_by_id[link.node_id].node_type: link.story_id for link in framing_links
+    }
+    assert framing_story_by_type == {
+        "opening": confirmable_story.id,
+        "reflection": reflection_story.id,
+        "closing": reflection_story.id,
+    }
 
     contract.constraints_json = {
         **contract.constraints_json,
         "include_story_ids": [non_core_story.id],
     }
-    links_by_story[confirmable_story.id].required = False
-    nodes_by_id[links_by_story[confirmable_story.id].node_id].required = False
-    links_by_story[non_core_story.id].required = True
-    nodes_by_id[links_by_story[non_core_story.id].node_id].required = True
+    primary_links_by_story[confirmable_story.id].required = False
+    nodes_by_id[primary_links_by_story[confirmable_story.id].node_id].required = False
+    primary_links_by_story[non_core_story.id].required = True
+    nodes_by_id[primary_links_by_story[non_core_story.id].node_id].required = True
     await test_db.commit()
 
     repaired = await run_chapter_structure_backfill(
@@ -1409,11 +1477,11 @@ async def test_chapter_structure_backfill_requires_first_confirmable_story_and_r
     )
     assert repaired["repaired_contract_ids"] == [contract.id]
     await test_db.refresh(contract)
-    await test_db.refresh(links_by_story[confirmable_story.id])
-    await test_db.refresh(links_by_story[non_core_story.id])
+    await test_db.refresh(primary_links_by_story[confirmable_story.id])
+    await test_db.refresh(primary_links_by_story[non_core_story.id])
     assert contract.constraints_json["include_story_ids"] == [confirmable_story.id]
-    assert links_by_story[confirmable_story.id].required is True
-    assert links_by_story[non_core_story.id].required is False
+    assert primary_links_by_story[confirmable_story.id].required is True
+    assert primary_links_by_story[non_core_story.id].required is False
 
     repeated = await run_chapter_structure_backfill(
         test_db,

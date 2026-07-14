@@ -17,6 +17,7 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockRole,
     MemoirDraftBlockStoryUsageRole,
     MemoirStoryLifecycleStatus,
+    MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
     MemoirStoryVerificationStatus,
 )
@@ -45,6 +46,11 @@ from app.services.memoir.narrative.draft_block_ai import (
 
 
 MAX_ADJACENT_CONTEXT_CHARS = 260
+FRAMING_BLOCK_ROLES = {
+    MemoirDraftBlockRole.OPENING,
+    MemoirDraftBlockRole.REFLECTION,
+    MemoirDraftBlockRole.CLOSING,
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +102,32 @@ def _story_usage_role(story_role: str) -> MemoirDraftBlockStoryUsageRole:
         "contrast": MemoirDraftBlockStoryUsageRole.CONTRAST,
         "transition_context": MemoirDraftBlockStoryUsageRole.SUPPORTING,
     }[story_role]
+
+
+def _claim_links_for_block_role(
+    role: MemoirDraftBlockRole,
+    links: list[MemoirStoryClaim],
+) -> list[MemoirStoryClaim]:
+    if role == MemoirDraftBlockRole.OPENING:
+        first_core = next((link for link in links if link.is_core), None)
+        return [first_core] if first_core is not None else []
+    if role == MemoirDraftBlockRole.REFLECTION:
+        return [
+            link
+            for link in links
+            if link.narrative_role == MemoirStoryNarrativeRole.REFLECTION.value
+        ][:3]
+    if role == MemoirDraftBlockRole.CLOSING:
+        return [
+            link
+            for link in links
+            if link.narrative_role
+            in {
+                MemoirStoryNarrativeRole.OUTCOME.value,
+                MemoirStoryNarrativeRole.REFLECTION.value,
+            }
+        ][:2]
+    return links
 
 
 def _eligible_story(story: MemoirStory) -> bool:
@@ -298,7 +330,12 @@ async def build_node_generation_context(
         ):
             continue
         prompt_claims: list[DraftBlockClaimInput] = []
-        for story_claim in links_by_story.get(story.id, []):
+        eligible_links = [
+            link
+            for link in links_by_story.get(story.id, [])
+            if link.claim_id in claims
+        ]
+        for story_claim in _claim_links_for_block_role(role, eligible_links):
             claim = claims[story_claim.claim_id]
             prompt_claims.append(
                 DraftBlockClaimInput(
@@ -351,6 +388,17 @@ async def build_node_generation_context(
 
     if role == MemoirDraftBlockRole.FACTUAL and not claim_sources:
         raise ValueError(f"ready factual node has no eligible claim evidence: {node.title}")
+    if role in FRAMING_BLOCK_ROLES and not claim_sources:
+        raise ValueError(
+            f"ready {role.value} node has no eligible role-specific claim evidence: "
+            f"{node.title}"
+        )
+    if role == MemoirDraftBlockRole.TRANSITION and (
+        not previous_context or not next_context
+    ):
+        raise ValueError(
+            f"ready transition node requires generated endpoint blocks: {node.title}"
+        )
     return DraftNodeGenerationContext(
         node=node,
         ai_input=DraftBlockGenerationInput(
