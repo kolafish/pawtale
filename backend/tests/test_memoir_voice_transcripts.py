@@ -1158,6 +1158,7 @@ async def test_share_video_worker_recovers_when_completion_write_stalls(
                 await asyncio.Event().wait()
             finally:
                 stalled_completion_cancelled.set()
+        assert stalled_completion_cancelled.is_set()
         return await original_complete(*args, **kwargs)
 
     monkeypatch.setattr(share_video_jobs, "_complete_share_video_job", stall_first_completion)

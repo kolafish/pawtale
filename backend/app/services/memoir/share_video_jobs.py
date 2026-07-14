@@ -562,14 +562,16 @@ async def _recover_published_share_video(
     lease: JobLease,
 ) -> bool:
     async with session_maker() as db:
-        job = await db.scalar(
-            select(MemoirMaterialShareVideo).where(
-                MemoirMaterialShareVideo.id == lease.job_id,
-                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                MemoirMaterialShareVideo.lease_token == lease.token,
-            )
-        )
+        job = await db.get(MemoirMaterialShareVideo, lease.job_id)
         if job is None:
+            return False
+        if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.video_storage_path:
+            _remove_video_completion_marker(share_video_file_path(job))
+            return True
+        if (
+            job.status != MemoirShareVideoJobStatus.RUNNING.value
+            or job.lease_token != lease.token
+        ):
             return False
         target_path = share_video_file_path(job)
         size_bytes = _published_video_size(target_path)
@@ -587,21 +589,25 @@ async def _recover_published_share_video(
     return completed
 
 
-async def _watch_for_published_share_video(
+async def _wait_for_published_share_video(
     session_maker: async_sessionmaker[AsyncSession],
     lease: JobLease,
     *,
     poll_seconds: float,
-) -> bool:
+) -> None:
+    async with session_maker() as db:
+        job = await db.scalar(
+            select(MemoirMaterialShareVideo).where(
+                MemoirMaterialShareVideo.id == lease.job_id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                MemoirMaterialShareVideo.lease_token == lease.token,
+            )
+        )
+        target_path = share_video_file_path(job) if job is not None else None
+    if target_path is None:
+        await asyncio.Event().wait()
     interval = max(0.01, poll_seconds)
-    while True:
-        try:
-            if await _recover_published_share_video(session_maker, lease):
-                return True
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("share video completion recovery failed job_id=%s", lease.job_id)
+    while _published_video_size(target_path) is None:
         await asyncio.sleep(interval)
 
 
@@ -816,7 +822,7 @@ async def run_share_video_job(
         renew,
         interval_seconds=heartbeat_seconds,
     ))
-    recovery_task = asyncio.create_task(_watch_for_published_share_video(
+    recovery_task = asyncio.create_task(_wait_for_published_share_video(
         session_maker,
         lease,
         poll_seconds=completion_recovery_poll_seconds,
@@ -826,13 +832,11 @@ async def run_share_video_job(
             {work_task, recovery_task},
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if work_task in done:
-            return await work_task
-        recovered = await recovery_task
-        if recovered:
+        if recovery_task in done:
+            await recovery_task
             work_task.cancel()
             await asyncio.gather(work_task, return_exceptions=True)
-            return True
+            return await _recover_published_share_video(session_maker, lease)
         return await work_task
     except JobLeaseLostError:
         logger.warning("share video job lease lost job_id=%s", lease.job_id)
