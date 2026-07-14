@@ -92,6 +92,22 @@ export function createMemoirChapterContractRevision(
   );
 }
 
+export function suggestMemoirChapterDirection(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/contract/suggest`,
+    ),
+    {
+      method: "POST",
+      data: { idempotency_key: `workspace:direction:${chapterId}` },
+    },
+  );
+}
+
 export function includeMemoirStoryInChapter(
   projectId: string,
   contractId: string,

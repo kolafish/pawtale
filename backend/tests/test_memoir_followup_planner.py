@@ -378,6 +378,7 @@ async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -405,6 +406,7 @@ async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert resumed.status_code == 201, resumed.text
@@ -459,6 +461,7 @@ async def test_related_but_off_target_evidence_does_not_complete_task(client, te
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -546,6 +549,7 @@ async def test_interviewer_evidence_cannot_complete_narrator_followup(client, te
             "guidance_mode": "guided_interview",
             "interview_type": "human_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -591,6 +595,7 @@ async def test_concurrent_answer_does_not_rollback_new_narrative_evidence(
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -667,6 +672,7 @@ async def test_cannot_recall_accepts_incomplete_and_prevents_reselection(client,
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     session = started.json()["session"]
@@ -692,8 +698,8 @@ async def test_cannot_recall_accepts_incomplete_and_prevents_reselection(client,
             "session_goal": "book_completion",
         },
     )
-    assert next_session.status_code == 201, next_session.text
-    assert next_session.json()["session"]["current_followup_task_id"] is None
+    assert next_session.status_code == 409, next_session.text
+    assert "问题尚未准备好" in next_session.json()["detail"]
     assert session["current_followup_task_id"] == fixture["task"].id
 
 
@@ -705,6 +711,7 @@ async def test_ask_family_later_keeps_gap_open_and_task_resumable(client, test_d
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -738,6 +745,7 @@ async def test_excluding_followup_excludes_related_story_claim_and_gap(client, t
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text
@@ -767,6 +775,7 @@ async def test_followup_prompt_drops_task_after_claim_becomes_private(client, te
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
         },
     )
     assert started.status_code == 201, started.text

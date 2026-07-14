@@ -550,8 +550,10 @@ async def select_next_task(
     project_id: str,
     preferred_chapter_id: str | None = None,
     avoid_story_id: str | None = None,
+    release_deferred: bool = True,
 ) -> MemoirFollowupTask | None:
-    await _release_due_deferred_tasks(db, project_id=project_id)
+    if release_deferred:
+        await _release_due_deferred_tasks(db, project_id=project_id)
     candidates = list(
         (
             await db.scalars(

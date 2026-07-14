@@ -33,6 +33,31 @@ export type MemoirFollowupTaskClaimRole = "known" | "do_not_repeat" | "expected_
 export type MemoirFollowupTaskUtteranceRole = "target_answer" | "related_context";
 export type MemoirFollowupCannotRecallResolution = "accept_incomplete" | "ask_family_later";
 export type MemoirNarrativeActorType = "ai" | "user" | "system";
+export type MemoirBookCompletionState =
+  | "ready"
+  | "preparing"
+  | "needs_preparation"
+  | "needs_review"
+  | "complete"
+  | "failed";
+export type MemoirBookCompletionAction =
+  | "start_interview"
+  | "wait"
+  | "prepare"
+  | "open_chapter"
+  | "open_book"
+  | "retry"
+  | "none";
+
+export interface MemoirBookCompletion {
+  project_id: string;
+  state: MemoirBookCompletionState;
+  action: MemoirBookCompletionAction;
+  headline: string;
+  detail: string;
+  task_id?: string | null;
+  chapter_id?: string | null;
+}
 
 export interface MemoirFollowupTaskClaim {
   claim_id: string;
