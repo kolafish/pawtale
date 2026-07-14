@@ -1,5 +1,6 @@
 import type {
   MemoirChapterWorkspace,
+  MemoirChapterWorkspaceAnswerUpdate,
   MemoirChapterWorkspaceAvailableStory,
   MemoirChapterWorkspaceClaim,
   MemoirChapterWorkspaceNode,
@@ -50,6 +51,11 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import {
+  readVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
+import {
   chapterNextAction,
   LOADING_NEXT_ACTION,
   type ChapterNextAction,
@@ -90,6 +96,11 @@ interface StorySlotView extends MemoirChapterWorkspaceStorySlot {
 
 interface ClaimView extends MemoirChapterWorkspaceClaim {
   evidenceCountText: string;
+  verificationStatusText: string;
+}
+
+interface AnswerUpdateView extends MemoirChapterWorkspaceAnswerUpdate {
+  summaryText: string;
 }
 
 interface StoryView extends MemoirChapterWorkspaceStory {
@@ -166,6 +177,7 @@ interface ChapterWorkspacePageData {
   nodes: NodeView[];
   stories: StoryView[];
   availableStories: AvailableStoryView[];
+  appliedAnswerUpdates: AnswerUpdateView[];
   contractRevisionBusy: boolean;
   contractRevisionError: string;
   gapGroups: GapGroupView[];
@@ -403,6 +415,7 @@ definePage<ChapterWorkspacePageData>()({
     nodes: [],
     stories: [],
     availableStories: [],
+    appliedAnswerUpdates: [],
     contractRevisionBusy: false,
     contractRevisionError: "",
     gapGroups: [],
@@ -479,7 +492,13 @@ definePage<ChapterWorkspacePageData>()({
         }),
         claims: story.claims.map((claim) => ({
           ...claim,
-          evidenceCountText: `${claim.evidence.length} 条证据`,
+          evidenceCountText: `${claim.evidence.length} 段原话依据`,
+          verificationStatusText: ({
+            confirmed: "已确认",
+            rejected: "已否定",
+            needs_verification: "需要确认",
+            unreviewed: "待核对",
+          })[claim.verification_status] || "待核对",
         })),
       })),
       availableStories: workspace.available_stories.map((story) => ({
@@ -489,6 +508,13 @@ definePage<ChapterWorkspacePageData>()({
         busy: availableStoryState.get(story.id)?.busy || false,
         error: availableStoryState.get(story.id)?.error || "",
       })),
+      appliedAnswerUpdates: workspace.answer_updates
+        .filter((item) => item.status === "applied")
+        .slice(0, 3)
+        .map((item) => ({
+          ...item,
+          summaryText: item.summaries.join("\n"),
+        })),
       gapGroups: [
         {
           key: "must_handle",
@@ -616,6 +642,8 @@ definePage<ChapterWorkspacePageData>()({
       await this.confirmCurrentDirection();
     } else if (action.kind === "start_audit") {
       await this.startAudit();
+    } else if (action.kind === "continue_fact_confirmation") {
+      await this.beginFollowupInterview(action.taskId || "");
     } else if (action.kind === "open_followups") {
       this.setData({ activeTab: "followups" });
     } else if (action.kind === "open_checks") {
@@ -1240,20 +1268,42 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  async startHumanFollowupInterview(event: DatasetEvent) {
+  async startFollowupInterview(event: DatasetEvent) {
     const taskId = datasetString(event, "taskId");
+    await this.beginFollowupInterview(taskId);
+  },
+
+  async beginFollowupInterview(taskId: string) {
     if (!taskId || this.data.startingFollowupTaskId) {
       return;
     }
     const task = this.data.followupTasks.find((item) => item.id === taskId);
+    if (task?.status === "in_progress" && task.assigned_session_id) {
+      wx.navigateTo({
+        url: pageUrl("/pages/voice-chat/index", {
+          voiceSessionId: task.assigned_session_id,
+          mode: "guided_interview",
+          interviewType: "ai_interview",
+          sessionGoal: "book_completion",
+          projectTitle: this.data.workspace?.chapter_title || "补全本章",
+        }),
+      });
+      return;
+    }
     if (!task?.canInterview) {
+      this.setData({ followupError: "这个问题当前不能开始，请刷新后再试" });
+      return;
+    }
+    if (!readVoiceAuthorizationConsent()) {
+      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
       return;
     }
     this.setData({ startingFollowupTaskId: taskId, followupError: "" });
     try {
+      await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
         guidance_mode: "guided_interview",
-        interview_type: "human_interview",
+        interview_type: "ai_interview",
         session_goal: "book_completion",
         current_followup_task_id: taskId,
         provider: "volc_streaming_asr",
@@ -1268,7 +1318,7 @@ definePage<ChapterWorkspacePageData>()({
         "voice_chat.start",
         {
           guidance_mode: "guided_interview",
-          interview_type: "human_interview",
+          interview_type: "ai_interview",
           session_goal: "book_completion",
           entry: "chapter_workspace",
         },
@@ -1278,7 +1328,7 @@ definePage<ChapterWorkspacePageData>()({
         url: pageUrl("/pages/voice-chat/index", {
           voiceSessionId: detail.session.id,
           mode: "guided_interview",
-          interviewType: "human_interview",
+          interviewType: "ai_interview",
           sessionGoal: "book_completion",
           projectTitle: this.data.workspace?.chapter_title || "补访问题",
         }),
@@ -1287,7 +1337,7 @@ definePage<ChapterWorkspacePageData>()({
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ followupError: error instanceof Error ? error.message : "人工访谈创建失败" });
+      this.setData({ followupError: error instanceof Error ? error.message : "AI 访谈创建失败" });
     } finally {
       this.setData({ startingFollowupTaskId: "" });
     }

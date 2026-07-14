@@ -179,6 +179,47 @@
   color: #ffffff;
 }
 
+.answer-update-band {
+  margin-top: 34rpx;
+  padding: 24rpx 0;
+  border-top: 1rpx solid #d8d0c7;
+  border-bottom: 1rpx solid #d8d0c7;
+}
+
+.answer-update-label,
+.answer-update-question,
+.answer-update-summary {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.answer-update-label {
+  color: #39705a;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+}
+
+.answer-update-row {
+  margin-top: 20rpx;
+  padding-left: 20rpx;
+  border-left: 5rpx solid #608273;
+}
+
+.answer-update-question {
+  color: #675d58;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.answer-update-summary {
+  margin-top: 8rpx;
+  color: #2b211e;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  white-space: pre-line;
+}
+
 .overview-detail-action,
 .overview-return {
   margin: 22rpx 0 0;
@@ -857,6 +898,13 @@
 
 .claim-label {
   color: #315947;
+  font-size: 23rpx;
+  font-weight: 700;
+}
+
+.claim-status {
+  margin-left: auto;
+  color: #8b5b43;
   font-size: 23rpx;
   font-weight: 700;
 }

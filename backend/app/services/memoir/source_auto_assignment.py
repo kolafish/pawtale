@@ -71,6 +71,7 @@ def _route_after_semantic_completion(
     followup_answer = MemoirFollowupAnswerInterpretationResponse(
         task_id=relation.task_id,
         status=MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION,
+        confirmation_type="fact_resolution",
         confirmation_question=relation.confirmation_question,
         reason=relation.interpretation_reason,
     )

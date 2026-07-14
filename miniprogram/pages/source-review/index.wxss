@@ -11,6 +11,7 @@
 .source-section,
 .choice-section,
 .split-section,
+.fact-confirmation-section,
 .action-section {
   padding: 30rpx 4rpx 34rpx;
   border-bottom: 1rpx solid #d7cec3;
@@ -134,11 +135,21 @@
 
 .choice-detail,
 .split-detail,
+.fact-confirmation-detail,
 .success-detail {
   margin-top: 6rpx;
   color: #6f655f;
   font-size: 25rpx;
   line-height: 38rpx;
+}
+
+.fact-confirmation-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.fact-confirmation-section .primary-button {
+  margin-top: 28rpx;
 }
 
 .split-field {

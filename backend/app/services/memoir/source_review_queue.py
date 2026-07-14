@@ -385,6 +385,7 @@ async def confirm_source_review_item(
             pending_answer = MemoirFollowupAnswerInterpretationResponse(
                 task_id=relation.task_id,
                 status=MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION,
+                confirmation_type="fact_resolution",
                 confirmation_question=relation.confirmation_question,
                 reason=relation.interpretation_reason,
             )

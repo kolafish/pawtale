@@ -350,6 +350,7 @@ async def _create_fact_resolution_case(client, test_db):
     return {
         "project_id": project_id,
         "user_id": first["user_id"],
+        "first": first,
         "chapter": chapter,
         "answer": answer,
         "answer_text": answer_text,
@@ -852,6 +853,23 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
             "reason": "回答明确解决了人物身份矛盾。",
         },
     )
+    stale_review_event = MemoirAutomationEvent(
+        project_id=case["project_id"],
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[case["first"]["utterance_id"]],
+        summary_text="请继续确认这两个称呼是否指向同一个人。",
+        metadata_json={
+            "route": {
+                "followup_answer": {
+                    "task_id": case["task"].id,
+                    "status": "needs_confirmation",
+                }
+            }
+        },
+    )
+    test_db.add(stale_review_event)
+    await test_db.commit()
 
     result = await run_source_auto_assignment_for_utterances(
         test_db,
@@ -882,6 +900,23 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
     assert case["task"].status == "answered"
     assert case["gap"].status == "resolved"
     assert case["relation"].result_role == "target_answer"
+    await test_db.refresh(stale_review_event)
+    assert stale_review_event.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert stale_review_event.metadata_json["resolution_reason"] == "followup_answer_resolved"
+    assert stale_review_event.metadata_json["resolved_utterance_ids"] == [
+        case["answer"]["utterance_id"]
+    ]
+    workspace_response = await client.get(
+        f"/api/memoir/projects/{case['project_id']}"
+        f"/chapters/{case['chapter'].id}/workspace"
+    )
+    assert workspace_response.status_code == 200, workspace_response.json()
+    answer_update = workspace_response.json()["answer_updates"][0]
+    assert answer_update["status"] == "applied"
+    assert answer_update["task_id"] == case["task"].id
+    assert "工作时的经理" in "".join(answer_update["summaries"])
+    assert "后来邀请创业的人" in "".join(answer_update["summaries"])
+    assert "Claim" not in json.dumps(answer_update, ensure_ascii=False)
 
     decisions_for_answer = list(
         (
@@ -1009,6 +1044,17 @@ async def test_ambiguous_fact_resolution_keeps_task_open_without_semantic_change
     )
     assert review_event is not None
     assert review_event.summary_text == confirmation_question
+    workspace_response = await client.get(
+        f"/api/memoir/projects/{case['project_id']}"
+        f"/chapters/{case['chapter'].id}/workspace"
+    )
+    assert workspace_response.status_code == 200, workspace_response.json()
+    answer_update = workspace_response.json()["answer_updates"][0]
+    assert answer_update["task_id"] == case["task"].id
+    assert answer_update["status"] == "needs_confirmation"
+    assert answer_update["question"] == confirmation_question
+    assert answer_update["answer_text"] == ""
+    assert answer_update["summaries"] == []
     confirmed = await client.post(
         f"/api/mobile/memoir/projects/{case['project_id']}"
         f"/book-source-review-items/{review_event.id}/confirm",
@@ -1022,6 +1068,10 @@ async def test_ambiguous_fact_resolution_keeps_task_open_without_semantic_change
     assert (
         confirmed.json()["item"]["followup_answer"]["status"]
         == "needs_confirmation"
+    )
+    assert (
+        confirmed.json()["item"]["followup_answer"]["confirmation_type"]
+        == "fact_resolution"
     )
     await test_db.refresh(case["task"])
     await test_db.refresh(case["gap"])
@@ -1230,6 +1280,11 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     assert review_event is not None
     assert review_event.summary_text == confirmation_question
     assert review_event.metadata_json["route"]["followup_answer"]["status"] == "needs_confirmation"
+    workspace_response = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
+    )
+    assert workspace_response.status_code == 200, workspace_response.json()
+    assert workspace_response.json()["answer_updates"] == []
 
     pending_review = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-source-review-items"

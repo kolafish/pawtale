@@ -26,7 +26,12 @@ from app.schemas.memoir_narrative import (
     MemoirClaimResponse,
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
-from app.services.memoir.narrative import chapter_contracts, gap_audit, gaps
+from app.services.memoir.narrative import (
+    chapter_answer_updates,
+    chapter_contracts,
+    gap_audit,
+    gaps,
+)
 from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
 
 
@@ -234,6 +239,11 @@ async def get_chapter_workspace(
             )
             for story in available_stories
         ],
+        answer_updates=await chapter_answer_updates.chapter_answer_updates(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        ),
         gaps=gap_groups,
         latest_audit_job=(
             MemoirChapterGapAuditJobResponse.model_validate(latest_job)

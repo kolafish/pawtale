@@ -38,6 +38,7 @@ from app.models.memoir_narrative import (
     MemoirStorySlotClaim,
 )
 from app.schemas.memoir_book import MemoirFollowupAnswerInterpretationResponse
+from app.services.memoir import automation_event_resolution
 from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
 from app.services.memoir.narrative import fact_resolution, followup_tasks, gap_audit, gaps
 
@@ -449,6 +450,12 @@ async def complete_task_from_semantic_interpretation(
         gap_id=task.gap_id,
         idempotency_key=f"gap-resolved-by-interpretation:{task.id}:{relation.utterance_id}",
         note="用户回答已明确补充所需的解释或事实判断。",
+    )
+    await automation_event_resolution.resolve_followup_source_review_events(
+        db,
+        project_id=project_id,
+        task_id=task.id,
+        resolved_by_utterance_id=relation.utterance_id,
     )
     if task.chapter_id:
         await gap_audit.enqueue_chapter_gap_audit(
