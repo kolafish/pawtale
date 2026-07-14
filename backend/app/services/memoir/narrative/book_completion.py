@@ -365,9 +365,7 @@ async def prepare_book_completion(
     if current.state in {"ready", "preparing"}:
         return current
     if current.state == "complete":
-        task = await followup_planner.select_next_task(db, project_id=project_id)
-        if task is None:
-            return current
+        await followup_planner.select_next_task(db, project_id=project_id)
         return await get_book_completion_status(db, project_id=project_id)
 
     plan = await load_plan_with_chapters(db, project_id)
