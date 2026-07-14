@@ -1050,6 +1050,50 @@ test("chapter workspace creates an explicit draft revision before editing a conf
   assert.equal(context.data.contractRevisionBusy, false);
 });
 
+test("available chapter stories stay scannable and can be searched by person or event", async () => {
+  const base = sampleWorkspace();
+  const candidates = Array.from({ length: 12 }, (_, index) => ({
+    ...base.available_stories[0],
+    id: `candidate-${index}`,
+    title: index === 10 ? "与李阅的关系" : `候选故事 ${index + 1}`,
+    summary: index === 10 ? "多年朋友关系中的共同经历。" : `第 ${index + 1} 条候选内容。`,
+  }));
+  const workspace = sampleWorkspace({ available_stories: candidates });
+  const { page } = loadWorkspacePage({ workspace });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project%2F1",
+    chapterId: "chapter-1",
+    tab: "stories",
+  });
+
+  assert.equal(context.data.availableStoryTotalCount, 12);
+  assert.equal(context.data.availableStoryMatchCount, 12);
+  assert.equal(context.data.availableStories.length, 8);
+  assert.equal(context.data.availableStoryHasMore, true);
+
+  page.changeAvailableStoryQuery.call(context, { detail: { value: "李阅" } });
+
+  assert.equal(context.data.availableStoryMatchCount, 1);
+  assert.deepEqual(
+    context.data.availableStories.map((story) => story.title),
+    ["与李阅的关系"],
+  );
+  assert.equal(context.data.availableStoryHasMore, false);
+
+  page.clearAvailableStoryQuery.call(context);
+  page.toggleAvailableStories.call(context);
+
+  assert.equal(context.data.availableStories.length, 12);
+  assert.equal(context.data.showAllAvailableStories, true);
+
+  page.toggleAvailableStories.call(context);
+
+  assert.equal(context.data.availableStories.length, 8);
+  assert.equal(context.data.showAllAvailableStories, false);
+});
+
 test("including a Story only marks that Story busy and exposes request failures", async () => {
   const base = sampleWorkspace();
   const secondCandidate = {
@@ -1094,6 +1138,16 @@ test("including a Story only marks that Story busy and exposes request failures"
   assert.equal(context.data.availableStories[0].busy, true);
   assert.equal(context.data.availableStories[1].busy, false);
   assert.equal(context.data.contractRevisionBusy, false);
+
+  page.changeAvailableStoryQuery.call(context, { detail: { value: "成都" } });
+  page.clearAvailableStoryQuery.call(context);
+
+  assert.equal(context.data.availableStories[0].busy, true);
+  await page.includeAvailableStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-2" } },
+  });
+  assert.equal(calls.filter((call) => call.storyId === "story-2").length, 1);
+
   await page.includeAvailableStory.call(context, {
     currentTarget: { dataset: { storyId: "story-3" } },
   });

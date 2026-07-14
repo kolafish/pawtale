@@ -349,7 +349,21 @@
 
       <view class="section-heading available-story-heading">
         <text class="section-title">可加入本章</text>
-        <text class="section-count">{{availableStories.length}} 个</text>
+        <text class="section-count">{{availableStoryMatchCount}} 个</text>
+      </view>
+      <view wx:if="{{availableStoryTotalCount}}" class="available-story-filter">
+        <input
+          class="available-story-search"
+          value="{{availableStoryQuery}}"
+          maxlength="80"
+          placeholder="搜索人物或事情"
+          bindinput="changeAvailableStoryQuery"
+        />
+        <button
+          wx:if="{{availableStoryQuery}}"
+          class="available-story-clear"
+          bindtap="clearAvailableStoryQuery"
+        >清空</button>
       </view>
       <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
       <view wx:if="{{availableStories.length && workspace.contract && workspace.contract.status === 'confirmed'}}" class="story-edit-state">
@@ -384,7 +398,13 @@
             bindtap="includeAvailableStory"
           >{{story.actionText}}</button>
         </view>
+        <button
+          wx:if="{{availableStoryHasMore || (showAllAvailableStories && !availableStoryQuery && availableStoryTotalCount > 8)}}"
+          class="available-story-toggle"
+          bindtap="toggleAvailableStories"
+        >{{showAllAvailableStories ? "收起" : "查看全部"}}</button>
       </view>
+      <view wx:elif="{{availableStoryQuery && !availableStories.length}}" class="empty-state">没有匹配的人物或事情</view>
       <view wx:elif="{{!workspace.contract}}" class="empty-state">确定本章方向后，可以从现有素材中加入内容</view>
       <view wx:else class="empty-state">没有其他适合加入本章的内容</view>
     </view>

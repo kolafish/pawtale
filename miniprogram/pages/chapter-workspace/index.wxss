@@ -1041,6 +1041,37 @@
   margin-top: 44rpx;
 }
 
+.available-story-filter {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  margin: 16rpx 0 8rpx;
+}
+
+.available-story-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 76rpx;
+  box-sizing: border-box;
+  padding: 0 24rpx;
+  border-radius: 12rpx;
+  background: #f3efeb;
+  color: #2b211e;
+  font-size: 26rpx;
+}
+
+.available-story-clear {
+  flex: 0 0 auto;
+  min-width: 88rpx;
+  min-height: 76rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  background: transparent;
+  color: #8b4940;
+  font-size: 24rpx;
+  line-height: 76rpx;
+}
+
 .story-edit-state,
 .available-story-row {
   display: flex;
@@ -1106,6 +1137,15 @@
 .available-story-action {
   flex: 0 0 auto;
   min-width: 142rpx;
+}
+
+.available-story-toggle {
+  min-height: 76rpx;
+  margin: 20rpx 0 0;
+  background: #f3efeb;
+  color: #6d5d55;
+  font-size: 25rpx;
+  line-height: 76rpx;
 }
 
 .followup-priority {

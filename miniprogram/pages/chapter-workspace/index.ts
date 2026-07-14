@@ -81,6 +81,7 @@ const VERIFICATION_DECISIONS = ["confirm", "reject"] as const;
 const SLOT_RESOLUTIONS = ["accepted_incomplete", "not_applicable"] as const;
 const AUDIT_POLL_INTERVAL_MS = 1500;
 const DRAFT_JOB_POLL_INTERVAL_MS = 1500;
+const AVAILABLE_STORY_PREVIEW_LIMIT = 8;
 
 type WorkspaceTab = (typeof TAB_VALUES)[number];
 
@@ -236,6 +237,11 @@ interface ChapterWorkspacePageData {
   nodes: NodeView[];
   stories: StoryView[];
   availableStories: AvailableStoryView[];
+  availableStoryQuery: string;
+  availableStoryTotalCount: number;
+  availableStoryMatchCount: number;
+  availableStoryHasMore: boolean;
+  showAllAvailableStories: boolean;
   contractRevisionBusy: boolean;
   contractRevisionError: string;
   gapGroups: GapGroupView[];
@@ -361,6 +367,16 @@ function availableStoryStatusText(story: MemoirChapterWorkspaceAvailableStory): 
     sufficient: "内容充分",
     accepted_incomplete: "接受不完整",
   })[story.completion_status] || story.completion_status;
+}
+
+function matchesAvailableStory(
+  story: MemoirChapterWorkspaceAvailableStory,
+  query: string,
+): boolean {
+  if (!query) {
+    return true;
+  }
+  return `${story.title}\n${story.summary}`.toLocaleLowerCase().includes(query);
 }
 
 function gapStatusText(status: string): string {
@@ -497,6 +513,7 @@ definePage<ChapterWorkspacePageData>()({
   auditPollToken: 0,
   draftPollTimer: null as ReturnType<typeof setTimeout> | null,
   draftPollToken: 0,
+  availableStoryState: new Map<string, { busy: boolean; error: string }>(),
   loadedOnce: false,
   ...chapterStructureActions,
 
@@ -543,6 +560,11 @@ definePage<ChapterWorkspacePageData>()({
     nodes: [],
     stories: [],
     availableStories: [],
+    availableStoryQuery: "",
+    availableStoryTotalCount: 0,
+    availableStoryMatchCount: 0,
+    availableStoryHasMore: false,
+    showAllAvailableStories: false,
     contractRevisionBusy: false,
     contractRevisionError: "",
     gapGroups: [],
@@ -608,9 +630,20 @@ definePage<ChapterWorkspacePageData>()({
     const busyClaimIds = new Set(this.data.busyClaimIds);
     const busySlotKeys = new Set(this.data.busySlotKeys);
     const splitNodeIds = new Set(this.data.splitNodeIds);
-    const availableStoryState = new Map(
-      this.data.availableStories.map((story) => [story.id, { busy: story.busy, error: story.error }]),
-    );
+    const availableStoryQuery = this.data.availableStoryQuery.trim().toLocaleLowerCase();
+    const allAvailableStories = workspace.available_stories.map((story) => ({
+      ...story,
+      statusText: availableStoryStatusText(story),
+      actionText: story.excluded_from_chapter ? "重新加入" : "加入本章",
+      busy: this.availableStoryState.get(story.id)?.busy || false,
+      error: this.availableStoryState.get(story.id)?.error || "",
+    }));
+    const matchingAvailableStories = allAvailableStories.filter((story) => (
+      matchesAvailableStory(story, availableStoryQuery)
+    ));
+    const visibleAvailableStories = availableStoryQuery || this.data.showAllAvailableStories
+      ? matchingAvailableStories
+      : matchingAvailableStories.slice(0, AVAILABLE_STORY_PREVIEW_LIMIT);
     const notes = new Map(
       this.data.gapGroups.flatMap((group) => group.items.map((gap) => [gap.id, gap.note] as const)),
     );
@@ -677,13 +710,11 @@ definePage<ChapterWorkspacePageData>()({
           })),
         };
       }),
-      availableStories: workspace.available_stories.map((story) => ({
-        ...story,
-        statusText: availableStoryStatusText(story),
-        actionText: story.excluded_from_chapter ? "重新加入" : "加入本章",
-        busy: availableStoryState.get(story.id)?.busy || false,
-        error: availableStoryState.get(story.id)?.error || "",
-      })),
+      availableStories: visibleAvailableStories,
+      availableStoryTotalCount: allAvailableStories.length,
+      availableStoryMatchCount: matchingAvailableStories.length,
+      availableStoryHasMore: !availableStoryQuery
+        && visibleAvailableStories.length < matchingAvailableStories.length,
       gapGroups: [
         {
           key: "must_handle",
@@ -1410,11 +1441,45 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   patchAvailableStory(storyId: string, patch: Partial<AvailableStoryView>) {
+    const current = this.availableStoryState.get(storyId) || { busy: false, error: "" };
+    this.availableStoryState.set(storyId, {
+      busy: patch.busy ?? current.busy,
+      error: patch.error ?? current.error,
+    });
     this.setData({
       availableStories: this.data.availableStories.map((story) => (
         story.id === storyId ? { ...story, ...patch } : story
       )),
     });
+  },
+
+  changeAvailableStoryQuery(event: PageTextInputEvent) {
+    this.setData({
+      availableStoryQuery: event.detail.value,
+      showAllAvailableStories: false,
+    });
+    if (this.data.workspace) {
+      this.applyWorkspace(this.data.workspace);
+    }
+  },
+
+  clearAvailableStoryQuery() {
+    this.setData({
+      availableStoryQuery: "",
+      showAllAvailableStories: false,
+    });
+    if (this.data.workspace) {
+      this.applyWorkspace(this.data.workspace);
+    }
+  },
+
+  toggleAvailableStories() {
+    this.setData({
+      showAllAvailableStories: !this.data.showAllAvailableStories,
+    });
+    if (this.data.workspace) {
+      this.applyWorkspace(this.data.workspace);
+    }
   },
 
   async includeAvailableStory(event: DatasetEvent) {
@@ -1442,17 +1507,18 @@ definePage<ChapterWorkspacePageData>()({
           reason: story.excluded_from_chapter ? "在章节工作台重新加入本章" : "在章节工作台加入本章",
         },
       );
+      this.availableStoryState.delete(story.id);
       await this.loadWorkspace(true);
       wx.showToast({ title: "已加入本章", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
+        this.patchAvailableStory(story.id, { busy: false });
         return;
       }
       this.patchAvailableStory(story.id, {
+        busy: false,
         error: error instanceof Error ? error.message : "内容加入本章失败",
       });
-    } finally {
-      this.patchAvailableStory(story.id, { busy: false });
     }
   },
 
