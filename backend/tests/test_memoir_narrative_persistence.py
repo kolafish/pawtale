@@ -147,6 +147,46 @@ async def test_narrative_migration_adds_structured_block_snapshot_column_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_include_decision_action_to_existing_database():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            current_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_narrative_decisions'"
+                        )
+                    )
+                ).scalar_one()
+            )
+            legacy_sql = current_sql.replace("'include', ", "")
+            assert legacy_sql != current_sql
+            await conn.execute(text("DROP TABLE memoir_narrative_decisions"))
+            await conn.execute(text(legacy_sql))
+
+        changed = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+        assert changed["changed_tables"] == ["memoir_narrative_decisions"]
+        async with engine.begin() as conn:
+            upgraded_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_narrative_decisions'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        assert "'include'" in upgraded_sql
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_repositories_enforce_project_scoping_and_source_shapes():
     register_models()
     engine = _sqlite_engine()

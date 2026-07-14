@@ -56,6 +56,17 @@ export interface MemoirChapterWorkspaceStory {
   claims: MemoirChapterWorkspaceClaim[];
 }
 
+export interface MemoirChapterWorkspaceAvailableStory {
+  id: string;
+  title: string;
+  story_type: string;
+  summary: string;
+  completion_status: string;
+  verification_status: string;
+  story_version: number;
+  excluded_from_chapter: boolean;
+}
+
 export interface MemoirChapterWorkspaceNodeStory {
   id: string;
   story_id: string;
@@ -81,8 +92,35 @@ export interface MemoirChapterWorkspaceContract {
   objective: string;
   reader_takeaway: string;
   time_scope_text: string;
+  time_start: string | null;
+  time_end: string | null;
+  core_questions: Array<{ key: string; question: string }>;
+  constraints: {
+    include_story_ids: string[];
+    exclude_story_ids: string[];
+    include_topics: string[];
+    exclude_topics: string[];
+  };
   status: string;
   nodes: MemoirChapterWorkspaceNode[];
+}
+
+export interface MemoirChapterContractRevisionRequest {
+  idempotency_key: string;
+  objective: string;
+  reader_takeaway: string;
+  time_scope_text: string;
+  time_start: string | null;
+  time_end: string | null;
+  core_questions: Array<{ key: string; question: string }>;
+  constraints: MemoirChapterWorkspaceContract["constraints"];
+  copy_from_contract_id: string;
+  copy_nodes: boolean;
+}
+
+export interface MemoirChapterStoryDecisionRequest {
+  idempotency_key: string;
+  reason?: string;
 }
 
 export interface MemoirNarrativeGap {
@@ -136,6 +174,7 @@ export interface MemoirChapterWorkspace {
   chapter_title: string;
   contract: MemoirChapterWorkspaceContract | null;
   stories: MemoirChapterWorkspaceStory[];
+  available_stories: MemoirChapterWorkspaceAvailableStory[];
   gaps: MemoirChapterWorkspaceGapGroups;
   latest_audit_job: MemoirChapterGapAuditJob | null;
 }

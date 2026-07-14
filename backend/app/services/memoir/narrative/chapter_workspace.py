@@ -5,15 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
+    MemoirChapterNodeStoryRole,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
+    MemoirStoryLifecycleStatus,
+    MemoirStoryPublicationStatus,
     MemoirStorySlotStatus,
+    MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirEditingJob
-from app.models.memoir_narrative import MemoirClaim, MemoirStorySlotClaim
+from app.models.memoir_narrative import MemoirClaim, MemoirStory, MemoirStorySlotClaim
 from app.schemas.memoir_narrative import (
     MemoirChapterGapAuditJobResponse,
+    MemoirChapterWorkspaceAvailableStoryResponse,
     MemoirChapterWorkspaceGapGroups,
     MemoirChapterWorkspaceResponse,
     MemoirChapterWorkspaceStoryResponse,
@@ -125,6 +130,35 @@ async def get_chapter_workspace(
             )
         )
 
+    primary_story_ids = {
+        link.story_id
+        for link in context.links
+        if link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value
+    }
+    available_stories = list(
+        (
+            await db.scalars(
+                select(MemoirStory)
+                .where(
+                    MemoirStory.project_id == project_id,
+                    MemoirStory.lifecycle_status
+                    == MemoirStoryLifecycleStatus.ACTIVE.value,
+                    MemoirStory.publication_status
+                    == MemoirStoryPublicationStatus.ELIGIBLE.value,
+                    MemoirStory.verification_status
+                    != MemoirStoryVerificationStatus.REJECTED.value,
+                    MemoirStory.id.not_in(primary_story_ids),
+                )
+                .order_by(MemoirStory.updated_at.desc(), MemoirStory.id)
+            )
+        ).all()
+    )
+    excluded_story_ids = (
+        set(chapter_contracts.contract_constraints(context.contract).exclude_story_ids)
+        if context.contract
+        else set()
+    )
+
     chapter_gaps, _ = await gaps.list_gaps(
         db,
         project_id=project_id,
@@ -177,6 +211,19 @@ async def get_chapter_workspace(
             else None
         ),
         stories=story_responses,
+        available_stories=[
+            MemoirChapterWorkspaceAvailableStoryResponse(
+                id=story.id,
+                title=story.title,
+                story_type=story.story_type,
+                summary=story.summary,
+                completion_status=story.completion_status,
+                verification_status=story.verification_status,
+                story_version=story.version,
+                excluded_from_chapter=story.id in excluded_story_ids,
+            )
+            for story in available_stories
+        ],
         gaps=gap_groups,
         latest_audit_job=(
             MemoirChapterGapAuditJobResponse.model_validate(latest_job)

@@ -1,5 +1,6 @@
 import type {
   MemoirChapterWorkspace,
+  MemoirChapterWorkspaceAvailableStory,
   MemoirChapterWorkspaceClaim,
   MemoirChapterWorkspaceNode,
   MemoirChapterWorkspaceStory,
@@ -20,15 +21,17 @@ import {
 } from "../../services/memoir-draft-job-state";
 import { definePage } from "../../services/page-definition";
 import {
-  createMemoirVoiceSession,
   applyMemoirDraftBlockRevision,
   assembleMemoirChapterDraftBlocks,
+  createMemoirChapterContractRevision,
+  createMemoirVoiceSession,
   decideMemoirDraftBlock,
   enqueueMemoirDraftBlockGeneration,
   enqueueMemoirDraftBlockRevision,
   enqueueMemoirChapterWorkspaceAudit,
   getMemoirDraftBlockJob,
   getMemoirChapterWorkspace,
+  includeMemoirStoryInChapter,
   listMemoirDraftBlocks,
   listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
@@ -59,6 +62,7 @@ interface WorkspaceDataset {
   action?: string;
   taskId?: string;
   blockId?: string;
+  storyId?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
@@ -82,6 +86,11 @@ interface StoryView extends MemoirChapterWorkspaceStory {
   statusText: string;
   slots: StorySlotView[];
   claims: ClaimView[];
+}
+
+interface AvailableStoryView extends MemoirChapterWorkspaceAvailableStory {
+  statusText: string;
+  actionText: string;
 }
 
 interface GapView extends MemoirNarrativeGap {
@@ -143,6 +152,10 @@ interface ChapterWorkspacePageData {
   actionBusyGapId: string;
   nodes: NodeView[];
   stories: StoryView[];
+  availableStories: AvailableStoryView[];
+  contractRevisionBusy: boolean;
+  storyActionBusyId: string;
+  storyActionError: string;
   gapGroups: GapGroupView[];
   followupTasks: FollowupTaskView[];
   followupLoading: boolean;
@@ -213,6 +226,17 @@ function storyStatusText(story: MemoirChapterWorkspaceStory): string {
   }
   return ({ incomplete: "待补充", sufficient: "内容充分", accepted_incomplete: "接受不完整" })[story.completion_status]
     || story.completion_status;
+}
+
+function availableStoryStatusText(story: MemoirChapterWorkspaceAvailableStory): string {
+  if (story.verification_status === "needs_verification" || story.verification_status === "unreviewed") {
+    return "待核实";
+  }
+  return ({
+    incomplete: "待补充",
+    sufficient: "内容充分",
+    accepted_incomplete: "接受不完整",
+  })[story.completion_status] || story.completion_status;
 }
 
 function gapStatusText(status: string): string {
@@ -365,6 +389,10 @@ definePage<ChapterWorkspacePageData>()({
     actionBusyGapId: "",
     nodes: [],
     stories: [],
+    availableStories: [],
+    contractRevisionBusy: false,
+    storyActionBusyId: "",
+    storyActionError: "",
     gapGroups: [],
     followupTasks: [],
     followupLoading: false,
@@ -438,6 +466,11 @@ definePage<ChapterWorkspacePageData>()({
           ...claim,
           evidenceCountText: `${claim.evidence.length} 条证据`,
         })),
+      })),
+      availableStories: workspace.available_stories.map((story) => ({
+        ...story,
+        statusText: availableStoryStatusText(story),
+        actionText: story.excluded_from_chapter ? "重新加入" : "加入本章",
       })),
       gapGroups: [
         {
@@ -548,6 +581,86 @@ definePage<ChapterWorkspacePageData>()({
 
   changeTab(event: DatasetEvent) {
     this.setData({ activeTab: queryChoice({ tab: datasetString(event, "tab") }, "tab", TAB_VALUES, "structure") });
+  },
+
+  async createContractRevision() {
+    const contract = this.data.workspace?.contract;
+    if (
+      !contract
+      || contract.status !== "confirmed"
+      || this.data.contractRevisionBusy
+    ) {
+      return;
+    }
+    this.setData({ contractRevisionBusy: true, storyActionError: "" });
+    try {
+      await createMemoirChapterContractRevision(
+        this.data.projectId,
+        this.data.chapterId,
+        {
+          idempotency_key: `workspace:revision:${contract.id}`,
+          objective: contract.objective,
+          reader_takeaway: contract.reader_takeaway,
+          time_scope_text: contract.time_scope_text,
+          time_start: contract.time_start,
+          time_end: contract.time_end,
+          core_questions: contract.core_questions,
+          constraints: contract.constraints,
+          copy_from_contract_id: contract.id,
+          copy_nodes: true,
+        },
+      );
+      await this.loadWorkspace(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        storyActionError: error instanceof Error ? error.message : "章节草稿创建失败",
+      });
+    } finally {
+      this.setData({ contractRevisionBusy: false });
+    }
+  },
+
+  async includeAvailableStory(event: DatasetEvent) {
+    const storyId = datasetString(event, "storyId");
+    const contract = this.data.workspace?.contract;
+    if (
+      !storyId
+      || !contract
+      || contract.status !== "draft"
+      || this.data.storyActionBusyId === storyId
+    ) {
+      return;
+    }
+    const story = this.data.availableStories.find((item) => item.id === storyId);
+    if (!story) {
+      return;
+    }
+    this.setData({ storyActionBusyId: storyId, storyActionError: "" });
+    try {
+      await includeMemoirStoryInChapter(
+        this.data.projectId,
+        contract.id,
+        story.id,
+        {
+          idempotency_key: `workspace:include:${contract.id}:${story.id}:${Date.now()}`,
+          reason: story.excluded_from_chapter ? "在章节工作台重新加入本章" : "在章节工作台加入本章",
+        },
+      );
+      await this.loadWorkspace(true);
+      wx.showToast({ title: "已加入本章", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        storyActionError: error instanceof Error ? error.message : "Story 加入本章失败",
+      });
+    } finally {
+      this.setData({ storyActionBusyId: "" });
+    }
   },
 
   stopAuditPolling() {

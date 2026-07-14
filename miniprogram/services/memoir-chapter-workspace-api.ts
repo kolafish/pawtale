@@ -1,7 +1,10 @@
 import type {
   MemoirChapterGapAuditJob,
   MemoirChapterGapAuditRequest,
+  MemoirChapterContractRevisionRequest,
   MemoirChapterWorkspace,
+  MemoirChapterWorkspaceContract,
+  MemoirChapterStoryDecisionRequest,
   MemoirNarrativeGap,
   MemoirNarrativeGapAction,
   MemoirNarrativeGapResolutionRequest,
@@ -27,6 +30,13 @@ function gapPath(projectId: string, gapId: string, action: MemoirNarrativeGapAct
   );
 }
 
+function chapterContractPath(projectId: string, contractId: string, suffix = ""): string {
+  return memoirNarrativeProjectPath(
+    projectId,
+    `/chapter-contracts/${encodeURIComponent(contractId)}${suffix}`,
+  );
+}
+
 export function getMemoirChapterWorkspace(
   projectId: string,
   chapterId: string,
@@ -48,6 +58,36 @@ export function enqueueMemoirChapterWorkspaceAudit(
         ai_model: data.ai_model,
       }),
     },
+  );
+}
+
+export function createMemoirChapterContractRevision(
+  projectId: string,
+  chapterId: string,
+  data: MemoirChapterContractRevisionRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/contract/revisions`,
+    ),
+    { method: "POST", data },
+  );
+}
+
+export function includeMemoirStoryInChapter(
+  projectId: string,
+  contractId: string,
+  storyId: string,
+  data: MemoirChapterStoryDecisionRequest,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    chapterContractPath(
+      projectId,
+      contractId,
+      `/stories/${encodeURIComponent(storyId)}/include`,
+    ),
+    { method: "POST", data },
   );
 }
 

@@ -177,6 +177,17 @@ class MemoirChapterWorkspaceStoryResponse(BaseModel):
     claims: list[MemoirClaimResponse] = Field(default_factory=list)
 
 
+class MemoirChapterWorkspaceAvailableStoryResponse(BaseModel):
+    id: str
+    title: str
+    story_type: str
+    summary: str
+    completion_status: str
+    verification_status: str
+    story_version: int
+    excluded_from_chapter: bool = False
+
+
 class MemoirChapterWorkspaceGapGroups(BaseModel):
     must_handle: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
     suggested: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
@@ -189,6 +200,9 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     chapter_title: str
     contract: MemoirChapterContractResponse | None = None
     stories: list[MemoirChapterWorkspaceStoryResponse] = Field(default_factory=list)
+    available_stories: list[MemoirChapterWorkspaceAvailableStoryResponse] = Field(
+        default_factory=list
+    )
     gaps: MemoirChapterWorkspaceGapGroups
     latest_audit_job: MemoirChapterGapAuditJobResponse | None = None
 
