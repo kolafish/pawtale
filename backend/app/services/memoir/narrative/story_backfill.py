@@ -420,7 +420,7 @@ async def run_story_backfill(
                         evidence_role=claim_input.evidence_role,
                         is_core=claim_input.is_core,
                     )
-                    for index, claim_input in enumerate(claim_inputs)
+                    for index, claim_input in enumerate(claim_inputs[:30])
                 ],
             )
             story, review_ids, created = await story_matching.resolve_extracted_story(

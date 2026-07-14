@@ -273,20 +273,22 @@ async def collect_claim_anchor_cluster_candidates(
         ):
             if len(component_ids) < 2:
                 continue
-            if any(
-                (current_project_id, claim_id) in covered_claims
+            unlinked_claim_ids = {
+                claim_id
                 for claim_id in component_ids
+                if not story_ids_by_claim.get((current_project_id, claim_id))
+            }
+            if not unlinked_claim_ids:
+                continue
+            if all(
+                (current_project_id, claim_id) in covered_claims
+                for claim_id in unlinked_claim_ids
             ):
                 continue
             component_claims = [claims_by_id[claim_id] for claim_id in component_ids]
             if not any(
                 claim.claim_type in NARRATIVE_STORY_CLUSTER_CLAIM_TYPES
                 for claim in component_claims
-            ):
-                continue
-            if all(
-                story_ids_by_claim.get((current_project_id, claim_id))
-                for claim_id in component_ids
             ):
                 continue
             anchor_counts = Counter(
