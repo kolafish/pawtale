@@ -294,7 +294,7 @@ def _ai_output(content: str, claim_id: str) -> dict[str, object]:
     }
 
 
-def test_generation_validation_distinguishes_omitted_and_embedded_unsupported_facts():
+def test_generation_validation_enforces_sources_unsupported_facts_and_adjacency():
     claim_id = "f07e2888-183a-4a58-9442-d4374cf0e6d7"
     context = DraftBlockGenerationInput.model_validate(
         {
@@ -345,7 +345,6 @@ def test_generation_validation_distinguishes_omitted_and_embedded_unsupported_fa
                 unsupported_fact_candidates=["我曾任武装队长"],
             ),
         )
-
     with pytest.raises(ValueError, match="with fact sources"):
         validate_generation_output(
             context,
@@ -355,7 +354,6 @@ def test_generation_validation_distinguishes_omitted_and_embedded_unsupported_fa
                 unsupported_fact_candidates=[],
             ),
         )
-
     duplicate_context = context.model_copy(
         update={"next_block_context": "储备粮食以后，乡里成了先进乡。"}
     )
@@ -505,7 +503,6 @@ async def test_initial_generation_builds_transition_after_both_endpoint_blocks(
         test_db,
         include_transition=True,
     )
-
     job = await draft_generation_jobs.enqueue_chapter_block_generation(
         test_db,
         project_id=created["project_id"],
