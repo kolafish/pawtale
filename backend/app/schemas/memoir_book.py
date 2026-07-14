@@ -344,6 +344,7 @@ class MemoirBookSourceRouteResponse(BaseModel):
     suggested_title: str | None = None
     confidence: float = Field(ge=0, le=1)
     reason: str
+    assignment_basis: Literal["ai", "completion_task"] = "ai"
     evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
 
 

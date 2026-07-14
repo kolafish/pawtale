@@ -28,6 +28,7 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
+from app.services.memoir.narrative import followup_completion
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -101,6 +102,7 @@ def _route_metadata(
         "suggested_title": route.suggested_title,
         "confidence": route.confidence,
         "reason": route.reason,
+        "assignment_basis": route.assignment_basis,
         "evidence": [item.model_dump(mode="json") for item in route.evidence],
     }
     lineage = (source_lineage_by_utterance or {}).get(route.utterance_id)
@@ -132,7 +134,11 @@ def _assignment_link_metadata(
 ) -> dict[str, ChapterSourceAssignmentMetadata]:
     return {
         route.utterance_id: ChapterSourceAssignmentMetadata(
-            assigned_by=MemoirChapterSourceAssignedBy.AI,
+            assigned_by=(
+                MemoirChapterSourceAssignedBy.SYSTEM
+                if route.assignment_basis == "completion_task"
+                else MemoirChapterSourceAssignedBy.AI
+            ),
             confidence=route.confidence,
             reason=route.reason,
         )
@@ -332,6 +338,16 @@ async def run_source_auto_assignment_for_utterances(
 ) -> MemoirBookSourceAutoAssignmentRunResponse:
     routes: list[MemoirBookSourceRouteResponse] = []
     for utterance_id in dict.fromkeys(item.strip() for item in utterance_ids if item.strip()):
+        utterance = await db.get(MemoirVoiceUtterance, utterance_id)
+        completion_context = (
+            await followup_completion.ingestion_context_for_utterance(
+                db,
+                project_id=project_id,
+                utterance=utterance,
+            )
+            if utterance is not None
+            else None
+        )
         routes.append(
             await source_router.route_book_source(
                 db,
@@ -339,6 +355,9 @@ async def run_source_auto_assignment_for_utterances(
                 project_id=project_id,
                 utterance_id=utterance_id,
                 ai_model=ai_model,
+                collection_chapter_id=(
+                    completion_context.chapter_id if completion_context else None
+                ),
             )
         )
 

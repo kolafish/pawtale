@@ -3,6 +3,7 @@ import json
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.semantic_state import upsert_chapter_card
 from app.models.memoir import MemoirBookPlanChapter
+from app.services.memoir import source_router
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
     create_test_book_plan,
@@ -283,6 +284,40 @@ async def test_source_router_ignores_non_memoir_source(client, test_db, monkeypa
     assert data["target_chapter_id"] is None
     assert data["suggested_title"] is None
     assert data["reason"] == "内容太短，无法判断为回忆录素材"
+
+
+async def test_completion_collection_context_does_not_force_non_memoir_content(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "小时候在老家院子里玩。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "老家院子"),
+        chapter_title="老家院子",
+    )
+    answer = await create_test_voice_transcript(client, test_db, "这个我实在想不起来了。")
+    fake_ai = _patch_source_router_ai(
+        monkeypatch,
+        _ignore_route(material_type="ai_interaction", reason="叙述者表示想不起来，没有回忆内容"),
+    )
+
+    route = await source_router.route_book_source(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_id=answer["utterance_id"],
+        collection_chapter_id=chapter.id,
+    )
+
+    assert route.action == "ignore"
+    assert route.target_chapter_id is None
+    assert route.assignment_basis == "ai"
+    assert "定向采集章节" in fake_ai.calls[0]["user_prompt"]
+    assert chapter.id in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_source_router_rejects_already_included_source(client, test_db):

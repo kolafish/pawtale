@@ -287,6 +287,7 @@ def _build_route_prompt(
     question_text: str,
     conversation_context: str,
     chapters: list[dict[str, object]],
+    collection_chapter: MemoirBookPlanChapter | None = None,
 ) -> str:
     source_card_lines: list[str] = []
     if source_card:
@@ -361,7 +362,11 @@ def _build_route_prompt(
 - 标题必须由这条讲述的真实回忆主题概括而来，不能截取问句、命令句、对 AI 的话；不能使用模板化“xxx的记忆”兜底。
 - 如果无法可靠命名新章节，使用 hold_for_review 且 suggested_title=null。
 - confidence 是你对 action 的把握，不是内容重要性。
+- 如果下面给出了“定向采集章节”，说明这条讲述来自该章的补全访谈。只要内容属于 memoir_content，系统会按这次明确的采集目的收入该章；你仍需准确判断 material_type，不要把“想不起来”、操作指令或与 AI 的对话误判为回忆素材。
 - 只输出 JSON，不要 Markdown，不要解释。
+
+定向采集章节：
+{f"{collection_chapter.id} / {collection_chapter.title}" if collection_chapter else "无"}
 
 当前讲述记录：
 - source_index: {source.source_index}
@@ -401,6 +406,7 @@ def _route_response_from_payload(
     *,
     source: SourceSegment,
     chapters_by_id: dict[str, MemoirBookPlanChapter],
+    collection_chapter: MemoirBookPlanChapter | None = None,
 ) -> MemoirBookSourceRouteResponse:
     material_type = str(payload.get("material_type") or "").strip()
     action = str(payload.get("action") or "").strip()
@@ -411,7 +417,11 @@ def _route_response_from_payload(
 
     target_chapter_id = _normalize_optional_text(payload.get("target_chapter_id"))
     target_chapter_title = None
-    if action == "assign_to_chapter":
+    if collection_chapter is not None and material_type == "memoir_content":
+        action = "assign_to_chapter"
+        target_chapter_id = collection_chapter.id
+        target_chapter_title = collection_chapter.title
+    elif action == "assign_to_chapter":
         if not target_chapter_id or target_chapter_id not in chapters_by_id:
             raise HTTPException(status_code=502, detail="AI 返回的目标章节无效")
         target_chapter_title = chapters_by_id[target_chapter_id].title
@@ -421,6 +431,8 @@ def _route_response_from_payload(
         target_chapter_title = chapters_by_id[target_chapter_id].title
 
     suggested_title = _normalize_optional_text(payload.get("suggested_title"))
+    if collection_chapter is not None and material_type == "memoir_content":
+        suggested_title = None
     if action == "suggest_new_chapter" and not suggested_title:
         raise HTTPException(status_code=502, detail="AI 建议新章节但没有给出标题")
     if action != "suggest_new_chapter":
@@ -455,6 +467,9 @@ def _route_response_from_payload(
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(status_code=502, detail="AI 归章结果缺少理由")
+    if collection_chapter is not None and material_type == "memoir_content":
+        confidence = max(confidence, 0.95)
+        reason = f"该讲述来自“{collection_chapter.title}”的补全访谈；{reason}"
 
     return MemoirBookSourceRouteResponse(
         material_type=material_type,
@@ -466,6 +481,11 @@ def _route_response_from_payload(
         suggested_title=suggested_title,
         confidence=round(confidence, 3),
         reason=reason,
+        assignment_basis=(
+            "completion_task"
+            if collection_chapter is not None and material_type == "memoir_content"
+            else "ai"
+        ),
         evidence=evidence,
     )
 
@@ -478,6 +498,7 @@ async def route_book_source(
     utterance_id: str,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    collection_chapter_id: str | None = None,
 ) -> MemoirBookSourceRouteResponse:
     await load_memoir_project(db, project_id, user_id)
     plan = await _load_plan(db, project_id)
@@ -497,6 +518,13 @@ async def route_book_source(
     chapters = sorted_chapters(plan)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     chapters_by_id = {chapter.id: chapter for chapter in chapters}
+    collection_chapter = (
+        chapters_by_id.get(collection_chapter_id)
+        if collection_chapter_id
+        else None
+    )
+    if collection_chapter_id and collection_chapter is None:
+        raise HTTPException(status_code=409, detail="补全访谈的目标章节已不存在")
     question_text, conversation_context = await _conversation_context(db, source)
     route_source_card = await _generate_or_reuse_route_source_card(
         db,
@@ -523,6 +551,7 @@ async def route_book_source(
             )
             for chapter in chapters
         ],
+        collection_chapter=collection_chapter,
     )
 
     client = ai_client
@@ -546,4 +575,9 @@ async def route_book_source(
         raise HTTPException(status_code=503, detail=AI_SOURCE_ROUTER_UNAVAILABLE_MESSAGE) from exc
 
     payload = _route_payload_from_llm(content)
-    return _route_response_from_payload(payload, source=source, chapters_by_id=chapters_by_id)
+    return _route_response_from_payload(
+        payload,
+        source=source,
+        chapters_by_id=chapters_by_id,
+        collection_chapter=collection_chapter,
+    )
