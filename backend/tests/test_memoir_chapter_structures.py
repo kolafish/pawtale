@@ -333,14 +333,16 @@ async def test_story_can_move_between_draft_nodes_without_recreating_its_link(
         chapter_titles=["第一次离家"],
     )
     story, _ = await _create_ready_story(test_db, created=created)
+    story_id = story.id
     draft = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
         json=_draft_payload(
             "move-story-contract",
             objective="按时间顺序整理离家经历。",
-            include_story_ids=[story.id],
+            include_story_ids=[story_id],
         ),
     )
+    assert draft.status_code == 200, draft.text
     contract_id = draft.json()["id"]
     node_ids: list[str] = []
     for index, title in enumerate(["离家前", "离家后"]):
@@ -359,16 +361,37 @@ async def test_story_can_move_between_draft_nodes_without_recreating_its_link(
     linked = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes/{node_ids[0]}/stories",
         json={
-            "story_id": story.id,
+            "story_id": story_id,
             "story_role": "primary",
             "sort_order": 0,
             "required": True,
         },
     )
+    assert linked.status_code == 200, linked.text
     link_id = linked.json()["nodes"][0]["stories"][0]["id"]
+    opening = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes",
+        json={
+            "idempotency_key": "move-story-opening",
+            "node_type": "opening",
+            "title": "开场",
+            "purpose": "引出离家经历。",
+            "required": False,
+        },
+    )
+    assert opening.status_code == 200, opening.text
+    opening_id = opening.json()["nodes"][-1]["id"]
+    invalid_target = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/move",
+        json={
+            "source_node_id": node_ids[0],
+            "target_node_id": opening_id,
+        },
+    )
+    assert invalid_target.status_code == 409
 
     moved = await client.post(
-        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story.id}/move",
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/move",
         json={
             "source_node_id": node_ids[0],
             "target_node_id": node_ids[1],
@@ -383,12 +406,25 @@ async def test_story_can_move_between_draft_nodes_without_recreating_its_link(
     assert nodes[node_ids[1]]["stories"] == [
         {
             "id": link_id,
-            "story_id": story.id,
+            "story_id": story_id,
             "story_role": "primary",
             "sort_order": 0,
             "required": True,
         }
     ]
+    replay = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/move",
+        json={
+            "source_node_id": node_ids[0],
+            "target_node_id": node_ids[1],
+        },
+    )
+    assert replay.status_code == 200, replay.text
+    replay_links = {
+        node["id"]: node["stories"] for node in replay.json()["nodes"]
+    }
+    assert replay_links[node_ids[0]] == []
+    assert [link["id"] for link in replay_links[node_ids[1]]] == [link_id]
 
 
 async def test_story_merge_rewires_draft_contract_and_collapses_duplicate_node(

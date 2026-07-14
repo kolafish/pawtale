@@ -559,6 +559,11 @@ async def move_story(
         contract_id=contract_id,
         node_id=request.target_node_id,
     )
+    if (
+        source.node_type != MemoirChapterNodeType.STORY.value
+        or target.node_type != MemoirChapterNodeType.STORY.value
+    ):
+        raise ValueError("Story links can only move between Story nodes")
     await _load_linkable_story(
         db,
         project_id=project_id,
@@ -571,16 +576,18 @@ async def move_story(
             MemoirChapterNodeStory.story_id == story_id,
         )
     )
-    if link is None:
-        raise ValueError("Story is not linked to the source chapter node")
-    duplicate = await db.scalar(
-        select(MemoirChapterNodeStory.id).where(
+    target_link = await db.scalar(
+        select(MemoirChapterNodeStory).where(
             MemoirChapterNodeStory.project_id == project_id,
             MemoirChapterNodeStory.node_id == target.id,
             MemoirChapterNodeStory.story_id == story_id,
         )
     )
-    if duplicate is not None:
+    if link is None:
+        if target_link is not None:
+            return target_link
+        raise ValueError("Story is not linked to the source chapter node")
+    if target_link is not None:
         raise ValueError("Story is already linked to the target chapter node")
     if link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value:
         other_primary = await db.scalar(
