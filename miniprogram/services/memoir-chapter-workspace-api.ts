@@ -75,6 +75,32 @@ export function createMemoirChapterContractRevision(
   );
 }
 
+export function suggestMemoirChapterDirection(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/contract/suggest`,
+    ),
+    {
+      method: "POST",
+      data: { idempotency_key: `workspace:direction:${chapterId}` },
+    },
+  );
+}
+
+export function confirmMemoirChapterContract(
+  projectId: string,
+  contractId: string,
+): Promise<MemoirChapterWorkspaceContract> {
+  return memoirRequest<MemoirChapterWorkspaceContract>(
+    chapterContractPath(projectId, contractId, "/confirm"),
+    { method: "POST" },
+  );
+}
+
 export function includeMemoirStoryInChapter(
   projectId: string,
   contractId: string,

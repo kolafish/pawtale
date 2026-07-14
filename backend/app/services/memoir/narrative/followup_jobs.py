@@ -19,7 +19,7 @@ from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_j
 from app.services.memoir.narrative import followup_planner
 
 
-async def _generation_signature(
+async def followup_generation_signature(
     db: AsyncSession,
     *,
     project_id: str,
@@ -59,6 +59,15 @@ async def _generation_signature(
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def followup_generation_dedupe_key(
+    *,
+    project_id: str,
+    chapter_id: str | None,
+    signature: str,
+) -> str:
+    return f"generate-followup-tasks:{project_id}:{chapter_id or 'book'}:{signature}"
+
+
 async def schedule_followup_task_generation(
     db: AsyncSession,
     *,
@@ -75,12 +84,11 @@ async def schedule_followup_task_generation(
         )
         if chapter_exists is None:
             raise ValueError("chapter does not belong to the project")
-    signature = await _generation_signature(
+    signature = await followup_generation_signature(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    scope = chapter_id or "book"
     return await enqueue_editing_job(
         db,
         project_id=project_id,
@@ -92,7 +100,11 @@ async def schedule_followup_task_generation(
             "planner_version": followup_planner.FOLLOWUP_PLANNER_VERSION,
             "source": source,
         },
-        dedupe_key=f"generate-followup-tasks:{project_id}:{scope}:{signature}",
+        dedupe_key=followup_generation_dedupe_key(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            signature=signature,
+        ),
         replace_completed=True,
         retry_failed=True,
     )

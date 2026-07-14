@@ -86,7 +86,7 @@
         bindtap="startBookCompletion"
         hover-class="{{resumeAskButtonHoverClass}}"
       >
-        帮我补全这本书
+        {{completionButtonTitle}}
       </button>
       <button
         class="{{resumeAskButtonClass}}"

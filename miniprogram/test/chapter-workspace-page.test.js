@@ -172,6 +172,12 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
     createMemoirChapterContractRevision: async () => {
       throw new Error("createMemoirChapterContractRevision was not mocked");
     },
+    suggestMemoirChapterDirection: async () => {
+      throw new Error("suggestMemoirChapterDirection was not mocked");
+    },
+    confirmMemoirChapterContract: async () => {
+      throw new Error("confirmMemoirChapterContract was not mocked");
+    },
     includeMemoirStoryInChapter: async () => {
       throw new Error("includeMemoirStoryInChapter was not mocked");
     },
@@ -309,7 +315,9 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
 
   assert.equal(context.data.workspace.chapter_title, "第一次离家");
-  assert.equal(context.data.contractStatusText, "契约 v1 · 已确认");
+  assert.equal(context.data.activeTab, "overview");
+  assert.equal(context.data.contractStatusText, "本章方向已确认");
+  assert.equal(context.data.nextAction.kind, "start_audit");
   assert.equal(context.data.nodes[0].storyText, "第一次离家");
   assert.equal(context.data.stories[0].claims[0].evidenceCountText, "1 条证据");
   assert.deepEqual(context.data.gapGroups.map((group) => group.title), [
@@ -319,6 +327,110 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   ]);
   assert.equal(context.data.gapGroups[0].items[0].severityText, "重要");
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
+});
+
+test("chapter overview turns current chapter state into one plain-language next action", () => {
+  const { chapterNextAction } = loadWorkspacePage().mod;
+  const workspace = sampleWorkspace({
+    gaps: { must_handle: [], suggested: [], accepted_incomplete: [] },
+    latest_audit_job: {
+      id: "audit-1",
+      project_id: "project/1",
+      chapter_id: "chapter-1",
+      status: "succeeded",
+      result_json: {},
+      error_message: "",
+      created_at: "2026-07-13T10:00:00",
+      updated_at: "2026-07-13T10:01:00",
+    },
+  });
+  const task = {
+    id: "task-1",
+    status: "pending",
+    question: "离家那天，是谁送您到车站的？",
+  };
+
+  const action = chapterNextAction(workspace, [task], []);
+
+  assert.equal(action.kind, "open_followups");
+  assert.equal(action.title, "离家那天，是谁送您到车站的？");
+  assert.equal(action.actionText, "回答这个问题");
+  assert.doesNotMatch(`${action.eyebrow}${action.title}${action.detail}`, /Story|Claim|slot|Contract/);
+});
+
+test("chapter overview creates a missing direction instead of opening an empty detail view", async () => {
+  const confirmed = sampleWorkspace();
+  const draft = {
+    ...confirmed,
+    contract: { ...confirmed.contract, status: "draft" },
+  };
+  const missing = { ...confirmed, contract: null };
+  let current = missing;
+  const suggestions = [];
+  const { page } = loadWorkspacePage({
+    workspace: missing,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => current,
+      suggestMemoirChapterDirection: async (projectId, chapterId) => {
+        suggestions.push({ projectId, chapterId });
+        current = draft;
+        return draft.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  assert.equal(context.data.nextAction.kind, "create_direction");
+  assert.equal(context.data.nextAction.actionText, "整理本章方向");
+  await page.runNextAction.call(context);
+
+  assert.deepEqual(suggestions, [{ projectId: "project/1", chapterId: "chapter-1" }]);
+  assert.equal(context.data.nextAction.kind, "confirm_direction");
+});
+
+test("chapter overview confirms a plain-language direction without exposing contract controls", async () => {
+  const confirmed = sampleWorkspace({
+    gaps: { must_handle: [], suggested: [], accepted_incomplete: [] },
+    latest_audit_job: {
+      id: "audit-1",
+      project_id: "project/1",
+      chapter_id: "chapter-1",
+      status: "succeeded",
+      result_json: {},
+      error_message: "",
+      created_at: "2026-07-13T10:00:00",
+      updated_at: "2026-07-13T10:01:00",
+    },
+  });
+  const draft = {
+    ...confirmed,
+    contract: { ...confirmed.contract, status: "draft" },
+  };
+  let current = draft;
+  const confirmations = [];
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace: draft,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => current,
+      confirmMemoirChapterContract: async (projectId, contractId) => {
+        confirmations.push({ projectId, contractId });
+        current = confirmed;
+        return confirmed.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  assert.equal(context.data.nextAction.kind, "confirm_direction");
+  assert.equal(context.data.nextAction.actionText, "这个方向可以");
+  await page.runNextAction.call(context);
+
+  assert.deepEqual(confirmations, [{ projectId: "project/1", contractId: "contract-1" }]);
+  assert.equal(context.data.contractStatusText, "本章方向已确认");
+  delete global.wx;
 });
 
 test("chapter workspace creates an explicit draft revision before editing a confirmed structure", async () => {

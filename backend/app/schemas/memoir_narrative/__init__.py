@@ -1,3 +1,4 @@
+from .book_completion import MemoirBookCompletionResponse
 from .book_consistency import (
     MemoirBookConsistencyAuditJobResponse,
     MemoirBookConsistencyAuditRequest,
@@ -102,6 +103,7 @@ from .stories import (
 )
 
 __all__ = [
+    "MemoirBookCompletionResponse",
     "MemoirBookConsistencyAuditJobResponse",
     "MemoirBookConsistencyAuditRequest",
     "MemoirBookFormalizeRequest",

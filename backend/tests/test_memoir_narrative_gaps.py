@@ -281,6 +281,17 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
         )
     ) == 1
 
+    semantic_response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace/audits",
+        json={"include_semantic_audit": True, "ai_model": "test-semantic-model"},
+    )
+    assert semantic_response.status_code == 202, semantic_response.text
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
+    )
+    assert workspace.status_code == 200
+    assert workspace.json()["latest_audit_job"]["id"] == semantic_response.json()["id"]
+
 
 def _semantic_context() -> ChapterAuditContext:
     now = datetime.now(UTC).replace(tzinfo=None)

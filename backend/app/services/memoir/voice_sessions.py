@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func, or_, select
@@ -63,7 +63,22 @@ async def create_voice_session(
 ) -> MemoirVoiceSessionDetailResponse:
     project = await load_memoir_project(db, project_id, user_id)
 
-    now = datetime.utcnow()
+    task = None
+    if req.session_goal == MemoirSessionGoal.BOOK_COMPLETION:
+        if not req.current_followup_task_id:
+            raise HTTPException(
+                status_code=409,
+                detail="本次要补的问题尚未准备好，请从首页重新进入补全成书",
+            )
+        task = await followup_tasks.get_task(
+            db,
+            project_id=project.id,
+            task_id=req.current_followup_task_id,
+        )
+        if task is None:
+            raise HTTPException(status_code=404, detail="补访任务不存在")
+
+    now = datetime.now(UTC).replace(tzinfo=None)
     voice_session = MemoirVoiceSession(
         project_id=project.id,
         status=MemoirVoiceSessionStatus.CREATED.value,
@@ -78,30 +93,17 @@ async def create_voice_session(
     )
     db.add(voice_session)
     await db.flush()
-    if req.session_goal == MemoirSessionGoal.BOOK_COMPLETION:
-        task = (
-            await followup_tasks.get_task(
+    if task is not None:
+        try:
+            await followup_planner.start_task_for_session(
                 db,
-                project_id=project.id,
-                task_id=req.current_followup_task_id,
+                task=task,
+                voice_session=voice_session,
+                actor_user_id=user_id,
             )
-            if req.current_followup_task_id
-            else await followup_planner.select_next_task(db, project_id=project.id)
-        )
-        if req.current_followup_task_id and task is None:
+        except ValueError as exc:
             await db.rollback()
-            raise HTTPException(status_code=404, detail="补访任务不存在")
-        if task is not None:
-            try:
-                await followup_planner.start_task_for_session(
-                    db,
-                    task=task,
-                    voice_session=voice_session,
-                    actor_user_id=user_id,
-                )
-            except ValueError as exc:
-                await db.rollback()
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)
 
@@ -288,6 +290,6 @@ async def stop_voice_session(
             else MemoirVoiceSessionStatus.STOPPED.value
         )
         voice_session.error_message = req.error_message or ""
-        voice_session.stopped_at = datetime.utcnow()
+        voice_session.stopped_at = datetime.now(UTC).replace(tzinfo=None)
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)

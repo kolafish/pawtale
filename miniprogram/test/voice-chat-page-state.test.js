@@ -205,7 +205,7 @@ test("book completion renders one task question without disabling unrelated reco
   assert.equal(patch.finishButtonText, "保存离开");
 });
 
-test("book completion without a task shows a terminal visible state", () => {
+test("book completion without a task exposes the invalid session and disables recording", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
@@ -214,10 +214,13 @@ test("book completion without a task shows a terminal visible state", () => {
     completionTaskLoading: false,
   });
 
-  assert.equal(patch.completionTaskStatusText, "目前没有待补的问题");
-  assert.equal(patch.liveDisplayText, "目前没有待补问题，可以保存离开");
+  assert.equal(patch.completionTaskStatusText, "没有拿到本次要补的问题");
+  assert.equal(patch.completionTaskQuestionText, "本次问题没有准备好");
+  assert.equal(patch.liveDisplayText, "请保存离开后，从首页重新进入");
   assert.equal(patch.showCompletionTaskActions, false);
   assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.micButtonDisabled, true);
+  assert.equal(patch.micButtonText, "请先保存离开");
 });
 
 test("voice chat view patch adds focused large text root classes", () => {

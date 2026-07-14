@@ -5,13 +5,13 @@
       <text class="page-title">{{workspace ? workspace.chapter_title : "章节工作台"}}</text>
       <text class="page-meta">{{contractStatusText}}</text>
     </view>
-    <button class="audit-button" loading="{{auditBusy}}" disabled="{{auditBusy}}" bindtap="startAudit">
+    <button wx:if="{{activeTab !== 'overview'}}" class="audit-button" loading="{{auditBusy}}" disabled="{{auditBusy}}" bindtap="startAudit">
       {{auditBusy ? "检查中" : "重新检查"}}
     </button>
   </view>
 
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
-  <view class="audit-state {{auditError ? 'failed' : ''}}">
+  <view wx:if="{{activeTab !== 'overview'}}" class="audit-state {{auditError ? 'failed' : ''}}">
     <text class="audit-state-title">{{auditStatusText}}</text>
     <text wx:if="{{auditError}}" class="audit-state-error">{{auditError}}</text>
   </view>
@@ -19,24 +19,41 @@
   <view wx:if="{{loading && !workspace}}" class="empty-state">正在加载</view>
 
   <block wx:if="{{workspace}}">
-    <view class="tab-bar">
-      <view class="tab {{activeTab === 'structure' ? 'active' : ''}}" data-tab="structure" bindtap="changeTab">章节结构</view>
-      <view class="tab {{activeTab === 'stories' ? 'active' : ''}}" data-tab="stories" bindtap="changeTab">故事与证据</view>
-      <view class="tab {{activeTab === 'drafts' ? 'active' : ''}}" data-tab="drafts" bindtap="changeTab">正文</view>
-      <view class="tab {{activeTab === 'checks' ? 'active' : ''}}" data-tab="checks" bindtap="changeTab">检查报告</view>
-      <view class="tab {{activeTab === 'followups' ? 'active' : ''}}" data-tab="followups" bindtap="changeTab">补访问题</view>
+    <view wx:if="{{activeTab === 'overview'}}" class="overview-section">
+      <text class="overview-eyebrow">{{nextAction.eyebrow}}</text>
+      <text class="overview-title">{{nextAction.title}}</text>
+      <text class="overview-detail">{{nextAction.detail}}</text>
+      <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
+      <button
+        wx:if="{{nextAction.actionText}}"
+        class="overview-primary-action"
+        loading="{{contractRevisionBusy || auditBusy || draftGenerationBusy}}"
+        disabled="{{nextAction.disabled || contractRevisionBusy || auditBusy || draftGenerationBusy}}"
+        bindtap="runNextAction"
+      >{{nextAction.actionText}}</button>
+      <button class="overview-detail-action" data-tab="structure" bindtap="changeTab">查看详细内容</button>
     </view>
+
+    <block wx:else>
+      <button class="overview-return" data-tab="overview" bindtap="changeTab">返回本章下一步</button>
+      <view class="tab-bar">
+        <view class="tab {{activeTab === 'structure' ? 'active' : ''}}" data-tab="structure" bindtap="changeTab">本章方向</view>
+        <view class="tab {{activeTab === 'stories' ? 'active' : ''}}" data-tab="stories" bindtap="changeTab">素材内容</view>
+        <view class="tab {{activeTab === 'drafts' ? 'active' : ''}}" data-tab="drafts" bindtap="changeTab">本章正文</view>
+        <view class="tab {{activeTab === 'checks' ? 'active' : ''}}" data-tab="checks" bindtap="changeTab">待处理</view>
+        <view class="tab {{activeTab === 'followups' ? 'active' : ''}}" data-tab="followups" bindtap="changeTab">补充问题</view>
+      </view>
 
     <view wx:if="{{activeTab === 'structure'}}" class="content-section">
       <view wx:if="{{workspace.contract}}" class="contract-band">
-        <text class="section-label">章节目标</text>
+        <text class="section-label">这章主要写什么</text>
         <text class="contract-objective">{{workspace.contract.objective}}</text>
         <text class="contract-takeaway">{{workspace.contract.reader_takeaway}}</text>
       </view>
-      <view wx:else class="empty-state">本章还没有结构契约</view>
+      <view wx:else class="empty-state">本章方向还没有确定</view>
 
       <view class="section-heading">
-        <text class="section-title">结构节点</text>
+        <text class="section-title">内容顺序</text>
         <text class="section-count">{{nodes.length}} 个</text>
       </view>
       <view wx:if="{{nodes.length}}" class="node-list">
@@ -52,7 +69,7 @@
           </view>
         </view>
       </view>
-      <view wx:else class="empty-state">本章还没有结构节点</view>
+      <view wx:else class="empty-state">本章还没有安排内容顺序</view>
     </view>
 
     <view wx:elif="{{activeTab === 'stories'}}" class="content-section">
@@ -70,7 +87,7 @@
 
           <view class="slot-grid">
             <view wx:for="{{story.slots}}" wx:for-item="slot" wx:key="slot_key" class="slot-row">
-              <text class="slot-name">{{slot.labelText}}{{slot.required ? " *" : ""}}</text>
+              <text class="slot-name">{{slot.labelText}}</text>
               <text class="slot-status {{slot.statusClass}}">{{slot.statusText}}</text>
             </view>
           </view>
@@ -91,7 +108,7 @@
           </view>
         </view>
       </view>
-      <view wx:else class="empty-state">本章还没有关联 Story</view>
+      <view wx:else class="empty-state">本章还没有加入可用的素材内容</view>
 
       <view class="section-heading available-story-heading">
         <text class="section-title">可加入本章</text>
@@ -101,7 +118,7 @@
       <view wx:if="{{availableStories.length && workspace.contract && workspace.contract.status === 'confirmed'}}" class="story-edit-state">
         <view class="story-edit-copy">
           <text class="story-edit-title">章节结构已确认</text>
-          <text class="story-edit-hint">先创建草稿修订，再选择要加入的故事</text>
+          <text class="story-edit-hint">开始调整后，再选择要加入的内容</text>
         </view>
         <button
           class="secondary-action-button story-revision-button"
@@ -131,15 +148,15 @@
           >{{story.actionText}}</button>
         </view>
       </view>
-      <view wx:elif="{{!workspace.contract}}" class="empty-state">建立章节契约后，可以从项目素材中加入 Story</view>
-      <view wx:else class="empty-state">没有其他可加入本章的 Story</view>
+      <view wx:elif="{{!workspace.contract}}" class="empty-state">确定本章方向后，可以从现有素材中加入内容</view>
+      <view wx:else class="empty-state">没有其他适合加入本章的内容</view>
     </view>
 
     <view wx:elif="{{activeTab === 'drafts'}}" class="content-section">
       <view class="draft-toolbar">
         <view class="draft-toolbar-copy">
-          <text class="section-title">结构化正文</text>
-          <text class="draft-toolbar-hint">{{draftBlocks.length}} 个正文块</text>
+          <text class="section-title">本章正文</text>
+          <text class="draft-toolbar-hint">{{draftBlocks.length}} 段</text>
         </view>
         <view class="draft-toolbar-actions">
           <button
@@ -235,7 +252,7 @@
           </view>
 
           <view wx:if="{{sourceBlockId === block.id}}" class="draft-source-panel">
-            <text wx:if="{{!block.sourceClaims.length && !block.sourceStories.length}}" class="draft-source-empty">历史快照没有结构化 Story/Claim 来源</text>
+            <text wx:if="{{!block.sourceClaims.length && !block.sourceStories.length}}" class="draft-source-empty">这段旧稿没有可查看的详细来源</text>
             <view wx:for="{{block.sourceStories}}" wx:for-item="sourceStory" wx:key="id" class="draft-source-story">
               <text class="draft-source-kind">故事</text>
               <text class="draft-source-title">{{sourceStory.title}}</text>
@@ -281,7 +298,7 @@
           </view>
         </view>
       </view>
-      <view wx:else class="empty-state">本章还没有结构化正文块</view>
+      <view wx:else class="empty-state">本章还没有正文</view>
     </view>
 
     <view wx:elif="{{activeTab === 'checks'}}" class="content-section">
@@ -350,5 +367,6 @@
       </view>
       <view wx:else class="empty-state">本章目前没有待补访的问题</view>
     </view>
+    </block>
   </block>
 </view>
