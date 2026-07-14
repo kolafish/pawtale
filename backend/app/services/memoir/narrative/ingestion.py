@@ -189,6 +189,11 @@ async def ingest_transcript_version(
     source_text = version.content
     speaker_role = _speaker_role(utterance)
     profile = entities.memoir_profile(project)
+    active_followup = await followup_completion.ingestion_context_for_utterance(
+        db,
+        project_id=project.id,
+        utterance=utterance,
+    )
     existing_story_candidates = await story_matching.story_extraction_candidates(
         db,
         project_id=project.id,
@@ -199,6 +204,19 @@ async def ingest_transcript_version(
         narrator_name=str(profile.get("narrator_name") or "").strip(),
         narrator_origin=str(profile.get("narrator_origin") or "").strip(),
         existing_story_candidates=existing_story_candidates,
+        active_followup_context=(
+            {
+                "task_id": active_followup.task_id,
+                "question": active_followup.question,
+                "target_slot": active_followup.target_slot,
+                "story_id": active_followup.story_id,
+                "story_title": active_followup.story_title,
+                "story_type": active_followup.story_type,
+                "story_summary": active_followup.story_summary,
+            }
+            if active_followup
+            else None
+        ),
         ai_model=ai_model,
         ai_client=ai_client,
     )
@@ -347,6 +365,13 @@ async def ingest_transcript_version(
         if not valid_links:
             continue
         linked_claim_ids = {claims_by_key[link.claim_key].id for link in valid_links}
+        answers_active_followup = bool(
+            active_followup
+            and active_followup.story_id
+            and active_followup.target_slot
+            and candidate.story_type.value == active_followup.story_type
+            and any(active_followup.target_slot in link.slot_keys for link in valid_links)
+        )
         story, review_candidates, created = await story_matching.resolve_extracted_story(
             db,
             project_id=project.id,
@@ -354,6 +379,9 @@ async def ingest_transcript_version(
             candidate=candidate,
             primary_place_entity_id=entity_ids.get(candidate.primary_place_entity_key or ""),
             claim_ids=linked_claim_ids,
+            preferred_story_id=(
+                active_followup.story_id if answers_active_followup and active_followup else None
+            ),
             force_needs_verification=(
                 speaker_role == MemoirClaimEvidenceSpeakerRole.INTERVIEWER
             ),

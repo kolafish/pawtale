@@ -34,6 +34,7 @@ PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
 UTTERANCE_ID_KEY = "utterance_id"
 AUDIT_SNAPSHOT_KEY = "audit_snapshot"
 AUDIT_SNAPSHOT_ID_KEY = "snapshot_id"
+EDITING_JOB_FAILURE_SOURCE = "editing_job_failure"
 
 
 def _clean_utterance_ids(utterance_ids: list[str] | None) -> list[str]:
@@ -129,7 +130,11 @@ def _event_is_visible(event: AutomationEventMetadataCarrier) -> bool:
 
 def _event_is_voice_unannounced(event: AutomationEventMetadataCarrier) -> bool:
     metadata = event.metadata_json or {}
-    return _event_is_visible(event) and not metadata.get(VOICE_PLAYED_AT_KEY)
+    return (
+        _event_is_visible(event)
+        and metadata.get("source") != EDITING_JOB_FAILURE_SOURCE
+        and not metadata.get(VOICE_PLAYED_AT_KEY)
+    )
 
 
 def _event_signature(metadata: dict) -> str:

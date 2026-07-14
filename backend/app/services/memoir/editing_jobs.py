@@ -18,17 +18,22 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir import automation_events
 from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
+    EDITING_JOB_FAILURE_SOURCE,
+    RESOLUTION_KEY,
+    RESOLUTION_REASON_KEY,
+    RESOLVED_AT_KEY,
     VOICE_PLAYED_AT_KEY,
     VOICE_PLAYED_MESSAGE_ID_KEY,
     VOICE_PLAYED_SESSION_ID_KEY,
     VOICE_SELECTED_AT_KEY,
     VOICE_SELECTED_MESSAGE_ID_KEY,
     VOICE_SELECTED_SESSION_ID_KEY,
+    _event_signature,
 )
 from app.services.memoir.job_leases import (
     JobLease,
@@ -52,7 +57,7 @@ class EditingJobResult:
 
 
 _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
-EDITING_JOB_FAILURE_EVENT_SOURCE = "editing_job_failure"
+EDITING_JOB_RECOVERY_REASON = "editing_job_succeeded"
 
 _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
@@ -117,7 +122,7 @@ async def _record_job_failure_event(
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     error = _compact_error_message(error_message)
     metadata: dict[str, object] = {
-        "source": EDITING_JOB_FAILURE_EVENT_SOURCE,
+        "source": EDITING_JOB_FAILURE_SOURCE,
         "editing_job_id": job.id,
         "job_type": job_type.value,
         "dedupe_key": job.dedupe_key or "",
@@ -154,6 +159,37 @@ async def _record_job_failure_event(
     event.metadata_json = updated_metadata
     db.add(event)
     await db.flush()
+
+
+async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) -> None:
+    try:
+        job_type = MemoirEditingJobType(job.job_type)
+    except ValueError:
+        return
+    event_type = _FAILURE_EVENT_TYPES.get(job_type)
+    if event_type is None:
+        return
+    signature = f"editing_job_failed:{job.id}"
+    events = (
+        await db.scalars(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.project_id == job.project_id,
+                MemoirAutomationEvent.event_type == event_type.value,
+            )
+        )
+    ).all()
+    for event in events:
+        if _event_signature(event.metadata_json or {}) != signature:
+            continue
+        event.metadata_json = {
+            **(event.metadata_json or {}),
+            RESOLUTION_KEY: "confirmed",
+            RESOLUTION_REASON_KEY: EDITING_JOB_RECOVERY_REASON,
+            RESOLVED_AT_KEY: datetime.now(UTC).isoformat(),
+        }
+        db.add(event)
+        await db.flush()
+        return
 
 
 def register_editing_job_handler(
@@ -425,6 +461,8 @@ async def _mark_job(
         return False
     if status == MemoirEditingJobStatus.FAILED:
         await _record_job_failure_event(db, job, error_message=error_message)
+    elif status == MemoirEditingJobStatus.SUCCEEDED:
+        await _resolve_job_failure_event(db, job)
     await db.commit()
     return True
 

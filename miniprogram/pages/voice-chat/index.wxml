@@ -82,7 +82,6 @@
       <text class="completion-task-status">{{completionTaskStatusText}}</text>
     </view>
     <text class="completion-task-question">{{completionTaskQuestionText}}</text>
-    <text wx:if="{{completionTaskPurposeText}}" class="completion-task-purpose">{{completionTaskPurposeText}}</text>
     <text wx:if="{{completionTaskError}}" class="completion-task-error">{{completionTaskError}}</text>
     <text wx:if="{{completionTaskActionText}}" class="completion-task-action-state">{{completionTaskActionText}}</text>
     <view wx:if="{{showCompletionTaskActions}}" class="completion-task-actions">

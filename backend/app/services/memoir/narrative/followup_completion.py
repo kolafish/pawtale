@@ -16,7 +16,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirStorySlotStatus,
 )
-from app.domain.memoir.types import MemoirChatMessageRole
+from app.domain.memoir.types import MemoirChatMessageRole, MemoirSessionGoal
 from app.models.memoir import (
     MemoirChatMessage,
     MemoirTranscriptVersion,
@@ -43,6 +43,17 @@ class FollowupCompletionResult:
     status: MemoirFollowupTaskStatus | None = None
     relation_role: MemoirFollowupTaskUtteranceRole | None = None
     answered_task_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class FollowupIngestionContext:
+    task_id: str
+    question: str
+    target_slot: str
+    story_id: str | None
+    story_title: str
+    story_type: str
+    story_summary: str
 
 
 async def _new_effective_claim_ids(
@@ -147,6 +158,106 @@ async def _add_task_utterance_relation(
     await db.flush()
 
 
+async def link_utterance_to_session_task(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+    utterance: MemoirVoiceUtterance,
+) -> str | None:
+    """Snapshot the task association before asynchronous transcript processing starts."""
+    if (
+        voice_session.session_goal != MemoirSessionGoal.BOOK_COMPLETION.value
+        or not voice_session.current_followup_task_id
+    ):
+        return None
+    task = await followup_tasks.get_task(
+        db,
+        project_id=voice_session.project_id,
+        task_id=voice_session.current_followup_task_id,
+    )
+    if (
+        task is None
+        or task.status != MemoirFollowupTaskStatus.IN_PROGRESS.value
+        or task.assigned_session_id != voice_session.id
+    ):
+        return None
+    await _add_task_utterance_relation(
+        db,
+        project_id=voice_session.project_id,
+        task_id=task.id,
+        utterance_id=utterance.id,
+        role=MemoirFollowupTaskUtteranceRole.RELATED_CONTEXT,
+    )
+    return task.id
+
+
+async def ingestion_context_for_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance: MemoirVoiceUtterance,
+) -> FollowupIngestionContext | None:
+    snapshotted_task_id = await db.scalar(
+        select(MemoirFollowupTaskUtterance.task_id)
+        .where(
+            MemoirFollowupTaskUtterance.project_id == project_id,
+            MemoirFollowupTaskUtterance.utterance_id == utterance.id,
+        )
+        .order_by(
+            MemoirFollowupTaskUtterance.created_at,
+            MemoirFollowupTaskUtterance.id,
+        )
+        .limit(1)
+    )
+    if snapshotted_task_id:
+        task = await followup_tasks.get_task(
+            db,
+            project_id=project_id,
+            task_id=snapshotted_task_id,
+        )
+        if task is None:
+            return None
+        if MemoirFollowupTaskStatus(task.status) not in followup_tasks.ACTIVE_TASK_STATUSES:
+            return None
+    else:
+        voice_session = await db.scalar(
+            select(MemoirVoiceSession).where(
+                MemoirVoiceSession.project_id == project_id,
+                MemoirVoiceSession.id == utterance.voice_session_id,
+            )
+        )
+        if voice_session is None or not voice_session.current_followup_task_id:
+            return None
+        task = await followup_tasks.get_task(
+            db,
+            project_id=project_id,
+            task_id=voice_session.current_followup_task_id,
+        )
+        if (
+            task is None
+            or task.status != MemoirFollowupTaskStatus.IN_PROGRESS.value
+            or task.assigned_session_id != voice_session.id
+        ):
+            return None
+    story = None
+    if task.story_id:
+        story = await db.scalar(
+            select(MemoirStory).where(
+                MemoirStory.project_id == project_id,
+                MemoirStory.id == task.story_id,
+            )
+        )
+    return FollowupIngestionContext(
+        task_id=task.id,
+        question=task.question,
+        target_slot=task.target_slot,
+        story_id=story.id if story else None,
+        story_title=story.title if story else "",
+        story_type=story.story_type if story else "",
+        story_summary=story.summary if story else "",
+    )
+
+
 async def evaluate_after_narrative_ingestion(
     db: AsyncSession,
     *,
@@ -164,26 +275,20 @@ async def evaluate_after_narrative_ingestion(
     )
     if message_role != MemoirChatMessageRole.USER.value:
         return FollowupCompletionResult()
-    voice_session = await db.scalar(
-        select(MemoirVoiceSession).where(
-            MemoirVoiceSession.project_id == project_id,
-            MemoirVoiceSession.id == utterance.voice_session_id,
-        )
+    ingestion_context = await ingestion_context_for_utterance(
+        db,
+        project_id=project_id,
+        utterance=utterance,
     )
-    if voice_session is None or not voice_session.current_followup_task_id:
-        current_task = None
-    else:
-        current_task = await followup_tasks.get_task(
+    current_task = (
+        await followup_tasks.get_task(
             db,
             project_id=project_id,
-            task_id=voice_session.current_followup_task_id,
+            task_id=ingestion_context.task_id,
         )
-        if (
-            current_task is None
-            or current_task.status != MemoirFollowupTaskStatus.IN_PROGRESS.value
-            or current_task.assigned_session_id != voice_session.id
-        ):
-            current_task = None
+        if ingestion_context
+        else None
+    )
 
     new_claim_ids = await _new_effective_claim_ids(
         db,
@@ -194,7 +299,7 @@ async def evaluate_after_narrative_ingestion(
     if not new_claim_ids:
         return FollowupCompletionResult(
             task_id=current_task.id if current_task else None,
-            status=(MemoirFollowupTaskStatus.IN_PROGRESS if current_task else None),
+            status=(MemoirFollowupTaskStatus(current_task.status) if current_task else None),
         )
     new_story_ids = set(
         (
@@ -227,10 +332,11 @@ async def evaluate_after_narrative_ingestion(
         task_claim_roles = {
             relation.claim_id: relation.context_role for relation in task.claims
         }
+        is_current_task = current_task is not None and task.id == current_task.id
         related = bool(new_claim_ids & set(task_claim_roles)) or bool(
             task.story_id and task.story_id in new_story_ids
         )
-        if not related:
+        if not related and not is_current_task:
             continue
         expected_evidence_received = any(
             claim_id in new_claim_ids
@@ -249,7 +355,6 @@ async def evaluate_after_narrative_ingestion(
             )
         )
         answered = expected_evidence_received or target_slot_completed
-        is_current_task = current_task is not None and task.id == current_task.id
         if not answered and not is_current_task:
             continue
         relation_role = (

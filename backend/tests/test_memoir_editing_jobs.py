@@ -289,6 +289,52 @@ async def test_run_editing_job_records_failed_automation_event(test_db):
     assert "voice_played_session_id" not in events[0].metadata_json
 
 
+async def test_successful_retry_resolves_prior_failure_event(test_db):
+    project = await _create_project(test_db)
+    project_id = project.id
+    await enqueue_editing_job(
+        test_db,
+        project_id=project_id,
+        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        payload_json={"utterance_ids": ["u-recovered"]},
+        dedupe_key="ingest:u-recovered",
+    )
+    await test_db.commit()
+
+    async def failing_handler(db, current_job):
+        raise RuntimeError("invalid provider payload")
+
+    register_editing_job_handler(MemoirEditingJobType.INGEST_NARRATIVE_STATE, failing_handler)
+    first_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+    assert await run_editing_job(test_db, first_lease) is False
+
+    await enqueue_editing_job(
+        test_db,
+        project_id=project_id,
+        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        payload_json={"utterance_ids": ["u-recovered"]},
+        dedupe_key="ingest:u-recovered",
+        retry_failed=True,
+    )
+    await test_db.commit()
+
+    async def successful_handler(db, current_job):
+        return EditingJobResult(result_json={"recovered": True})
+
+    register_editing_job_handler(MemoirEditingJobType.INGEST_NARRATIVE_STATE, successful_handler)
+    retry_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+    assert await run_editing_job(test_db, retry_lease) is True
+
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
+    )
+    assert event is not None
+    assert event.status == MemoirAutomationEventStatus.FAILED.value
+    assert event.metadata_json["resolution"] == "confirmed"
+    assert event.metadata_json["resolution_reason"] == "editing_job_succeeded"
+    assert event.metadata_json["resolved_at"]
+
+
 async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test_db):
     project = await _create_project(test_db)
     claimed_at = _utcnow()
