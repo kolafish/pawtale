@@ -20,6 +20,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeGapDetectedBy,
@@ -465,7 +466,53 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
     assert len(tasks) == 1
     assert tasks[0].story_id == fixture["story"].id
     assert tasks[0].target_slot == MEMOIR_STORY_NARRATION_TARGET
+    assert tasks[0].answer_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value
     assert "按您记得的顺序" in tasks[0].question
+
+
+async def test_followup_generation_marks_chapter_causality_as_clarification(
+    client,
+    test_db,
+):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    await gaps.upsert_gaps(
+        test_db,
+        project_id=fixture["project_id"],
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=fixture["chapter"].id,
+                gap_type=MemoirNarrativeGapType.CAUSALITY,
+                severity=MemoirNarrativeGapSeverity.MEDIUM,
+                title="比赛与本章主题的关系不清楚",
+                description="需要确认比赛为什么会出现在这一章。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+                story_roles={
+                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
+                },
+                chapter_roles={
+                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.PRIMARY,
+                },
+            )
+        ],
+    )
+    await test_db.commit()
+
+    await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=fixture["chapter"].id,
+    )
+    task = await test_db.scalar(
+        select(MemoirFollowupTask)
+        .join(MemoirNarrativeGap, MemoirNarrativeGap.id == MemoirFollowupTask.gap_id)
+        .where(MemoirNarrativeGap.gap_type == MemoirNarrativeGapType.CAUSALITY.value)
+    )
+
+    assert task is not None
+    assert task.answer_use == MemoirFollowupAnswerUse.CLARIFICATION.value
+    assert "没有理解这件事和本章前后内容的关系" in task.question
+    assert "为什么后来这样发展" not in task.question
 
 
 async def test_followup_task_finishes_after_new_slot_evidence_without_confirmation(

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.domain.memoir.narrative_types import (
+    MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
     MemoirFollowupTaskUtteranceRole,
@@ -87,6 +88,9 @@ class MemoirFollowupTask(Base):
     )
     story_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     target_slot: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    answer_use: Mapped[str] = mapped_column(
+        String(24), default=MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value, nullable=False
+    )
     question: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
     known_context_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
