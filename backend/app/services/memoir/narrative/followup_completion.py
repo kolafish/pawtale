@@ -47,6 +47,7 @@ class FollowupCompletionResult:
 @dataclass(frozen=True)
 class FollowupIngestionContext:
     task_id: str
+    chapter_id: str | None
     question: str
     target_slot: str
     story_id: str | None
@@ -262,6 +263,7 @@ async def ingestion_context_for_utterance(
         )
     return FollowupIngestionContext(
         task_id=task.id,
+        chapter_id=task.chapter_id,
         question=task.question,
         target_slot=task.target_slot,
         story_id=story.id if story else None,

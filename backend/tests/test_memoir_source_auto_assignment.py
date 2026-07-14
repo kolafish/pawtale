@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -18,6 +19,11 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
+)
+from app.models.memoir_narrative import (
+    MemoirFollowupTask,
+    MemoirFollowupTaskUtterance,
+    MemoirNarrativeGap,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
@@ -505,6 +511,85 @@ async def test_source_auto_assignment_skips_new_topic_without_changing_plan(clie
     assert [ref["utterance_id"] for ref in data["plan"]["chapters"][0]["source_refs"]] == [
         first["utterance_id"],
     ]
+
+
+async def test_completion_capture_assigns_memoir_content_to_task_chapter(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "小时候常在外婆家的院子里玩。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "外婆家的院子"),
+        chapter_title="院子里的童年",
+    )
+    answer = await create_test_voice_transcript(
+        client,
+        test_db,
+        "外婆会带着我摘菜，夏天我们还会坐在屋檐下剥青豆。",
+    )
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="causality",
+        severity="medium",
+        title="补充院子里的生活",
+        description="讲清楚外婆和孩子在院子里做过什么。",
+        fingerprint=sha256(b"completion-capture-target-chapter").hexdigest(),
+        status="open",
+        detected_by="ai",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        question="你和外婆在院子里做过哪些事？",
+        purpose="补充院子生活的具体经历。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    test_db.add(
+        MemoirFollowupTaskUtterance(
+            project_id=project_id,
+            task_id=task.id,
+            utterance_id=answer["utterance_id"],
+            result_role="related_context",
+            is_assignment_snapshot=True,
+        )
+    )
+    await test_db.commit()
+    _patch_source_router_ai(monkeypatch, _new_chapter_route("另一段生活"))
+
+    result = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[answer["utterance_id"]],
+    )
+
+    assert result.assigned_source_count == 1
+    assert result.items[0].action == "assign_to_chapter"
+    assert result.items[0].target_chapter_id == chapter.id
+    assert result.items[0].confidence == 0.95
+    assert "补全访谈" in result.items[0].reason
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == project_id,
+            MemoirChapterSourceLink.chapter_id == chapter.id,
+            MemoirChapterSourceLink.utterance_id == answer["utterance_id"],
+        )
+    )
+    assert link is not None
+    assert link.assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
 
 
 async def test_source_routing_job_holds_new_topic_for_review(client, test_db, monkeypatch):
