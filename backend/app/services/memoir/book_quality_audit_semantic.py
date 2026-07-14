@@ -344,6 +344,10 @@ async def _semantic_snapshot_from_llm(
     try:
         if client is None:
             client = get_ai_service(ai_model)
+        # Rules and chapter-card snapshots are durable cache entries. Commit
+        # them before the semantic provider call so the long network wait does
+        # not retain a SQLite write transaction.
+        await db.commit()
         content = await client._call_llm(
             SEMANTIC_AUDIT_SYSTEM_PROMPT,
             _semantic_prompt(rules_snapshot=rules_snapshot, chapter_cards=chapter_cards),
