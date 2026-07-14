@@ -5,14 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChapterSourceAssignedBy,
     MemoirEditingJobStatus,
 )
-from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_narrative import MemoirFollowupTaskUtterance
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
@@ -22,6 +23,7 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAutoAssignmentRunRequest,
     MemoirBookSourceAutoAssignmentRunResponse,
     MemoirBookSourceRouteResponse,
+    MemoirFollowupAnswerInterpretationResponse,
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
@@ -54,6 +56,29 @@ def _route_is_assignable(
         route.action == "assign_to_chapter"
         and bool(route.target_chapter_id)
         and (route.confidence or 0) >= threshold
+    )
+
+
+def _route_after_semantic_completion(
+    route: MemoirBookSourceRouteResponse,
+    relation: MemoirFollowupTaskUtterance,
+) -> MemoirBookSourceRouteResponse:
+    if (
+        relation.interpretation_status
+        != MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
+    ):
+        return route
+    followup_answer = MemoirFollowupAnswerInterpretationResponse(
+        task_id=relation.task_id,
+        status=MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION,
+        confirmation_question=relation.confirmation_question,
+        reason=relation.interpretation_reason,
+    )
+    return route.model_copy(
+        update={
+            "action": "hold_for_review",
+            "followup_answer": followup_answer,
+        }
     )
 
 
@@ -398,7 +423,9 @@ async def run_source_auto_assignment_for_utterances(
                 db,
                 project_id=project_id,
                 relation=relation,
+                ai_model=ai_model,
             )
+            route = _route_after_semantic_completion(route, relation)
         routes.append(route)
 
     narrative_jobs = await _record_route_dispositions(

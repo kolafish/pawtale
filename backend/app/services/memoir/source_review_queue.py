@@ -374,9 +374,47 @@ async def confirm_source_review_item(
                 direct_narrative_text=req.direct_narrative_text,
                 clarification_text=req.clarification_text,
                 fact_resolution_text=req.fact_resolution_text,
+                ai_model=req.ai_model,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if (
+            relation.interpretation_status
+            == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
+        ):
+            pending_answer = MemoirFollowupAnswerInterpretationResponse(
+                task_id=relation.task_id,
+                status=MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION,
+                confirmation_question=relation.confirmation_question,
+                reason=relation.interpretation_reason,
+            )
+            metadata = dict(event.metadata_json or {})
+            route_metadata = _event_route_metadata(metadata)
+            route_metadata.update(
+                {
+                    "action": "hold_for_review",
+                    "route_action": "hold_for_review",
+                    "followup_answer": pending_answer.model_dump(mode="json"),
+                }
+            )
+            if isinstance(metadata.get("route"), dict):
+                metadata["route"] = route_metadata
+            else:
+                metadata.update(route_metadata)
+            event.summary_text = relation.confirmation_question
+            event.metadata_json = metadata
+            db.add(event)
+            plan = await book_plans.get_book_plan(
+                db,
+                user_id=user_id,
+                project_id=project_id,
+            )
+            await db.commit()
+            await db.refresh(event)
+            return MemoirBookSourceReviewConfirmResponse(
+                item=source_review_item_response(event),
+                plan=plan,
+            )
         resolved_followup_answer = MemoirFollowupAnswerInterpretationResponse(
             task_id=relation.task_id,
             status=MemoirFollowupAnswerInterpretationStatus.RESOLVED,
@@ -392,6 +430,7 @@ async def confirm_source_review_item(
     target_chapter_id = req.chapter_id or item.target_chapter_id
     records_as_context = bool(
         resolved_followup_answer
+        and not resolved_followup_answer.direct_narrative_text
         and (
             resolved_followup_answer.clarification_text
             or resolved_followup_answer.fact_resolution_text

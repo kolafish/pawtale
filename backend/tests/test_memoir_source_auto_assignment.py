@@ -4,6 +4,11 @@ from hashlib import sha256
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import (
+    MemoirClaimType,
+    MemoirNarrativeActorType,
+    MemoirNarrativeEntityType,
+)
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -22,11 +27,22 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
+    MemoirClaim,
+    MemoirClaimEvidence,
+    MemoirFollowupTaskClaim,
     MemoirFollowupTask,
     MemoirFollowupTaskUtterance,
+    MemoirNarrativeDecision,
+    MemoirNarrativeEntity,
     MemoirNarrativeGap,
+    MemoirNarrativeGapClaim,
     MemoirStory,
 )
+from app.repositories.memoir_narrative import (
+    MemoirClaimRepository,
+    MemoirNarrativeEntityRepository,
+)
+from app.schemas.memoir_narrative import MemoirClaimCreate, MemoirNarrativeEntityCreate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
@@ -79,10 +95,35 @@ class FakeSourceCardAI:
         )
 
 
+class FakeFactResolutionAI:
+    provider_name = "fake-ai"
+    model_name = "fake-fact-resolution"
+
+    def __init__(self, payload: dict[str, object]):
+        self.payload = payload
+        self.calls: list[dict[str, object]] = []
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs):
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt, **kwargs})
+        return json.dumps(self.payload, ensure_ascii=False)
+
+
 def _patch_source_router_ai(monkeypatch, *payloads: dict[str, object]) -> None:
     fake = FakeSourceRouterAI(*payloads)
     monkeypatch.setattr("app.services.memoir.source_cards.get_ai_service", lambda ai_model=None: FakeSourceCardAI())
     monkeypatch.setattr("app.services.memoir.source_router.get_ai_service", lambda ai_model=None: fake)
+
+
+def _patch_fact_resolution_ai(
+    monkeypatch,
+    payload: dict[str, object],
+) -> FakeFactResolutionAI:
+    fake = FakeFactResolutionAI(payload)
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.fact_resolution.get_ai_service",
+        lambda ai_model=None: fake,
+    )
+    return fake
 
 
 def _assign_route(chapter_id: str, *, confidence: float = 0.91) -> dict[str, object]:
@@ -191,6 +232,135 @@ async def _schedule_guarded_route_job(
     )
     assert job is not None
     return job
+
+
+async def _create_fact_resolution_case(client, test_db):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我工作时有一位经理，后来也有人邀请我加入创业公司。",
+    )
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "工作时的经理"),
+        chapter_title="工作这些年",
+    )
+    answer_text = (
+        "他们俩这都是一个人呀。首先他是我工作时候的经理，后来我们都离开"
+        "那家公司了，所以他创业的时候也邀请我加入了，都是他。"
+    )
+    answer = await create_test_voice_transcript(client, test_db, answer_text)
+
+    entity_repository = MemoirNarrativeEntityRepository(test_db)
+    retained = await entity_repository.create(
+        MemoirNarrativeEntityCreate(
+            project_id=project_id,
+            entity_type=MemoirNarrativeEntityType.PERSON,
+            canonical_name="工作时的经理",
+            aliases=["经理"],
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    duplicate = await entity_repository.create(
+        MemoirNarrativeEntityCreate(
+            project_id=project_id,
+            entity_type=MemoirNarrativeEntityType.PERSON,
+            canonical_name="后来邀请创业的人",
+            aliases=["前同事"],
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    claim_repository = MemoirClaimRepository(test_db)
+    confirmed_claim = await claim_repository.create(
+        MemoirClaimCreate(
+            project_id=project_id,
+            claim_type=MemoirClaimType.EVENT,
+            statement="工作时的经理后来邀请我加入创业公司。",
+            subject_entity_id=duplicate.id,
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    rejected_claim = await claim_repository.create(
+        MemoirClaimCreate(
+            project_id=project_id,
+            claim_type=MemoirClaimType.RELATIONSHIP,
+            statement="工作时的经理和邀请创业的人是两个人。",
+            subject_entity_id=retained.id,
+            object_entity_id=duplicate.id,
+            created_by=MemoirNarrativeActorType.AI,
+        )
+    )
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="contradiction",
+        severity="high",
+        title="经理和邀请创业的人是否为同一人",
+        description="两处讲述使用了不同人物称呼。",
+        fingerprint=sha256(f"fact-resolution:{answer['utterance_id']}".encode()).hexdigest(),
+        status="open",
+        detected_by="ai",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    for claim, role in ((confirmed_claim, "supporting"), (rejected_claim, "conflicting")):
+        test_db.add(
+            MemoirNarrativeGapClaim(
+                project_id=project_id,
+                gap_id=gap.id,
+                claim_id=claim.id,
+                role=role,
+            )
+        )
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        answer_use="fact_resolution",
+        question="工作时的经理和后来邀请您创业的人是同一个人吗？",
+        purpose="确认两处人物称呼是否指向同一人。",
+        known_context_summary="书中把经理和邀请创业的人写成了两个称呼。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    for claim in (confirmed_claim, rejected_claim):
+        test_db.add(
+            MemoirFollowupTaskClaim(
+                project_id=project_id,
+                task_id=task.id,
+                claim_id=claim.id,
+                context_role="known",
+            )
+        )
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=answer["utterance_id"],
+        result_role="related_context",
+        is_assignment_snapshot=True,
+    )
+    test_db.add(relation)
+    await test_db.commit()
+    return {
+        "project_id": project_id,
+        "user_id": first["user_id"],
+        "chapter": chapter,
+        "answer": answer,
+        "answer_text": answer_text,
+        "retained": retained,
+        "duplicate": duplicate,
+        "confirmed_claim": confirmed_claim,
+        "rejected_claim": rejected_claim,
+        "gap": gap,
+        "task": task,
+        "relation": relation,
+    }
 
 
 async def test_source_auto_assignment_assigns_high_confidence_source_and_records_progress(
@@ -554,7 +724,7 @@ async def test_source_auto_assignment_skips_new_topic_without_changing_plan(clie
     ]
 
 
-async def test_completion_capture_assigns_memoir_content_to_task_chapter(
+async def test_completion_mixed_answer_assigns_narrative_part_to_task_chapter(
     client,
     test_db,
     monkeypatch,
@@ -567,10 +737,12 @@ async def test_completion_capture_assigns_memoir_content_to_task_chapter(
         source_ref=memoir_source_ref(first, "外婆家的院子"),
         chapter_title="院子里的童年",
     )
+    direct_text = "外婆会带着我摘菜，夏天我们还会坐在屋檐下剥青豆。"
+    clarification_text = "这句话只是解释为什么要补这一段。"
     answer = await create_test_voice_transcript(
         client,
         test_db,
-        "外婆会带着我摘菜，夏天我们还会坐在屋檐下剥青豆。",
+        direct_text + clarification_text,
     )
     gap = MemoirNarrativeGap(
         project_id=project_id,
@@ -598,21 +770,21 @@ async def test_completion_capture_assigns_memoir_content_to_task_chapter(
     )
     test_db.add(task)
     await test_db.flush()
-    test_db.add(
-        MemoirFollowupTaskUtterance(
-            project_id=project_id,
-            task_id=task.id,
-            utterance_id=answer["utterance_id"],
-            result_role="related_context",
-            is_assignment_snapshot=True,
-        )
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=answer["utterance_id"],
+        result_role="related_context",
+        is_assignment_snapshot=True,
     )
+    test_db.add(relation)
     await test_db.commit()
     _patch_source_router_ai(
         monkeypatch,
         _completion_route(
-            answer_kind="direct_narrative",
-            direct_narrative_text="外婆会带着我摘菜，夏天我们还会坐在屋檐下剥青豆。",
+            answer_kind="mixed",
+            direct_narrative_text=direct_text,
+            clarification_text=clarification_text,
         ),
     )
 
@@ -637,6 +809,224 @@ async def test_completion_capture_assigns_memoir_content_to_task_chapter(
     )
     assert link is not None
     assert link.assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
+    await test_db.refresh(relation)
+    assert relation.answer_kind == "mixed"
+    assert relation.direct_narrative_text == direct_text
+    assert relation.clarification_text == clarification_text
+
+
+async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
+    client,
+    test_db,
+    monkeypatch,
+):
+    case = await _create_fact_resolution_case(client, test_db)
+    route_payload = _completion_route(
+        answer_kind="fact_resolution",
+        fact_resolution_text=case["answer_text"],
+    )
+    _patch_source_router_ai(monkeypatch, route_payload, route_payload)
+    fact_ai = _patch_fact_resolution_ai(
+        monkeypatch,
+        {
+            "status": "resolved",
+            "operations": [
+                {
+                    "operation": "merge_entities",
+                    "source_entity_id": case["duplicate"].id,
+                    "retained_entity_id": case["retained"].id,
+                    "reason": "用户明确说两个称呼都是同一个人。",
+                },
+                {
+                    "operation": "confirm_claim",
+                    "claim_id": case["confirmed_claim"].id,
+                    "reason": "用户确认经理后来邀请自己加入创业公司。",
+                },
+                {
+                    "operation": "reject_claim",
+                    "claim_id": case["rejected_claim"].id,
+                    "reason": "用户明确否定这是两个人。",
+                },
+            ],
+            "confirmation_question": "",
+            "reason": "回答明确解决了人物身份矛盾。",
+        },
+    )
+
+    result = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=case["user_id"],
+        project_id=case["project_id"],
+        utterance_ids=[case["answer"]["utterance_id"]],
+    )
+    repeated = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=case["user_id"],
+        project_id=case["project_id"],
+        utterance_ids=[case["answer"]["utterance_id"]],
+    )
+
+    await test_db.refresh(case["duplicate"])
+    await test_db.refresh(case["confirmed_claim"])
+    await test_db.refresh(case["rejected_claim"])
+    await test_db.refresh(case["task"])
+    await test_db.refresh(case["gap"])
+    await test_db.refresh(case["relation"])
+    assert result.items[0].action == "record_as_context"
+    assert repeated.items[0].action == "record_as_context"
+    assert result.assigned_source_count == 0
+    assert case["duplicate"].merged_into_entity_id == case["retained"].id
+    assert case["confirmed_claim"].subject_entity_id == case["retained"].id
+    assert case["confirmed_claim"].verification_status == "confirmed"
+    assert case["rejected_claim"].verification_status == "rejected"
+    assert case["task"].status == "answered"
+    assert case["gap"].status == "resolved"
+    assert case["relation"].result_role == "target_answer"
+
+    decisions_for_answer = list(
+        (
+            await test_db.scalars(
+                select(MemoirNarrativeDecision).where(
+                    MemoirNarrativeDecision.project_id == case["project_id"],
+                    MemoirNarrativeDecision.source_followup_task_utterance_id
+                    == case["relation"].id,
+                )
+            )
+        ).all()
+    )
+    assert {decision.action for decision in decisions_for_answer} >= {
+        "merge",
+        "confirm",
+        "reject",
+    }
+    assert {
+        decision.source_transcript_version_id for decision in decisions_for_answer
+    } == {case["answer"]["transcript_version_id"]}
+    answer_evidence = list(
+        (
+            await test_db.scalars(
+                select(MemoirClaimEvidence).where(
+                    MemoirClaimEvidence.project_id == case["project_id"],
+                    MemoirClaimEvidence.transcript_version_id
+                    == case["answer"]["transcript_version_id"],
+                )
+            )
+        ).all()
+    )
+    assert {evidence.evidence_role for evidence in answer_evidence} == {
+        "supports",
+        "contradicts",
+    }
+    assert {evidence.audio_file_id for evidence in answer_evidence} == {
+        case["answer"]["audio_file_id"]
+    }
+    assert {(evidence.start_ms, evidence.end_ms) for evidence in answer_evidence} == {
+        (0, 8000)
+    }
+    chapter_audit_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == case["project_id"],
+            MemoirEditingJob.chapter_id == case["chapter"].id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+        )
+    )
+    assert chapter_audit_job is not None
+    assert chapter_audit_job.payload_json["source"] == "book_completion_semantic_answer"
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.project_id == case["project_id"],
+            MemoirChapterSourceLink.utterance_id == case["answer"]["utterance_id"],
+        )
+    )
+    assert link is None
+    assert len(fact_ai.calls) == 1
+    prompt = str(fact_ai.calls[0]["user_prompt"])
+    assert case["confirmed_claim"].id in prompt
+    assert case["rejected_claim"].id in prompt
+    assert case["retained"].id in prompt
+    assert case["duplicate"].id in prompt
+
+
+async def test_ambiguous_fact_resolution_keeps_task_open_without_semantic_changes(
+    client,
+    test_db,
+    monkeypatch,
+):
+    case = await _create_fact_resolution_case(client, test_db)
+    _patch_source_router_ai(
+        monkeypatch,
+        _completion_route(
+            answer_kind="fact_resolution",
+            fact_resolution_text=case["answer_text"],
+        ),
+    )
+    confirmation_question = "你说的同一个人，是工作时的经理和后来邀请你创业的人吗？"
+    _patch_fact_resolution_ai(
+        monkeypatch,
+        {
+            "status": "needs_confirmation",
+            "operations": [],
+            "confirmation_question": confirmation_question,
+            "reason": "现有回答还不能唯一对应到书中的人物。",
+        },
+    )
+
+    result = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=case["user_id"],
+        project_id=case["project_id"],
+        utterance_ids=[case["answer"]["utterance_id"]],
+    )
+
+    await test_db.refresh(case["duplicate"])
+    await test_db.refresh(case["confirmed_claim"])
+    await test_db.refresh(case["rejected_claim"])
+    await test_db.refresh(case["task"])
+    await test_db.refresh(case["gap"])
+    await test_db.refresh(case["relation"])
+    assert result.items[0].action == "hold_for_review"
+    assert result.assigned_source_count == 0
+    assert case["duplicate"].merged_into_entity_id is None
+    assert case["confirmed_claim"].verification_status == "unreviewed"
+    assert case["rejected_claim"].verification_status == "unreviewed"
+    assert case["task"].status == "pending"
+    assert case["gap"].status == "open"
+    assert case["relation"].interpretation_status == "needs_confirmation"
+    assert case["relation"].answer_kind is None
+    assert case["relation"].confirmation_question == confirmation_question
+    decision_count = await test_db.scalar(
+        select(func.count(MemoirNarrativeDecision.id)).where(
+            MemoirNarrativeDecision.project_id == case["project_id"],
+        )
+    )
+    assert decision_count == 0
+    review_event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.project_id == case["project_id"],
+            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
+        )
+    )
+    assert review_event is not None
+    assert review_event.summary_text == confirmation_question
+    confirmed = await client.post(
+        f"/api/mobile/memoir/projects/{case['project_id']}"
+        f"/book-source-review-items/{review_event.id}/confirm",
+        json={
+            "followup_answer_kind": "fact_resolution",
+            "fact_resolution_text": case["answer_text"],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.json()
+    assert confirmed.json()["item"]["status"] == "needs_review"
+    assert (
+        confirmed.json()["item"]["followup_answer"]["status"]
+        == "needs_confirmation"
+    )
+    await test_db.refresh(case["task"])
+    await test_db.refresh(case["gap"])
+    assert case["task"].status == "pending"
+    assert case["gap"].status == "open"
 
 
 async def test_completion_clarification_updates_task_without_narrative_ingestion(
