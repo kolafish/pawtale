@@ -1272,6 +1272,54 @@ test("book page opens transcripts for pending source automation events", async (
   delete global.wx;
 });
 
+test("book page opens answer confirmation for ambiguous completion answers", async () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { mod, page } = loadBookPage();
+  const event = {
+    id: "event-confirm-answer",
+    project_id: "project/1",
+    event_type: "source_held",
+    status: "needs_review",
+    chapter_id: "chapter-1",
+    utterance_ids: ["utterance-1"],
+    summary_text: "请确认这段话该怎么使用",
+    confidence: 0.5,
+    metadata_json: {
+      route: {
+        utterance_id: "utterance-1",
+        followup_answer: {
+          status: "needs_confirmation",
+        },
+      },
+    },
+    created_at: "2026-07-14T12:00:00Z",
+    updated_at: "2026-07-14T12:00:00Z",
+  };
+  const item = mod.buildAutomationEventViews([event])[0];
+  assert.equal(item.titleText, "回答用途待确认");
+  assert.equal(item.actionText, "去确认");
+  assert.equal(item.actionKind, "confirm_answer");
+
+  const context = pageContext(page, { projectId: "project/1" });
+  await page.acknowledgeAutomationEvent.call(context, {
+    currentTarget: {
+      dataset: {
+        id: event.id,
+        action: item.actionKind,
+      },
+    },
+  });
+  assert.deepEqual(navigations, [
+    "/pages/source-review/index?projectId=project%2F1&eventId=event-confirm-answer",
+  ]);
+  delete global.wx;
+});
+
 test("book page shows source coverage notice only when there are uncovered transcripts", () => {
   const { mod } = loadBookPage();
 
