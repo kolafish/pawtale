@@ -294,6 +294,12 @@ class MemoirFollowupTaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class MemoirFollowupAnswerUse(str, Enum):
+    DIRECT_NARRATIVE = "direct_narrative"
+    CLARIFICATION = "clarification"
+    FACT_RESOLUTION = "fact_resolution"
+
+
 MEMOIR_STORY_NARRATION_TARGET = "story_narration"
 
 

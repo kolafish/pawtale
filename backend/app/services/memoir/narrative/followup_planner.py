@@ -13,10 +13,12 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimPublicationStatus,
     MemoirClaimEvidenceRole,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeGapClaimRole,
+    MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
@@ -43,7 +45,7 @@ from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "2"
+FOLLOWUP_PLANNER_VERSION = "3"
 NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
@@ -115,22 +117,46 @@ def _story_slot_key(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
     return gap.target_slot if gap.target_slot in schema.slot_keys else ""
 
 
+def _answer_use(gap_type: MemoirNarrativeGapType) -> MemoirFollowupAnswerUse:
+    if gap_type == MemoirNarrativeGapType.MISSING_SLOT:
+        return MemoirFollowupAnswerUse.DIRECT_NARRATIVE
+    if gap_type in {
+        MemoirNarrativeGapType.CHRONOLOGY,
+        MemoirNarrativeGapType.RELATIONSHIP,
+        MemoirNarrativeGapType.CAUSALITY,
+        MemoirNarrativeGapType.UNCLEAR_REFERENCE,
+    }:
+        return MemoirFollowupAnswerUse.CLARIFICATION
+    if gap_type in {
+        MemoirNarrativeGapType.CONTRADICTION,
+        MemoirNarrativeGapType.REPETITION,
+        MemoirNarrativeGapType.UNSUPPORTED_FACT,
+    }:
+        return MemoirFollowupAnswerUse.FACT_RESOLUTION
+    raise ValueError(f"unsupported follow-up gap type: {gap_type.value}")
+
+
 def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key: str) -> str:
     story_prefix = f"关于“{story.title}”，" if story else ""
     if slot_key:
         return f"{story_prefix}{SLOT_LABELS.get(slot_key, slot_key)}，你还记得哪些具体情况？"
     if gap.gap_type == MemoirNarrativeGapType.CHRONOLOGY.value:
-        return f"{story_prefix}这些事情大概是什么先后顺序？"
+        return f"{story_prefix}我还不能确定这些事情的先后顺序。请按发生顺序再说明一下。"
     if gap.gap_type == MemoirNarrativeGapType.RELATIONSHIP.value:
-        return f"{story_prefix}这里提到的人彼此是什么关系？"
+        return f"{story_prefix}我还没有理解这里提到的人彼此是什么关系。请帮我说明一下。"
     if gap.gap_type == MemoirNarrativeGapType.CAUSALITY.value:
-        return f"{story_prefix}是什么原因让事情后来这样发展？"
+        if gap.scope_type == MemoirNarrativeGapScopeType.CHAPTER.value:
+            return (
+                f"{story_prefix}我还没有理解这件事和本章前后内容的关系。"
+                "它是在说明什么，或者和哪件事有关？"
+            )
+        return f"{story_prefix}我还没有理解这件事的前因后果。是什么促成了它，后来又带来了什么？"
     if gap.gap_type == MemoirNarrativeGapType.CONTRADICTION.value:
-        return f"{story_prefix}这两种说法里，哪一种更接近当时的实际情况？"
+        return f"{story_prefix}这里有两种不一致的说法。哪一种才是准确的？"
     if gap.gap_type == MemoirNarrativeGapType.UNCLEAR_REFERENCE.value:
-        return f"{story_prefix}这里说的那个人或那件事，具体指的是谁或什么？"
+        return f"{story_prefix}我没有理解这里的指代。说的是谁，或者具体是哪件事？"
     if gap.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT.value:
-        return f"{story_prefix}这件事你是亲身经历的，还是后来听谁讲的？"
+        return f"{story_prefix}我还不能确认这条信息的来源。它是亲身经历、听别人讲，还是你的推测？"
     return f"{story_prefix}{gap.title}，你愿意再讲一点具体情况吗？"
 
 
@@ -480,6 +506,7 @@ async def generate_followup_tasks(
             "chapter_id": chapter.id if chapter else None,
             "story_id": story.id if story else None,
             "target_slot": MEMOIR_STORY_NARRATION_TARGET if is_story_narration else slot_key,
+            "answer_use": _answer_use(gap_type).value,
             "question": (
                 _story_narration_question(story)
                 if is_story_narration and story is not None
