@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
+    MEMOIR_STORY_NARRATION_TARGET,
     MemoirChapterContractStatus,
     MemoirClaimPublicationStatus,
     MemoirClaimEvidenceRole,
@@ -42,7 +43,7 @@ from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "1"
+FOLLOWUP_PLANNER_VERSION = "2"
 NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
@@ -131,6 +132,13 @@ def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key:
     if gap.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT.value:
         return f"{story_prefix}这件事你是亲身经历的，还是后来听谁讲的？"
     return f"{story_prefix}{gap.title}，你愿意再讲一点具体情况吗？"
+
+
+def _story_narration_question(story: MemoirStory) -> str:
+    return (
+        f"关于“{story.title}”，请按您记得的顺序讲讲："
+        "事情怎么开始、当时有哪些人、发生了什么、后来结果怎样。"
+    )
 
 
 def _task_priority(
@@ -361,6 +369,42 @@ async def generate_followup_tasks(
             )
         ).all()
     } if gaps else {}
+    missing_slot_leaders: dict[str, str] = {}
+    handled_missing_story_ids = set(
+        (
+            await db.scalars(
+                select(MemoirFollowupTask.story_id).where(
+                    MemoirFollowupTask.project_id == project_id,
+                    MemoirFollowupTask.story_id.is_not(None),
+                    MemoirFollowupTask.target_slot == MEMOIR_STORY_NARRATION_TARGET,
+                    MemoirFollowupTask.status.in_(
+                        [
+                            MemoirFollowupTaskStatus.ANSWERED.value,
+                            MemoirFollowupTaskStatus.CANNOT_RECALL.value,
+                            MemoirFollowupTaskStatus.EXCLUDED.value,
+                        ]
+                    ),
+                )
+            )
+        ).all()
+    )
+    handled_statuses = {
+        MemoirFollowupTaskStatus.ANSWERED.value,
+        MemoirFollowupTaskStatus.CANNOT_RECALL.value,
+        MemoirFollowupTaskStatus.EXCLUDED.value,
+    }
+    for gap in gaps:
+        story_id = _gap_story_id(gap)
+        if (
+            gap.gap_type != MemoirNarrativeGapType.MISSING_SLOT.value
+            or not story_id
+            or story_id not in required_story_ids
+        ):
+            continue
+        missing_slot_leaders.setdefault(story_id, gap.id)
+        existing = existing_tasks.get(gap.id)
+        if existing is not None and existing.status in handled_statuses:
+            handled_missing_story_ids.add(story_id)
 
     created: list[str] = []
     updated: list[str] = []
@@ -386,18 +430,28 @@ async def generate_followup_tasks(
                 if claim is not None and _safe_claim(claim):
                     claim_roles.setdefault(claim_id, MemoirFollowupTaskClaimRole.DO_NOT_REPEAT)
 
-        actionable = gap_type not in NON_INTERVIEW_GAP_TYPES and (
-            bool(story and slot_key)
-            or bool(claim_roles)
-            or (story is not None and gap_type != MemoirNarrativeGapType.MISSING_SLOT)
+        existing = existing_tasks.get(gap.id)
+        is_story_narration = bool(
+            story
+            and gap_type == MemoirNarrativeGapType.MISSING_SLOT
+            and story.id in required_story_ids
+            and story.id not in handled_missing_story_ids
+            and missing_slot_leaders.get(story.id) == gap.id
         )
+        actionable = (
+            is_story_narration
+            if gap_type == MemoirNarrativeGapType.MISSING_SLOT
+            else gap_type not in NON_INTERVIEW_GAP_TYPES
+            and (bool(claim_roles) or story is not None)
+        )
+        if existing is not None and existing.status == MemoirFollowupTaskStatus.IN_PROGRESS.value:
+            actionable = True
         if story is not None and (
             story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
             or story.verification_status == MemoirStoryVerificationStatus.REJECTED.value
             or story.publication_status != MemoirStoryPublicationStatus.ELIGIBLE.value
         ):
             actionable = False
-        existing = existing_tasks.get(gap.id)
         if not actionable:
             skipped.append(gap.id)
             if existing and existing.status in {
@@ -425,9 +479,17 @@ async def generate_followup_tasks(
         values = {
             "chapter_id": chapter.id if chapter else None,
             "story_id": story.id if story else None,
-            "target_slot": slot_key,
-            "question": _task_question(gap, story, slot_key),
-            "purpose": gap.description.strip() or gap.title.strip(),
+            "target_slot": MEMOIR_STORY_NARRATION_TARGET if is_story_narration else slot_key,
+            "question": (
+                _story_narration_question(story)
+                if is_story_narration and story is not None
+                else _task_question(gap, story, slot_key)
+            ),
+            "purpose": (
+                f"补充“{story.title}”的完整经过和后来影响"
+                if is_story_narration and story is not None
+                else gap.description.strip() or gap.title.strip()
+            ),
             "known_context_summary": _known_context_summary(story, related_claims),
             "priority": _task_priority(
                 gap,
@@ -514,7 +576,7 @@ async def _task_is_selectable(
         )
         if story is None:
             return False
-        if task.target_slot:
+        if task.target_slot and task.target_slot != MEMOIR_STORY_NARRATION_TARGET:
             slot_status = await db.scalar(
                 select(MemoirStorySlot.status).where(
                     MemoirStorySlot.project_id == task.project_id,
@@ -714,7 +776,7 @@ async def prompt_context_for_session(
         lines.append("可承接的已知事实：" + "；".join(dict.fromkeys(known)))
     if do_not_repeat:
         lines.append("已经充分问过、不要重复追问：" + "；".join(dict.fromkeys(do_not_repeat)))
-    lines.append("只能围绕这一项补访；一次只问一个问题，不得编造未给出的事实。")
+    lines.append("只能围绕这一项补访；请邀请叙述者完整讲一段，不得拆成连续的细节盘问，也不得编造未给出的事实。")
     return FollowupPromptContext(
         task_id=task.id,
         question=task.question,

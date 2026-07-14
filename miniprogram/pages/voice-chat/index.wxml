@@ -78,7 +78,7 @@
 
   <view wx:if="{{showCompletionTaskPanel}}" class="{{completionTaskPanelClass}}">
     <view class="completion-task-head">
-      <text class="completion-task-label">这次只补一件事</text>
+      <text class="completion-task-label">本次补充</text>
       <text class="completion-task-status">{{completionTaskStatusText}}</text>
     </view>
     <text class="completion-task-question">{{completionTaskQuestionText}}</text>
@@ -96,7 +96,7 @@
       disabled="{{completionTaskControlsDisabled}}"
       bindtap="continueToNextCompletionTask"
     >
-      继续下一项
+      返回全书概览
     </button>
   </view>
 

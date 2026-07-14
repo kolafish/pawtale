@@ -35,6 +35,7 @@ export type MemoirFollowupCannotRecallResolution = "accept_incomplete" | "ask_fa
 export type MemoirNarrativeActorType = "ai" | "user" | "system";
 export type MemoirBookCompletionState =
   | "ready"
+  | "in_progress"
   | "preparing"
   | "needs_preparation"
   | "needs_review"
@@ -57,6 +58,28 @@ export interface MemoirBookCompletion {
   detail: string;
   task_id?: string | null;
   chapter_id?: string | null;
+}
+
+export interface MemoirBookCompletionChapter {
+  chapter_id: string;
+  title: string;
+  sort_order: number;
+  state: MemoirBookCompletionState;
+  headline: string;
+  detail: string;
+  remaining_count: number;
+  focus_areas: string[];
+  task_id?: string | null;
+  active_session_id?: string | null;
+}
+
+export interface MemoirBookCompletionOverview {
+  project_id: string;
+  headline: string;
+  detail: string;
+  total_chapters: number;
+  completed_chapters: number;
+  chapters: MemoirBookCompletionChapter[];
 }
 
 export interface MemoirFollowupTaskClaim {

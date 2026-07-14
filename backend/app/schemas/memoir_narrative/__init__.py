@@ -1,4 +1,8 @@
-from .book_completion import MemoirBookCompletionResponse
+from .book_completion import (
+    MemoirBookCompletionChapterResponse,
+    MemoirBookCompletionOverviewResponse,
+    MemoirBookCompletionResponse,
+)
 from .book_consistency import (
     MemoirBookConsistencyAuditJobResponse,
     MemoirBookConsistencyAuditRequest,

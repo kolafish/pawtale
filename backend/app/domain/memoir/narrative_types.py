@@ -294,6 +294,9 @@ class MemoirFollowupTaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+MEMOIR_STORY_NARRATION_TARGET = "story_narration"
+
+
 class MemoirFollowupTaskClaimRole(str, Enum):
     KNOWN = "known"
     DO_NOT_REPEAT = "do_not_repeat"
