@@ -56,6 +56,7 @@ class DraftBlockClaimInput(BaseModel):
     verification_status: str
     narrative_role: str
     is_core: bool
+    slot_keys: list[str] = Field(default_factory=list)
     evidence: list[DraftBlockEvidenceInput] = Field(default_factory=list)
 
 
@@ -67,6 +68,7 @@ class DraftBlockStoryInput(BaseModel):
     title: str
     summary: str
     story_role: str
+    coverage_slot_keys: list[str] = Field(default_factory=list)
     claims: list[DraftBlockClaimInput] = Field(default_factory=list)
 
 
@@ -144,6 +146,8 @@ def _prompt(context: DraftBlockGenerationInput) -> str:
 - used_claim_ids 只能来自输入 Story.claims；正文中的每个事实性陈述都必须能映射到其中一个 ID。
 - 如果想写但没有 Claim 支撑，把该表述放入 unsupported_fact_candidates，并从 content 中完全删除；仅报告但未写入正文的候选不会导致本次生成失败。
 - certainty 不是 exact 时保留原有不确定语气，不能改成确定事实。
+- 正文默认采用讲述者第一人称；Claim statement 中的“叙述者”只是结构标签，必须改写成“我”，不得原样输出。
+- factual 块必须覆盖每个 Story.coverage_slot_keys：每个 key 至少使用一条带有该 slot_key 的 Claim，不能只挑开头、结果或少数片段。
 - opening、reflection、closing 只要输入包含 Story，就必须引用实际使用的 Claim；没有 Story 时不得写人物、职务、地点、时间、关系、事件或结果等具体事实。
 - opening 只选一个具体钩子，最多两句，不概括整个 Story，也不复述 next_block_context。
 - factual 按事件顺序写清经过，不替讲述者补感受或评价。
@@ -183,6 +187,26 @@ def validate_generation_output(
         raise ValueError("draft block with fact sources must cite at least one allowed claim")
     if context.block_role == MemoirDraftBlockRole.TRANSITION and output.used_claim_ids:
         raise ValueError("transition draft block cannot introduce claim-backed facts")
+    if (
+        context.block_role != MemoirDraftBlockRole.TRANSITION
+        and "叙述者" in output.content
+    ):
+        raise ValueError("draft block must replace the internal narrator label with first-person voice")
+    if context.block_role == MemoirDraftBlockRole.FACTUAL:
+        used_claim_ids = set(output.used_claim_ids)
+        for story in context.stories:
+            used_slot_keys = {
+                slot_key
+                for claim in story.claims
+                if claim.claim_id in used_claim_ids
+                for slot_key in claim.slot_keys
+            }
+            missing_slot_keys = set(story.coverage_slot_keys) - used_slot_keys
+            if missing_slot_keys:
+                raise ValueError(
+                    f"factual draft block missed supported Story slots for {story.story_id}: "
+                    + ", ".join(sorted(missing_slot_keys))
+                )
     adjacent_sentences = {
         sentence
         for adjacent in (
@@ -230,9 +254,10 @@ async def generate_draft_block_text(
             if attempt == 1:
                 raise
             prompt_snapshot = (
-                f"{prompt}\n\n上一次输出未通过服务端事实与重复校验：{exc}。"
+                f"{prompt}\n\n上一次输出未通过服务端事实与重复校验（含结构与文体）：{exc}。"
                 "如有重复句，请保持 Claim 事实不变但换一种不重复的表述，"
-                "或改写当前节点的其他已支持内容。请严格修正并重新输出完整 JSON。"
+                "如有缺失槽位，请补写对应 Claim；如出现‘叙述者’，请改成第一人称。"
+                "请严格修正并重新输出完整 JSON。"
             )
             continue
         return GeneratedDraftBlock(
