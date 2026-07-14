@@ -21,6 +21,7 @@ from app.services.memoir.editing_jobs import (
     clear_editing_job_handlers,
     enqueue_editing_job,
     register_editing_job_handler,
+    run_available_editing_jobs,
     run_editing_job,
 )
 from app.services.memoir.job_leases import JobLeaseLostError, run_with_lease_heartbeat
@@ -373,6 +374,90 @@ async def test_editing_job_claim_is_atomic_across_workers(tmp_path):
             assert stored_job.status == MemoirEditingJobStatus.RUNNING.value
             assert stored_job.lease_token == leases[0].token
             assert stored_job.attempts == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_sqlite_editing_worker_serializes_claimed_job_writes(tmp_path):
+    register_models()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-serial.db'}", echo=False)
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    active_handlers = 0
+    peak_handlers = 0
+
+    async def handler(db, current_job):
+        nonlocal active_handlers, peak_handlers
+        active_handlers += 1
+        peak_handlers = max(peak_handlers, active_handlers)
+        await asyncio.sleep(0.01)
+        active_handlers -= 1
+        return EditingJobResult(result_json={"job_id": current_job.id})
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_maker() as db:
+            project = Project(title="串行任务", type=ProjectType.MEMOIR.value)
+            db.add(project)
+            await db.flush()
+            for index in range(2):
+                await enqueue_editing_job(
+                    db,
+                    project_id=project.id,
+                    job_type=MemoirEditingJobType.ROUTE_SOURCES,
+                    run_after=_utcnow() - timedelta(seconds=1),
+                    dedupe_key=f"route:serial:{index}",
+                )
+            await db.commit()
+
+        register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, handler)
+        assert await run_available_editing_jobs(session_maker) == 2
+        assert peak_handlers == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(tmp_path):
+    register_models()
+    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-drain.db'}", echo=False)
+    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def first_handler(db, current_job):
+        await enqueue_editing_job(
+            db,
+            project_id=current_job.project_id,
+            job_type=MemoirEditingJobType.QUALITY_AUDIT,
+            run_after=_utcnow() - timedelta(seconds=1),
+            dedupe_key=f"quality:after:{current_job.id}",
+        )
+        return EditingJobResult()
+
+    async def second_handler(db, current_job):
+        return EditingJobResult(result_json={"drained": current_job.id})
+
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_maker() as db:
+            project = Project(title="连续任务", type=ProjectType.MEMOIR.value)
+            db.add(project)
+            await db.flush()
+            await enqueue_editing_job(
+                db,
+                project_id=project.id,
+                job_type=MemoirEditingJobType.ROUTE_SOURCES,
+                run_after=_utcnow() - timedelta(seconds=1),
+                dedupe_key="route:drain",
+            )
+            await db.commit()
+
+        register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, first_handler)
+        register_editing_job_handler(MemoirEditingJobType.QUALITY_AUDIT, second_handler)
+        assert await run_available_editing_jobs(session_maker) == 2
+        async with session_maker() as db:
+            statuses = (await db.scalars(select(MemoirEditingJob.status))).all()
+            assert len(statuses) == 2
+            assert set(statuses) == {MemoirEditingJobStatus.SUCCEEDED.value}
     finally:
         await engine.dispose()
 

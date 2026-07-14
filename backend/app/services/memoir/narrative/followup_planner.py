@@ -544,20 +544,26 @@ async def select_next_task(
     *,
     project_id: str,
     preferred_chapter_id: str | None = None,
+    eligible_chapter_ids: set[str] | None = None,
     avoid_story_id: str | None = None,
     release_deferred: bool = True,
 ) -> MemoirFollowupTask | None:
+    if eligible_chapter_ids is not None and not eligible_chapter_ids:
+        return None
     if release_deferred:
         await _release_due_deferred_tasks(db, project_id=project_id)
+    filters = [
+        MemoirFollowupTask.project_id == project_id,
+        MemoirFollowupTask.status == MemoirFollowupTaskStatus.PENDING.value,
+    ]
+    if eligible_chapter_ids is not None:
+        filters.append(MemoirFollowupTask.chapter_id.in_(eligible_chapter_ids))
     candidates = list(
         (
             await db.scalars(
                 select(MemoirFollowupTask)
                 .options(*followup_tasks.task_load_options())
-                .where(
-                    MemoirFollowupTask.project_id == project_id,
-                    MemoirFollowupTask.status == MemoirFollowupTaskStatus.PENDING.value,
-                )
+                .where(*filters)
                 .order_by(
                     MemoirFollowupTask.priority.desc(),
                     MemoirFollowupTask.created_at,

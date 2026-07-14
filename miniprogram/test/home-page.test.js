@@ -755,6 +755,66 @@ test("home waits for the background completion state instead of using an elapsed
   assert.equal(createdSessions[0].current_followup_task_id, "task-after-worker");
 });
 
+test("home completion preparation keeps other interview actions available and cancels stale polling", async () => {
+  let resolvePreparation;
+  const preparation = new Promise((resolve) => {
+    resolvePreparation = resolve;
+  });
+  const createdSessions = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      prepareMemoirBookCompletion: async () => preparation,
+      createMemoirVoiceSession: async (input) => {
+        createdSessions.push(input);
+        return { session: { id: "voice/human" } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project/1",
+      hasProject: true,
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const completion = page.startBookCompletion.call(context);
+  await Promise.resolve();
+
+  assert.equal(context.data.preparingBookCompletion, true);
+  assert.equal(context.data.creatingVoice, false);
+  assert.equal(context.data.primaryVoiceButtonTitle, "随便讲一段");
+  assert.doesNotMatch(context.data.resumeAskButtonClass, /button-blocked/);
+
+  await page.startHumanInterview.call(context);
+  resolvePreparation({
+    project_id: "project/1",
+    state: "preparing",
+    action: "wait",
+    headline: "正在整理",
+    detail: "稍后继续",
+    chapter_id: "chapter-1",
+  });
+  await completion;
+
+  assert.equal(context.data.preparingBookCompletion, false);
+  assert.equal(createdSessions.length, 1);
+  assert.equal(createdSessions[0].interview_type, "human_interview");
+  assert.equal(navigations.length, 1);
+  delete global.wx;
+});
+
 test("home does not create voice sessions when consent audit sync fails", async () => {
   let createCalls = 0;
   const { page } = loadHomePage({
