@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChapterSourceAssignedBy,
     MemoirChapterSourceLinkStatus,
@@ -651,7 +652,7 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
         "小时候在外婆家的院子里摘菜，夏天还会剥青豆。",
     )
     project_id = first["session"]["project_id"]
-    await create_test_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
         source_ref=memoir_source_ref(first, "外婆家的院子"),
@@ -666,6 +667,7 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
         monkeypatch,
         _new_chapter_route("供销社工作初记"),
         _new_chapter_route("供销社盘点往事"),
+        _assign_route(chapter.id),
     )
 
     first_response = await run_source_auto_assignment_for_utterances(
@@ -680,8 +682,15 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
         project_id=project_id,
         utterance_ids=[uncovered["utterance_id"]],
     )
+    third_response = await run_source_auto_assignment_for_utterances(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_ids=[uncovered["utterance_id"]],
+    )
 
     assert first_response.events[0].id == second_response.events[0].id
+    assert third_response.assigned_source_count == 1
     assert len(first_response.narrative_ingestion_job_ids) == 1
     assert second_response.narrative_ingestion_job_ids == first_response.narrative_ingestion_job_ids
     events = (
@@ -693,8 +702,11 @@ async def test_source_auto_assignment_updates_existing_pending_review_event(clie
         )
     ).scalars().all()
     assert len(events) == 1
-    assert events[0].summary_text == "1 条讲述可能是新话题，建议确认是否新建「供销社盘点往事」。"
+    assert events[0].summary_text == "讲述已整理进「院子里的童年」，自动处理记录已隐藏。"
     assert events[0].metadata_json["route"]["suggested_title"] == "供销社盘点往事"
+    assert events[0].status == MemoirAutomationEventStatus.COMPLETED.value
+    assert events[0].chapter_id == chapter.id
+    assert events[0].metadata_json["resolution"] == "confirmed"
 
 
 async def test_source_routing_job_ignores_non_memoir_source_without_review_event(client, test_db, monkeypatch):
