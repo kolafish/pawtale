@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from hashlib import sha256
-import json
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,23 +25,11 @@ from app.schemas.memoir_narrative.extraction import (
     MemoirNarrativeExtractedStoryClaim,
 )
 from app.services.memoir.narrative import stories, story_decisions, story_matching
-
-
-@dataclass(frozen=True)
-class StoryBackfillCandidate:
-    fingerprint: str
-    project_id: str
-    origin: str
-    title: str
-    summary: str
-    story_type: MemoirStoryType
-    claim_ids: tuple[str, ...]
-    existing_story_ids: tuple[str, ...]
-
-
-def _fingerprint(payload: dict[str, object]) -> str:
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return sha256(encoded.encode("utf-8")).hexdigest()
+from app.services.memoir.narrative.story_backfill_candidates import (
+    StoryBackfillCandidate,
+    collect_claim_anchor_cluster_candidates,
+    story_backfill_fingerprint as _fingerprint,
+)
 
 
 def _cluster_items(snapshot: MemoirChapterEventClusterSnapshot) -> list[dict[str, object]]:
@@ -271,6 +255,18 @@ async def collect_story_backfill_candidates(
                 ),
             )
         )
+    covered_claims = {
+        (candidate.project_id, claim_id)
+        for candidate in candidates
+        for claim_id in candidate.claim_ids
+    }
+    candidates.extend(
+        await collect_claim_anchor_cluster_candidates(
+            db,
+            project_id=project_id,
+            covered_claims=covered_claims,
+        )
+    )
     return candidates
 
 
@@ -304,6 +300,77 @@ def _event_claim_mapping(claim: MemoirClaim, *, index: int) -> MemoirStoryClaimI
     )
 
 
+def _relationship_claim_mapping(
+    claim: MemoirClaim,
+    *,
+    index: int,
+) -> MemoirStoryClaimInput:
+    if claim.claim_type == MemoirClaimType.REFLECTION.value:
+        role = MemoirStoryNarrativeRole.REFLECTION
+        slot_keys = ["reflection"]
+        is_core = False
+    elif claim.claim_type == MemoirClaimType.ATTRIBUTE.value:
+        role = MemoirStoryNarrativeRole.BACKGROUND
+        slot_keys = ["person_portrait"]
+        is_core = False
+    elif claim.claim_type in {
+        MemoirClaimType.RELATIONSHIP.value,
+        MemoirClaimType.CHRONOLOGY.value,
+    }:
+        role = MemoirStoryNarrativeRole.BACKGROUND
+        slot_keys = ["relationship_change"]
+        is_core = True
+    else:
+        role = MemoirStoryNarrativeRole.ACTION
+        slot_keys = ["representative_scene"]
+        is_core = True
+    return MemoirStoryClaimInput(
+        claim_id=claim.id,
+        narrative_role=role,
+        sort_order=index,
+        is_core=is_core,
+        slot_keys=slot_keys,
+    )
+
+
+def _theme_claim_mapping(claim: MemoirClaim, *, index: int) -> MemoirStoryClaimInput:
+    if claim.claim_type == MemoirClaimType.REFLECTION.value:
+        role = MemoirStoryNarrativeRole.REFLECTION
+        slot_keys = ["reflection"]
+    else:
+        role = MemoirStoryNarrativeRole.CONTEXT
+        slot_keys = (
+            ["theme_definition", "supporting_cases"]
+            if index == 0
+            else ["supporting_cases"]
+        )
+    return MemoirStoryClaimInput(
+        claim_id=claim.id,
+        narrative_role=role,
+        sort_order=index,
+        is_core=True,
+        slot_keys=slot_keys,
+    )
+
+
+def _story_claim_mappings(
+    candidate: StoryBackfillCandidate,
+    *,
+    claims_by_id: dict[str, MemoirClaim],
+) -> list[MemoirStoryClaimInput]:
+    mappings: list[MemoirStoryClaimInput] = []
+    for index, claim_id in enumerate(candidate.claim_ids):
+        claim = claims_by_id[claim_id]
+        if candidate.story_type == MemoirStoryType.RELATIONSHIP:
+            mapping = _relationship_claim_mapping(claim, index=index)
+        elif candidate.story_type == MemoirStoryType.THEME:
+            mapping = _theme_claim_mapping(claim, index=index)
+        else:
+            mapping = _event_claim_mapping(claim, index=index)
+        mappings.append(mapping)
+    return mappings
+
+
 async def run_story_backfill(
     db: AsyncSession,
     *,
@@ -326,6 +393,13 @@ async def run_story_backfill(
         }
         for candidate in candidates:
             claim_ids = {claim_id for claim_id in candidate.claim_ids if claim_id in claims_by_id}
+            claim_anchor_candidate = candidate.origin.startswith(
+                "claim_anchor_cluster:"
+            )
+            claim_inputs = _story_claim_mappings(
+                candidate,
+                claims_by_id=claims_by_id,
+            )
             explicit_story_id = (
                 candidate.existing_story_ids[0]
                 if len(candidate.existing_story_ids) == 1
@@ -341,15 +415,12 @@ async def run_story_backfill(
                 claims=[
                     MemoirNarrativeExtractedStoryClaim(
                         claim_key=f"claim_{index}",
-                        narrative_role=MemoirStoryNarrativeRole.CONTEXT,
-                        slot_keys=(
-                            ["supporting_cases"]
-                            if candidate.story_type == MemoirStoryType.THEME
-                            else ["actions"]
-                        ),
-                        is_core=True,
+                        narrative_role=claim_input.narrative_role,
+                        slot_keys=claim_input.slot_keys,
+                        evidence_role=claim_input.evidence_role,
+                        is_core=claim_input.is_core,
                     )
-                    for index, _claim_id in enumerate(candidate.claim_ids)
+                    for index, claim_input in enumerate(claim_inputs[:30])
                 ],
             )
             story, review_ids, created = await story_matching.resolve_extracted_story(
@@ -357,38 +428,18 @@ async def run_story_backfill(
                 project_id=candidate.project_id,
                 transcript_version_id=f"backfill:{candidate.fingerprint}",
                 candidate=extracted,
-                primary_place_entity_id=None,
+                primary_place_entity_id=candidate.primary_place_entity_id,
                 claim_ids=claim_ids,
                 force_needs_verification=True,
                 created_by=MemoirNarrativeActorType.SYSTEM,
                 creation_change_type=MemoirStoryRevisionChangeType.BACKFILL_CANDIDATE,
                 creation_reason=f"candidate seeded from {candidate.origin}",
+                allow_existing_story_reuse=not claim_anchor_candidate,
             )
             if created:
                 created_story_ids.append(story.id)
             else:
                 reused_story_ids.append(story.id)
-            claim_inputs = (
-                [
-                    MemoirStoryClaimInput(
-                        claim_id=claim_id,
-                        narrative_role=MemoirStoryNarrativeRole.CONTEXT,
-                        sort_order=index,
-                        is_core=True,
-                        slot_keys=(
-                            ["theme_definition", "supporting_cases"]
-                            if index == 0
-                            else ["supporting_cases"]
-                        ),
-                    )
-                    for index, claim_id in enumerate(candidate.claim_ids)
-                ]
-                if candidate.story_type == MemoirStoryType.THEME
-                else [
-                    _event_claim_mapping(claims_by_id[claim_id], index=index)
-                    for index, claim_id in enumerate(candidate.claim_ids)
-                ]
-            )
             await stories.attach_claims_to_story(
                 db,
                 story=story,
@@ -405,12 +456,16 @@ async def run_story_backfill(
             review_candidates = tuple(
                 dict.fromkeys([*ambiguous_existing_ids, *review_ids])
             )
-            if created or review_candidates:
+            if created or review_candidates or claim_anchor_candidate:
                 await story_decisions.mark_story_needs_review(
                     db,
                     story=story,
                     candidate_story_ids=review_candidates,
-                    reason="legacy semantic snapshot is only a Story candidate",
+                    reason=(
+                        "evidence-backed historical Claims require Story review"
+                        if claim_anchor_candidate
+                        else "legacy semantic snapshot is only a Story candidate"
+                    ),
                     idempotency_key=f"story-backfill-review:{candidate.fingerprint}",
                 )
         await db.commit()
@@ -423,6 +478,10 @@ async def run_story_backfill(
         ),
         "source_card_candidate_count": sum(
             candidate.origin.startswith("source_card_group:") for candidate in candidates
+        ),
+        "claim_anchor_candidate_count": sum(
+            candidate.origin.startswith("claim_anchor_cluster:")
+            for candidate in candidates
         ),
         "created_story_count": len(created_story_ids),
         "reused_story_count": len(reused_story_ids),
