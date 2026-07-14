@@ -162,6 +162,7 @@ async def resolve_extracted_story(
     creation_change_type: MemoirStoryRevisionChangeType = MemoirStoryRevisionChangeType.CREATED,
     creation_reason: str = "story candidate extracted from transcript evidence",
     allow_existing_story_reuse: bool = True,
+    preferred_story_id: str | None = None,
 ) -> tuple[MemoirStory, tuple[str, ...], bool]:
     repository = MemoirStoryRepository(db)
     review_candidate_ids: list[str] = []
@@ -188,6 +189,24 @@ async def resolve_extracted_story(
             ):
                 return suggested, (), False
             review_candidate_ids.append(suggested.id)
+
+    if preferred_story_id:
+        preferred = await repository.get(
+            project_id=project_id,
+            story_id=preferred_story_id,
+        )
+        if (
+            preferred
+            and preferred.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value
+            and preferred.verification_status != MemoirStoryVerificationStatus.REJECTED.value
+            and preferred.story_type == candidate.story_type.value
+            and _anchors_compatible(
+                preferred,
+                candidate,
+                primary_place_entity_id=primary_place_entity_id,
+            )
+        ):
+            return preferred, (), False
 
     normalized_title = normalize_story_title(candidate.title)
     exact_matches = list(

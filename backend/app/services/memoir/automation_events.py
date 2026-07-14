@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
+    MemoirEditingJobStatus,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
+    MemoirEditingJob,
 )
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
@@ -25,6 +27,7 @@ from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
     AUDIT_SNAPSHOT_KEY,
+    EDITING_JOB_FAILURE_SOURCE,
     EVENT_SIGNATURE_KEY,
     VOICE_PLAYED_AT_KEY,
     VOICE_PLAYED_MESSAGE_ID_KEY,
@@ -120,6 +123,39 @@ def _action_required_event_priority(event: MemoirAutomationEvent) -> int:
 
 def _prioritized_events(events: list[MemoirAutomationEvent]) -> list[MemoirAutomationEvent]:
     return sorted(events, key=_action_required_event_priority)
+
+
+async def _without_recovered_job_failures(
+    db: AsyncSession,
+    events: list[MemoirAutomationEvent],
+) -> list[MemoirAutomationEvent]:
+    job_ids = {
+        str(metadata.get("editing_job_id") or "").strip()
+        for event in events
+        for metadata in [event.metadata_json or {}]
+        if metadata.get("source") == EDITING_JOB_FAILURE_SOURCE
+    }
+    job_ids.discard("")
+    if not job_ids:
+        return events
+    succeeded_job_ids = set(
+        (
+            await db.scalars(
+                select(MemoirEditingJob.id).where(
+                    MemoirEditingJob.id.in_(job_ids),
+                    MemoirEditingJob.status == MemoirEditingJobStatus.SUCCEEDED.value,
+                )
+            )
+        ).all()
+    )
+    if not succeeded_job_ids:
+        return events
+    return [
+        event
+        for event in events
+        if str((event.metadata_json or {}).get("editing_job_id") or "").strip()
+        not in succeeded_job_ids
+    ]
 
 
 def event_response(
@@ -243,6 +279,8 @@ async def list_automation_events(
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
     events = list(result.scalars().all())
+    if not include_acknowledged:
+        events = await _without_recovered_job_failures(db, events)
     events = _visible_events(
         events,
         include_acknowledged=include_acknowledged,

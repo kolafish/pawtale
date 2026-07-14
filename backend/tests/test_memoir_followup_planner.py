@@ -57,6 +57,7 @@ from app.models.memoir_narrative import (
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
+from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.narrative import (
     followup_completion,
     followup_planner,
@@ -64,6 +65,7 @@ from app.services.memoir.narrative import (
     gaps,
     story_slots,
 )
+from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -321,15 +323,15 @@ async def _add_narrative_evidence(
                 created_by=MemoirNarrativeActorType.AI.value,
             )
         )
-        fixture["slot"].status = MemoirStorySlotStatus.SUFFICIENT.value
-        fixture["slot"].assessment_summary = "新口述明确说明了比赛结果。"
-        test_db.add(fixture["slot"])
     test_db.add_all(relations)
     await test_db.flush()
     return utterance, version
 
 
-async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_db):
+async def test_followup_task_finishes_after_new_slot_evidence_without_confirmation(
+    client,
+    test_db,
+):
     fixture = await _create_story_gap(client, test_db)
     repeated = await followup_planner.generate_followup_tasks(
         test_db,
@@ -410,6 +412,8 @@ async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_
     assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
         (utterance.id, "target_answer")
     ]
+    await test_db.refresh(fixture["slot"])
+    assert fixture["slot"].status == MemoirStorySlotStatus.PARTIAL.value
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
     assert gap is not None
     assert gap.status == MemoirNarrativeGapStatus.RESOLVED.value
@@ -424,6 +428,117 @@ async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_
     )
     assert continued.status_code == 200, continued.text
     assert continued.json() is None
+
+
+async def test_voice_persistence_snapshots_current_followup_task(client, test_db):
+    fixture = await _create_story_gap(client, test_db)
+    started = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    persisted = await VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=started.json()["session"]["id"],
+        user_id=fixture["user_id"],
+    ).persist_final(
+        StreamingASREvent(
+            type="final",
+            text="我们最后拿了全校第一名。",
+            start_ms=0,
+            end_ms=1800,
+            raw={"source": "test.followup"},
+        )
+    )
+
+    relation = await test_db.scalar(
+        select(MemoirFollowupTaskUtterance).where(
+            MemoirFollowupTaskUtterance.task_id == fixture["task"].id,
+            MemoirFollowupTaskUtterance.utterance_id == persisted.utterance_id,
+        )
+    )
+    assert relation is not None
+    assert relation.result_role == "related_context"
+    assert relation.is_assignment_snapshot is True
+
+
+async def test_saved_answer_completes_task_after_session_stops_before_ingestion(client, test_db):
+    fixture = await _create_story_gap(client, test_db)
+    started = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    session = await test_db.get(MemoirVoiceSession, started.json()["session"]["id"])
+    assert session is not None
+    utterance, version = await _add_narrative_evidence(
+        test_db,
+        fixture,
+        voice_session_id=session.id,
+    )
+    linked_task_id = await followup_completion.link_utterance_to_session_task(
+        test_db,
+        voice_session=session,
+        utterance=utterance,
+    )
+    await test_db.commit()
+    assert linked_task_id == fixture["task"].id
+
+    stopped = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session.id}/stop",
+        json={},
+    )
+    assert stopped.status_code == 200, stopped.text
+    task = await followup_tasks.get_task(
+        test_db,
+        project_id=fixture["project_id"],
+        task_id=fixture["task"].id,
+    )
+    assert task is not None
+    assert task.status == MemoirFollowupTaskStatus.DEFERRED.value
+    session = await test_db.get(MemoirVoiceSession, session.id)
+    assert session is not None
+    session.current_followup_task_id = None
+    test_db.add(session)
+    await test_db.commit()
+
+    completion = await followup_completion.evaluate_after_narrative_ingestion(
+        test_db,
+        project_id=fixture["project_id"],
+        utterance=utterance,
+        transcript_version=version,
+    )
+    await test_db.commit()
+
+    assert completion.status == MemoirFollowupTaskStatus.ANSWERED
+    assert completion.answered_task_ids == (fixture["task"].id,)
+    task = await followup_tasks.get_task(
+        test_db,
+        project_id=fixture["project_id"],
+        task_id=fixture["task"].id,
+    )
+    assert task is not None
+    assert task.status == MemoirFollowupTaskStatus.ANSWERED.value
+    assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
+        (utterance.id, "target_answer")
+    ]
+    retry_context = await followup_completion.ingestion_context_for_utterance(
+        test_db,
+        project_id=fixture["project_id"],
+        utterance=utterance,
+    )
+    assert retry_context is not None
+    assert retry_context.task_id == fixture["task"].id
 
 
 async def test_related_but_off_target_evidence_does_not_complete_task(client, test_db):

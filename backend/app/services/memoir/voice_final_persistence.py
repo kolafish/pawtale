@@ -20,6 +20,7 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.narrative import followup_completion
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_ROUTE_ACTION,
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
@@ -155,6 +156,12 @@ class VoiceFinalPersistenceService:
             await self.db.flush()
             transcript_version.source_artifact_id = utterance.id
             await self.db.flush()
+            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
+                await followup_completion.link_utterance_to_session_task(
+                    self.db,
+                    voice_session=voice_session,
+                    utterance=utterance,
+                )
             await prune_transcript_versions_for_utterance(
                 self.db,
                 utterance_id=utterance.id,

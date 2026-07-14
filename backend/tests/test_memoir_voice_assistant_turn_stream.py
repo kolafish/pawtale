@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +11,15 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
-from app.models.memoir import AudioFile, MemoirBookPlanChapter, MemoirChatMessage
+from app.models.memoir import (
+    AudioFile,
+    MemoirBookPlanChapter,
+    MemoirChatMessage,
+    MemoirEditingJob,
+)
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
@@ -682,6 +690,100 @@ async def test_automation_event_response_does_not_expand_other_project_audit_sna
 
     assert len(response.items) == 1
     assert "audit_snapshot" not in response.items[0].metadata_json
+
+
+async def test_automation_events_hide_historical_failure_after_job_recovered(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="这条素材后来已经整理成功。",
+    )
+    project_id = created["session"]["project_id"]
+    job = MemoirEditingJob(
+        project_id=project_id,
+        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE.value,
+        status=MemoirEditingJobStatus.SUCCEEDED.value,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+        payload_json={"utterance_ids": [created["utterance_id"]]},
+        result_json={"recovered": True},
+    )
+    test_db.add(job)
+    await test_db.flush()
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
+        status=MemoirAutomationEventStatus.FAILED,
+        summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
+        metadata_json={
+            "source": "editing_job_failure",
+            "editing_job_id": job.id,
+            "event_signature": f"editing_job_failed:{job.id}",
+        },
+    )
+    await test_db.commit()
+
+    response = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+    )
+    audit_history = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        include_acknowledged=True,
+    )
+
+    assert response.items == []
+    assert len(audit_history.items) == 1
+
+
+async def test_internal_editing_failure_is_not_announced_during_interview(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="原始转写仍然已经保存。",
+    )
+    project_id = created["session"]["project_id"]
+    job = MemoirEditingJob(
+        project_id=project_id,
+        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE.value,
+        status=MemoirEditingJobStatus.FAILED.value,
+        run_after=datetime.now(UTC).replace(tzinfo=None),
+        payload_json={"utterance_ids": [created["utterance_id"]]},
+        error_message="AI narrative extraction did not match schema",
+    )
+    test_db.add(job)
+    await test_db.flush()
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
+        status=MemoirAutomationEventStatus.FAILED,
+        summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
+        metadata_json={
+            "source": "editing_job_failure",
+            "editing_job_id": job.id,
+            "event_signature": f"editing_job_failed:{job.id}",
+        },
+    )
+    await test_db.commit()
+
+    visible = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+    )
+    voice_updates = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        voice_unannounced_only=True,
+    )
+
+    assert len(visible.items) == 1
+    assert voice_updates.items == []
 
 
 async def test_voice_assistant_turn_guided_opening_references_previous_session(

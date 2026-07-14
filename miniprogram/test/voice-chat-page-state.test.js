@@ -199,6 +199,7 @@ test("book completion renders one task question without disabling unrelated reco
   assert.equal(patch.showCompletionTaskPanel, true);
   assert.equal(patch.showAssistantPanel, false);
   assert.equal(patch.completionTaskQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
+  assert.equal("completionTaskPurposeText" in patch, false);
   assert.equal(patch.showCompletionTaskActions, true);
   assert.equal(patch.completionTaskControlsDisabled, true);
   assert.equal(patch.micButtonDisabled, false);

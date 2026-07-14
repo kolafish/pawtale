@@ -545,6 +545,48 @@ async def test_ai_story_candidate_cannot_merge_without_hard_anchor(client, test_
     assert resolved.verification_status == MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value
 
 
+async def test_active_followup_target_can_reuse_story_without_duplicate_title(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, text="补访回答。")
+    project_id = created["session"]["project_id"]
+    existing = await stories.create_story(
+        test_db,
+        data=MemoirStoryCreate(
+            project_id=project_id,
+            title="爷爷退休后的创业经历",
+            story_type=MemoirStoryType.EVENT,
+            created_by=MemoirNarrativeActorType.AI,
+        ),
+    )
+    candidate = MemoirNarrativeExtractedStory(
+        key="courtyard_colleagues",
+        title="爷爷和院里同事一起做事",
+        story_type=MemoirStoryType.EVENT,
+        summary="爷爷退休后和院里同事一起创业。",
+        claims=[
+            MemoirNarrativeExtractedStoryClaim(
+                claim_key="people_claim",
+                narrative_role=MemoirStoryNarrativeRole.CONTEXT,
+                slot_keys=["people"],
+                is_core=True,
+            )
+        ],
+    )
+
+    resolved, review_candidates, was_created = await story_matching.resolve_extracted_story(
+        test_db,
+        project_id=project_id,
+        transcript_version_id="followup-transcript",
+        candidate=candidate,
+        primary_place_entity_id=None,
+        claim_ids={"people-claim-id"},
+        preferred_story_id=existing.id,
+    )
+
+    assert resolved.id == existing.id
+    assert was_created is False
+    assert review_candidates == ()
+
+
 async def test_same_title_without_structural_anchor_requires_review(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="同名的两段往事。")
     project_id = created["session"]["project_id"]

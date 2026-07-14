@@ -124,7 +124,6 @@ export interface VoiceChatData {
   completionTaskPanelClass: string;
   completionTaskStatusText: string;
   completionTaskQuestionText: string;
-  completionTaskPurposeText: string;
   showCompletionTaskActions: boolean;
   showCompletionTaskContinue: boolean;
   completionTaskControlsDisabled: boolean;
@@ -269,7 +268,6 @@ export function initialVoiceChatData(): VoiceChatData {
     completionTaskPanelClass: "completion-task-panel",
     completionTaskStatusText: "",
     completionTaskQuestionText: "",
-    completionTaskPurposeText: "",
     showCompletionTaskActions: false,
     showCompletionTaskContinue: false,
     completionTaskControlsDisabled: false,
@@ -333,7 +331,6 @@ export type VoiceChatViewPatch = Pick<
   | "completionTaskPanelClass"
   | "completionTaskStatusText"
   | "completionTaskQuestionText"
-  | "completionTaskPurposeText"
   | "showCompletionTaskActions"
   | "showCompletionTaskContinue"
   | "completionTaskControlsDisabled"
@@ -559,8 +556,6 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     completionTaskPanelClass,
     completionTaskStatusText: completionTaskStatusText(state),
     completionTaskQuestionText: state.completionTask?.question || "本次问题没有准备好",
-    completionTaskPurposeText: state.completionTask?.purpose
-      || (completionUnavailable ? "请保存离开后，从首页重新进入补全成书。" : ""),
     showCompletionTaskActions,
     showCompletionTaskContinue,
     completionTaskControlsDisabled,
