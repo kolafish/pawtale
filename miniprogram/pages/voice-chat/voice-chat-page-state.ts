@@ -402,7 +402,7 @@ function completionTaskStatusText(state: VoiceChatData): string {
   }
   const status = state.completionTask?.status;
   if (!status) {
-    return "目前没有待补的问题";
+    return "没有拿到本次要补的问题";
   }
   return ({
     pending: "这项等待补充",
@@ -420,6 +420,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
   const isHumanInterview = state.interviewType === "human_interview";
   const isBookCompletion = state.sessionGoal === "book_completion";
+  const completionUnavailable = isBookCompletion
+    && !state.completionTaskLoading
+    && !state.completionTask;
   const showCompletionTaskPanel = isBookCompletion;
   const showAssistantPanel = !isHumanInterview
     && !isBookCompletion
@@ -436,6 +439,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
+  } else if (completionUnavailable) {
+    stageStatusText = "请重新进入补全成书";
   } else if (state.recording) {
     stageStatusText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "我在听，您慢慢说";
   } else if (state.persistenceStateText === "已保存") {
@@ -465,7 +470,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     liveDisplayText = state.latestTranscriptText
       || (state.completionTask
         ? "回答上面这一个问题就好"
-        : (state.completionTaskLoading ? "正在准备要补的问题" : "目前没有待补问题，可以保存离开"));
+        : (state.completionTaskLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"));
   }
   let controlHintText = isHumanInterview
     ? ""
@@ -484,6 +489,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     micButtonText = "正在打开麦克风";
   } else if (state.connecting) {
     micButtonText = "正在准备";
+  } else if (completionUnavailable && !state.recording) {
+    micButtonText = "请先保存离开";
   } else if (state.recording) {
     micButtonText = isHumanInterview ? "说完了，保存这段" : "说完了，帮我整理";
   } else if (!isHumanInterview && assistantBusy) {
@@ -513,7 +520,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
   }
-  const micButtonDisabled = state.recordingStarting || !state.voiceAuthorizationAgreed;
+  const micButtonDisabled = state.recordingStarting
+    || !state.voiceAuthorizationAgreed
+    || (completionUnavailable && !state.recording);
   const roleRecordButtonSuffix = micButtonDisabled ? " disabled" : "";
   const micButtonClass = [
     "mic-button",
@@ -549,8 +558,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showCompletionTaskPanel,
     completionTaskPanelClass,
     completionTaskStatusText: completionTaskStatusText(state),
-    completionTaskQuestionText: state.completionTask?.question || "这本书目前没有需要补充的问题",
-    completionTaskPurposeText: state.completionTask?.purpose || "",
+    completionTaskQuestionText: state.completionTask?.question || "本次问题没有准备好",
+    completionTaskPurposeText: state.completionTask?.purpose
+      || (completionUnavailable ? "请保存离开后，从首页重新进入补全成书。" : ""),
     showCompletionTaskActions,
     showCompletionTaskContinue,
     completionTaskControlsDisabled,

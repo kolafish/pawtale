@@ -26,7 +26,7 @@ from app.schemas.memoir_narrative import (
     MemoirClaimResponse,
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
-from app.services.memoir.narrative import chapter_contracts, gaps
+from app.services.memoir.narrative import chapter_contracts, gap_audit, gaps
 from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
 
 
@@ -201,6 +201,16 @@ async def get_chapter_workspace(
         )
         .order_by(MemoirEditingJob.updated_at.desc(), MemoirEditingJob.created_at.desc())
     )
+    if latest_job:
+        payload = latest_job.payload_json if isinstance(latest_job.payload_json, dict) else {}
+        ai_model_value = payload.get("ai_model")
+        current_signature = gap_audit.chapter_gap_audit_signature(
+            context,
+            include_semantic_audit=bool(payload.get("include_semantic_audit")),
+            ai_model=(str(ai_model_value) if ai_model_value else None),
+        )
+        if payload.get("input_signature") != current_signature:
+            latest_job = None
     return MemoirChapterWorkspaceResponse(
         project_id=project_id,
         chapter_id=chapter_id,

@@ -1,4 +1,5 @@
 import type {
+  MemoirBookCompletion,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
@@ -14,7 +15,9 @@ import {
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
+  getMemoirBookCompletion,
   listMemoirVoiceTranscripts,
+  prepareMemoirBookCompletion,
 } from "../../services/memoir-voice-api";
 import {
   dismissHomeLaunch,
@@ -42,12 +45,14 @@ import {
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
+const BOOK_COMPLETION_POLL_INTERVAL_MS = 1200;
 
 type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
 
 interface HomeData {
   loading: boolean;
   creatingVoice: boolean;
+  preparingBookCompletion: boolean;
   needsLogin: boolean;
   error: string;
   userId: string;
@@ -84,6 +89,7 @@ interface HomeData {
   voiceStartNoteText: string;
   resumeAskButtonClass: string;
   resumeAskButtonHoverClass: string;
+  completionButtonTitle: string;
   showResumeActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
@@ -111,6 +117,7 @@ type HomeViewPatch = Pick<
   | "voiceStartNoteText"
   | "resumeAskButtonClass"
   | "resumeAskButtonHoverClass"
+  | "completionButtonTitle"
   | "showResumeActions"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
@@ -265,6 +272,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
         ),
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
+    completionButtonTitle: state.preparingBookCompletion ? "正在整理下一题" : "帮我补全这本书",
     showResumeActions: state.hasProject && !state.needsLogin,
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
   };
@@ -292,9 +300,12 @@ async function loadLastStoryHint(projectId: string): Promise<string> {
 }
 
 definePage<HomeData>()({
+  bookCompletionPollToken: 0,
+
   data: {
     loading: false,
     creatingVoice: false,
+    preparingBookCompletion: false,
     needsLogin: false,
     error: "",
     userId: "",
@@ -331,6 +342,7 @@ definePage<HomeData>()({
     voiceStartNoteText: "先起个名字，我再听您讲。",
     resumeAskButtonClass: "resume-ask-button",
     resumeAskButtonHoverClass: "resume-ask-button-hover",
+    completionButtonTitle: "帮我补全这本书",
     showResumeActions: false,
     showVoiceAuthorizationPanel: true,
     largeTextEnabled: false,
@@ -344,6 +356,14 @@ definePage<HomeData>()({
     if (!this.data.loading) {
       await this.loadHome();
     }
+  },
+
+  onHide() {
+    this.stopBookCompletionPreparation();
+  },
+
+  onUnload() {
+    this.stopBookCompletionPreparation();
   },
 
   onShareAppMessage() {
@@ -465,16 +485,129 @@ definePage<HomeData>()({
   },
 
   async startBookCompletion() {
-    await this.startVoiceChatWithMode(
-      "guided_interview",
-      "home_resume",
-      "ai_interview",
-      "book_completion",
-    );
+    if (!this.canStartVoiceChat(false)) {
+      return;
+    }
+    const token = ++this.bookCompletionPollToken;
+    setHomeData(this, {
+      creatingVoice: true,
+      preparingBookCompletion: true,
+      error: "",
+    });
+    try {
+      let state = await prepareMemoirBookCompletion(this.data.projectId);
+      while (
+        (state.state === "preparing" || state.state === "needs_preparation")
+        && token === this.bookCompletionPollToken
+      ) {
+        await new Promise<void>((resolve) => setTimeout(resolve, BOOK_COMPLETION_POLL_INTERVAL_MS));
+        if (token !== this.bookCompletionPollToken) {
+          return;
+        }
+        state = state.state === "needs_preparation"
+          ? await prepareMemoirBookCompletion(this.data.projectId)
+          : await getMemoirBookCompletion(this.data.projectId);
+      }
+      if (token === this.bookCompletionPollToken) {
+        await this.handleBookCompletionState(state);
+      }
+    } catch (error) {
+      if (isAuthError(error)) {
+        switchToMe();
+        return;
+      }
+      setHomeData(this, {
+        error: error instanceof Error ? error.message : "下一题整理失败",
+      });
+    } finally {
+      if (token === this.bookCompletionPollToken) {
+        setHomeData(this, {
+          creatingVoice: false,
+          preparingBookCompletion: false,
+        });
+      }
+    }
   },
 
   async startHumanInterview() {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
+  },
+
+  stopBookCompletionPreparation() {
+    this.bookCompletionPollToken += 1;
+    if (this.data.preparingBookCompletion) {
+      setHomeData(this, {
+        creatingVoice: false,
+        preparingBookCompletion: false,
+      });
+    }
+  },
+
+  ensureVoiceAuthorization() {
+    if (this.data.voiceAuthorizationAgreed) {
+      return true;
+    }
+    setHomeData(this, { error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
+    wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    return false;
+  },
+
+  canStartVoiceChat(requireVoiceAuthorization = true) {
+    if (this.data.loading || this.data.creatingVoice) {
+      return false;
+    }
+    if (this.data.needsLogin) {
+      switchToMe();
+      return false;
+    }
+    if (!this.data.projectId) {
+      this.createProject();
+      return false;
+    }
+    if (requireVoiceAuthorization && !this.ensureVoiceAuthorization()) {
+      return false;
+    }
+    return true;
+  },
+
+  async handleBookCompletionState(state: MemoirBookCompletion) {
+    if (state.state === "ready" && state.task_id) {
+      if (!this.ensureVoiceAuthorization()) {
+        return;
+      }
+      await syncVoiceAuthorizationConsent();
+      await this.createAndOpenVoiceChat(
+        "guided_interview",
+        "home_resume",
+        "ai_interview",
+        "book_completion",
+        state.task_id,
+      );
+      return;
+    }
+    if (state.action === "open_chapter" && state.chapter_id) {
+      wx.navigateTo({
+        url: pageUrl("/pages/chapter-workspace/index", {
+          projectId: this.data.projectId,
+          chapterId: state.chapter_id,
+        }),
+      });
+      return;
+    }
+    if (state.action === "open_book") {
+      wx.switchTab({ url: "/pages/book/index" });
+      return;
+    }
+    if (state.state === "complete") {
+      wx.showModal({
+        title: state.headline,
+        content: state.detail,
+        showCancel: false,
+        confirmText: "知道了",
+      });
+      return;
+    }
+    setHomeData(this, { error: `${state.headline}。${state.detail}` });
   },
 
   async startVoiceChatWithMode(
@@ -483,65 +616,13 @@ definePage<HomeData>()({
     interviewType: MemoirInterviewType = "ai_interview",
     sessionGoal: MemoirSessionGoal = "open_narration",
   ) {
-    if (this.data.loading || this.data.creatingVoice) {
-      return;
-    }
-    if (this.data.needsLogin) {
-      switchToMe();
-      return;
-    }
-    if (!this.data.projectId) {
-      this.createProject();
-      return;
-    }
-    if (!this.data.voiceAuthorizationAgreed) {
-      setHomeData(this, { error: "请先阅读并同意《声纹授权协议》后再开始语音聊天" });
-      wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
+    if (!this.canStartVoiceChat()) {
       return;
     }
     setHomeData(this, { creatingVoice: true, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
-      const detail = await createMemoirVoiceSession({
-        guidance_mode: mode,
-        interview_type: interviewType,
-        session_goal: sessionGoal,
-        provider: "volc_streaming_asr",
-        input_format: "pcm_s16le_16000_mono",
-        metadata_json: {
-          entry: entry === "home" ? "miniprogram_home" : `miniprogram_${entry}`,
-          interview_type: interviewType,
-          session_goal: sessionGoal,
-          first_version: true,
-          ...(this.data.launchVariant !== "none" ? { launch_variant: this.data.launchVariant } : {}),
-          ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
-        },
-      }, {
-        projectId: this.data.projectId,
-      });
-      trackAuditAction(
-        "voice_chat.start",
-        {
-          guidance_mode: mode,
-          interview_type: interviewType,
-          session_goal: sessionGoal,
-          entry,
-          launch_variant: this.data.launchVariant,
-        },
-        { projectId: this.data.projectId, voiceSessionId: detail.session.id },
-      );
-      if (entry === "home_launch") {
-        this.dismissLaunchPanel();
-      }
-      wx.navigateTo({
-        url: pageUrl("/pages/voice-chat/index", {
-          voiceSessionId: detail.session.id,
-          mode,
-          interviewType,
-          sessionGoal,
-          projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
-        }),
-      });
+      await this.createAndOpenVoiceChat(mode, entry, interviewType, sessionGoal);
     } catch (error) {
       if (isAuthError(error)) {
         switchToMe();
@@ -553,5 +634,55 @@ definePage<HomeData>()({
     } finally {
       setHomeData(this, { creatingVoice: false });
     }
+  },
+
+  async createAndOpenVoiceChat(
+    mode: MemoirGuidanceMode,
+    entry: HomeVoiceEntry,
+    interviewType: MemoirInterviewType,
+    sessionGoal: MemoirSessionGoal,
+    currentFollowupTaskId = "",
+  ) {
+    const detail = await createMemoirVoiceSession({
+      guidance_mode: mode,
+      interview_type: interviewType,
+      session_goal: sessionGoal,
+      ...(currentFollowupTaskId ? { current_followup_task_id: currentFollowupTaskId } : {}),
+      provider: "volc_streaming_asr",
+      input_format: "pcm_s16le_16000_mono",
+      metadata_json: {
+        entry: entry === "home" ? "miniprogram_home" : `miniprogram_${entry}`,
+        interview_type: interviewType,
+        session_goal: sessionGoal,
+        first_version: true,
+        ...(this.data.launchVariant !== "none" ? { launch_variant: this.data.launchVariant } : {}),
+        ...(entry === "home_resume" && this.data.hasLastStoryHint ? { resume_hint: this.data.lastStoryHint } : {}),
+      },
+    }, {
+      projectId: this.data.projectId,
+    });
+    trackAuditAction(
+      "voice_chat.start",
+      {
+        guidance_mode: mode,
+        interview_type: interviewType,
+        session_goal: sessionGoal,
+        entry,
+        launch_variant: this.data.launchVariant,
+      },
+      { projectId: this.data.projectId, voiceSessionId: detail.session.id },
+    );
+    if (entry === "home_launch") {
+      this.dismissLaunchPanel();
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/voice-chat/index", {
+        voiceSessionId: detail.session.id,
+        mode,
+        interviewType,
+        sessionGoal,
+        projectTitle: this.data.projectTitle ? this.data.projectDisplayTitle || this.data.projectTitle : "",
+      }),
+    });
   },
 });

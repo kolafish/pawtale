@@ -23,6 +23,7 @@ import { definePage } from "../../services/page-definition";
 import {
   applyMemoirDraftBlockRevision,
   assembleMemoirChapterDraftBlocks,
+  confirmMemoirChapterContract,
   createMemoirChapterContractRevision,
   createMemoirVoiceSession,
   decideMemoirDraftBlock,
@@ -36,6 +37,7 @@ import {
   listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
   resolveMemoirNarrativeGap,
+  suggestMemoirChapterDirection,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -47,9 +49,17 @@ import {
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import {
+  chapterNextAction,
+  LOADING_NEXT_ACTION,
+  type ChapterNextAction,
+} from "./chapter-next-action";
 
 
-const TAB_VALUES = ["structure", "stories", "drafts", "checks", "followups"] as const;
+export { chapterNextAction };
+
+
+const TAB_VALUES = ["overview", "structure", "stories", "drafts", "checks", "followups"] as const;
 const GAP_ACTIONS = ["resolve", "accept-incomplete", "not-applicable", "dismiss"] as const;
 const AUDIT_POLL_INTERVAL_MS = 1500;
 const DRAFT_JOB_POLL_INTERVAL_MS = 1500;
@@ -146,6 +156,7 @@ interface ChapterWorkspacePageData {
   projectId: string;
   chapterId: string;
   activeTab: WorkspaceTab;
+  nextAction: ChapterNextAction;
   workspace: MemoirChapterWorkspace | null;
   contractStatusText: string;
   auditStatusText: string;
@@ -359,7 +370,7 @@ export function draftBlockViews(
       nodeTitle: (block.node_id && nodeTitles.get(block.node_id)) || "历史正文",
       editorialStatusText: ({ draft: "待确认", confirmed: "已确认", excluded: "不收录" })[block.editorial_status],
       freshnessStatusText: block.freshness_status === "stale" ? "来源已变化" : "来源有效",
-      sourceCountText: sourceCount ? `${sourceCount} 项来源` : "无结构化来源",
+      sourceCountText: sourceCount ? `${sourceCount} 项来源` : "没有详细来源",
       sourceClaims,
       sourceStories,
       revisionFeedback: feedback.get(block.id) || "",
@@ -381,9 +392,10 @@ definePage<ChapterWorkspacePageData>()({
     error: "",
     projectId: "",
     chapterId: "",
-    activeTab: "structure",
+    activeTab: "overview",
+    nextAction: LOADING_NEXT_ACTION,
     workspace: null,
-    contractStatusText: "尚未建立章节契约",
+    contractStatusText: "本章方向尚未确定",
     auditStatusText: "尚未检查",
     auditError: "",
     auditBusy: false,
@@ -417,7 +429,7 @@ definePage<ChapterWorkspacePageData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
-    const activeTab = queryChoice(query, "tab", TAB_VALUES, "structure");
+    const activeTab = queryChoice(query, "tab", TAB_VALUES, "overview");
     this.setData({ projectId, chapterId, activeTab, error: "" });
     if (!projectId || !chapterId) {
       this.setData({ error: "缺少章节信息" });
@@ -441,8 +453,8 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       workspace,
       contractStatusText: workspace.contract
-        ? `契约 v${workspace.contract.version} · ${workspace.contract.status === "confirmed" ? "已确认" : "草稿"}`
-        : "尚未建立章节契约",
+        ? `本章方向${workspace.contract.status === "confirmed" ? "已确认" : "待确认"}`
+        : "本章方向尚未确定",
       auditStatusText: state.text,
       auditError: state.error,
       auditBusy: state.busy,
@@ -460,7 +472,7 @@ definePage<ChapterWorkspacePageData>()({
           const status = slotStatus(slot.status);
           return {
             ...slot,
-            labelText: SLOT_LABELS[slot.slot_key] || slot.slot_key,
+            labelText: SLOT_LABELS[slot.slot_key] || "其他内容",
             statusText: status.text,
             statusClass: status.className,
           };
@@ -501,6 +513,7 @@ definePage<ChapterWorkspacePageData>()({
         },
       ],
       draftBlocks: draftBlockViews(this.data.draftBlocks, workspace, this.data.draftBlocks),
+      nextAction: chapterNextAction(workspace, this.data.followupTasks, this.data.draftBlocks),
     });
     this.startAuditPollingIfNeeded();
   },
@@ -543,9 +556,11 @@ definePage<ChapterWorkspacePageData>()({
         chapterId: this.data.chapterId,
         limit: 100,
       });
+      const followupTasks = response.items.map(followupTaskView);
       this.setData({
-        followupTasks: response.items.map(followupTaskView),
+        followupTasks,
         followupError: "",
+        nextAction: chapterNextAction(this.data.workspace, followupTasks, this.data.draftBlocks),
       });
     } catch (error) {
       if (routeAuthError(error, "me")) {
@@ -568,9 +583,11 @@ definePage<ChapterWorkspacePageData>()({
     }
     try {
       const response = await listMemoirDraftBlocks(this.data.projectId, this.data.chapterId);
+      const draftBlocks = draftBlockViews(response.blocks, this.data.workspace, this.data.draftBlocks);
       this.setData({
-        draftBlocks: draftBlockViews(response.blocks, this.data.workspace, this.data.draftBlocks),
+        draftBlocks,
         draftError: "",
+        nextAction: chapterNextAction(this.data.workspace, this.data.followupTasks, draftBlocks),
       });
     } catch (error) {
       if (routeAuthError(error, "me")) {
@@ -585,7 +602,71 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   changeTab(event: DatasetEvent) {
-    this.setData({ activeTab: queryChoice({ tab: datasetString(event, "tab") }, "tab", TAB_VALUES, "structure") });
+    this.setData({ activeTab: queryChoice({ tab: datasetString(event, "tab") }, "tab", TAB_VALUES, "overview") });
+  },
+
+  async runNextAction() {
+    const action = this.data.nextAction;
+    if (action.disabled) {
+      return;
+    }
+    if (action.kind === "create_direction") {
+      await this.suggestCurrentDirection();
+    } else if (action.kind === "confirm_direction") {
+      await this.confirmCurrentDirection();
+    } else if (action.kind === "start_audit") {
+      await this.startAudit();
+    } else if (action.kind === "open_followups") {
+      this.setData({ activeTab: "followups" });
+    } else if (action.kind === "open_checks") {
+      this.setData({ activeTab: "checks" });
+    } else if (action.kind === "generate_draft") {
+      await this.generateDraftBlocks();
+    } else if (action.kind === "open_drafts") {
+      this.setData({ activeTab: "drafts" });
+    }
+  },
+
+  async suggestCurrentDirection() {
+    if (this.data.workspace?.contract || this.data.contractRevisionBusy) {
+      return;
+    }
+    this.setData({ contractRevisionBusy: true, contractRevisionError: "" });
+    try {
+      await suggestMemoirChapterDirection(this.data.projectId, this.data.chapterId);
+      await this.loadWorkspace(true);
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        contractRevisionError: error instanceof Error ? error.message : "本章方向整理失败",
+      });
+    } finally {
+      this.setData({ contractRevisionBusy: false });
+    }
+  },
+
+  async confirmCurrentDirection() {
+    const contract = this.data.workspace?.contract;
+    if (!contract || contract.status === "confirmed" || this.data.contractRevisionBusy) {
+      return;
+    }
+    this.setData({ contractRevisionBusy: true, contractRevisionError: "" });
+    try {
+      await confirmMemoirChapterContract(this.data.projectId, contract.id);
+      await this.loadWorkspace(true);
+      wx.showToast({ title: "本章方向已确认", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        contractRevisionError: error instanceof Error ? error.message : "本章方向确认失败",
+      });
+    } finally {
+      this.setData({ contractRevisionBusy: false });
+    }
   },
 
   async createContractRevision() {
@@ -668,7 +749,7 @@ definePage<ChapterWorkspacePageData>()({
         return;
       }
       this.patchAvailableStory(story.id, {
-        error: error instanceof Error ? error.message : "Story 加入本章失败",
+        error: error instanceof Error ? error.message : "内容加入本章失败",
       });
     } finally {
       this.patchAvailableStory(story.id, { busy: false });

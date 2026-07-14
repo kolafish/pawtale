@@ -16,6 +16,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
+    MemoirNarrativeGapScopeType,
     MemoirNarrativeGapStatus,
 )
 from app.models.memoir import MemoirBookPlanChapter
@@ -327,6 +328,53 @@ async def reconcile_project_rule_gaps(
             project_id=project_id,
             gap_id=gap.id,
             idempotency_key=f"rule-gap-obsolete:{gap.id}:{gap.detection_count}",
+            note=AUTO_RULE_RESOLUTION_NOTE,
+        )
+        resolved_count += 1
+    return resolved_count
+
+
+async def reconcile_chapter_rule_gaps(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    complete_candidates: list[MemoirNarrativeGapCandidate],
+) -> int:
+    """Resolve obsolete deterministic gaps after a complete chapter audit."""
+    active_fingerprints = {
+        gap_fingerprint(candidate)
+        for candidate in complete_candidates
+        if candidate.detected_by == MemoirNarrativeGapDetectedBy.RULES
+    }
+    open_rule_gaps = (
+        await db.scalars(
+            select(MemoirNarrativeGap).where(
+                MemoirNarrativeGap.project_id == project_id,
+                MemoirNarrativeGap.detected_by == MemoirNarrativeGapDetectedBy.RULES.value,
+                MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+                MemoirNarrativeGap.scope_type.in_(
+                    [
+                        MemoirNarrativeGapScopeType.STORY.value,
+                        MemoirNarrativeGapScopeType.CHAPTER.value,
+                    ]
+                ),
+                (
+                    (MemoirNarrativeGap.primary_chapter_id == chapter_id)
+                    | MemoirNarrativeGap.chapters.any(chapter_id=chapter_id)
+                ),
+            )
+        )
+    ).all()
+    resolved_count = 0
+    for gap in open_rule_gaps:
+        if gap.fingerprint in active_fingerprints:
+            continue
+        await resolve_gap_by_system(
+            db,
+            project_id=project_id,
+            gap_id=gap.id,
+            idempotency_key=f"chapter-rule-gap-obsolete:{chapter_id}:{gap.id}:{gap.detection_count}",
             note=AUTO_RULE_RESOLUTION_NOTE,
         )
         resolved_count += 1
