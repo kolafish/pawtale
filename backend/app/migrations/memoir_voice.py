@@ -11,6 +11,7 @@ from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirChatMessageRole,
+    MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirInterviewType,
     MemoirSessionGoal,
@@ -46,6 +47,15 @@ OBSOLETE_EDITING_JOB_TYPES = (
     "generate_book_output",
     "generate_chapter_draft",
     "revise_chapter",
+)
+ACTIVE_EDITING_JOB_STATUSES = (
+    MemoirEditingJobStatus.PENDING.value,
+    MemoirEditingJobStatus.RUNNING.value,
+)
+TERMINAL_EDITING_JOB_STATUSES = (
+    MemoirEditingJobStatus.SUCCEEDED.value,
+    MemoirEditingJobStatus.FAILED.value,
+    MemoirEditingJobStatus.SKIPPED.value,
 )
 
 
@@ -449,15 +459,48 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
                     )
                     changed_columns.append(f"memoir_editing_jobs.{column_name}")
 
+            active_obsolete_jobs = (
+                await conn.execute(
+                    text(
+                        "SELECT job_type, status, COUNT(*) AS job_count "
+                        "FROM memoir_editing_jobs "
+                        "WHERE job_type IN (:book_output, :chapter_draft, :chapter_revision) "
+                        "AND status IN (:pending, :running) "
+                        "GROUP BY job_type, status "
+                        "ORDER BY job_type, status"
+                    ),
+                    {
+                        "book_output": OBSOLETE_EDITING_JOB_TYPES[0],
+                        "chapter_draft": OBSOLETE_EDITING_JOB_TYPES[1],
+                        "chapter_revision": OBSOLETE_EDITING_JOB_TYPES[2],
+                        "pending": ACTIVE_EDITING_JOB_STATUSES[0],
+                        "running": ACTIVE_EDITING_JOB_STATUSES[1],
+                    },
+                )
+            ).fetchall()
+            if active_obsolete_jobs:
+                active_summary = ", ".join(
+                    f"{job_type}/{status}={job_count}"
+                    for job_type, status, job_count in active_obsolete_jobs
+                )
+                raise RuntimeError(
+                    "memoir narrative cutover is blocked by active legacy editing jobs: "
+                    f"{active_summary}"
+                )
+
             obsolete_jobs = await conn.execute(
                 text(
                     "DELETE FROM memoir_editing_jobs "
-                    "WHERE job_type IN (:book_output, :chapter_draft, :chapter_revision)"
+                    "WHERE job_type IN (:book_output, :chapter_draft, :chapter_revision) "
+                    "AND status IN (:succeeded, :failed, :skipped)"
                 ),
                 {
                     "book_output": OBSOLETE_EDITING_JOB_TYPES[0],
                     "chapter_draft": OBSOLETE_EDITING_JOB_TYPES[1],
                     "chapter_revision": OBSOLETE_EDITING_JOB_TYPES[2],
+                    "succeeded": TERMINAL_EDITING_JOB_STATUSES[0],
+                    "failed": TERMINAL_EDITING_JOB_STATUSES[1],
+                    "skipped": TERMINAL_EDITING_JOB_STATUSES[2],
                 },
             )
             if obsolete_jobs.rowcount:
