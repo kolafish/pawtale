@@ -92,6 +92,47 @@
         </view>
       </view>
       <view wx:else class="empty-state">本章还没有关联 Story</view>
+
+      <view class="section-heading available-story-heading">
+        <text class="section-title">可加入本章</text>
+        <text class="section-count">{{availableStories.length}} 个</text>
+      </view>
+      <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
+      <view wx:if="{{availableStories.length && workspace.contract && workspace.contract.status === 'confirmed'}}" class="story-edit-state">
+        <view class="story-edit-copy">
+          <text class="story-edit-title">章节结构已确认</text>
+          <text class="story-edit-hint">先创建草稿修订，再选择要加入的故事</text>
+        </view>
+        <button
+          class="secondary-action-button story-revision-button"
+          loading="{{contractRevisionBusy}}"
+          disabled="{{contractRevisionBusy}}"
+          bindtap="createContractRevision"
+        >开始调整</button>
+      </view>
+      <view wx:if="{{availableStories.length}}" class="available-story-list">
+        <view wx:for="{{availableStories}}" wx:for-item="story" wx:key="id" class="available-story-row">
+          <view class="available-story-main">
+            <view class="row-title-line">
+              <text class="story-title">{{story.title}}</text>
+              <text class="status-label">{{story.statusText}}</text>
+            </view>
+            <text class="story-summary">{{story.summary || "暂无故事摘要"}}</text>
+            <text wx:if="{{story.excluded_from_chapter}}" class="available-story-note">此前已从本章移出</text>
+            <text wx:if="{{story.error}}" class="available-story-error">{{story.error}}</text>
+          </view>
+          <button
+            wx:if="{{workspace.contract && workspace.contract.status === 'draft'}}"
+            class="primary-small-button available-story-action"
+            data-story-id="{{story.id}}"
+            loading="{{story.busy}}"
+            disabled="{{story.busy}}"
+            bindtap="includeAvailableStory"
+          >{{story.actionText}}</button>
+        </view>
+      </view>
+      <view wx:elif="{{!workspace.contract}}" class="empty-state">建立章节契约后，可以从项目素材中加入 Story</view>
+      <view wx:else class="empty-state">没有其他可加入本章的 Story</view>
     </view>
 
     <view wx:elif="{{activeTab === 'drafts'}}" class="content-section">

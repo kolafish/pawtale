@@ -98,6 +98,7 @@ class MemoirNarrativeDecisionTargetType(str, Enum):
 
 class MemoirNarrativeDecisionAction(str, Enum):
     CONFIRM = "confirm"
+    INCLUDE = "include"
     REJECT = "reject"
     MERGE = "merge"
     RESOLVE = "resolve"

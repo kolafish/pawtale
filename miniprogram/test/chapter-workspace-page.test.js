@@ -49,6 +49,15 @@ function sampleWorkspace(overrides = {}) {
       objective: "说明第一次离家的原因和影响。",
       reader_takeaway: "理解这次经历如何改变了叙述者。",
       time_scope_text: "青年时期",
+      time_start: null,
+      time_end: null,
+      core_questions: [{ key: "meaning", question: "这段经历为什么重要？" }],
+      constraints: {
+        include_story_ids: ["story-1"],
+        exclude_story_ids: [],
+        include_topics: [],
+        exclude_topics: [],
+      },
       status: "confirmed",
       nodes: [{
         id: "node-1",
@@ -102,6 +111,16 @@ function sampleWorkspace(overrides = {}) {
         }],
       }],
     }],
+    available_stories: [{
+      id: "story-2",
+      title: "与李阅的关系",
+      story_type: "relationship",
+      summary: "多年朋友关系中的共同经历。",
+      completion_status: "incomplete",
+      verification_status: "needs_verification",
+      story_version: 1,
+      excluded_from_chapter: false,
+    }],
     gaps: {
       must_handle: [sampleGap()],
       suggested: [],
@@ -150,6 +169,12 @@ function sampleDraftBlock(overrides = {}) {
 function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], voiceApiExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => workspace,
+    createMemoirChapterContractRevision: async () => {
+      throw new Error("createMemoirChapterContractRevision was not mocked");
+    },
+    includeMemoirStoryInChapter: async () => {
+      throw new Error("includeMemoirStoryInChapter was not mocked");
+    },
     enqueueMemoirChapterWorkspaceAudit: async () => {
       throw new Error("enqueueMemoirChapterWorkspaceAudit was not mocked");
     },
@@ -294,6 +319,108 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   ]);
   assert.equal(context.data.gapGroups[0].items[0].severityText, "重要");
   assert.equal(JSON.stringify(context.data).includes("percentage"), false);
+});
+
+test("chapter workspace creates an explicit draft revision before editing a confirmed structure", async () => {
+  const confirmed = sampleWorkspace();
+  const draft = sampleWorkspace({
+    contract: { ...confirmed.contract, id: "contract-2", version: 2, status: "draft" },
+  });
+  let current = confirmed;
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    workspace: confirmed,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => current,
+      createMemoirChapterContractRevision: async (projectId, chapterId, data) => {
+        calls.push({ projectId, chapterId, data });
+        current = draft;
+        return draft.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project%2F1",
+    chapterId: "chapter-1",
+    tab: "stories",
+  });
+
+  await page.createContractRevision.call(context);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].projectId, "project/1");
+  assert.equal(calls[0].chapterId, "chapter-1");
+  assert.equal(calls[0].data.idempotency_key, "workspace:revision:contract-1");
+  assert.equal(calls[0].data.copy_from_contract_id, "contract-1");
+  assert.equal(calls[0].data.copy_nodes, true);
+  assert.deepEqual(calls[0].data.core_questions, confirmed.contract.core_questions);
+  assert.equal(context.data.workspace.contract.status, "draft");
+  assert.equal(context.data.activeTab, "stories");
+  assert.equal(context.data.contractRevisionBusy, false);
+});
+
+test("including a Story only marks that Story busy and exposes request failures", async () => {
+  const base = sampleWorkspace();
+  const secondCandidate = {
+    ...base.available_stories[0],
+    id: "story-3",
+    title: "在成都求学",
+    excluded_from_chapter: true,
+  };
+  const draft = sampleWorkspace({
+    contract: { ...base.contract, status: "draft" },
+    available_stories: [...base.available_stories, secondCandidate],
+  });
+  let current = draft;
+  let releaseInclude;
+  const pending = new Promise((resolve) => { releaseInclude = resolve; });
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace: draft,
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => current,
+      includeMemoirStoryInChapter: async (projectId, contractId, storyId, data) => {
+        calls.push({ projectId, contractId, storyId, data });
+        if (storyId === "story-3") {
+          throw new Error("章节结构已发生变化");
+        }
+        await pending;
+        current = sampleWorkspace({
+          contract: { ...base.contract, status: "draft" },
+          available_stories: [secondCandidate],
+        });
+        return current.contract;
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1", tab: "stories" });
+
+  const firstRequest = page.includeAvailableStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-2" } },
+  });
+  assert.equal(context.data.availableStories[0].busy, true);
+  assert.equal(context.data.availableStories[1].busy, false);
+  assert.equal(context.data.contractRevisionBusy, false);
+  await page.includeAvailableStory.call(context, {
+    currentTarget: { dataset: { storyId: "story-3" } },
+  });
+  assert.equal(context.data.availableStories[0].busy, true);
+  assert.equal(context.data.availableStories[1].busy, false);
+  assert.equal(context.data.availableStories[1].error, "章节结构已发生变化");
+
+  releaseInclude();
+  await firstRequest;
+
+  assert.equal(calls[0].contractId, "contract-1");
+  assert.equal(calls[0].storyId, "story-2");
+  assert.match(calls[0].data.idempotency_key, /^workspace:include:contract-1:story-2:/);
+  assert.deepEqual(context.data.availableStories.map((story) => story.id), ["story-3"]);
+  assert.equal(context.data.availableStories[0].busy, false);
+  assert.equal(context.data.availableStories[0].error, "章节结构已发生变化");
+  delete global.wx;
 });
 
 test("chapter workspace lists follow-up questions and starts a task-bound human interview", async () => {

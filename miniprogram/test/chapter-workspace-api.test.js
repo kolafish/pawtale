@@ -53,12 +53,35 @@ test("chapter workspace API uses narrative resource routes and explicit action p
   installWx(requests);
   resetModules();
   const {
+    createMemoirChapterContractRevision,
     enqueueMemoirChapterWorkspaceAudit,
     getMemoirChapterWorkspace,
+    includeMemoirStoryInChapter,
     resolveMemoirNarrativeGap,
   } = require("../services/memoir-chapter-workspace-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
+  await createMemoirChapterContractRevision("project/1", "chapter/1", {
+    idempotency_key: "revision-1",
+    objective: "讲清离家经历。",
+    reader_takeaway: "理解离家的影响。",
+    time_scope_text: "青年时期",
+    time_start: null,
+    time_end: null,
+    core_questions: [{ key: "meaning", question: "为什么重要？" }],
+    constraints: {
+      include_story_ids: [],
+      exclude_story_ids: [],
+      include_topics: [],
+      exclude_topics: [],
+    },
+    copy_from_contract_id: "contract/1",
+    copy_nodes: true,
+  });
+  await includeMemoirStoryInChapter("project/1", "contract/1", "story/1", {
+    idempotency_key: "include-1",
+    reason: "属于本章",
+  });
   await enqueueMemoirChapterWorkspaceAudit("project/1", "chapter/1");
   await resolveMemoirNarrativeGap("project/1", "gap/1", "not-applicable", {
     idempotency_key: "decision-1",
@@ -67,13 +90,20 @@ test("chapter workspace API uses narrative resource routes and explicit action p
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
-  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace/audits");
-  assert.deepEqual(apiRequests[1].data, {
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/revisions");
+  assert.equal(apiRequests[1].data.copy_from_contract_id, "contract/1");
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/include");
+  assert.deepEqual(apiRequests[2].data, {
+    idempotency_key: "include-1",
+    reason: "属于本章",
+  });
+  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace/audits");
+  assert.deepEqual(apiRequests[3].data, {
     include_semantic_audit: true,
     ai_model: "deepseek-v4-flash",
   });
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/not-applicable");
-  assert.deepEqual(apiRequests[2].data, {
+  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/not-applicable");
+  assert.deepEqual(apiRequests[4].data, {
     idempotency_key: "decision-1",
     note: "该项不适用于本章",
   });

@@ -56,6 +56,7 @@ from .extraction import MemoirNarrativeExtraction
 from .gaps import (
     MemoirChapterGapAuditJobResponse,
     MemoirChapterGapAuditRequest,
+    MemoirChapterWorkspaceAvailableStoryResponse,
     MemoirChapterWorkspaceGapGroups,
     MemoirChapterWorkspaceResponse,
     MemoirChapterWorkspaceStoryResponse,
@@ -155,6 +156,7 @@ __all__ = [
     "MemoirNarrativeExtraction",
     "MemoirChapterGapAuditJobResponse",
     "MemoirChapterGapAuditRequest",
+    "MemoirChapterWorkspaceAvailableStoryResponse",
     "MemoirChapterWorkspaceGapGroups",
     "MemoirChapterWorkspaceResponse",
     "MemoirChapterWorkspaceStoryResponse",

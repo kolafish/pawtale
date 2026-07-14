@@ -150,6 +150,35 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
+async def _ensure_decision_include_action(conn) -> bool:
+    table_name = "memoir_narrative_decisions"
+    table_sql = await _table_sql(conn, table_name)
+    if not table_sql or "'include'" in table_sql:
+        return False
+
+    for trigger_name in MEMOIR_NARRATIVE_DECISION_TRIGGERS:
+        await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+    for index_name in await _index_names(conn, table_name):
+        if not index_name.startswith("sqlite_autoindex"):
+            await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+
+    legacy_table_name = f"{table_name}_before_include_action"
+    await conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}"))
+    table = Base.metadata.tables[table_name]
+    await conn.run_sync(
+        lambda sync_conn: table.create(sync_conn, checkfirst=False)
+    )
+    column_names = ", ".join(f'"{column.name}"' for column in table.columns)
+    await conn.execute(
+        text(
+            f"INSERT INTO {table_name} ({column_names}) "
+            f"SELECT {column_names} FROM {legacy_table_name}"
+        )
+    )
+    await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+    return True
+
+
 async def _index_names(conn, table_name: str) -> set[str]:
     rows = (await conn.execute(text(f"PRAGMA index_list({table_name})"))).fetchall()
     return {str(row[1]) for row in rows}
@@ -353,6 +382,8 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 changed_indexes.append(index.name)
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
+        if await _ensure_decision_include_action(conn):
+            changed_tables.append("memoir_narrative_decisions")
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
