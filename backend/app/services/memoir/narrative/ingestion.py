@@ -11,6 +11,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSourceType,
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerInterpretationStatus,
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import (
@@ -194,12 +195,19 @@ async def ingest_transcript_version(
         project_id=project.id,
         utterance=utterance,
     )
+    extraction_text = (
+        active_followup.direct_narrative_text
+        if active_followup
+        and active_followup.interpretation_status
+        == MemoirFollowupAnswerInterpretationStatus.RESOLVED.value
+        else source_text
+    )
     existing_story_candidates = await story_matching.story_extraction_candidates(
         db,
         project_id=project.id,
     )
     extraction, provider, model, extraction_diagnostics = await extract_narrative_state(
-        source_text=source_text,
+        source_text=extraction_text,
         speaker_role=speaker_role,
         narrator_name=str(profile.get("narrator_name") or "").strip(),
         narrator_origin=str(profile.get("narrator_origin") or "").strip(),
@@ -208,6 +216,7 @@ async def ingest_transcript_version(
             {
                 "task_id": active_followup.task_id,
                 "question": active_followup.question,
+                "answer_kind": active_followup.answer_kind,
                 "target_slot": active_followup.target_slot,
                 "story_id": active_followup.story_id,
                 "story_title": active_followup.story_title,
@@ -220,7 +229,7 @@ async def ingest_transcript_version(
         ai_model=ai_model,
         ai_client=ai_client,
     )
-    valid_claims, skipped_keys = _valid_claims(extraction, source_text=source_text)
+    valid_claims, skipped_keys = _valid_claims(extraction, source_text=extraction_text)
     valid_claim_keys = {candidate.key for candidate, _quotes in valid_claims}
     needed_entity_keys = {
         key

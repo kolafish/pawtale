@@ -1,6 +1,10 @@
 import json
 
+import pytest
+
+from app.domain.memoir.narrative_types import MemoirFollowupAnswerKind
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
 from app.services.memoir.semantic_state import upsert_chapter_card
 from app.models.memoir import MemoirBookPlanChapter
 from app.services.memoir import source_router
@@ -64,6 +68,17 @@ def _patch_source_router_ai(monkeypatch, *payloads: dict[str, object] | str) -> 
     _patch_source_card_ai(monkeypatch)
     monkeypatch.setattr("app.services.memoir.source_router.get_ai_service", lambda ai_model=None: fake)
     return fake
+
+
+def test_mixed_followup_answer_parts_must_not_overlap():
+    with pytest.raises(ValueError, match="相互重叠"):
+        validate_resolved_answer_parts(
+            source_text="我去看了爷爷，但这其实是我想发给他的一句话。",
+            answer_kind=MemoirFollowupAnswerKind.MIXED,
+            direct_narrative_text="我去看了爷爷，但这其实是我想发给他的一句话",
+            clarification_text="这其实是我想发给他的一句话",
+            fact_resolution_text="",
+        )
 
 
 def _assign_route(chapter: MemoirBookPlanChapter, *, confidence: float = 0.91) -> dict[str, object]:
@@ -310,7 +325,17 @@ async def test_completion_collection_context_does_not_force_non_memoir_content(
         user_id=first["user_id"],
         project_id=project_id,
         utterance_id=answer["utterance_id"],
-        collection_chapter_id=chapter.id,
+        followup_context=source_router.SourceRouteFollowupContext(
+            task_id="task-1",
+            chapter_id=chapter.id,
+            question="你还记得这件事吗？",
+            purpose="补充这件事的细节。",
+            expected_answer_use="direct_narrative",
+            known_context_summary="",
+            story_id=None,
+            story_title="",
+            story_summary="",
+        ),
     )
 
     assert route.action == "ignore"

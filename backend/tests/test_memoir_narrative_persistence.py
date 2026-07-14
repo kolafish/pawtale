@@ -172,6 +172,56 @@ async def test_narrative_migration_adds_followup_assignment_snapshot_column_once
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_followup_answer_interpretation_columns_once():
+    register_models()
+    engine = _sqlite_engine()
+    columns = [
+        "interpretation_status",
+        "answer_kind",
+        "direct_narrative_text",
+        "clarification_text",
+        "fact_resolution_text",
+        "confirmation_question",
+        "interpretation_reason",
+    ]
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_followup_task_utterances"))
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_task_utterances ("
+                    "id VARCHAR(36) PRIMARY KEY NOT NULL, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "task_id VARCHAR(36) NOT NULL, "
+                    "utterance_id VARCHAR(36) NOT NULL, "
+                    "result_role VARCHAR(24) NOT NULL, "
+                    "is_assignment_snapshot BOOLEAN NOT NULL DEFAULT 0, "
+                    "created_at DATETIME NOT NULL)"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            f"memoir_followup_task_utterances.{column}" for column in columns
+        ]
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            actual_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_followup_task_utterances)")
+                    )
+                ).fetchall()
+            }
+        assert set(columns) <= actual_columns
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_migration_backfills_followup_answer_use_from_gap_type():
     register_models()
     engine = _sqlite_engine()

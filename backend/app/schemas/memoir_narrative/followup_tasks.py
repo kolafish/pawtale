@@ -6,6 +6,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.narrative_types import (
+    MemoirFollowupAnswerInterpretationStatus,
+    MemoirFollowupAnswerKind,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
@@ -27,6 +29,13 @@ class MemoirFollowupTaskUtteranceResponse(BaseModel):
 
     utterance_id: str
     result_role: MemoirFollowupTaskUtteranceRole
+    interpretation_status: MemoirFollowupAnswerInterpretationStatus
+    answer_kind: MemoirFollowupAnswerKind | None
+    direct_narrative_text: str
+    clarification_text: str
+    fact_resolution_text: str
+    confirmation_question: str
+    interpretation_reason: str
     created_at: datetime
 
 

@@ -300,6 +300,19 @@ class MemoirFollowupAnswerUse(str, Enum):
     FACT_RESOLUTION = "fact_resolution"
 
 
+class MemoirFollowupAnswerInterpretationStatus(str, Enum):
+    PENDING = "pending"
+    RESOLVED = "resolved"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+
+
+class MemoirFollowupAnswerKind(str, Enum):
+    DIRECT_NARRATIVE = "direct_narrative"
+    CLARIFICATION = "clarification"
+    FACT_RESOLUTION = "fact_resolution"
+    MIXED = "mixed"
+
+
 MEMOIR_STORY_NARRATION_TARGET = "story_narration"
 
 

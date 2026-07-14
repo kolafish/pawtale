@@ -64,6 +64,15 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
 }
 FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
+FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS = {
+    "interpretation_status": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
+    "answer_kind": "VARCHAR(24)",
+    "direct_narrative_text": "TEXT NOT NULL DEFAULT ''",
+    "clarification_text": "TEXT NOT NULL DEFAULT ''",
+    "fact_resolution_text": "TEXT NOT NULL DEFAULT ''",
+    "confirmation_question": "TEXT NOT NULL DEFAULT ''",
+    "interpretation_reason": "TEXT NOT NULL DEFAULT ''",
+}
 FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
     "missing_slot": "direct_narrative",
     "chronology": "clarification",
@@ -171,6 +180,25 @@ async def _ensure_followup_task_utterance_assignment_column(conn) -> list[str]:
         )
     )
     return [f"{table_name}.{FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN}"]
+
+
+async def _ensure_followup_task_utterance_interpretation_columns(conn) -> list[str]:
+    table_name = "memoir_followup_task_utterances"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    changed: list[str] = []
+    for column_name, column_type in FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        )
+        changed.append(f"{table_name}.{column_name}")
+    return changed
 
 
 async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
@@ -462,6 +490,9 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
         changed_columns.extend(
             await _ensure_followup_task_utterance_assignment_column(conn)
+        )
+        changed_columns.extend(
+            await _ensure_followup_task_utterance_interpretation_columns(conn)
         )
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
         if await _ensure_decision_include_action(conn):

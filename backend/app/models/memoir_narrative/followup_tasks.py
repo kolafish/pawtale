@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.domain.memoir.narrative_types import (
+    MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
@@ -189,4 +190,15 @@ class MemoirFollowupTaskUtterance(Base):
         default=False,
         nullable=False,
     )
+    interpretation_status: Mapped[str] = mapped_column(
+        String(24),
+        default=MemoirFollowupAnswerInterpretationStatus.PENDING.value,
+        nullable=False,
+    )
+    answer_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    direct_narrative_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    clarification_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    fact_resolution_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    confirmation_question: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    interpretation_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
