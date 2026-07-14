@@ -76,6 +76,27 @@ MEMOIR_BOOK_PLAN_CHAPTER_ARCHIVE_COLUMNS = {
         "VARCHAR(36) REFERENCES memoir_book_plan_chapters(id)"
     ),
 }
+FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
+FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
+FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS = {
+    "interpretation_status": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
+    "answer_kind": "VARCHAR(24)",
+    "direct_narrative_text": "TEXT NOT NULL DEFAULT ''",
+    "clarification_text": "TEXT NOT NULL DEFAULT ''",
+    "fact_resolution_text": "TEXT NOT NULL DEFAULT ''",
+    "confirmation_question": "TEXT NOT NULL DEFAULT ''",
+    "interpretation_reason": "TEXT NOT NULL DEFAULT ''",
+}
+FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
+    "missing_slot": "direct_narrative",
+    "chronology": "clarification",
+    "relationship": "clarification",
+    "causality": "clarification",
+    "unclear_reference": "clarification",
+    "contradiction": "fact_resolution",
+    "repetition": "fact_resolution",
+    "unsupported_fact": "fact_resolution",
+}
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -123,8 +144,7 @@ async def _ensure_structured_draft_snapshot_column(conn) -> list[str]:
     if not await _table_exists(conn, table_name):
         return []
     columns = {
-        str(column["name"])
-        for column in await _table_column_schema(conn, table_name)
+        str(column["name"]) for column in await _table_column_schema(conn, table_name)
     }
     if "block_snapshot_json" in columns:
         return []
@@ -173,6 +193,92 @@ async def _ensure_book_plan_chapter_archive_columns(conn) -> list[str]:
         )
         changed.append(f"{table_name}.{column_name}")
     return changed
+
+
+async def _ensure_followup_task_utterance_assignment_column(conn) -> list[str]:
+    table_name = "memoir_followup_task_utterances"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    if FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN in columns:
+        return []
+    await conn.execute(
+        text(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN} "
+            "BOOLEAN NOT NULL DEFAULT 0"
+        )
+    )
+    return [f"{table_name}.{FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN}"]
+
+
+async def _ensure_followup_task_utterance_interpretation_columns(conn) -> list[str]:
+    table_name = "memoir_followup_task_utterances"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    changed: list[str] = []
+    for column_name, column_type in FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        )
+        changed.append(f"{table_name}.{column_name}")
+    return changed
+
+
+async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
+    table_name = "memoir_followup_tasks"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    if FOLLOWUP_TASK_ANSWER_USE_COLUMN in columns:
+        return []
+    unknown_gap_types = set(
+        (
+            await conn.execute(
+                text(
+                    "SELECT DISTINCT gap_type FROM memoir_narrative_gaps "
+                    "WHERE gap_type NOT IN "
+                    "('missing_slot', 'chronology', 'relationship', 'causality', "
+                    "'contradiction', 'repetition', 'unclear_reference', 'unsupported_fact')"
+                )
+            )
+        ).scalars()
+    )
+    if unknown_gap_types:
+        raise RuntimeError(
+            "Cannot migrate follow-up answer use for unknown gap types: "
+            + ", ".join(sorted(str(item) for item in unknown_gap_types))
+        )
+    await conn.execute(
+        text(
+            f"ALTER TABLE {table_name} ADD COLUMN {FOLLOWUP_TASK_ANSWER_USE_COLUMN} "
+            "VARCHAR(24) NOT NULL DEFAULT 'direct_narrative'"
+        )
+    )
+    cases = " ".join(
+        f"WHEN '{gap_type}' THEN '{answer_use}'"
+        for gap_type, answer_use in FOLLOWUP_ANSWER_USE_BY_GAP_TYPE.items()
+    )
+    await conn.execute(
+        text(
+            f"UPDATE {table_name} SET {FOLLOWUP_TASK_ANSWER_USE_COLUMN} = CASE "
+            "(SELECT gap_type FROM memoir_narrative_gaps "
+            f"WHERE memoir_narrative_gaps.id = {table_name}.gap_id) {cases} END"
+        )
+    )
+    return [f"{table_name}.{FOLLOWUP_TASK_ANSWER_USE_COLUMN}"]
 
 
 async def _table_sql(conn, table_name: str) -> str:
@@ -516,6 +622,13 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
         changed_columns.extend(await _ensure_book_plan_chapter_archive_columns(conn))
+        changed_columns.extend(
+            await _ensure_followup_task_utterance_assignment_column(conn)
+        )
+        changed_columns.extend(
+            await _ensure_followup_task_utterance_interpretation_columns(conn)
+        )
+        changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
         if await _ensure_decision_include_action(conn):
             changed_tables.append("memoir_narrative_decisions")
         changed_triggers.extend(await _ensure_decision_triggers(conn))

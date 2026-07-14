@@ -373,9 +373,9 @@ def evaluate_deterministic_gaps(
                     target_slot=slot_key,
                     title=f"“{story.title}”缺少{SLOT_LABELS.get(slot_key, slot_key)}信息",
                     description=(
-                        slot.assessment_summary
-                        if slot
-                        else "该必要故事槽位尚无可引用事实。"
+                        "这部分已有一些内容，还需要补充一两项具体细节。"
+                        if status == MemoirStorySlotStatus.PARTIAL.value
+                        else "这部分还没有可用于成书的具体信息。"
                     ),
                     detected_by=MemoirNarrativeGapDetectedBy.RULES,
                     story_roles={story_id: MemoirNarrativeGapRelationRole.PRIMARY},

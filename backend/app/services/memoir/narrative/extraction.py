@@ -158,6 +158,7 @@ def build_narrative_extraction_repair_prompt(
     source_text: str,
     invalid_response: str,
     validation_error: Exception,
+    active_followup_context: dict[str, object] | None = None,
 ) -> str:
     if isinstance(validation_error, ValidationError):
         errors: object = validation_error.errors(
@@ -182,7 +183,11 @@ def build_narrative_extraction_repair_prompt(
 - relationship claim 必须同时引用已声明的 subject 和 object person entity。
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
 - validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
+- active_followup 非空且原文确实回答该问题时，保留对 active_followup.story_id 和 active_followup.target_slot 的关联；原文无关时不得强行关联。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
+
+active_followup:
+{json.dumps(active_followup_context, ensure_ascii=False)}
 
 validation_errors:
 {json.dumps(errors, ensure_ascii=False)}
@@ -371,12 +376,14 @@ def build_narrative_extraction_prompt(
     narrator_name: str,
     narrator_origin: str,
     existing_story_candidates: list[dict[str, object]],
+    active_followup_context: dict[str, object] | None = None,
 ) -> str:
     context = {
         "speaker_role": speaker_role.value,
         "narrator_name": narrator_name,
         "narrator_origin": narrator_origin,
         "existing_story_candidates": existing_story_candidates,
+        "active_followup": active_followup_context,
     }
     return f"""请从下面一条回忆录转写中抽取人物、地点、机构和事实命题。
 
@@ -459,6 +466,7 @@ source_text:
 - life_stage 槽位：entry_reason, responsibilities, representative_events, ability_and_character, transition, reflection。
 - theme 槽位：theme_definition, supporting_cases, contrast_or_failure, continuity, reflection。
 - 只有明确是同一件事时才填写 existing_story_id；它只是候选提示，不会绕过服务端校验。
+- active_followup 非空时，source_text 是用户对该问题的直接回答。若内容确实属于其中的目标故事，必须复用 active_followup.story_id，并优先标注 active_followup.target_slot；若内容无关，不得强行归入。
 """
 
 
@@ -469,6 +477,7 @@ async def extract_narrative_state(
     narrator_name: str,
     narrator_origin: str,
     existing_story_candidates: list[dict[str, object]] | None = None,
+    active_followup_context: dict[str, object] | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> tuple[
@@ -506,6 +515,7 @@ async def extract_narrative_state(
             narrator_name=narrator_name,
             narrator_origin=narrator_origin,
             existing_story_candidates=existing_story_candidates or [],
+            active_followup_context=active_followup_context,
         ),
         temperature=0.0,
         max_tokens=NARRATIVE_EXTRACTION_MAX_TOKENS,
@@ -540,6 +550,7 @@ async def extract_narrative_state(
                 source_text=source_text,
                 invalid_response=response_text,
                 validation_error=first_error,
+                active_followup_context=active_followup_context,
             ),
             temperature=0.0,
             max_tokens=NARRATIVE_EXTRACTION_MAX_TOKENS,

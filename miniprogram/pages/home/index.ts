@@ -1,5 +1,4 @@
 import type {
-  MemoirBookCompletion,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
@@ -15,9 +14,7 @@ import {
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
-  getMemoirBookCompletion,
   listMemoirVoiceTranscripts,
-  prepareMemoirBookCompletion,
 } from "../../services/memoir-voice-api";
 import {
   dismissHomeLaunch,
@@ -45,14 +42,12 @@ import {
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
-const BOOK_COMPLETION_POLL_INTERVAL_MS = 1200;
 
 type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
 
 interface HomeData {
   loading: boolean;
   creatingVoice: boolean;
-  preparingBookCompletion: boolean;
   needsLogin: boolean;
   error: string;
   userId: string;
@@ -272,7 +267,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
         ),
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
-    completionButtonTitle: state.preparingBookCompletion ? "正在整理下一题" : "帮我补全这本书",
+    completionButtonTitle: "帮我补全这本书",
     showResumeActions: state.hasProject && !state.needsLogin,
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
   };
@@ -300,12 +295,9 @@ async function loadLastStoryHint(projectId: string): Promise<string> {
 }
 
 definePage<HomeData>()({
-  bookCompletionPollToken: 0,
-
   data: {
     loading: false,
     creatingVoice: false,
-    preparingBookCompletion: false,
     needsLogin: false,
     error: "",
     userId: "",
@@ -356,14 +348,6 @@ definePage<HomeData>()({
     if (!this.data.loading) {
       await this.loadHome();
     }
-  },
-
-  onHide() {
-    this.stopBookCompletionPreparation();
-  },
-
-  onUnload() {
-    this.stopBookCompletionPreparation();
   },
 
   onShareAppMessage() {
@@ -484,63 +468,20 @@ definePage<HomeData>()({
     await this.startVoiceChatWithMode("free_narration", "home_resume");
   },
 
-  async startBookCompletion() {
+  startBookCompletion() {
     if (!this.canStartVoiceChat(false)) {
       return;
     }
-    const token = ++this.bookCompletionPollToken;
-    setHomeData(this, {
-      creatingVoice: true,
-      preparingBookCompletion: true,
-      error: "",
+    wx.navigateTo({
+      url: pageUrl("/pages/book-completion/index", {
+        projectId: this.data.projectId,
+        projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
+      }),
     });
-    try {
-      let state = await prepareMemoirBookCompletion(this.data.projectId);
-      while (
-        (state.state === "preparing" || state.state === "needs_preparation")
-        && token === this.bookCompletionPollToken
-      ) {
-        await new Promise<void>((resolve) => setTimeout(resolve, BOOK_COMPLETION_POLL_INTERVAL_MS));
-        if (token !== this.bookCompletionPollToken) {
-          return;
-        }
-        state = state.state === "needs_preparation"
-          ? await prepareMemoirBookCompletion(this.data.projectId)
-          : await getMemoirBookCompletion(this.data.projectId);
-      }
-      if (token === this.bookCompletionPollToken) {
-        await this.handleBookCompletionState(state);
-      }
-    } catch (error) {
-      if (isAuthError(error)) {
-        switchToMe();
-        return;
-      }
-      setHomeData(this, {
-        error: error instanceof Error ? error.message : "下一题整理失败",
-      });
-    } finally {
-      if (token === this.bookCompletionPollToken) {
-        setHomeData(this, {
-          creatingVoice: false,
-          preparingBookCompletion: false,
-        });
-      }
-    }
   },
 
   async startHumanInterview() {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
-  },
-
-  stopBookCompletionPreparation() {
-    this.bookCompletionPollToken += 1;
-    if (this.data.preparingBookCompletion) {
-      setHomeData(this, {
-        creatingVoice: false,
-        preparingBookCompletion: false,
-      });
-    }
   },
 
   ensureVoiceAuthorization() {
@@ -568,46 +509,6 @@ definePage<HomeData>()({
       return false;
     }
     return true;
-  },
-
-  async handleBookCompletionState(state: MemoirBookCompletion) {
-    if (state.state === "ready" && state.task_id) {
-      if (!this.ensureVoiceAuthorization()) {
-        return;
-      }
-      await syncVoiceAuthorizationConsent();
-      await this.createAndOpenVoiceChat(
-        "guided_interview",
-        "home_resume",
-        "ai_interview",
-        "book_completion",
-        state.task_id,
-      );
-      return;
-    }
-    if (state.action === "open_chapter" && state.chapter_id) {
-      wx.navigateTo({
-        url: pageUrl("/pages/chapter-workspace/index", {
-          projectId: this.data.projectId,
-          chapterId: state.chapter_id,
-        }),
-      });
-      return;
-    }
-    if (state.action === "open_book") {
-      wx.switchTab({ url: "/pages/book/index" });
-      return;
-    }
-    if (state.state === "complete") {
-      wx.showModal({
-        title: state.headline,
-        content: state.detail,
-        showCancel: false,
-        confirmText: "知道了",
-      });
-      return;
-    }
-    setHomeData(this, { error: `${state.headline}。${state.detail}` });
   },
 
   async startVoiceChatWithMode(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 
 from fastapi import HTTPException
@@ -7,6 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import (
+    MemoirFollowupAnswerInterpretationStatus,
+    MemoirFollowupAnswerKind,
+)
 from app.domain.memoir.types import MemoirBookPlanStatus, MemoirChatMessageRole, MemoirSemanticCacheStatus
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -19,6 +24,7 @@ from app.models.memoir import (
 from app.schemas.memoir_book import (
     MemoirBookSourceRouteEvidence,
     MemoirBookSourceRouteResponse,
+    MemoirFollowupAnswerInterpretationResponse,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
@@ -35,19 +41,42 @@ from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter,
 )
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
+from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
 from app.services.memoir.source_cards import generate_or_reuse_source_card
 
 
-SYSTEM_PROMPT = "你是一位谨慎的中文回忆录素材整理编辑。你只根据给定上下文判断一条讲述是否应该进入回忆录章节。"
+SYSTEM_PROMPT = (
+    "你是一位谨慎的中文回忆录素材整理编辑。"
+    "你只根据给定上下文判断讲述的素材归属和补全回答用途。"
+)
 AI_SOURCE_ROUTER_UNAVAILABLE_MESSAGE = "AI 暂时无法判断讲述归属，请稍后重试。"
 MAX_SOURCE_TEXT_CHARS = 1800
 MAX_DRAFT_CONTEXT_CHARS = 500
 MAX_QUOTE_CHARS = 120
 MAX_RECENT_CONTEXT_MESSAGES = 8
 ALLOWED_MATERIAL_TYPES = {"memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"}
-ALLOWED_ACTIONS = {"assign_to_chapter", "suggest_new_chapter", "hold_for_review", "ignore"}
+ALLOWED_ACTIONS = {
+    "assign_to_chapter",
+    "record_as_context",
+    "suggest_new_chapter",
+    "hold_for_review",
+    "ignore",
+}
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class SourceRouteFollowupContext:
+    task_id: str
+    chapter_id: str | None
+    question: str
+    purpose: str
+    expected_answer_use: str
+    known_context_summary: str
+    story_id: str | None
+    story_title: str
+    story_summary: str
 
 
 def _latest_draft_text(chapter: MemoirBookPlanChapter) -> str:
@@ -287,6 +316,8 @@ def _build_route_prompt(
     question_text: str,
     conversation_context: str,
     chapters: list[dict[str, object]],
+    collection_chapter: MemoirBookPlanChapter | None = None,
+    followup_context: SourceRouteFollowupContext | None = None,
 ) -> str:
     source_card_lines: list[str] = []
     if source_card:
@@ -331,6 +362,40 @@ def _build_route_prompt(
             )
         )
 
+    followup_output = ""
+    followup_rules = ""
+    followup_details = "无"
+    if followup_context:
+        followup_output = """,
+  "followup_answer": {
+    "status": "resolved | needs_confirmation",
+    "answer_kind": "direct_narrative | clarification | fact_resolution | mixed | null",
+    "direct_narrative_text": "可直接作为新增叙事事实处理的原文片段，没有则为空字符串",
+    "clarification_text": "只用于解释已有内容含义或与章节关系的原文片段，没有则为空字符串",
+    "fact_resolution_text": "纠正、确认或否定已有事实的原文片段，没有则为空字符串",
+    "confirmation_question": "无法准确判断时，向用户提出的一句具体中文确认问题，否则为空字符串",
+    "reason": "一句中文理由"
+  }"""
+        followup_rules = """
+- 当前记录是对一个补全问题的回答，必须返回 followup_answer。
+- direct_narrative 表示回答提供了可以直接进入叙事事实层的新经历或新细节。
+- clarification 表示回答主要解释已有文字、事件或素材与章节的关系；它是编辑上下文，不是可直接拼入正文的新段落。
+- fact_resolution 表示回答纠正、确认或否定已有事实。
+- mixed 只在同一回答确实同时包含上述至少两类内容时使用，并按用途拆开。
+- 三个用途文本必须逐字、连续地来自当前讲述原文；不得改写、概括或补词。
+- 能准确拆分时 status=resolved；无法准确判断用途或无法可靠拆分时 status=needs_confirmation、answer_kind=null，三个用途文本留空，并给出具体确认问题。
+- needs_confirmation 时 action 必须是 hold_for_review，不得归章；不要猜测一个最可能用途。
+- 纯 clarification 或纯 fact_resolution 仍属于 memoir_content，但不会作为新正文素材摄取。
+"""
+        followup_details = f"""task_id: {followup_context.task_id}
+question: {followup_context.question}
+purpose: {followup_context.purpose}
+expected_answer_use: {followup_context.expected_answer_use}
+known_context_summary: {followup_context.known_context_summary or '无'}
+target_story_id: {followup_context.story_id or '无'}
+target_story_title: {followup_context.story_title or '无'}
+target_story_summary: {followup_context.story_summary or '无'}"""
+
     return f"""请判断“当前讲述记录”是否应该进入回忆录章节，并给出严格 JSON。
 
 输出 JSON 格式必须是：
@@ -343,7 +408,7 @@ def _build_route_prompt(
   "reason": "一句中文理由",
   "evidence": [
     {{"quote": "原文证据", "reason": "为什么支持判断"}}
-  ]
+  ]{followup_output}
 }}
 
 判断标准：
@@ -361,7 +426,15 @@ def _build_route_prompt(
 - 标题必须由这条讲述的真实回忆主题概括而来，不能截取问句、命令句、对 AI 的话；不能使用模板化“xxx的记忆”兜底。
 - 如果无法可靠命名新章节，使用 hold_for_review 且 suggested_title=null。
 - confidence 是你对 action 的把握，不是内容重要性。
+- 如果下面给出了“定向采集章节”，说明这条讲述来自该章的补全访谈。用途判断明确后，正文素材才会按采集目的收入该章；无法判断时必须等待用户确认。你仍需准确判断 material_type，不要把“想不起来”、操作指令或与 AI 的对话误判为回忆素材。
+{followup_rules}
 - 只输出 JSON，不要 Markdown，不要解释。
+
+定向采集章节：
+{f"{collection_chapter.id} / {collection_chapter.title}" if collection_chapter else "无"}
+
+补全任务上下文：
+{followup_details}
 
 当前讲述记录：
 - source_index: {source.source_index}
@@ -396,11 +469,79 @@ def _normalize_optional_text(value: object) -> str | None:
     return text or None
 
 
+def _followup_answer_from_payload(
+    payload: dict[str, object],
+    *,
+    source: SourceSegment,
+    context: SourceRouteFollowupContext,
+) -> MemoirFollowupAnswerInterpretationResponse:
+    raw = payload.get("followup_answer")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=502, detail="AI 补全回答结果缺少用途判断")
+    try:
+        status = MemoirFollowupAnswerInterpretationStatus(
+            str(raw.get("status") or "").strip()
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="AI 补全回答判断状态无效") from exc
+    if status == MemoirFollowupAnswerInterpretationStatus.PENDING:
+        raise HTTPException(status_code=502, detail="AI 不能返回未处理的补全回答状态")
+
+    reason = str(raw.get("reason") or "").strip()
+    if not reason:
+        raise HTTPException(status_code=502, detail="AI 补全回答结果缺少理由")
+    source_text = source.text.strip()
+    direct_text = str(raw.get("direct_narrative_text") or "").strip()
+    clarification_text = str(raw.get("clarification_text") or "").strip()
+    fact_text = str(raw.get("fact_resolution_text") or "").strip()
+    confirmation_question = str(raw.get("confirmation_question") or "").strip()
+
+    if status == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION:
+        if raw.get("answer_kind") is not None or any((direct_text, clarification_text, fact_text)):
+            raise HTTPException(status_code=502, detail="待确认的补全回答不能预设用途")
+        if not confirmation_question:
+            raise HTTPException(status_code=502, detail="待确认的补全回答缺少确认问题")
+        return MemoirFollowupAnswerInterpretationResponse(
+            task_id=context.task_id,
+            status=status,
+            confirmation_question=confirmation_question,
+            reason=reason,
+        )
+
+    try:
+        answer_kind = MemoirFollowupAnswerKind(str(raw.get("answer_kind") or "").strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail="AI 补全回答用途无效") from exc
+    try:
+        validate_resolved_answer_parts(
+            source_text=source_text,
+            answer_kind=answer_kind,
+            direct_narrative_text=direct_text,
+            clarification_text=clarification_text,
+            fact_resolution_text=fact_text,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=502, detail=f"AI 补全回答拆分无效：{exc}") from exc
+    if confirmation_question:
+        raise HTTPException(status_code=502, detail="已判定的补全回答不能再返回确认问题")
+    return MemoirFollowupAnswerInterpretationResponse(
+        task_id=context.task_id,
+        status=status,
+        answer_kind=answer_kind,
+        direct_narrative_text=direct_text,
+        clarification_text=clarification_text,
+        fact_resolution_text=fact_text,
+        reason=reason,
+    )
+
+
 def _route_response_from_payload(
     payload: dict[str, object],
     *,
     source: SourceSegment,
     chapters_by_id: dict[str, MemoirBookPlanChapter],
+    collection_chapter: MemoirBookPlanChapter | None = None,
+    followup_context: SourceRouteFollowupContext | None = None,
 ) -> MemoirBookSourceRouteResponse:
     material_type = str(payload.get("material_type") or "").strip()
     action = str(payload.get("action") or "").strip()
@@ -408,10 +549,45 @@ def _route_response_from_payload(
         raise HTTPException(status_code=502, detail="AI 归章结果类型无效")
     if material_type != "memoir_content" and action != "ignore":
         raise HTTPException(status_code=502, detail="AI 将非回忆素材错误标记为可归章")
+    if action == "record_as_context" and followup_context is None:
+        raise HTTPException(status_code=502, detail="普通素材不能标记为补全上下文")
+
+    followup_answer = (
+        _followup_answer_from_payload(payload, source=source, context=followup_context)
+        if followup_context and material_type == "memoir_content"
+        else None
+    )
+    if followup_context and material_type == "memoir_content" and followup_answer is None:
+        raise HTTPException(status_code=502, detail="补全回答缺少用途判断")
 
     target_chapter_id = _normalize_optional_text(payload.get("target_chapter_id"))
     target_chapter_title = None
-    if action == "assign_to_chapter":
+    if (
+        followup_answer is not None
+        and followup_answer.status == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION
+    ):
+        action = "hold_for_review"
+        if collection_chapter is not None:
+            target_chapter_id = collection_chapter.id
+            target_chapter_title = collection_chapter.title
+        elif target_chapter_id and target_chapter_id in chapters_by_id:
+            target_chapter_title = chapters_by_id[target_chapter_id].title
+    elif followup_answer is not None and (
+        followup_answer.clarification_text or followup_answer.fact_resolution_text
+    ):
+        action = "record_as_context"
+        if collection_chapter is not None:
+            target_chapter_id = collection_chapter.id
+            target_chapter_title = collection_chapter.title
+    elif (
+        collection_chapter is not None
+        and followup_answer is not None
+        and material_type == "memoir_content"
+    ):
+        action = "assign_to_chapter"
+        target_chapter_id = collection_chapter.id
+        target_chapter_title = collection_chapter.title
+    elif action == "assign_to_chapter":
         if not target_chapter_id or target_chapter_id not in chapters_by_id:
             raise HTTPException(status_code=502, detail="AI 返回的目标章节无效")
         target_chapter_title = chapters_by_id[target_chapter_id].title
@@ -421,6 +597,8 @@ def _route_response_from_payload(
         target_chapter_title = chapters_by_id[target_chapter_id].title
 
     suggested_title = _normalize_optional_text(payload.get("suggested_title"))
+    if followup_answer is not None:
+        suggested_title = None
     if action == "suggest_new_chapter" and not suggested_title:
         raise HTTPException(status_code=502, detail="AI 建议新章节但没有给出标题")
     if action != "suggest_new_chapter":
@@ -455,17 +633,38 @@ def _route_response_from_payload(
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         raise HTTPException(status_code=502, detail="AI 归章结果缺少理由")
+    if (
+        collection_chapter is not None
+        and followup_answer is not None
+        and followup_answer.status == MemoirFollowupAnswerInterpretationStatus.RESOLVED
+    ):
+        confidence = max(confidence, 0.95)
+        reason = f"该讲述来自“{collection_chapter.title}”的补全访谈；{reason}"
 
     return MemoirBookSourceRouteResponse(
         material_type=material_type,
         action=action,
         utterance_id=source.utterance_id,
         source_index=source.source_index,
-        target_chapter_id=target_chapter_id if action == "assign_to_chapter" else None,
-        target_chapter_title=target_chapter_title if action == "assign_to_chapter" else None,
+        target_chapter_id=(
+            target_chapter_id
+            if action == "assign_to_chapter" or followup_answer is not None
+            else None
+        ),
+        target_chapter_title=(
+            target_chapter_title
+            if action == "assign_to_chapter" or followup_answer is not None
+            else None
+        ),
         suggested_title=suggested_title,
         confidence=round(confidence, 3),
         reason=reason,
+        assignment_basis=(
+            "completion_task"
+            if followup_answer is not None
+            else "ai"
+        ),
+        followup_answer=followup_answer,
         evidence=evidence,
     )
 
@@ -478,6 +677,7 @@ async def route_book_source(
     utterance_id: str,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    followup_context: SourceRouteFollowupContext | None = None,
 ) -> MemoirBookSourceRouteResponse:
     await load_memoir_project(db, project_id, user_id)
     plan = await _load_plan(db, project_id)
@@ -497,6 +697,13 @@ async def route_book_source(
     chapters = sorted_chapters(plan)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     chapters_by_id = {chapter.id: chapter for chapter in chapters}
+    collection_chapter = (
+        chapters_by_id.get(followup_context.chapter_id)
+        if followup_context and followup_context.chapter_id
+        else None
+    )
+    if followup_context and followup_context.chapter_id and collection_chapter is None:
+        raise HTTPException(status_code=409, detail="补全访谈的目标章节已不存在")
     question_text, conversation_context = await _conversation_context(db, source)
     route_source_card = await _generate_or_reuse_route_source_card(
         db,
@@ -523,6 +730,8 @@ async def route_book_source(
             )
             for chapter in chapters
         ],
+        collection_chapter=collection_chapter,
+        followup_context=followup_context,
     )
 
     client = ai_client
@@ -546,4 +755,10 @@ async def route_book_source(
         raise HTTPException(status_code=503, detail=AI_SOURCE_ROUTER_UNAVAILABLE_MESSAGE) from exc
 
     payload = _route_payload_from_llm(content)
-    return _route_response_from_payload(payload, source=source, chapters_by_id=chapters_by_id)
+    return _route_response_from_payload(
+        payload,
+        source=source,
+        chapters_by_id=chapters_by_id,
+        collection_chapter=collection_chapter,
+        followup_context=followup_context,
+    )

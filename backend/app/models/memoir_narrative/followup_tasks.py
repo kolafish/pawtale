@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -18,6 +19,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.domain.memoir.narrative_types import (
+    MemoirFollowupAnswerInterpretationStatus,
+    MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
     MemoirFollowupTaskUtteranceRole,
@@ -86,6 +89,9 @@ class MemoirFollowupTask(Base):
     )
     story_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     target_slot: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    answer_use: Mapped[str] = mapped_column(
+        String(24), default=MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value, nullable=False
+    )
     question: Mapped[str] = mapped_column(Text, nullable=False)
     purpose: Mapped[str] = mapped_column(Text, nullable=False)
     known_context_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -179,4 +185,20 @@ class MemoirFollowupTaskUtterance(Base):
         String(36), ForeignKey("memoir_voice_utterances.id"), nullable=False
     )
     result_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    is_assignment_snapshot: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    interpretation_status: Mapped[str] = mapped_column(
+        String(24),
+        default=MemoirFollowupAnswerInterpretationStatus.PENDING.value,
+        nullable=False,
+    )
+    answer_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    direct_narrative_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    clarification_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    fact_resolution_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    confirmation_question: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    interpretation_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

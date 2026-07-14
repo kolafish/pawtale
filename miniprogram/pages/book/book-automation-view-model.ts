@@ -7,7 +7,7 @@ export interface BookAutomationEventView {
   eventIds: string[];
   eventIdsText: string;
   eventType: MemoirAutomationEvent["event_type"];
-  actionKind: "acknowledge" | "acknowledge_group" | "review_source" | "none";
+  actionKind: "acknowledge" | "acknowledge_group" | "review_source" | "confirm_answer" | "none";
   primaryUtteranceId: string;
   titleText: string;
   summaryText: string;
@@ -62,6 +62,9 @@ function automationEventTitle(event: MemoirAutomationEvent): string {
     return "已自动归章";
   }
   if (event.event_type === "source_held") {
+    if (followupAnswerNeedsConfirmation(event)) {
+      return "回答用途待确认";
+    }
     return event.status === "needs_review" ? "待整理讲述" : "整理建议已处理";
   }
   if (event.event_type === "chapter_auto_revised") {
@@ -131,6 +134,9 @@ function automationEventActionText(event: MemoirAutomationEvent): string {
     return "处理中";
   }
   if (event.status === "needs_review" && event.event_type === "source_held") {
+    if (followupAnswerNeedsConfirmation(event)) {
+      return "去确认";
+    }
     return "去整理";
   }
   if (event.status === "needs_review") {
@@ -141,6 +147,17 @@ function automationEventActionText(event: MemoirAutomationEvent): string {
 
 function objectValue(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function followupAnswerNeedsConfirmation(event: MemoirAutomationEvent): boolean {
+  if (event.event_type !== "source_held" || event.status !== "needs_review") {
+    return false;
+  }
+  const metadata = objectValue(event.metadata_json);
+  const route = Object.keys(objectValue(metadata.route)).length
+    ? objectValue(metadata.route)
+    : metadata;
+  return stringValue(objectValue(route.followup_answer).status) === "needs_confirmation";
 }
 
 function objectList(value: unknown): Record<string, unknown>[] {
@@ -437,6 +454,9 @@ function automationEventActionKind(event: MemoirAutomationEvent): BookAutomation
     return "none";
   }
   if (event.status === "needs_review") {
+    if (followupAnswerNeedsConfirmation(event)) {
+      return "confirm_answer";
+    }
     return event.event_type === "source_held" && automationEventPrimaryUtteranceId(event)
       ? "review_source"
       : "none";

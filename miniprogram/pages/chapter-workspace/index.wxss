@@ -1115,8 +1115,7 @@
   line-height: 34rpx;
 }
 
-.followup-question,
-.followup-purpose {
+.followup-question {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -1127,13 +1126,6 @@
   font-size: 31rpx;
   font-weight: 700;
   line-height: 46rpx;
-}
-
-.followup-purpose {
-  margin-top: 10rpx;
-  color: #675d58;
-  font-size: 25rpx;
-  line-height: 40rpx;
 }
 
 .followup-interview-button {

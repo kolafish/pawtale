@@ -18,17 +18,22 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir import automation_events
 from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
+    EDITING_JOB_FAILURE_SOURCE,
+    RESOLUTION_KEY,
+    RESOLUTION_REASON_KEY,
+    RESOLVED_AT_KEY,
     VOICE_PLAYED_AT_KEY,
     VOICE_PLAYED_MESSAGE_ID_KEY,
     VOICE_PLAYED_SESSION_ID_KEY,
     VOICE_SELECTED_AT_KEY,
     VOICE_SELECTED_MESSAGE_ID_KEY,
     VOICE_SELECTED_SESSION_ID_KEY,
+    _event_signature,
 )
 from app.services.memoir.job_leases import (
     JobLease,
@@ -52,7 +57,7 @@ class EditingJobResult:
 
 
 _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
-EDITING_JOB_FAILURE_EVENT_SOURCE = "editing_job_failure"
+EDITING_JOB_RECOVERY_REASON = "editing_job_succeeded"
 
 _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
@@ -111,7 +116,7 @@ async def _record_job_failure_event(
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     error = _compact_error_message(error_message)
     metadata: dict[str, object] = {
-        "source": EDITING_JOB_FAILURE_EVENT_SOURCE,
+        "source": EDITING_JOB_FAILURE_SOURCE,
         "editing_job_id": job.id,
         "job_type": job_type.value,
         "dedupe_key": job.dedupe_key or "",
@@ -148,6 +153,37 @@ async def _record_job_failure_event(
     event.metadata_json = updated_metadata
     db.add(event)
     await db.flush()
+
+
+async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) -> None:
+    try:
+        job_type = MemoirEditingJobType(job.job_type)
+    except ValueError:
+        return
+    event_type = _FAILURE_EVENT_TYPES.get(job_type)
+    if event_type is None:
+        return
+    signature = f"editing_job_failed:{job.id}"
+    events = (
+        await db.scalars(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.project_id == job.project_id,
+                MemoirAutomationEvent.event_type == event_type.value,
+            )
+        )
+    ).all()
+    for event in events:
+        if _event_signature(event.metadata_json or {}) != signature:
+            continue
+        event.metadata_json = {
+            **(event.metadata_json or {}),
+            RESOLUTION_KEY: "confirmed",
+            RESOLUTION_REASON_KEY: EDITING_JOB_RECOVERY_REASON,
+            RESOLVED_AT_KEY: datetime.now(UTC).isoformat(),
+        }
+        db.add(event)
+        await db.flush()
+        return
 
 
 def register_editing_job_handler(
@@ -419,6 +455,8 @@ async def _mark_job(
         return False
     if status == MemoirEditingJobStatus.FAILED:
         await _record_job_failure_event(db, job, error_message=error_message)
+    elif status == MemoirEditingJobStatus.SUCCEEDED:
+        await _resolve_job_failure_event(db, job)
     await db.commit()
     return True
 
@@ -512,17 +550,53 @@ async def run_due_editing_jobs(
     job_type: MemoirEditingJobType | None = None,
     project_id: str | None = None,
 ) -> int:
+    _, succeeded = await _run_due_editing_job_batch(
+        session_maker,
+        limit=limit,
+        job_type=job_type,
+        project_id=project_id,
+    )
+    return succeeded
+
+
+async def _run_due_editing_job_batch(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    limit: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
+) -> tuple[int, int]:
     async with session_maker() as db:
+        serialize_writes = db.get_bind().dialect.name == "sqlite"
         leases = await claim_due_editing_jobs(
             db,
-            limit=limit,
+            limit=1 if serialize_writes else limit,
             job_type=job_type,
             project_id=project_id,
         )
-    results = await asyncio.gather(
-        *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
-    )
-    return sum(results)
+    if serialize_writes:
+        results = [
+            await _run_claimed_editing_job(session_maker, lease)
+            for lease in leases
+        ]
+    else:
+        results = await asyncio.gather(
+            *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
+        )
+    return len(leases), sum(results)
+
+
+async def run_available_editing_jobs(
+    session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> int:
+    succeeded = 0
+    while True:
+        claimed, batch_succeeded = await _run_due_editing_job_batch(session_maker)
+        succeeded += batch_succeeded
+        if claimed == 0 or (should_stop is not None and should_stop()):
+            return succeeded
 
 
 async def editing_worker_loop(stop_event: asyncio.Event) -> None:
@@ -530,7 +604,7 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
     while not stop_event.is_set():
         try:
-            await run_due_editing_jobs()
+            await run_available_editing_jobs(should_stop=stop_event.is_set)
         except Exception:
             logger.exception("memoir editing worker tick failed")
         try:

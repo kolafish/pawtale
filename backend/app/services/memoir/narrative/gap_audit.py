@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -26,12 +27,7 @@ from app.services.memoir.narrative.gap_rules import (
 GAP_AUDIT_ENGINE_VERSION = "1"
 
 
-def chapter_gap_audit_signature(
-    context: ChapterAuditContext,
-    *,
-    include_semantic_audit: bool,
-    ai_model: str | None,
-) -> str:
+def chapter_gap_audit_content_signature(context: ChapterAuditContext) -> str:
     payload = {
         "engine_version": GAP_AUDIT_ENGINE_VERSION,
         "chapter_id": context.chapter.id,
@@ -78,11 +74,64 @@ def chapter_gap_audit_signature(
             for story_id, slots in sorted(context.slots.items())
             for slot in sorted(slots.values(), key=lambda item: item.slot_key)
         ],
+    }
+    encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def chapter_gap_audit_signature(
+    context: ChapterAuditContext,
+    *,
+    include_semantic_audit: bool,
+    ai_model: str | None,
+) -> str:
+    payload = {
+        "content_signature": chapter_gap_audit_content_signature(context),
         "semantic": include_semantic_audit,
         "ai_model": ai_model or "default",
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return sha256(encoded.encode("utf-8")).hexdigest()
+
+
+async def current_chapter_gap_audit_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    content_signature: str,
+) -> MemoirEditingJob | None:
+    jobs = list(
+        (
+            await db.scalars(
+                select(MemoirEditingJob)
+                .where(
+                    MemoirEditingJob.project_id == project_id,
+                    MemoirEditingJob.chapter_id == chapter_id,
+                    MemoirEditingJob.job_type
+                    == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+                )
+                .order_by(MemoirEditingJob.updated_at.desc(), MemoirEditingJob.created_at.desc())
+                .limit(20)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    )
+    current = [
+        job
+        for job in jobs
+        if isinstance(job.payload_json, dict)
+        and job.payload_json.get("content_signature") == content_signature
+    ]
+    for statuses in (
+        {MemoirEditingJobStatus.SUCCEEDED.value},
+        {MemoirEditingJobStatus.PENDING.value, MemoirEditingJobStatus.RUNNING.value},
+        {MemoirEditingJobStatus.FAILED.value, MemoirEditingJobStatus.SKIPPED.value},
+    ):
+        match = next((job for job in current if job.status in statuses), None)
+        if match is not None:
+            return match
+    return None
 
 
 def chapter_gap_audit_dedupe_key(
@@ -123,6 +172,7 @@ async def enqueue_chapter_gap_audit(
             "include_semantic_audit": include_semantic_audit,
             "ai_model": ai_model,
             "input_signature": signature,
+            "content_signature": chapter_gap_audit_content_signature(context),
             "engine_version": GAP_AUDIT_ENGINE_VERSION,
             "source": source,
         },
@@ -152,6 +202,22 @@ async def run_chapter_gap_audit_job(
         chapter_id=chapter_id,
     )
     deterministic_candidates = evaluate_deterministic_gaps(context)
+    semantic_candidates = []
+    provider = None
+    model = None
+    semantic_error: Exception | None = None
+    include_semantic = bool(payload.get("include_semantic_audit", True))
+    if include_semantic:
+        try:
+            semantic_candidates, provider, model = await gap_semantic.evaluate_semantic_gaps(
+                context,
+                ai_model=(str(payload["ai_model"]) if payload.get("ai_model") else None),
+                ai_client=semantic_ai_client,
+            )
+        except Exception as exc:
+            semantic_error = exc
+
+    # Do not hold SQLite's writer lock while waiting for the semantic provider.
     _, deterministic_created = await gaps.upsert_gaps(
         db,
         project_id=job.project_id,
@@ -163,44 +229,34 @@ async def run_chapter_gap_audit_job(
         chapter_id=chapter_id,
         complete_candidates=deterministic_candidates,
     )
-    semantic_candidates = []
     semantic_created = 0
-    provider = None
-    model = None
-    include_semantic = bool(payload.get("include_semantic_audit", True))
-    if include_semantic:
-        try:
-            semantic_candidates, provider, model = await gap_semantic.evaluate_semantic_gaps(
-                context,
-                ai_model=(str(payload["ai_model"]) if payload.get("ai_model") else None),
-                ai_client=semantic_ai_client,
-            )
-            _, semantic_created = await gaps.upsert_gaps(
-                db,
-                project_id=job.project_id,
-                candidates=semantic_candidates,
-            )
-        except Exception as exc:
-            await followup_jobs.schedule_followup_task_generation(
-                db,
-                project_id=job.project_id,
-                chapter_id=chapter_id,
-                source="chapter_gap_audit_partial",
-            )
-            return EditingJobResult(
-                status=MemoirEditingJobStatus.FAILED,
-                result_json={
-                    "chapter_id": chapter_id,
-                    "deterministic_gap_count": len(deterministic_candidates),
-                    "deterministic_created_count": deterministic_created,
-                    "deterministic_resolved_count": deterministic_resolved,
-                    "semantic_gap_count": 0,
-                    "semantic_created_count": 0,
-                    "partial_result": True,
-                    "engine_version": GAP_AUDIT_ENGINE_VERSION,
-                },
-                error_message=str(exc),
-            )
+    if semantic_error is not None:
+        await followup_jobs.schedule_followup_task_generation(
+            db,
+            project_id=job.project_id,
+            chapter_id=chapter_id,
+            source="chapter_gap_audit_partial",
+        )
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.FAILED,
+            result_json={
+                "chapter_id": chapter_id,
+                "deterministic_gap_count": len(deterministic_candidates),
+                "deterministic_created_count": deterministic_created,
+                "deterministic_resolved_count": deterministic_resolved,
+                "semantic_gap_count": 0,
+                "semantic_created_count": 0,
+                "partial_result": True,
+                "engine_version": GAP_AUDIT_ENGINE_VERSION,
+            },
+            error_message=str(semantic_error),
+        )
+    if semantic_candidates:
+        _, semantic_created = await gaps.upsert_gaps(
+            db,
+            project_id=job.project_id,
+            candidates=semantic_candidates,
+        )
 
     await followup_jobs.schedule_followup_task_generation(
         db,

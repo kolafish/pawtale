@@ -269,6 +269,7 @@ async def switch_session_task(
         db,
         project_id=project_id,
         preferred_chapter_id=current.chapter_id,
+        eligible_chapter_ids={current.chapter_id} if current.chapter_id else None,
         avoid_story_id=current.story_id,
     )
     voice_session.current_followup_task_id = None

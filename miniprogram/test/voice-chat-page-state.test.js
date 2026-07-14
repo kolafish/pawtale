@@ -197,8 +197,11 @@ test("book completion renders one task question without disabling unrelated reco
   });
 
   assert.equal(patch.showCompletionTaskPanel, true);
-  assert.equal(patch.showAssistantPanel, false);
+  assert.equal(patch.showAssistantPanel, true);
+  assert.equal(patch.showAssistantOpening, false);
+  assert.equal(patch.assistantDisplayText, "模型生成的另一个问法");
   assert.equal(patch.completionTaskQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
+  assert.equal("completionTaskPurposeText" in patch, false);
   assert.equal(patch.showCompletionTaskActions, true);
   assert.equal(patch.completionTaskControlsDisabled, true);
   assert.equal(patch.micButtonDisabled, false);
@@ -221,6 +224,21 @@ test("book completion without a task exposes the invalid session and disables re
   assert.equal(patch.showAssistantPanel, false);
   assert.equal(patch.micButtonDisabled, true);
   assert.equal(patch.micButtonText, "请先保存离开");
+});
+
+test("deferred book completion returns to the whole-book overview", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    sessionGoal: "book_completion",
+    completionTask: {
+      id: "task-1",
+      question: "请按顺序讲讲这段经历。",
+      status: "deferred",
+    },
+  });
+
+  assert.equal(patch.showCompletionTaskContinue, true);
+  assert.equal(patch.completionTaskStatusText, "已留到以后再补");
 });
 
 test("voice chat view patch adds focused large text root classes", () => {

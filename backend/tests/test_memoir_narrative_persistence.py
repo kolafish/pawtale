@@ -189,7 +189,10 @@ async def test_narrative_migration_adds_and_enforces_chapter_archive_lifecycle()
                 )
             )
             await conn.commit()
-            with pytest.raises(IntegrityError, match="invalid memoir chapter archive state"):
+            with pytest.raises(
+                IntegrityError,
+                match="invalid memoir chapter archive state",
+            ):
                 await conn.execute(
                     text(
                         "UPDATE memoir_book_plan_chapters "
@@ -219,7 +222,9 @@ async def test_narrative_migration_replaces_stale_chapter_node_trigger_once():
             await conn.run_sync(Base.metadata.create_all)
         await migrate_memoir_narrative_schema(engine)
         async with engine.begin() as conn:
-            await conn.execute(text("DROP TRIGGER memoir_chapter_nodes_immutable_update"))
+            await conn.execute(
+                text("DROP TRIGGER memoir_chapter_nodes_immutable_update")
+            )
             await conn.execute(
                 text(
                     """
@@ -249,6 +254,154 @@ async def test_narrative_migration_replaces_stale_chapter_node_trigger_once():
             )
         assert "NEW.status IS OLD.status" not in trigger_sql
         assert "NEW.title IS OLD.title" in trigger_sql
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_adds_followup_assignment_snapshot_column_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_followup_task_utterances "
+                    "DROP COLUMN is_assignment_snapshot"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_followup_task_utterances.is_assignment_snapshot"
+        ]
+        assert second["changed_columns"] == []
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_adds_followup_answer_interpretation_columns_once():
+    register_models()
+    engine = _sqlite_engine()
+    columns = [
+        "interpretation_status",
+        "answer_kind",
+        "direct_narrative_text",
+        "clarification_text",
+        "fact_resolution_text",
+        "confirmation_question",
+        "interpretation_reason",
+    ]
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_followup_task_utterances"))
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_task_utterances ("
+                    "id VARCHAR(36) PRIMARY KEY NOT NULL, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "task_id VARCHAR(36) NOT NULL, "
+                    "utterance_id VARCHAR(36) NOT NULL, "
+                    "result_role VARCHAR(24) NOT NULL, "
+                    "is_assignment_snapshot BOOLEAN NOT NULL DEFAULT 0, "
+                    "created_at DATETIME NOT NULL)"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            f"memoir_followup_task_utterances.{column}" for column in columns
+        ]
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            actual_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_followup_task_utterances)")
+                    )
+                ).fetchall()
+            }
+        assert set(columns) <= actual_columns
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_backfills_followup_answer_use_from_gap_type():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, email, password_hash, role, display_name, created_at, updated_at) "
+                    "VALUES ('answer-use-user', 'answer-use@example.com', 'hash', 'user', "
+                    "'Answer Use User', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO projects "
+                    "(id, user_id, type, title, metadata_json, created_at, updated_at) "
+                    "VALUES ('answer-use-project', 'answer-use-user', 'memoir', "
+                    "'Answer Use Project', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text("ALTER TABLE memoir_followup_tasks DROP COLUMN answer_use")
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gaps "
+                    "(id, project_id, scope_type, primary_story_id, primary_chapter_id, "
+                    "gap_type, severity, target_slot, title, description, fingerprint, "
+                    "status, detected_by, detection_count, resolution_note, resolved_by, "
+                    "resolved_by_user_id, resolved_at, first_detected_at, last_detected_at, "
+                    "created_at, updated_at) VALUES "
+                    "('answer-use-gap', 'answer-use-project', 'book', NULL, NULL, "
+                    "'causality', 'medium', '', '章节关系不清楚', '', "
+                    "'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', "
+                    "'open', 'ai', 1, '', NULL, NULL, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_tasks "
+                    "(id, project_id, gap_id, chapter_id, story_id, target_slot, question, "
+                    "purpose, known_context_summary, priority, status, assigned_session_id, "
+                    "defer_until, defer_reason, created_by, started_at, completed_at, "
+                    "created_at, updated_at) VALUES "
+                    "('answer-use-task', 'answer-use-project', 'answer-use-gap', NULL, NULL, "
+                    "'', '这件事和本章有什么关系？', '确认章节关系', '', 10, 'pending', "
+                    "NULL, NULL, '', 'system', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == ["memoir_followup_tasks.answer_use"]
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            answer_use = (
+                await conn.execute(
+                    text(
+                        "SELECT answer_use FROM memoir_followup_tasks "
+                        "WHERE id = 'answer-use-task'"
+                    )
+                )
+            ).scalar_one()
+        assert answer_use == "clarification"
     finally:
         await engine.dispose()
 

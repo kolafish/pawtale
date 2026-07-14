@@ -528,6 +528,10 @@ async def generate_or_reuse_chapter_card(
             return existing
 
     try:
+        # Stale-card updates are an independent cache transition. Persist them
+        # before waiting on the provider so SQLite does not hold a write lock
+        # for the duration of the network call.
+        await db.commit()
         generated = await generate_chapter_card_payload(
             context=context,
             ai_model=ai_model,
@@ -555,6 +559,7 @@ async def generate_or_reuse_chapter_card(
         )
     except Exception as exc:
         logger.exception("memoir chapter card generation failed chapter_id=%s", chapter_id)
+        await db.rollback()
         return await upsert_chapter_card(
             db,
             project_id=project_id,

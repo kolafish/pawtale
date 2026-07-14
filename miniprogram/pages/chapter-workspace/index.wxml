@@ -589,7 +589,6 @@
             <text class="status-label">{{task.statusText}}</text>
           </view>
           <text class="followup-question">{{task.question}}</text>
-          <text wx:if="{{task.purpose}}" class="followup-purpose">{{task.purpose}}</text>
           <button
             wx:if="{{task.canInterview}}"
             class="followup-interview-button"

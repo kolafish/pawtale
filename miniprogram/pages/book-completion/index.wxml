@@ -1,0 +1,43 @@
+<view class="completion-page">
+  <view class="page-intro">
+    <text class="page-kicker">全书补全</text>
+    <text class="page-title">{{headline}}</text>
+    <text class="page-detail">{{detail}}</text>
+    <text wx:if="{{progressText}}" class="progress-text">{{progressText}}</text>
+  </view>
+
+  <view wx:if="{{error}}" class="error-strip">{{error}}</view>
+  <view wx:if="{{loading}}" class="loading-state">正在查看全书...</view>
+
+  <view wx:else class="chapter-list">
+    <view
+      wx:for="{{chapters}}"
+      wx:key="chapter_id"
+      class="{{item.chapterClass}}"
+      data-chapter-id="{{item.chapter_id}}"
+      bindtap="tapChapter"
+      aria-role="button"
+      aria-disabled="{{item.disabled}}"
+    >
+      <view class="chapter-heading">
+        <text class="chapter-order">第 {{index + 1}} 章</text>
+        <text class="chapter-state">{{item.stateText}}</text>
+      </view>
+      <text class="chapter-title">{{item.title}}</text>
+      <text class="chapter-headline">{{item.headline}}</text>
+      <text class="chapter-detail">{{item.detail}}</text>
+      <view wx:if="{{item.focus_areas.length}}" class="focus-list">
+        <text class="focus-label">最值得补充</text>
+        <text wx:for="{{item.focus_areas}}" wx:key="*this" class="focus-item">{{item}}</text>
+      </view>
+      <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
+        {{item.actionText}}
+      </view>
+    </view>
+
+    <view wx:if="{{!chapters.length}}" class="empty-state">
+      <text>这本书还没有章节。</text>
+      <text>先到书稿页确定章节，再回来补全。</text>
+    </view>
+  </view>
+</view>

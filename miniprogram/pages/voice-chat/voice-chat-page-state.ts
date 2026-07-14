@@ -124,7 +124,6 @@ export interface VoiceChatData {
   completionTaskPanelClass: string;
   completionTaskStatusText: string;
   completionTaskQuestionText: string;
-  completionTaskPurposeText: string;
   showCompletionTaskActions: boolean;
   showCompletionTaskContinue: boolean;
   completionTaskControlsDisabled: boolean;
@@ -269,7 +268,6 @@ export function initialVoiceChatData(): VoiceChatData {
     completionTaskPanelClass: "completion-task-panel",
     completionTaskStatusText: "",
     completionTaskQuestionText: "",
-    completionTaskPurposeText: "",
     showCompletionTaskActions: false,
     showCompletionTaskContinue: false,
     completionTaskControlsDisabled: false,
@@ -333,7 +331,6 @@ export type VoiceChatViewPatch = Pick<
   | "completionTaskPanelClass"
   | "completionTaskStatusText"
   | "completionTaskQuestionText"
-  | "completionTaskPurposeText"
   | "showCompletionTaskActions"
   | "showCompletionTaskContinue"
   | "completionTaskControlsDisabled"
@@ -425,7 +422,6 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     && !state.completionTask;
   const showCompletionTaskPanel = isBookCompletion;
   const showAssistantPanel = !isHumanInterview
-    && !isBookCompletion
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview
@@ -469,7 +465,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (isBookCompletion && !state.recording && !assistantBusy) {
     liveDisplayText = state.latestTranscriptText
       || (state.completionTask
-        ? "回答上面这一个问题就好"
+        ? "按您记得的顺序讲一段就好"
         : (state.completionTaskLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"));
   }
   let controlHintText = isHumanInterview
@@ -532,6 +528,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const completionTaskStatus = state.completionTask?.status;
   const showCompletionTaskActions = completionTaskStatus === "pending" || completionTaskStatus === "in_progress";
   const showCompletionTaskContinue = completionTaskStatus === "answered"
+    || completionTaskStatus === "deferred"
     || completionTaskStatus === "cannot_recall"
     || completionTaskStatus === "excluded";
   const completionTaskControlsDisabled = Boolean(state.completionTaskAction) || state.recording;
@@ -544,7 +541,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
     topModeLabel: isBookCompletion ? (isHumanInterview ? "人工补访" : "补全成书") : (isHumanInterview ? "人工访谈" : "AI 访谈"),
-    topSubtitle: isBookCompletion ? "一次只补一个问题" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
+    topSubtitle: isBookCompletion ? "一次补完整一段经历" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
@@ -559,15 +556,14 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     completionTaskPanelClass,
     completionTaskStatusText: completionTaskStatusText(state),
     completionTaskQuestionText: state.completionTask?.question || "本次问题没有准备好",
-    completionTaskPurposeText: state.completionTask?.purpose
-      || (completionUnavailable ? "请保存离开后，从首页重新进入补全成书。" : ""),
     showCompletionTaskActions,
     showCompletionTaskContinue,
     completionTaskControlsDisabled,
     completionTaskActionText: state.completionTaskAction ? "正在处理" : "",
     assistantPanelClass: state.followUpError ? "assistant-panel error-state" : "assistant-panel",
-    assistantLabelText: state.followUpError ? "小余没说好" : "小余想听您讲讲",
-    showAssistantOpening: !state.latestTranscriptText
+    assistantLabelText: state.followUpError ? "小余没说好" : (isBookCompletion ? "小余正在问这一章" : "小余想听您讲讲"),
+    showAssistantOpening: !isBookCompletion
+      && !state.latestTranscriptText
       && !state.followUpLoading
       && !state.followUpError
       && !state.selectedOpeningTopicText,
@@ -579,7 +575,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showTTSProgress: Boolean(state.assistantPromptText && state.followUpTTSPlaying),
     replayButtonText: state.followUpAudioFileId ? "重听一遍" : (state.followUpTTSError ? "重试朗读" : "读给我听"),
     followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),
-    showSkipFollowUp: Boolean(state.assistantPromptText && !state.followUpLoading && !state.followUpError),
+    showSkipFollowUp: !isBookCompletion
+      && Boolean(state.assistantPromptText && !state.followUpLoading && !state.followUpError),
     showStageStatus,
     stageStatusClass: state.error ? "stage-status error" : (state.recording ? "stage-status listening" : "stage-status"),
     stageStatusText,

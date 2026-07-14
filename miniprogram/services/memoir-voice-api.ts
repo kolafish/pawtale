@@ -1,6 +1,7 @@
 export * from "./memoir-audio-api";
 export * from "./memoir-book-api";
 export * from "./memoir-book-completion-api";
+export * from "./memoir-book-source-review-api";
 export * from "./memoir-chapter-workspace-api";
 export * from "./memoir-draft-block-api";
 export * from "./memoir-followup-task-api";

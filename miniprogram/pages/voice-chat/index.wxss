@@ -196,7 +196,6 @@
 }
 
 .completion-task-question,
-.completion-task-purpose,
 .completion-task-error,
 .completion-task-action-state {
   display: block;
@@ -210,14 +209,6 @@
   font-weight: 700;
   line-height: 1.42;
   text-wrap: balance;
-}
-
-.completion-task-purpose {
-  margin-top: 14rpx;
-  color: #675d58;
-  font-size: 27rpx;
-  line-height: 42rpx;
-  text-wrap: pretty;
 }
 
 .completion-task-error {
@@ -261,6 +252,25 @@
   transition-property: transform, background-color, opacity;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
+}
+
+.voice-chat-page.book-completion .completion-task-panel {
+  padding: 22rpx 24rpx;
+  border-left: 6rpx solid #bd7b6f;
+  border-radius: 8rpx;
+  background: #fffaf5;
+  box-shadow: none;
+}
+
+.voice-chat-page.book-completion .completion-task-question {
+  margin-top: 12rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 44rpx;
+}
+
+.voice-chat-page.book-completion .completion-task-actions {
+  margin-top: 18rpx;
 }
 
 .completion-task-actions button::after,
@@ -1165,7 +1175,6 @@
   line-height: 82rpx;
 }
 
-.voice-chat-page.large-text .completion-task-purpose,
 .voice-chat-page.large-text .completion-task-error,
 .voice-chat-page.large-text .completion-task-action-state {
   font-size: 36rpx;

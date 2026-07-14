@@ -67,6 +67,16 @@ class FakeAuditAI:
         return json.dumps(payload, ensure_ascii=False)
 
 
+class TransactionCheckingAuditAI(FakeAuditAI):
+    def __init__(self, db, responses: list[dict]):
+        super().__init__(responses)
+        self.db = db
+
+    async def _call_llm(self, *args, **kwargs) -> str:
+        assert not self.db.in_transaction(), "database transaction crossed the provider call boundary"
+        return await super()._call_llm(*args, **kwargs)
+
+
 async def _mark_source_pending(test_db, *, chapter_id: str, utterance_id: str) -> None:
     link = await test_db.scalar(
         select(MemoirChapterSourceLink).where(
@@ -173,7 +183,7 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
 
 async def test_book_quality_audit_writes_semantic_snapshot_when_requested(client, test_db):
     user_id, project_id, chapter, second = await _create_needs_update_audit_context(client, test_db)
-    chapter_ai = FakeAuditAI([
+    chapter_ai = TransactionCheckingAuditAI(test_db, [
         {
             "summary": "本章围绕院子里的童年记忆。",
             "covered": {"time": ["小时候"], "places": ["外婆家的院子"], "people": ["外婆"], "events": ["摘菜"]},
@@ -182,7 +192,7 @@ async def test_book_quality_audit_writes_semantic_snapshot_when_requested(client
             "evidence_refs": [{"utterance_id": second["utterance_id"], "quote": "剥青豆"}],
         }
     ])
-    semantic_ai = FakeAuditAI([
+    semantic_ai = TransactionCheckingAuditAI(test_db, [
         {
             "overall_status": "needs_updates",
             "summary_text": "语义审计认为「院子里的童年」需要补写新素材。",

@@ -435,7 +435,7 @@ test("builds voice gateway URLs from runtime backend config", () => {
   delete global.wx;
 });
 
-test("fetches voice session detail through backend API", async () => {
+test("fetches and stops a voice session through backend API", async () => {
   const requests = [];
   const detail = {
     session: {
@@ -481,15 +481,24 @@ test("fetches voice session detail through backend API", async () => {
   };
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
-  const { getMemoirVoiceSession } = require("../services/memoir-voice-api.ts");
+  const {
+    getMemoirVoiceSession,
+    stopMemoirVoiceSession,
+  } = require("../services/memoir-voice-api.ts");
 
   const result = await getMemoirVoiceSession("voice/1");
+  const stopped = await stopMemoirVoiceSession("voice/1");
 
   assert.deepEqual(result, detail);
-  assert.equal(requests.length, 2);
-  assert.equal(requests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1");
-  assert.equal(requests[1].method, "GET");
-  assert.equal(requests[1].header.Cookie, "pawtale_session=abc");
+  assert.deepEqual(stopped, detail);
+  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  assert.equal(apiRequests.length, 2);
+  assert.equal(apiRequests[0].url, "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1");
+  assert.equal(apiRequests[0].method, "GET");
+  assert.equal(apiRequests[0].header.Cookie, "pawtale_session=abc");
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/mobile/memoir/voice-sessions/voice%2F1/stop");
+  assert.equal(apiRequests[1].method, "POST");
+  assert.deepEqual(apiRequests[1].data, {});
   delete global.wx;
 });
 

@@ -20,7 +20,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -30,7 +30,8 @@ from app.models.memoir_narrative import (
     MemoirStorySlot,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.narrative import story_slots
+from app.services.memoir.editing_jobs import register_editing_job_handler
+from app.services.memoir.narrative import gap_audit, story_slots
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -143,9 +144,11 @@ async def _latest_job(test_db, project_id: str, job_type: MemoirEditingJobType):
     )
 
 
-async def _run_completion_preparation(client, test_db, project_id: str):
+async def _run_completion_preparation(client, test_db, project_id: str, chapter_id: str):
     register_memoir_editing_job_handlers()
-    started = await client.post(f"/api/memoir/projects/{project_id}/book-completion/prepare")
+    started = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/prepare"
+    )
     assert started.status_code == 200, started.text
     assert started.json()["state"] == "preparing"
 
@@ -166,24 +169,44 @@ async def _run_completion_preparation(client, test_db, project_id: str):
     assert await run_test_editing_job(test_db, generation_job.id) is True
 
 
-async def test_book_completion_prepares_a_real_question_before_creating_voice_session(
+async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     client,
     test_db,
 ):
     project_id, chapter, _ = await _create_structured_chapter(client, test_db, complete=False)
 
-    initial = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
+    initial = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert initial.status_code == 200
-    assert initial.json()["state"] == "needs_preparation"
-    assert "没有需要" not in initial.json()["headline"]
+    assert initial.json()["chapters"][0]["state"] == "needs_preparation"
 
-    await _run_completion_preparation(client, test_db, project_id)
+    register_memoir_editing_job_handlers()
+    started = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare"
+    )
+    assert started.status_code == 200
+    assert started.json()["state"] == "preparing"
+    audit_job = await _latest_job(
+        test_db,
+        project_id,
+        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+    )
+    assert audit_job is not None
+    assert await run_test_editing_job(test_db, audit_job.id) is True
+    generation_job = await _latest_job(
+        test_db,
+        project_id,
+        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
+    )
+    assert generation_job is not None
+    assert await run_test_editing_job(test_db, generation_job.id) is True
 
-    ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert ready.status_code == 200
-    assert ready.json()["state"] == "ready"
-    assert ready.json()["task_id"]
-    assert ready.json()["chapter_id"] == chapter.id
+    ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    chapter_state = ready.json()["chapters"][0]
+    assert chapter_state["state"] == "ready"
+    assert chapter_state["remaining_count"] == 1
+    assert chapter_state["task_id"]
+    assert "按您记得的顺序" in chapter_state["focus_areas"][0]
+    assert not any(term in ready.text for term in ("Story", "Claim", "slot", "Contract"))
 
     voice = await post_mobile_memoir_voice_session(
         client,
@@ -191,12 +214,16 @@ async def test_book_completion_prepares_a_real_question_before_creating_voice_se
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
-            "current_followup_task_id": ready.json()["task_id"],
+            "current_followup_task_id": chapter_state["task_id"],
             "provider": "volc_streaming_asr",
         },
     )
     assert voice.status_code == 201, voice.text
-    assert voice.json()["session"]["current_followup_task_id"] == ready.json()["task_id"]
+
+    resumed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    resumed_chapter = resumed.json()["chapters"][0]
+    assert resumed_chapter["state"] == "in_progress"
+    assert resumed_chapter["active_session_id"] == voice.json()["session"]["id"]
 
 
 async def test_book_completion_voice_session_rejects_an_empty_task_boundary(client, test_db):
@@ -215,26 +242,40 @@ async def test_book_completion_voice_session_rejects_an_empty_task_boundary(clie
     assert "问题尚未准备好" in response.json()["detail"]
 
 
-async def test_book_completion_only_reports_no_current_question_after_a_current_audit(
-    client,
-    test_db,
-):
-    project_id, _, _ = await _create_structured_chapter(client, test_db, complete=True)
-
-    await _run_completion_preparation(client, test_db, project_id)
-
-    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert status.status_code == 200
-    assert status.json()["state"] == "complete"
-    assert status.json()["headline"] == "现在没有需要回答的问题"
-
-
-async def test_book_completion_prepare_restores_a_due_deferred_question(
+async def test_book_completion_prepare_rejects_a_chapter_outside_the_project(
     client,
     test_db,
 ):
     project_id, _, _ = await _create_structured_chapter(client, test_db, complete=False)
-    await _run_completion_preparation(client, test_db, project_id)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/missing/prepare"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "章节不存在"
+
+
+async def test_book_completion_overview_marks_audited_complete_chapter(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(client, test_db, complete=True)
+
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
+
+    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert status.status_code == 200
+    assert status.json()["completed_chapters"] == 1
+    assert status.json()["chapters"][0]["state"] == "complete"
+
+
+async def test_book_completion_overview_can_resume_a_deferred_chapter(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(client, test_db, complete=False)
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
     tasks = list(
         (
             await test_db.scalars(
@@ -255,17 +296,28 @@ async def test_book_completion_prepare_restores_a_due_deferred_question(
         await test_db.refresh(task)
         assert task.status == MemoirFollowupTaskStatus.DEFERRED.value
 
-    read_only_status = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert read_only_status.json()["state"] == "complete"
+    overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    chapter_state = overview.json()["chapters"][0]
+    assert chapter_state["state"] == "ready"
+    assert chapter_state["task_id"] in {task.id for task in tasks}
+    assert "留到以后" in chapter_state["headline"]
 
-    restored = await client.post(f"/api/memoir/projects/{project_id}/book-completion/prepare")
+    restored = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": chapter_state["task_id"],
+        },
+    )
+    assert restored.status_code == 201, restored.text
+    restored_task = await test_db.get(MemoirFollowupTask, chapter_state["task_id"])
+    assert restored_task is not None
+    assert restored_task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
 
-    assert restored.status_code == 200
-    assert restored.json()["state"] == "ready"
-    assert restored.json()["task_id"] in {task.id for task in tasks}
 
-
-async def test_book_completion_routes_to_one_unconfirmed_chapter_before_auditing(
+async def test_book_completion_overview_routes_unconfirmed_chapter_to_review(
     client,
     test_db,
 ):
@@ -276,12 +328,11 @@ async def test_book_completion_routes_to_one_unconfirmed_chapter_before_auditing
         confirm_contract=False,
     )
 
-    status = await client.post(f"/api/memoir/projects/{project_id}/book-completion/prepare")
+    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
 
     assert status.status_code == 200
-    assert status.json()["state"] == "needs_review"
-    assert status.json()["action"] == "open_chapter"
-    assert status.json()["chapter_id"] == chapter.id
+    assert status.json()["chapters"][0]["state"] == "needs_review"
+    assert status.json()["chapters"][0]["chapter_id"] == chapter.id
     assert await _latest_job(
         test_db,
         project_id,
@@ -294,10 +345,10 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     test_db,
 ):
     project_id, chapter, story = await _create_structured_chapter(client, test_db, complete=False)
-    await _run_completion_preparation(client, test_db, project_id)
-    first = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert first.json()["state"] == "ready"
-    old_task_id = first.json()["task_id"]
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
+    first = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert first.json()["chapters"][0]["state"] == "ready"
+    old_task_id = first.json()["chapters"][0]["task_id"]
 
     slots = (
         await test_db.scalars(
@@ -313,19 +364,121 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     story.version += 1
     await test_db.commit()
 
-    stale = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert stale.json()["state"] == "needs_preparation"
+    stale = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert stale.json()["chapters"][0]["state"] == "needs_preparation"
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )
     assert workspace.status_code == 200
     assert workspace.json()["latest_audit_job"] is None
 
-    await _run_completion_preparation(client, test_db, project_id)
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
 
-    refreshed = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
-    assert refreshed.json()["state"] == "complete"
-    assert refreshed.json()["task_id"] is None
+    refreshed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert refreshed.json()["chapters"][0]["state"] == "complete"
+    assert refreshed.json()["chapters"][0]["task_id"] is None
     old_task = await test_db.get(MemoirFollowupTask, old_task_id)
     assert old_task is not None
     assert old_task.status == MemoirFollowupTaskStatus.CANCELLED.value
+
+
+async def test_book_completion_uses_a_ready_question_without_waiting_for_other_chapters(
+    client,
+    test_db,
+):
+    project_id, first_chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    await _run_completion_preparation(client, test_db, project_id, first_chapter.id)
+
+    second_chapter = MemoirBookPlanChapter(
+        plan_id=first_chapter.plan_id,
+        project_id=project_id,
+        title="后来参加工作",
+        sort_order=1,
+    )
+    test_db.add(second_chapter)
+    await test_db.commit()
+
+    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+
+    assert status.status_code == 200
+    chapter_states = {
+        item["chapter_id"]: item["state"] for item in status.json()["chapters"]
+    }
+    assert chapter_states[first_chapter.id] == "ready"
+    assert chapter_states[second_chapter.id] == "needs_review"
+    second_audit = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.chapter_id == second_chapter.id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+        )
+    )
+    assert second_audit is None
+
+
+async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, test_db):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    semantic_job = await gap_audit.enqueue_chapter_gap_audit(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="test-model",
+        source="chapter_workspace",
+    )
+    await test_db.commit()
+
+    class EmptySemanticClient:
+        provider_name = "test"
+        model_name = "test-model"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            return '{"schema_version":"1","gaps":[]}'
+
+    async def semantic_handler(db, job):
+        return await gap_audit.run_chapter_gap_audit_job(
+            db,
+            job,
+            semantic_ai_client=EmptySemanticClient(),
+        )
+
+    register_memoir_editing_job_handlers()
+    register_editing_job_handler(
+        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+        semantic_handler,
+    )
+    assert await run_test_editing_job(test_db, semantic_job.id) is True
+    generation_job = await _latest_job(
+        test_db,
+        project_id,
+        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
+    )
+    assert generation_job is not None
+    assert await run_test_editing_job(test_db, generation_job.id) is True
+
+    status = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare"
+    )
+    audit_jobs = (
+        await test_db.scalars(
+            select(MemoirEditingJob).where(
+                MemoirEditingJob.project_id == project_id,
+                MemoirEditingJob.chapter_id == chapter.id,
+                MemoirEditingJob.job_type
+                == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+            )
+        )
+    ).all()
+
+    assert status.status_code == 200
+    assert status.json()["state"] == "ready"
+    assert [job.id for job in audit_jobs] == [semantic_job.id]
