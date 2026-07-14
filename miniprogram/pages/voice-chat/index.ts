@@ -39,6 +39,7 @@ import {
   createMemoirVoiceNoAnswerPrompt,
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
+  stopMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
@@ -563,6 +564,8 @@ definePage<VoiceChatData>()({
     try {
       if (this.voiceStreaming.hasClient()) {
         await this.voiceStreaming.finishSession();
+      } else {
+        await stopMemoirVoiceSession(this.data.voiceSessionId);
       }
       trackAuditAction(
         "voice_chat.finish",

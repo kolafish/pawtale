@@ -69,6 +69,18 @@ export function getMemoirVoiceSession(
   return memoirRequest<MemoirVoiceSessionDetail>(memoirVoiceSessionPath(voiceSessionId));
 }
 
+export function stopMemoirVoiceSession(
+  voiceSessionId: string,
+): Promise<MemoirVoiceSessionDetail> {
+  return memoirRequest<MemoirVoiceSessionDetail>(
+    memoirVoiceSessionPath(voiceSessionId, "/stop"),
+    {
+      method: "POST",
+      data: {},
+    },
+  );
+}
+
 export function listMemoirVoiceSessions(
   options: VoiceSessionListOptions = {},
 ): Promise<MemoirVoiceSessionListResponse> {

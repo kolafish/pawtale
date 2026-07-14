@@ -73,6 +73,9 @@ function loadVoiceChatPage({
       throw new Error("excludeMemoirFollowupTask was not mocked");
     },
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
+    stopMemoirVoiceSession: async () => {
+      throw new Error("stopMemoirVoiceSession was not mocked");
+    },
     ...voiceApiExports,
   });
   clearModule("../pages/voice-chat/voice-chat-completion-task-runtime.ts");
@@ -310,6 +313,53 @@ test("switching a completion task leaves microphone and finish controls availabl
   assert.equal(context.data.currentFollowupTaskId, "task-2");
   assert.equal(context.data.completionTask.question, "后来这件事怎样影响了家里？");
   assert.equal(context.data.completionTaskAction, "");
+});
+
+test("book completion return stops the backend session when websocket is absent", async () => {
+  const stoppedSessions = [];
+  const navigations = [];
+  global.wx = {
+    navigateBack(options) {
+      navigations.push(options);
+    },
+  };
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      stopMemoirVoiceSession: async (voiceSessionId) => {
+        stoppedSessions.push(voiceSessionId);
+        return { session: { id: voiceSessionId, status: "stopped" } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      sessionGoal: "book_completion",
+      completionTask: {
+        id: "task-1",
+        question: "请按顺序讲讲这段经历。",
+        status: "answered",
+      },
+    },
+    recordingStartGeneration: 0,
+    voiceStreaming: {
+      hasClient: () => false,
+    },
+    stopCompletionTaskRefresh() {},
+    cancelFollowUpTTS() {},
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.continueToNextCompletionTask.call(context);
+
+  assert.deepEqual(stoppedSessions, ["voice-1"]);
+  assert.deepEqual(navigations, [{ delta: 1 }]);
+  assert.equal(context.data.finishingSession, false);
+  delete global.wx;
 });
 
 test("human interview record action starts the selected speaker in one tap", async () => {
