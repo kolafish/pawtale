@@ -128,6 +128,7 @@ function sampleWorkspace(overrides = {}) {
       story_version: 1,
       excluded_from_chapter: false,
     }],
+    answer_updates: [],
     gaps: {
       must_handle: [sampleGap()],
       suggested: [],
@@ -266,6 +267,11 @@ function loadWorkspacePage({ workspace = sampleWorkspace(), draftBlocks = [], vo
       throw new Error("confirmMemoirBookChapterDraft was not mocked");
     },
     ...voiceApiExports,
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsent: () => true,
+    syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
 }
@@ -418,7 +424,8 @@ test("chapter workspace page is registered and exposes structure, evidence, and 
   assert.equal(context.data.contractStatusText, "本章方向已确认");
   assert.equal(context.data.nextAction.kind, "start_audit");
   assert.equal(context.data.nodes[0].storyText, "第一次离家");
-  assert.equal(context.data.stories[0].claims[0].evidenceCountText, "1 条证据");
+  assert.equal(context.data.stories[0].claims[0].evidenceCountText, "1 段原话依据");
+  assert.equal(context.data.stories[0].claims[0].statusText, "待核对");
   assert.deepEqual(context.data.gapGroups.map((group) => group.title), [
     "必须处理",
     "建议补充",
@@ -1199,7 +1206,7 @@ test("including a Story only marks that Story busy and exposes request failures"
   delete global.wx;
 });
 
-test("chapter workspace lists follow-up questions and starts a task-bound human interview", async () => {
+test("chapter workspace lists follow-up questions and starts the task-bound AI interview", async () => {
   const createdSessions = [];
   const navigations = [];
   global.wx = {
@@ -1244,7 +1251,7 @@ test("chapter workspace lists follow-up questions and starts a task-bound human 
 
   assert.equal(context.data.followupTasks[0].statusText, "以后再补");
   assert.equal(context.data.followupTasks[0].canInterview, true);
-  const starting = page.startHumanFollowupInterview.call(context, {
+  const starting = page.startFollowupInterview.call(context, {
     currentTarget: { dataset: { taskId: "task/1" } },
   });
   assert.equal(context.data.startingFollowupTaskId, "task/1");
@@ -1252,11 +1259,76 @@ test("chapter workspace lists follow-up questions and starts a task-bound human 
   await starting;
 
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
-  assert.equal(createdSessions[0].input.interview_type, "human_interview");
+  assert.equal(createdSessions[0].input.interview_type, "ai_interview");
   assert.equal(createdSessions[0].input.session_goal, "book_completion");
   assert.equal(createdSessions[0].input.current_followup_task_id, "task/1");
   assert.match(navigations[0], /sessionGoal=book_completion/);
   assert.equal(context.data.startingFollowupTaskId, "");
+  delete global.wx;
+});
+
+test("chapter overview continues ambiguous fact confirmation in the existing AI interview", async () => {
+  const createdSessions = [];
+  const navigations = [];
+  const followupTask = {
+    id: "task-fact-1",
+    project_id: "project/1",
+    gap_id: "gap-1",
+    chapter_id: "chapter-1",
+    story_id: null,
+    target_slot: "",
+    answer_use: "fact_resolution",
+    question: "经理和邀请创业的人是同一个人吗？",
+    purpose: "核对人物关系",
+    known_context_summary: "书中有两个称呼",
+    priority: 3000,
+    status: "pending",
+    assigned_session_id: null,
+    defer_until: null,
+    defer_reason: "",
+    created_by: "system",
+    started_at: null,
+    completed_at: null,
+    claims: [],
+    utterances: [],
+    created_at: "2026-07-14T10:00:00",
+    updated_at: "2026-07-14T10:00:00",
+  };
+  const workspace = sampleWorkspace({
+    answer_updates: [{
+      id: "relation-1",
+      task_id: followupTask.id,
+      status: "needs_confirmation",
+      question: "您说的同一个人，是工作时的经理和后来邀请创业的人吗？",
+      answer_text: "",
+      summaries: [],
+      created_at: "2026-07-14T10:05:00",
+    }],
+  });
+  global.wx = {
+    navigateTo({ url }) { navigations.push(url); },
+  };
+  const { page } = loadWorkspacePage({
+    workspace,
+    voiceApiExports: {
+      listMemoirFollowupTasks: async () => ({ items: [followupTask], total: 1 }),
+      createMemoirVoiceSession: async (input, options) => {
+        createdSessions.push({ input, options });
+        return { session: { id: "voice-fact-1" } };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project%2F1", chapterId: "chapter-1" });
+
+  assert.equal(context.data.nextAction.kind, "continue_fact_confirmation");
+  assert.equal(context.data.nextAction.title, workspace.answer_updates[0].question);
+  await page.runNextAction.call(context);
+
+  assert.equal(createdSessions[0].input.interview_type, "ai_interview");
+  assert.equal(createdSessions[0].input.current_followup_task_id, followupTask.id);
+  assert.equal(createdSessions[0].options.projectId, "project/1");
+  assert.match(navigations[0], /voiceSessionId=voice-fact-1/);
   delete global.wx;
 });
 test("starting an audit only marks the audit control busy while the background job is submitted", async () => {

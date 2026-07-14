@@ -38,8 +38,9 @@ from app.models.memoir_narrative import (
     MemoirStorySlotClaim,
 )
 from app.schemas.memoir_book import MemoirFollowupAnswerInterpretationResponse
+from app.services.memoir import automation_event_resolution
 from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
-from app.services.memoir.narrative import followup_tasks, gap_audit, gaps
+from app.services.memoir.narrative import fact_resolution, followup_tasks, gap_audit, gaps
 
 
 @dataclass(frozen=True)
@@ -347,6 +348,7 @@ async def confirm_answer_interpretation(
     direct_narrative_text: str,
     clarification_text: str,
     fact_resolution_text: str,
+    ai_model: str | None = None,
 ) -> MemoirFollowupTaskUtterance:
     relation = await db.scalar(
         select(MemoirFollowupTaskUtterance).where(
@@ -389,6 +391,7 @@ async def confirm_answer_interpretation(
         db,
         project_id=project_id,
         relation=relation,
+        ai_model=ai_model,
     )
     return relation
 
@@ -398,6 +401,7 @@ async def complete_task_from_semantic_interpretation(
     *,
     project_id: str,
     relation: MemoirFollowupTaskUtterance,
+    ai_model: str | None = None,
 ) -> bool:
     if relation.interpretation_status != MemoirFollowupAnswerInterpretationStatus.RESOLVED.value:
         return False
@@ -418,6 +422,15 @@ async def complete_task_from_semantic_interpretation(
     )
     if not answered:
         return False
+    if expected_use == MemoirFollowupAnswerUse.FACT_RESOLUTION:
+        if not await fact_resolution.resolve_fact_answer(
+            db,
+            project_id=project_id,
+            task=task,
+            relation=relation,
+            ai_model=ai_model,
+        ):
+            return False
     relation.result_role = MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value
     db.add(relation)
     if task.status != MemoirFollowupTaskStatus.ANSWERED.value:
@@ -438,6 +451,21 @@ async def complete_task_from_semantic_interpretation(
         idempotency_key=f"gap-resolved-by-interpretation:{task.id}:{relation.utterance_id}",
         note="用户回答已明确补充所需的解释或事实判断。",
     )
+    await automation_event_resolution.resolve_followup_source_review_events(
+        db,
+        project_id=project_id,
+        task_id=task.id,
+        resolved_by_utterance_id=relation.utterance_id,
+    )
+    if task.chapter_id:
+        await gap_audit.enqueue_chapter_gap_audit(
+            db,
+            project_id=project_id,
+            chapter_id=task.chapter_id,
+            include_semantic_audit=False,
+            ai_model=None,
+            source="book_completion_semantic_answer",
+        )
     await db.flush()
     return True
 

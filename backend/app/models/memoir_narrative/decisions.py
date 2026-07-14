@@ -3,7 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -22,6 +32,14 @@ class MemoirNarrativeDecision(Base):
             "project_id",
             "idempotency_key",
             name="uq_memoir_narrative_decisions_project_idempotency",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "source_followup_task_utterance_id"],
+            [
+                "memoir_followup_task_utterances.project_id",
+                "memoir_followup_task_utterances.id",
+            ],
+            name="fk_memoir_narrative_decisions_followup_source_project",
         ),
         CheckConstraint(
             f"target_type IN ({_enum_values(MemoirNarrativeDecisionTargetType)})",
@@ -47,12 +65,27 @@ class MemoirNarrativeDecision(Base):
             "length(trim(idempotency_key)) > 0",
             name="ck_memoir_narrative_decisions_idempotency_key",
         ),
+        CheckConstraint(
+            "(source_followup_task_utterance_id IS NULL "
+            "AND source_transcript_version_id IS NULL) OR "
+            "(source_followup_task_utterance_id IS NOT NULL "
+            "AND source_transcript_version_id IS NOT NULL)",
+            name="ck_memoir_narrative_decisions_followup_source_shape",
+        ),
         Index(
             "ix_memoir_narrative_decisions_project_target_created",
             "project_id",
             "target_type",
             "target_id",
             "created_at",
+        ),
+        Index(
+            "ix_memoir_narrative_decisions_followup_source",
+            "source_followup_task_utterance_id",
+        ),
+        Index(
+            "ix_memoir_narrative_decisions_transcript_source",
+            "source_transcript_version_id",
         ),
     )
 
@@ -69,6 +102,18 @@ class MemoirNarrativeDecision(Base):
     actor_user_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("users.id"),
+        nullable=True,
+    )
+    source_followup_task_utterance_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+    source_transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey(
+            "memoir_transcript_versions.id",
+            name="fk_memoir_narrative_decisions_transcript_source",
+        ),
         nullable=True,
     )
     before_state_json: Mapped[dict] = mapped_column(JSON, nullable=False)

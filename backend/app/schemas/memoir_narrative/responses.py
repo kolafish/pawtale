@@ -99,6 +99,8 @@ class MemoirNarrativeDecisionResponse(BaseModel):
     action: str
     actor_type: str
     actor_user_id: str | None
+    source_followup_task_utterance_id: str | None
+    source_transcript_version_id: str | None
     before_state_json: dict
     after_state_json: dict
     reason: str

@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirClaimPublicationStatus,
+    MemoirClaimType,
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
     MemoirNarrativeEntityVerificationStatus,
+    MemoirStoryRevisionChangeType,
 )
 from app.models.memoir_narrative import (
     MemoirClaim,
@@ -23,6 +25,7 @@ from app.models.memoir_narrative import (
 from app.services.memoir.narrative import (
     decision_log,
     draft_blocks,
+    story_revisions,
     stories as story_service,
 )
 
@@ -53,6 +56,8 @@ async def decide_entity_verification(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
+    source_followup_task_utterance_id: str | None = None,
+    source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
     existing = await decision_log.existing_decision(
@@ -64,9 +69,17 @@ async def decide_entity_verification(
         action=action,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
         return existing
+    await decision_log.validate_source(
+        db,
+        project_id=project_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
+    )
     entity = await db.scalar(
         select(MemoirNarrativeEntity).where(
             MemoirNarrativeEntity.project_id == project_id,
@@ -98,6 +111,8 @@ async def decide_entity_verification(
         after_state=_entity_state(entity),
         reason=reason,
         idempotency_key=idempotency_key,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
 
 
@@ -110,6 +125,8 @@ async def merge_entities(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
+    source_followup_task_utterance_id: str | None = None,
+    source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     existing = await decision_log.existing_decision(
         db,
@@ -120,9 +137,17 @@ async def merge_entities(
         action=MemoirNarrativeDecisionAction.MERGE,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
         return existing
+    await decision_log.validate_source(
+        db,
+        project_id=project_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
+    )
     if source_entity_id == retained_entity_id:
         raise ValueError("entity cannot be merged into itself")
     entities = list(
@@ -145,9 +170,69 @@ async def merge_entities(
     if source.merged_into_entity_id or retained.merged_into_entity_id:
         raise ValueError("already merged entities cannot be merged again")
 
+    claims = list(
+        (
+            await db.scalars(
+                select(MemoirClaim).where(
+                    MemoirClaim.project_id == project_id,
+                    or_(
+                        MemoirClaim.subject_entity_id == source.id,
+                        MemoirClaim.object_entity_id == source.id,
+                        MemoirClaim.place_entity_id == source.id,
+                    ),
+                )
+            )
+        ).all()
+    )
+    evidence = list(
+        (
+            await db.scalars(
+                select(MemoirClaimEvidence).where(
+                    MemoirClaimEvidence.project_id == project_id,
+                    MemoirClaimEvidence.speaker_entity_id == source.id,
+                )
+            )
+        ).all()
+    )
+    place_stories = list(
+        (
+            await db.scalars(
+                select(MemoirStory).where(
+                    MemoirStory.project_id == project_id,
+                    MemoirStory.primary_place_entity_id == source.id,
+                )
+            )
+        ).all()
+    )
+    story_snapshots = {
+        story.id: await story_revisions.story_snapshot(db, story)
+        for story in place_stories
+    }
+
+    def reference_state() -> dict[str, object]:
+        return {
+            "claims": {
+                claim.id: {
+                    "subject_entity_id": claim.subject_entity_id,
+                    "object_entity_id": claim.object_entity_id,
+                    "place_entity_id": claim.place_entity_id,
+                }
+                for claim in claims
+            },
+            "evidence": {
+                item.id: {"speaker_entity_id": item.speaker_entity_id}
+                for item in evidence
+            },
+            "stories": {
+                story.id: {"primary_place_entity_id": story.primary_place_entity_id}
+                for story in place_stories
+            },
+        }
+
     before = {
         "source": _entity_state(source),
         "retained": _entity_state(retained),
+        "references": reference_state(),
     }
     retained.aliases_json = list(
         dict.fromkeys(
@@ -159,8 +244,29 @@ async def merge_entities(
     source.merged_into_entity_id = retained.id
     source.updated_by = MemoirNarrativeActorType.USER.value
     source.updated_by_user_id = actor_user_id
-    db.add_all([source, retained])
-    return await decision_log.record_decision(
+    for claim in claims:
+        if claim.subject_entity_id == source.id:
+            claim.subject_entity_id = retained.id
+        if claim.object_entity_id == source.id:
+            claim.object_entity_id = retained.id
+        if claim.place_entity_id == source.id:
+            claim.place_entity_id = retained.id
+        claim.updated_by = MemoirNarrativeActorType.USER.value
+        claim.updated_by_user_id = actor_user_id
+    for item in evidence:
+        item.speaker_entity_id = retained.id
+    for story in place_stories:
+        story.primary_place_entity_id = retained.id
+        story.updated_by = MemoirNarrativeActorType.USER.value
+        story.updated_by_user_id = actor_user_id
+    self_relationship_claims = [
+        claim
+        for claim in claims
+        if claim.claim_type == MemoirClaimType.RELATIONSHIP.value
+        and claim.subject_entity_id == claim.object_entity_id
+    ]
+    db.add_all([source, retained, *claims, *evidence, *place_stories])
+    decision = await decision_log.record_decision(
         db,
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.ENTITY,
@@ -172,10 +278,42 @@ async def merge_entities(
         after_state={
             "source": _entity_state(source),
             "retained": _entity_state(retained),
+            "references": reference_state(),
         },
         reason=reason,
         idempotency_key=idempotency_key,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
+    for claim in claims:
+        await draft_blocks.mark_blocks_stale_for_claim(
+            db,
+            project_id=project_id,
+            claim_id=claim.id,
+        )
+    for claim in self_relationship_claims:
+        await mark_claim_needs_review(
+            db,
+            claim=claim,
+            reason=(
+                "Entity merge made both sides of a relationship claim refer to the same "
+                f"entity; review required after merge decision {decision.id}."
+            ),
+            idempotency_key=f"entity-merge-self-relationship:{decision.id}:{claim.id}",
+            source_followup_task_utterance_id=source_followup_task_utterance_id,
+            source_transcript_version_id=source_transcript_version_id,
+        )
+    for story in place_stories:
+        await story_revisions.record_story_revision(
+            db,
+            story=story,
+            before_state=story_snapshots[story.id],
+            change_type=MemoirStoryRevisionChangeType.CLAIMS_UPDATED,
+            actor_type=MemoirNarrativeActorType.USER,
+            actor_user_id=actor_user_id,
+            reason=f"entity merge decision {decision.id} updated the story place reference",
+        )
+    return decision
 
 
 async def decide_claim_verification(
@@ -187,6 +325,8 @@ async def decide_claim_verification(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
+    source_followup_task_utterance_id: str | None = None,
+    source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
     existing = await decision_log.existing_decision(
@@ -198,9 +338,17 @@ async def decide_claim_verification(
         action=action,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
         return existing
+    await decision_log.validate_source(
+        db,
+        project_id=project_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
+    )
     claim = await db.scalar(
         select(MemoirClaim).where(
             MemoirClaim.project_id == project_id,
@@ -242,6 +390,8 @@ async def decide_claim_verification(
         after_state=_claim_state(claim),
         reason=reason,
         idempotency_key=idempotency_key,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     await draft_blocks.mark_blocks_stale_for_claim(
         db,
@@ -330,6 +480,8 @@ async def mark_claim_needs_review(
     claim: MemoirClaim,
     reason: str,
     idempotency_key: str,
+    source_followup_task_utterance_id: str | None = None,
+    source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     existing = await decision_log.existing_decision(
         db,
@@ -340,9 +492,17 @@ async def mark_claim_needs_review(
         action=MemoirNarrativeDecisionAction.NEEDS_REVIEW,
         actor_type=MemoirNarrativeActorType.SYSTEM,
         actor_user_id=None,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
         return existing
+    await decision_log.validate_source(
+        db,
+        project_id=claim.project_id,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
+    )
     before = _claim_state(claim)
     claim.verification_status = MemoirClaimVerificationStatus.NEEDS_VERIFICATION.value
     claim.updated_by = MemoirNarrativeActorType.SYSTEM.value
@@ -360,6 +520,8 @@ async def mark_claim_needs_review(
         after_state=_claim_state(claim),
         reason=reason,
         idempotency_key=idempotency_key,
+        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_transcript_version_id=source_transcript_version_id,
     )
     await draft_blocks.mark_blocks_stale_for_claim(
         db,

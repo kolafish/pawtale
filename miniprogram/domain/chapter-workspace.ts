@@ -199,6 +199,16 @@ export interface MemoirChapterGapAuditJob {
   updated_at: string;
 }
 
+export interface MemoirChapterWorkspaceAnswerUpdate {
+  id: string;
+  task_id: string;
+  status: "applied" | "needs_confirmation";
+  question: string;
+  answer_text: string;
+  summaries: string[];
+  created_at: string;
+}
+
 export interface MemoirChapterWorkspace {
   project_id: string;
   chapter_id: string;
@@ -206,6 +216,7 @@ export interface MemoirChapterWorkspace {
   contract: MemoirChapterWorkspaceContract | null;
   stories: MemoirChapterWorkspaceStory[];
   available_stories: MemoirChapterWorkspaceAvailableStory[];
+  answer_updates: MemoirChapterWorkspaceAnswerUpdate[];
   gaps: MemoirChapterWorkspaceGapGroups;
   latest_audit_job: MemoirChapterGapAuditJob | null;
 }

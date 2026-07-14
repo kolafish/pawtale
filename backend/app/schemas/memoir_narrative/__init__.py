@@ -58,10 +58,18 @@ from .draft_blocks import (
 )
 from .entities import MemoirNarrativeEntityCreate
 from .extraction import MemoirNarrativeExtraction
+from .fact_resolution import (
+    MemoirClaimConfirmationResolution,
+    MemoirClaimRejectionResolution,
+    MemoirEntityMergeResolution,
+    MemoirFactResolutionOperation,
+    MemoirFactResolutionPlan,
+)
 from .gaps import (
     MemoirChapterGapAuditJobResponse,
     MemoirChapterGapAuditRequest,
     MemoirChapterWorkspaceAvailableStoryResponse,
+    MemoirChapterWorkspaceAnswerUpdateResponse,
     MemoirChapterWorkspaceGapGroups,
     MemoirChapterWorkspaceResponse,
     MemoirChapterWorkspaceStoryResponse,
@@ -160,9 +168,15 @@ __all__ = [
     "MemoirNarrativeEntityMergeRequest",
     "MemoirNarrativeEntityResponse",
     "MemoirNarrativeExtraction",
+    "MemoirClaimConfirmationResolution",
+    "MemoirClaimRejectionResolution",
+    "MemoirEntityMergeResolution",
+    "MemoirFactResolutionOperation",
+    "MemoirFactResolutionPlan",
     "MemoirChapterGapAuditJobResponse",
     "MemoirChapterGapAuditRequest",
     "MemoirChapterWorkspaceAvailableStoryResponse",
+    "MemoirChapterWorkspaceAnswerUpdateResponse",
     "MemoirChapterWorkspaceGapGroups",
     "MemoirChapterWorkspaceResponse",
     "MemoirChapterWorkspaceStoryResponse",

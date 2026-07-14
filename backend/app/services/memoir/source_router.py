@@ -572,6 +572,14 @@ def _route_response_from_payload(
             target_chapter_title = collection_chapter.title
         elif target_chapter_id and target_chapter_id in chapters_by_id:
             target_chapter_title = chapters_by_id[target_chapter_id].title
+    elif (
+        followup_answer is not None
+        and followup_answer.direct_narrative_text
+        and collection_chapter is not None
+    ):
+        action = "assign_to_chapter"
+        target_chapter_id = collection_chapter.id
+        target_chapter_title = collection_chapter.title
     elif followup_answer is not None and (
         followup_answer.clarification_text or followup_answer.fact_resolution_text
     ):

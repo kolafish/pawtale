@@ -282,6 +282,7 @@ export type MemoirFollowupAnswerKind =
 export interface MemoirFollowupAnswerInterpretation {
   task_id: string;
   status: "pending" | "needs_confirmation" | "resolved";
+  confirmation_type: "answer_usage" | "fact_resolution";
   answer_kind?: MemoirFollowupAnswerKind | null;
   direct_narrative_text: string;
   clarification_text: string;

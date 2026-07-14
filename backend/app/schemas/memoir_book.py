@@ -330,6 +330,7 @@ class MemoirBookSourceRouteEvidence(BaseModel):
 class MemoirFollowupAnswerInterpretationResponse(BaseModel):
     task_id: str
     status: MemoirFollowupAnswerInterpretationStatus
+    confirmation_type: Literal["answer_usage", "fact_resolution"] = "answer_usage"
     answer_kind: MemoirFollowupAnswerKind | None = None
     direct_narrative_text: str = ""
     clarification_text: str = ""

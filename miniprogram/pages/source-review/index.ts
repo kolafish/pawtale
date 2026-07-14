@@ -6,16 +6,24 @@ import type {
 import { definePage } from "../../services/page-definition";
 import {
   confirmMemoirBookSourceReviewItem,
+  createMemoirVoiceSession,
   listMemoirBookSourceReviewItems,
 } from "../../services/memoir-voice-api";
+import { getMemoirFollowupTask } from "../../services/memoir-followup-task-api";
 import { routeAuthError, switchToBook } from "../../services/navigation";
 import {
   datasetString,
+  pageUrl,
   queryParam,
   type PageDatasetEvent,
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import {
+  readVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
 import {
   buildSourceReviewConfirmationRequest,
   type MixedAnswerParts,
@@ -35,9 +43,12 @@ interface SourceReviewData extends MixedAnswerParts {
   eventId: string;
   loading: boolean;
   saving: boolean;
+  startingVoice: boolean;
   success: boolean;
   error: string;
   questionText: string;
+  taskId: string;
+  confirmationType: "answer_usage" | "fact_resolution";
   sourceText: string;
   selectedKind: MemoirFollowupAnswerKind | "";
   choices: AnswerChoice[];
@@ -86,7 +97,7 @@ const CHOICES: AnswerChoice[] = [
 
 function reviewItemPatch(item: MemoirBookSourceReviewItem): Pick<
   SourceReviewData,
-  "questionText" | "sourceText"
+  "questionText" | "sourceText" | "taskId" | "confirmationType"
 > {
   const followup = item.followup_answer;
   return {
@@ -94,6 +105,8 @@ function reviewItemPatch(item: MemoirBookSourceReviewItem): Pick<
       || item.summary_text.trim()
       || "这段话是要写进书里，还是只用来解释已有内容？",
     sourceText: item.source_text.trim(),
+    taskId: followup?.task_id || "",
+    confirmationType: followup?.confirmation_type || "answer_usage",
   };
 }
 
@@ -104,9 +117,12 @@ definePage<SourceReviewData>()({
     eventId: "",
     loading: true,
     saving: false,
+    startingVoice: false,
     success: false,
     error: "",
     questionText: "",
+    taskId: "",
+    confirmationType: "answer_usage",
     sourceText: "",
     selectedKind: "",
     choices: CHOICES,
@@ -228,6 +244,67 @@ definePage<SourceReviewData>()({
         saving: false,
         error: error instanceof Error ? error.message : "确认失败",
       });
+    }
+  },
+
+  async startFactConfirmation() {
+    if (this.data.startingVoice || !this.data.projectId || !this.data.taskId) {
+      return;
+    }
+    this.setData({ startingVoice: true, error: "" });
+    try {
+      const task = await getMemoirFollowupTask(this.data.projectId, this.data.taskId);
+      if (task.status === "in_progress" && task.assigned_session_id) {
+        wx.navigateTo({
+          url: pageUrl("/pages/voice-chat/index", {
+            voiceSessionId: task.assigned_session_id,
+            mode: "guided_interview",
+            interviewType: "ai_interview",
+            sessionGoal: "book_completion",
+            projectTitle: "补全本章",
+          }),
+        });
+        return;
+      }
+      if (task.status !== "pending" && task.status !== "deferred") {
+        this.setData({ error: "这个问题当前不能继续，请返回章节工作台刷新状态" });
+        return;
+      }
+      if (!readVoiceAuthorizationConsent()) {
+        wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+        return;
+      }
+      await syncVoiceAuthorizationConsent();
+      const detail = await createMemoirVoiceSession({
+        guidance_mode: "guided_interview",
+        interview_type: "ai_interview",
+        session_goal: "book_completion",
+        current_followup_task_id: this.data.taskId,
+        provider: "volc_streaming_asr",
+        input_format: "pcm_s16le_16000_mono",
+        metadata_json: {
+          entry: "miniprogram_source_review_fact_confirmation",
+          source_review_event_id: this.data.eventId,
+        },
+      }, { projectId: this.data.projectId });
+      wx.navigateTo({
+        url: pageUrl("/pages/voice-chat/index", {
+          voiceSessionId: detail.session.id,
+          mode: "guided_interview",
+          interviewType: "ai_interview",
+          sessionGoal: "book_completion",
+          projectTitle: "补全本章",
+        }),
+      });
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "AI 访谈创建失败",
+      });
+    } finally {
+      this.setData({ startingVoice: false });
     }
   },
 
