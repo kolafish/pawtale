@@ -841,6 +841,12 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     assert review_event.summary_text == confirmation_question
     assert review_event.metadata_json["route"]["followup_answer"]["status"] == "needs_confirmation"
 
+    pending_review = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-source-review-items"
+    )
+    assert pending_review.status_code == 200
+    assert pending_review.json()["items"][0]["source_text"] == answer_text
+
     confirmed = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-source-review-items/{review_event.id}/confirm",
         json={
@@ -864,6 +870,47 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     assert relation.interpretation_status == "resolved"
     assert relation.answer_kind == "clarification"
     assert relation.clarification_text == answer_text
+
+
+async def test_source_review_does_not_expose_utterance_text_from_another_project(
+    client,
+    test_db,
+):
+    project_source = await create_test_voice_transcript(client, test_db, "当前项目的讲述。")
+    other_project = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "另一个项目"},
+    )
+    assert other_project.status_code == 201
+    other_source = await create_test_voice_transcript(
+        client,
+        test_db,
+        "另一个项目的私密讲述。",
+        project_id=other_project.json()["id"],
+    )
+    event = MemoirAutomationEvent(
+        project_id=project_source["session"]["project_id"],
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[other_source["utterance_id"]],
+        summary_text="需要确认讲述用途。",
+        metadata_json={
+            "route_action": "hold_for_review",
+            "material_type": "memoir_content",
+            "utterance_id": other_source["utterance_id"],
+        },
+    )
+    test_db.add(event)
+    await test_db.commit()
+
+    response = await client.get(
+        f"/api/mobile/memoir/projects/{project_source['session']['project_id']}"
+        "/book-source-review-items"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["id"] == event.id
+    assert response.json()["items"][0]["source_text"] == ""
 
 
 async def test_source_routing_job_holds_new_topic_for_review(client, test_db, monkeypatch):

@@ -451,6 +451,7 @@ class MemoirBookSourceReviewItemResponse(BaseModel):
     confidence: float | None = None
     reason: str
     summary_text: str
+    source_text: str = ""
     followup_answer: MemoirFollowupAnswerInterpretationResponse | None = None
     evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)

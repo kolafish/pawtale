@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
-from app.models.memoir import MemoirAutomationEvent, MemoirVoiceUtterance
+from app.models.memoir import MemoirAutomationEvent, MemoirVoiceSession, MemoirVoiceUtterance
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
     MemoirBookPlanStructureCommandRequest,
@@ -87,7 +87,36 @@ def _evidence_items(metadata: dict[str, object]) -> list[MemoirBookSourceRouteEv
     return items
 
 
-def source_review_item_response(event: MemoirAutomationEvent) -> MemoirBookSourceReviewItemResponse:
+def _utterance_source_text(utterance: MemoirVoiceUtterance | None) -> str:
+    if utterance is None:
+        return ""
+    return (utterance.transcript_edited or "").strip() or (
+        utterance.transcript_raw or ""
+    ).strip()
+
+
+async def _load_project_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+) -> MemoirVoiceUtterance | None:
+    return await db.scalar(
+        select(MemoirVoiceUtterance)
+        .join(MemoirVoiceSession, MemoirVoiceSession.id == MemoirVoiceUtterance.voice_session_id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceUtterance.id == utterance_id,
+        )
+        .options(selectinload(MemoirVoiceUtterance.chat_message))
+    )
+
+
+def source_review_item_response(
+    event: MemoirAutomationEvent,
+    *,
+    source_text: str = "",
+) -> MemoirBookSourceReviewItemResponse:
     metadata = event.metadata_json or {}
     route_metadata = _event_route_metadata(metadata)
     utterance_id = _event_utterance_id(event)
@@ -115,6 +144,7 @@ def source_review_item_response(event: MemoirAutomationEvent) -> MemoirBookSourc
         confidence=event.confidence,
         reason=reason if isinstance(reason, str) else "",
         summary_text=event.summary_text,
+        source_text=source_text,
         followup_answer=followup_answer,
         evidence=_evidence_items(route_metadata),
         metadata_json=metadata,
@@ -214,7 +244,12 @@ async def create_source_review_item(
         db.add(existing)
         await db.commit()
         await db.refresh(existing)
-        return source_review_item_response(existing)
+        utterance = await _load_project_utterance(
+            db,
+            project_id=project_id,
+            utterance_id=utterance_id,
+        )
+        return source_review_item_response(existing, source_text=_utterance_source_text(utterance))
 
     event = MemoirAutomationEvent(
         project_id=project_id,
@@ -229,7 +264,12 @@ async def create_source_review_item(
     db.add(event)
     await db.commit()
     await db.refresh(event)
-    return source_review_item_response(event)
+    utterance = await _load_project_utterance(
+        db,
+        project_id=project_id,
+        utterance_id=utterance_id,
+    )
+    return source_review_item_response(event, source_text=_utterance_source_text(utterance))
 
 
 async def list_source_review_items(
@@ -253,8 +293,35 @@ async def list_source_review_items(
             .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
         )
     ).scalars().all()
+    utterance_ids = {_event_utterance_id(event) for event in events}
+    utterances = (
+        (
+            await db.scalars(
+                select(MemoirVoiceUtterance)
+                .join(
+                    MemoirVoiceSession,
+                    MemoirVoiceSession.id == MemoirVoiceUtterance.voice_session_id,
+                )
+                .where(
+                    MemoirVoiceSession.project_id == project_id,
+                    MemoirVoiceUtterance.id.in_(utterance_ids),
+                )
+            )
+        ).all()
+        if utterance_ids
+        else []
+    )
+    source_text_by_utterance_id = {
+        utterance.id: _utterance_source_text(utterance) for utterance in utterances
+    }
     return MemoirBookSourceReviewListResponse(
-        items=[source_review_item_response(event) for event in events],
+        items=[
+            source_review_item_response(
+                event,
+                source_text=source_text_by_utterance_id.get(_event_utterance_id(event), ""),
+            )
+            for event in events
+        ],
         total=len(events),
     )
 
@@ -289,6 +356,7 @@ async def confirm_source_review_item(
     item = source_review_item_response(event)
     utterance_id = item.utterance_id
     resolved_followup_answer = None
+    confirmed_source_text = ""
     if (
         item.followup_answer is not None
         and item.followup_answer.status
@@ -372,13 +440,14 @@ async def confirm_source_review_item(
     )
 
     if resolved_followup_answer is not None:
-        utterance = await db.scalar(
-            select(MemoirVoiceUtterance)
-            .where(MemoirVoiceUtterance.id == utterance_id)
-            .options(selectinload(MemoirVoiceUtterance.chat_message))
+        utterance = await _load_project_utterance(
+            db,
+            project_id=project_id,
+            utterance_id=utterance_id,
         )
         if utterance is None:
             raise HTTPException(status_code=404, detail="讲述记录不存在")
+        confirmed_source_text = _utterance_source_text(utterance)
         confirmed_action = "record_as_context" if records_as_context else "assign_to_chapter"
         confirmed_route = MemoirBookSourceRouteResponse(
             material_type="memoir_content",
@@ -404,9 +473,6 @@ async def confirm_source_review_item(
                 ai_model=req.ai_model,
             )
 
-    event = await db.get(MemoirAutomationEvent, event_id)
-    if not event:
-        raise HTTPException(status_code=404, detail="待确认整理项不存在")
     event.chapter_id = resolved_chapter_id
     event.status = MemoirAutomationEventStatus.COMPLETED.value
     metadata = dict(event.metadata_json or {})
@@ -434,7 +500,10 @@ async def confirm_source_review_item(
     await db.commit()
     await db.refresh(event)
     return MemoirBookSourceReviewConfirmResponse(
-        item=source_review_item_response(event),
+        item=source_review_item_response(
+            event,
+            source_text=confirmed_source_text,
+        ),
         plan=plan,
     )
 

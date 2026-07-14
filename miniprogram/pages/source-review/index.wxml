@@ -1,0 +1,90 @@
+<view class="review-page">
+  <view wx:if="{{loading}}" class="state-message">正在加载这段回答</view>
+
+  <view wx:elif="{{success}}" class="success-state">
+    <text class="success-kicker">已经确认</text>
+    <text class="success-title">这段话的用途已记录</text>
+    <text class="success-detail">后续整理章节时，会按您刚才的选择处理。</text>
+    <button class="primary-button" bindtap="returnToBook">返回书稿</button>
+  </view>
+
+  <block wx:else>
+    <view class="page-intro">
+      <text class="page-kicker">需要您确认一下</text>
+      <text class="page-title">{{questionText || "这段话该怎么使用？"}}</text>
+    </view>
+
+    <view wx:if="{{sourceText}}" class="source-section">
+      <text class="section-label">您刚才说的是</text>
+      <text class="source-copy">{{sourceText}}</text>
+    </view>
+
+    <view wx:if="{{sourceText}}" class="choice-section">
+      <text class="section-title">请选择最符合的一项</text>
+      <view class="choice-list">
+        <view
+          wx:for="{{choices}}"
+          wx:key="kind"
+          class="choice-row {{selectedKind === item.kind ? 'selected' : ''}}"
+          data-kind="{{item.kind}}"
+          bindtap="selectAnswerKind"
+        >
+          <view class="choice-mark"><view class="choice-dot"></view></view>
+          <view class="choice-copy">
+            <text class="choice-title">{{item.title}}</text>
+            <text class="choice-detail">{{item.detail}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{selectedKind === 'mixed'}}" class="split-section">
+      <text class="section-title">请把原话分开</text>
+      <text class="split-detail">每一栏只保留上方原话中的对应片段，至少填写两栏。</text>
+      <view class="split-field">
+        <text class="split-label">可以写进正文的经历</text>
+        <textarea
+          class="split-input"
+          value="{{directNarrativeText}}"
+          data-field="directNarrativeText"
+          maxlength="-1"
+          auto-height
+          bindinput="updateMixedPart"
+        ></textarea>
+      </view>
+      <view class="split-field">
+        <text class="split-label">只用于解释原文</text>
+        <textarea
+          class="split-input"
+          value="{{clarificationText}}"
+          data-field="clarificationText"
+          maxlength="-1"
+          auto-height
+          bindinput="updateMixedPart"
+        ></textarea>
+      </view>
+      <view class="split-field">
+        <text class="split-label">只用于核对事实</text>
+        <textarea
+          class="split-input"
+          value="{{factResolutionText}}"
+          data-field="factResolutionText"
+          maxlength="-1"
+          auto-height
+          bindinput="updateMixedPart"
+        ></textarea>
+      </view>
+    </view>
+
+    <text wx:if="{{error}}" class="error-message">{{error}}</text>
+
+    <view wx:if="{{sourceText}}" class="action-section">
+      <button
+        class="primary-button"
+        loading="{{saving}}"
+        disabled="{{saving || !selectedKind}}"
+        bindtap="submitConfirmation"
+      >{{saving ? "正在确认" : "确认这样处理"}}</button>
+    </view>
+  </block>
+</view>

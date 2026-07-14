@@ -273,6 +273,58 @@ export interface MemoirAutomationEventListResponse {
   limit: number;
 }
 
+export type MemoirFollowupAnswerKind =
+  | "direct_narrative"
+  | "clarification"
+  | "fact_resolution"
+  | "mixed";
+
+export interface MemoirFollowupAnswerInterpretation {
+  task_id: string;
+  status: "pending" | "needs_confirmation" | "resolved";
+  answer_kind?: MemoirFollowupAnswerKind | null;
+  direct_narrative_text: string;
+  clarification_text: string;
+  fact_resolution_text: string;
+  confirmation_question: string;
+  reason: string;
+}
+
+export interface MemoirBookSourceReviewItem {
+  id: string;
+  project_id: string;
+  status: MemoirAutomationEventStatus;
+  utterance_id: string;
+  source_index: number;
+  route_action: "assign_to_chapter" | "record_as_context" | "suggest_new_chapter" | "hold_for_review" | "ignore";
+  target_chapter_id?: string | null;
+  target_chapter_title?: string | null;
+  suggested_title?: string | null;
+  reason: string;
+  summary_text: string;
+  source_text: string;
+  followup_answer?: MemoirFollowupAnswerInterpretation | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoirBookSourceReviewListResponse {
+  items: MemoirBookSourceReviewItem[];
+  total: number;
+}
+
+export interface MemoirBookSourceReviewConfirmRequest {
+  followup_answer_kind: MemoirFollowupAnswerKind;
+  direct_narrative_text?: string;
+  clarification_text?: string;
+  fact_resolution_text?: string;
+}
+
+export interface MemoirBookSourceReviewConfirmResponse {
+  item: MemoirBookSourceReviewItem;
+  plan: MemoirBookPlan;
+}
+
 export interface MemoirProjectProgressChapter {
   chapter_id: string;
   title: string;
