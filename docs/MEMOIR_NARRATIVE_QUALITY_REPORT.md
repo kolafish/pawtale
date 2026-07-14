@@ -8,6 +8,23 @@
 
 工程门禁已经实现，但尚未取得项目所有者/主要编辑对至少两个脱敏真实章节的新旧盲评分。该状态不能由开发者自评或生成正文的同一 LLM 改成通过，也不能作为 PR12 删除旧链路的依据。
 
+## PR 交付矩阵
+
+| 设计 PR | 实际 PR | 当前状态 |
+| --- | --- | --- |
+| PR1 设计基线 | [#710](https://github.com/kolafish/pawtale/pull/710) | 已合并 |
+| PR2 事实持久化 | [#711](https://github.com/kolafish/pawtale/pull/711) | 已合并；SQLite 外键边界修复 [#712](https://github.com/kolafish/pawtale/pull/712) 已合并 |
+| PR3 Entity/Claim/Evidence ingestion | [#713](https://github.com/kolafish/pawtale/pull/713) | 已合并 |
+| PR4 Story 生命周期和槽位 | [#714](https://github.com/kolafish/pawtale/pull/714) | 已合并 |
+| PR5 ChapterContract/Node | [#715](https://github.com/kolafish/pawtale/pull/715) | 已合并 |
+| PR6 完整性和章节工作台 | [#716](https://github.com/kolafish/pawtale/pull/716) | 已合并 |
+| PR7 Followup Planner | [#717](https://github.com/kolafish/pawtale/pull/717) | 已合并 |
+| PR8 小程序补访体验 | [#718](https://github.com/kolafish/pawtale/pull/718) | 已合并；当前真机 smoke 尚未执行 |
+| PR9 DraftBlock/来源/锁定 | [#719](https://github.com/kolafish/pawtale/pull/719) | 已合并 |
+| PR10 节点生成和局部修订 | [#720](https://github.com/kolafish/pawtale/pull/720) | 已合并 |
+| PR11 全书一致性 | [#721](https://github.com/kolafish/pawtale/pull/721) | 已合并；人工质量门禁尚未通过 |
+| PR12 回填和正式切换 | [#722](https://github.com/kolafish/pawtale/pull/722) | Draft；工程实现完成，禁止在本报告变为 READY 前合并 |
+
 当前已完成：
 
 - 事实正文块必须有直接 Claim 和有效 evidence。
@@ -27,11 +44,13 @@
 - 最新生产一致性快照先在 ECS 端切换到独立 `DELETE` journal 并完成完整性、外键和 SHA-256 校验，再传回受控目录；本地字节数和 SHA-256 与 ECS 完全一致。PR12 runtime schema 在该副本上迁移成功，87 张既有表中只有 `memoir_editing_jobs` 清理了 11 条旧整章生成链路的终态队列记录（10 条 `succeeded`、1 条 `skipped`），其余 86 张表的行数和共同字段内容哈希均未变化；历史章节稿、成书版本、音频、转写、Claim、Evidence 和 Story 数量保持不变，迁移后 `integrity_check=ok`、`foreign_key_check=0`，且不存在指向 `*_old` 的外键。
 - 当前线程 review 补充了旧任务切换前置条件：只要旧整章生成任务仍为 `pending/running`，schema 迁移必须失败并保留全部任务；只有 `succeeded/failed/skipped` 终态记录可以在删除旧枚举约束时清理。真实事件序列回归测试同时覆盖“活跃任务阻断、事务不删除、终态后允许清理”。
 - 全局数据检查曾发现前置回填后新增的 1 个 evidence-backed Claim 簇未进入 Story。生产环境在停止 Pawtale writers、生成完整 manifest 备份并验证恢复依据后，通过正式 `stories` 阶段新增 1 条待用户核对的候选 Story，没有自动确认 Story 或 Contract。回填后 20 个活跃项目均为 `migration_complete=true`、`cutover_data_ready=true`，无数据阻塞项目；`chapter_workflow_ready=false` 仍由真实用户确认和结构化正文块门禁保持。
+- 当前 PR12 OpenAPI 的 98 个 memoir 路径全部已存在于 ECS 前置版本；生产只额外保留 `/book-editor/chapters/{chapter_id}/draft/generate` 和 `/book-editor/output/generate` 两个 PR12 将删除的旧生成入口。因此项目所有者可以在正式切流前完成 Story、Claim、slot、Contract 和 DraftBlock 决策，不需要临时部署 PR12 或兼容 API。
 
 上述三章中的确认、缺失槽位处理和章节收录均标记为 disposable engineering validation，只验证真实事件序列、provider 输入输出边界和确定性测量工具，不代表项目所有者或叙述者作出了产品决定，也不计入人工切换门禁。
 
 仍需完成：
 
+- 按 `docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md` 在当前 PR head 和真机上执行自由讲述、成书补访、人工补访及章节工作台 smoke，并记录 commit、设备、微信版本、执行人和失败证据；现有清单与单元测试不能替代该执行记录。
 - 从受控数据路径选择至少两个脱敏真实章节，且三类样本整体覆盖事件型、关系型、生涯型。
 - 隐藏 A/B 的新旧链路身份，由项目所有者或主要编辑完成评分。
 - 条件允许时增加一名不参与实现的独立评审者。
