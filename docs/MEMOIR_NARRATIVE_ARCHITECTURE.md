@@ -866,6 +866,8 @@ schema_version
 
 同一输入重试不得重复创建 Entity、Claim、Story、Gap 或 Task。人工已经确认的状态不得被重试任务降级。
 
+历史版本已经生成 Claim/Evidence、但没有生成 Story 时，不得通过重新执行整条 ingestion 进行修复。LLM 对同一事实的拆分和措辞可能变化，直接重跑会把同一 transcript version 扩增为重复 Claim。历史修复必须只读取现有 Claim/Evidence，在同一 transcript version 内按共享的非叙述者人物或地点锚点生成待确认 Story 候选，并使用稳定 fingerprint 幂等落库；低置信度拆分、合并和槽位归属继续由用户 review。
+
 ### 8.4 失败策略
 
 - AI 不可用时任务失败或延期，原始素材仍可查看和编辑。
@@ -1172,7 +1174,7 @@ PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures
   --backup-manifest /controlled/backup/manifest.json
 ```
 
-`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、Story/Contract 建议已物化且没有失败的摄取任务。`chapter_workflow_ready` 单独表示用户已确认 Contract 且章节已有结构化 DraftBlock；它必须通过真实章节工作台操作达成，不能由迁移脚本伪造确认人或产品决策。两者都不能替代第十五章的人工盲评门禁。
+`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、同一 transcript version 中共享人物或地点锚点的叙事 Claim 簇均已进入待确认 Story、Story/Contract 建议已物化且没有失败的摄取任务。它不表示 Story 已被用户确认。`chapter_workflow_ready` 单独表示用户已确认 Contract 且章节已有结构化 DraftBlock；它必须通过真实章节工作台操作达成，不能由迁移脚本伪造确认人或产品决策。两者都不能替代第十五章的人工盲评门禁。
 
 恢复操作默认只做预检。只有确认所有写进程仍处于停止状态时才允许执行；工具会先保存当前数据库调查快照，再清理目标库侧车并原子替换为经过 SHA-256 和完整性校验的备份。
 

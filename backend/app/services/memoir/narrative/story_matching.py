@@ -161,6 +161,7 @@ async def resolve_extracted_story(
     created_by: MemoirNarrativeActorType = MemoirNarrativeActorType.AI,
     creation_change_type: MemoirStoryRevisionChangeType = MemoirStoryRevisionChangeType.CREATED,
     creation_reason: str = "story candidate extracted from transcript evidence",
+    allow_existing_story_reuse: bool = True,
 ) -> tuple[MemoirStory, tuple[str, ...], bool]:
     repository = MemoirStoryRepository(db)
     review_candidate_ids: list[str] = []
@@ -175,7 +176,8 @@ async def resolve_extracted_story(
             and suggested.verification_status != MemoirStoryVerificationStatus.REJECTED.value
         ):
             if (
-                candidate.match_confidence >= STORY_MATCH_CONFIDENCE_THRESHOLD
+                allow_existing_story_reuse
+                and candidate.match_confidence >= STORY_MATCH_CONFIDENCE_THRESHOLD
                 and await _explicit_candidate_is_safe(
                     db,
                     story=suggested,
@@ -217,7 +219,7 @@ async def resolve_extracted_story(
             claim_ids=claim_ids,
         ):
             compatible_matches.append(story)
-    if len(compatible_matches) == 1:
+    if allow_existing_story_reuse and len(compatible_matches) == 1:
         return compatible_matches[0], (), False
     review_candidate_ids.extend(story.id for story in exact_matches)
     review_candidate_ids = list(dict.fromkeys(review_candidate_ids))

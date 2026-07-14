@@ -253,6 +253,82 @@ async def test_narrative_migration_replaces_stale_chapter_node_trigger_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_include_decision_action_to_existing_database():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, email, password_hash, role, display_name, created_at, updated_at) "
+                    "VALUES ('migration-user', 'migration@example.com', 'hash', 'user', "
+                    "'Migration User', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO projects "
+                    "(id, user_id, type, title, metadata_json, created_at, updated_at) "
+                    "VALUES ('migration-project', 'migration-user', 'memoir', "
+                    "'Migration Project', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            current_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_narrative_decisions'"
+                        )
+                    )
+                ).scalar_one()
+            )
+            legacy_sql = current_sql.replace("'include', ", "")
+            assert legacy_sql != current_sql
+            await conn.execute(text("DROP TABLE memoir_narrative_decisions"))
+            await conn.execute(text(legacy_sql))
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_decisions "
+                    "(id, project_id, target_type, target_id, action, actor_type, "
+                    "actor_user_id, before_state_json, after_state_json, reason, "
+                    "idempotency_key, created_at) VALUES "
+                    "('legacy-decision', 'migration-project', 'story', 'story-1', "
+                    "'confirm', 'user', 'migration-user', '{}', '{}', "
+                    "'preserve me', 'legacy-confirm', CURRENT_TIMESTAMP)"
+                )
+            )
+
+        changed = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+        assert changed["changed_tables"] == ["memoir_narrative_decisions"]
+        async with engine.begin() as conn:
+            upgraded_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_narrative_decisions'"
+                        )
+                    )
+                ).scalar_one()
+            )
+            preserved = (
+                await conn.execute(
+                    text(
+                        "SELECT action, reason FROM memoir_narrative_decisions "
+                        "WHERE id = 'legacy-decision'"
+                    )
+                )
+            ).one()
+        assert "'include'" in upgraded_sql
+        assert preserved == ("confirm", "preserve me")
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_repositories_enforce_project_scoping_and_source_shapes():
     register_models()
     engine = _sqlite_engine()

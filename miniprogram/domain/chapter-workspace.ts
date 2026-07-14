@@ -56,6 +56,17 @@ export interface MemoirChapterWorkspaceStory {
   claims: MemoirChapterWorkspaceClaim[];
 }
 
+export interface MemoirChapterWorkspaceAvailableStory {
+  id: string;
+  title: string;
+  story_type: string;
+  summary: string;
+  completion_status: string;
+  verification_status: string;
+  story_version: number;
+  excluded_from_chapter: boolean;
+}
+
 export interface MemoirChapterWorkspaceNodeStory {
   id: string;
   story_id: string;
@@ -138,6 +149,11 @@ export interface MemoirChapterStructureMutationResponse {
   target: MemoirChapterWorkspaceContract;
 }
 
+export interface MemoirChapterStoryDecisionRequest {
+  idempotency_key: string;
+  reason?: string;
+}
+
 export interface MemoirNarrativeGap {
   id: string;
   project_id: string;
@@ -189,6 +205,7 @@ export interface MemoirChapterWorkspace {
   chapter_title: string;
   contract: MemoirChapterWorkspaceContract | null;
   stories: MemoirChapterWorkspaceStory[];
+  available_stories: MemoirChapterWorkspaceAvailableStory[];
   gaps: MemoirChapterWorkspaceGapGroups;
   latest_audit_job: MemoirChapterGapAuditJob | null;
 }

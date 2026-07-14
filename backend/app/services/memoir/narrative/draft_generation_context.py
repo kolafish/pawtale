@@ -32,6 +32,8 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
+    MemoirStorySlot,
+    MemoirStorySlotClaim,
 )
 from app.schemas.memoir_narrative import (
     MemoirDraftBlockClaimSource,
@@ -311,6 +313,39 @@ async def build_node_generation_context(
         ).unique().all()
         if _eligible_claim(claim)
     } if claim_ids else {}
+    slot_keys_by_story_claim: dict[tuple[str, str], set[str]] = {}
+    if claim_ids:
+        slot_rows = (
+            await db.execute(
+                select(
+                    MemoirStorySlot.story_id,
+                    MemoirStorySlotClaim.claim_id,
+                    MemoirStorySlot.slot_key,
+                )
+                .join(
+                    MemoirStorySlotClaim,
+                    (MemoirStorySlotClaim.project_id == MemoirStorySlot.project_id)
+                    & (MemoirStorySlotClaim.story_slot_id == MemoirStorySlot.id),
+                )
+                .join(
+                    MemoirStory,
+                    (MemoirStory.project_id == MemoirStorySlot.project_id)
+                    & (MemoirStory.id == MemoirStorySlot.story_id),
+                )
+                .where(
+                    MemoirStorySlot.project_id == project_id,
+                    MemoirStorySlot.story_id.in_(eligible_story_ids),
+                    MemoirStorySlot.schema_version == MemoirStory.slot_schema_version,
+                    MemoirStorySlotClaim.claim_id.in_(claim_ids),
+                    MemoirStorySlotClaim.evidence_role
+                    == MemoirClaimEvidenceRole.SUPPORTS.value,
+                )
+            )
+        ).all()
+        for story_id, claim_id, slot_key in slot_rows:
+            slot_keys_by_story_claim.setdefault((story_id, claim_id), set()).add(
+                slot_key
+            )
 
     links_by_story: dict[str, list[MemoirStoryClaim]] = {}
     for link in story_claim_links:
@@ -337,6 +372,9 @@ async def build_node_generation_context(
         ]
         for story_claim in _claim_links_for_block_role(role, eligible_links):
             claim = claims[story_claim.claim_id]
+            slot_keys = sorted(
+                slot_keys_by_story_claim.get((story.id, claim.id), set())
+            )
             prompt_claims.append(
                 DraftBlockClaimInput(
                     claim_id=claim.id,
@@ -345,6 +383,7 @@ async def build_node_generation_context(
                     verification_status=claim.verification_status,
                     narrative_role=story_claim.narrative_role,
                     is_core=story_claim.is_core,
+                    slot_keys=slot_keys,
                     evidence=[
                         DraftBlockEvidenceInput(
                             evidence_id=evidence.id,
@@ -382,6 +421,13 @@ async def build_node_generation_context(
                     title=story.title,
                     summary=story.summary,
                     story_role=node_link.story_role,
+                    coverage_slot_keys=sorted(
+                        {
+                            slot_key
+                            for claim in prompt_claims
+                            for slot_key in claim.slot_keys
+                        }
+                    ),
                     claims=prompt_claims,
                 )
             )

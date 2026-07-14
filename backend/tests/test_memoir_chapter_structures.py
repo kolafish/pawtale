@@ -61,6 +61,7 @@ from app.models.memoir_narrative import (
     MemoirStoryClaim,
     MemoirStoryRevision,
 )
+from app.models.projects import Project
 from app.services.memoir.narrative.chapter_structure_backfill import (
     run_chapter_structure_backfill,
 )
@@ -549,6 +550,181 @@ async def test_story_merge_rewires_draft_contract_and_collapses_duplicate_node(
     await test_db.refresh(source)
     assert source.lifecycle_status == MemoirStoryLifecycleStatus.MERGED.value
     assert source.merged_into_story_id == retained.id
+
+
+async def test_owner_can_atomically_include_an_available_story_in_a_draft_contract(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["一生的朋友"],
+    )
+    story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="与李阅的关系",
+        verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION,
+    )
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload(
+            "include-story-contract",
+            objective="讲清重要朋友之间的相识、共同经历和关系变化。",
+            exclude_story_ids=[story.id],
+        ),
+    )
+    assert draft.status_code == 200, draft.text
+    contract_id = draft.json()["id"]
+    closing = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/nodes",
+        json={
+            "idempotency_key": "include-story-closing",
+            "node_type": "closing",
+            "title": "收束",
+            "purpose": "回到友情带来的长期影响。",
+            "required": False,
+        },
+    )
+    assert closing.status_code == 200, closing.text
+
+    before = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
+    )
+    assert before.status_code == 200, before.text
+    assert before.json()["available_stories"] == [
+        {
+            "id": story.id,
+            "title": story.title,
+            "story_type": story.story_type,
+            "summary": story.summary,
+            "completion_status": story.completion_status,
+            "verification_status": "needs_verification",
+            "story_version": 1,
+            "excluded_from_chapter": True,
+        }
+    ]
+
+    payload = {
+        "idempotency_key": "include-li-yue-in-friends-chapter",
+        "reason": "这段朋友关系属于本章",
+    }
+    included = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story.id}/include",
+        json=payload,
+    )
+    assert included.status_code == 200, included.text
+    body = included.json()
+    assert body["constraints"]["include_story_ids"] == [story.id]
+    assert body["constraints"]["exclude_story_ids"] == []
+    assert [node["node_type"] for node in body["nodes"]] == ["story", "closing"]
+    story_node = body["nodes"][0]
+    assert story_node["title"] == story.title
+    assert story_node["required"] is True
+    assert story_node["status"] == "needs_work"
+    assert story_node["stories"] == [
+        {
+            "id": story_node["stories"][0]["id"],
+            "story_id": story.id,
+            "story_role": "primary",
+            "sort_order": 0,
+            "required": True,
+        }
+    ]
+    await test_db.refresh(story)
+    assert story.verification_status == MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value
+
+    decision = await test_db.scalar(
+        select(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.project_id == project_id,
+            MemoirNarrativeDecision.idempotency_key == payload["idempotency_key"],
+        )
+    )
+    assert decision is not None
+    assert decision.action == "include"
+    assert decision.after_state_json["included_story_id"] == story.id
+
+    replay = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story.id}/include",
+        json=payload,
+    )
+    assert replay.status_code == 200, replay.text
+    assert len(replay.json()["nodes"]) == 2
+    assert await test_db.scalar(
+        select(func.count()).select_from(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.project_id == project_id,
+            MemoirNarrativeDecision.idempotency_key == payload["idempotency_key"],
+        )
+    ) == 1
+
+    after = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
+    )
+    assert after.status_code == 200, after.text
+    assert after.json()["available_stories"] == []
+    assert [item["id"] for item in after.json()["stories"]] == [story.id]
+
+
+async def test_including_story_is_project_scoped_and_requires_a_draft_contract(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db)
+    project_id = first["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["求学经历"],
+    )
+    story, _ = await _create_ready_story(test_db, created=first)
+    story_id = story.id
+    foreign_project = Project(
+        user_id=first["user_id"],
+        type="memoir",
+        title="另一本回忆录",
+    )
+    test_db.add(foreign_project)
+    await test_db.commit()
+    foreign = await create_test_voice_transcript(
+        client,
+        test_db,
+        project_id=foreign_project.id,
+    )
+    foreign_story, _ = await _create_ready_story(
+        test_db,
+        created=foreign,
+        title="另一个项目的故事",
+    )
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/contract/revisions",
+        json=_draft_payload("include-story-scope", objective="记录求学经历。"),
+    )
+    assert draft.status_code == 200, draft.text
+    contract_id = draft.json()["id"]
+
+    foreign_response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{foreign_story.id}/include",
+        json={"idempotency_key": "foreign-story", "reason": "不应跨项目"},
+    )
+    assert foreign_response.status_code == 404
+
+    included = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/include",
+        json={"idempotency_key": "ready-story", "reason": "属于本章"},
+    )
+    assert included.status_code == 200, included.text
+    confirmed = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/confirm"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    immutable = await client.post(
+        f"/api/memoir/projects/{project_id}/chapter-contracts/{contract_id}/stories/{story_id}/include",
+        json={"idempotency_key": "confirmed-story", "reason": "不应原地修改"},
+    )
+    assert immutable.status_code == 409
 
 
 async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generation_gate(

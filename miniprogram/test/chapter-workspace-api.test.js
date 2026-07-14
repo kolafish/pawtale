@@ -60,6 +60,7 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     enqueueMemoirChapterWorkspaceAudit,
     excludeMemoirStoryFromChapter,
     getMemoirChapterWorkspace,
+    includeMemoirStoryInChapter,
     mergeMemoirStory,
     mergeMemoirChapterStructures,
     moveMemoirStoryBetweenChapterNodes,
@@ -71,6 +72,27 @@ test("chapter workspace API uses narrative resource routes and explicit action p
   } = require("../services/memoir-chapter-workspace-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
+  await createMemoirChapterContractRevision("project/1", "chapter/1", {
+    idempotency_key: "revision-1",
+    objective: "讲清离家经历。",
+    reader_takeaway: "理解离家的影响。",
+    time_scope_text: "青年时期",
+    time_start: null,
+    time_end: null,
+    core_questions: [{ key: "meaning", question: "为什么重要？" }],
+    constraints: {
+      include_story_ids: [],
+      exclude_story_ids: [],
+      include_topics: [],
+      exclude_topics: [],
+    },
+    copy_from_contract_id: "contract/1",
+    copy_nodes: true,
+  });
+  await includeMemoirStoryInChapter("project/1", "contract/1", "story/1", {
+    idempotency_key: "include-1",
+    reason: "属于本章",
+  });
   await enqueueMemoirChapterWorkspaceAudit("project/1", "chapter/1");
   await resolveMemoirNarrativeGap("project/1", "gap/1", "not-applicable", {
     idempotency_key: "decision-1",
@@ -158,69 +180,76 @@ test("chapter workspace API uses narrative resource routes and explicit action p
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
-  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace/audits");
-  assert.deepEqual(apiRequests[1].data, {
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/revisions");
+  assert.equal(apiRequests[1].data.copy_from_contract_id, "contract/1");
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/include");
+  assert.deepEqual(apiRequests[2].data, {
+    idempotency_key: "include-1",
+    reason: "属于本章",
+  });
+  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace/audits");
+  assert.deepEqual(apiRequests[3].data, {
     include_semantic_audit: true,
     ai_model: "deepseek-v4-flash",
   });
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/not-applicable");
-  assert.deepEqual(apiRequests[2].data, {
+  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/not-applicable");
+  assert.deepEqual(apiRequests[4].data, {
     idempotency_key: "decision-1",
     note: "该项不适用于本章",
   });
-  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/claims/claim%2F1/confirm");
-  assert.deepEqual(apiRequests[3].data, {
+  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/claims/claim%2F1/confirm");
+  assert.deepEqual(apiRequests[5].data, {
     idempotency_key: "claim-decision-1",
     reason: "证据已核对",
   });
-  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/reject");
-  assert.deepEqual(apiRequests[4].data, {
+  assert.equal(apiRequests[6].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/reject");
+  assert.deepEqual(apiRequests[6].data, {
     idempotency_key: "story-decision-1",
     reason: "不用于成书",
   });
-  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/exclude");
-  assert.deepEqual(apiRequests[5].data, {
+  assert.equal(apiRequests[7].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/exclude");
+  assert.deepEqual(apiRequests[7].data, {
     idempotency_key: "chapter-exclusion-1",
     reason: "移到下一章",
   });
-  assert.equal(apiRequests[6].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/slots/time%2Fplace/resolve");
-  assert.deepEqual(apiRequests[6].data, {
+  assert.equal(apiRequests[8].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/slots/time%2Fplace/resolve");
+  assert.deepEqual(apiRequests[8].data, {
     idempotency_key: "slot-decision-1",
     note: "叙述者暂时无法补充",
     status: "accepted_incomplete",
   });
-  assert.equal(apiRequests[7].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/confirm");
-  assert.deepEqual(apiRequests[7].data, {});
-  assert.equal(apiRequests[8].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/node%2F1");
-  assert.equal(apiRequests[8].method, "PATCH");
-  assert.deepEqual(apiRequests[8].data, {
+  assert.equal(apiRequests[9].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/confirm");
+  assert.deepEqual(apiRequests[9].data, {});
+  assert.equal(apiRequests[10].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/node%2F1");
+  assert.equal(apiRequests[10].method, "PATCH");
+  assert.deepEqual(apiRequests[10].data, {
     title: "新的节点标题",
     purpose: "新的叙事作用",
     required: true,
   });
-  assert.equal(apiRequests[9].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/reorder");
-  assert.deepEqual(apiRequests[9].data, { node_ids: ["node/2", "node/1"] });
-  assert.equal(apiRequests[10].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/move");
-  assert.deepEqual(apiRequests[10].data, {
+  assert.equal(apiRequests[11].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/nodes/reorder");
+  assert.deepEqual(apiRequests[11].data, { node_ids: ["node/2", "node/1"] });
+  assert.equal(apiRequests[12].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-contracts/contract%2F1/stories/story%2F1/move");
+  assert.deepEqual(apiRequests[12].data, {
     source_node_id: "node/1",
     target_node_id: "node/2",
   });
-  assert.equal(apiRequests[11].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/merge");
-  assert.deepEqual(apiRequests[11].data, {
+  assert.equal(apiRequests[13].url, "http://backend.local:8000/api/memoir/projects/project%2F1/stories/story%2F1/merge");
+  assert.deepEqual(apiRequests[13].data, {
     retained_story_id: "story/2",
     idempotency_key: "merge-1",
     reason: "确认是同一个故事",
   });
-  assert.equal(apiRequests[12].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/revisions");
-  assert.equal(apiRequests[12].method, "POST");
-  assert.deepEqual(apiRequests[12].data.core_questions, [
+  assert.equal(apiRequests[14].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/revisions");
+  assert.equal(apiRequests[14].method, "POST");
+  assert.deepEqual(apiRequests[14].data.core_questions, [
     { key: "reason", question: "为什么离家？" },
   ]);
-  assert.equal(apiRequests[13].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/split");
-  assert.deepEqual(apiRequests[13].data.node_ids, ["node/2"]);
-  assert.equal(apiRequests[13].data.target_title, "第一次离家");
-  assert.equal(apiRequests[14].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/merge");
-  assert.deepEqual(apiRequests[14].data, {
+  assert.equal(apiRequests[15].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/split");
+  assert.deepEqual(apiRequests[15].data.node_ids, ["node/2"]);
+  assert.equal(apiRequests[15].data.target_title, "第一次离家");
+  assert.equal(apiRequests[16].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapter-structures/merge");
+  assert.deepEqual(apiRequests[16].data, {
     idempotency_key: "merge-chapter-1",
     source_contract_id: "contract/1",
     target_chapter_id: "chapter/2",
