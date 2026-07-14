@@ -4,6 +4,7 @@ from collections import Counter
 from copy import deepcopy
 import json
 import logging
+import re
 
 from pydantic import ValidationError
 
@@ -29,6 +30,29 @@ NARRATIVE_EXTRACTION_SYSTEM_PROMPT = (
     "你是一位严谨的中文回忆录事实编辑。只能抽取原文明确表达、可由逐字引文支持的事实。"
 )
 NARRATIVE_EXTRACTION_MAX_TOKENS = 6000
+NARRATIVE_CONTROL_ONLY_PATTERNS = (
+    re.compile(
+        r"^(?:我们|咱们|我)?(?:接着|继续|再|开始|来|先)?"
+        r"(?:聊|说|讲)(?:一说|说|一下|一会儿)?(?:刚才|之前|上次)?"
+        r"(?:那个|这个)?(?:人|朋友|话题|事情|事|经历|问题)?"
+        r"(?:吧|呢|好了|到这里)?[。！？!?]*$"
+    ),
+    re.compile(
+        r"^(?:我们|咱们|我)?(?:先)?(?:换|换到|转到)"
+        r"(?:一个|个|下一个)?(?:话题|人|事情|事)(?:吧|呢)?[。！？!?]*$"
+    ),
+    re.compile(
+        r"^(?:今天|这次|我们|咱们|我)?(?:先)?(?:聊|说|讲)到这里"
+        r"(?:吧|了)?[。！？!?]*$"
+    ),
+)
+
+
+def is_narrative_control_only(source_text: str) -> bool:
+    normalized = re.sub(r"\s+", "", source_text.strip())
+    return bool(normalized) and len(normalized) <= 40 and any(
+        pattern.fullmatch(normalized) for pattern in NARRATIVE_CONTROL_ONLY_PATTERNS
+    )
 
 
 def build_narrative_extraction_repair_prompt(
@@ -326,6 +350,7 @@ source_text:
 - 每条 claim 至少提供一段逐字引文；无法找到逐字引文就不要输出该 claim。
 - 时间不确定时保留 time_text，certainty 使用 approximate 或 uncertain，不猜具体日期。
 - speaker_role=interviewer 时，采访者提出的问题不是叙述者事实；采访者自己陈述的新事实可以抽取，但会由系统进入人工核实。
+- “接着聊那个朋友吧”“换个话题”等只控制访谈流程的句子不是人物关系或回忆事实；整条 source_text 只有这类话语时，entities、claims、stories 全部返回空数组。
 - aliases 只能来自原文，不能因为名称相似自行判断是同一个人。
 - story 必须引用本次 claims，不能脱离有逐字证据的 claim 创建。
 - narrative_role 描述叙事作用，slot_keys 描述结构槽位，两者不能混用。
@@ -352,6 +377,26 @@ async def extract_narrative_state(
     str | None,
     dict[str, int | bool],
 ]:
+    if is_narrative_control_only(source_text):
+        return (
+            MemoirNarrativeExtraction(
+                schema_version="1",
+                entities=[],
+                claims=[],
+                stories=[],
+            ),
+            None,
+            None,
+            {
+                "repair_attempted": False,
+                "discarded_entity_count": 0,
+                "discarded_claim_count": 0,
+                "discarded_story_count": 0,
+                "discarded_story_slot_key_count": 0,
+                "used_initial_response_after_repair": False,
+                "control_only_source": True,
+            },
+        )
     client = ai_client or get_ai_service(ai_model)
     content = await client._call_llm(
         NARRATIVE_EXTRACTION_SYSTEM_PROMPT,

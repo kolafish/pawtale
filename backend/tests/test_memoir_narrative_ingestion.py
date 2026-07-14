@@ -44,6 +44,7 @@ from app.services.memoir.narrative.ingestion_jobs import (
     run_narrative_ingestion_job,
     schedule_narrative_ingestion_job,
 )
+from app.services.memoir.narrative.extraction import is_narrative_control_only
 from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
 from tests.memoir_helpers import create_test_voice_transcript
 
@@ -228,6 +229,29 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence is not None
     assert evidence.quote == "七二年前后，我搬到了成都"
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
+
+
+async def test_control_only_utterance_creates_no_claim_or_story(client, test_db):
+    source_text = "我们接着聊那个朋友吧"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    fake_ai = FakeNarrativeAI([])
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert fake_ai.calls == 0
+    assert result.created_claim_ids == ()
+    assert result.created_story_ids == ()
+    assert result.extraction_diagnostics["control_only_source"] is True
+    assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
+    assert is_narrative_control_only("继续说刚才那个话题。") is True
+    assert is_narrative_control_only("我们接着聊那个朋友吧，我三年级转学时她来找我。") is False
 
 
 async def test_real_provider_schema_errors_are_repaired_once(client, test_db):

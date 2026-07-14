@@ -41,6 +41,8 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
+    MemoirStorySlot,
+    MemoirStorySlotClaim,
 )
 from app.schemas.memoir_narrative import (
     MemoirDraftBlockGenerationRequest,
@@ -174,6 +176,26 @@ async def _create_generation_fixture(
             created_by=MemoirNarrativeActorType.USER.value,
             created_by_user_id=user_id,
         )
+        slot = MemoirStorySlot(
+            project_id=project_id,
+            story_id=story.id,
+            schema_version="1",
+            slot_key="actions",
+            status="sufficient",
+            assessment_summary="行动已有事实支持。",
+            user_resolution_note="",
+        )
+        contradicted_slot = MemoirStorySlot(
+            project_id=project_id,
+            story_id=story.id,
+            schema_version="1",
+            slot_key="outcome",
+            status="partial",
+            assessment_summary="结果只有反证，不能作为正文覆盖来源。",
+            user_resolution_note="",
+        )
+        test_db.add_all([slot, contradicted_slot])
+        await test_db.flush()
         test_db.add_all(
             [
                 revision,
@@ -194,6 +216,22 @@ async def _create_generation_fixture(
                     narrative_role=MemoirStoryNarrativeRole.ACTION.value,
                     sort_order=0,
                     is_core=True,
+                    created_by=MemoirNarrativeActorType.USER.value,
+                    created_by_user_id=user_id,
+                ),
+                MemoirStorySlotClaim(
+                    project_id=project_id,
+                    story_slot_id=slot.id,
+                    claim_id=claim.id,
+                    evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
+                    created_by=MemoirNarrativeActorType.USER.value,
+                    created_by_user_id=user_id,
+                ),
+                MemoirStorySlotClaim(
+                    project_id=project_id,
+                    story_slot_id=contradicted_slot.id,
+                    claim_id=claim.id,
+                    evidence_role=MemoirClaimEvidenceRole.CONTRADICTS.value,
                     created_by=MemoirNarrativeActorType.USER.value,
                     created_by_user_id=user_id,
                 ),
@@ -364,6 +402,81 @@ def test_generation_validation_enforces_sources_and_adjacent_sentence_boundary()
         )
 
 
+def test_factual_generation_requires_supported_slot_coverage_and_narrator_voice():
+    action_claim_id = "action-claim"
+    outcome_claim_id = "outcome-claim"
+    context = DraftBlockGenerationInput.model_validate(
+        {
+            "contract_id": "contract",
+            "contract_objective": "写清一段完整经历。",
+            "reader_takeaway": "理解行动和结果。",
+            "node_id": "story-node",
+            "node_type": "story",
+            "node_title": "一次转折",
+            "node_purpose": "完整讲述事情的经过。",
+            "block_role": "factual",
+            "stories": [
+                {
+                    "story_id": "story",
+                    "story_revision_id": "revision",
+                    "title": "一次转折",
+                    "summary": "采取行动后事情有了结果。",
+                    "story_role": "primary",
+                    "coverage_slot_keys": ["actions", "outcome"],
+                    "claims": [
+                        {
+                            "claim_id": action_claim_id,
+                            "statement": "叙述者采取了行动。",
+                            "certainty": "exact",
+                            "verification_status": "confirmed",
+                            "narrative_role": "action",
+                            "is_core": True,
+                            "slot_keys": ["actions"],
+                        },
+                        {
+                            "claim_id": outcome_claim_id,
+                            "statement": "事情有了结果。",
+                            "certainty": "exact",
+                            "verification_status": "confirmed",
+                            "narrative_role": "outcome",
+                            "is_core": True,
+                            "slot_keys": ["outcome"],
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    with pytest.raises(ValueError, match="missed supported Story slots.*outcome"):
+        validate_generation_output(
+            context,
+            DraftBlockLLMOutput(
+                content="我采取了行动。",
+                used_claim_ids=[action_claim_id],
+                unsupported_fact_candidates=[],
+            ),
+        )
+    with pytest.raises(ValueError, match="first-person voice"):
+        validate_generation_output(
+            context,
+            DraftBlockLLMOutput(
+                content="叙述者采取了行动，事情随后有了结果。",
+                used_claim_ids=[action_claim_id, outcome_claim_id],
+                unsupported_fact_candidates=[],
+            ),
+        )
+
+    validate_generation_output(
+        context,
+        DraftBlockLLMOutput(
+            content="我采取了行动，事情随后有了结果。",
+            used_claim_ids=[action_claim_id, outcome_claim_id],
+            unsupported_fact_candidates=[],
+        ),
+    )
+
+
 async def test_draft_generation_job_routes_enqueue_and_read_scoped_job(client, test_db):
     created = await _create_generation_fixture(client, test_db)
     queued = await client.post(
@@ -483,6 +596,8 @@ async def test_initial_generation_builds_source_backed_opening_before_facts(
     assert [block.id for block in blocks] == result.result_json["created_block_ids"]
     assert '"node_type":"opening"' in ai.prompts[0]
     assert '"node_type":"story"' in ai.prompts[1]
+    assert '"coverage_slot_keys":["actions"]' in ai.prompts[1]
+    assert '"slot_keys":["actions"]' in ai.prompts[1]
     assert '"previous_block_context":"十八岁那年，我离开家乡。"' in ai.prompts[1]
     assert '"node_type":"story"' in ai.prompts[2]
     assert "上一次输出未通过服务端事实与重复校验" in ai.prompts[2]
