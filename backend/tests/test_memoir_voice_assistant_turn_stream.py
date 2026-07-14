@@ -728,8 +728,15 @@ async def test_automation_events_hide_historical_failure_after_job_recovered(cli
         user_id=created["user_id"],
         project_id=project_id,
     )
+    audit_history = await automation_events.list_automation_events(
+        test_db,
+        user_id=created["user_id"],
+        project_id=project_id,
+        include_acknowledged=True,
+    )
 
     assert response.items == []
+    assert len(audit_history.items) == 1
 
 
 async def test_internal_editing_failure_is_not_announced_during_interview(client, test_db):

@@ -323,15 +323,15 @@ async def _add_narrative_evidence(
                 created_by=MemoirNarrativeActorType.AI.value,
             )
         )
-        fixture["slot"].status = MemoirStorySlotStatus.SUFFICIENT.value
-        fixture["slot"].assessment_summary = "新口述明确说明了比赛结果。"
-        test_db.add(fixture["slot"])
     test_db.add_all(relations)
     await test_db.flush()
     return utterance, version
 
 
-async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_db):
+async def test_followup_task_finishes_after_new_slot_evidence_without_confirmation(
+    client,
+    test_db,
+):
     fixture = await _create_story_gap(client, test_db)
     repeated = await followup_planner.generate_followup_tasks(
         test_db,
@@ -412,6 +412,8 @@ async def test_followup_task_finishes_only_after_new_slot_evidence(client, test_
     assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
         (utterance.id, "target_answer")
     ]
+    await test_db.refresh(fixture["slot"])
+    assert fixture["slot"].status == MemoirStorySlotStatus.PARTIAL.value
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
     assert gap is not None
     assert gap.status == MemoirNarrativeGapStatus.RESOLVED.value
@@ -462,6 +464,7 @@ async def test_voice_persistence_snapshots_current_followup_task(client, test_db
     )
     assert relation is not None
     assert relation.result_role == "related_context"
+    assert relation.is_assignment_snapshot is True
 
 
 async def test_saved_answer_completes_task_after_session_stops_before_ingestion(client, test_db):
@@ -529,6 +532,13 @@ async def test_saved_answer_completes_task_after_session_stops_before_ingestion(
     assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
         (utterance.id, "target_answer")
     ]
+    retry_context = await followup_completion.ingestion_context_for_utterance(
+        test_db,
+        project_id=fixture["project_id"],
+        utterance=utterance,
+    )
+    assert retry_context is not None
+    assert retry_context.task_id == fixture["task"].id
 
 
 async def test_related_but_off_target_evidence_does_not_complete_task(client, test_db):

@@ -279,7 +279,8 @@ async def list_automation_events(
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
     events = list(result.scalars().all())
-    events = await _without_recovered_job_failures(db, events)
+    if not include_acknowledged:
+        events = await _without_recovered_job_failures(db, events)
     events = _visible_events(
         events,
         include_acknowledged=include_acknowledged,

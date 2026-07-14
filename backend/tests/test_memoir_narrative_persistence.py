@@ -147,6 +147,31 @@ async def test_narrative_migration_adds_structured_block_snapshot_column_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_followup_assignment_snapshot_column_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_followup_task_utterances "
+                    "DROP COLUMN is_assignment_snapshot"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_followup_task_utterances.is_assignment_snapshot"
+        ]
+        assert second["changed_columns"] == []
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_migration_adds_include_decision_action_to_existing_database():
     register_models()
     engine = _sqlite_engine()

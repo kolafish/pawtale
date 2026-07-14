@@ -62,6 +62,7 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
     "formalized_by_user_id": "VARCHAR(36)",
     "formalized_at": "DATETIME",
 }
+FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -109,8 +110,7 @@ async def _ensure_structured_draft_snapshot_column(conn) -> list[str]:
     if not await _table_exists(conn, table_name):
         return []
     columns = {
-        str(column["name"])
-        for column in await _table_column_schema(conn, table_name)
+        str(column["name"]) for column in await _table_column_schema(conn, table_name)
     }
     if "block_snapshot_json" in columns:
         return []
@@ -140,6 +140,26 @@ async def _ensure_book_output_formal_columns(conn) -> list[str]:
         )
         changed.append(f"{table_name}.{column_name}")
     return changed
+
+
+async def _ensure_followup_task_utterance_assignment_column(conn) -> list[str]:
+    table_name = "memoir_followup_task_utterances"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    if FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN in columns:
+        return []
+    await conn.execute(
+        text(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN} "
+            "BOOLEAN NOT NULL DEFAULT 0"
+        )
+    )
+    return [f"{table_name}.{FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN}"]
 
 
 async def _table_sql(conn, table_name: str) -> str:
@@ -382,6 +402,9 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 changed_indexes.append(index.name)
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
+        changed_columns.extend(
+            await _ensure_followup_task_utterance_assignment_column(conn)
+        )
         if await _ensure_decision_include_action(conn):
             changed_tables.append("memoir_narrative_decisions")
         changed_triggers.extend(await _ensure_decision_triggers(conn))

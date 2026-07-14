@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -179,4 +180,9 @@ class MemoirFollowupTaskUtterance(Base):
         String(36), ForeignKey("memoir_voice_utterances.id"), nullable=False
     )
     result_role: Mapped[str] = mapped_column(String(24), nullable=False)
+    is_assignment_snapshot: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

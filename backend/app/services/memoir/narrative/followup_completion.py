@@ -14,7 +14,6 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupTaskStatus,
     MemoirFollowupTaskUtteranceRole,
     MemoirNarrativeActorType,
-    MemoirStorySlotStatus,
 )
 from app.domain.memoir.types import MemoirChatMessageRole, MemoirSessionGoal
 from app.models.memoir import (
@@ -109,7 +108,6 @@ async def _target_slot_received_evidence(
             MemoirStorySlot.story_id == story_id,
             MemoirStorySlot.schema_version == story.slot_schema_version,
             MemoirStorySlot.slot_key == target_slot,
-            MemoirStorySlot.status == MemoirStorySlotStatus.SUFFICIENT.value,
         )
     )
     if slot is None:
@@ -132,6 +130,7 @@ async def _add_task_utterance_relation(
     task_id: str,
     utterance_id: str,
     role: MemoirFollowupTaskUtteranceRole,
+    is_assignment_snapshot: bool = False,
 ) -> None:
     relation = await db.scalar(
         select(MemoirFollowupTaskUtterance).where(
@@ -147,14 +146,22 @@ async def _add_task_utterance_relation(
                 task_id=task_id,
                 utterance_id=utterance_id,
                 result_role=role.value,
+                is_assignment_snapshot=is_assignment_snapshot,
             )
         )
-    elif (
-        role == MemoirFollowupTaskUtteranceRole.TARGET_ANSWER
-        and relation.result_role != role.value
-    ):
-        relation.result_role = role.value
-        db.add(relation)
+    else:
+        changed = False
+        if (
+            role == MemoirFollowupTaskUtteranceRole.TARGET_ANSWER
+            and relation.result_role != role.value
+        ):
+            relation.result_role = role.value
+            changed = True
+        if is_assignment_snapshot and not relation.is_assignment_snapshot:
+            relation.is_assignment_snapshot = True
+            changed = True
+        if changed:
+            db.add(relation)
     await db.flush()
 
 
@@ -187,6 +194,7 @@ async def link_utterance_to_session_task(
         task_id=task.id,
         utterance_id=utterance.id,
         role=MemoirFollowupTaskUtteranceRole.RELATED_CONTEXT,
+        is_assignment_snapshot=True,
     )
     return task.id
 
@@ -202,6 +210,7 @@ async def ingestion_context_for_utterance(
         .where(
             MemoirFollowupTaskUtterance.project_id == project_id,
             MemoirFollowupTaskUtterance.utterance_id == utterance.id,
+            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
         )
         .order_by(
             MemoirFollowupTaskUtterance.created_at,
@@ -217,7 +226,11 @@ async def ingestion_context_for_utterance(
         )
         if task is None:
             return None
-        if MemoirFollowupTaskStatus(task.status) not in followup_tasks.ACTIVE_TASK_STATUSES:
+        context_statuses = {
+            *followup_tasks.ACTIVE_TASK_STATUSES,
+            MemoirFollowupTaskStatus.ANSWERED,
+        }
+        if MemoirFollowupTaskStatus(task.status) not in context_statuses:
             return None
     else:
         voice_session = await db.scalar(
