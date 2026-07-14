@@ -171,6 +171,14 @@ async def project_migration_report(
         db,
         select(func.count(MemoirStory.id)).where(MemoirStory.project_id == project_id),
     )
+    story_backfill_candidates = await collect_story_backfill_candidates(
+        db,
+        project_id=project_id,
+    )
+    ungrouped_claim_cluster_count = sum(
+        candidate.origin.startswith("claim_anchor_cluster:")
+        for candidate in story_backfill_candidates
+    )
     source_link_count = await _count(
         db,
         select(func.count(MemoirChapterSourceLink.id)).where(
@@ -188,6 +196,8 @@ async def project_migration_report(
         blockers.append("narrative ingestion jobs failed")
     if claims_without_evidence:
         blockers.append("Claims without evidence remain")
+    if ungrouped_claim_cluster_count:
+        blockers.append("evidence-backed Claim clusters are not grouped into Stories")
     if legacy_versions_missing:
         blockers.append("legacy chapter versions are not snapshotted")
     if missing_contract_count:
@@ -210,6 +220,7 @@ async def project_migration_report(
         "claim_count": claim_count,
         "claims_without_evidence_count": claims_without_evidence,
         "story_count": story_count,
+        "ungrouped_claim_cluster_count": ungrouped_claim_cluster_count,
         "missing_contract_count": missing_contract_count,
         "confirmed_contract_count": confirmed_contract_count,
         "chapters_with_structured_blocks_count": chapters_with_structured_blocks,
