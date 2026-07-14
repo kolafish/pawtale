@@ -518,17 +518,53 @@ async def run_due_editing_jobs(
     job_type: MemoirEditingJobType | None = None,
     project_id: str | None = None,
 ) -> int:
+    _, succeeded = await _run_due_editing_job_batch(
+        session_maker,
+        limit=limit,
+        job_type=job_type,
+        project_id=project_id,
+    )
+    return succeeded
+
+
+async def _run_due_editing_job_batch(
+    session_maker: async_sessionmaker[AsyncSession],
+    *,
+    limit: int | None = None,
+    job_type: MemoirEditingJobType | None = None,
+    project_id: str | None = None,
+) -> tuple[int, int]:
     async with session_maker() as db:
+        serialize_writes = db.get_bind().dialect.name == "sqlite"
         leases = await claim_due_editing_jobs(
             db,
-            limit=limit,
+            limit=1 if serialize_writes else limit,
             job_type=job_type,
             project_id=project_id,
         )
-    results = await asyncio.gather(
-        *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
-    )
-    return sum(results)
+    if serialize_writes:
+        results = [
+            await _run_claimed_editing_job(session_maker, lease)
+            for lease in leases
+        ]
+    else:
+        results = await asyncio.gather(
+            *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
+        )
+    return len(leases), sum(results)
+
+
+async def run_available_editing_jobs(
+    session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> int:
+    succeeded = 0
+    while True:
+        claimed, batch_succeeded = await _run_due_editing_job_batch(session_maker)
+        succeeded += batch_succeeded
+        if claimed == 0 or (should_stop is not None and should_stop()):
+            return succeeded
 
 
 async def editing_worker_loop(stop_event: asyncio.Event) -> None:
@@ -536,7 +572,7 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
     while not stop_event.is_set():
         try:
-            await run_due_editing_jobs()
+            await run_available_editing_jobs(should_stop=stop_event.is_set)
         except Exception:
             logger.exception("memoir editing worker tick failed")
         try:

@@ -485,12 +485,11 @@ definePage<HomeData>()({
   },
 
   async startBookCompletion() {
-    if (!this.canStartVoiceChat(false)) {
+    if (this.data.preparingBookCompletion || !this.canStartVoiceChat(false)) {
       return;
     }
     const token = ++this.bookCompletionPollToken;
     setHomeData(this, {
-      creatingVoice: true,
       preparingBookCompletion: true,
       error: "",
     });
@@ -522,7 +521,6 @@ definePage<HomeData>()({
     } finally {
       if (token === this.bookCompletionPollToken) {
         setHomeData(this, {
-          creatingVoice: false,
           preparingBookCompletion: false,
         });
       }
@@ -537,7 +535,6 @@ definePage<HomeData>()({
     this.bookCompletionPollToken += 1;
     if (this.data.preparingBookCompletion) {
       setHomeData(this, {
-        creatingVoice: false,
         preparingBookCompletion: false,
       });
     }
@@ -619,6 +616,7 @@ definePage<HomeData>()({
     if (!this.canStartVoiceChat()) {
       return;
     }
+    this.stopBookCompletionPreparation();
     setHomeData(this, { creatingVoice: true, error: "" });
     try {
       await syncVoiceAuthorizationConsent();

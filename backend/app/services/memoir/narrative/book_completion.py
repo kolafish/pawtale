@@ -38,7 +38,6 @@ _FAILED_JOB_STATUSES = {
 class _ChapterPreparation:
     chapter: MemoirBookPlanChapter
     context: ChapterAuditContext
-    audit_dedupe_key: str
     audit_job: MemoirEditingJob | None
 
 
@@ -91,77 +90,63 @@ async def _chapter_preparations(
         ):
             first_needing_direction = first_needing_direction or chapter
             continue
-        signature = gap_audit.chapter_gap_audit_signature(
-            context,
-            include_semantic_audit=False,
-            ai_model=None,
-        )
-        dedupe_key = gap_audit.chapter_gap_audit_dedupe_key(
-            project_id=project_id,
-            chapter_id=chapter.id,
-            signature=signature,
-        )
         preparations.append(
             _ChapterPreparation(
                 chapter=chapter,
                 context=context,
-                audit_dedupe_key=dedupe_key,
-                audit_job=await _job_by_dedupe_key(db, dedupe_key),
+                audit_job=await gap_audit.current_chapter_gap_audit_job(
+                    db,
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                    content_signature=gap_audit.chapter_gap_audit_content_signature(context),
+                ),
             )
         )
     return preparations, first_needing_direction
 
 
-def _job_problem(
+def _audit_problem(
     project_id: str,
-    preparations: list[_ChapterPreparation],
+    preparation: _ChapterPreparation,
 ) -> MemoirBookCompletionResponse | None:
-    failed = next(
-        (item for item in preparations if item.audit_job and item.audit_job.status in _FAILED_JOB_STATUSES),
-        None,
-    )
-    if failed:
+    job = preparation.audit_job
+    if job is not None and job.status in _FAILED_JOB_STATUSES:
         return _response(
             project_id,
             state="failed",
             action="retry",
             headline="整理下一题时没有完成",
-            detail=f"可以重新整理“{failed.chapter.title}”，已有录音和书稿不会受影响。",
-            chapter_id=failed.chapter.id,
+            detail=f"可以重新整理“{preparation.chapter.title}”，已有录音和书稿不会受影响。",
+            chapter_id=preparation.chapter.id,
         )
-    active = next(
-        (item for item in preparations if item.audit_job and item.audit_job.status in _ACTIVE_JOB_STATUSES),
-        None,
-    )
-    if active:
+    if job is not None and job.status in _ACTIVE_JOB_STATUSES:
         return _response(
             project_id,
             state="preparing",
             action="wait",
             headline="正在整理下一件要补的事",
-            detail=f"正在查看“{active.chapter.title}”，整理好后会直接显示一个问题。",
-            chapter_id=active.chapter.id,
+            detail=f"正在查看“{preparation.chapter.title}”，整理好后会直接显示一个问题。",
+            chapter_id=preparation.chapter.id,
         )
-    missing = next((item for item in preparations if item.audit_job is None), None)
-    if missing:
+    if job is None:
         return _response(
             project_id,
             state="needs_preparation",
             action="prepare",
             headline="先整理下一件要补的事",
             detail="系统会根据现有书稿找出一个最值得补充的问题。",
-            chapter_id=missing.chapter.id,
+            chapter_id=preparation.chapter.id,
         )
     return None
 
 
-async def _generation_problem(
+async def _generation_jobs(
     db: AsyncSession,
     *,
     project_id: str,
     preparations: list[_ChapterPreparation],
-) -> MemoirBookCompletionResponse | None:
-    jobs: list[tuple[_ChapterPreparation, MemoirEditingJob | None]] = []
+) -> dict[str, MemoirEditingJob | None]:
+    jobs: dict[str, MemoirEditingJob | None] = {}
     for item in preparations:
         signature = await followup_jobs.followup_generation_signature(
             db,
@@ -173,37 +158,41 @@ async def _generation_problem(
             chapter_id=item.chapter.id,
             signature=signature,
         )
-        jobs.append((item, await _job_by_dedupe_key(db, dedupe_key)))
+        jobs[item.chapter.id] = await _job_by_dedupe_key(db, dedupe_key)
+    return jobs
 
-    failed = next((pair for pair in jobs if pair[1] and pair[1].status in _FAILED_JOB_STATUSES), None)
-    if failed:
+
+def _generation_problem(
+    project_id: str,
+    preparation: _ChapterPreparation,
+    job: MemoirEditingJob | None,
+) -> MemoirBookCompletionResponse | None:
+    if job is not None and job.status in _FAILED_JOB_STATUSES:
         return _response(
             project_id,
             state="failed",
             action="retry",
             headline="下一题没有整理出来",
-            detail=f"可以重新整理“{failed[0].chapter.title}”，已有内容不会丢失。",
-            chapter_id=failed[0].chapter.id,
+            detail=f"可以重新整理“{preparation.chapter.title}”，已有内容不会丢失。",
+            chapter_id=preparation.chapter.id,
         )
-    active = next((pair for pair in jobs if pair[1] and pair[1].status in _ACTIVE_JOB_STATUSES), None)
-    if active:
+    if job is not None and job.status in _ACTIVE_JOB_STATUSES:
         return _response(
             project_id,
             state="preparing",
             action="wait",
             headline="正在准备一个具体问题",
             detail="问题准备好后会自动继续，不需要反复点击。",
-            chapter_id=active[0].chapter.id,
+            chapter_id=preparation.chapter.id,
         )
-    missing = next((pair for pair in jobs if pair[1] is None), None)
-    if missing:
+    if job is None:
         return _response(
             project_id,
             state="needs_preparation",
             action="prepare",
             headline="还差一步就能开始",
             detail="正在把书稿中缺少的内容整理成一个具体问题。",
-            chapter_id=missing[0].chapter.id,
+            chapter_id=preparation.chapter.id,
         )
     return None
 
@@ -264,30 +253,25 @@ async def get_book_completion_status(
         project_id=project_id,
         chapters=chapters,
     )
-    if first_needing_direction:
-        return _response(
-            project_id,
-            state="needs_review",
-            action="open_chapter",
-            headline=f"先确定“{first_needing_direction.title}”主要写什么",
-            detail="确认本章方向后，系统才能判断还缺哪件事。",
-            chapter_id=first_needing_direction.id,
-        )
-    problem = _job_problem(project_id, preparations)
-    if problem:
-        return problem
-    if preparations:
-        problem = await _generation_problem(
-            db,
-            project_id=project_id,
-            preparations=preparations,
-        )
-        if problem:
-            return problem
+    generation_jobs = await _generation_jobs(
+        db,
+        project_id=project_id,
+        preparations=preparations,
+    )
+    prepared = [
+        item
+        for item in preparations
+        if item.audit_job is not None
+        and item.audit_job.status == MemoirEditingJobStatus.SUCCEEDED.value
+        and generation_jobs[item.chapter.id] is not None
+        and generation_jobs[item.chapter.id].status == MemoirEditingJobStatus.SUCCEEDED.value
+    ]
+    prepared_chapter_ids = {item.chapter.id for item in prepared}
 
     task = await followup_planner.select_next_task(
         db,
         project_id=project_id,
+        eligible_chapter_ids=prepared_chapter_ids,
         release_deferred=False,
     )
     if task is not None:
@@ -301,10 +285,20 @@ async def get_book_completion_status(
             chapter_id=task.chapter_id,
         )
 
+    if first_needing_direction:
+        return _response(
+            project_id,
+            state="needs_review",
+            action="open_chapter",
+            headline=f"先确定“{first_needing_direction.title}”主要写什么",
+            detail="确认本章方向后，系统才能判断还缺哪件事。",
+            chapter_id=first_needing_direction.id,
+        )
+
     open_gap_chapter = await _first_open_gap_chapter(
         db,
         project_id=project_id,
-        chapters=chapters,
+        chapters=[item.chapter for item in prepared],
     )
     if open_gap_chapter:
         return _response(
@@ -318,7 +312,7 @@ async def get_book_completion_status(
     incomplete_structure = next(
         (
             item
-            for item in preparations
+            for item in prepared
             if not item.context.nodes
             or not item.context.links
             or item.context.contract.status != MemoirChapterContractStatus.CONFIRMED.value
@@ -334,6 +328,18 @@ async def get_book_completion_status(
             detail="本章方向和内容顺序确认后，才算完成当前整理。",
             chapter_id=incomplete_structure.chapter.id,
         )
+
+    for item in preparations:
+        problem = _audit_problem(project_id, item)
+        if problem:
+            return problem
+        problem = _generation_problem(
+            project_id,
+            item,
+            generation_jobs[item.chapter.id],
+        )
+        if problem:
+            return problem
 
     deferred_exists = await db.scalar(
         select(MemoirFollowupTask.id)
@@ -367,6 +373,8 @@ async def prepare_book_completion(
     if current.state == "complete":
         await followup_planner.select_next_task(db, project_id=project_id)
         return await get_book_completion_status(db, project_id=project_id)
+    if current.action in {"open_book", "open_chapter"} or not current.chapter_id:
+        return current
 
     plan = await load_plan_with_chapters(db, project_id)
     chapters = sorted_chapters(plan) if plan else []
@@ -377,42 +385,38 @@ async def prepare_book_completion(
         project_id=project_id,
         chapters=chapters,
     )
+    item = next(
+        (preparation for preparation in preparations if preparation.chapter.id == current.chapter_id),
+        None,
+    )
+    if item is None:
+        return current
 
-    audit_work_pending = False
-    for item in preparations:
-        job = item.audit_job
-        if job is None or job.status in _FAILED_JOB_STATUSES:
-            await gap_audit.enqueue_chapter_gap_audit(
-                db,
-                project_id=project_id,
-                chapter_id=item.chapter.id,
-                include_semantic_audit=False,
-                ai_model=None,
-                source="book_completion",
-            )
-            audit_work_pending = True
-        elif job.status in _ACTIVE_JOB_STATUSES:
-            audit_work_pending = True
-    if audit_work_pending:
-        return await get_book_completion_status(db, project_id=project_id)
-
-    for item in preparations:
-        signature = await followup_jobs.followup_generation_signature(
+    job = item.audit_job
+    if job is None or job.status in _FAILED_JOB_STATUSES:
+        await gap_audit.enqueue_chapter_gap_audit(
             db,
             project_id=project_id,
             chapter_id=item.chapter.id,
+            include_semantic_audit=False,
+            ai_model=None,
+            source="book_completion",
         )
-        dedupe_key = followup_jobs.followup_generation_dedupe_key(
+        return await get_book_completion_status(db, project_id=project_id)
+    if job.status in _ACTIVE_JOB_STATUSES:
+        return current
+
+    generation_jobs = await _generation_jobs(
+        db,
+        project_id=project_id,
+        preparations=[item],
+    )
+    generation_job = generation_jobs[item.chapter.id]
+    if generation_job is None or generation_job.status in _FAILED_JOB_STATUSES:
+        await followup_jobs.schedule_followup_task_generation(
+            db,
             project_id=project_id,
             chapter_id=item.chapter.id,
-            signature=signature,
+            source="book_completion",
         )
-        job = await _job_by_dedupe_key(db, dedupe_key)
-        if job is None or job.status in _FAILED_JOB_STATUSES:
-            await followup_jobs.schedule_followup_task_generation(
-                db,
-                project_id=project_id,
-                chapter_id=item.chapter.id,
-                source="book_completion",
-            )
     return await get_book_completion_status(db, project_id=project_id)

@@ -20,7 +20,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -30,7 +30,8 @@ from app.models.memoir_narrative import (
     MemoirStorySlot,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.narrative import story_slots
+from app.services.memoir.editing_jobs import register_editing_job_handler
+from app.services.memoir.narrative import gap_audit, story_slots
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -329,3 +330,100 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     old_task = await test_db.get(MemoirFollowupTask, old_task_id)
     assert old_task is not None
     assert old_task.status == MemoirFollowupTaskStatus.CANCELLED.value
+
+
+async def test_book_completion_uses_a_ready_question_without_waiting_for_other_chapters(
+    client,
+    test_db,
+):
+    project_id, first_chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    await _run_completion_preparation(client, test_db, project_id)
+
+    second_chapter = MemoirBookPlanChapter(
+        plan_id=first_chapter.plan_id,
+        project_id=project_id,
+        title="后来参加工作",
+        sort_order=1,
+    )
+    test_db.add(second_chapter)
+    await test_db.commit()
+
+    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion")
+
+    assert status.status_code == 200
+    assert status.json()["state"] == "ready"
+    assert status.json()["chapter_id"] == first_chapter.id
+    second_audit = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.chapter_id == second_chapter.id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+        )
+    )
+    assert second_audit is None
+
+
+async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, test_db):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    semantic_job = await gap_audit.enqueue_chapter_gap_audit(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="test-model",
+        source="chapter_workspace",
+    )
+    await test_db.commit()
+
+    class EmptySemanticClient:
+        provider_name = "test"
+        model_name = "test-model"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            return '{"schema_version":"1","gaps":[]}'
+
+    async def semantic_handler(db, job):
+        return await gap_audit.run_chapter_gap_audit_job(
+            db,
+            job,
+            semantic_ai_client=EmptySemanticClient(),
+        )
+
+    register_memoir_editing_job_handlers()
+    register_editing_job_handler(
+        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+        semantic_handler,
+    )
+    assert await run_test_editing_job(test_db, semantic_job.id) is True
+    generation_job = await _latest_job(
+        test_db,
+        project_id,
+        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
+    )
+    assert generation_job is not None
+    assert await run_test_editing_job(test_db, generation_job.id) is True
+
+    status = await client.post(f"/api/memoir/projects/{project_id}/book-completion/prepare")
+    audit_jobs = (
+        await test_db.scalars(
+            select(MemoirEditingJob).where(
+                MemoirEditingJob.project_id == project_id,
+                MemoirEditingJob.chapter_id == chapter.id,
+                MemoirEditingJob.job_type
+                == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+            )
+        )
+    ).all()
+
+    assert status.status_code == 200
+    assert status.json()["state"] == "ready"
+    assert [job.id for job in audit_jobs] == [semantic_job.id]
