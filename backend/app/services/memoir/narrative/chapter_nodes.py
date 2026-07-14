@@ -12,6 +12,8 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
     MemoirNarrativeActorType,
+    MemoirNarrativeDecisionAction,
+    MemoirNarrativeDecisionTargetType,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStoryVerificationStatus,
@@ -26,11 +28,13 @@ from app.schemas.memoir_narrative import (
     MemoirChapterNodeCreateRequest,
     MemoirChapterNodeReorderRequest,
     MemoirChapterNodeStoryAttachRequest,
+    MemoirChapterNodeStoryMoveRequest,
     MemoirChapterNodeUpdateRequest,
     MemoirChapterStructureMergeRequest,
     MemoirChapterStructureSplitRequest,
+    MemoirNarrativeDecisionRequest,
 )
-from app.services.memoir.narrative import chapter_contracts
+from app.services.memoir.narrative import chapter_contracts, decision_log
 
 
 def _utcnow() -> datetime:
@@ -208,6 +212,29 @@ async def _story_links_for_node(
     )
 
 
+async def _load_linkable_story(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    story_id: str,
+) -> MemoirStory:
+    story = await db.scalar(
+        select(MemoirStory).where(
+            MemoirStory.project_id == project_id,
+            MemoirStory.id == story_id,
+        )
+    )
+    if story is None:
+        raise ValueError("chapter node Story does not belong to the project")
+    if (
+        story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
+        or story.publication_status != MemoirStoryPublicationStatus.ELIGIBLE.value
+        or story.verification_status == MemoirStoryVerificationStatus.REJECTED.value
+    ):
+        raise ValueError("chapter node Story must be active and eligible")
+    return story
+
+
 async def recompute_story_node_status(
     db: AsyncSession,
     *,
@@ -368,23 +395,14 @@ async def attach_story(
         contract_id=contract_id,
         node_id=node_id,
     )
-    story = await db.scalar(
-        select(MemoirStory).where(
-            MemoirStory.project_id == project_id,
-            MemoirStory.id == request.story_id,
-        )
+    story = await _load_linkable_story(
+        db,
+        project_id=project_id,
+        story_id=request.story_id,
     )
-    if story is None:
-        raise ValueError("chapter node Story does not belong to the project")
     constraints = chapter_contracts.contract_constraints(contract)
     if story.id in constraints.exclude_story_ids:
         raise ValueError("chapter contract explicitly excludes this Story")
-    if (
-        story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
-        or story.publication_status != MemoirStoryPublicationStatus.ELIGIBLE.value
-        or story.verification_status == MemoirStoryVerificationStatus.REJECTED.value
-    ):
-        raise ValueError("chapter node Story must be active and eligible")
     existing = await db.scalar(
         select(MemoirChapterNodeStory).where(
             MemoirChapterNodeStory.project_id == project_id,
@@ -476,6 +494,227 @@ async def detach_story(
         actor_user_id=actor_user_id,
     )
     return node
+
+
+async def move_story(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    contract_id: str,
+    story_id: str,
+    request: MemoirChapterNodeStoryMoveRequest,
+    actor_user_id: str,
+) -> MemoirChapterNodeStory:
+    contract = await chapter_contracts.load_contract(
+        db,
+        project_id=project_id,
+        contract_id=contract_id,
+    )
+    _require_draft(contract)
+    source = await load_node(
+        db,
+        project_id=project_id,
+        contract_id=contract_id,
+        node_id=request.source_node_id,
+    )
+    target = await load_node(
+        db,
+        project_id=project_id,
+        contract_id=contract_id,
+        node_id=request.target_node_id,
+    )
+    if (
+        source.node_type != MemoirChapterNodeType.STORY.value
+        or target.node_type != MemoirChapterNodeType.STORY.value
+    ):
+        raise ValueError("Story links can only move between Story nodes")
+    await _load_linkable_story(
+        db,
+        project_id=project_id,
+        story_id=story_id,
+    )
+    link = await db.scalar(
+        select(MemoirChapterNodeStory).where(
+            MemoirChapterNodeStory.project_id == project_id,
+            MemoirChapterNodeStory.node_id == source.id,
+            MemoirChapterNodeStory.story_id == story_id,
+        )
+    )
+    target_link = await db.scalar(
+        select(MemoirChapterNodeStory).where(
+            MemoirChapterNodeStory.project_id == project_id,
+            MemoirChapterNodeStory.node_id == target.id,
+            MemoirChapterNodeStory.story_id == story_id,
+        )
+    )
+    if link is None:
+        if target_link is not None:
+            return target_link
+        raise ValueError("Story is not linked to the source chapter node")
+    if target_link is not None:
+        raise ValueError("Story is already linked to the target chapter node")
+    if link.story_role == MemoirChapterNodeStoryRole.PRIMARY.value:
+        other_primary = await db.scalar(
+            select(MemoirChapterNodeStory.id)
+            .join(
+                MemoirChapterNode,
+                (MemoirChapterNode.project_id == MemoirChapterNodeStory.project_id)
+                & (MemoirChapterNode.id == MemoirChapterNodeStory.node_id),
+            )
+            .where(
+                MemoirChapterNodeStory.project_id == project_id,
+                MemoirChapterNodeStory.story_id == story_id,
+                MemoirChapterNodeStory.story_role
+                == MemoirChapterNodeStoryRole.PRIMARY.value,
+                MemoirChapterNode.contract_id == contract.id,
+                MemoirChapterNodeStory.id != link.id,
+            )
+        )
+        if other_primary is not None:
+            raise ValueError("a Story can only be primary once in one chapter contract")
+
+    link.node_id = target.id
+    db.add(link)
+    await db.flush()
+    if await _story_links_for_node(db, node=source):
+        await recompute_story_node_status(
+            db,
+            node=source,
+            actor_user_id=actor_user_id,
+        )
+    else:
+        source.required = False
+        source.status = MemoirChapterNodeStatus.EXCLUDED.value
+        source.updated_by = MemoirNarrativeActorType.USER.value
+        source.updated_by_user_id = actor_user_id
+        db.add(source)
+    if target.status == MemoirChapterNodeStatus.EXCLUDED.value:
+        target.status = MemoirChapterNodeStatus.PLANNED.value
+    await recompute_story_node_status(
+        db,
+        node=target,
+        actor_user_id=actor_user_id,
+    )
+    await db.flush()
+    return link
+
+
+async def exclude_story_from_contract(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    contract_id: str,
+    story_id: str,
+    request: MemoirNarrativeDecisionRequest,
+    actor_user_id: str,
+) -> MemoirChapterContract:
+    contract = await chapter_contracts.load_contract(
+        db,
+        project_id=project_id,
+        contract_id=contract_id,
+    )
+    existing = await decision_log.existing_decision(
+        db,
+        project_id=project_id,
+        idempotency_key=request.idempotency_key,
+        target_type=MemoirNarrativeDecisionTargetType.CHAPTER_CONTRACT,
+        target_id=contract.id,
+        action=MemoirNarrativeDecisionAction.EXCLUDE,
+        actor_type=MemoirNarrativeActorType.USER,
+        actor_user_id=actor_user_id,
+    )
+    if existing is not None:
+        if existing.after_state_json.get("excluded_story_id") != story_id:
+            raise ValueError("idempotency key was reused for another chapter Story")
+        return contract
+
+    _require_draft(contract)
+    nodes = await _nodes_for_contract(db, contract=contract)
+    nodes_by_id = {node.id: node for node in nodes}
+    links = (
+        list(
+            (
+                await db.scalars(
+                    select(MemoirChapterNodeStory).where(
+                        MemoirChapterNodeStory.project_id == project_id,
+                        MemoirChapterNodeStory.node_id.in_(nodes_by_id),
+                        MemoirChapterNodeStory.story_id == story_id,
+                    )
+                )
+            ).all()
+        )
+        if nodes_by_id
+        else []
+    )
+    if not links:
+        raise ValueError("Story is not linked to the chapter contract")
+
+    constraints = chapter_contracts.contract_constraints(contract)
+    affected_node_ids = sorted({link.node_id for link in links})
+    before_state = {
+        "story_id": story_id,
+        "include_story_ids": constraints.include_story_ids,
+        "exclude_story_ids": constraints.exclude_story_ids,
+        "node_ids": affected_node_ids,
+    }
+    for link in links:
+        await db.delete(link)
+    await db.flush()
+
+    for node_id in affected_node_ids:
+        node = nodes_by_id[node_id]
+        if await _story_links_for_node(db, node=node):
+            await recompute_story_node_status(
+                db,
+                node=node,
+                actor_user_id=actor_user_id,
+            )
+            continue
+        node.required = False
+        node.status = MemoirChapterNodeStatus.EXCLUDED.value
+        node.updated_by = MemoirNarrativeActorType.USER.value
+        node.updated_by_user_id = actor_user_id
+        db.add(node)
+
+    updated_constraints = type(constraints)(
+        **constraints.model_dump(exclude={"include_story_ids", "exclude_story_ids"}),
+        include_story_ids=[
+            candidate_id
+            for candidate_id in constraints.include_story_ids
+            if candidate_id != story_id
+        ],
+        exclude_story_ids=list(
+            dict.fromkeys([*constraints.exclude_story_ids, story_id])
+        ),
+    )
+    contract.constraints_json = updated_constraints.model_dump(mode="json")
+    db.add(contract)
+    await db.flush()
+
+    await decision_log.record_decision(
+        db,
+        project_id=project_id,
+        target_type=MemoirNarrativeDecisionTargetType.CHAPTER_CONTRACT,
+        target_id=contract.id,
+        action=MemoirNarrativeDecisionAction.EXCLUDE,
+        actor_type=MemoirNarrativeActorType.USER,
+        actor_user_id=actor_user_id,
+        before_state=before_state,
+        after_state={
+            "excluded_story_id": story_id,
+            "include_story_ids": updated_constraints.include_story_ids,
+            "exclude_story_ids": updated_constraints.exclude_story_ids,
+            "excluded_node_ids": [
+                node_id
+                for node_id in affected_node_ids
+                if nodes_by_id[node_id].status
+                == MemoirChapterNodeStatus.EXCLUDED.value
+            ],
+        },
+        reason=request.reason,
+        idempotency_key=request.idempotency_key,
+    )
+    return contract
 
 
 def _validate_transition_partition(
