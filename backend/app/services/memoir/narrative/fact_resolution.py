@@ -321,6 +321,152 @@ async def _record_answer_evidence(
     )
 
 
+async def _apply_fact_resolution_operations(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    relation: MemoirFollowupTaskUtterance,
+    plan: MemoirFactResolutionPlan,
+    project: Project,
+    utterance: MemoirVoiceUtterance,
+    transcript_version: MemoirTranscriptVersion,
+) -> tuple[MemoirNarrativeDecision, ...]:
+    await decision_log.validate_source(
+        db,
+        project_id=project_id,
+        source_followup_task_utterance_id=relation.id,
+        source_transcript_version_id=transcript_version.id,
+    )
+    fact_text = relation.fact_resolution_text.strip()
+    applied: list[MemoirNarrativeDecision] = []
+    operations = sorted(
+        plan.operations,
+        key=lambda operation: 0 if isinstance(operation, MemoirEntityMergeResolution) else 1,
+    )
+    for operation in operations:
+        common = {
+            "db": db,
+            "project_id": project_id,
+            "actor_user_id": project.user_id,
+            "reason": operation.reason,
+            "source_followup_task_utterance_id": relation.id,
+            "source_transcript_version_id": transcript_version.id,
+        }
+        if isinstance(operation, MemoirEntityMergeResolution):
+            applied.append(
+                await decisions.merge_entities(
+                    **common,
+                    source_entity_id=operation.source_entity_id,
+                    retained_entity_id=operation.retained_entity_id,
+                    idempotency_key=(
+                        f"followup-fact:{relation.id}:merge:"
+                        f"{operation.source_entity_id}:{operation.retained_entity_id}"
+                    ),
+                )
+            )
+            continue
+        confirmed = isinstance(operation, MemoirClaimConfirmationResolution)
+        await _record_answer_evidence(
+            db,
+            project_id=project_id,
+            claim_id=operation.claim_id,
+            relation=relation,
+            utterance=utterance,
+            transcript_version=transcript_version,
+            actor_user_id=project.user_id,
+            fact_text=fact_text,
+            evidence_role=(
+                MemoirClaimEvidenceRole.SUPPORTS
+                if confirmed
+                else MemoirClaimEvidenceRole.CONTRADICTS
+            ),
+        )
+        applied.append(
+            await decisions.decide_claim_verification(
+                **common,
+                claim_id=operation.claim_id,
+                confirmed=confirmed,
+                idempotency_key=(
+                    f"followup-fact:{relation.id}:claim:{operation.claim_id}:"
+                    f"{'confirm' if confirmed else 'reject'}"
+                ),
+            )
+        )
+    return tuple(applied)
+
+
+async def _prepare_resolved_fact_plan(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    task: MemoirFollowupTask,
+    relation: MemoirFollowupTaskUtterance,
+    plan: MemoirFactResolutionPlan,
+) -> tuple[Project, MemoirVoiceUtterance, MemoirTranscriptVersion]:
+    if plan.status != "resolved":
+        raise ValueError("only resolved fact plans can be applied")
+    fact_text = relation.fact_resolution_text.strip()
+    if not fact_text:
+        raise ValueError("事实核对回答为空")
+    project, utterance, transcript_version = await _answer_sources(
+        db,
+        project_id=project_id,
+        relation=relation,
+    )
+    if fact_text not in transcript_version.content:
+        raise ValueError("事实核对文本不属于当前转写版本")
+    claims, entities, _task_roles, _gap_roles = await _allowed_context(
+        db,
+        project_id=project_id,
+        task=task,
+    )
+    _validate_plan_targets(plan, claims=claims, entities=entities)
+    return project, utterance, transcript_version
+
+
+async def validate_resolved_fact_plan(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    task: MemoirFollowupTask,
+    relation: MemoirFollowupTaskUtterance,
+    plan: MemoirFactResolutionPlan,
+) -> None:
+    await _prepare_resolved_fact_plan(
+        db,
+        project_id=project_id,
+        task=task,
+        relation=relation,
+        plan=plan,
+    )
+
+
+async def apply_resolved_fact_plan(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    task: MemoirFollowupTask,
+    relation: MemoirFollowupTaskUtterance,
+    plan: MemoirFactResolutionPlan,
+) -> tuple[MemoirNarrativeDecision, ...]:
+    project, utterance, transcript_version = await _prepare_resolved_fact_plan(
+        db,
+        project_id=project_id,
+        task=task,
+        relation=relation,
+        plan=plan,
+    )
+    return await _apply_fact_resolution_operations(
+        db,
+        project_id=project_id,
+        relation=relation,
+        plan=plan,
+        project=project,
+        utterance=utterance,
+        transcript_version=transcript_version,
+    )
+
+
 async def resolve_fact_answer(
     db: AsyncSession,
     *,
@@ -417,59 +563,13 @@ async def resolve_fact_answer(
         await db.flush()
         return False
 
-    await decision_log.validate_source(
+    await _apply_fact_resolution_operations(
         db,
         project_id=project_id,
-        source_followup_task_utterance_id=relation.id,
-        source_transcript_version_id=transcript_version.id,
+        relation=relation,
+        plan=plan,
+        project=project,
+        utterance=utterance,
+        transcript_version=transcript_version,
     )
-    operations = sorted(
-        plan.operations,
-        key=lambda operation: 0 if isinstance(operation, MemoirEntityMergeResolution) else 1,
-    )
-    for operation in operations:
-        common = {
-            "db": db,
-            "project_id": project_id,
-            "actor_user_id": project.user_id,
-            "reason": operation.reason,
-            "source_followup_task_utterance_id": relation.id,
-            "source_transcript_version_id": transcript_version.id,
-        }
-        if isinstance(operation, MemoirEntityMergeResolution):
-            await decisions.merge_entities(
-                **common,
-                source_entity_id=operation.source_entity_id,
-                retained_entity_id=operation.retained_entity_id,
-                idempotency_key=(
-                    f"followup-fact:{relation.id}:merge:"
-                    f"{operation.source_entity_id}:{operation.retained_entity_id}"
-                ),
-            )
-            continue
-        confirmed = isinstance(operation, MemoirClaimConfirmationResolution)
-        await _record_answer_evidence(
-            db,
-            project_id=project_id,
-            claim_id=operation.claim_id,
-            relation=relation,
-            utterance=utterance,
-            transcript_version=transcript_version,
-            actor_user_id=project.user_id,
-            fact_text=fact_text,
-            evidence_role=(
-                MemoirClaimEvidenceRole.SUPPORTS
-                if confirmed
-                else MemoirClaimEvidenceRole.CONTRADICTS
-            ),
-        )
-        await decisions.decide_claim_verification(
-            **common,
-            claim_id=operation.claim_id,
-            confirmed=confirmed,
-            idempotency_key=(
-                f"followup-fact:{relation.id}:claim:{operation.claim_id}:"
-                f"{'confirm' if confirmed else 'reject'}"
-            ),
-        )
     return True
