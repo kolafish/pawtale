@@ -11,6 +11,12 @@ from app.models.memoir import MemoirBookPlanChapter
 from app.schemas.memoir_book import MemoirBookChapterSourceRef
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.book_draft_inputs import (
+    ChapterDraftInput,
+    ChapterEditorialContext,
+    ChapterSourceCardContext,
+    ChapterSourceText,
+)
 from app.services.memoir.book_plan_sources import text_or_empty
 
 
@@ -27,18 +33,6 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class ChapterSourceCardContext:
-    source_card_id: str
-    summary: str = ""
-    people: list[str] | None = None
-    places: list[str] | None = None
-    time_hints: list[str] | None = None
-    event_tags: list[str] | None = None
-    key_facts: list[str] | None = None
-    open_questions: list[str] | None = None
-
-
-@dataclass(frozen=True)
 class ChapterCardPromptContext:
     chapter_card_id: str
     summary: str = ""
@@ -52,14 +46,6 @@ class RemovedChapterSourceText:
     utterance_id: str
     quote: str = ""
     text: str = ""
-
-
-@dataclass(frozen=True)
-class ChapterSourceText:
-    ref: MemoirBookChapterSourceRef
-    text: str
-    change_type: Literal["existing", "new", "changed"] = "existing"
-    source_card: ChapterSourceCardContext | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +162,25 @@ def _source_block(sources: list[ChapterSourceText], pending_ids: set[str]) -> st
     )
 
 
+def _editorial_context_block(contexts: list[ChapterEditorialContext]) -> str:
+    if not contexts:
+        return "无"
+    return "\n\n".join(
+        (
+            f"editorial_context {index}\n"
+            f"task_id: {context.task_id}\n"
+            f"answer_kind: {context.answer_kind.value}\n"
+            f"utterance_id: {context.ref.utterance_id}\n"
+            f"transcript_version_id: {context.ref.transcript_version_id or '无'}\n"
+            f"question: {context.question}\n"
+            f"purpose: {context.purpose}\n"
+            f"clarification: {context.clarification_text or '无'}\n"
+            f"fact_resolution: {context.fact_resolution_text or '无'}"
+        )
+        for index, context in enumerate(contexts, start=1)
+    )
+
+
 def _removed_source_block(removed_sources: list[RemovedChapterSourceText]) -> str:
     if not removed_sources:
         return "无"
@@ -208,7 +213,7 @@ def _chapter_card_prompt_text(chapter_card: ChapterCardPromptContext | None) -> 
 def _build_revision_plan_prompt(
     *,
     chapter: MemoirBookPlanChapter,
-    sources: list[ChapterSourceText],
+    draft_input: ChapterDraftInput,
     previous_content: str,
     pending_source_utterance_ids: set[str],
     removed_sources: list[RemovedChapterSourceText],
@@ -224,7 +229,10 @@ def _build_revision_plan_prompt(
 {previous_content.strip()}
 
 当前仍保留的来源讲述记录：
-{_source_block(sources, pending_source_utterance_ids)}
+{_source_block(draft_input.narrative_sources, pending_source_utterance_ids)}
+
+编辑上下文（只用于理解、纠错和决定如何修订，不是可直接写入正文的口述素材）：
+{_editorial_context_block(draft_input.editorial_contexts)}
 
 已删除来源：
 {_removed_source_block(removed_sources)}
@@ -244,6 +252,7 @@ def _build_revision_plan_prompt(
 - mode=regenerate：新增/变化来源与现有正文讲的是同一件事、同一人物/地点/时间段，会修正现有叙述，或存在已删除来源需要从正文中移除，需要重新组织整章。
 - mode=needs_review：新增来源明显不属于本章，或缺少足够关系，应该先由用户调整章节归属。
 - 不要保留仅由已删除来源支撑的内容；判断必须基于当前来源讲述记录、已删除来源和现有正文。
+- clarification 用于解释已有叙述的含义或它与章节的关系；fact_resolution 用于纠正、确认或否定已有事实。它们只能形成修订约束，不能被当作新增事件要求写入正文。
 - removed_source_ids 只能来自已删除来源列表；当前列表为：{", ".join(sorted(removed_ids)) or "无"}。
 """
 
@@ -476,7 +485,7 @@ def _event_clusters_prompt_text(event_clusters: list[ChapterEventCluster]) -> st
 def _build_draft_prompt(
     *,
     chapter: MemoirBookPlanChapter,
-    sources: list[ChapterSourceText],
+    draft_input: ChapterDraftInput,
     feedback: str | None,
     previous_content: str | None = None,
     pending_source_utterance_ids: set[str] | None = None,
@@ -488,7 +497,9 @@ def _build_draft_prompt(
     pending_ids = pending_source_utterance_ids or set()
     removed_source_items = removed_sources or []
     removed_ids = {source.utterance_id for source in removed_source_items}
+    sources = draft_input.narrative_sources
     source_text = _source_block(sources, pending_ids)
+    editorial_context_text = _editorial_context_block(draft_input.editorial_contexts)
     feedback_text = f"\n用户反馈：{feedback.strip()}\n" if feedback else ""
     previous_text = (
         f"\n原章节正文（作为修订基础，保留仍由当前来源支撑的表达和段落）：\n{previous_content.strip()}\n"
@@ -526,15 +537,14 @@ def _build_draft_prompt(
     if (pending_ids or removed_ids) and previous_content:
         coverage_text = (
             f"\n来源覆盖要求：本章当前共有 {len(sources)} 条保留来源；"
-            "本次必须覆盖所有 source_type 为“新增来源”或“文本已变化来源”的内容，"
-            "既有来源用于衔接、核对和保留原文。"
+            "本次应审阅所有 source_type 为“新增来源”或“文本已变化来源”的叙事片段，"
+            "只选取能让章节事实更完整、结构更连贯的具体内容；既有来源用于衔接、核对和保留原文。"
             f"不得继续写入 removed_source_ids={sorted(removed_ids) or []} 独有支撑的内容。\n"
         )
     else:
         coverage_text = (
-            f"\n来源覆盖要求：本章共有 {len(sources)} 条来源；正文必须覆盖每一条 source 中叙述者实际讲过的具体信息，"
-            "不能只写第一条，也不能只写最贴合标题的一条。若章节标题与来源讲述记录不完全一致，以来源讲述记录为准，"
-            "可以分段或用自然过渡串联不同主题。\n"
+            f"\n来源使用要求：本章共有 {len(sources)} 条可写入正文的叙事来源；先理解全部来源，再围绕章节主线选择具体信息，"
+            "不要机械逐条拼接。若章节标题与来源讲述记录不完全一致，以来源讲述记录为准；无法自然归入主线的细节不要强行写入。\n"
         )
     return f"""请把下面口述材料整理成一个回忆录章节正文。
 
@@ -550,13 +560,17 @@ def _build_draft_prompt(
 写作要求：
 - 必须以叙述者已讲述的内容为主，使用第一人称或贴近原话的叙述。
 - 不新增事实、人物、时间、地点、事件、对话或情绪，不替用户补故事。
+- “编辑上下文”不是叙述者要发表的正文，不得照抄、转述或把其中的解释过程写成事件；只用它修正叙事来源的含义、事实关系和取舍。
+- clarification 说明“原有叙述应如何理解”；fact_resolution 说明“哪些旧事实应确认、纠正或删除”。若缺少可发表的新叙事片段，应修改或删去旧表达，而不是把编辑上下文本身补进正文。
 - 可以去掉明显口头填充词，调整顺序和标点，让文字更像书稿。
 - 素材少就写短，不要为了篇幅扩写。
-- 每条要求覆盖的来源至少要有一处可对应的具体内容进入正文。
 - 不要输出标题、列表、解释或 Markdown，只输出正文。
 
-来源讲述记录：
+可写入正文的叙事来源：
 {source_text}
+
+不可直接写入正文的编辑上下文：
+{editorial_context_text}
 """
 
 
@@ -564,7 +578,7 @@ async def generate_chapter_draft_text(
     client: AITextClient,
     *,
     chapter: MemoirBookPlanChapter,
-    sources: list[ChapterSourceText],
+    draft_input: ChapterDraftInput,
     feedback: str | None,
     previous_content: str | None,
     pending_source_utterance_ids: set[str],
@@ -584,7 +598,7 @@ async def generate_chapter_draft_text(
     if should_plan_pending_sources:
         plan_prompt = _build_revision_plan_prompt(
             chapter=chapter,
-            sources=sources,
+            draft_input=draft_input,
             previous_content=previous_content or "",
             pending_source_utterance_ids=pending_source_utterance_ids,
             removed_sources=removed_source_items,
@@ -620,6 +634,7 @@ async def generate_chapter_draft_text(
         and not removed_source_ids
     )
     event_clusters: list[ChapterEventCluster] = []
+    sources = draft_input.narrative_sources
     if not should_supplement_pending_sources and len(sources) > 1:
         if event_cluster_provider:
             event_clusters = await event_cluster_provider()
@@ -644,7 +659,7 @@ async def generate_chapter_draft_text(
     )
     prompt = _build_draft_prompt(
         chapter=chapter,
-        sources=sources,
+        draft_input=draft_input,
         feedback=feedback,
         previous_content=draft_previous_content,
         pending_source_utterance_ids=draft_pending_ids,

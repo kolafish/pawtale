@@ -19,10 +19,8 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChatMessage,
     MemoirChapterCard,
     MemoirChapterSourceLink,
-    MemoirSourceCard,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -33,7 +31,6 @@ from app.schemas.memoir_book import (
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftUpdateRequest,
     MemoirBookChapterDraftVersionResponse,
-    MemoirBookChapterSourceRef,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
@@ -50,10 +47,13 @@ from app.services.memoir.book_audio import (
 from app.services.memoir.book_draft_ai import (
     AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE,
     ChapterCardPromptContext,
-    ChapterSourceCardContext,
-    ChapterSourceText,
     RemovedChapterSourceText,
     generate_chapter_draft_text,
+)
+from app.services.memoir.book_draft_inputs import (
+    build_chapter_draft_input,
+    limited_string_items,
+    utterance_display_text,
 )
 from app.services.memoir.book_plan_sources import (
     DRAFT_STATUS_REASON_KEY,
@@ -61,78 +61,18 @@ from app.services.memoir.book_plan_sources import (
     metadata_without_keys as _metadata_without_keys,
     source_change_metadata_keys as _source_change_metadata_keys,
     source_change_counts as _source_change_counts,
-    text_or_empty as _text_or_empty,
 )
 from app.services.memoir.book_source_links import (
-    ChapterSourceChangeState,
     chapter_source_change_state as _chapter_source_change_state,
-    chapter_source_ref_dicts as _chapter_source_ref_dicts,
     mark_chapter_sources_merged as _mark_chapter_sources_merged,
 )
 from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
 from app.services.memoir.chapter_event_clusters import get_or_build_chapter_event_clusters
-from app.services.memoir.source_cards import (
-    SOURCE_CARD_ENGINE,
-    source_text_for_utterance as _source_card_text_for_utterance,
-    source_text_hash as _source_card_text_hash,
-)
 from app.services.memoir.voice_tts_types import TTSClient
 
 
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
 logger = logging.getLogger(__name__)
-
-
-def _display_text(utterance: MemoirVoiceUtterance) -> str:
-    return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
-
-
-def _latest_draft_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
-    if not draft or not draft.versions:
-        return None
-    return sorted(draft.versions, key=lambda version: (version.version, version.created_at, version.id))[-1]
-
-
-def _string_items(value: object, *, limit: int = 6, item_limit: int = 80) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    items: list[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in items:
-            items.append(text[:item_limit])
-        if len(items) >= limit:
-            break
-    return items
-
-
-def _source_card_context(card: MemoirSourceCard | None) -> ChapterSourceCardContext | None:
-    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
-        return None
-    key_facts: list[str] = []
-    raw_key_facts = card.card_json.get("key_facts")
-    if isinstance(raw_key_facts, list):
-        for item in raw_key_facts:
-            if not isinstance(item, dict):
-                continue
-            text = str(item.get("text") or "").strip()
-            quote = str(item.get("evidence_quote") or "").strip()
-            if text and quote:
-                key_facts.append(f"{text}（证据：{quote[:80]}）")
-            elif text:
-                key_facts.append(text[:120])
-            if len(key_facts) >= 5:
-                break
-    return ChapterSourceCardContext(
-        source_card_id=card.id,
-        summary=str(card.card_json.get("summary") or "").strip()[:260],
-        people=_string_items(card.card_json.get("people")),
-        places=_string_items(card.card_json.get("places")),
-        time_hints=_string_items(card.card_json.get("time_hints")),
-        event_tags=_string_items(card.card_json.get("event_tags")),
-        key_facts=key_facts,
-        open_questions=_string_items(card.card_json.get("open_questions"), limit=4),
-    )
 
 
 def _chapter_card_context(card: MemoirChapterCard | None) -> ChapterCardPromptContext | None:
@@ -155,71 +95,8 @@ def _chapter_card_context(card: MemoirChapterCard | None) -> ChapterCardPromptCo
         summary=str(card.card_json.get("summary") or "").strip()[:300],
         covered=card.card_json.get("covered") if isinstance(card.card_json.get("covered"), dict) else {},
         gaps=gaps,
-        next_questions=_string_items(card.card_json.get("next_questions"), limit=4),
+        next_questions=limited_string_items(card.card_json.get("next_questions"), limit=4),
     )
-
-
-def _source_change_type(
-    *,
-    utterance_id: str,
-    link: MemoirChapterSourceLink | None,
-    latest_version: MemoirBookChapterDraftVersion | None,
-    pending_source_ids: set[str],
-) -> str:
-    if utterance_id not in pending_source_ids:
-        return "existing"
-    if not link or not latest_version:
-        return "new"
-    if link.created_at and link.created_at <= latest_version.created_at:
-        return "changed"
-    return "new"
-
-
-async def _active_links_by_utterance(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> dict[str, MemoirChapterSourceLink]:
-    rows = (
-        await db.execute(
-            select(MemoirChapterSourceLink).where(
-                MemoirChapterSourceLink.project_id == project_id,
-                MemoirChapterSourceLink.chapter_id == chapter_id,
-                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
-            )
-        )
-    ).scalars().all()
-    return {link.utterance_id: link for link in rows}
-
-
-async def _ready_source_cards_by_utterance(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    source_text_by_utterance: dict[str, str],
-) -> dict[str, MemoirSourceCard]:
-    if not source_text_by_utterance:
-        return {}
-    source_hash_by_utterance = {
-        utterance_id: _source_card_text_hash(text)
-        for utterance_id, text in source_text_by_utterance.items()
-    }
-    rows = (
-        await db.execute(
-            select(MemoirSourceCard).where(
-                MemoirSourceCard.project_id == project_id,
-                MemoirSourceCard.utterance_id.in_(list(source_hash_by_utterance.keys())),
-                MemoirSourceCard.engine == SOURCE_CARD_ENGINE,
-                MemoirSourceCard.status == MemoirSemanticCacheStatus.READY.value,
-            )
-        )
-    ).scalars().all()
-    return {
-        card.utterance_id: card
-        for card in rows
-        if card.source_text_hash == source_hash_by_utterance.get(card.utterance_id)
-    }
 
 
 async def _ready_chapter_card_context(
@@ -321,85 +198,6 @@ def _require_confirmed_plan(chapter: MemoirBookPlanChapter) -> None:
         raise HTTPException(status_code=400, detail="请先确认章节规划")
 
 
-async def _chapter_sources(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter: MemoirBookPlanChapter,
-    source_change_state: ChapterSourceChangeState,
-) -> list[ChapterSourceText]:
-    refs = [
-        MemoirBookChapterSourceRef.model_validate(ref)
-        for ref in await _chapter_source_ref_dicts(db, chapter=chapter)
-        if isinstance(ref, dict)
-    ]
-    if not refs:
-        raise HTTPException(status_code=400, detail="章节缺少来源讲述")
-    utterance_ids = [ref.utterance_id for ref in refs]
-    result = await db.execute(
-        select(MemoirVoiceUtterance, MemoirChatMessage)
-        .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
-        .join(MemoirChatMessage, MemoirVoiceUtterance.chat_message_id == MemoirChatMessage.id)
-        .where(
-            MemoirVoiceSession.project_id == project_id,
-            MemoirVoiceUtterance.id.in_(utterance_ids),
-        )
-    )
-    by_utterance_id = {
-        utterance.id: (utterance, message)
-        for utterance, message in result.all()
-    }
-    source_text_by_utterance: dict[str, str] = {}
-    for ref in refs:
-        pair = by_utterance_id.get(ref.utterance_id)
-        if pair:
-            source_text_by_utterance[ref.utterance_id] = _source_card_text_for_utterance(pair[0])
-    cards_by_utterance = await _ready_source_cards_by_utterance(
-        db,
-        project_id=project_id,
-        source_text_by_utterance=source_text_by_utterance,
-    )
-    links_by_utterance = await _active_links_by_utterance(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-    )
-    latest_version = _latest_draft_version(chapter.draft)
-    sources: list[ChapterSourceText] = []
-    for ref in refs:
-        pair = by_utterance_id.get(ref.utterance_id)
-        if not pair:
-            raise HTTPException(status_code=400, detail="章节来源讲述不存在")
-        utterance, message = pair
-        text = _display_text(utterance)
-        if not text:
-            raise HTTPException(status_code=400, detail="章节来源讲述为空")
-        sources.append(
-            ChapterSourceText(
-                ref=MemoirBookChapterSourceRef(
-                    voice_session_id=utterance.voice_session_id,
-                    message_id=message.id,
-                    utterance_id=utterance.id,
-                    transcript_version_id=message.transcript_version_id,
-                    audio_file_id=utterance.audio_file_id or message.audio_file_id,
-                    start_ms=utterance.start_ms,
-                    end_ms=utterance.end_ms,
-                    created_at=utterance.created_at,
-                    quote=ref.quote,
-                ),
-                text=text,
-                change_type=_source_change_type(
-                    utterance_id=ref.utterance_id,
-                    link=links_by_utterance.get(ref.utterance_id),
-                    latest_version=latest_version,
-                    pending_source_ids=source_change_state.pending_source_ids,
-                ),
-                source_card=_source_card_context(cards_by_utterance.get(ref.utterance_id)),
-            )
-        )
-    return sources
-
-
 async def _removed_chapter_sources(
     db: AsyncSession,
     *,
@@ -430,7 +228,10 @@ async def _removed_chapter_sources(
             )
         )
     ).scalars().all()
-    text_by_utterance = {utterance.id: _display_text(utterance) for utterance in existing_utterances}
+    text_by_utterance = {
+        utterance.id: utterance_display_text(utterance)
+        for utterance in existing_utterances
+    }
     return [
         RemovedChapterSourceText(
             utterance_id=utterance_id,
@@ -597,7 +398,7 @@ async def generate_chapter_draft(
             removed_source_count=source_change_state.removed_source_count,
         )
 
-    sources = await _chapter_sources(
+    draft_input = await build_chapter_draft_input(
         db,
         project_id=project_id,
         chapter=chapter,
@@ -625,13 +426,13 @@ async def generate_chapter_draft(
                 db,
                 client=client,
                 chapter=chapter,
-                sources=sources,
+                sources=draft_input.narrative_sources,
             )
 
         generated = await generate_chapter_draft_text(
             client,
             chapter=chapter,
-            sources=sources,
+            draft_input=draft_input,
             feedback=req.feedback,
             previous_content=previous_content,
             pending_source_utterance_ids=pending_source_ids,
