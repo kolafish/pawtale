@@ -48,6 +48,11 @@ from app.schemas.memoir_narrative import (
     MemoirDraftBlockRevisionJobRequest,
 )
 from app.services.memoir.narrative import draft_assembly, draft_blocks, draft_generation_jobs
+from app.services.memoir.narrative.draft_block_ai import (
+    DraftBlockGenerationInput,
+    DraftBlockLLMOutput,
+    validate_generation_output,
+)
 from tests.memoir_helpers import create_test_book_plan_with_chapters, ensure_mobile_memoir_project
 
 
@@ -66,7 +71,13 @@ class FakeDraftAI:
         return json.dumps(self.responses.pop(0), ensure_ascii=False)
 
 
-async def _create_generation_fixture(client, test_db):
+async def _create_generation_fixture(
+    client,
+    test_db,
+    *,
+    include_opening: bool = False,
+    include_transition: bool = False,
+):
     project_id = await ensure_mobile_memoir_project(client)
     user_id = (await client.get("/api/auth/me")).json()["id"]
     plan, chapters = await create_test_book_plan_with_chapters(
@@ -108,7 +119,11 @@ async def _create_generation_fixture(client, test_db):
             node_type=MemoirChapterNodeType.STORY.value,
             title=title,
             purpose=f"写清{title}的经过。",
-            sort_order=index,
+            sort_order=(
+                index * 2 + (1 if include_opening else 0)
+                if include_transition
+                else index + (1 if include_opening else 0)
+            ),
             required=True,
             status=MemoirChapterNodeStatus.READY.value,
             created_by=MemoirNarrativeActorType.SYSTEM.value,
@@ -197,6 +212,57 @@ async def _create_generation_fixture(client, test_db):
         stories.append(story)
         claims.append(claim)
         revisions.append(revision)
+    opening = None
+    if include_opening:
+        opening = MemoirChapterNode(
+            project_id=project_id,
+            chapter_id=chapter.id,
+            contract_id=contract.id,
+            node_type=MemoirChapterNodeType.OPENING.value,
+            title="开场",
+            purpose="从一个有证据的具体画面进入本章。",
+            sort_order=0,
+            required=True,
+            status=MemoirChapterNodeStatus.READY.value,
+            created_by=MemoirNarrativeActorType.USER.value,
+            created_by_user_id=user_id,
+            updated_by=MemoirNarrativeActorType.USER.value,
+            updated_by_user_id=user_id,
+        )
+        test_db.add(opening)
+        await test_db.flush()
+        test_db.add(
+            MemoirChapterNodeStory(
+                project_id=project_id,
+                node_id=opening.id,
+                story_id=stories[0].id,
+                story_role=MemoirChapterNodeStoryRole.SUPPORTING.value,
+                sort_order=0,
+                required=False,
+                created_by=MemoirNarrativeActorType.USER.value,
+                created_by_user_id=user_id,
+            )
+        )
+    transition = None
+    if include_transition:
+        transition = MemoirChapterNode(
+            project_id=project_id,
+            chapter_id=chapter.id,
+            contract_id=contract.id,
+            node_type=MemoirChapterNodeType.TRANSITION.value,
+            title="转场",
+            purpose="衔接离开家乡和住进宿舍。",
+            sort_order=2 if include_opening else 1,
+            required=True,
+            transition_from_node_id=nodes[0].id,
+            transition_to_node_id=nodes[1].id,
+            status=MemoirChapterNodeStatus.READY.value,
+            created_by=MemoirNarrativeActorType.USER.value,
+            created_by_user_id=user_id,
+            updated_by=MemoirNarrativeActorType.USER.value,
+            updated_by_user_id=user_id,
+        )
+        test_db.add(transition)
     await test_db.flush()
     contract.status = MemoirChapterContractStatus.CONFIRMED.value
     contract.confirmed_by_user_id = user_id
@@ -204,9 +270,12 @@ async def _create_generation_fixture(client, test_db):
     await test_db.commit()
     return {
         "project_id": project_id,
+        "user_id": user_id,
         "plan": plan,
         "chapter": chapter,
         "contract": contract,
+        "opening": opening,
+        "transition": transition,
         "nodes": nodes,
         "stories": stories,
         "claims": claims,
@@ -220,6 +289,79 @@ def _ai_output(content: str, claim_id: str) -> dict[str, object]:
         "used_claim_ids": [claim_id],
         "unsupported_fact_candidates": [],
     }
+
+
+def test_generation_validation_enforces_sources_and_adjacent_sentence_boundary():
+    claim_id = "f07e2888-183a-4a58-9442-d4374cf0e6d7"
+    context = DraftBlockGenerationInput.model_validate(
+        {
+            "contract_id": "contract",
+            "contract_objective": "梳理工作经历。",
+            "reader_takeaway": "理解关键经历。",
+            "node_id": "opening",
+            "node_type": "opening",
+            "node_title": "开场",
+            "node_purpose": "从已有经历进入本章。",
+            "block_role": "opening",
+            "stories": [
+                {
+                    "story_id": "story",
+                    "story_revision_id": "revision",
+                    "title": "储备粮食成为先进乡并调回县任职",
+                    "summary": "储备粮食后成为先进乡，随后调回县任职。",
+                    "story_role": "supporting",
+                    "claims": [
+                        {
+                            "claim_id": claim_id,
+                            "statement": "储备粮食后成为先进乡，随后调回县任职。",
+                            "certainty": "exact",
+                            "verification_status": "confirmed",
+                            "narrative_role": "outcome",
+                            "is_core": True,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    validate_generation_output(
+        context,
+        DraftBlockLLMOutput(
+            content="储备粮食以后，乡里成了先进乡，后来我调回县里任职。",
+            used_claim_ids=[claim_id],
+            unsupported_fact_candidates=["我曾任武装队长"],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unsupported fact candidates"):
+        validate_generation_output(
+            context,
+            DraftBlockLLMOutput(
+                content="我曾任武装队长，储备粮食以后乡里成了先进乡。",
+                used_claim_ids=[claim_id],
+                unsupported_fact_candidates=["我曾任武装队长"],
+            ),
+        )
+    with pytest.raises(ValueError, match="with fact sources"):
+        validate_generation_output(
+            context,
+            DraftBlockLLMOutput(
+                content="我这一辈子，岗位换了不少。",
+                used_claim_ids=[],
+                unsupported_fact_candidates=[],
+            ),
+        )
+    with pytest.raises(ValueError, match="duplicates an adjacent sentence"):
+        validate_generation_output(
+            context.model_copy(
+                update={"next_block_context": "储备粮食以后，乡里成了先进乡。"}
+            ),
+            DraftBlockLLMOutput(
+                content="储备粮食以后，乡里成了先进乡！",
+                used_claim_ids=[claim_id],
+                unsupported_fact_candidates=[],
+            ),
+        )
 
 
 async def test_draft_generation_job_routes_enqueue_and_read_scoped_job(client, test_db):
@@ -302,6 +444,91 @@ async def test_node_generation_uses_claim_allowlists_and_never_rewrites_existing
     assert [block.current_version_id for block in blocks] == original_version_ids
 
 
+async def test_initial_generation_builds_source_backed_opening_before_facts(
+    client,
+    test_db,
+):
+    created = await _create_generation_fixture(
+        client,
+        test_db,
+        include_opening=True,
+    )
+    job = await draft_generation_jobs.enqueue_chapter_block_generation(
+        test_db,
+        project_id=created["project_id"],
+        chapter_id=created["chapter"].id,
+        request=MemoirDraftBlockGenerationRequest(),
+    )
+    ai = FakeDraftAI(
+        [
+            _ai_output("十八岁那年，我离开家乡。", created["claims"][0].id),
+            _ai_output("十八岁那年，我离开家乡。", created["claims"][0].id),
+            _ai_output("那年我动身去成都读书。", created["claims"][0].id),
+            _ai_output("到成都后，我住进了学校宿舍。", created["claims"][1].id),
+        ]
+    )
+    result = await draft_generation_jobs.run_draft_block_generation_job(
+        test_db,
+        job,
+        ai_client=ai,
+    )
+    blocks = list(
+        (
+            await test_db.scalars(
+                select(MemoirDraftBlock).order_by(MemoirDraftBlock.sort_order)
+            )
+        ).all()
+    )
+
+    assert [block.id for block in blocks] == result.result_json["created_block_ids"]
+    assert '"node_type":"opening"' in ai.prompts[0]
+    assert '"node_type":"story"' in ai.prompts[1]
+    assert '"previous_block_context":"十八岁那年，我离开家乡。"' in ai.prompts[1]
+    assert '"node_type":"story"' in ai.prompts[2]
+    assert "上一次输出未通过服务端事实与重复校验" in ai.prompts[2]
+    assert "十八岁那年，我离开家乡" in ai.prompts[2]
+    assert '"node_type":"story"' in ai.prompts[3]
+
+
+async def test_initial_generation_builds_transition_after_both_endpoint_blocks(
+    client,
+    test_db,
+):
+    created = await _create_generation_fixture(
+        client,
+        test_db,
+        include_transition=True,
+    )
+    job = await draft_generation_jobs.enqueue_chapter_block_generation(
+        test_db,
+        project_id=created["project_id"],
+        chapter_id=created["chapter"].id,
+        request=MemoirDraftBlockGenerationRequest(),
+    )
+    ai = FakeDraftAI(
+        [
+            _ai_output("十八岁那年，我离开家乡。", created["claims"][0].id),
+            _ai_output("到成都后，我住进了学校宿舍。", created["claims"][1].id),
+            {
+                "content": "离开家乡之后，新的生活就此开始。",
+                "used_claim_ids": [],
+                "unsupported_fact_candidates": [],
+            },
+        ]
+    )
+    await draft_generation_jobs.run_draft_block_generation_job(
+        test_db,
+        job,
+        ai_client=ai,
+    )
+
+    assert '"node_type":"story"' in ai.prompts[0]
+    assert '"node_type":"story"' in ai.prompts[1]
+    assert '"node_type":"transition"' in ai.prompts[2]
+    assert '"previous_block_context":"十八岁那年，我离开家乡。"' in ai.prompts[2]
+    assert '"next_block_context":"到成都后，我住进了学校宿舍。"' in ai.prompts[2]
+
+
 async def test_generation_rejects_provider_claim_outside_node_allowlist(client, test_db):
     created = await _create_generation_fixture(client, test_db)
     job = await draft_generation_jobs.enqueue_chapter_block_generation(
@@ -315,7 +542,11 @@ async def test_generation_rejects_provider_claim_outside_node_allowlist(client, 
             _ai_output(
                 "这段文字使用了不属于当前节点的事实。",
                 created["claims"][1].id,
-            )
+            ),
+            _ai_output(
+                "这段文字仍然使用了不属于当前节点的事实。",
+                created["claims"][1].id,
+            ),
         ]
     )
     with pytest.raises(ValueError, match="outside allowlist"):
