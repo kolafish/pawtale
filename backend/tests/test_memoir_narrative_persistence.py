@@ -295,7 +295,7 @@ async def test_narrative_migration_backfills_followup_answer_use_from_gap_type()
         await engine.dispose()
 
 
-async def test_narrative_migration_adds_include_decision_action_to_existing_database():
+async def test_narrative_migration_rebuilds_legacy_decisions_and_preserves_rows():
     register_models()
     engine = _sqlite_engine()
     try:
@@ -317,20 +317,26 @@ async def test_narrative_migration_adds_include_decision_action_to_existing_data
                     "'Migration Project', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 )
             )
-            current_sql = str(
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT sql FROM sqlite_master "
-                            "WHERE type = 'table' AND name = 'memoir_narrative_decisions'"
-                        )
-                    )
-                ).scalar_one()
-            )
-            legacy_sql = current_sql.replace("'include', ", "")
-            assert legacy_sql != current_sql
             await conn.execute(text("DROP TABLE memoir_narrative_decisions"))
-            await conn.execute(text(legacy_sql))
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_narrative_decisions ("
+                    "id VARCHAR(36) PRIMARY KEY NOT NULL, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "target_type VARCHAR(32) NOT NULL, "
+                    "target_id VARCHAR(36) NOT NULL, "
+                    "action VARCHAR(32) NOT NULL, "
+                    "actor_type VARCHAR(12) NOT NULL, "
+                    "actor_user_id VARCHAR(36), "
+                    "before_state_json JSON NOT NULL, "
+                    "after_state_json JSON NOT NULL, "
+                    "reason TEXT NOT NULL DEFAULT '', "
+                    "idempotency_key VARCHAR(200) NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "CONSTRAINT uq_memoir_narrative_decisions_project_idempotency "
+                    "UNIQUE (project_id, idempotency_key))"
+                )
+            )
             await conn.execute(
                 text(
                     "INSERT INTO memoir_narrative_decisions "
@@ -360,13 +366,16 @@ async def test_narrative_migration_adds_include_decision_action_to_existing_data
             preserved = (
                 await conn.execute(
                     text(
-                        "SELECT action, reason FROM memoir_narrative_decisions "
+                        "SELECT action, reason, source_followup_task_utterance_id, "
+                        "source_transcript_version_id FROM memoir_narrative_decisions "
                         "WHERE id = 'legacy-decision'"
                     )
                 )
             ).one()
         assert "'include'" in upgraded_sql
-        assert preserved == ("confirm", "preserve me")
+        assert "fk_memoir_narrative_decisions_followup_source_project" in upgraded_sql
+        assert "fk_memoir_narrative_decisions_transcript_source" in upgraded_sql
+        assert preserved == ("confirm", "preserve me", None, None)
     finally:
         await engine.dispose()
 
