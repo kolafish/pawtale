@@ -10,7 +10,8 @@ from app.domain.memoir.types import MemoirSemanticCacheStatus
 from app.models.memoir import MemoirBookPlanChapter, MemoirChapterEventClusterSnapshot
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
-from app.services.memoir.book_draft_ai import ChapterEventCluster, ChapterSourceText, generate_event_clusters
+from app.services.memoir.book_draft_ai import ChapterEventCluster, generate_event_clusters
+from app.services.memoir.book_draft_inputs import ChapterSourceText
 from app.services.memoir.book_plan_sources import text_or_empty
 from app.services.memoir.semantic_state import (
     semantic_json_signature,

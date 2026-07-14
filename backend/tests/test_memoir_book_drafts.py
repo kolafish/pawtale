@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from hashlib import sha256
 
 from sqlalchemy import select
 
@@ -21,6 +22,11 @@ from app.models.memoir import (
     MemoirChapterSourceLink,
     MemoirBookPlanChapter,
     MemoirChapterEventClusterSnapshot,
+)
+from app.models.memoir_narrative import (
+    MemoirFollowupTask,
+    MemoirFollowupTaskUtterance,
+    MemoirNarrativeGap,
 )
 from app.services.memoir import automation_event_metadata
 from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
@@ -199,6 +205,204 @@ async def test_mobile_memoir_book_chapter_draft_get_returns_404_before_draft_exi
 
     assert response.status_code == 404
     assert response.json()["detail"] == "章节稿不存在"
+
+
+async def test_chapter_draft_uses_unsent_message_answer_only_as_editorial_context(
+    client,
+    test_db,
+    monkeypatch,
+):
+    source = await create_test_voice_transcript(client, test_db, "我去看望爷爷，还给他买了西瓜。")
+    project_id = source["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(source, "看望爷爷并买西瓜"),
+        chapter_title="回成都后的疏离与克制",
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    answer_text = (
+        "我想说的其实是我想发给他的一句话。我想告诉他我今天去看了我爷爷的事情，"
+        "但是我没有发给他，我忍住了。"
+    )
+    answer = await create_test_voice_transcript(client, test_db, answer_text)
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="causality",
+        severity="medium",
+        title="看望爷爷与章节主题的关联不明确",
+        description="需要解释这段内容为什么属于本章。",
+        fingerprint=sha256(b"draft-watermelon-clarification").hexdigest(),
+        status="resolved",
+        detected_by="ai",
+        resolved_by="system",
+        resolved_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        answer_use="clarification",
+        question="买西瓜这件事与本章想表达的克制有什么关系？",
+        purpose="解释已有事件与章节主题的关系。",
+        priority=100,
+        status="answered",
+        created_by="system",
+        completed_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add(task)
+    await test_db.flush()
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=answer["utterance_id"],
+        result_role="target_answer",
+        is_assignment_snapshot=True,
+        interpretation_status="resolved",
+        answer_kind="clarification",
+        clarification_text=answer_text,
+    )
+    test_db.add(relation)
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI("我去看望爷爷时，给他买了一个西瓜。")
+    monkeypatch.setattr("app.services.memoir.book_drafts.get_ai_service", lambda model=None: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_ai.calls) == 1
+    prompt = fake_ai.calls[0]["user_prompt"]
+    narrative_block, context_block = prompt.split("不可直接写入正文的编辑上下文：", maxsplit=1)
+    assert "transcript: 我去看望爷爷，还给他买了西瓜。" in narrative_block
+    assert answer_text not in narrative_block
+    assert f"utterance_id: {answer['utterance_id']}" in context_block
+    assert f"transcript_version_id: {answer['transcript_version_id']}" in context_block
+    assert f"clarification: {answer_text}" in context_block
+    assert "每条要求覆盖的来源至少要有一处" not in prompt
+
+    relation.clarification_text = "这段文字已经无法在当前转写中找到。"
+    test_db.add(relation)
+    await test_db.commit()
+    invalid_response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+    assert invalid_response.status_code == 409
+    assert (
+        invalid_response.json()["detail"]
+        == "补全回答用途与当前转写不一致，请重新确认后再生成章节"
+    )
+    assert len(fake_ai.calls) == 1
+
+
+async def test_chapter_draft_splits_mixed_completion_answer_before_clustering_and_writing(
+    client,
+    test_db,
+    monkeypatch,
+):
+    source = await create_test_voice_transcript(client, test_db, "回成都以后，我很少主动联系他。")
+    project_id = source["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(source),
+        chapter_title="回成都后的疏离与克制",
+        status=MemoirBookPlanStatus.CONFIRMED,
+    )
+    direct_text = "我去看了爷爷，还给他买了西瓜。"
+    clarification_text = "那其实是我想发给他的消息，但最后没有发。"
+    answer = await create_test_voice_transcript(
+        client,
+        test_db,
+        f"{direct_text}{clarification_text}",
+    )
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="chapter",
+        primary_chapter_id=chapter.id,
+        gap_type="causality",
+        severity="medium",
+        title="补充克制的具体经历",
+        description="补充事件，并说明它与克制的关系。",
+        fingerprint=sha256(b"draft-mixed-completion-answer").hexdigest(),
+        status="resolved",
+        detected_by="ai",
+        resolved_by="system",
+        resolved_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        chapter_id=chapter.id,
+        answer_use="clarification",
+        question="你还记得哪些具体事情，它为什么能说明你的克制？",
+        purpose="补充事件并解释它与章节主题的关系。",
+        priority=100,
+        status="answered",
+        created_by="system",
+        completed_at=datetime.now(UTC).replace(tzinfo=None),
+    )
+    test_db.add(task)
+    await test_db.flush()
+    test_db.add(
+        MemoirFollowupTaskUtterance(
+            project_id=project_id,
+            task_id=task.id,
+            utterance_id=answer["utterance_id"],
+            result_role="target_answer",
+            is_assignment_snapshot=True,
+            interpretation_status="resolved",
+            answer_kind="mixed",
+            direct_narrative_text=direct_text,
+            clarification_text=clarification_text,
+        )
+    )
+    await test_db.commit()
+    fake_ai = FakeBookDraftAI(
+        [
+            json.dumps(
+                {
+                    "clusters": [
+                        {
+                            "title": "回成都后的联系",
+                            "source_ids": [source["utterance_id"], answer["utterance_id"]],
+                            "summary": "回成都后的疏离，以及看望爷爷的经历。",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            "回成都以后，我很少主动联系他。有一次我去看爷爷，还给爷爷买了西瓜。",
+        ]
+    )
+    monkeypatch.setattr("app.services.memoir.book_drafts.get_ai_service", lambda model=None: fake_ai)
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft",
+        json={"force_regenerate": True},
+    )
+
+    assert response.status_code == 200
+    assert len(fake_ai.calls) == 2
+    cluster_prompt = fake_ai.calls[0]["user_prompt"]
+    assert direct_text in cluster_prompt
+    assert clarification_text not in cluster_prompt
+    draft_prompt = fake_ai.calls[1]["user_prompt"]
+    narrative_block, context_block = draft_prompt.split("不可直接写入正文的编辑上下文：", maxsplit=1)
+    assert f"transcript: {direct_text}" in narrative_block
+    assert clarification_text not in narrative_block
+    assert f"clarification: {clarification_text}" in context_block
+    assert f"utterance_id: {answer['utterance_id']}" in narrative_block
+    assert f"utterance_id: {answer['utterance_id']}" in context_block
 
 
 async def test_mobile_memoir_book_chapter_draft_get_returns_existing_draft_with_source_change_counts(
@@ -1635,12 +1839,12 @@ async def test_mobile_memoir_book_chapter_draft_force_regenerate_ignores_previou
     assert "腊月里还会提前准备团圆饭要用的菜" in prompt
     assert prompt.count("source_type: 既有来源") == 3
     assert "source_type: 新增来源" not in prompt
-    assert "本章共有 3 条来源" in prompt
-    assert "不能只写第一条" in prompt
+    assert "本章共有 3 条可写入正文的叙事来源" in prompt
+    assert "不要机械逐条拼接" in prompt
     assert "以来源讲述记录为准" in prompt
     assert "章节标题参考" in prompt
     assert "章节范围参考" not in prompt
-    assert "每条要求覆盖的来源至少要有一处可对应的具体内容进入正文" in prompt
+    assert "每条要求覆盖的来源至少要有一处可对应的具体内容进入正文" not in prompt
 
     refreshed_chapter = await test_db.scalar(
         select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
