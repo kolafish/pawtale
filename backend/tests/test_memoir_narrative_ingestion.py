@@ -254,6 +254,174 @@ async def test_control_only_utterance_creates_no_claim_or_story(client, test_db)
     assert is_narrative_control_only("我们接着聊那个朋友吧，我三年级转学时她来找我。") is False
 
 
+async def test_incompletely_grouped_evidenced_claim_cluster_requests_one_repair(
+    client,
+    test_db,
+):
+    source_text = (
+        "李阅是我的高中同学，现在也是朋友。"
+        "每次回成都，我都会找她玩。"
+        "我们认识二十多年了。"
+    )
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    initial = {
+        "schema_version": "1",
+        "entities": [
+            {
+                "key": "narrator",
+                "entity_type": "person",
+                "canonical_name": "讲述者",
+                "aliases": ["我"],
+                "description": "讲述者本人",
+                "is_narrator": True,
+            },
+            {
+                "key": "li_yue",
+                "entity_type": "person",
+                "canonical_name": "李阅",
+                "aliases": ["她"],
+                "description": "讲述者的高中同学和朋友",
+                "is_narrator": False,
+            },
+        ],
+        "claims": [
+            {
+                "key": "friendship",
+                "claim_type": "relationship",
+                "statement": "李阅是讲述者的高中同学，现在也是朋友。",
+                "subject_entity_key": "narrator",
+                "predicate_code": "social_relationship",
+                "object_entity_key": "li_yue",
+                "object_text": None,
+                "place_entity_key": None,
+                "time_text": None,
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "unknown",
+                "certainty": "exact",
+                "evidence_quotes": ["李阅是我的高中同学，现在也是朋友"],
+            },
+            {
+                "key": "visits",
+                "claim_type": "event",
+                "statement": "讲述者每次回成都都会找李阅玩。",
+                "subject_entity_key": "narrator",
+                "predicate_code": "narrative_fact",
+                "object_entity_key": "li_yue",
+                "object_text": None,
+                "place_entity_key": None,
+                "time_text": None,
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "unknown",
+                "certainty": "exact",
+                "evidence_quotes": ["每次回成都，我都会找她玩"],
+            },
+            {
+                "key": "duration",
+                "claim_type": "chronology",
+                "statement": "讲述者和李阅认识二十多年了。",
+                "subject_entity_key": "narrator",
+                "predicate_code": "narrative_fact",
+                "object_entity_key": "li_yue",
+                "object_text": None,
+                "place_entity_key": None,
+                "time_text": "二十多年",
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "period",
+                "certainty": "approximate",
+                "evidence_quotes": ["我们认识二十多年了"],
+            },
+        ],
+        "stories": [
+            {
+                "key": "partial_friendship",
+                "title": "与李阅的友谊",
+                "story_type": "relationship",
+                "summary": "讲述者与高中同学李阅保持联系。",
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "unknown",
+                "primary_place_entity_key": None,
+                "existing_story_id": None,
+                "match_confidence": 0.0,
+                "claims": [
+                    {
+                        "claim_key": "friendship",
+                        "narrative_role": "background",
+                        "slot_keys": ["meeting"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    },
+                    {
+                        "claim_key": "visits",
+                        "narrative_role": "action",
+                        "slot_keys": ["shared_experience"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    },
+                ],
+            }
+        ],
+    }
+    repaired = {
+        **initial,
+        "stories": [
+            {
+                "key": "li_yue_friendship",
+                "title": "与李阅二十多年的友谊",
+                "story_type": "relationship",
+                "summary": "讲述者与高中同学李阅保持了二十多年的友谊。",
+                "time_start": None,
+                "time_end": None,
+                "time_precision": "period",
+                "primary_place_entity_key": None,
+                "existing_story_id": None,
+                "match_confidence": 0.0,
+                "claims": [
+                    {
+                        "claim_key": "friendship",
+                        "narrative_role": "background",
+                        "slot_keys": ["meeting"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    },
+                    {
+                        "claim_key": "visits",
+                        "narrative_role": "action",
+                        "slot_keys": ["shared_experience"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    },
+                    {
+                        "claim_key": "duration",
+                        "narrative_role": "outcome",
+                        "slot_keys": ["relationship_change"],
+                        "evidence_role": "supports",
+                        "is_core": True,
+                    },
+                ],
+            }
+        ],
+    }
+    fake_ai = FakeNarrativeAI([initial, repaired])
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=fake_ai,
+    )
+
+    assert fake_ai.calls == 2
+    assert len(result.created_claim_ids) == 3
+    assert len(result.created_story_ids) == 1
+    assert result.extraction_diagnostics["repair_attempted"] is True
+
+
 async def test_real_provider_schema_errors_are_repaired_once(client, test_db):
     source_text = "八十年代初，我搬到了成都。"
     created = await create_test_voice_transcript(client, test_db, text=source_text)

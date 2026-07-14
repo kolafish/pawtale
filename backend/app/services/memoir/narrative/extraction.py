@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSpeakerRole,
+    MemoirClaimType,
     MemoirStoryType,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeExtraction
@@ -30,6 +31,12 @@ NARRATIVE_EXTRACTION_SYSTEM_PROMPT = (
     "你是一位严谨的中文回忆录事实编辑。只能抽取原文明确表达、可由逐字引文支持的事实。"
 )
 NARRATIVE_EXTRACTION_MAX_TOKENS = 6000
+STORY_CLUSTER_CLAIM_TYPES = {
+    MemoirClaimType.EVENT,
+    MemoirClaimType.RELATIONSHIP,
+    MemoirClaimType.CHRONOLOGY,
+    MemoirClaimType.REFLECTION,
+}
 NARRATIVE_CONTROL_ONLY_PATTERNS = (
     re.compile(
         r"^(?:我们|咱们|我)?(?:接着|继续|再|开始|来|先)?"
@@ -53,6 +60,97 @@ def is_narrative_control_only(source_text: str) -> bool:
     return bool(normalized) and len(normalized) <= 40 and any(
         pattern.fullmatch(normalized) for pattern in NARRATIVE_CONTROL_ONLY_PATTERNS
     )
+
+
+def _ungrouped_story_cluster_claim_keys(
+    extraction: MemoirNarrativeExtraction,
+    *,
+    source_text: str,
+) -> set[str]:
+    evidenced_claim_keys = {
+        claim.key
+        for claim in extraction.claims
+        if any(
+            quote.strip() and quote.strip() in source_text
+            for quote in claim.evidence_quotes
+        )
+    }
+    grouped_claim_keys = {
+        link.claim_key
+        for story in extraction.stories
+        for link in story.claims
+    }
+    ungrouped_claim_keys = evidenced_claim_keys - grouped_claim_keys
+    narrator_entity_keys = {
+        entity.key for entity in extraction.entities if entity.is_narrator
+    }
+    claims_by_anchor: dict[tuple[str, str], set[str]] = {}
+    claims_by_key = {claim.key: claim for claim in extraction.claims}
+    for claim_key in evidenced_claim_keys:
+        claim = claims_by_key[claim_key]
+        anchors = {
+            ("entity", entity_key)
+            for entity_key in (claim.subject_entity_key, claim.object_entity_key)
+            if entity_key and entity_key not in narrator_entity_keys
+        }
+        if claim.place_entity_key:
+            anchors.add(("place", claim.place_entity_key))
+        for anchor in anchors:
+            claims_by_anchor.setdefault(anchor, set()).add(claim.key)
+
+    clustered_claim_keys: set[str] = set()
+    for claim_keys in claims_by_anchor.values():
+        if len(claim_keys) < 2:
+            continue
+        if not any(
+            claims_by_key[claim_key].claim_type in STORY_CLUSTER_CLAIM_TYPES
+            for claim_key in claim_keys
+        ):
+            continue
+        clustered_claim_keys.update(claim_keys & ungrouped_claim_keys)
+    return clustered_claim_keys
+
+
+def _validate_story_coverage(
+    extraction: MemoirNarrativeExtraction,
+    *,
+    source_text: str,
+) -> MemoirNarrativeExtraction:
+    ungrouped_claim_keys = _ungrouped_story_cluster_claim_keys(
+        extraction,
+        source_text=source_text,
+    )
+    if ungrouped_claim_keys:
+        raise ValueError(
+            "evidence-backed claims sharing a person or place anchor are not grouped into Stories: "
+            + ", ".join(sorted(ungrouped_claim_keys))
+        )
+    return extraction
+
+
+def _validate_extraction_for_source(
+    content: str,
+    *,
+    source_text: str,
+) -> MemoirNarrativeExtraction:
+    return _validate_story_coverage(
+        _validate_extraction(content),
+        source_text=source_text,
+    )
+
+
+def _usable_salvaged_candidate(
+    candidate: tuple[MemoirNarrativeExtraction, dict[str, int]] | None,
+    *,
+    source_text: str,
+) -> tuple[MemoirNarrativeExtraction, dict[str, int]] | None:
+    if candidate is None:
+        return None
+    try:
+        _validate_story_coverage(candidate[0], source_text=source_text)
+    except ValueError:
+        return None
+    return candidate
 
 
 def build_narrative_extraction_repair_prompt(
@@ -83,6 +181,7 @@ def build_narrative_extraction_repair_prompt(
 - time_start/time_end 必须同时为 null，或同时为完整 ISO 8601 datetime（例如 1982-01-01T00:00:00）。
 - relationship claim 必须同时引用已声明的 subject 和 object person entity。
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
+- validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
 
 validation_errors:
@@ -353,6 +452,7 @@ source_text:
 - “接着聊那个朋友吧”“换个话题”等只控制访谈流程的句子不是人物关系或回忆事实；整条 source_text 只有这类话语时，entities、claims、stories 全部返回空数组。
 - aliases 只能来自原文，不能因为名称相似自行判断是同一个人。
 - story 必须引用本次 claims，不能脱离有逐字证据的 claim 创建。
+- 同一条 source_text 中多条可证实 Claim 共享同一非叙述者人物或地点锚点时，不得把这个候选簇留在 Story 之外；应按真实事件、关系或人生阶段分成一个或多个 Story，不得机械地按素材数量创建 Story。
 - narrative_role 描述叙事作用，slot_keys 描述结构槽位，两者不能混用。
 - event 槽位：background, trigger, people, difficulty, actions, turning_point, outcome, reflection。
 - relationship 槽位：meeting, person_portrait, shared_experience, relationship_change, representative_scene, reflection。
@@ -421,10 +521,16 @@ async def extract_narrative_state(
         "used_initial_response_after_repair": False,
     }
     try:
-        extraction = _validate_extraction(response_text)
+        extraction = _validate_extraction_for_source(
+            response_text,
+            source_text=source_text,
+        )
     except (TypeError, ValueError, ValidationError) as first_error:
         diagnostics["repair_attempted"] = True
-        initial_candidate = _try_salvage_extraction_items(response_text)
+        initial_candidate = _usable_salvaged_candidate(
+            _try_salvage_extraction_items(response_text),
+            source_text=source_text,
+        )
         logger.warning(
             "AI narrative extraction schema validation failed; requesting one repair"
         )
@@ -441,7 +547,10 @@ async def extract_narrative_state(
         )
         try:
             repaired_candidate = (
-                _validate_extraction(str(repaired_content)),
+                _validate_extraction_for_source(
+                    str(repaired_content),
+                    source_text=source_text,
+                ),
                 {
                     "discarded_entity_count": 0,
                     "discarded_claim_count": 0,
@@ -450,7 +559,10 @@ async def extract_narrative_state(
                 },
             )
         except (TypeError, ValueError, ValidationError) as repair_error:
-            repaired_candidate = _try_salvage_extraction_items(str(repaired_content))
+            repaired_candidate = _usable_salvaged_candidate(
+                _try_salvage_extraction_items(str(repaired_content)),
+                source_text=source_text,
+            )
             if initial_candidate is None and repaired_candidate is None:
                 raise ValueError(
                     "AI narrative extraction did not match schema"
