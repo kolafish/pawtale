@@ -15,7 +15,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimPublicationStatus,
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
@@ -45,6 +44,7 @@ from app.schemas.memoir_narrative import (
     MemoirChapterStructureResponse,
 )
 from app.services.memoir.narrative import story_decisions
+from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
 
 LEGACY_SUGGESTION_IDEMPOTENCY_KEY = "chapter-structure-backfill-v1"
@@ -498,19 +498,6 @@ async def create_contract_revision(
     return contract
 
 
-def story_is_ready(story: MemoirStory) -> bool:
-    return (
-        story.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value
-        and story.publication_status == MemoirStoryPublicationStatus.ELIGIBLE.value
-        and story.verification_status == MemoirStoryVerificationStatus.CONFIRMED.value
-        and story.completion_status
-        in {
-            MemoirStoryCompletionStatus.SUFFICIENT.value,
-            MemoirStoryCompletionStatus.ACCEPTED_INCOMPLETE.value,
-        }
-    )
-
-
 async def legacy_story_candidates(
     db: AsyncSession,
     *,
@@ -572,7 +559,7 @@ async def _required_legacy_story(
     )
 
 
-async def _eligible_story_claim_shapes(
+async def eligible_story_claim_shapes(
     db: AsyncSession,
     *,
     project_id: str,
@@ -654,7 +641,7 @@ async def _legacy_framing_story_ids(
     candidates: list[MemoirStory],
     required_story: MemoirStory | None,
 ) -> dict[str, str]:
-    shapes = await _eligible_story_claim_shapes(
+    shapes = await eligible_story_claim_shapes(
         db,
         project_id=project_id,
         story_ids={story.id for story in candidates},
@@ -787,6 +774,14 @@ async def create_legacy_contract_suggestion(
         required_story=required_story,
     )
     questions = _legacy_core_questions(chapter=chapter, candidates=candidates)
+    supported_story_ids = {
+        story_id
+        for story_id, _, _ in await eligible_story_claim_shapes(
+            db,
+            project_id=project_id,
+            story_ids={story.id for story in candidates},
+        )
+    }
     contract = MemoirChapterContract(
         id=contract_id,
         project_id=project_id,
@@ -869,7 +864,11 @@ async def create_legacy_contract_suggestion(
             required=required,
             status=(
                 MemoirChapterNodeStatus.READY.value
-                if story is not None and story_is_ready(story)
+                if (
+                    story is not None
+                    and story_can_support_draft(story)
+                    and story.id in supported_story_ids
+                )
                 else (
                     MemoirChapterNodeStatus.NEEDS_WORK.value
                     if node_type == MemoirChapterNodeType.STORY
@@ -1214,18 +1213,18 @@ async def validate_contract_for_generation(
             )
         ).all()
     } if story_ids else {}
-    eligible_claim_shapes = await _eligible_story_claim_shapes(
+    eligible_claim_shapes = await eligible_story_claim_shapes(
         db,
         project_id=project_id,
         story_ids=set(stories),
     )
 
     issues: list[MemoirChapterContractValidationIssue] = []
-    if contract.status != MemoirChapterContractStatus.CONFIRMED.value:
+    if contract.status == MemoirChapterContractStatus.SUPERSEDED.value:
         issues.append(
             MemoirChapterContractValidationIssue(
-                code="contract_not_confirmed",
-                message="章节契约尚未确认。",
+                code="contract_superseded",
+                message="该章节方向已被新版本替代。",
             )
         )
     if not nodes:
@@ -1247,17 +1246,6 @@ async def validate_contract_for_generation(
         }
     ]
     for node in required_nodes:
-        if node.status not in {
-            MemoirChapterNodeStatus.READY.value,
-            MemoirChapterNodeStatus.EXCLUDED.value,
-        }:
-            issues.append(
-                MemoirChapterContractValidationIssue(
-                    code="required_node_not_ready",
-                    message=f"必要节点“{node.title}”尚未准备完成。",
-                    node_id=node.id,
-                )
-            )
         if node.node_type != MemoirChapterNodeType.STORY.value:
             continue
         links = links_by_node.get(node.id, [])
@@ -1272,7 +1260,7 @@ async def validate_contract_for_generation(
         required_links = [link for link in links if link.required] or links
         for link in required_links:
             story = stories.get(link.story_id)
-            if story is None or not story_is_ready(story):
+            if story is None or not story_can_support_draft(story):
                 issues.append(
                     MemoirChapterContractValidationIssue(
                         code="required_story_not_ready",
@@ -1281,29 +1269,16 @@ async def validate_contract_for_generation(
                         story_id=link.story_id,
                     )
                 )
-
-    for node in nodes:
-        if node.status == MemoirChapterNodeStatus.EXCLUDED.value:
-            continue
-        if not node.required and node.status != MemoirChapterNodeStatus.READY.value:
-            continue
-        node_story_ids = {
-            link.story_id for link in links_by_node.get(node.id, [])
-        }
-        if not _framing_node_has_supported_claim(
-            node_type=node.node_type,
-            story_ids=node_story_ids,
-            shapes=eligible_claim_shapes,
-        ):
-            issues.append(
-                MemoirChapterContractValidationIssue(
-                    code="framing_node_has_no_supported_claim",
-                    message=(
-                        f"结构节点“{node.title}”缺少与其作用匹配且有证据的 Claim。"
-                    ),
-                    node_id=node.id,
+                continue
+            if not any(shape[0] == link.story_id for shape in eligible_claim_shapes):
+                issues.append(
+                    MemoirChapterContractValidationIssue(
+                        code="required_story_has_no_supported_claim",
+                        message=f"节点“{node.title}”引用的 Story 还没有可追溯事实。",
+                        node_id=node.id,
+                        story_id=link.story_id,
+                    )
                 )
-            )
 
     linked_story_ids = set(stories)
     constraints = contract_constraints(contract)
@@ -1348,11 +1323,19 @@ async def validate_contract_for_generation(
         )
     for story_id in set(constraints.include_story_ids) & linked_story_ids:
         story = stories[story_id]
-        if not story_is_ready(story):
+        if not story_can_support_draft(story):
             issues.append(
                 MemoirChapterContractValidationIssue(
                     code="required_story_not_ready",
                     message="契约要求收录的 Story 尚未满足成书条件。",
+                    story_id=story_id,
+                )
+            )
+        elif not any(shape[0] == story_id for shape in eligible_claim_shapes):
+            issues.append(
+                MemoirChapterContractValidationIssue(
+                    code="required_story_has_no_supported_claim",
+                    message="章节要求收录的 Story 还没有可追溯事实。",
                     story_id=story_id,
                 )
             )

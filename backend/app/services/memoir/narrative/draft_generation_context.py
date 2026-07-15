@@ -16,10 +16,7 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockClaimUsageRole,
     MemoirDraftBlockRole,
     MemoirDraftBlockStoryUsageRole,
-    MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
-    MemoirStoryPublicationStatus,
-    MemoirStoryVerificationStatus,
 )
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -43,6 +40,7 @@ from app.services.memoir.narrative.draft_block_ai import (
     DraftBlockGenerationInput,
     DraftBlockStoryInput,
 )
+from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
 
 MAX_ADJACENT_CONTEXT_CHARS = 260
@@ -130,18 +128,6 @@ def _claim_links_for_block_role(
     return links
 
 
-def _eligible_story(story: MemoirStory) -> bool:
-    return (
-        story.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value
-        and story.publication_status == MemoirStoryPublicationStatus.ELIGIBLE.value
-        and story.verification_status
-        not in {
-            MemoirStoryVerificationStatus.DISPUTED.value,
-            MemoirStoryVerificationStatus.REJECTED.value,
-        }
-    )
-
-
 def _eligible_claim(claim: MemoirClaim) -> bool:
     return (
         claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
@@ -159,7 +145,7 @@ def _eligible_claim(claim: MemoirClaim) -> bool:
     )
 
 
-async def load_confirmed_contract_nodes(
+async def load_current_contract_nodes(
     db: AsyncSession,
     *,
     project_id: str,
@@ -169,11 +155,23 @@ async def load_confirmed_contract_nodes(
         select(MemoirChapterContract).where(
             MemoirChapterContract.project_id == project_id,
             MemoirChapterContract.chapter_id == chapter_id,
-            MemoirChapterContract.status == MemoirChapterContractStatus.CONFIRMED.value,
+            MemoirChapterContract.status.in_(
+                {
+                    MemoirChapterContractStatus.DRAFT.value,
+                    MemoirChapterContractStatus.CONFIRMED.value,
+                }
+            ),
+        )
+        .order_by(
+            MemoirChapterContract.version.desc(),
+            (
+                MemoirChapterContract.status
+                == MemoirChapterContractStatus.CONFIRMED.value
+            ).desc(),
         )
     )
     if contract is None:
-        raise ValueError("confirm the chapter contract before generating draft blocks")
+        raise ValueError("prepare a chapter direction before generating draft blocks")
     nodes = list(
         (
             await db.scalars(
@@ -261,7 +259,9 @@ async def build_node_generation_context(
         ).all()
     } if story_ids and role != MemoirDraftBlockRole.TRANSITION else {}
     eligible_story_ids = {
-        story_id for story_id, story in stories.items() if _eligible_story(story)
+        story_id
+        for story_id, story in stories.items()
+        if story_can_support_draft(story)
     }
     revisions: dict[str, MemoirStoryRevision] = {}
     if eligible_story_ids:
@@ -473,7 +473,7 @@ def select_generation_nodes(
     requested = list(dict.fromkeys(requested_node_ids))
     missing = set(requested) - set(by_id)
     if missing:
-        raise ValueError("requested draft nodes do not belong to the confirmed contract")
+        raise ValueError("requested draft nodes do not belong to the current chapter direction")
     selected = [by_id[node_id] for node_id in requested] if requested else nodes
     not_ready = [
         node.title

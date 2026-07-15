@@ -35,6 +35,7 @@ from app.schemas.memoir_narrative import (
     MemoirNarrativeDecisionRequest,
 )
 from app.services.memoir.narrative import chapter_contracts, decision_log
+from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
 
 def _utcnow() -> datetime:
@@ -260,8 +261,18 @@ async def recompute_story_node_status(
             )
         ).all()
     } if story_ids else {}
+    supported_story_ids = {
+        story_id
+        for story_id, _, _ in await chapter_contracts.eligible_story_claim_shapes(
+            db,
+            project_id=node.project_id,
+            story_ids=story_ids,
+        )
+    }
     ready = bool(required_links) and all(
-        story_id in stories and chapter_contracts.story_is_ready(stories[story_id])
+        story_id in stories
+        and story_id in supported_story_ids
+        and story_can_support_draft(stories[story_id])
         for story_id in story_ids
     )
     status = (

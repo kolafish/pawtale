@@ -270,8 +270,6 @@ def evaluate_deterministic_gaps(
     links_by_node: dict[str, list[MemoirChapterNodeStory]] = defaultdict(list)
     for link in context.links:
         links_by_node[link.node_id].append(link)
-    nodes_by_id = {node.id: node for node in context.nodes}
-
     for node in context.nodes:
         if (
             node.required
@@ -315,7 +313,11 @@ def evaluate_deterministic_gaps(
                 story = context.stories.get(link.story_id)
                 if story is not None and (
                     story.publication_status == MemoirStoryPublicationStatus.ELIGIBLE.value
-                    and story.verification_status != MemoirStoryVerificationStatus.REJECTED.value
+                    and story.verification_status
+                    not in {
+                        MemoirStoryVerificationStatus.DISPUTED.value,
+                        MemoirStoryVerificationStatus.REJECTED.value,
+                    }
                 ):
                     continue
                 candidates.append(
@@ -332,15 +334,6 @@ def evaluate_deterministic_gaps(
                     )
                 )
 
-    required_story_ids = {
-        link.story_id
-        for link in context.links
-        if link.required
-        or (
-            nodes_by_id.get(link.node_id) is not None
-            and nodes_by_id[link.node_id].required
-        )
-    }
     for story_id, story in context.stories.items():
         if (
             story.publication_status != MemoirStoryPublicationStatus.ELIGIBLE.value
@@ -357,17 +350,12 @@ def evaluate_deterministic_gaps(
                 MemoirStorySlotStatus.PARTIAL.value,
             }:
                 continue
-            severity = (
-                MemoirNarrativeGapSeverity.HIGH
-                if story_id in required_story_ids and status == MemoirStorySlotStatus.MISSING.value
-                else MemoirNarrativeGapSeverity.MEDIUM
-            )
             candidates.append(
                 MemoirNarrativeGapCandidate(
                     scope_type=MemoirNarrativeGapScopeType.STORY,
                     primary_story_id=story_id,
                     gap_type=MemoirNarrativeGapType.MISSING_SLOT,
-                    severity=severity,
+                    severity=MemoirNarrativeGapSeverity.MEDIUM,
                     target_slot=slot_key,
                     title=f"“{story.title}”缺少{SLOT_LABELS.get(slot_key, slot_key)}信息",
                     description=(

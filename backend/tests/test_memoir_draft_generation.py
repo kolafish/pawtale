@@ -79,6 +79,7 @@ async def _create_generation_fixture(
     *,
     include_opening: bool = False,
     include_transition: bool = False,
+    confirm_contract: bool = True,
 ):
     project_id = await ensure_mobile_memoir_project(client)
     user_id = (await client.get("/api/auth/me")).json()["id"]
@@ -302,9 +303,10 @@ async def _create_generation_fixture(
         )
         test_db.add(transition)
     await test_db.flush()
-    contract.status = MemoirChapterContractStatus.CONFIRMED.value
-    contract.confirmed_by_user_id = user_id
-    contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
+    if confirm_contract:
+        contract.status = MemoirChapterContractStatus.CONFIRMED.value
+        contract.confirmed_by_user_id = user_id
+        contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
     await test_db.commit()
     return {
         "project_id": project_id,
@@ -497,6 +499,40 @@ async def test_draft_generation_job_routes_enqueue_and_read_scoped_job(client, t
     )
     assert loaded.status_code == 200, loaded.text
     assert loaded.json()["id"] == body["id"]
+
+
+async def test_draft_generation_uses_the_current_draft_chapter_direction(
+    client,
+    test_db,
+):
+    created = await _create_generation_fixture(
+        client,
+        test_db,
+        confirm_contract=False,
+    )
+    assert created["contract"].status == MemoirChapterContractStatus.DRAFT.value
+    job = await draft_generation_jobs.enqueue_chapter_block_generation(
+        test_db,
+        project_id=created["project_id"],
+        chapter_id=created["chapter"].id,
+        request=MemoirDraftBlockGenerationRequest(node_ids=[created["nodes"][0].id]),
+    )
+
+    result = await draft_generation_jobs.run_draft_block_generation_job(
+        test_db,
+        job,
+        ai_client=FakeDraftAI(
+            [
+                _ai_output(
+                    "十八岁那年，我离开家乡，前往成都读书。",
+                    created["claims"][0].id,
+                )
+            ]
+        ),
+    )
+
+    assert result.result_json["contract_id"] == created["contract"].id
+    assert len(result.result_json["created_block_ids"]) == 1
 
 
 async def test_node_generation_uses_claim_allowlists_and_never_rewrites_existing_blocks(

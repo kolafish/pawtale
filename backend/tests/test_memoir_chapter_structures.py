@@ -475,7 +475,7 @@ async def test_owner_can_atomically_include_an_available_story_in_a_draft_contra
     story_node = body["nodes"][0]
     assert story_node["title"] == story.title
     assert story_node["required"] is True
-    assert story_node["status"] == "needs_work"
+    assert story_node["status"] == "ready"
     assert story_node["stories"] == [
         {
             "id": story_node["stories"][0]["id"],
@@ -639,12 +639,9 @@ async def test_legacy_suggestion_uses_evidence_backed_story_and_enforces_generat
         f"/api/memoir/projects/{project_id}/chapter-contracts/{contract['id']}/generation-validation"
     )
     assert before_confirmation.status_code == 200
-    assert before_confirmation.json()["can_generate"] is False
-    assert {issue["code"] for issue in before_confirmation.json()["issues"]} >= {
-        "contract_not_confirmed",
-        "framing_node_has_no_supported_claim",
-        "required_node_not_ready",
-    }
+    assert before_confirmation.json()["contract_confirmed"] is False
+    assert before_confirmation.json()["can_generate"] is True
+    assert before_confirmation.json()["issues"] == []
 
     reflection_node = next(
         node for node in contract["nodes"] if node["node_type"] == "reflection"

@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
-    MemoirChapterContractStatus,
     MemoirChapterNodeStatus,
     MemoirChapterNodeType,
     MemoirClaimPublicationStatus,
@@ -15,15 +14,10 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
     MemoirDraftBlockRole,
-    MemoirNarrativeGapSeverity,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapStatus,
-    MemoirStoryPublicationStatus,
-    MemoirStorySlotStatus,
-    MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import (
-    MemoirBookPlanStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirOutputStatus,
@@ -37,19 +31,15 @@ from app.schemas.memoir_narrative import (
     MemoirBookReadinessGroups,
     MemoirBookReadinessResponse,
 )
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative.book_consistency_context import (
     BookConsistencyContext,
     book_consistency_signature,
     load_book_consistency_context,
 )
-
-
-READY_SLOT_STATUSES = {
-    MemoirStorySlotStatus.SUFFICIENT.value,
-    MemoirStorySlotStatus.ACCEPTED_INCOMPLETE.value,
-    MemoirStorySlotStatus.NOT_APPLICABLE.value,
-}
+from app.services.memoir.narrative.readiness_policy import (
+    gap_blocks_formalization,
+    story_can_support_draft,
+)
 
 
 def _utcnow() -> datetime:
@@ -87,18 +77,13 @@ def _structure_blockers(context: BookConsistencyContext) -> list[MemoirBookReadi
     blockers: list[MemoirBookReadinessBlocker] = []
     if context.plan is None:
         return [_blocker("book_plan_missing", "还没有章节规划")]
-    if context.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        blockers.append(_blocker("book_plan_unconfirmed", "章节规划尚未确认"))
     for chapter in context.chapters:
         chapter_id = chapter.chapter.id
-        if (
-            chapter.contract is None
-            or chapter.contract.status != MemoirChapterContractStatus.CONFIRMED.value
-        ):
+        if chapter.contract is None:
             blockers.append(
                 _blocker(
                     f"chapter_contract:{chapter_id}",
-                    f"“{chapter.chapter.title}”的结构契约尚未确认",
+                    f"“{chapter.chapter.title}”还没有章节方向",
                     chapter_id=chapter_id,
                 )
             )
@@ -109,19 +94,11 @@ def _structure_blockers(context: BookConsistencyContext) -> list[MemoirBookReadi
         for node in chapter.nodes:
             if not node.required or node.status == MemoirChapterNodeStatus.EXCLUDED.value:
                 continue
-            if node.status != MemoirChapterNodeStatus.READY.value:
-                blockers.append(
-                    _blocker(
-                        f"required_node:{node.id}",
-                        f"必要结构“{node.title}”尚未完成",
-                        node.purpose,
-                        chapter_id=chapter_id,
-                    )
-                )
             if node.node_type != MemoirChapterNodeType.STORY.value:
                 continue
-            required_links = [link for link in links_by_node.get(node.id, []) if link.required]
-            if not required_links:
+            story_links = links_by_node.get(node.id, [])
+            required_links = [link for link in story_links if link.required] or story_links
+            if not story_links:
                 blockers.append(
                     _blocker(
                         f"required_node_story:{node.id}",
@@ -131,15 +108,7 @@ def _structure_blockers(context: BookConsistencyContext) -> list[MemoirBookReadi
                 )
             for link in required_links:
                 story = chapter.stories.get(link.story_id)
-                if (
-                    story is None
-                    or story.publication_status != MemoirStoryPublicationStatus.ELIGIBLE.value
-                    or story.verification_status
-                    in {
-                        MemoirStoryVerificationStatus.DISPUTED.value,
-                        MemoirStoryVerificationStatus.REJECTED.value,
-                    }
-                ):
+                if story is None or not story_can_support_draft(story):
                     blockers.append(
                         _blocker(
                             f"required_story:{link.story_id}",
@@ -149,20 +118,24 @@ def _structure_blockers(context: BookConsistencyContext) -> list[MemoirBookReadi
                         )
                     )
                     continue
-                required_slots = story_slot_schema(
-                    story.story_type,
-                    story.slot_schema_version,
-                ).required_slot_keys
-                slots = chapter.slots.get(story.id, {})
-                for slot_key in required_slots:
-                    slot = slots.get(slot_key)
-                    if slot and slot.status in READY_SLOT_STATUSES:
-                        continue
+                has_supported_claim = any(
+                    (claim := chapter.claims.get(story_claim.claim_id)) is not None
+                    and claim.superseded_by_claim_id is None
+                    and claim.publication_status
+                    == MemoirClaimPublicationStatus.ELIGIBLE.value
+                    and claim.verification_status
+                    not in {
+                        MemoirClaimVerificationStatus.DISPUTED.value,
+                        MemoirClaimVerificationStatus.REJECTED.value,
+                    }
+                    and chapter.evidence_counts.get(claim.id, 0) > 0
+                    for story_claim in chapter.story_claims.get(story.id, [])
+                )
+                if not has_supported_claim:
                     blockers.append(
                         _blocker(
-                            f"required_story_slot:{story.id}:{slot_key}",
-                            f"“{story.title}”仍有必要信息未处理",
-                            slot.assessment_summary if slot else f"缺少 {slot_key}",
+                            f"required_story_source:{story.id}",
+                            f"“{story.title}”还没有可追溯的事实来源",
                             chapter_id=chapter_id,
                             story_id=story.id,
                         )
@@ -338,7 +311,10 @@ async def _gap_groups(
         )
         if gap.status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value:
             accepted.append(item)
-        elif gap.severity == MemoirNarrativeGapSeverity.HIGH.value:
+        elif gap_blocks_formalization(
+            gap_type=gap.gap_type,
+            severity=gap.severity,
+        ):
             must.append(item)
         else:
             suggested.append(item)

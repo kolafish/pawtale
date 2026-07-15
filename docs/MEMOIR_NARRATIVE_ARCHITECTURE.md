@@ -4,14 +4,14 @@
 
 本文档是 Pawtale 回忆录“事实整理、故事构建、章节结构、补访规划、正文生成和全书审校”的主设计文档。
 
-- 状态：已确认设计基线，等待按 PR 计划实施。
+- 状态：叙事数据基线已落地；2026-07 起按本文“完整度与成稿语义修订”继续演进。
 - 适用范围：新版回忆录项目的叙事领域层、成书链路和成书驱动访谈。
 - 不取代：实时录音、Streaming ASR、LLM/TTS 对话状态机等语音基础能力。
 - 上游文档：`docs/MEMOIR_VOICE_CHAT_REDESIGN.md`。
 - 历史基础：`docs/MEMOIR_SEMANTIC_AUDIT_REFACTOR_PLAN.md` 已完成的素材卡、章节卡、SourceLink 和审计快照重构。
 - 执行原则：如果实现发现本设计不成立，必须先在对应 PR 中修改本文档、说明证据和影响，再调整实现；不能通过临时字段、兼容分支或提示词补丁绕开设计问题。
 
-本文档约束后续 6 个阶段、12 个 PR。除非设计在 PR 中被明确修订，后续实现和 code review 均以本文档为验收依据。
+原 6 阶段、12 PR 计划保留为历史实施记录，不再是当前切流依据。当前实现和 code review 以第十八章的 4 PR 修订计划及本文业务不变量为验收依据。
 
 ## 一、问题定义
 
@@ -150,16 +150,17 @@ ChapterNode -> Story -> Claim -> ClaimEvidence -> TranscriptVersion / Utterance 
 - 同一 Story 可以关联多次访谈、多个 Claim 和多段音频。
 - 一条素材可以为多个 Story 提供不同 Claim，但不能因为章节不同复制出多个相同 Story。
 - AI 合并 Story 只能生成建议；低置信度合并必须进入 review，不能静默覆盖。
-- Story 的完整状态由槽位状态、核心 Claim 和用户决策计算，不能只由字数或素材数决定。
-- `completion_status` 是由当前 StorySlot 计算并持久化的查询投影；重算不得覆盖槽位上的人工 resolution。
+- StorySlot 和 `completion_status` 用于描述还可以补充什么、安排后续访谈，不是正文生成或正式成书的硬门槛。
+- Story 只要处于 active、允许收录、没有 disputed/rejected，并且至少有一条可追溯的有效 Claim，就可以支持草稿生成；不要求用户逐条确认 Story。
+- `completion_status` 是由当前 StorySlot 计算并持久化的查询投影；重算不得覆盖槽位上的人工 resolution，也不得把“缺少固定槽位”解释为“已有内容不可成书”。
 
 ### 4.4 章节不变量
 
-- Chapter 在生成正文前必须有 ChapterContract 和至少一个 ChapterNode。
+- Chapter 在生成正文前必须有当前章节方向和至少一个 ChapterNode；当前方向可以是系统生成的 draft，不要求用户先理解或确认内部 ChapterContract。
 - 章节结构节点只能通过 Story 引用事实，不能重新建立独立事实副本。
 - 一个 Story 可以服务多个章节，但每个节点必须说明该 Story 在本章的叙事作用。
 - 章节标题变化不能隐式修改目标、时间范围和必须覆盖内容。
-- 正式章节不得存在未解决的 high severity 缺口，除非用户明确接受不完整或排除收录。
+- 正式章节不得存在未解决的 high correctness gap；缺少细节、固定槽位和一般丰富度建议不阻塞已有正文成书。
 
 ### 4.5 正文不变量
 
@@ -403,18 +404,18 @@ entry_reason -> responsibilities -> representative_events -> ability_and_charact
 theme_definition -> supporting_cases -> contrast_or_failure -> continuity -> reflection
 ```
 
-第一版 schema 的 required 槽位是明确、版本化的产品约束：
+第一版 schema 的重点槽位是明确、版本化的访谈规划信号：
 
 - event：`background`、`trigger`、`people`、`actions`、`outcome`。
 - relationship：`person_portrait`、`shared_experience`、`representative_scene`。
 - life_stage：`entry_reason`、`responsibilities`、`representative_events`、`transition`。
 - theme：`theme_definition`、`supporting_cases`、`continuity`。
 
-未列入 required 的槽位为 optional。Story 的 `completion_status` 只根据 required 槽位确定；optional 槽位缺失不会阻塞 sufficient。已有充分证据的槽位不能直接降级为 `accepted_incomplete` 或 `not_applicable`，需要先处理其 Claim/Evidence 冲突或确认状态。
+未列入重点集合的槽位为 optional。Story 的 `completion_status` 仍可根据重点槽位计算，供“还可以补什么”和任务排序使用；任何槽位缺失都不直接阻止已有事实进入草稿或正式书稿。已有充分证据的槽位不能直接降级为 `accepted_incomplete` 或 `not_applicable`，需要先处理其 Claim/Evidence 冲突或确认状态。
 
 ### 5.5 ChapterContract：章节契约
 
-`MemoirChapterContract` 与现有 `MemoirBookPlanChapter` 按版本一对多关联，表达章节为什么存在；`chapter_id + version` 唯一，同一章节只能有一个当前 confirmed version。
+`MemoirChapterContract` 与现有 `MemoirBookPlanChapter` 按版本一对多关联，表达章节为什么存在；`chapter_id + version` 唯一。它在产品上称为“章节方向/章节说明”，Contract 只是内部模型名。
 
 第一版目标字段：
 
@@ -447,7 +448,7 @@ updated_at
 
 已确认的 contract version 及其 ChapterNode 集合不可原地改写。结构编辑创建新的 contract version 并从上一版本显式复制或调整节点，历史 DraftBlockVersion 继续引用原 contract/node，保证旧书稿可解释。
 
-确认和替代必须记录执行用户与时间。数据库层同时保护已确认 contract、Node 和 NodeStory，除 `confirmed -> superseded` 生命周期迁移外不允许原地更新或删除，不能只依赖 API 约定维持历史可解释性。
+用户明确调整并确认章节方向时，确认和替代必须记录执行用户与时间。系统生成的 draft 可以直接驱动缺口分析和草稿生成，但不得伪造确认人；数据库层继续保护已确认 contract、Node 和 NodeStory，除 `confirmed -> superseded` 生命周期迁移外不允许原地更新或删除。
 
 `core_questions_json` 中每个问题必须有稳定 question key；问题是否已回答由 Node/Story/Claim 和 Gap 计算，不能在 JSON 中维护第二套完成状态。
 
@@ -727,19 +728,25 @@ LLM 输出必须先经过 schema 和 evidence 校验，再 upsert NarrativeGap�
 
 内部可以为任务排序计算权重，但不得把权重包装成精确的“章节完整度 72%”。
 
+三组含义必须稳定：
+
+- “必须处理”只包含会造成事实错误、来源失效、隐私泄漏或正文逻辑无法成立的问题。
+- “建议补充”包含缺少细节、重点槽位不充分、可增强的场景/感受和重复表达优化。
+- “可以接受的不完整”表示用户已明确决定不再追问，但不能被系统改写为“事实已确认”。
+- 历史数据中即使把 `missing_slot` 标成 high，读取正式成书门槛时也按建议补充处理，避免旧派生状态继续错误阻塞。
+
 ### 6.3 正式成书门槛
 
 草稿预览随时可以生成；标记为“正式书稿”必须满足：
 
-- ChapterContract 已确认。
-- required ChapterNode 已 ready，或被用户明确排除。
-- required Story 的核心槽位为 sufficient、accepted_incomplete 或 not_applicable。
-- 没有未处理的 high gap。
+- 每章有当前章节方向和至少一个可成稿的故事节点；章节方向可以是 draft。
+- 正文使用的 Story 处于 active、允许收录、没有 disputed/rejected，并有可追溯 Claim/Evidence。
+- 没有未处理的 high correctness gap，包括事实冲突、无来源事实、关键时间/人物关系/因果或指代无法成立。
 - 没有 disputed/rejected/private Claim 进入正文。
 - 每个 factual DraftBlock 都有有效 Claim 引用。
 - 全书时间线和人物关系审校没有未处理 high gap。
 
-用户可以明确接受不完整，但系统不能把缺失自动判定为完整。
+缺少细节、固定 StorySlot、可选开场/反思/收束不会阻塞正式书稿。用户可以明确接受不完整；当系统无法判断一个解释是正文事实、编辑说明还是事实修正时，必须询问用户，不能静默猜测或把所有回答都拼入正文。
 
 ## 七、访谈产品与编排
 
@@ -774,7 +781,9 @@ current_followup_task_id  # optional
 
 ### 7.3 补全成书
 
-进入时由 Followup Planner 选择一个 pending task，排序考虑：
+进入时先展示章节级全局补全视图，再由 Followup Planner 选择一个 pending task。用户必须先看见每章当前已经讲清、必须核对和建议补充的主题，不能只能跟随 AI 连续回答局部小问题。
+
+任务排序考虑：
 
 - high gap 优先于 medium/low。
 - required Story 优先于 supporting Story。
@@ -873,11 +882,11 @@ schema_version
 新成书流程必须按以下顺序执行：
 
 ```text
-确认 ChapterContract
+读取当前章节方向（draft 或 confirmed）
  -> 生成/调整 ChapterNode
  -> 为节点选择 Story 并说明叙事作用
- -> 运行结构和事实审校
- -> 对 ready 节点逐块生成 DraftBlock
+ -> 运行事实和结构建议审校
+ -> 对有有效 Story/Claim/Evidence 的节点逐块生成 DraftBlock
  -> 校验 DraftBlockClaim 和无来源事实
  -> 生成必要过渡块
  -> 组装章节快照
@@ -896,6 +905,7 @@ schema_version
 - ClaimEvidence 的必要引用。
 - 前后相邻块的短上下文。
 - 用户明确写作反馈。
+- 补全回答的用途：直接讲述、编辑解释或事实修正。编辑解释只帮助理解原文，不能直接写进正文；事实修正必须先更新 Claim 语义再参与生成。
 
 不默认输入全章所有录音和旧稿。LLM 输出正文和使用的 claim IDs，服务端必须验证 claim IDs 属于允许集合。
 
@@ -930,31 +940,28 @@ Story 顺序变化只影响节点顺序和必要过渡块；不能无故重写�
 
 ## 十、章节工作台
 
-成书首页继续承担项目级概览，不继续膨胀为完整编辑器。新增独立章节工作台和故事详情视图。
+成书首页承担项目级概览，章节工作台承担单章全局视图。普通用户不需要先理解 Story、Claim、slot、Contract 等内部模型；这些术语只允许出现在开发/审计接口或明确的高级编辑视图。
 
 章节工作台至少包含：
 
 ```text
-章节结构区
-  ChapterContract
-  ChapterNode 顺序和作用
-  Story 关联、拆分、合并和移动
+本章概览
+  已经讲清的主题
+  必须核对的问题
+  建议补充的方向
+  已接受的不完整
 
-故事详情区
-  原始音频和转写
-  Claim 和人物/时间/地点
-  Story slots
-  冲突和确认状态
-  用户修改记录
+正文与来源
+  当前章节正文
+  每段可查看原始音频、转写和修改记录
+  有歧义时向用户展示具体选择，不展示内部状态名
 
-检查报告区
-  必须处理
-  建议补充
-  可以接受的不完整
-  可创建/执行的 FollowupTask
+下一步
+  选择一个主题开始补充
+  换一个、想不起来、以后再说、不想收录
 ```
 
-老人端只显示当前访谈所需的最少信息；复杂结构、证据和审校主要提供给家人或编辑使用。
+老人端复用现有 AI 访谈的实时 ASR/TTS/录音链路，只显示当前访谈所需的最少信息；复杂证据审计可以提供给家人或编辑，但仍使用产品语言而不是数据模型名。
 
 ## 十一、API 边界
 
@@ -1118,7 +1125,7 @@ EventCluster 不能直接成为 confirmed Story；同一事件可能在不同章
 8. 删除旧 source -> whole chapter prompt、旧事件聚类主读和永久 fallback。
 ```
 
-临时双读/双写必须在 PR 描述中声明删除 PR，最迟在 PR12 清理。
+临时双读/双写必须在 PR 描述中声明删除 PR，最迟在第十八章的最终切流 PR 清理。
 
 ### 14.3 数据保护和回滚
 
@@ -1127,11 +1134,11 @@ EventCluster 不能直接成为 confirmed Story；同一事件可能在不同章
 - 回填只新增叙事数据，不覆盖 utterance、transcript、audio 和历史 book output。
 - 切换前比较用户数、项目数、utterance 数、有效 transcript version、Claim evidence 覆盖和章节来源覆盖。
 - 回滚切换只切读路径；已经生成的新叙事数据保留用于排查，不反向污染旧事实层。
-- PR12 删除旧代码前必须确认所有活跃项目已完成迁移检查。
+- 最终切流 PR 删除旧代码前必须确认所有活跃项目已完成迁移检查。
 
-### 14.4 PR12 前置安全迁移
+### 14.4 最终切流前的安全迁移
 
-章节工作台的真实数据准备必须先于 PR12 正式切流，并保持 14.2 的旧成书链可用。该阶段只做三件事：修复 SQLite 历史表重建遗留的外键目标、创建可验证且可恢复的完整备份、按阶段新增 Claim/Story/Contract 建议和 legacy DraftBlock 快照。不得在该阶段删除旧生成任务、停止旧成书事件或改变正式成书读路径。
+章节工作台的真实数据准备必须先于最终正式切流，并保持 14.2 的旧成书链可用。该阶段只做三件事：修复 SQLite 历史表重建遗留的外键目标、创建可验证且可恢复的完整备份、按阶段新增 Claim/Story/章节方向建议和 legacy DraftBlock 快照。不得在该阶段删除旧生成任务、停止旧成书事件或改变正式成书读路径。
 
 正式环境执行时必须先停止 API 和后台 worker。备份、迁移和所有写入阶段必须指向同一个文件型 SQLite 数据库；每个写入阶段必须使用同一份由备份工具生成的 `manifest.json`。manifest 必须绑定源数据库绝对路径、独立备份库 SHA-256、`PRAGMA integrity_check`、核心表行数、对象引用清单和目录校验和，不能用手工复制的 SQLite 主文件代替。
 
@@ -1164,7 +1171,7 @@ PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures
   --backup-manifest /controlled/backup/manifest.json
 ```
 
-`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、同一 transcript version 中共享人物或地点锚点的叙事 Claim 簇均已进入待确认 Story、Story/Contract 建议已物化且没有失败的摄取任务。它不表示 Story 已被用户确认。`chapter_workflow_ready` 单独表示用户已确认 Contract 且章节已有结构化 DraftBlock；它必须通过真实章节工作台操作达成，不能由迁移脚本伪造确认人或产品决策。两者都不能替代第十五章的人工盲评门禁。
+`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、同一 transcript version 中共享人物或地点锚点的叙事 Claim 簇均已进入 Story 候选、章节方向建议已物化且没有失败的摄取任务。它不表示 Story 已被用户确认。`chapter_workflow_ready` 单独表示章节已有当前方向和结构化 DraftBlock；迁移脚本不得伪造确认人或产品决策。两者都不能替代来源校验、一致性审校和真实章节质量验收。
 
 恢复操作默认只做预检。只有确认所有写进程仍处于停止状态时才允许执行；工具会先保存当前数据库调查快照，再清理目标库侧车并原子替换为经过 SHA-256 和完整性校验的备份。
 
@@ -1254,7 +1261,9 @@ PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
 
 review 必须对照本文档检查范围和不变量。测试通过但违反领域边界的 PR 不得合并。
 
-## 十六、实施计划：6 个阶段、12 个 PR
+## 十六、历史实施记录：6 个阶段、12 个 PR
+
+本章记录叙事基础模型最初如何分阶段落地，相关 PR 已不再作为当前实现顺序或切流门槛。尤其是下文 PR12 的早期方案，不得直接覆盖第十八章对完整度、回答用途和工作台产品边界的修订。
 
 ### 阶段 1：设计基线与持久化基础
 
@@ -1523,3 +1532,38 @@ review 必须对照本文档检查范围和不变量。测试通过但违反领�
 ```
 
 最终产品不再把章节视为“一篇已经生成的文章”，而是把它视为一个有目标、有结构、由长期 Story 组成、可以逐步补齐和确认的容器。Story 也不再等于一次录音，而是能在长期访谈中持续积累证据、修正事实并服务多个章节的核心数据资产。
+
+## 十八、2026-07 修订实施计划：4 个 PR
+
+旧 Draft PR #722 不直接合入。它保留为历史参考；当前实现从最新 `main` 按以下四个独立 PR 演进。
+
+### PR 1：重定义完整度与成书门槛
+
+- 区分事实/来源/隐私/逻辑硬问题与内容丰富度建议。
+- 章节方向 draft 可以参与缺口分析和草稿生成，不伪造用户确认。
+- Story 未逐条人工确认、重点槽位缺失不再自动阻止成书。
+- 历史 high `missing_slot` 在 readiness 读取时降为建议，避免迁移前派生状态继续阻塞。
+- 高优先级事实冲突、无来源事实、失效正文块和隐私内容继续阻塞。
+
+### PR 2：补全回答用途与结构化成稿
+
+- 把补全回答明确分为直接讲述、编辑解释和事实修正。
+- 直接讲述进入 Story/Claim/Evidence；编辑解释作为非引用生成上下文；事实修正先更新语义状态。
+- 结构化 DraftBlock 生成接入上述上下文，禁止把“我只是解释这句话”等编辑说明写入正文。
+- 系统无法可靠判断回答用途时询问用户，不增加静默 fallback。
+
+### PR 3：简化章节工作台
+
+- 提供单章全局视图：已讲清、必须核对、建议补充、已接受不完整。
+- 普通页面隐藏 Story/Claim/slot/Contract 等内部模型名。
+- 补全入口复用现有 AI 访谈的实时 ASR/TTS/录音链路，章节工作台只选择目标和展示进度。
+- 用户可以按主题选择下一步，不被迫沿单个细节无限追问。
+
+### PR 4：验收、切流和旧链路删除
+
+- 用真实章节验证补全回答归章、编辑解释不入正文、事实修正生效和全书一致性。
+- 新结构化链路达到来源、逻辑和产品验收条件后切换正式读写路径。
+- 删除旧整章 prompt、旧页面、旧任务链路、永久双轨和无用测试。
+- 保留原始音频、转写版本、多人转写、离线双模型 ASR 和方言增强能力。
+
+每个 PR 必须独立 review、运行影响范围内的高价值测试并给出迁移/删除结论。第 4 个 PR 合并前不得提前删除仍承载线上语义的旧实现。
