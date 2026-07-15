@@ -6,7 +6,6 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
-    MemoirChapterContractStatus,
     MemoirFollowupTaskStatus,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
@@ -85,10 +84,7 @@ async def _chapter_preparations(
             project_id=project_id,
             chapter_id=chapter.id,
         )
-        if (
-            context.contract is None
-            or context.contract.status != MemoirChapterContractStatus.CONFIRMED.value
-        ):
+        if context.contract is None:
             continue
         preparations.append(
             _ChapterPreparation(

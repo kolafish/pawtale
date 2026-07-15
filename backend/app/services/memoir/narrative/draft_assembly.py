@@ -13,7 +13,6 @@ from app.domain.memoir.narrative_types import (
 )
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
-    MemoirBookPlanStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
@@ -35,10 +34,10 @@ from app.schemas.memoir_narrative import (
     MemoirChapterDraftBlockAssemblyResponse,
     MemoirDraftBlockAssemblyItem,
 )
-from app.services.memoir.narrative.draft_generation_context import (
-    load_confirmed_contract_nodes,
-)
 from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir.narrative.draft_generation_context import (
+    load_current_contract_nodes,
+)
 
 
 def _utcnow() -> datetime:
@@ -71,7 +70,7 @@ async def assemble_chapter_draft(
     project_id: str,
     chapter_id: str,
 ) -> MemoirChapterDraftBlockAssemblyResponse:
-    contract, nodes = await load_confirmed_contract_nodes(
+    contract, nodes = await load_current_contract_nodes(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -255,8 +254,6 @@ async def assemble_book_output(
     )
     if plan is None:
         raise ValueError("book plan does not belong to the project")
-    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        raise ValueError("confirm the book plan before assembling the book output")
     chapters = sorted(plan.chapters, key=lambda chapter: (chapter.sort_order, chapter.id))
     if not chapters:
         raise ValueError("book plan has no chapters")

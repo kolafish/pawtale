@@ -29,6 +29,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
@@ -39,8 +40,16 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirOutputStatus
-from app.models.memoir import MemoirBookChapterDraft, MemoirBookOutput
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirBookPlanStatus,
+    MemoirOutputStatus,
+)
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookOutput,
+    MemoirBookOutputVersion,
+)
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -59,7 +68,7 @@ from app.schemas.memoir_narrative import (
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.narrative import chapter_contracts, draft_blocks
+from app.services.memoir.narrative import chapter_contracts, draft_blocks, gaps
 from app.services.memoir.narrative.book_consistency_semantic import (
     evaluate_book_semantic_gaps,
 )
@@ -154,13 +163,19 @@ class OutOfScopeWindowSemanticAuditAI(EmptySemanticAuditAI):
         )
 
 
-async def _create_ready_structured_book(client, test_db):
+async def _create_ready_structured_book(
+    client,
+    test_db,
+    *,
+    plan_status: MemoirBookPlanStatus = MemoirBookPlanStatus.CONFIRMED,
+):
     project_id = await ensure_mobile_memoir_project(client)
     user_id = (await client.get("/api/auth/me")).json()["id"]
     _, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
         chapter_titles=["第一次离家"],
+        status=plan_status,
     )
     chapter = chapters[0]
     contract = MemoirChapterContract(
@@ -342,12 +357,47 @@ async def _create_ready_structured_book(client, test_db):
     return project_id, user_id, block
 
 
+async def test_structured_book_can_assemble_from_a_draft_plan(client, test_db):
+    project_id, _, _ = await _create_ready_structured_book(
+        client,
+        test_db,
+        plan_status=MemoirBookPlanStatus.DRAFT,
+    )
+
+    output = await test_db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    assert output is not None
+    output_version = await test_db.scalar(
+        select(MemoirBookOutputVersion).where(
+            MemoirBookOutputVersion.output_id == output.id
+        )
+    )
+    assert output_version is not None
+    assert output_version.chapter_snapshot_json
+
+
 async def test_current_full_audit_is_required_before_formalizing_and_edits_reopen_draft(
     client,
     test_db,
     monkeypatch,
 ):
     project_id, user_id, _ = await _create_ready_structured_book(client, test_db)
+    chapter_story = await test_db.scalar(
+        select(MemoirStory).where(
+            MemoirStory.project_id == project_id,
+            MemoirStory.title == "第一次离家",
+        )
+    )
+    assert chapter_story is not None
+    chapter_story.verification_status = MemoirStoryVerificationStatus.UNREVIEWED.value
+    for slot in (
+        await test_db.scalars(
+            select(MemoirStorySlot).where(MemoirStorySlot.story_id == chapter_story.id)
+        )
+    ).all():
+        slot.status = MemoirStorySlotStatus.MISSING.value
+    await test_db.commit()
     unrelated_story = MemoirStory(
         project_id=project_id,
         title="未纳入本书的旁支故事",
@@ -406,6 +456,74 @@ async def test_current_full_audit_is_required_before_formalizing_and_edits_reope
     body = readiness.json()
     assert body["ready_for_formal"] is True
     assert body["audit_is_current"] is True
+    assert any(
+        item["code"].startswith("gap:")
+        for item in body["groups"]["suggested"]
+    )
+
+    legacy_high_detail_gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        primary_chapter_id=(
+            await test_db.scalar(
+                select(MemoirChapterNode.chapter_id).where(
+                    MemoirChapterNode.project_id == project_id
+                )
+            )
+        ),
+        gap_type=MemoirNarrativeGapType.MISSING_SLOT.value,
+        severity=MemoirNarrativeGapSeverity.HIGH.value,
+        target_slot="legacy-required-detail",
+        title="历史数据中的必要细节缺失",
+        description="内容丰富度问题不应阻止正式成书。",
+        fingerprint="d" * 64,
+        detected_by=MemoirNarrativeGapDetectedBy.RULES.value,
+    )
+    test_db.add(legacy_high_detail_gap)
+    await test_db.commit()
+    detail_readiness = await client.get(
+        f"/api/memoir/projects/{project_id}/book-readiness"
+    )
+    assert detail_readiness.json()["ready_for_formal"] is True
+    assert f"gap:{legacy_high_detail_gap.id}" in {
+        item["code"] for item in detail_readiness.json()["groups"]["suggested"]
+    }
+
+    contradiction = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        primary_chapter_id=legacy_high_detail_gap.primary_chapter_id,
+        gap_type=MemoirNarrativeGapType.CONTRADICTION.value,
+        severity=MemoirNarrativeGapSeverity.HIGH.value,
+        title="同一事件存在冲突说法",
+        description="冲突会改变正文事实，需要先由用户确认。",
+        fingerprint="c" * 64,
+        detected_by=MemoirNarrativeGapDetectedBy.RULES.value,
+    )
+    test_db.add(contradiction)
+    await test_db.commit()
+    contradiction_readiness = await client.get(
+        f"/api/memoir/projects/{project_id}/book-readiness"
+    )
+    assert contradiction_readiness.json()["ready_for_formal"] is False
+    assert f"gap:{contradiction.id}" in {
+        item["code"]
+        for item in contradiction_readiness.json()["groups"]["must_handle"]
+    }
+    await gaps.resolve_gap(
+        test_db,
+        project_id=project_id,
+        gap_id=contradiction.id,
+        status=MemoirNarrativeGapStatus.RESOLVED,
+        actor_user_id=user_id,
+        idempotency_key="resolve-readiness-contradiction",
+        note="用户已确认正确说法。",
+    )
+    await test_db.commit()
+
+    readiness = await client.get(f"/api/memoir/projects/{project_id}/book-readiness")
+    body = readiness.json()
+    assert body["ready_for_formal"] is True
     formalized = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/formalize",
         json={

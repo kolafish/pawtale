@@ -31,7 +31,7 @@ from app.services.memoir.narrative.draft_block_ai import (
 )
 from app.services.memoir.narrative.draft_generation_context import (
     build_node_generation_context,
-    load_confirmed_contract_nodes,
+    load_current_contract_nodes,
     select_generation_nodes,
 )
 
@@ -88,7 +88,7 @@ async def enqueue_chapter_block_generation(
     chapter_id: str,
     request: MemoirDraftBlockGenerationRequest,
 ) -> MemoirEditingJob:
-    contract, _ = await load_confirmed_contract_nodes(
+    contract, _ = await load_current_contract_nodes(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -172,7 +172,7 @@ async def _run_initial_generation(
 ) -> EditingJobResult:
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     chapter_id = str(payload.get("chapter_id") or job.chapter_id or "").strip()
-    contract, nodes = await load_confirmed_contract_nodes(
+    contract, nodes = await load_current_contract_nodes(
         db,
         project_id=job.project_id,
         chapter_id=chapter_id,
@@ -184,7 +184,7 @@ async def _run_initial_generation(
         requested_node_ids=_string_list(payload.get("node_ids")),
     )
     if not selected_nodes:
-        raise ValueError("the confirmed chapter contract has no ready nodes")
+        raise ValueError("the current chapter direction has no ready nodes")
     existing_node_ids = set(
         (
             await db.scalars(
@@ -297,14 +297,14 @@ async def _run_revision_generation(
         raise ValueError("draft block changed after the revision job was queued")
     if block.locked:
         raise ValueError("locked draft block cannot be revised by an automatic task")
-    contract, nodes = await load_confirmed_contract_nodes(
+    contract, nodes = await load_current_contract_nodes(
         db,
         project_id=job.project_id,
         chapter_id=block.chapter_id,
     )
     node = next((item for item in nodes if item.id == block.node_id), None)
     if node is None:
-        raise ValueError("draft block node is not part of the current confirmed contract")
+        raise ValueError("draft block node is not part of the current chapter direction")
     context = await build_node_generation_context(
         db,
         project_id=job.project_id,
@@ -376,14 +376,14 @@ async def apply_generated_revision(
     block = await draft_block_queries.load_block(db, project_id=project_id, block_id=block_id)
     if block.current_version_id != request.expected_current_version_id:
         raise ValueError("draft block changed concurrently; reload and retry")
-    contract, nodes = await load_confirmed_contract_nodes(
+    contract, nodes = await load_current_contract_nodes(
         db,
         project_id=project_id,
         chapter_id=block.chapter_id,
     )
     node = next((item for item in nodes if item.id == block.node_id), None)
     if node is None:
-        raise ValueError("draft block node is not part of the current confirmed contract")
+        raise ValueError("draft block node is not part of the current chapter direction")
     context = await build_node_generation_context(
         db,
         project_id=project_id,

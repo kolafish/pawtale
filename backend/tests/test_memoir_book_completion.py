@@ -226,6 +226,29 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     assert resumed_chapter["active_session_id"] == voice.json()["session"]["id"]
 
 
+async def test_book_completion_can_prepare_from_a_draft_chapter_direction(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+        confirm_contract=False,
+    )
+
+    initial = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert initial.status_code == 200, initial.text
+    assert initial.json()["chapters"][0]["state"] == "needs_preparation"
+
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
+
+    ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
+    assert ready.status_code == 200, ready.text
+    assert ready.json()["chapters"][0]["state"] == "ready"
+    assert ready.json()["chapters"][0]["task_id"]
+
+
 async def test_book_completion_voice_session_rejects_an_empty_task_boundary(client, test_db):
     created = await create_test_voice_transcript(client, test_db)
     response = await post_mobile_memoir_voice_session(
@@ -315,29 +338,6 @@ async def test_book_completion_overview_can_resume_a_deferred_chapter(
     restored_task = await test_db.get(MemoirFollowupTask, chapter_state["task_id"])
     assert restored_task is not None
     assert restored_task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
-
-
-async def test_book_completion_overview_routes_unconfirmed_chapter_to_review(
-    client,
-    test_db,
-):
-    project_id, chapter, _ = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=False,
-        confirm_contract=False,
-    )
-
-    status = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
-
-    assert status.status_code == 200
-    assert status.json()["chapters"][0]["state"] == "needs_review"
-    assert status.json()["chapters"][0]["chapter_id"] == chapter.id
-    assert await _latest_job(
-        test_db,
-        project_id,
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
-    ) is None
 
 
 async def test_book_completion_reaudits_changed_content_before_reusing_an_old_question(
