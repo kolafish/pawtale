@@ -306,3 +306,75 @@ async def cancel_active_tasks_for_gap(
         )
         cancelled += 1
     return cancelled
+
+
+async def reactivate_cancelled_task_for_gap(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    gap_id: str,
+    reason: str,
+    decision_identity: str,
+) -> int:
+    """Restore the one-to-one task when a system-resolved Gap recurs."""
+    task = await db.scalar(
+        select(MemoirFollowupTask).where(
+            MemoirFollowupTask.project_id == project_id,
+            MemoirFollowupTask.gap_id == gap_id,
+            MemoirFollowupTask.status == MemoirFollowupTaskStatus.CANCELLED.value,
+        )
+    )
+    if task is None:
+        return 0
+
+    idempotency_key = f"reactivate-followup:{decision_identity}:{task.id}"
+    existing = await decision_log.existing_decision(
+        db,
+        project_id=project_id,
+        idempotency_key=idempotency_key,
+        target_type=MemoirNarrativeDecisionTargetType.FOLLOWUP_TASK,
+        target_id=task.id,
+        action=MemoirNarrativeDecisionAction.NEEDS_REVIEW,
+        actor_type=MemoirNarrativeActorType.SYSTEM,
+        actor_user_id=None,
+    )
+    if existing is not None:
+        return int(task.status == MemoirFollowupTaskStatus.PENDING.value)
+
+    before = task_state(task)
+    result = await db.execute(
+        update(MemoirFollowupTask)
+        .where(
+            MemoirFollowupTask.project_id == project_id,
+            MemoirFollowupTask.id == task.id,
+            MemoirFollowupTask.status == MemoirFollowupTaskStatus.CANCELLED.value,
+        )
+        .values(
+            **_transition_values(
+                status=MemoirFollowupTaskStatus.PENDING,
+                assigned_session_id=None,
+                defer_until=None,
+                reason="",
+            )
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if result.rowcount != 1:
+        raise FollowupTaskConflictError(
+            "follow-up task state changed concurrently; reload and retry"
+        )
+    await db.refresh(task)
+    await decision_log.record_decision(
+        db,
+        project_id=project_id,
+        target_type=MemoirNarrativeDecisionTargetType.FOLLOWUP_TASK,
+        target_id=task.id,
+        action=MemoirNarrativeDecisionAction.NEEDS_REVIEW,
+        actor_type=MemoirNarrativeActorType.SYSTEM,
+        actor_user_id=None,
+        before_state=before,
+        after_state=task_state(task),
+        reason=reason.strip(),
+        idempotency_key=idempotency_key,
+    )
+    return 1

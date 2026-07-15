@@ -74,19 +74,30 @@ def _gap_state(gap: MemoirNarrativeGap) -> dict[str, object]:
     }
 
 
-def _was_auto_resolved_rule_gap(gap: MemoirNarrativeGap) -> bool:
-    return bool(
+def _auto_resolution_kind(gap: MemoirNarrativeGap) -> str | None:
+    if (
+        gap.status != MemoirNarrativeGapStatus.RESOLVED.value
+        or gap.resolved_by != MemoirNarrativeActorType.SYSTEM.value
+    ):
+        return None
+    if (
         gap.detected_by == MemoirNarrativeGapDetectedBy.RULES.value
-        and gap.status == MemoirNarrativeGapStatus.RESOLVED.value
-        and gap.resolved_by == MemoirNarrativeActorType.SYSTEM.value
         and gap.resolution_note == AUTO_RULE_RESOLUTION_NOTE
-    )
+    ):
+        return "rule"
+    if (
+        gap.detected_by == MemoirNarrativeGapDetectedBy.AI.value
+        and gap.resolution_note == SEMANTIC_AUDIT_RESOLUTION_NOTE
+    ):
+        return "semantic"
+    return None
 
 
-async def _reopen_auto_resolved_rule_gap(
+async def _reopen_auto_resolved_gap(
     db: AsyncSession,
     *,
     gap: MemoirNarrativeGap,
+    resolution_kind: str,
 ) -> None:
     before = _gap_state(gap)
     next_detection_count = gap.detection_count + 1
@@ -105,8 +116,21 @@ async def _reopen_auto_resolved_rule_gap(
         actor_user_id=None,
         before_state=before,
         after_state=_gap_state(gap),
-        reason="系统规则再次检测到该问题",
-        idempotency_key=f"rule-gap-reopened:{gap.id}:{next_detection_count}",
+        reason="系统复查再次检测到该问题",
+        idempotency_key=(
+            f"{resolution_kind}-gap-reopened:{gap.id}:{next_detection_count}"
+        ),
+    )
+    from app.services.memoir.narrative import followup_tasks
+
+    await followup_tasks.reactivate_cancelled_task_for_gap(
+        db,
+        project_id=gap.project_id,
+        gap_id=gap.id,
+        reason="gap recurred after a system audit",
+        decision_identity=(
+            f"{resolution_kind}-gap-reopened:{gap.id}:{next_detection_count}"
+        ),
     )
 
 
@@ -265,8 +289,13 @@ async def upsert_gap(
                 raise
             created = False
     if not created:
-        if _was_auto_resolved_rule_gap(gap):
-            await _reopen_auto_resolved_rule_gap(db, gap=gap)
+        resolution_kind = _auto_resolution_kind(gap)
+        if resolution_kind is not None:
+            await _reopen_auto_resolved_gap(
+                db,
+                gap=gap,
+                resolution_kind=resolution_kind,
+            )
         gap.severity = candidate.severity.value
         gap.title = candidate.title
         gap.description = candidate.description

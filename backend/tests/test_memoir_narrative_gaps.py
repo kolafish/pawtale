@@ -360,7 +360,7 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
     assert workspace.json()["latest_audit_job"]["id"] == semantic_response.json()["id"]
 
 
-async def test_semantic_reaudit_resolves_obsolete_gap_and_cancels_task(
+async def test_semantic_reaudit_resolves_then_reopens_gap_and_task_if_it_recurs(
     client,
     test_db,
 ):
@@ -371,21 +371,20 @@ async def test_semantic_reaudit_resolves_obsolete_gap_and_cancels_task(
         project_id=project_id,
         chapter_titles=["青年时期"],
     )
+    candidate = MemoirNarrativeGapCandidate(
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+        primary_chapter_id=chapters[0].id,
+        gap_type=MemoirNarrativeGapType.CAUSALITY,
+        severity=MemoirNarrativeGapSeverity.MEDIUM,
+        target_slot="semantic:opening:old-opening-gap",
+        title="开头缺少背景",
+        description="读者不知道故事发生前的处境。",
+        detected_by=MemoirNarrativeGapDetectedBy.AI,
+    )
     stored, _ = await gaps.upsert_gaps(
         test_db,
         project_id=project_id,
-        candidates=[
-            MemoirNarrativeGapCandidate(
-                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
-                primary_chapter_id=chapters[0].id,
-                gap_type=MemoirNarrativeGapType.CAUSALITY,
-                severity=MemoirNarrativeGapSeverity.MEDIUM,
-                target_slot="semantic:opening:old-opening-gap",
-                title="开头缺少背景",
-                description="读者不知道故事发生前的处境。",
-                detected_by=MemoirNarrativeGapDetectedBy.AI,
-            )
-        ],
+        candidates=[candidate],
     )
     task = MemoirFollowupTask(
         project_id=project_id,
@@ -412,6 +411,20 @@ async def test_semantic_reaudit_resolves_obsolete_gap_and_cancels_task(
 
     assert stored[0].status == MemoirNarrativeGapStatus.RESOLVED.value
     assert task.status == MemoirFollowupTaskStatus.CANCELLED.value
+
+    reopened, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[candidate],
+    )
+    await test_db.flush()
+
+    assert created_count == 0
+    assert reopened[0].id == stored[0].id
+    assert reopened[0].status == MemoirNarrativeGapStatus.OPEN.value
+    assert reopened[0].resolved_by is None
+    assert reopened[0].resolution_note == ""
+    assert task.status == MemoirFollowupTaskStatus.PENDING.value
 
 
 def _semantic_context() -> ChapterAuditContext:
