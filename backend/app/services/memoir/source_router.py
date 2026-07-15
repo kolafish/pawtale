@@ -70,6 +70,7 @@ logger = logging.getLogger(__name__)
 class SourceRouteFollowupContext:
     task_id: str
     chapter_id: str | None
+    target_slot: str
     question: str
     purpose: str
     expected_answer_use: str
@@ -378,9 +379,12 @@ def _build_route_prompt(
   }"""
         followup_rules = """
 - 当前记录是对一个补全问题的回答，必须返回 followup_answer。
+- 先判断当前讲述是否在回答“补全任务上下文”，再判断它能否直接作为正文；不要因为没有人物、时间、地点就先判成 noise。
 - direct_narrative 表示回答提供了可以直接进入叙事事实层的新经历或新细节。
 - clarification 表示回答主要解释已有文字、事件或素材与章节的关系；它是编辑上下文，不是可直接拼入正文的新段落。
 - fact_resolution 表示回答纠正、确认或否定已有事实。
+- 当 target_slot 以 semantic: 开头时，叙述者对章节开头、结尾、转场、人物关系或表达方式给出的明确选择，也是有效的 clarification。比如说明“这里应该用抽象场景开头”“这不是一件具体事件”“结尾应停在当时的感受”，都不能判成 noise 或 meta_instruction。
+- 如果叙述者只是在抱怨系统、反问 AI、表示想不起来或要求换题，并没有给出内容或编辑判断，才按 ai_interaction、meta_instruction、noise 或 too_short 忽略，不要伪造成 clarification。
 - mixed 只在同一回答确实同时包含上述至少两类内容时使用，并按用途拆开。
 - 三个用途文本必须逐字、连续地来自当前讲述原文；不得改写、概括或补词。
 - 能准确拆分时 status=resolved；无法准确判断用途或无法可靠拆分时 status=needs_confirmation、answer_kind=null，三个用途文本留空，并给出具体确认问题。
@@ -388,6 +392,7 @@ def _build_route_prompt(
 - 纯 clarification 或纯 fact_resolution 仍属于 memoir_content，但不会作为新正文素材摄取。
 """
         followup_details = f"""task_id: {followup_context.task_id}
+target_slot: {followup_context.target_slot or '无'}
 question: {followup_context.question}
 purpose: {followup_context.purpose}
 expected_answer_use: {followup_context.expected_answer_use}

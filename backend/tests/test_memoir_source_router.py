@@ -328,6 +328,7 @@ async def test_completion_collection_context_does_not_force_non_memoir_content(
         followup_context=source_router.SourceRouteFollowupContext(
             task_id="task-1",
             chapter_id=chapter.id,
+            target_slot="story_narration",
             question="你还记得这件事吗？",
             purpose="补充这件事的细节。",
             expected_answer_use="direct_narrative",
@@ -343,6 +344,73 @@ async def test_completion_collection_context_does_not_force_non_memoir_content(
     assert route.assignment_basis == "ai"
     assert "定向采集章节" in fake_ai.calls[0]["user_prompt"]
     assert chapter.id in fake_ai.calls[0]["user_prompt"]
+
+
+async def test_semantic_completion_editorial_direction_is_valid_clarification(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我打开聊天窗口，最后没有发出消息。")
+    project_id = first["session"]["project_id"]
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=project_id,
+        source_ref=memoir_source_ref(first, "没有发出的消息"),
+        chapter_title="界限与邀约",
+    )
+    answer_text = "这个场景是一个抽象的代表性画面，我想把它作为这一章的开头，不是在补充一件新的亲身经历。"
+    answer = await create_test_voice_transcript(client, test_db, answer_text)
+    fake_ai = _patch_source_router_ai(
+        monkeypatch,
+        {
+            "material_type": "memoir_content",
+            "action": "ignore",
+            "target_chapter_id": None,
+            "suggested_title": None,
+            "confidence": 0.96,
+            "reason": "叙述者明确说明了章节开头的表达方式。",
+            "evidence": [{"quote": answer_text, "reason": "这是对章节写法的明确选择。"}],
+            "followup_answer": {
+                "status": "resolved",
+                "answer_kind": "clarification",
+                "direct_narrative_text": "",
+                "clarification_text": answer_text,
+                "fact_resolution_text": "",
+                "confirmation_question": "",
+                "reason": "回答提供的是章节开头的编辑说明。",
+            },
+        },
+    )
+
+    route = await source_router.route_book_source(
+        test_db,
+        user_id=first["user_id"],
+        project_id=project_id,
+        utterance_id=answer["utterance_id"],
+        followup_context=source_router.SourceRouteFollowupContext(
+            task_id="semantic-task",
+            chapter_id=chapter.id,
+            target_slot="semantic:opening:opening-gap",
+            question="如果从一个具体场景开始这一章，你最先想到的是哪一幕？",
+            purpose="补充本章开头。",
+            expected_answer_use="direct_narrative",
+            known_context_summary="",
+            story_id=None,
+            story_title="",
+            story_summary="",
+        ),
+    )
+
+    assert route.material_type == "memoir_content"
+    assert route.action == "record_as_context"
+    assert route.target_chapter_id == chapter.id
+    assert route.followup_answer is not None
+    assert route.followup_answer.answer_kind == MemoirFollowupAnswerKind.CLARIFICATION
+    assert route.followup_answer.clarification_text == answer_text
+    prompt = fake_ai.calls[0]["user_prompt"]
+    assert "target_slot: semantic:opening:opening-gap" in prompt
+    assert "都不能判成 noise 或 meta_instruction" in prompt
 
 
 async def test_source_router_rejects_already_included_source(client, test_db):

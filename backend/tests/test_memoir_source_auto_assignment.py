@@ -1069,7 +1069,7 @@ async def test_ambiguous_fact_resolution_keeps_task_open_without_semantic_change
     assert case["gap"].status == "open"
 
 
-async def test_completion_clarification_updates_task_without_narrative_ingestion(
+async def test_semantic_completion_clarification_closes_task_and_review_event(
     client,
     test_db,
     monkeypatch,
@@ -1086,7 +1086,7 @@ async def test_completion_clarification_updates_task_without_narrative_ingestion
         source_ref=memoir_source_ref(first, "看望爷爷并买西瓜"),
         chapter_title="回成都后的疏离与克制",
     )
-    answer_text = "我想说的其实是我想发给他的一句话。我想告诉他我今天去看了我爷爷的事情，但是我没有发给他，我忍住了。"
+    answer_text = "这个场景是一个抽象的代表性画面，我想把它作为这一章的开头，不是在补充一件新的亲身经历。"
     answer = await create_test_voice_transcript(client, test_db, answer_text)
     gap = MemoirNarrativeGap(
         project_id=project_id,
@@ -1094,8 +1094,9 @@ async def test_completion_clarification_updates_task_without_narrative_ingestion
         primary_chapter_id=chapter.id,
         gap_type="causality",
         severity="medium",
-        title="看望爷爷与章节主题的关联不明确",
-        description="需要解释这段内容为什么属于本章。",
+        target_slot="semantic:opening:watermelon-opening",
+        title="章节开头还可以更清楚",
+        description="需要明确这一章应该怎样开头。",
         fingerprint=sha256(b"watermelon-clarification-regression").hexdigest(),
         status="open",
         detected_by="ai",
@@ -1106,9 +1107,10 @@ async def test_completion_clarification_updates_task_without_narrative_ingestion
         project_id=project_id,
         gap_id=gap.id,
         chapter_id=chapter.id,
-        answer_use="clarification",
-        question="买西瓜这件事与本章想表达的克制有什么关系？",
-        purpose="解释已有事件与章节主题的关系。",
+        target_slot="semantic:opening:watermelon-opening",
+        answer_use="direct_narrative",
+        question="如果从一个具体场景开始这一章，你最先想到的是哪一幕？",
+        purpose="补充本章开头。",
         known_context_summary="已有素材写到看望爷爷并买西瓜。",
         priority=100,
         status="pending",
@@ -1124,6 +1126,23 @@ async def test_completion_clarification_updates_task_without_narrative_ingestion
         is_assignment_snapshot=True,
     )
     test_db.add(relation)
+    review_event = MemoirAutomationEvent(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+        utterance_ids_json=[answer["utterance_id"]],
+        summary_text="这是一件亲身经历，还是章节写法说明？",
+        metadata_json={
+            "route": {
+                "followup_answer": {
+                    "task_id": task.id,
+                    "status": "needs_confirmation",
+                }
+            }
+        },
+    )
+    test_db.add(review_event)
     await test_db.commit()
     stories_before = await test_db.scalar(
         select(func.count(MemoirStory.id)).where(MemoirStory.project_id == project_id)
@@ -1157,6 +1176,9 @@ async def test_completion_clarification_updates_task_without_narrative_ingestion
     assert relation.answer_kind == "clarification"
     assert relation.clarification_text == answer_text
     assert relation.direct_narrative_text == ""
+    await test_db.refresh(review_event)
+    assert review_event.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert review_event.metadata_json["resolution_reason"] == "followup_answer_resolved"
     link = await test_db.scalar(
         select(MemoirChapterSourceLink).where(
             MemoirChapterSourceLink.project_id == project_id,

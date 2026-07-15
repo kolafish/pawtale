@@ -401,6 +401,7 @@ async def run_source_auto_assignment_for_utterances(
                 source_router.SourceRouteFollowupContext(
                     task_id=completion_context.task_id,
                     chapter_id=completion_context.chapter_id,
+                    target_slot=completion_context.target_slot,
                     question=completion_context.question,
                     purpose=completion_context.purpose,
                     expected_answer_use=completion_context.expected_answer_use,
