@@ -11,7 +11,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
-    MemoirDraftBlockRole,
 )
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -164,8 +163,6 @@ async def _current_chapter_assembly(
                     MemoirDraftBlock.project_id == project_id,
                     MemoirDraftBlock.chapter_id == chapter_id,
                     MemoirDraftBlock.node_id.in_(node_ids),
-                    MemoirDraftBlock.block_role
-                    != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
                     MemoirDraftBlock.editorial_status
                     != MemoirDraftBlockEditorialStatus.EXCLUDED.value,
                     MemoirChapterNode.contract_id == contract.id,

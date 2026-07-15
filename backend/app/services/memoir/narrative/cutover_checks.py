@@ -5,7 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
-    MemoirDraftBlockRole,
+    MemoirClaimVerificationStatus,
+    MemoirStoryLifecycleStatus,
 )
 from app.domain.memoir.types import (
     MemoirEditingJobStatus,
@@ -13,7 +14,6 @@ from app.domain.memoir.types import (
 )
 from app.domain.projects.types import ProjectType
 from app.models.memoir import (
-    MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChapterSourceLink,
@@ -25,12 +25,11 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirDraftBlock,
-    MemoirDraftBlockVersion,
     MemoirStory,
+    MemoirStoryClaim,
 )
 from app.models.projects import Project
 from app.services.memoir.narrative.backfill import run_narrative_ingestion_backfill
-from app.services.memoir.narrative.story_backfill import collect_story_backfill_candidates
 
 
 async def active_memoir_project_ids(
@@ -142,19 +141,6 @@ async def project_migration_report(
             MemoirClaimEvidence.id.is_(None),
         ),
     )
-    legacy_versions_missing = await _count(
-        db,
-        select(func.count(MemoirBookChapterDraftVersion.id))
-        .outerjoin(
-            MemoirDraftBlockVersion,
-            MemoirDraftBlockVersion.legacy_draft_version_id
-            == MemoirBookChapterDraftVersion.id,
-        )
-        .where(
-            MemoirBookChapterDraftVersion.project_id == project_id,
-            MemoirDraftBlockVersion.id.is_(None),
-        ),
-    )
     chapters_with_structured_blocks = await _count(
         db,
         select(func.count(func.distinct(MemoirDraftBlock.chapter_id)))
@@ -164,20 +150,37 @@ async def project_migration_report(
         )
         .where(
             MemoirDraftBlock.project_id == project_id,
-            MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
         ),
     )
     story_count = await _count(
         db,
         select(func.count(MemoirStory.id)).where(MemoirStory.project_id == project_id),
     )
-    story_backfill_candidates = await collect_story_backfill_candidates(
+    claims_without_story = await _count(
         db,
-        project_id=project_id,
-    )
-    ungrouped_claim_cluster_count = sum(
-        candidate.origin.startswith("claim_anchor_cluster:")
-        for candidate in story_backfill_candidates
+        select(func.count(MemoirClaim.id)).where(
+            MemoirClaim.project_id == project_id,
+            MemoirClaim.superseded_by_claim_id.is_(None),
+            MemoirClaim.verification_status
+            != MemoirClaimVerificationStatus.REJECTED.value,
+            exists().where(
+                MemoirClaimEvidence.project_id == MemoirClaim.project_id,
+                MemoirClaimEvidence.claim_id == MemoirClaim.id,
+            ),
+            ~exists()
+            .where(
+                MemoirStoryClaim.project_id == MemoirClaim.project_id,
+                MemoirStoryClaim.claim_id == MemoirClaim.id,
+            )
+            .where(
+                exists().where(
+                    MemoirStory.project_id == MemoirStoryClaim.project_id,
+                    MemoirStory.id == MemoirStoryClaim.story_id,
+                    MemoirStory.lifecycle_status
+                    == MemoirStoryLifecycleStatus.ACTIVE.value,
+                )
+            ),
+        ),
     )
     source_link_count = await _count(
         db,
@@ -196,10 +199,8 @@ async def project_migration_report(
         blockers.append("narrative ingestion jobs failed")
     if claims_without_evidence:
         blockers.append("Claims without evidence remain")
-    if ungrouped_claim_cluster_count:
-        blockers.append("evidence-backed Claim clusters are not grouped into Stories")
-    if legacy_versions_missing:
-        blockers.append("legacy chapter versions are not snapshotted")
+    if claims_without_story:
+        blockers.append("evidence-backed Claims are not grouped into active Stories")
     if missing_contract_count:
         blockers.append("chapter contract suggestions are missing")
     chapter_workflow_blockers: list[str] = []
@@ -220,11 +221,10 @@ async def project_migration_report(
         "claim_count": claim_count,
         "claims_without_evidence_count": claims_without_evidence,
         "story_count": story_count,
-        "ungrouped_claim_cluster_count": ungrouped_claim_cluster_count,
+        "claims_without_story_count": claims_without_story,
         "missing_contract_count": missing_contract_count,
         "confirmed_contract_count": confirmed_contract_count,
         "chapters_with_structured_blocks_count": chapters_with_structured_blocks,
-        "legacy_versions_missing_snapshot_count": legacy_versions_missing,
         "migration_complete": not blockers,
         "migration_blockers": blockers,
         "cutover_data_ready": not blockers,
@@ -277,13 +277,13 @@ async def assert_ingestion_complete(
         )
 
 
-async def assert_story_candidates_materialized(
+async def assert_story_graph_complete(
     db: AsyncSession,
     *,
     project_id: str | None = None,
 ) -> None:
-    candidates = await collect_story_backfill_candidates(db, project_id=project_id)
-    if any(not candidate.existing_story_ids for candidate in candidates):
+    report = await collect_migration_report(db, project_id=project_id)
+    if any(int(item["claims_without_story_count"]) for item in report["projects"]):
         raise RuntimeError(
-            "Story backfill candidates must be materialized before chapter structures"
+            "Evidence-backed Claims must belong to active Stories before chapter structures"
         )

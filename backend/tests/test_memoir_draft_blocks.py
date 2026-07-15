@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.memoir.narrative_types import (
@@ -27,12 +27,6 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryRevisionChangeType,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
-)
-from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirCreatedBy
-from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
-from app.models.memoir import (
-    MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
 )
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -198,6 +192,7 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     story_source = _story_source(created)
     claim_id = claim_source.claim_id
     revision_id = story_source.story_revision_id
+    node_id = created["node"].id
     with pytest.raises(ValueError, match="requires direct story and claim sources"):
         await draft_blocks.create_block(
             test_db,
@@ -282,6 +277,9 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     )
     assert edited.status_code == 200, edited.text
     body = edited.json()
+    assert body["node_id"] == node_id
+    assert "legacy_draft_id" not in body
+    assert "legacy_draft_version_id" not in body["current_version"]
     assert body["locked"] is True
     assert body["editorial_status"] == MemoirDraftBlockEditorialStatus.DRAFT.value
     assert body["version_count"] == 2
@@ -364,110 +362,3 @@ async def test_claim_staleness_only_marks_current_versions_with_that_claim(
     assert blocks[0].editorial_status == MemoirDraftBlockEditorialStatus.CONFIRMED.value
     assert blocks[0].locked is True
     assert blocks[1].freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
-
-
-async def test_legacy_backfill_preserves_history_and_never_reclaims_user_current_version(
-    client,
-    test_db,
-):
-    project_id = await ensure_mobile_memoir_project(client)
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db,
-        project_id=project_id,
-        chapter_titles=["旧章节"],
-    )
-    chapter = chapters[0]
-    legacy_draft = MemoirBookChapterDraft(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        status=MemoirBookChapterDraftStatus.CONFIRMED.value,
-    )
-    test_db.add(legacy_draft)
-    await test_db.flush()
-    legacy_draft_id = legacy_draft.id
-    legacy_versions = [
-        MemoirBookChapterDraftVersion(
-            draft_id=legacy_draft.id,
-            project_id=project_id,
-            chapter_id=chapter.id,
-            version=version,
-            content=content,
-            created_by=MemoirCreatedBy.USER.value,
-            prompt_snapshot="",
-        )
-        for version, content in ((1, "第一版旧稿"), (2, "第二版旧稿"))
-    ]
-    test_db.add_all(legacy_versions)
-    await test_db.commit()
-
-    first = await migrate_memoir_narrative_schema(test_db.bind)
-    assert first["legacy_backfill"] == {
-        "blocks": 1,
-        "versions": 2,
-        "drafts_without_versions": 0,
-    }
-    block = await test_db.scalar(
-        select(MemoirDraftBlock).where(
-            MemoirDraftBlock.legacy_draft_id == legacy_draft.id
-        )
-    )
-    assert block is not None
-    assert block.block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT.value
-    assert block.editorial_status == MemoirDraftBlockEditorialStatus.CONFIRMED.value
-    assert block.current_version_id is not None
-
-    manual_version_id = block.current_version_id
-    await draft_blocks.manually_edit_block(
-        test_db,
-        project_id=project_id,
-        block_id=block.id,
-        expected_current_version_id=manual_version_id,
-        content="用户在新结构里的第三版",
-        feedback="manual edit after backfill",
-    )
-    await test_db.commit()
-    await test_db.refresh(block)
-    manual_version_id = block.current_version_id
-
-    legacy_v3 = MemoirBookChapterDraftVersion(
-        draft_id=legacy_draft.id,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        version=3,
-        content="旧链路后来生成的第三版",
-        created_by=MemoirCreatedBy.AI.value,
-        prompt_snapshot="legacy prompt",
-    )
-    test_db.add(legacy_v3)
-    await test_db.commit()
-    legacy_v3_id = legacy_v3.id
-    second = await migrate_memoir_narrative_schema(test_db.bind)
-    assert second["legacy_backfill"]["blocks"] == 0
-    assert second["legacy_backfill"]["versions"] == 1
-
-    test_db.expire_all()
-    block = await test_db.scalar(
-        select(MemoirDraftBlock).where(MemoirDraftBlock.legacy_draft_id == legacy_draft_id)
-    )
-    assert block is not None
-    assert block.current_version_id == manual_version_id
-    versions = list(
-        (
-            await test_db.scalars(
-                select(MemoirDraftBlockVersion)
-                .where(MemoirDraftBlockVersion.block_id == block.id)
-                .order_by(MemoirDraftBlockVersion.version)
-            )
-        ).all()
-    )
-    assert [version.version for version in versions] == [1, 2, 3, 4]
-    assert versions[-1].legacy_draft_version_id == legacy_v3_id
-    assert await test_db.scalar(
-        select(func.count(MemoirBookChapterDraftVersion.id)).where(
-            MemoirBookChapterDraftVersion.draft_id == legacy_draft_id
-        )
-    ) == 3
-
-    third = await migrate_memoir_narrative_schema(test_db.bind)
-    assert third["legacy_backfill"]["blocks"] == 0
-    assert third["legacy_backfill"]["versions"] == 0

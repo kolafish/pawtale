@@ -6,8 +6,7 @@ export type MemoirDraftBlockRole =
   | "transition"
   | "reflection"
   | "opening"
-  | "closing"
-  | "legacy_snapshot";
+  | "closing";
 
 export type MemoirDraftBlockEditorialStatus = "draft" | "confirmed" | "excluded";
 export type MemoirDraftBlockFreshnessStatus = "current" | "stale";
@@ -33,7 +32,6 @@ export interface MemoirDraftBlockVersion {
   model: string | null;
   prompt_snapshot: string;
   feedback: string | null;
-  legacy_draft_version_id: string | null;
   claims: MemoirDraftBlockClaimSource[];
   stories: MemoirDraftBlockStorySource[];
   created_at: string;
@@ -43,14 +41,13 @@ export interface MemoirDraftBlock {
   id: string;
   project_id: string;
   chapter_id: string;
-  node_id: string | null;
+  node_id: string;
   block_role: MemoirDraftBlockRole;
   sort_order: number;
   editorial_status: MemoirDraftBlockEditorialStatus;
   freshness_status: MemoirDraftBlockFreshnessStatus;
   locked: boolean;
   current_version_id: string;
-  legacy_draft_id: string | null;
   current_version: MemoirDraftBlockVersion;
   version_count: number;
   created_at: string;

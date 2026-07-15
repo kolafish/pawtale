@@ -149,7 +149,6 @@ def _source_blockers(context: BookConsistencyContext) -> list[MemoirBookReadines
         item
         for item in context.blocks
         if item.block.editorial_status != MemoirDraftBlockEditorialStatus.EXCLUDED.value
-        and item.block.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value
     ]
     if not active_blocks:
         return [_blocker("structured_blocks_missing", "书稿还没有结构化正文块")]
@@ -235,7 +234,6 @@ def _output_blockers(context: BookConsistencyContext) -> list[MemoirBookReadines
         (item.block.id, item.version.id)
         for item in context.blocks
         if item.block.editorial_status != MemoirDraftBlockEditorialStatus.EXCLUDED.value
-        and item.block.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value
     }
     if not actual_blocks or actual_blocks != expected_blocks:
         return [

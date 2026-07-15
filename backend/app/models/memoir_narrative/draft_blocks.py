@@ -14,7 +14,6 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -38,7 +37,6 @@ class MemoirDraftBlock(Base):
     __tablename__ = "memoir_draft_blocks"
     __table_args__ = (
         UniqueConstraint("project_id", "id", name="uq_memoir_draft_blocks_project_id"),
-        UniqueConstraint("legacy_draft_id", name="uq_memoir_draft_blocks_legacy_draft"),
         ForeignKeyConstraint(
             ["project_id", "node_id"],
             ["memoir_chapter_nodes.project_id", "memoir_chapter_nodes.id"],
@@ -57,11 +55,6 @@ class MemoirDraftBlock(Base):
             name="ck_memoir_draft_blocks_freshness_status",
         ),
         CheckConstraint("sort_order >= 0", name="ck_memoir_draft_blocks_sort_order"),
-        CheckConstraint(
-            "(block_role = 'legacy_snapshot' AND node_id IS NULL AND legacy_draft_id IS NOT NULL) OR "
-            "(block_role != 'legacy_snapshot' AND node_id IS NOT NULL AND legacy_draft_id IS NULL)",
-            name="ck_memoir_draft_blocks_source_shape",
-        ),
         Index(
             "ix_memoir_draft_blocks_project_chapter",
             "project_id",
@@ -79,8 +72,6 @@ class MemoirDraftBlock(Base):
             "chapter_id",
             "sort_order",
             unique=True,
-            sqlite_where=text("block_role != 'legacy_snapshot'"),
-            postgresql_where=text("block_role != 'legacy_snapshot'"),
         ),
     )
 
@@ -91,14 +82,13 @@ class MemoirDraftBlock(Base):
     chapter_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"), nullable=False
     )
-    node_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    node_id: Mapped[str] = mapped_column(String(36), nullable=False)
     block_role: Mapped[str] = mapped_column(String(24), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     editorial_status: Mapped[str] = mapped_column(String(16), nullable=False)
     freshness_status: Mapped[str] = mapped_column(String(16), nullable=False)
     locked: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     current_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    legacy_draft_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
@@ -128,10 +118,6 @@ class MemoirDraftBlockVersion(Base):
             "block_id",
             "version",
             name="uq_memoir_draft_block_versions_version",
-        ),
-        UniqueConstraint(
-            "legacy_draft_version_id",
-            name="uq_memoir_draft_block_versions_legacy_version",
         ),
         ForeignKeyConstraint(
             ["project_id", "block_id"],
@@ -163,7 +149,6 @@ class MemoirDraftBlockVersion(Base):
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     prompt_snapshot: Mapped[str] = mapped_column(Text, default="", nullable=False)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
-    legacy_draft_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
     block: Mapped[MemoirDraftBlock] = relationship(

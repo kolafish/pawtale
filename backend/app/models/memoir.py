@@ -735,51 +735,6 @@ class MemoirChapterCard(Base):
     draft_version: Mapped[MemoirBookChapterDraftVersion | None] = orm_relationship("MemoirBookChapterDraftVersion")
 
 
-class MemoirChapterEventClusterSnapshot(Base):
-    __tablename__ = "memoir_chapter_event_cluster_snapshots"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "chapter_id",
-            "engine",
-            "input_signature",
-            name="uq_memoir_chapter_event_cluster_snapshots_signature",
-        ),
-        CheckConstraint(
-            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
-            name="ck_memoir_chapter_event_cluster_snapshots_status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
-    chapter_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("memoir_book_plan_chapters.id"),
-        nullable=False,
-        index=True,
-    )
-    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    input_signature: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default=MemoirSemanticCacheStatus.READY.value,
-        nullable=False,
-        index=True,
-    )
-    clusters_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    source_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    source_fingerprints_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    project: Mapped["Project"] = orm_relationship("Project")
-    plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan")
-    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter")
-
-
 class MemoirBookQualityAuditSnapshot(Base):
     __tablename__ = "memoir_book_quality_audit_snapshots"
     __table_args__ = (

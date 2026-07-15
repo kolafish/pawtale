@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeType,
     MemoirDraftBlockFreshnessStatus,
-    MemoirDraftBlockRole,
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
@@ -167,8 +166,6 @@ async def enqueue_block_revision(
         raise ValueError("draft block changed concurrently; reload and retry")
     if block.locked:
         raise ValueError("unlock the draft block before requesting a revision")
-    if block.block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT.value or block.node_id is None:
-        raise ValueError("legacy snapshot blocks cannot be revised by the node generator")
     editorial_contexts = await load_chapter_editorial_contexts(
         db,
         project_id=project_id,
@@ -240,8 +237,6 @@ async def _run_initial_generation(
                     MemoirDraftBlock.project_id == job.project_id,
                     MemoirDraftBlock.chapter_id == chapter_id,
                     MemoirDraftBlock.node_id.in_([node.id for node in nodes]),
-                    MemoirDraftBlock.block_role
-                    != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
                 )
             )
         ).all()
@@ -258,7 +253,6 @@ async def _run_initial_generation(
                 select(MemoirDraftBlock.sort_order).where(
                     MemoirDraftBlock.project_id == job.project_id,
                     MemoirDraftBlock.chapter_id == chapter_id,
-                    MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
                 )
             )
         ).all()

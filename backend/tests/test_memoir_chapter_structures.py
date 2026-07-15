@@ -1030,7 +1030,7 @@ async def test_chapter_structure_backfill_is_dry_run_by_default_and_never_confir
     assert stored_titles == {"第一章", "第二章"}
 
 
-async def test_chapter_structure_backfill_requires_first_confirmable_story_and_repairs_legacy_draft(
+async def test_chapter_structure_backfill_requires_first_confirmable_story_and_repairs_system_draft(
     client,
     test_db,
 ):

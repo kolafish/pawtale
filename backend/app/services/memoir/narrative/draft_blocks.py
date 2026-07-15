@@ -183,8 +183,6 @@ async def create_block(
         raise ValueError("draft block content cannot be empty")
     if sort_order < 0:
         raise ValueError("draft block sort order cannot be negative")
-    if block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT:
-        raise ValueError("legacy snapshot blocks can only be created by migration")
     chapter_exists = await db.scalar(
         select(MemoirBookPlanChapter.id).where(
             MemoirBookPlanChapter.project_id == project_id,
@@ -289,11 +287,6 @@ async def append_version(
         raise ValueError("draft block changed concurrently; reload and retry")
     if created_by != MemoirNarrativeActorType.USER and block.locked:
         raise ValueError("locked draft block cannot be modified by an automatic task")
-    if (
-        created_by != MemoirNarrativeActorType.USER
-        and block.block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT.value
-    ):
-        raise ValueError("legacy snapshot blocks cannot be modified by an automatic task")
     block_role = MemoirDraftBlockRole(block.block_role)
     await _validate_sources(
         db,
@@ -503,8 +496,6 @@ async def mark_chapter_blocks_stale(
         .where(
             MemoirDraftBlock.project_id == project_id,
             MemoirDraftBlock.chapter_id.in_(chapter_ids),
-            MemoirDraftBlock.block_role
-            != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
             MemoirDraftBlock.freshness_status
             == MemoirDraftBlockFreshnessStatus.CURRENT.value,
         )
@@ -527,7 +518,6 @@ async def mark_blocks_stale_for_editorial_context(
     conditions = [
         MemoirDraftBlock.project_id == project_id,
         MemoirDraftBlock.chapter_id == chapter_id,
-        MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
         MemoirDraftBlock.freshness_status
         == MemoirDraftBlockFreshnessStatus.CURRENT.value,
     ]

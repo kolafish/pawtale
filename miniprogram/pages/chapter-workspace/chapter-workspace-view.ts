@@ -125,7 +125,6 @@ function draftBlockView(
     transition: "衔接",
     reflection: "回望与感受",
     closing: "结尾",
-    legacy_snapshot: "旧版正文",
   })[block.block_role];
   let statusText = block.editorial_status === "draft" ? "请通读" : "已保存";
   if (block.freshness_status === "stale") {
@@ -171,9 +170,7 @@ export function draftBlockViews(
   const claimById = new Map(
     workspace.stories.flatMap((story) => story.claims.map((claim) => [claim.id, claim] as const)),
   );
-  return blocks
-    .filter((block) => block.block_role !== "legacy_snapshot")
-    .map((block) => draftBlockView(block, storyById, claimById, existing));
+  return blocks.map((block) => draftBlockView(block, storyById, claimById, existing));
 }
 
 export function chapterWorkspaceViewPatch(
@@ -208,7 +205,7 @@ export function chapterWorkspaceViewPatch(
   });
   const suggestionIds = new Set(workspace.gaps.suggested.map((gap) => gap.id));
   directionTasks.forEach((task) => suggestionIds.add(task.gap_id));
-  const currentDraftBlocks = draftBlocks.filter((block) => block.block_role !== "legacy_snapshot");
+  const currentDraftBlocks = draftBlocks;
   const mustConfirmCount = confirmations.length + reviewGaps.length;
   const suggestionCount = suggestionIds.size;
   const hasStaleDraft = currentDraftBlocks.some((block) => block.freshness_status === "stale");

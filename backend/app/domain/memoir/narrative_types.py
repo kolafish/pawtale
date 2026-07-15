@@ -209,7 +209,6 @@ class MemoirDraftBlockRole(str, Enum):
     REFLECTION = "reflection"
     OPENING = "opening"
     CLOSING = "closing"
-    LEGACY_SNAPSHOT = "legacy_snapshot"
 
 
 class MemoirDraftBlockEditorialStatus(str, Enum):
