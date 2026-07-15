@@ -37,6 +37,23 @@ async def _trigger_exists(conn, trigger_name: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _trigger_sql(conn, trigger_name: str) -> str:
+    result = await conn.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'trigger' AND name = :trigger_name"
+        ),
+        {"trigger_name": trigger_name},
+    )
+    return str(result.scalar_one_or_none() or "")
+
+
+async def _replace_unguarded_delete_trigger(conn, trigger_name: str) -> None:
+    current_sql = await _trigger_sql(conn, trigger_name)
+    if current_sql and "__delete_in_progress" not in current_sql:
+        await conn.execute(text(f"DROP TRIGGER {trigger_name}"))
+
+
 def _legacy_block_id(draft_id: str) -> str:
     return str(uuid5(NAMESPACE_URL, f"pawtale:memoir-draft-block:legacy:{draft_id}"))
 
@@ -500,6 +517,15 @@ async def ensure_draft_block_triggers(conn) -> list[str]:
                 WHERE block.project_id = OLD.project_id
                   AND block.id = OLD.block_id
             )
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'draft block versions are append-only');
             END
@@ -520,6 +546,15 @@ async def ensure_draft_block_triggers(conn) -> list[str]:
                 WHERE version.project_id = OLD.project_id
                   AND version.id = OLD.block_version_id
             )
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'draft block claim sources are immutable');
             END
@@ -540,12 +575,28 @@ async def ensure_draft_block_triggers(conn) -> list[str]:
                 WHERE version.project_id = OLD.project_id
                   AND version.id = OLD.block_version_id
             )
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'draft block story sources are immutable');
             END
         """,
     }
+    guarded_delete_triggers = {
+        "memoir_draft_block_versions_no_delete",
+        "memoir_draft_block_claims_no_delete",
+        "memoir_draft_block_stories_no_delete",
+    }
     for trigger_name, statement in statements.items():
+        if trigger_name in guarded_delete_triggers:
+            await _replace_unguarded_delete_trigger(conn, trigger_name)
         if await _trigger_exists(conn, trigger_name):
             continue
         await conn.execute(text(statement))

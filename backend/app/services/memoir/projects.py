@@ -1,20 +1,14 @@
-import logging
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import delete, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
-from app.models.memoir import (
-    AudioFile,
-    MemoirChatMessage,
-    MemoirVoiceSession,
-    MemoirVoiceUtterance,
-)
+from app.models.memoir import MemoirChatMessage
 from app.models.projects import DocumentGroup, Project
 from app.schemas.memoir_projects import (
     MemoirProjectCreate,
@@ -23,7 +17,7 @@ from app.schemas.memoir_projects import (
 )
 from app.schemas.projects import ProjectResponse
 import app.services.project_documents as project_docs
-from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import project_deletion
 from app.services.projects.access import load_project
 
 
@@ -31,7 +25,6 @@ DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
-logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -139,67 +132,6 @@ async def _memoir_voice_char_counts(
     return counts
 
 
-async def _memoir_project_audio_files(
-    db: AsyncSession,
-    user_id: str,
-    project_id: str,
-) -> list[AudioFile]:
-    chat_audio_ids = (
-        select(MemoirChatMessage.audio_file_id)
-        .where(
-            MemoirChatMessage.project_id == project_id,
-            MemoirChatMessage.audio_file_id.is_not(None),
-        )
-    )
-    utterance_audio_ids = (
-        select(MemoirVoiceUtterance.audio_file_id)
-        .join(
-            MemoirVoiceSession,
-            MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id,
-        )
-        .where(
-            MemoirVoiceSession.project_id == project_id,
-            MemoirVoiceUtterance.audio_file_id.is_not(None),
-        )
-    )
-    result = await db.execute(
-        select(AudioFile).where(
-            AudioFile.user_id == user_id,
-            or_(
-                AudioFile.id.in_(chat_audio_ids),
-                AudioFile.id.in_(utterance_audio_ids),
-            ),
-        )
-    )
-    return list(result.scalars())
-
-
-async def _delete_audio_file_rows(db: AsyncSession, audio_file_ids: list[str]) -> None:
-    if not audio_file_ids:
-        return
-    await db.execute(delete(AudioFile).where(AudioFile.id.in_(audio_file_ids)))
-    await db.commit()
-
-
-async def _referenced_audio_file_ids(db: AsyncSession, audio_file_ids: list[str]) -> set[str]:
-    if not audio_file_ids:
-        return set()
-
-    referenced_ids: set[str] = set()
-    queries = [
-        select(MemoirChatMessage.audio_file_id).where(
-            MemoirChatMessage.audio_file_id.in_(audio_file_ids)
-        ),
-        select(MemoirVoiceUtterance.audio_file_id).where(
-            MemoirVoiceUtterance.audio_file_id.in_(audio_file_ids)
-        ),
-    ]
-    for query in queries:
-        result = await db.execute(query)
-        referenced_ids.update(audio_id for audio_id in result.scalars() if audio_id)
-    return referenced_ids
-
-
 async def _load_memoir_project_response(
     db: AsyncSession,
     project_id: str,
@@ -239,14 +171,6 @@ async def active_mobile_memoir_project(
     if projects:
         return projects[0]
     return None
-
-
-async def get_mobile_memoir_project(
-    db: AsyncSession,
-    user_id: str,
-    project_id: str,
-) -> ProjectResponse:
-    return await _load_memoir_project_response(db, project_id, user_id)
 
 
 async def mobile_project_list(
@@ -329,22 +253,4 @@ async def delete_mobile_memoir_project(
     if len(projects) <= 1:
         raise HTTPException(status_code=400, detail="至少保留一本回忆录")
 
-    audio_files = await _memoir_project_audio_files(db, user_id, project.id)
-    audio_file_ids = [audio_file.id for audio_file in audio_files]
-
-    await project_docs.delete_project(db, project)
-    still_referenced_audio_ids = await _referenced_audio_file_ids(db, audio_file_ids)
-    deletable_audio_files = [
-        audio_file
-        for audio_file in audio_files
-        if audio_file.id not in still_referenced_audio_ids
-    ]
-    await _delete_audio_file_rows(db, [audio_file.id for audio_file in deletable_audio_files])
-    try:
-        await memoir_audio_files.delete_audio_file_paths(deletable_audio_files)
-    except Exception:
-        logger.warning(
-            "Failed to delete memoir project audio files project_id=%s",
-            project.id,
-            exc_info=True,
-        )
+    await project_deletion.delete_project(db, project)

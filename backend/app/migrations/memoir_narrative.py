@@ -324,6 +324,24 @@ async def _trigger_exists(conn, trigger_name: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _trigger_sql(conn, trigger_name: str) -> str:
+    result = await conn.execute(
+        text(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type = 'trigger' AND name = :trigger_name"
+        ),
+        {"trigger_name": trigger_name},
+    )
+    return str(result.scalar_one_or_none() or "")
+
+
+async def _replace_unguarded_delete_trigger(conn, trigger_name: str) -> None:
+    current_sql = await _trigger_sql(conn, trigger_name)
+    if not current_sql or "__delete_in_progress" in current_sql:
+        return
+    await conn.execute(text(f"DROP TRIGGER {trigger_name}"))
+
+
 async def _ensure_decision_triggers(conn) -> list[str]:
     changed: list[str] = []
     statements = {
@@ -337,12 +355,23 @@ async def _ensure_decision_triggers(conn) -> list[str]:
         "memoir_narrative_decisions_no_delete": """
             CREATE TRIGGER memoir_narrative_decisions_no_delete
             BEFORE DELETE ON memoir_narrative_decisions
+            WHEN EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+            )
             BEGIN
                 SELECT RAISE(ABORT, 'memoir narrative decisions are append-only');
             END
         """,
     }
     for trigger_name, statement in statements.items():
+        if trigger_name == "memoir_narrative_decisions_no_delete":
+            await _replace_unguarded_delete_trigger(conn, trigger_name)
         if await _trigger_exists(conn, trigger_name):
             continue
         await conn.execute(text(statement))
@@ -386,6 +415,15 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
             CREATE TRIGGER memoir_chapter_contracts_immutable_delete
             BEFORE DELETE ON memoir_chapter_contracts
             WHEN OLD.confirmed_at IS NOT NULL
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'confirmed chapter contracts are immutable');
             END
@@ -427,6 +465,15 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
                   AND project_id = OLD.project_id
                   AND confirmed_at IS NOT NULL
             )
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'confirmed chapter nodes are immutable');
             END
@@ -480,12 +527,28 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
                   AND node.project_id = OLD.project_id
                   AND contract.confirmed_at IS NOT NULL
             )
+              AND EXISTS (
+                SELECT 1
+                FROM projects
+                WHERE id = OLD.project_id
+                  AND COALESCE(
+                    json_extract(metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+              )
             BEGIN
                 SELECT RAISE(ABORT, 'confirmed chapter node stories are immutable');
             END
         """,
     }
+    guarded_delete_triggers = {
+        "memoir_chapter_contracts_immutable_delete",
+        "memoir_chapter_nodes_immutable_delete",
+        "memoir_chapter_node_stories_immutable_delete",
+    }
     for trigger_name, statement in statements.items():
+        if trigger_name in guarded_delete_triggers:
+            await _replace_unguarded_delete_trigger(conn, trigger_name)
         if await _trigger_exists(conn, trigger_name):
             continue
         await conn.execute(text(statement))
