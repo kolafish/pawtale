@@ -283,6 +283,28 @@ class MemoirNarrativeGapRelationRole(str, Enum):
     INVOLVED = "involved"
 
 
+class MemoirCompletionItemKind(str, Enum):
+    NARRATOR_FOLLOWUP = "narrator_followup"
+    FACT_CONFIRMATION = "fact_confirmation"
+    EDITORIAL_REVIEW = "editorial_review"
+    OPTIONAL_ENRICHMENT = "optional_enrichment"
+
+
+class MemoirCompletionItemStatus(str, Enum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    DEFERRED = "deferred"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class MemoirCompletionItemAction(str, Enum):
+    INTERVIEW = "interview"
+    REVIEW = "review"
+    EDIT = "edit"
+    NONE = "none"
+
+
 class MemoirFollowupTaskStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

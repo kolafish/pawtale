@@ -32,6 +32,8 @@ class MemoirBookCompletionResponse(BaseModel):
     headline: str
     detail: str
     task_id: str | None = None
+    item_id: str | None = None
+    item_kind: str | None = None
     chapter_id: str | None = None
 
 
@@ -45,6 +47,8 @@ class MemoirBookCompletionChapterResponse(BaseModel):
     remaining_count: int = 0
     focus_areas: list[str] = Field(default_factory=list)
     task_id: str | None = None
+    item_id: str | None = None
+    item_kind: str | None = None
     active_session_id: str | None = None
 
 

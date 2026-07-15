@@ -171,7 +171,7 @@ class MemoirStorySlotClaimResponse(BaseModel):
 class MemoirStorySlotResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
+    id: str | None
     schema_version: str
     slot_key: str
     required: bool
@@ -182,7 +182,7 @@ class MemoirStorySlotResponse(BaseModel):
     resolved_by_user_id: str | None
     resolved_at: datetime | None
     claims: list[MemoirStorySlotClaimResponse] = Field(default_factory=list)
-    updated_at: datetime
+    updated_at: datetime | None
 
 
 class MemoirStoryRevisionResponse(BaseModel):

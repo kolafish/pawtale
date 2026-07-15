@@ -15,6 +15,7 @@ from .book_consistency import (
     MemoirBookSemanticGapCandidate,
 )
 from .claims import MemoirClaimCreate, MemoirClaimEvidenceCreate
+from .completion_items import MemoirCompletionItem
 from .chapter_structures import (
     MemoirChapterContractConstraints,
     MemoirChapterContractDraftRequest,
@@ -127,6 +128,7 @@ __all__ = [
     "MemoirBookSemanticGapCandidate",
     "MemoirClaimCreate",
     "MemoirClaimEvidenceCreate",
+    "MemoirCompletionItem",
     "MemoirChapterContractConstraints",
     "MemoirChapterContractDraftRequest",
     "MemoirChapterContractResponse",

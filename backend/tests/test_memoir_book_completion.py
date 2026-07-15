@@ -119,7 +119,16 @@ async def _create_structured_chapter(
             created_by_user_id=user_id,
         )
     )
-    slots = await story_slots.ensure_story_slots(test_db, story=story)
+    slots = await story_slots.ensure_story_slot_keys(
+        test_db,
+        story=story,
+        slot_keys=set(
+            story_slots.story_slot_schema(
+                story.story_type,
+                story.slot_schema_version,
+            ).slot_keys
+        ),
+    )
     if complete:
         for slot in slots:
             slot.status = MemoirStorySlotStatus.SUFFICIENT.value
@@ -205,6 +214,8 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     assert chapter_state["state"] == "ready"
     assert chapter_state["remaining_count"] == 1
     assert chapter_state["task_id"]
+    assert chapter_state["item_id"]
+    assert chapter_state["item_kind"] == "narrator_followup"
     assert "按您记得的顺序" in chapter_state["focus_areas"][0]
     assert not any(term in ready.text for term in ("Story", "Claim", "slot", "Contract"))
 
@@ -223,6 +234,7 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     resumed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     resumed_chapter = resumed.json()["chapters"][0]
     assert resumed_chapter["state"] == "in_progress"
+    assert resumed_chapter["item_id"] == chapter_state["item_id"]
     assert resumed_chapter["active_session_id"] == voice.json()["session"]["id"]
 
 

@@ -351,7 +351,13 @@ async def resolve_story_slot(
         )
     )
     if slot is None:
-        raise ValueError("story slot does not belong to the project")
+        slot = (
+            await story_slots.ensure_story_slot_keys(
+                db,
+                story=story,
+                slot_keys={slot_key},
+            )
+        )[0]
     existing = await decision_log.existing_decision(
         db,
         project_id=project_id,

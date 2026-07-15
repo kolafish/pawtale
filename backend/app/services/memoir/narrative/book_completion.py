@@ -2,17 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
-    MemoirFollowupTaskStatus,
-    MemoirNarrativeGapStatus,
-    MemoirNarrativeGapType,
+    MemoirCompletionItemAction,
+    MemoirCompletionItemStatus,
 )
 from app.domain.memoir.types import MemoirEditingJobStatus
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
-from app.models.memoir_narrative import MemoirFollowupTask, MemoirNarrativeGap
 from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionAction,
     MemoirBookCompletionChapterResponse,
@@ -21,7 +19,7 @@ from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionState,
 )
 from app.services.memoir.book_plan_sources import load_plan_with_chapters, sorted_chapters
-from app.services.memoir.narrative import followup_jobs, gap_audit
+from app.services.memoir.narrative import completion_items, followup_jobs, gap_audit
 from app.services.memoir.narrative.gap_rules import ChapterAuditContext, load_chapter_audit_context
 
 
@@ -50,6 +48,8 @@ def _response(
     headline: str,
     detail: str,
     task_id: str | None = None,
+    item_id: str | None = None,
+    item_kind: str | None = None,
     chapter_id: str | None = None,
 ) -> MemoirBookCompletionResponse:
     return MemoirBookCompletionResponse(
@@ -59,6 +59,8 @@ def _response(
         headline=headline,
         detail=detail,
         task_id=task_id,
+        item_id=item_id,
+        item_kind=item_kind,
         chapter_id=chapter_id,
     )
 
@@ -193,72 +195,6 @@ def _generation_problem(
     return None
 
 
-async def _chapter_active_tasks(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> list[MemoirFollowupTask]:
-    return list(
-        (
-            await db.scalars(
-                select(MemoirFollowupTask)
-                .where(
-                    MemoirFollowupTask.project_id == project_id,
-                    MemoirFollowupTask.chapter_id == chapter_id,
-                    MemoirFollowupTask.status.in_(
-                        [
-                            MemoirFollowupTaskStatus.PENDING.value,
-                            MemoirFollowupTaskStatus.IN_PROGRESS.value,
-                            MemoirFollowupTaskStatus.DEFERRED.value,
-                        ]
-                    ),
-                )
-                .order_by(
-                    (
-                        MemoirFollowupTask.status
-                        == MemoirFollowupTaskStatus.IN_PROGRESS.value
-                    ).desc(),
-                    (
-                        MemoirFollowupTask.status
-                        == MemoirFollowupTaskStatus.PENDING.value
-                    ).desc(),
-                    MemoirFollowupTask.priority.desc(),
-                    MemoirFollowupTask.created_at,
-                    MemoirFollowupTask.id,
-                )
-            )
-        ).all()
-    )
-
-
-async def _chapter_has_manual_review_gap(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> bool:
-    gap_id = await db.scalar(
-        select(MemoirNarrativeGap.id)
-        .where(
-            MemoirNarrativeGap.project_id == project_id,
-            MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
-            MemoirNarrativeGap.gap_type.notin_(
-                [
-                    MemoirNarrativeGapType.MISSING_SLOT.value,
-                    MemoirNarrativeGapType.REPETITION.value,
-                ]
-            ),
-            or_(
-                MemoirNarrativeGap.primary_chapter_id == chapter_id,
-                MemoirNarrativeGap.chapters.any(chapter_id=chapter_id),
-            ),
-        )
-        .limit(1)
-    )
-    return gap_id is not None
-
-
 def _chapter_response_from_problem(
     preparation: _ChapterPreparation,
     problem: MemoirBookCompletionResponse,
@@ -291,13 +227,20 @@ async def _chapter_completion_status(
             detail="确认本章方向后，系统才能判断最值得补充的内容。",
         )
 
-    tasks = await _chapter_active_tasks(
+    items = await completion_items.chapter_completion_items(
         db,
         project_id=project_id,
         chapter_id=chapter.id,
     )
+    interview_items = [
+        item for item in items if item.action == MemoirCompletionItemAction.INTERVIEW
+    ]
     in_progress = next(
-        (task for task in tasks if task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value),
+        (
+            item
+            for item in interview_items
+            if item.status == MemoirCompletionItemStatus.IN_PROGRESS
+        ),
         None,
     )
     if in_progress is not None:
@@ -308,10 +251,12 @@ async def _chapter_completion_status(
             state="in_progress",
             headline="这一章有一段正在补充",
             detail="可以回到刚才的语音访谈继续讲。",
-            remaining_count=len(tasks),
-            focus_areas=[task.question for task in tasks[:3]],
-            task_id=in_progress.id,
-            active_session_id=in_progress.assigned_session_id,
+            remaining_count=len(interview_items),
+            focus_areas=[item.question for item in interview_items[:3]],
+            task_id=in_progress.task_id,
+            item_id=in_progress.id,
+            item_kind=in_progress.kind.value,
+            active_session_id=in_progress.active_session_id,
         )
 
     audit_problem = _audit_problem(project_id, preparation)
@@ -321,9 +266,9 @@ async def _chapter_completion_status(
     if generation_problem:
         return _chapter_response_from_problem(preparation, generation_problem)
 
-    if tasks:
-        task = tasks[0]
-        deferred = task.status == MemoirFollowupTaskStatus.DEFERRED.value
+    if interview_items:
+        item = interview_items[0]
+        deferred = item.status == MemoirCompletionItemStatus.DEFERRED
         return MemoirBookCompletionChapterResponse(
             chapter_id=chapter.id,
             title=chapter.title,
@@ -335,16 +280,14 @@ async def _chapter_completion_status(
                 if deferred
                 else "先讲完整经过，不需要逐个回答细节。"
             ),
-            remaining_count=len(tasks),
-            focus_areas=[item.question for item in tasks[:3]],
-            task_id=task.id,
+            remaining_count=len(interview_items),
+            focus_areas=[candidate.question for candidate in interview_items[:3]],
+            task_id=item.task_id,
+            item_id=item.id,
+            item_kind=item.kind.value,
         )
 
-    if await _chapter_has_manual_review_gap(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-    ):
+    if any(item.requires_manual_review for item in items):
         return MemoirBookCompletionChapterResponse(
             chapter_id=chapter.id,
             title=chapter.title,
@@ -439,16 +382,17 @@ async def prepare_book_completion_chapter(
             chapter_id=chapter.id,
         )
     preparation = preparations[0]
-    active_tasks = await _chapter_active_tasks(
+    items = await completion_items.chapter_completion_items(
         db,
         project_id=project_id,
         chapter_id=chapter.id,
     )
     in_progress = next(
         (
-            task
-            for task in active_tasks
-            if task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+            item
+            for item in items
+            if item.action == MemoirCompletionItemAction.INTERVIEW
+            and item.status == MemoirCompletionItemStatus.IN_PROGRESS
         ),
         None,
     )
@@ -459,7 +403,9 @@ async def prepare_book_completion_chapter(
             action="start_interview",
             headline=in_progress.question,
             detail="先讲完整经过，不需要逐个回答细节。",
-            task_id=in_progress.id,
+            task_id=in_progress.task_id,
+            item_id=in_progress.id,
+            item_kind=in_progress.kind.value,
             chapter_id=chapter.id,
         )
 
@@ -521,31 +467,34 @@ async def prepare_book_completion_chapter(
             chapter_id=chapter.id,
         )
 
-    active_tasks = await _chapter_active_tasks(
+    items = await completion_items.chapter_completion_items(
         db,
         project_id=project_id,
         chapter_id=chapter.id,
     )
-    task = next(
+    item = next(
         (
             item
-            for item in active_tasks
-            if item.status
+            for item in items
+            if item.action == MemoirCompletionItemAction.INTERVIEW
+            and item.status
             in {
-                MemoirFollowupTaskStatus.PENDING.value,
-                MemoirFollowupTaskStatus.DEFERRED.value,
+                MemoirCompletionItemStatus.OPEN,
+                MemoirCompletionItemStatus.DEFERRED,
             }
         ),
         None,
     )
-    if task is not None:
+    if item is not None:
         return _response(
             project_id,
             state="ready",
             action="start_interview",
-            headline=task.question,
+            headline=item.question,
             detail="先讲完整经过，不需要逐个回答细节。",
-            task_id=task.id,
+            task_id=item.task_id,
+            item_id=item.id,
+            item_kind=item.kind.value,
             chapter_id=chapter.id,
         )
 

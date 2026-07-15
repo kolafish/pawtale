@@ -2,7 +2,7 @@ from hashlib import sha256
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -29,7 +29,7 @@ from app.migrations.memoir_narrative import (
     migrate_memoir_narrative_schema,
 )
 from app.models.memoir import MemoirImageAsset, MemoirTranscriptVersion, MemoirVoiceSession
-from app.models.memoir_narrative import MemoirClaimEvidence
+from app.models.memoir_narrative import MemoirClaimEvidence, MemoirStory, MemoirStorySlot
 from app.models.projects import Project
 from app.models.users import User
 from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarrativeEntityRepository
@@ -69,6 +69,75 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
             "changed_indexes": [],
             "changed_triggers": [],
         }
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_removes_only_derived_empty_story_slots():
+    register_models()
+    engine = _sqlite_engine()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as db:
+            project = Project(type="memoir", title="稀疏槽位测试")
+            db.add(project)
+            await db.flush()
+            story = MemoirStory(
+                project_id=project.id,
+                title="一次经历",
+                title_normalized="一次经历",
+                story_type="event",
+                summary="",
+                time_precision="unknown",
+                lifecycle_status="active",
+                completion_status="incomplete",
+                verification_status="unreviewed",
+                publication_status="eligible",
+                slot_schema_version="1",
+                created_by="system",
+                updated_by="system",
+            )
+            db.add(story)
+            await db.flush()
+            db.add_all(
+                [
+                    MemoirStorySlot(
+                        project_id=project.id,
+                        story_id=story.id,
+                        schema_version="1",
+                        slot_key="trigger",
+                        status="missing",
+                    ),
+                    MemoirStorySlot(
+                        project_id=project.id,
+                        story_id=story.id,
+                        schema_version="1",
+                        slot_key="background",
+                        status="partial",
+                        assessment_summary="已有一条未确认信息",
+                    ),
+                ]
+            )
+            await db.commit()
+
+        await migrate_memoir_narrative_schema(engine)
+
+        async with session_factory() as db:
+            remaining = list(
+                (
+                    await db.scalars(
+                        select(MemoirStorySlot).where(
+                            MemoirStorySlot.project_id == project.id,
+                            MemoirStorySlot.story_id == story.id,
+                        )
+                    )
+                ).all()
+            )
+            assert [(slot.slot_key, slot.status) for slot in remaining] == [
+                ("background", "partial")
+            ]
     finally:
         await engine.dispose()
 

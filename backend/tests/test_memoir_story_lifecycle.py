@@ -26,6 +26,7 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirStory,
     MemoirStoryClaim,
+    MemoirStorySlot,
 )
 from app.models.projects import Project
 from app.repositories.memoir_narrative import (
@@ -455,6 +456,16 @@ async def test_story_api_is_idempotent_and_requires_evidence_before_confirmation
     assert len(first.json()["slots"]) == 8
 
     story_id = first.json()["id"]
+    assert list(
+        (
+            await test_db.scalars(
+                select(MemoirStorySlot).where(
+                    MemoirStorySlot.project_id == project_id,
+                    MemoirStorySlot.story_id == story_id,
+                )
+            )
+        ).all()
+    ) == []
     no_evidence = await client.post(
         f"/api/memoir/projects/{project_id}/stories/{story_id}/confirm",
         json={"idempotency_key": "confirm-empty-story", "reason": "确认"},
@@ -482,6 +493,17 @@ async def test_story_api_is_idempotent_and_requires_evidence_before_confirmation
         },
     )
     assert attached.status_code == 200
+    persisted_slots = list(
+        (
+            await test_db.scalars(
+                select(MemoirStorySlot).where(
+                    MemoirStorySlot.project_id == project_id,
+                    MemoirStorySlot.story_id == story_id,
+                )
+            )
+        ).all()
+    )
+    assert [slot.slot_key for slot in persisted_slots] == ["background"]
     confirmed = await client.post(
         f"/api/memoir/projects/{project_id}/stories/{story_id}/confirm",
         json={"idempotency_key": "confirm-story-with-evidence", "reason": "本人确认"},
