@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -12,6 +13,8 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirFollowupAnswerUse,
+    MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
@@ -28,16 +31,18 @@ from app.domain.memoir.narrative_types import (
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.models.memoir_narrative import (
     MemoirClaim,
+    MemoirFollowupTask,
     MemoirNarrativeGap,
     MemoirNarrativeDecision,
     MemoirStory,
     MemoirStoryClaim,
 )
-from app.services.memoir.narrative import gap_semantic, gaps
+from app.services.memoir.narrative import gap_audit, gap_semantic, gaps
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import claim_editing_job, run_editing_job
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
+    ChapterAuditDraftBlock,
     evaluate_deterministic_gaps,
     load_chapter_audit_context,
 )
@@ -355,6 +360,73 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
     assert workspace.json()["latest_audit_job"]["id"] == semantic_response.json()["id"]
 
 
+async def test_semantic_reaudit_resolves_then_reopens_gap_and_task_if_it_recurs(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["青年时期"],
+    )
+    candidate = MemoirNarrativeGapCandidate(
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+        primary_chapter_id=chapters[0].id,
+        gap_type=MemoirNarrativeGapType.CAUSALITY,
+        severity=MemoirNarrativeGapSeverity.MEDIUM,
+        target_slot="semantic:opening:old-opening-gap",
+        title="开头缺少背景",
+        description="读者不知道故事发生前的处境。",
+        detected_by=MemoirNarrativeGapDetectedBy.AI,
+    )
+    stored, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[candidate],
+    )
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=stored[0].id,
+        chapter_id=chapters[0].id,
+        target_slot=stored[0].target_slot,
+        answer_use=MemoirFollowupAnswerUse.CLARIFICATION.value,
+        question="当时是什么背景？",
+        purpose="补充章节背景",
+        priority=2800,
+        status=MemoirFollowupTaskStatus.PENDING.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(task)
+    await test_db.flush()
+
+    assert await gaps.reconcile_chapter_semantic_gaps(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        complete_candidates=[],
+    ) == 1
+    await test_db.flush()
+
+    assert stored[0].status == MemoirNarrativeGapStatus.RESOLVED.value
+    assert task.status == MemoirFollowupTaskStatus.CANCELLED.value
+
+    reopened, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[candidate],
+    )
+    await test_db.flush()
+
+    assert created_count == 0
+    assert reopened[0].id == stored[0].id
+    assert reopened[0].status == MemoirNarrativeGapStatus.OPEN.value
+    assert reopened[0].resolved_by is None
+    assert reopened[0].resolution_note == ""
+    assert task.status == MemoirFollowupTaskStatus.PENDING.value
+
+
 def _semantic_context() -> ChapterAuditContext:
     now = datetime.now(UTC).replace(tzinfo=None)
     chapter = MemoirBookPlanChapter(
@@ -447,3 +519,50 @@ async def test_semantic_gap_audit_rejects_evidence_outside_chapter():
 
     assert context.claims["claim-1"].statement == "十八岁时离开家乡。"
     assert context.stories["story-1"].summary == "十八岁时离开家乡。"
+
+
+async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_issue():
+    draft_block = ChapterAuditDraftBlock(
+        id="block-1",
+        node_id="node-1",
+        block_role="connective",
+        sort_order=0,
+        editorial_status="draft",
+        freshness_status="current",
+        current_version_id="block-version-1",
+        content="第二天，他直接去了新的学校。此前的搬家背景没有交代。",
+    )
+    context = replace(_semantic_context(), draft_blocks=(draft_block,))
+    prompt = gap_semantic.build_semantic_gap_prompt(context)
+
+    assert draft_block.content in prompt
+    assert "先看整章是否缺少进入本章所需的背景" in prompt
+    assert "不能仅因为事件简短" in prompt
+    assert "最多输出 3 个问题" in prompt
+
+    payload = """{
+      "schema_version": "1",
+      "gaps": [{
+        "gap_type": "causality",
+        "severity": "medium",
+        "dimension": "opening",
+        "title": "开头缺少搬家背景",
+        "description": "当前开头直接进入新学校，读者不知道为什么搬家。",
+        "story_ids": ["story-1"],
+        "claim_ids": ["claim-1"]
+      }]
+    }"""
+    candidates, _, _ = await gap_semantic.evaluate_semantic_gaps(
+        context,
+        ai_client=FakeAIClient(payload),
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].target_slot.startswith("semantic:opening:")
+    changed_context = replace(
+        context,
+        draft_blocks=(replace(draft_block, content="先交代搬家原因，再写进入新学校。"),),
+    )
+    assert gap_audit.chapter_gap_audit_content_signature(
+        context
+    ) != gap_audit.chapter_gap_audit_content_signature(changed_context)

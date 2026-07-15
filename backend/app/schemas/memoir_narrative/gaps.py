@@ -227,7 +227,12 @@ class MemoirSemanticGapCandidate(BaseModel):
     severity: MemoirNarrativeGapSeverity
     dimension: Literal[
         "causality",
+        "chapter_context",
+        "chapter_focus",
+        "opening",
+        "closing",
         "person_introduction",
+        "relationship_clarity",
         "reference",
         "transition",
         "list_style",

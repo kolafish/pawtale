@@ -42,6 +42,7 @@ TERMINAL_GAP_STATUSES = {
     MemoirNarrativeGapStatus.DISMISSED,
 }
 AUTO_RULE_RESOLUTION_NOTE = "系统规则复查：触发条件已不再成立。"
+SEMANTIC_AUDIT_RESOLUTION_NOTE = "系统语义复查：本轮未再检测到该问题。"
 
 
 def _utcnow() -> datetime:
@@ -73,19 +74,30 @@ def _gap_state(gap: MemoirNarrativeGap) -> dict[str, object]:
     }
 
 
-def _was_auto_resolved_rule_gap(gap: MemoirNarrativeGap) -> bool:
-    return bool(
+def _auto_resolution_kind(gap: MemoirNarrativeGap) -> str | None:
+    if (
+        gap.status != MemoirNarrativeGapStatus.RESOLVED.value
+        or gap.resolved_by != MemoirNarrativeActorType.SYSTEM.value
+    ):
+        return None
+    if (
         gap.detected_by == MemoirNarrativeGapDetectedBy.RULES.value
-        and gap.status == MemoirNarrativeGapStatus.RESOLVED.value
-        and gap.resolved_by == MemoirNarrativeActorType.SYSTEM.value
         and gap.resolution_note == AUTO_RULE_RESOLUTION_NOTE
-    )
+    ):
+        return "rule"
+    if (
+        gap.detected_by == MemoirNarrativeGapDetectedBy.AI.value
+        and gap.resolution_note == SEMANTIC_AUDIT_RESOLUTION_NOTE
+    ):
+        return "semantic"
+    return None
 
 
-async def _reopen_auto_resolved_rule_gap(
+async def _reopen_auto_resolved_gap(
     db: AsyncSession,
     *,
     gap: MemoirNarrativeGap,
+    resolution_kind: str,
 ) -> None:
     before = _gap_state(gap)
     next_detection_count = gap.detection_count + 1
@@ -104,8 +116,21 @@ async def _reopen_auto_resolved_rule_gap(
         actor_user_id=None,
         before_state=before,
         after_state=_gap_state(gap),
-        reason="系统规则再次检测到该问题",
-        idempotency_key=f"rule-gap-reopened:{gap.id}:{next_detection_count}",
+        reason="系统复查再次检测到该问题",
+        idempotency_key=(
+            f"{resolution_kind}-gap-reopened:{gap.id}:{next_detection_count}"
+        ),
+    )
+    from app.services.memoir.narrative import followup_tasks
+
+    await followup_tasks.reactivate_cancelled_task_for_gap(
+        db,
+        project_id=gap.project_id,
+        gap_id=gap.id,
+        reason="gap recurred after a system audit",
+        decision_identity=(
+            f"{resolution_kind}-gap-reopened:{gap.id}:{next_detection_count}"
+        ),
     )
 
 
@@ -264,8 +289,13 @@ async def upsert_gap(
                 raise
             created = False
     if not created:
-        if _was_auto_resolved_rule_gap(gap):
-            await _reopen_auto_resolved_rule_gap(db, gap=gap)
+        resolution_kind = _auto_resolution_kind(gap)
+        if resolution_kind is not None:
+            await _reopen_auto_resolved_gap(
+                db,
+                gap=gap,
+                resolution_kind=resolution_kind,
+            )
         gap.severity = candidate.severity.value
         gap.title = candidate.title
         gap.description = candidate.description
@@ -376,6 +406,52 @@ async def reconcile_chapter_rule_gaps(
             gap_id=gap.id,
             idempotency_key=f"chapter-rule-gap-obsolete:{chapter_id}:{gap.id}:{gap.detection_count}",
             note=AUTO_RULE_RESOLUTION_NOTE,
+        )
+        resolved_count += 1
+    return resolved_count
+
+
+async def reconcile_chapter_semantic_gaps(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    complete_candidates: list[MemoirNarrativeGapCandidate],
+) -> int:
+    active_fingerprints = {
+        gap_fingerprint(candidate)
+        for candidate in complete_candidates
+        if candidate.detected_by == MemoirNarrativeGapDetectedBy.AI
+        and candidate.target_slot.startswith("semantic:")
+    }
+    open_semantic_gaps = (
+        await db.scalars(
+            select(MemoirNarrativeGap).where(
+                MemoirNarrativeGap.project_id == project_id,
+                MemoirNarrativeGap.detected_by
+                == MemoirNarrativeGapDetectedBy.AI.value,
+                MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+                MemoirNarrativeGap.target_slot.like("semantic:%"),
+                (
+                    (MemoirNarrativeGap.primary_chapter_id == chapter_id)
+                    | MemoirNarrativeGap.chapters.any(chapter_id=chapter_id)
+                ),
+            )
+        )
+    ).all()
+    resolved_count = 0
+    for gap in open_semantic_gaps:
+        if gap.fingerprint in active_fingerprints:
+            continue
+        await resolve_gap_by_system(
+            db,
+            project_id=project_id,
+            gap_id=gap.id,
+            idempotency_key=(
+                f"chapter-semantic-gap-obsolete:{chapter_id}:"
+                f"{gap.id}:{gap.detection_count}"
+            ),
+            note=SEMANTIC_AUDIT_RESOLUTION_NOTE,
         )
         resolved_count += 1
     return resolved_count

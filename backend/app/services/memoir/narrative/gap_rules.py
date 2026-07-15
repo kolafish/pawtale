@@ -32,12 +32,26 @@ from app.models.memoir_narrative import (
     MemoirChapterNodeStory,
     MemoirClaim,
     MemoirClaimEvidence,
+    MemoirDraftBlock,
+    MemoirDraftBlockVersion,
     MemoirStory,
     MemoirStoryClaim,
     MemoirStorySlot,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
+
+
+@dataclass(frozen=True)
+class ChapterAuditDraftBlock:
+    id: str
+    node_id: str
+    block_role: str
+    sort_order: int
+    editorial_status: str
+    freshness_status: str
+    current_version_id: str
+    content: str
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,7 @@ class ChapterAuditContext:
     claims: dict[str, MemoirClaim]
     evidence_counts: dict[str, int]
     slots: dict[str, dict[str, MemoirStorySlot]]
+    draft_blocks: tuple[ChapterAuditDraftBlock, ...] = ()
 
 
 SLOT_LABELS = {
@@ -208,6 +223,33 @@ async def load_chapter_audit_context(
             )
         ).all():
             story_slots[slot.story_id][slot.slot_key] = slot
+    draft_blocks = tuple(
+        ChapterAuditDraftBlock(
+            id=block.id,
+            node_id=block.node_id,
+            block_role=block.block_role,
+            sort_order=block.sort_order,
+            editorial_status=block.editorial_status,
+            freshness_status=block.freshness_status,
+            current_version_id=version.id,
+            content=version.content,
+        )
+        for block, version in (
+            await db.execute(
+                select(MemoirDraftBlock, MemoirDraftBlockVersion)
+                .join(
+                    MemoirDraftBlockVersion,
+                    (MemoirDraftBlockVersion.project_id == MemoirDraftBlock.project_id)
+                    & (MemoirDraftBlockVersion.id == MemoirDraftBlock.current_version_id),
+                )
+                .where(
+                    MemoirDraftBlock.project_id == project_id,
+                    MemoirDraftBlock.chapter_id == chapter_id,
+                )
+                .order_by(MemoirDraftBlock.sort_order, MemoirDraftBlock.id)
+            )
+        ).all()
+    )
     return ChapterAuditContext(
         chapter=chapter,
         contract=contract,
@@ -218,6 +260,7 @@ async def load_chapter_audit_context(
         claims=claims,
         evidence_counts=evidence_counts,
         slots=dict(story_slots),
+        draft_blocks=draft_blocks,
     )
 
 

@@ -27,6 +27,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStorySlotStatus,
+    MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirSessionGoal
@@ -48,7 +49,7 @@ from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "4"
+FOLLOWUP_PLANNER_VERSION = "5"
 NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
@@ -127,7 +128,25 @@ def _story_slot_key(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
     return gap.target_slot if gap.target_slot in schema.slot_keys else ""
 
 
-def _answer_use(gap_type: MemoirNarrativeGapType) -> MemoirFollowupAnswerUse:
+def _semantic_dimension(gap: MemoirNarrativeGap) -> str:
+    parts = gap.target_slot.split(":", 2)
+    return parts[1] if len(parts) == 3 and parts[0] == "semantic" else ""
+
+
+def _answer_use(gap: MemoirNarrativeGap) -> MemoirFollowupAnswerUse:
+    if _semantic_dimension(gap) in {
+        "chapter_context",
+        "chapter_focus",
+        "opening",
+        "closing",
+        "person_introduction",
+        "relationship_clarity",
+        "transition",
+        "list_style",
+        "causality",
+    }:
+        return MemoirFollowupAnswerUse.DIRECT_NARRATIVE
+    gap_type = MemoirNarrativeGapType(gap.gap_type)
     if gap_type == MemoirNarrativeGapType.MISSING_SLOT:
         return MemoirFollowupAnswerUse.DIRECT_NARRATIVE
     if gap_type in {
@@ -148,6 +167,19 @@ def _answer_use(gap_type: MemoirNarrativeGapType) -> MemoirFollowupAnswerUse:
 
 def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key: str) -> str:
     story_prefix = f"关于“{story.title}”，" if story else ""
+    semantic_dimension = _semantic_dimension(gap)
+    semantic_questions = {
+        "chapter_context": "这段内容开始前，读者还需要知道哪些重要背景？",
+        "opening": "如果从一个具体场景开始这一章，你最先想到的是哪一幕？当时是什么情形？",
+        "closing": "讲完这些经历后，你最想让读者记住什么？它后来带来了什么影响？",
+        "chapter_focus": "这一章里哪段经历最能说明你当时的变化？为什么它最重要？",
+        "person_introduction": "这里提到的关键人物分别是谁？他们和你、彼此是什么关系？",
+        "relationship_clarity": "这里提到的人彼此是什么关系？这段关系后来有过什么变化？",
+        "transition": "前后两段经历之间发生了什么变化？你是怎样从前一段走到后一段的？",
+        "list_style": "这些经历里哪一件最能代表那段日子？请重点讲讲那一件。",
+    }
+    if semantic_dimension in semantic_questions:
+        return semantic_questions[semantic_dimension]
     if slot_key:
         return f"{story_prefix}{SLOT_LABELS.get(slot_key, slot_key)}，你还记得哪些具体情况？"
     if gap.gap_type == MemoirNarrativeGapType.CHRONOLOGY.value:
@@ -171,10 +203,34 @@ def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key:
 
 
 def _story_narration_question(story: MemoirStory) -> str:
-    return (
-        f"关于“{story.title}”，请按您记得的顺序讲讲："
-        "事情怎么开始、当时有哪些人、发生了什么、后来结果怎样。"
-    )
+    prompts = {
+        MemoirStoryType.EVENT.value: (
+            "请讲清最关键的经过：当时是什么背景、发生了什么变化、结果和影响怎样。"
+        ),
+        MemoirStoryType.RELATIONSHIP.value: (
+            "请讲讲你们如何相识、彼此是什么样的人、哪段共同经历最能代表这段关系，"
+            "以及关系后来怎样变化。"
+        ),
+        MemoirStoryType.LIFE_STAGE.value: (
+            "请讲讲你为什么进入这段人生阶段、当时主要承担什么、哪段经历最有代表性，"
+            "以及后来怎样走向下一阶段。"
+        ),
+        MemoirStoryType.THEME.value: (
+            "请先说说它对你意味着什么，再选一两件最能说明这个主题的具体经历，"
+            "以及它后来怎样影响你。"
+        ),
+    }
+    return f"关于“{story.title}”，{prompts.get(story.story_type, prompts[MemoirStoryType.EVENT.value])}"
+
+
+def _story_narration_purpose(story: MemoirStory) -> str:
+    purpose = {
+        MemoirStoryType.EVENT.value: "关键经过和后来影响",
+        MemoirStoryType.RELATIONSHIP.value: "人物关系、代表经历和关系变化",
+        MemoirStoryType.LIFE_STAGE.value: "阶段背景、代表经历和人生转变",
+        MemoirStoryType.THEME.value: "主题含义、代表事例和持续影响",
+    }
+    return f"补充“{story.title}”的{purpose.get(story.story_type, purpose[MemoirStoryType.EVENT.value])}"
 
 
 def _task_priority(
@@ -189,8 +245,21 @@ def _task_priority(
         MemoirNarrativeGapSeverity.LOW.value: 1000,
     }.get(gap.severity, 0)
     required_bonus = 400 if story_required else 0
+    semantic_dimension = _semantic_dimension(gap)
+    editorial_value_bonus = {
+        "chapter_context": 900,
+        "chapter_focus": 900,
+        "opening": 900,
+        "closing": 900,
+        "person_introduction": 800,
+        "relationship_clarity": 800,
+        "transition": 700,
+        "list_style": 700,
+        "causality": 500,
+        "reference": 500,
+    }.get(semantic_dimension, 0)
     chapter_bonus = max(0, 200 - min(chapter_order or 0, 200))
-    return severity + required_bonus + chapter_bonus
+    return severity + required_bonus + editorial_value_bonus + chapter_bonus
 
 
 def _safe_claim(claim: MemoirClaim) -> bool:
@@ -630,14 +699,14 @@ async def generate_followup_tasks(
             "chapter_id": chapter.id if chapter else None,
             "story_id": story.id if story else None,
             "target_slot": MEMOIR_STORY_NARRATION_TARGET if is_story_narration else slot_key,
-            "answer_use": _answer_use(gap_type).value,
+            "answer_use": _answer_use(gap).value,
             "question": (
                 _story_narration_question(story)
                 if is_story_narration and story is not None
                 else _task_question(gap, story, slot_key)
             ),
             "purpose": (
-                f"补充“{story.title}”的完整经过和后来影响"
+                _story_narration_purpose(story)
                 if is_story_narration and story is not None
                 else gap.description.strip() or gap.title.strip()
             ),

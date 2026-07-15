@@ -43,6 +43,7 @@ from app.schemas.memoir_narrative import (
     MemoirDraftBlockStorySource,
 )
 from app.services.memoir.narrative import draft_blocks
+from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     ensure_mobile_memoir_project,
@@ -222,6 +223,13 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     await test_db.commit()
     block_id = block.id
     initial_version_id = block.current_version_id
+    audit_context = await load_chapter_audit_context(
+        test_db,
+        project_id=created["project_id"],
+        chapter_id=created["chapter"].id,
+    )
+    assert [item.id for item in audit_context.draft_blocks] == [block.id]
+    assert audit_context.draft_blocks[0].content == "十八岁那年，我第一次离开家乡。"
 
     stale_confirmation = await client.post(
         f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/confirm",

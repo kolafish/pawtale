@@ -422,6 +422,10 @@ async def complete_task_from_semantic_interpretation(
         expected_use == MemoirFollowupAnswerUse.CLARIFICATION
         and bool(relation.clarification_text)
     ) or (
+        expected_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE
+        and task.target_slot.startswith("semantic:")
+        and bool(relation.clarification_text)
+    ) or (
         expected_use == MemoirFollowupAnswerUse.FACT_RESOLUTION
         and bool(relation.fact_resolution_text)
     )
@@ -474,7 +478,7 @@ async def complete_task_from_semantic_interpretation(
             db,
             project_id=project_id,
             chapter_id=task.chapter_id,
-            include_semantic_audit=False,
+            include_semantic_audit=task.target_slot.startswith("semantic:"),
             ai_model=None,
             source="book_completion_semantic_answer",
         )
@@ -552,6 +556,7 @@ async def evaluate_after_narrative_ingestion(
     )
     answered_task_ids: list[str] = []
     chapters_to_reaudit: set[str] = set()
+    chapters_to_semantic_reaudit: set[str] = set()
     current_relation_role: MemoirFollowupTaskUtteranceRole | None = None
     for task in candidates:
         task_claim_roles = {
@@ -585,7 +590,17 @@ async def evaluate_after_narrative_ingestion(
             and task.target_slot == MEMOIR_STORY_NARRATION_TARGET
             and (is_current_task or task.story_id in new_story_ids)
         )
-        answered = expected_evidence_received or target_slot_completed or broad_story_answered
+        semantic_narrative_answered = bool(
+            is_current_task
+            and task.target_slot.startswith("semantic:")
+            and new_claim_ids
+        )
+        answered = (
+            expected_evidence_received
+            or target_slot_completed
+            or broad_story_answered
+            or semantic_narrative_answered
+        )
         if not answered and not is_current_task:
             continue
         relation_role = (
@@ -648,13 +663,15 @@ async def evaluate_after_narrative_ingestion(
             and task.chapter_id
         ):
             chapters_to_reaudit.add(task.chapter_id)
+        elif task.target_slot.startswith("semantic:") and task.chapter_id:
+            chapters_to_semantic_reaudit.add(task.chapter_id)
 
-    for chapter_id in sorted(chapters_to_reaudit):
+    for chapter_id in sorted(chapters_to_reaudit | chapters_to_semantic_reaudit):
         await gap_audit.enqueue_chapter_gap_audit(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
-            include_semantic_audit=False,
+            include_semantic_audit=chapter_id in chapters_to_semantic_reaudit,
             ai_model=None,
             source="book_completion_answer",
         )
