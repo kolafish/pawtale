@@ -1,4 +1,5 @@
 import type {
+  MemoirBookDraftBlockAssembly,
   MemoirChapterDraftBlockAssembly,
   MemoirDraftBlock,
   MemoirDraftBlockDecisionRequest,
@@ -20,6 +21,18 @@ function chapterBlocksPath(projectId: string, chapterId: string, suffix = ""): s
   return memoirNarrativeProjectPath(
     projectId,
     `/chapters/${encodeURIComponent(chapterId)}/draft-blocks${suffix}`,
+  );
+}
+
+export function assembleMemoirBookDraftBlocks(
+  projectId: string,
+): Promise<MemoirBookDraftBlockAssembly> {
+  return memoirRequest<MemoirBookDraftBlockAssembly>(
+    memoirNarrativeProjectPath(projectId, "/book-output/assemble-from-draft-blocks"),
+    {
+      method: "POST",
+      data: {},
+    },
   );
 }
 

@@ -208,9 +208,9 @@ updated_at
     "detail": "建议先补写本章，之后再继续追问外婆、夏天和剥青豆的细节。"
   },
   "primary_action": {
-    "type": "revise_chapter",
+    "type": "open_chapter_workspace",
     "chapter_id": "...",
-    "cta_text": "补写本章"
+    "cta_text": "整理本章"
   }
 }
 ```

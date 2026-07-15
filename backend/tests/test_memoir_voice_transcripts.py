@@ -19,7 +19,6 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
-    MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirSemanticCacheStatus,
     MemoirShareVideoJobStatus,
@@ -2251,14 +2250,6 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
         select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
     )
     assert route_job is None
-    revision_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapter.id}")
-    )
-    assert revision_job is not None
-    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
-    assert revision_job.payload_json["base_version_id"] == draft_version_id
-    assert revision_job.payload_json["pending_source_utterance_ids"] == [created["utterance_id"]]
     source_card_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
@@ -2512,9 +2503,6 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
         )
     )
     await test_db.commit()
-    generated = await client.post(f"/api/mobile/memoir/projects/{project_id}/book-output/generate", json={})
-    assert generated.status_code == 200
-
     response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{second['utterance_id']}")
 
     assert response.status_code == 204
@@ -2540,12 +2528,6 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "sources_deleted"
     assert refreshed_draft.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
-
-    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
-    assert output.status_code == 200
-    assert output.json()["is_stale"] is True
-    assert output.json()["stale_chapter_titles"] == ["童年和离家"]
-
 
 async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_db, monkeypatch):
     created = await create_test_voice_transcript(client, test_db)

@@ -267,8 +267,8 @@ def audit_display_contract(
                 detail="建议先补写本章，再继续补充人物、地点和细节。",
             ),
             MemoirBookQualityAuditPrimaryActionResponse(
-                type="revise_chapter",
-                cta_text="补写本章",
+                type="open_chapter_workspace",
+                cta_text="整理本章",
                 chapter_id=primary_item.chapter_id if primary_item else None,
                 utterance_count=pending_count,
             ),
@@ -283,13 +283,13 @@ def audit_display_contract(
         source_count = primary_item.source_count if primary_item else 0
         return (
             MemoirBookQualityAuditDisplayResponse(
-                title=f"「{title}」可以生成正文",
-                summary=f"本章已有 {source_count} 条素材，但还没有章节正文。",
-                detail="可以先生成一版正文，再根据新增讲述继续修订。",
+                title=f"「{title}」可以开始整理",
+                summary=f"本章已有 {source_count} 条素材，可以按章节结构整理正文。",
+                detail="进入章节工作台，逐段核对并确认本章正文。",
             ),
             MemoirBookQualityAuditPrimaryActionResponse(
-                type="generate_chapter_draft",
-                cta_text="生成本章",
+                type="open_chapter_workspace",
+                cta_text="开始整理",
                 chapter_id=primary_item.chapter_id if primary_item else None,
                 utterance_count=source_count,
             ),
@@ -301,8 +301,8 @@ def audit_display_contract(
         title = primary_item.title if primary_item else "当前章节"
         if primary_item and primary_item.status == "thin_draft":
             summary = "正文已有基础，但相对素材还偏薄。"
-            action_type = "revise_chapter"
-            cta_text = "完善本章"
+            action_type = "open_chapter_workspace"
+            cta_text = "继续整理"
         else:
             summary = "素材已有基础，还可以继续补充关键细节。"
             action_type = "continue_interview"

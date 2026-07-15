@@ -26,12 +26,10 @@ from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChapterSourceLinkStatus,
-    MemoirEditingJobType,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirChapterSourceLink,
-    MemoirEditingJob,
     MemoirSourceCard,
     MemoirVoiceUtterance,
 )
@@ -271,7 +269,7 @@ async def test_context_only_followup_repair_removes_only_explicit_derived_graph(
     assert dry_run.story_ids_to_delete == (story.id,)
     assert dry_run.claim_ids_to_delete == (claim.id,)
 
-    result = await apply_context_only_followup_answer_repair(test_db, spec=spec)
+    await apply_context_only_followup_answer_repair(test_db, spec=spec)
     await test_db.commit()
 
     await test_db.refresh(relation)
@@ -294,17 +292,6 @@ async def test_context_only_followup_repair_removes_only_explicit_derived_graph(
     assert await test_db.get(MemoirSourceCard, source_card.id) is None
     assert event.metadata_json["historical_repair"]["answer_kind"] == "clarification"
     assert event.metadata_json["acknowledged_at"]
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == spec.project_id,
-            MemoirEditingJob.chapter_id == spec.chapter_id,
-            MemoirEditingJob.job_type == MemoirEditingJobType.REVISE_CHAPTER.value,
-        )
-    )
-    assert job is not None
-    assert result.chapter_revision_job_id == job.id
-
-
 async def test_context_only_followup_repair_rejects_changed_source_text(
     client,
     test_db,

@@ -2,7 +2,7 @@ import type {
   MemoirBookCoverStyle,
   MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
-  MemoirBookOutputGenerateRequest,
+  MemoirBookOutputUpdateRequest,
 } from "../../domain/voice-chat";
 import {
   BOOK_COVER_STYLE_OPTIONS,
@@ -52,7 +52,7 @@ function latestBookMetadata(output: MemoirBookOutput | null): Record<string, str
 export function bookGenerationSettings(
   output: MemoirBookOutput | null,
   defaults: { title: string; narratorName: string },
-): Omit<MemoirBookOutputGenerateRequest, "ai_model" | "force_regenerate"> {
+): MemoirBookOutputUpdateRequest {
   const stored = latestBookMetadata(output);
   const title = latestBookTitle(output) || trimText(defaults.title);
   const narratorName = stored.narrator_name || trimText(defaults.narratorName);

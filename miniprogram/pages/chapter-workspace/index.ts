@@ -14,6 +14,7 @@ import { definePage } from "../../services/page-definition";
 import {
   applyMemoirDraftBlockRevision,
   assembleMemoirChapterDraftBlocks,
+  confirmMemoirBookChapterDraft,
   confirmMemoirChapterContract,
   createMemoirVoiceSession,
   decideMemoirDraftBlock,
@@ -151,6 +152,7 @@ definePage<ChapterWorkspacePageData>()({
     suggestionHints: [],
     appliedAnswerUpdates: [],
     outlineTitles: [],
+    canAssembleDraft: false,
     auditBusy: false,
     auditError: "",
     contractBusy: false,
@@ -896,19 +898,21 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.assemblingDraft
       || this.data.editingBlockId
       || this.data.revisionBlockId
+      || !this.data.canAssembleDraft
     ) {
       return;
     }
     this.setData({ assemblingDraft: true, draftError: "" });
     try {
       const result = await assembleMemoirChapterDraftBlocks(this.data.projectId, this.data.chapterId);
-      this.setData({ draftGenerationStatus: `章节稿第 ${result.version} 版已保存` });
-      wx.showToast({ title: "章节稿已保存", icon: "success" });
+      await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
+      this.setData({ draftGenerationStatus: `章节稿第 ${result.version} 版已确认` });
+      wx.showToast({ title: "本章正文已确认", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ draftError: error instanceof Error ? error.message : "章节稿保存失败" });
+      this.setData({ draftError: error instanceof Error ? error.message : "章节稿确认失败" });
     } finally {
       this.setData({ assemblingDraft: false });
     }

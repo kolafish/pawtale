@@ -79,6 +79,7 @@ export interface ChapterWorkspaceViewPatch {
   suggestionHints: ReviewGapView[];
   appliedAnswerUpdates: AnswerUpdateView[];
   outlineTitles: string[];
+  canAssembleDraft: boolean;
 }
 
 function storyHasUsableEvidence(story: MemoirChapterWorkspaceStory): boolean {
@@ -211,6 +212,10 @@ export function chapterWorkspaceViewPatch(
   const mustConfirmCount = confirmations.length + reviewGaps.length;
   const suggestionCount = suggestionIds.size;
   const hasStaleDraft = currentDraftBlocks.some((block) => block.freshness_status === "stale");
+  const canAssembleDraft = Boolean(currentDraftBlocks.length) && currentDraftBlocks.every((block) => (
+    block.editorial_status === "confirmed"
+    && block.freshness_status === "current"
+  ));
 
   let readinessTitle = "现有内容已经可以开始写正文";
   let readinessDetail = "您也可以先选择下面任意一个方向继续补充。";
@@ -272,5 +277,6 @@ export function chapterWorkspaceViewPatch(
         summaryText: item.summaries.join("\n"),
       })),
     outlineTitles: (workspace.contract?.nodes || []).map((node) => node.title),
+    canAssembleDraft,
   };
 }

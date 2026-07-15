@@ -47,7 +47,6 @@ from app.models.memoir_narrative import (
     MemoirStorySlotClaim,
 )
 from app.schemas.memoir_book import MemoirBookSourceRouteResponse
-from app.services.memoir.book_auto_revision import schedule_chapter_auto_revision
 from app.services.memoir.book_plan_sources import (
     SOURCES_CHANGED_STATUS_REASON,
     draft_status_metadata,
@@ -55,6 +54,7 @@ from app.services.memoir.book_plan_sources import (
     removed_source_ids,
     set_source_change_metadata,
 )
+from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.narrative.followup_completion import (
     complete_task_from_semantic_interpretation,
 )
@@ -99,7 +99,6 @@ class ContextOnlyFollowupAnswerRepairPlan:
     story_ids_to_delete: tuple[str, ...]
     claim_ids_to_delete: tuple[str, ...]
     source_assignment_event_ids_to_close: tuple[str, ...]
-    chapter_revision_job_id: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -563,6 +562,11 @@ async def apply_context_only_followup_answer_repair(
             SOURCES_CHANGED_STATUS_REASON,
         )
         db.add(draft)
+    await draft_blocks.mark_chapter_blocks_stale(
+        db,
+        project_id=spec.project_id,
+        chapter_ids={spec.chapter_id},
+    )
 
     source_card = _required(
         await db.get(MemoirSourceCard, spec.source_card_id),
@@ -594,14 +598,4 @@ async def apply_context_only_followup_answer_repair(
     db.add(event)
     await db.flush()
 
-    revision_job = await schedule_chapter_auto_revision(
-        db,
-        project_id=spec.project_id,
-        chapter_id=spec.chapter_id,
-    )
-    return ContextOnlyFollowupAnswerRepairPlan(
-        **{
-            **plan.as_dict(),
-            "chapter_revision_job_id": revision_job.id if revision_job else None,
-        }
-    )
+    return plan

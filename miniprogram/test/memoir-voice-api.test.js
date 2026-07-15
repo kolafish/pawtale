@@ -57,19 +57,14 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         data = sampleBookVoiceCommandPreview();
       } else if (options.url.endsWith("/book-voice-command/execute")) {
         data = sampleBookVoiceCommandExecuteResponse("rename_chapter", samplePlan("confirmed"));
-      } else if (options.url.endsWith("/draft/jobs")) {
-        data = sampleAutomationEvent();
       } else if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         data = sampleDraft();
       } else if (options.url.endsWith("/book-output/title-suggestions")) {
         data = { suggestions: ["外婆慢慢说"] };
-      } else if (options.url.endsWith("/book-output/generate/jobs")) {
-        data = sampleAutomationEvent({ event_type: "book_output_generated", chapter_id: null });
       } else if (options.url.endsWith("/book-output/editorial-copy/regenerate/jobs")) {
         data = sampleAutomationEvent({ event_type: "book_editorial_copy_generated", chapter_id: null });
       } else if (
         options.url.endsWith("/book-output")
-        || options.url.endsWith("/book-output/generate")
         || options.url.endsWith("/book-output/editorial-copy/regenerate")
         || options.url.includes("/book-output/chapters/")
       ) {
@@ -664,6 +659,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
   resetMemoirVoiceApiModules();
   const api = require("../services/memoir-voice-api.ts");
   const base = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1";
+  const narrativeBase = "http://backend.local:8000/api/memoir/projects/project%2F1";
   const selectedModel = "doubao-seed-2-0-pro-260215";
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },
@@ -676,8 +672,9 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },
-    { call: () => api.updateMemoirBookChapterDraft("project/1", "chapter/1", { content: "正文" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/draft`, data: { content: "正文" } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
+    { call: () => api.assembleMemoirChapterDraftBlocks("project/1", "chapter/1"), method: "POST", url: `${narrativeBase}/chapters/chapter%2F1/draft-blocks/assemble`, data: {} },
+    { call: () => api.assembleMemoirBookDraftBlocks("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble-from-draft-blocks`, data: {} },
     { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 180000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 180000 },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
@@ -685,8 +682,6 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
-    { call: () => api.enqueueMemoirBookChapterDraftGeneration("project/1", "chapter/1", { force_regenerate: true }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },
-    { call: () => api.enqueueMemoirBookOutputGeneration("project/1", { force_regenerate: true }), method: "POST", url: `${base}/book-output/generate/jobs`, data: { force_regenerate: true, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },
   ];
 
@@ -698,7 +693,9 @@ test("book service APIs encode backend routes and selected AI model", async () =
     await apiCase.call();
   }
 
-  const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
+  const apiRequests = requests.filter((request) => (
+    request.url.includes("/api/mobile/memoir/") || request.url.includes("/api/memoir/")
+  ));
   assert.equal(apiRequests.length, cases.length);
   cases.forEach((apiCase, index) => {
     const request = apiRequests[index];

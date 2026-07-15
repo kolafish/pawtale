@@ -4,18 +4,22 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirCreatedBy,
     MemoirImageAssetSourceType,
     MemoirOutputStatus,
     MemoirShareVideoJobStatus,
 )
 from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
+    MemoirBookChapterDraftVersion,
     MemoirBookOutput,
+    MemoirBookOutputVersion,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
 )
-from app.schemas.memoir_book import MemoirBookOutputGenerateRequest
 from app.services.memoir import book_output_export, book_outputs, image_assets
+from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
+from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.image_assets import (
     RegisteredShareVideoBackground,
     register_share_video_background_asset,
@@ -39,13 +43,56 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
         project_id=project_id,
         text="小时候院子里有一棵葡萄树，夏天一家人都坐在下面乘凉。",
     )
-    _, chapters = await create_test_book_plan_with_chapters(
+    plan, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
         chapter_titles=["院子里的夏天"],
         source_refs_by_chapter=[[memoir_source_ref(created, "小时候院子里有一棵葡萄树。")]],
         draft_contents=["夏天的时候，院子里的葡萄树撑起一片阴凉，家人常坐在下面聊天。"],
         draft_statuses=[MemoirBookChapterDraftStatus.CONFIRMED],
+    )
+    chapter = chapters[0]
+    draft_version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.chapter_id == chapter.id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert draft_version is not None
+    snapshot = [
+        chapter_snapshot(
+            chapter,
+            draft_version,
+            chapter_index=1,
+            source_refs=[memoir_source_ref(created, "小时候院子里有一棵葡萄树。")],
+        )
+    ]
+    title = "我的回忆录"
+    content = f"{title}\n\n目录\n1. {chapter.title}\n\n第1章 {chapter.title}\n\n{draft_version.content}"
+    output = MemoirBookOutput(
+        project_id=project_id,
+        plan_id=plan.id,
+        title=title,
+        status=MemoirOutputStatus.DRAFT.value,
+        metadata_json={},
+    )
+    test_db.add(output)
+    await test_db.flush()
+    manuscript = manuscript_from_snapshot(
+        title=title,
+        content=content,
+        snapshot=snapshot,
+    )
+    test_db.add(
+        MemoirBookOutputVersion(
+            output_id=output.id,
+            project_id=project_id,
+            plan_id=plan.id,
+            version=1,
+            content=content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript.model_dump(mode="json"),
+            created_by=MemoirCreatedBy.SYSTEM.value,
+        )
     )
     image_path = tmp_path / "memoir" / "share-video-backgrounds" / "old_album" / "fake" / "asset.png"
     image_path.parent.mkdir(parents=True, exist_ok=True)
@@ -93,12 +140,6 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
 async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, test_db, tmp_path, monkeypatch):
     user, project_id, chapter_id, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
 
-    await book_outputs.generate_book_output(
-        test_db,
-        user_id=user["id"],
-        project_id=project_id,
-        req=MemoirBookOutputGenerateRequest(force_regenerate=True),
-    )
     output = await test_db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )

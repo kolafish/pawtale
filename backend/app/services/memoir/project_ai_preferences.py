@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from app.models.projects import Project
+
+
+AI_MODEL_METADATA_KEY = "ai_model"
+
+
+def project_ai_model(project: Project | None) -> str | None:
+    metadata = project.metadata_json if project else {}
+    value = (metadata or {}).get(AI_MODEL_METADATA_KEY)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def remember_project_ai_model(project: Project, ai_model: str | None) -> None:
+    model = (ai_model or "").strip()
+    if not model:
+        return
+    project.metadata_json = {
+        **(project.metadata_json or {}),
+        AI_MODEL_METADATA_KEY: model,
+        "ai_model_updated_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
+    }

@@ -1,39 +1,27 @@
 from __future__ import annotations
 
-import logging
-
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
-    MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterCard,
-    MemoirChapterSourceLink,
-    MemoirVoiceSession,
-    MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
-    MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
-    MemoirBookChapterDraftUpdateRequest,
     MemoirBookChapterDraftVersionResponse,
 )
-from app.services.ai_factory import get_ai_service
-from app.services.ai_types import AITextClient
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_audio import (
     audio_cache_payload,
@@ -44,85 +32,29 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
-from app.services.memoir.book_draft_ai import (
-    AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE,
-    ChapterCardPromptContext,
-    RemovedChapterSourceText,
-    generate_chapter_draft_text,
-)
-from app.services.memoir.book_draft_inputs import (
-    build_chapter_draft_input,
-    limited_string_items,
-    utterance_display_text,
-)
 from app.services.memoir.book_plan_sources import (
     DRAFT_STATUS_REASON_KEY,
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
-    metadata_without_keys as _metadata_without_keys,
-    source_change_metadata_keys as _source_change_metadata_keys,
-    source_change_counts as _source_change_counts,
+    metadata_without_keys,
+    source_change_counts,
+    source_change_metadata_keys,
 )
 from app.services.memoir.book_source_links import (
-    chapter_source_change_state as _chapter_source_change_state,
-    mark_chapter_sources_merged as _mark_chapter_sources_merged,
+    chapter_source_change_state,
+    mark_chapter_sources_merged,
 )
-from app.services.memoir.chapter_cards import CHAPTER_CARD_ENGINE, build_chapter_card_context
-from app.services.memoir.chapter_event_clusters import get_or_build_chapter_event_clusters
+from app.services.memoir.narrative.draft_assembly import (
+    assert_chapter_draft_snapshot_current,
+)
 from app.services.memoir.voice_tts_types import TTSClient
 
 
 CHAPTER_TTS_CACHE_KEY = "chapter_tts"
-logger = logging.getLogger(__name__)
 
 
-def _chapter_card_context(card: MemoirChapterCard | None) -> ChapterCardPromptContext | None:
-    if not card or card.status != MemoirSemanticCacheStatus.READY.value or not isinstance(card.card_json, dict):
-        return None
-    gaps: list[str] = []
-    raw_gaps = card.card_json.get("gaps")
-    if isinstance(raw_gaps, list):
-        for item in raw_gaps:
-            if not isinstance(item, dict):
-                continue
-            message = str(item.get("message") or "").strip()
-            severity = str(item.get("severity") or "").strip()
-            if message:
-                gaps.append(f"{severity or 'medium'}: {message[:140]}")
-            if len(gaps) >= 4:
-                break
-    return ChapterCardPromptContext(
-        chapter_card_id=card.id,
-        summary=str(card.card_json.get("summary") or "").strip()[:300],
-        covered=card.card_json.get("covered") if isinstance(card.card_json.get("covered"), dict) else {},
-        gaps=gaps,
-        next_questions=limited_string_items(card.card_json.get("next_questions"), limit=4),
-    )
-
-
-async def _ready_chapter_card_context(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> ChapterCardPromptContext | None:
-    try:
-        context = await build_chapter_card_context(db, project_id=project_id, chapter_id=chapter_id)
-        card = await db.scalar(
-            select(MemoirChapterCard).where(
-                MemoirChapterCard.project_id == project_id,
-                MemoirChapterCard.chapter_id == chapter_id,
-                MemoirChapterCard.engine == CHAPTER_CARD_ENGINE,
-                MemoirChapterCard.input_signature == context.input_signature,
-                MemoirChapterCard.status == MemoirSemanticCacheStatus.READY.value,
-            )
-        )
-    except Exception:
-        logger.exception("memoir chapter draft chapter card context failed chapter_id=%s", chapter_id)
-        return None
-    return _chapter_card_context(card)
-
-
-def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapterDraftVersionResponse:
+def _version_response(
+    version: MemoirBookChapterDraftVersion,
+) -> MemoirBookChapterDraftVersionResponse:
     return MemoirBookChapterDraftVersionResponse(
         id=version.id,
         draft_id=version.draft_id,
@@ -135,7 +67,9 @@ def _version_response(version: MemoirBookChapterDraftVersion) -> MemoirBookChapt
         prompt_snapshot=version.prompt_snapshot,
         feedback=version.feedback,
         block_snapshot_json=[
-            item for item in (version.block_snapshot_json or []) if isinstance(item, dict)
+            item
+            for item in (version.block_snapshot_json or [])
+            if isinstance(item, dict)
         ],
         created_at=version.created_at,
     )
@@ -148,9 +82,17 @@ def _draft_response(
     pending_source_count: int | None = None,
     removed_source_count: int | None = None,
 ) -> MemoirBookChapterDraftResponse:
-    versions = [_version_response(version) for version in draft.versions]
+    versions = [
+        _version_response(version)
+        for version in sorted(
+            draft.versions,
+            key=lambda item: (item.version, item.created_at, item.id),
+        )
+    ]
     if pending_source_count is None or removed_source_count is None:
-        pending_source_count, removed_source_count = _source_change_counts(chapter_metadata_json)
+        pending_source_count, removed_source_count = source_change_counts(
+            chapter_metadata_json
+        )
     return MemoirBookChapterDraftResponse(
         id=draft.id,
         project_id=draft.project_id,
@@ -184,11 +126,13 @@ async def _load_chapter(
         )
         .options(
             selectinload(MemoirBookPlanChapter.plan),
-            selectinload(MemoirBookPlanChapter.draft).selectinload(MemoirBookChapterDraft.versions),
+            selectinload(MemoirBookPlanChapter.draft).selectinload(
+                MemoirBookChapterDraft.versions
+            ),
         )
         .execution_options(populate_existing=True)
     )
-    if not chapter:
+    if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
     return chapter
 
@@ -196,50 +140,6 @@ async def _load_chapter(
 def _require_confirmed_plan(chapter: MemoirBookPlanChapter) -> None:
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=400, detail="请先确认章节规划")
-
-
-async def _removed_chapter_sources(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-    removed_source_ids: set[str],
-) -> list[RemovedChapterSourceText]:
-    if not removed_source_ids:
-        return []
-    links = (
-        await db.execute(
-            select(MemoirChapterSourceLink).where(
-                MemoirChapterSourceLink.project_id == project_id,
-                MemoirChapterSourceLink.chapter_id == chapter_id,
-                MemoirChapterSourceLink.utterance_id.in_(removed_source_ids),
-                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.REMOVED.value,
-            )
-        )
-    ).scalars().all()
-    links_by_utterance = {link.utterance_id: link for link in links}
-    existing_utterances = (
-        await db.execute(
-            select(MemoirVoiceUtterance)
-            .join(MemoirVoiceSession, MemoirVoiceUtterance.voice_session_id == MemoirVoiceSession.id)
-            .where(
-                MemoirVoiceSession.project_id == project_id,
-                MemoirVoiceUtterance.id.in_(removed_source_ids),
-            )
-        )
-    ).scalars().all()
-    text_by_utterance = {
-        utterance.id: utterance_display_text(utterance)
-        for utterance in existing_utterances
-    }
-    return [
-        RemovedChapterSourceText(
-            utterance_id=utterance_id,
-            quote=(links_by_utterance.get(utterance_id).quote if links_by_utterance.get(utterance_id) else ""),
-            text=text_by_utterance.get(utterance_id, ""),
-        )
-        for utterance_id in sorted(removed_source_ids)
-    ]
 
 
 async def _load_draft(
@@ -259,82 +159,6 @@ async def _load_draft(
     )
 
 
-async def _latest_version_number(db: AsyncSession, draft_id: str) -> int:
-    value = await db.scalar(
-        select(func.max(MemoirBookChapterDraftVersion.version)).where(
-            MemoirBookChapterDraftVersion.draft_id == draft_id
-        )
-    )
-    return int(value or 0)
-
-
-async def _append_version(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-    content: str,
-    created_by: MemoirCreatedBy,
-    model: str | None,
-    prompt_snapshot: str,
-    feedback: str | None = None,
-    chapter: MemoirBookPlanChapter | None = None,
-    clear_source_assignment_state: bool = False,
-) -> MemoirBookChapterDraftResponse:
-    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not draft:
-        draft = MemoirBookChapterDraft(
-            project_id=project_id,
-            chapter_id=chapter_id,
-            status=MemoirBookChapterDraftStatus.DRAFT.value,
-        )
-        db.add(draft)
-        await db.flush()
-    else:
-        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-    if clear_source_assignment_state:
-        draft.metadata_json = _metadata_without_keys(draft.metadata_json, {DRAFT_STATUS_REASON_KEY})
-        if chapter:
-            chapter.metadata_json = _metadata_without_keys(
-                chapter.metadata_json,
-                _source_change_metadata_keys(),
-            )
-            db.add(chapter)
-
-    version_number = await _latest_version_number(db, draft.id) + 1
-    version = MemoirBookChapterDraftVersion(
-        draft_id=draft.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        version=version_number,
-        content=content,
-        created_by=created_by.value,
-        model=model,
-        prompt_snapshot=prompt_snapshot,
-        feedback=feedback,
-    )
-    db.add(version)
-    await db.flush()
-    if clear_source_assignment_state:
-        await _mark_chapter_sources_merged(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            draft_version_id=version.id,
-            include_removed=True,
-        )
-    await db.commit()
-    refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not refreshed:
-        raise HTTPException(status_code=500, detail="章节稿保存失败")
-    return _draft_response(
-        refreshed,
-        chapter_metadata_json=chapter.metadata_json if chapter else None,
-        pending_source_count=0 if clear_source_assignment_state else None,
-        removed_source_count=0 if clear_source_assignment_state else None,
-    )
-
-
 async def get_chapter_draft(
     db: AsyncSession,
     *,
@@ -351,146 +175,14 @@ async def get_chapter_draft(
         allow_admin=allow_admin,
     )
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not draft:
+    if draft is None:
         raise HTTPException(status_code=404, detail="章节稿不存在")
-    source_change_state = await _chapter_source_change_state(db, chapter=chapter)
+    changes = await chapter_source_change_state(db, chapter=chapter)
     return _draft_response(
         draft,
         chapter_metadata_json=chapter.metadata_json,
-        pending_source_count=source_change_state.pending_source_count,
-        removed_source_count=source_change_state.removed_source_count,
-    )
-
-
-async def generate_chapter_draft(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftGenerateRequest,
-    ai_client: AITextClient | None = None,
-    allow_admin: bool = False,
-) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        allow_admin=allow_admin,
-    )
-    _require_confirmed_plan(chapter)
-    existing = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    source_change_state = await _chapter_source_change_state(db, chapter=chapter)
-    pending_source_ids = source_change_state.pending_source_ids
-    removed_source_ids = source_change_state.removed_source_ids
-    if (
-        existing
-        and existing.versions
-        and not req.force_regenerate
-        and not pending_source_ids
-        and not removed_source_ids
-    ):
-        return _draft_response(
-            existing,
-            chapter_metadata_json=chapter.metadata_json,
-            pending_source_count=source_change_state.pending_source_count,
-            removed_source_count=source_change_state.removed_source_count,
-        )
-
-    draft_input = await build_chapter_draft_input(
-        db,
-        project_id=project_id,
-        chapter=chapter,
-        source_change_state=source_change_state,
-    )
-    removed_sources = await _removed_chapter_sources(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        removed_source_ids=removed_source_ids,
-    )
-    chapter_card = await _ready_chapter_card_context(db, project_id=project_id, chapter_id=chapter.id)
-    client = ai_client
-    try:
-        if client is None:
-            client = get_ai_service(req.ai_model)
-        previous_content = (
-            existing.versions[-1].content
-            if existing and existing.versions
-            else None
-        )
-
-        async def event_cluster_provider():
-            return await get_or_build_chapter_event_clusters(
-                db,
-                client=client,
-                chapter=chapter,
-                sources=draft_input.narrative_sources,
-            )
-
-        generated = await generate_chapter_draft_text(
-            client,
-            chapter=chapter,
-            draft_input=draft_input,
-            feedback=req.feedback,
-            previous_content=previous_content,
-            pending_source_utterance_ids=pending_source_ids,
-            removed_sources=removed_sources,
-            chapter_card=chapter_card,
-            event_cluster_provider=event_cluster_provider,
-            force_regenerate=req.force_regenerate,
-        )
-    except HTTPException as exc:
-        if exc.status_code < 500:
-            raise
-        logger.exception("AI memoir chapter draft failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE) from exc
-    except Exception as exc:
-        logger.exception("AI memoir chapter draft failed provider=%s", getattr(client, "provider_name", "unknown"))
-        raise HTTPException(status_code=503, detail=AI_BOOK_DRAFT_UNAVAILABLE_MESSAGE) from exc
-
-    return await _append_version(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        content=generated.content,
-        created_by=MemoirCreatedBy.AI,
-        model=getattr(client, "model_name", req.ai_model),
-        prompt_snapshot=generated.prompt_snapshot,
-        feedback=req.feedback,
-        chapter=chapter,
-        clear_source_assignment_state=True,
-    )
-
-
-async def update_chapter_draft(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftUpdateRequest,
-    allow_admin: bool = False,
-) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        allow_admin=allow_admin,
-    )
-    _require_confirmed_plan(chapter)
-    return await _append_version(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        content=req.content,
-        created_by=MemoirCreatedBy.USER,
-        model=None,
-        prompt_snapshot="",
-        chapter=chapter,
-        clear_source_assignment_state=True,
+        pending_source_count=changes.pending_source_count,
+        removed_source_count=changes.removed_source_count,
     )
 
 
@@ -510,29 +202,54 @@ async def confirm_chapter_draft(
         allow_admin=allow_admin,
     )
     _require_confirmed_plan(chapter)
-    source_change_state = await _chapter_source_change_state(db, chapter=chapter)
-    if source_change_state.pending_source_ids:
-        raise HTTPException(status_code=400, detail="请先补写新增来源")
+    changes = await chapter_source_change_state(db, chapter=chapter)
+    if changes.pending_source_ids or changes.removed_source_ids:
+        raise HTTPException(status_code=400, detail="请先在章节工作台重新组装正文")
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not draft or not draft.versions:
+    if draft is None or not draft.versions:
         raise HTTPException(status_code=400, detail="章节稿为空，无法确认")
+    latest = max(
+        draft.versions,
+        key=lambda item: (item.version, item.created_at, item.id),
+    )
+    if not [
+        item
+        for item in (latest.block_snapshot_json or [])
+        if isinstance(item, dict)
+    ]:
+        raise HTTPException(status_code=400, detail="请先在章节工作台组装结构化正文")
+    try:
+        await assert_chapter_draft_snapshot_current(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            block_snapshot=latest.block_snapshot_json,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="正文块在组装后发生变化，请重新组装本章",
+        ) from exc
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
-    draft.metadata_json = _metadata_without_keys(
+    draft.metadata_json = metadata_without_keys(
         draft.metadata_json,
         {DRAFT_STATUS_REASON_KEY, REMOVED_SOURCE_UTTERANCE_IDS_KEY},
     )
-    chapter.metadata_json = _metadata_without_keys(chapter.metadata_json, _source_change_metadata_keys())
+    chapter.metadata_json = metadata_without_keys(
+        chapter.metadata_json,
+        source_change_metadata_keys(),
+    )
     db.add(chapter)
-    await _mark_chapter_sources_merged(
+    await mark_chapter_sources_merged(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
-        draft_version_id=draft.versions[-1].id,
+        draft_version_id=latest.id,
         include_removed=True,
     )
     await db.commit()
     refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not refreshed:
+    if refreshed is None:
         raise HTTPException(status_code=500, detail="章节稿确认失败")
     return _draft_response(
         refreshed,
@@ -561,9 +278,12 @@ async def synthesize_chapter_draft_audio(
     )
     _require_confirmed_plan(chapter)
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if not draft or not draft.versions:
+    if draft is None or not draft.versions:
         raise HTTPException(status_code=400, detail="章节稿为空，无法朗读")
-    latest = draft.versions[-1]
+    latest = max(
+        draft.versions,
+        key=lambda item: (item.version, item.created_at, item.id),
+    )
     text = latest.content.strip()
     text_hash = source_text_hash(text)
     speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
@@ -577,7 +297,6 @@ async def synthesize_chapter_draft_audio(
     )
     if cached:
         return cached
-
     synthesis = await synthesize_text_audio(
         db,
         user_id=user_id,
@@ -590,7 +309,11 @@ async def synthesize_chapter_draft_audio(
         draft.metadata_json = {
             **(draft.metadata_json or {}),
             CHAPTER_TTS_CACHE_KEY: {
-                **audio_cache_payload(synthesis, voice=req.voice, speed_ratio=speed_ratio),
+                **audio_cache_payload(
+                    synthesis,
+                    voice=req.voice,
+                    speed_ratio=speed_ratio,
+                ),
                 "draft_version_id": latest.id,
                 "chapter_id": chapter.id,
             },
@@ -599,6 +322,6 @@ async def synthesize_chapter_draft_audio(
         await db.commit()
     except Exception:
         await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
+        discard_staged_audio_files(synthesis)
         raise
     return audio_response(synthesis)

@@ -26,11 +26,6 @@ from app.schemas.memoir_book import (
 )
 from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_auto_revision import (
-    remember_project_ai_model as _remember_project_ai_model,
-    schedule_chapter_auto_revision as _schedule_chapter_auto_revision,
-    schedule_chapter_auto_revisions as _schedule_chapter_auto_revisions,
-)
 from app.services.memoir.book_plan_sources import (
     NEW_SOURCES_ASSIGNED_STATUS_REASON,
     SOURCES_CHANGED_STATUS_REASON,
@@ -57,6 +52,10 @@ from app.services.memoir.chapter_source_links import (
     ChapterSourceAssignmentMetadata,
     sync_plan_chapter_source_links as _sync_plan_chapter_source_links,
 )
+from app.services.memoir.project_ai_preferences import (
+    remember_project_ai_model as _remember_project_ai_model,
+)
+from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 from app.services.memoir.source_disposition import CONTEXT_SOURCE_ROUTE_ACTION
 
@@ -84,6 +83,11 @@ async def _mark_chapter_drafts_sources_changed(
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
         draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
         db.add(draft)
+    await draft_blocks.mark_chapter_blocks_stale(
+        db,
+        project_id=project_id,
+        chapter_ids=chapter_ids,
+    )
 
 
 async def get_book_source_coverage(
@@ -258,12 +262,6 @@ async def assign_book_sources_to_chapters(
                     NEW_SOURCES_ASSIGNED_STATUS_REASON,
                 )
                 db.add(draft)
-        await _schedule_chapter_auto_revisions(
-            db,
-            project_id=project_id,
-            chapter_ids=affected_chapter_ids,
-            ai_model=req.ai_model,
-        )
 
     await db.commit()
     refreshed = await _load_plan(db, project_id)
@@ -349,12 +347,6 @@ async def move_book_source_between_chapters(
         db,
         project_id=project_id,
         chapter_ids={source_chapter.id, target_chapter.id},
-    )
-    await _schedule_chapter_auto_revision(
-        db,
-        project_id=project_id,
-        chapter_id=target_chapter.id,
-        ai_model=req.ai_model,
     )
     await db.flush()
     await _sync_plan_chapter_source_links(
@@ -443,12 +435,6 @@ async def remove_book_sources_from_chapter(
         source_refs_by_chapter=refs_by_chapter,
         assigned_by=MemoirChapterSourceAssignedBy.USER,
         assignment_reason="manual_source_remove",
-    )
-    await _schedule_chapter_auto_revision(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        ai_model=req.ai_model,
     )
     await db.commit()
     refreshed = await _load_plan(db, project_id)

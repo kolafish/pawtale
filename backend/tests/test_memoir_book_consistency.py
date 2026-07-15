@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 import json
 from types import SimpleNamespace
 
@@ -48,7 +48,6 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookOutput,
-    MemoirBookOutputVersion,
 )
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -336,6 +335,15 @@ async def _create_ready_structured_book(
             )
         ],
     )
+    await draft_blocks.confirm_block(
+        test_db,
+        project_id=project_id,
+        block_id=block.id,
+        expected_current_version_id=str(block.current_version_id),
+        actor_user_id=user_id,
+        idempotency_key=f"test-confirm:{block.id}:{block.current_version_id}",
+        reason="测试用户已核对本段正文。",
+    )
     await test_db.commit()
     assembled_chapter = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/draft-blocks/assemble"
@@ -353,11 +361,15 @@ async def _create_ready_structured_book(
     assembled_book = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble-from-draft-blocks"
     )
+    if plan_status != MemoirBookPlanStatus.CONFIRMED:
+        assert assembled_book.status_code == 409, assembled_book.text
+        assert assembled_book.json()["detail"] == "请先确认全书章节目录"
+        return project_id, user_id, block
     assert assembled_book.status_code == 200, assembled_book.text
     return project_id, user_id, block
 
 
-async def test_structured_book_can_assemble_from_a_draft_plan(client, test_db):
+async def test_structured_book_requires_a_confirmed_plan(client, test_db):
     project_id, _, _ = await _create_ready_structured_book(
         client,
         test_db,
@@ -367,14 +379,7 @@ async def test_structured_book_can_assemble_from_a_draft_plan(client, test_db):
     output = await test_db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
-    assert output is not None
-    output_version = await test_db.scalar(
-        select(MemoirBookOutputVersion).where(
-            MemoirBookOutputVersion.output_id == output.id
-        )
-    )
-    assert output_version is not None
-    assert output_version.chapter_snapshot_json
+    assert output is None
 
 
 async def test_current_full_audit_is_required_before_formalizing_and_edits_reopen_draft(

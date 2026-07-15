@@ -197,9 +197,9 @@
           <button
             class="secondary-action strong"
             loading="{{assemblingDraft}}"
-            disabled="{{assemblingDraft || editingBlockId || revisionBlockId || !draftBlocks.length}}"
+            disabled="{{assemblingDraft || editingBlockId || revisionBlockId || !canAssembleDraft}}"
             bindtap="assembleChapterDraft"
-          >保存章节稿</button>
+          >确认本章正文</button>
         </view>
       </view>
 

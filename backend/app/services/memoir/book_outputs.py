@@ -26,7 +26,6 @@ from app.schemas.memoir_book import (
     MemoirBookAudioResponse,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
-    MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
@@ -49,34 +48,34 @@ from app.services.memoir.book_output_manuscript import (
     apply_editorial_copy as _apply_editorial_copy,
     chapter_id_set as _chapter_id_set,
     cover_style as _cover_style,
-    effective_book_metadata as _effective_book_metadata,
     fallback_title_suggestions as _fallback_title_suggestions,
     formal_book_title as _formal_book_title,
-    manuscript_from_snapshot as _manuscript_from_snapshot,
     manuscript_response as _manuscript_response,
     positive_int as _positive_int,
     request_book_metadata_patch as _request_book_metadata_patch,
     safe_str as _safe_str,
     stored_cover_style as _stored_cover_style,
-    stored_manuscript_metadata as _stored_manuscript_metadata,
     structured_content_response as _structured_content_response,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
     updated_manuscript_payload as _updated_manuscript_payload,
 )
+from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
     render_book_output_export,
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
-from app.services.memoir.image_assets import manuscript_image_snapshots
 from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir.project_ai_preferences import (
+    project_ai_model as _project_ai_model,
+    remember_project_ai_model as _remember_project_ai_model,
+)
 from app.services.memoir.voice_tts_types import TTSClient
 
 
 BOOK_TTS_CACHE_KEY = "book_tts"
-AI_MODEL_METADATA_KEY = "ai_model"
 SNAPSHOT_COMPARE_KEYS = (
     "chapter_id",
     "chapter_title",
@@ -86,29 +85,6 @@ SNAPSHOT_COMPARE_KEYS = (
     "draft_version",
     "content_char_count",
 )
-
-
-def _project_ai_model(project: object) -> str | None:
-    metadata = getattr(project, "metadata_json", None)
-    if not isinstance(metadata, dict):
-        return None
-    value = metadata.get(AI_MODEL_METADATA_KEY)
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
-def _remember_project_ai_model(project: object, ai_model: str | None) -> None:
-    model = (ai_model or "").strip()
-    if not model:
-        return
-    metadata = getattr(project, "metadata_json", None)
-    setattr(
-        project,
-        "metadata_json",
-        {
-            **(metadata if isinstance(metadata, dict) else {}),
-            AI_MODEL_METADATA_KEY: model,
-        },
-    )
 
 
 def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
@@ -232,7 +208,7 @@ def _compose_book_content(
         content = version.content.strip()
         body_parts.append(f"第{index}章 {chapter.title}\n\n{content}")
         snapshot.append(
-            _chapter_snapshot(
+            chapter_snapshot(
                 chapter,
                 version,
                 chapter_index=index,
@@ -265,52 +241,6 @@ def _compose_book_content_from_snapshot(
     return (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)).strip()
 
 
-def _chapter_snapshot(
-    chapter: MemoirBookPlanChapter,
-    version: MemoirBookChapterDraftVersion,
-    *,
-    chapter_index: int,
-    source_refs: list[dict[str, object]] | None = None,
-) -> dict[str, object]:
-    content = version.content.strip()
-    refs = source_refs or []
-    source_ref_snapshot = [
-        {
-            "utterance_id": _safe_str(item.get("utterance_id")),
-            "transcript_version_id": _safe_str(item.get("transcript_version_id")) or None,
-            "voice_session_id": _safe_str(item.get("voice_session_id")) or None,
-            "quote": _safe_str(item.get("quote")),
-            "summary": _safe_str(item.get("summary")) or _safe_str(item.get("source_summary")),
-            "representative_quote": _safe_str(item.get("representative_quote")) or _safe_str(item.get("quote")),
-        }
-        for item in refs
-        if isinstance(item, dict) and _safe_str(item.get("utterance_id"))
-    ]
-    chapter_metadata = chapter.metadata_json if isinstance(chapter.metadata_json, dict) else {}
-    return {
-        "chapter_id": chapter.id,
-        "chapter_title": chapter.title,
-        "chapter_index": chapter_index,
-        "chapter_sort_order": chapter.sort_order,
-        "chapter_summary": (
-            _safe_str(chapter_metadata.get("chapter_summary"))
-            or _safe_str(chapter_metadata.get("summary"))
-            or _safe_str(chapter_metadata.get("editorial_summary"))
-        ),
-        "metadata_json": chapter_metadata,
-        "draft_id": chapter.draft.id if chapter.draft else "",
-        "draft_version_id": version.id,
-        "draft_version": version.version,
-        "block_snapshot": [
-            item for item in (version.block_snapshot_json or []) if isinstance(item, dict)
-        ],
-        "content_char_count": len(content),
-        "source_count": len(source_ref_snapshot),
-        "source_refs": source_ref_snapshot,
-        "content": content,
-    }
-
-
 def _current_book_snapshot(
     plan: MemoirBookPlan,
     *,
@@ -327,7 +257,7 @@ def _current_book_snapshot(
             unavailable_titles.append(chapter.title)
             continue
         snapshot.append(
-            _chapter_snapshot(
+            chapter_snapshot(
                 chapter,
                 version,
                 chapter_index=index,
@@ -428,133 +358,6 @@ async def get_book_output(
             source_refs_by_chapter=refs_by_chapter,
         ),
     )
-
-
-async def generate_book_output(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    req: MemoirBookOutputGenerateRequest,
-    allow_admin: bool = False,
-) -> MemoirBookOutputResponse:
-    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    plan = await _load_plan(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        allow_admin=allow_admin,
-    )
-    chapters = _require_confirmed_chapters(plan)
-    refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
-    user_title = _safe_str(req.title)
-    title = _formal_book_title(user_title or plan.title)
-    cover_style = _cover_style(req.cover_style)
-    content, snapshot = _compose_book_content(
-        title=title,
-        chapters=chapters,
-        source_refs_by_chapter=refs_by_chapter,
-    )
-    requested_ai_model = (req.ai_model or "").strip()
-    ai_model = requested_ai_model or _project_ai_model(project)
-    _remember_project_ai_model(project, req.ai_model)
-    editorial_copy = (
-        await generate_manuscript_editorial_copy(
-            title=title,
-            snapshot=snapshot,
-            ai_model=ai_model,
-        )
-        if ai_model
-        else None
-    )
-    if not user_title and editorial_copy and editorial_copy.book_title:
-        generated_title = _formal_book_title(editorial_copy.book_title)
-        if generated_title and generated_title != title:
-            title = generated_title
-            content, snapshot = _compose_book_content(
-                title=title,
-                chapters=chapters,
-                source_refs_by_chapter=refs_by_chapter,
-            )
-
-    output = await _load_output(db, project_id=project_id)
-    latest_version = output.versions[-1] if output and output.versions else None
-    metadata_patch = _request_book_metadata_patch(req)
-    book_metadata = _effective_book_metadata(
-        project=project,
-        stored=latest_version.manuscript_json if latest_version else None,
-        patch=metadata_patch,
-    )
-    stale_titles = (
-        _snapshot_stale_chapter_titles(output.versions[-1], snapshot, [])
-        if output and output.versions
-        else []
-    )
-    metadata_changed = bool(
-        latest_version
-        and metadata_patch
-        and any(_stored_manuscript_metadata(latest_version.manuscript_json or {}).get(key, "") != value for key, value in metadata_patch.items())
-    )
-    title_or_style_changed = bool(
-        output
-        and latest_version
-        and (
-            (user_title and output.title != title)
-            or (req.cover_style and _stored_cover_style(latest_version) != cover_style)
-            or metadata_changed
-        )
-    )
-    if output and output.versions and not req.force_regenerate and not stale_titles and not title_or_style_changed:
-        return _output_response(output)
-
-    if not output:
-        output = MemoirBookOutput(
-            project_id=project_id,
-            plan_id=plan.id,
-            title=title,
-            status=MemoirOutputStatus.DRAFT.value,
-            metadata_json={},
-        )
-        db.add(output)
-        await db.flush()
-    else:
-        output.plan_id = plan.id
-        output.title = title
-        invalidate_formal_book_output(output)
-        output.metadata_json = {
-            **(output.metadata_json or {}),
-            BOOK_TTS_CACHE_KEY: None,
-        }
-
-    chapter_illustrations_by_chapter, image_appendix = await manuscript_image_snapshots(db, project_id=project_id)
-    manuscript = _manuscript_from_snapshot(
-        title=title,
-        content=content,
-        snapshot=snapshot,
-        editorial_copy=editorial_copy,
-        cover_style_value=cover_style,
-        metadata=book_metadata,
-        chapter_illustrations_by_chapter=chapter_illustrations_by_chapter,
-        image_appendix=image_appendix,
-    )
-    version_number = await _latest_output_version_number(db, output.id) + 1
-    db.add(
-        MemoirBookOutputVersion(
-            output_id=output.id,
-            project_id=project_id,
-            plan_id=plan.id,
-            version=version_number,
-            content=content,
-            chapter_snapshot_json=snapshot,
-            manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
-            created_by=MemoirCreatedBy.SYSTEM.value,
-        )
-    )
-    await db.commit()
-    refreshed = await _load_output(db, project_id=project_id)
-    if not refreshed:
-        raise HTTPException(status_code=500, detail="全书稿保存失败")
-    return _output_response(refreshed)
 
 
 async def update_book_output(

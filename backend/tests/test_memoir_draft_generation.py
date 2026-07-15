@@ -1089,6 +1089,22 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
             ),
         )
 
+    with pytest.raises(ValueError, match="confirm every included draft block"):
+        await draft_assembly.assemble_chapter_draft(
+            test_db,
+            project_id=created["project_id"],
+            chapter_id=created["chapter"].id,
+        )
+    for block in blocks:
+        await draft_blocks.confirm_block(
+            test_db,
+            project_id=created["project_id"],
+            block_id=block.id,
+            expected_current_version_id=str(block.current_version_id),
+            actor_user_id=created["user_id"],
+            idempotency_key=f"test-confirm:{block.id}:{block.current_version_id}",
+            reason="test chapter assembly gate",
+        )
     first_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,
         project_id=created["project_id"],
@@ -1109,6 +1125,15 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         expected_current_version_id=str(first.current_version_id),
         content=first_version_content + " 我也第一次学会独自面对陌生环境。",
         feedback="补充这次离家带来的变化。",
+    )
+    await draft_blocks.confirm_block(
+        test_db,
+        project_id=created["project_id"],
+        block_id=first.id,
+        expected_current_version_id=str(first.current_version_id),
+        actor_user_id=created["user_id"],
+        idempotency_key=f"test-reconfirm:{first.id}:{first.current_version_id}",
+        reason="test edited block assembly gate",
     )
     second_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,

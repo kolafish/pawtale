@@ -46,6 +46,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
+from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
@@ -64,7 +65,6 @@ from app.services.memoir.book_plan_sources import (
     set_deleted_source_metadata as _set_deleted_source_metadata,
     set_source_change_metadata as _set_source_change_metadata,
 )
-from app.services.memoir.book_auto_revision import schedule_chapter_auto_revisions
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids as _source_ref_utterance_ids,
@@ -83,9 +83,9 @@ MAX_TRANSCRIPT_VERSIONS_PER_UTTERANCE_TYPE = 3
 TRANSCRIPT_FTS_MIN_TERM_LENGTH = 3
 _FILLER = r"(?:嗯+|啊+|呃+|额+|那个|这个|就是)"
 _REPEATED_FILLERS_RE = re.compile(rf"(?:{_FILLER}[\s，,、]*){{2,}}")
-_BOUNDARY_FILLER_RE = re.compile(rf"(^|[。！？!?；;，,、]\s*)(?:嗯+|啊+|呃+|额+|就是)[\s，,、]*")
+_BOUNDARY_FILLER_RE = re.compile(r"(^|[。！？!?；;，,、]\s*)(?:嗯+|啊+|呃+|额+|就是)[\s，,、]*")
 _BOUNDARY_DEICTIC_RE = re.compile(
-    rf"(^|[。！？!?；;，,、]\s*)(?:那个|这个)(?=(?:就是|就|是|那个|这个|嗯|啊|呃|额|[\s，,、]))[\s，,、]*"
+    r"(^|[。！？!?；;，,、]\s*)(?:那个|这个)(?=(?:就是|就|是|那个|这个|嗯|啊|呃|额|[\s，,、]))[\s，,、]*"
 )
 _DUPLICATE_PUNCTUATION_RE = re.compile(r"([，,。！？!?；;])\1+")
 _SPACE_RE = re.compile(r"\s+")
@@ -1021,6 +1021,11 @@ async def _sync_included_transcript_edit(
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
         draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
         db.add(draft)
+    await draft_blocks.mark_chapter_blocks_stale(
+        db,
+        project_id=project_id,
+        chapter_ids=changed_chapter_ids,
+    )
     return changed_chapter_ids
 
 
@@ -1070,13 +1075,6 @@ async def _apply_edited_text(
         source=f"transcript_{version_type.value}",
         include_routing=not changed_chapter_ids,
     )
-    if changed_chapter_ids:
-        await schedule_chapter_auto_revisions(
-            db,
-            project_id=utterance.voice_session.project_id,
-            chapter_ids=changed_chapter_ids,
-            ai_model=ai_model,
-        )
     if commit:
         await db.commit()
     inclusions = await _book_inclusions_by_utterance_ids(

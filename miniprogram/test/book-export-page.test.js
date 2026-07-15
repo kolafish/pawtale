@@ -82,8 +82,8 @@ function loadBookExportPage(voiceApiExports = {}) {
     formalizeMemoirBookOutput: async () => ({ status: "accepted" }),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
+    assembleMemoirBookDraftBlocks: async () => undefined,
     updateMemoirBookOutput: async () => sampleBookOutput(),
-    enqueueMemoirBookOutputGeneration: async () => ({ id: "event-book-output" }),
     enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
     ...voiceApiExports,
   });
@@ -467,7 +467,7 @@ test("book export page downloads reading PDF with the standard layout", async ()
   delete global.wx;
 });
 
-test("book export page submits full-book regeneration as a new version", async () => {
+test("book export page assembles confirmed blocks as a new full-book version", async () => {
   const requests = [];
   const toasts = [];
   global.wx = {
@@ -476,9 +476,12 @@ test("book export page submits full-book regeneration as a new version", async (
     },
   };
   const { page } = loadBookExportPage({
-    enqueueMemoirBookOutputGeneration: async (projectId, payload) => {
-      requests.push({ projectId, payload });
-      return { id: "event-book-output" };
+    assembleMemoirBookDraftBlocks: async (projectId) => {
+      requests.push({ kind: "assemble", projectId });
+    },
+    updateMemoirBookOutput: async (projectId, payload) => {
+      requests.push({ kind: "update", projectId, payload });
+      return sampleBookOutput();
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -486,10 +489,11 @@ test("book export page submits full-book regeneration as a new version", async (
 
   await page.generateBook.call(context);
 
-  assert.deepEqual(requests[0], {
+  assert.deepEqual(requests[0], { kind: "assemble", projectId: "project/1" });
+  assert.deepEqual(requests[1], {
+    kind: "update",
     projectId: "project/1",
     payload: {
-      force_regenerate: true,
       title: "外婆回忆录",
       subtitle: "根据口述访谈整理",
       narrator_name: "外婆",
@@ -501,7 +505,7 @@ test("book export page submits full-book regeneration as a new version", async (
     },
   });
   assert.equal(context.data.generatingBook, false);
-  assert.equal(context.data.exportNotice, "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。");
-  assert.equal(toasts[0].title, "已后台生成");
+  assert.equal(context.data.exportNotice, "已根据各章确认正文更新全书稿。");
+  assert.equal(toasts[0].title, "书稿已更新");
   delete global.wx;
 });

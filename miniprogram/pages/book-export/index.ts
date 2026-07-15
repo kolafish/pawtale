@@ -8,8 +8,8 @@ import type {
 import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
+  assembleMemoirBookDraftBlocks,
   enqueueMemoirBookConsistencyAudit,
-  enqueueMemoirBookOutputGeneration,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
   getMemoirBookConsistencyAudit,
@@ -762,14 +762,15 @@ definePage<BookExportData>()({
     const metadata = currentBookMetadataPayload(this.data, false);
     this.setData({ generatingBook: true, error: "" });
     try {
-      await enqueueMemoirBookOutputGeneration(this.data.projectId, {
-        force_regenerate: true,
+      await assembleMemoirBookDraftBlocks(this.data.projectId);
+      const output = await updateMemoirBookOutput(this.data.projectId, {
         title: trimText(this.data.bookTitleInput) || undefined,
         ...metadata,
         cover_style: this.data.bookCoverStyle,
       });
-      this.setData({ exportNotice: "已提交重新整理，当前书稿会保留；新版本完成后可在历史版本里查看。" });
-      wx.showToast({ title: "已后台生成", icon: "success" });
+      this.applyBookExportData(this.data.plan, output);
+      this.setData({ exportNotice: "已根据各章确认正文更新全书稿。" });
+      wx.showToast({ title: "书稿已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
