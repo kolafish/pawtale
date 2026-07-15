@@ -33,6 +33,10 @@ def is_ignored_non_memoir_source(utterance: MemoirVoiceUtterance) -> bool:
     return action == IGNORED_SOURCE_ROUTE_ACTION and material_type in IGNORED_SOURCE_MATERIAL_TYPES
 
 
+def is_context_only_source(utterance: MemoirVoiceUtterance) -> bool:
+    return source_route_action(utterance) == CONTEXT_SOURCE_ROUTE_ACTION
+
+
 def is_countable_source_utterance(utterance: MemoirVoiceUtterance, text: str | None = None) -> bool:
     if text is None:
         text = (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()

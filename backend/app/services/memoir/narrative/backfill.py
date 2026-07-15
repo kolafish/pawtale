@@ -14,6 +14,7 @@ from app.services.memoir.narrative.ingestion_jobs import (
 )
 from app.services.memoir.source_disposition import (
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
+    is_context_only_source,
     is_ignored_non_memoir_source,
 )
 
@@ -78,6 +79,7 @@ async def run_narrative_ingestion_backfill(
     skipped_existing = 0
     skipped_without_version = 0
     skipped_ignored = 0
+    skipped_context = 0
     max_candidates = None if limit is None else max(0, limit)
     for utterance, current_project_id in rows:
         if max_candidates is not None and len(candidates) >= max_candidates:
@@ -92,6 +94,9 @@ async def run_narrative_ingestion_backfill(
         )
         if dedupe_key in completed_or_active_job_keys:
             skipped_existing += 1
+            continue
+        if is_context_only_source(utterance):
+            skipped_context += 1
             continue
         if (
             is_ignored_non_memoir_source(utterance)
@@ -124,6 +129,7 @@ async def run_narrative_ingestion_backfill(
         "candidate_count": len(candidates),
         "skipped_without_version_count": skipped_without_version,
         "skipped_ignored_count": skipped_ignored,
+        "skipped_context_count": skipped_context,
         "skipped_existing_job_count": skipped_existing,
         "enqueued_count": len(job_ids),
         "editing_job_ids": job_ids,

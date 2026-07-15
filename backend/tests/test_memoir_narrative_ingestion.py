@@ -833,6 +833,31 @@ async def test_ingestion_job_skips_stale_transcript_without_calling_ai(client, t
     assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
 
 
+async def test_ingestion_job_skips_source_reclassified_as_context_only(client, test_db):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="他们是同一个人。",
+    )
+    project, utterance, _version = await _load_source(test_db, created)
+    job = await schedule_narrative_ingestion_job(
+        test_db,
+        project_id=project.id,
+        utterance=utterance,
+        source="before_source_review",
+    )
+    assert job is not None
+    utterance.source_material_type = "memoir_content"
+    utterance.source_route_action = "record_as_context"
+    await test_db.flush()
+
+    result = await run_narrative_ingestion_job(test_db, job)
+
+    assert result.status == MemoirEditingJobStatus.SKIPPED
+    assert result.error_message == "narrative ingestion source is context only"
+    assert await test_db.scalar(select(func.count()).select_from(MemoirClaim)) == 0
+
+
 async def test_ingestion_scheduler_retries_failures_but_keeps_success_idempotent(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
     project, utterance, _version = await _load_source(test_db, created)
@@ -1267,3 +1292,35 @@ async def test_backfill_dry_run_does_not_write_and_execute_only_queues(client, t
     )
     assert completed["candidate_count"] == 0
     assert completed["skipped_existing_job_count"] == 1
+
+
+async def test_context_only_followup_answer_is_not_narrative_ingestion_candidate(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="他们是同一个人，这句话只用于纠正前文人物关系。",
+    )
+    project, utterance, _version = await _load_source(test_db, created)
+    utterance.source_material_type = "memoir_content"
+    utterance.source_route_action = "record_as_context"
+    await test_db.commit()
+
+    scheduled = await schedule_narrative_ingestion_job(
+        test_db,
+        project_id=project.id,
+        utterance=utterance,
+        source="followup_answer_confirmed",
+    )
+    report = await run_narrative_ingestion_backfill(
+        test_db,
+        project_id=project.id,
+        dry_run=True,
+    )
+
+    assert scheduled is None
+    assert report["candidate_count"] == 0
+    assert report["skipped_context_count"] == 1
+    assert await test_db.scalar(select(func.count()).select_from(MemoirEditingJob)) == 0

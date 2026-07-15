@@ -19,6 +19,7 @@ from app.services.memoir.narrative.ingestion import (
     ingest_transcript_version,
     transcript_text_hash,
 )
+from app.services.memoir.source_disposition import is_context_only_source
 
 
 def narrative_ingestion_dedupe_key(
@@ -83,6 +84,8 @@ async def schedule_narrative_ingestion_job(
     source: str,
     ai_model: str | None = None,
 ) -> MemoirEditingJob | None:
+    if is_context_only_source(utterance):
+        return None
     transcript_version_id = (
         utterance.chat_message.transcript_version_id
         if utterance.chat_message
@@ -158,6 +161,12 @@ async def run_narrative_ingestion_job(
             error_message="narrative ingestion source unavailable",
         )
     project, utterance, version = loaded
+    if is_context_only_source(utterance):
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={"utterance_id": utterance.id},
+            error_message="narrative ingestion source is context only",
+        )
     current_version_id = (
         utterance.chat_message.transcript_version_id
         if utterance.chat_message
