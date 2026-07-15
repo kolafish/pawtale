@@ -539,6 +539,8 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
     assert "先看整章是否缺少进入本章所需的背景" in prompt
     assert "不能仅因为事件简短" in prompt
     assert "最多输出 3 个问题" in prompt
+    assert "纯事件前因后果类 causality 最多一个" in prompt
+    assert "禁止套用" in prompt
 
     payload = """{
       "schema_version": "1",
@@ -566,3 +568,59 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
     assert gap_audit.chapter_gap_audit_content_signature(
         context
     ) != gap_audit.chapter_gap_audit_content_signature(changed_context)
+
+
+async def test_semantic_gap_audit_keeps_one_question_per_editorial_dimension():
+    context = _semantic_context()
+    payload = """{
+      "schema_version": "1",
+      "gaps": [
+        {
+          "gap_type": "causality",
+          "severity": "medium",
+          "dimension": "causality",
+          "title": "离家原因不清楚",
+          "description": "读者不知道为什么离家。",
+          "story_ids": ["story-1"],
+          "claim_ids": ["claim-1"]
+        },
+        {
+          "gap_type": "causality",
+          "severity": "medium",
+          "dimension": "causality",
+          "title": "到校经过不清楚",
+          "description": "读者不知道怎样到校。",
+          "story_ids": ["story-1"],
+          "claim_ids": ["claim-1"]
+        },
+        {
+          "gap_type": "causality",
+          "severity": "medium",
+          "dimension": "opening",
+          "title": "开头进入得太突然",
+          "description": "章节直接写离家，没有进入场景。",
+          "story_ids": ["story-1"],
+          "claim_ids": ["claim-1"]
+        },
+        {
+          "gap_type": "relationship",
+          "severity": "medium",
+          "dimension": "person_introduction",
+          "title": "陪同者没有介绍",
+          "description": "关键人物首次出现时身份不清楚。",
+          "story_ids": ["story-1"],
+          "claim_ids": ["claim-1"]
+        }
+      ]
+    }"""
+
+    candidates, _, _ = await gap_semantic.evaluate_semantic_gaps(
+        context,
+        ai_client=FakeAIClient(payload),
+    )
+
+    assert [candidate.target_slot.split(":", 2)[1] for candidate in candidates] == [
+        "causality",
+        "opening",
+        "person_introduction",
+    ]

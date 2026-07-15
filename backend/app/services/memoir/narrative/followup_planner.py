@@ -46,10 +46,11 @@ from app.models.memoir_narrative import (
     MemoirStorySlotClaim,
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
+from app.services.memoir.narrative import gaps as gap_service
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "5"
+FOLLOWUP_PLANNER_VERSION = "6"
 NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
@@ -98,6 +99,43 @@ class FollowupPromptContext:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def _semantic_task_leaders(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> dict[str, MemoirFollowupTask]:
+    status_rank = {
+        MemoirFollowupTaskStatus.IN_PROGRESS.value: 0,
+        MemoirFollowupTaskStatus.ANSWERED.value: 1,
+        MemoirFollowupTaskStatus.CANNOT_RECALL.value: 1,
+        MemoirFollowupTaskStatus.EXCLUDED.value: 1,
+        MemoirFollowupTaskStatus.PENDING.value: 2,
+        MemoirFollowupTaskStatus.DEFERRED.value: 3,
+    }
+    tasks = list(
+        (
+            await db.scalars(
+                select(MemoirFollowupTask).where(
+                    MemoirFollowupTask.project_id == project_id,
+                    MemoirFollowupTask.target_slot.like("semantic:%"),
+                    MemoirFollowupTask.status.in_(tuple(status_rank)),
+                )
+            )
+        ).all()
+    )
+    leaders: dict[str, MemoirFollowupTask] = {}
+    for task in sorted(
+        tasks,
+        key=lambda item: (
+            status_rank[item.status],
+            item.created_at,
+            item.id,
+        ),
+    ):
+        leaders.setdefault(task.target_slot, task)
+    return leaders
 
 
 def _gap_story_id(gap: MemoirNarrativeGap) -> str | None:
@@ -527,6 +565,10 @@ async def generate_followup_tasks(
             )
         ).all()
     } if gaps else {}
+    semantic_task_leaders = await _semantic_task_leaders(
+        db,
+        project_id=project_id,
+    )
     missing_slot_leaders: dict[str, str] = {}
     narration_tasks = list(
         (
@@ -647,6 +689,27 @@ async def generate_followup_tasks(
                     claim_roles.setdefault(claim_id, MemoirFollowupTaskClaimRole.DO_NOT_REPEAT)
 
         existing = existing_tasks.get(gap.id)
+        semantic_target = gap.target_slot if _semantic_dimension(gap) else ""
+        semantic_leader = semantic_task_leaders.get(semantic_target)
+        if semantic_leader is not None and semantic_leader.gap_id != gap.id:
+            skipped.append(gap.id)
+            if (
+                existing is not None
+                and existing.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+            ):
+                # Do not invalidate a voice session while the user is answering it.
+                continue
+            await gap_service.resolve_gap_by_system(
+                db,
+                project_id=project_id,
+                gap_id=gap.id,
+                idempotency_key=(
+                    f"semantic-gap-duplicate:{FOLLOWUP_PLANNER_VERSION}:"
+                    f"{gap.id}:{semantic_leader.id}:{gap.detection_count}"
+                ),
+                note=gap_service.SEMANTIC_DUPLICATE_RESOLUTION_NOTE,
+            )
+            continue
         is_story_narration = bool(
             story
             and gap_type == MemoirNarrativeGapType.MISSING_SLOT
@@ -756,6 +819,8 @@ async def generate_followup_tasks(
             db.add(task)
             updated.append(task.id)
         await _sync_task_claims(db, task=task, claim_roles=claim_roles)
+        if semantic_target:
+            semantic_task_leaders.setdefault(semantic_target, task)
     await db.flush()
     return FollowupGenerationResult(tuple(created), tuple(updated), tuple(skipped))
 

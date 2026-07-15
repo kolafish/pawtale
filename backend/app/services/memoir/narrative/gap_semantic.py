@@ -165,6 +165,8 @@ input:
 
 约束：
 - 最多输出 3 个问题，按“最影响读者理解且一次补充能明显改善”的价值从高到低排序；宁缺毋滥。
+- 同一 dimension 最多输出一个问题；纯事件前因后果类 causality 最多一个，不能让三个问题都变成事件细节追问。
+- title 和 description 必须点明本章具体哪里影响理解，禁止套用“在哪里发生、怎么开始、怎么结束”的通用采访模板。
 - 一本回忆录可以有意对次要事件一笔带过。不能仅因为事件简短、没有完整起因经过结果，就要求继续展开。
 - opening、closing、chapter_context、chapter_focus、transition、list_style 使用 causality gap_type；person_introduction、relationship_clarity 使用 relationship；reference 使用 unclear_reference。
 - draft_blocks 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有 draft_blocks 时才主要依据结构与 Story 摘要。
@@ -200,7 +202,8 @@ def _validated_candidates(
         and not claim.superseded_by_claim_id
     }
     candidates: list[MemoirNarrativeGapCandidate] = []
-    for item in output.gaps[:SEMANTIC_GAP_LIMIT]:
+    selected_dimensions: set[str] = set()
+    for item in output.gaps:
         if item.gap_type not in SEMANTIC_GAP_TYPES:
             raise ValueError("semantic audit returned a deterministic-only gap type")
         if item.gap_type != SEMANTIC_DIMENSION_GAP_TYPES[item.dimension]:
@@ -215,6 +218,8 @@ def _validated_candidates(
             raise ValueError("semantic contradiction requires at least two Claims")
         if item.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT and not claim_ids:
             raise ValueError("semantic unsupported fact requires a Claim")
+        if item.dimension in selected_dimensions:
+            continue
         story_ids.update(
             story_id
             for story_id, links in context.story_claims.items()
@@ -257,6 +262,9 @@ def _validated_candidates(
                 },
             )
         )
+        selected_dimensions.add(item.dimension)
+        if len(candidates) >= SEMANTIC_GAP_LIMIT:
+            break
     return candidates
 
 

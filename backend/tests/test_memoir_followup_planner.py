@@ -644,6 +644,74 @@ async def test_semantic_followup_task_preserves_gap_target_slot(client, test_db)
     assert task.answer_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value
 
 
+async def test_semantic_followup_target_is_only_asked_in_one_chapter(client, test_db):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    second_chapter = MemoirBookPlanChapter(
+        plan_id=fixture["chapter"].plan_id,
+        project_id=fixture["project_id"],
+        title="比赛后的回望",
+        sort_order=fixture["chapter"].sort_order + 1,
+    )
+    test_db.add(second_chapter)
+    await test_db.flush()
+    semantic_target = "semantic:chapter_context:shared-story-evidence"
+    semantic_gaps, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=fixture["project_id"],
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapter.id,
+                gap_type=MemoirNarrativeGapType.CAUSALITY,
+                severity=MemoirNarrativeGapSeverity.MEDIUM,
+                target_slot=semantic_target,
+                title="比赛前的背景还不清楚",
+                description="需要交代这场比赛为何重要。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+                story_roles={
+                    fixture["story"].id: MemoirNarrativeGapRelationRole.INVOLVED,
+                },
+            )
+            for chapter in (fixture["chapter"], second_chapter)
+        ],
+    )
+    await test_db.commit()
+
+    result = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+    )
+    await test_db.commit()
+    rerun = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+    )
+    await test_db.commit()
+
+    semantic_tasks = list(
+        (
+            await test_db.scalars(
+                select(MemoirFollowupTask).where(
+                    MemoirFollowupTask.project_id == fixture["project_id"],
+                    MemoirFollowupTask.target_slot == semantic_target,
+                    MemoirFollowupTask.status.in_(
+                        [status.value for status in followup_tasks.ACTIVE_TASK_STATUSES]
+                    ),
+                )
+            )
+        ).all()
+    )
+    assert len(semantic_tasks) == 1
+    duplicate_gap = next(
+        gap for gap in semantic_gaps if gap.id != semantic_tasks[0].gap_id
+    )
+    await test_db.refresh(duplicate_gap)
+    assert duplicate_gap.status == MemoirNarrativeGapStatus.RESOLVED.value
+    assert duplicate_gap.resolution_note == gaps.SEMANTIC_DUPLICATE_RESOLUTION_NOTE
+    assert duplicate_gap.id in result.skipped_gap_ids
+    assert rerun.created_task_ids == ()
+
+
 async def test_required_framing_node_does_not_promote_its_supporting_story(
     client,
     test_db,
