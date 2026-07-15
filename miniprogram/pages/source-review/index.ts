@@ -74,7 +74,7 @@ const EMPTY_MIXED_PARTS: MixedAnswerParts = {
 const CHOICES: AnswerChoice[] = [
   {
     kind: "direct_narrative",
-    title: "补充一段经历",
+    title: "作为正文素材",
     detail: "这段话可以直接写进章节正文",
   },
   {

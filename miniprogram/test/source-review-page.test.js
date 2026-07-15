@@ -78,6 +78,7 @@ test("source review page confirms the full answer as clarification", async () =>
   await page.onLoad.call(context, { projectId: "project-1", eventId: "event-1" });
   assert.equal(context.data.questionText, "这段话要写进书里，还是只用于解释原文？");
   assert.equal(context.data.sourceText, reviewItem().source_text);
+  assert.equal(context.data.choices[0].title, "作为正文素材");
 
   page.selectAnswerKind.call(context, {
     currentTarget: { dataset: { kind: "clarification" } },

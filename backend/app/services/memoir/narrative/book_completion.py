@@ -31,6 +31,7 @@ _FAILED_JOB_STATUSES = {
     MemoirEditingJobStatus.FAILED.value,
     MemoirEditingJobStatus.SKIPPED.value,
 }
+_INTERVIEW_GUIDANCE = "围绕这个方向讲您记得的内容，不必逐项作答。"
 
 
 @dataclass(frozen=True)
@@ -48,8 +49,6 @@ def _response(
     headline: str,
     detail: str,
     task_id: str | None = None,
-    item_id: str | None = None,
-    item_kind: str | None = None,
     chapter_id: str | None = None,
 ) -> MemoirBookCompletionResponse:
     return MemoirBookCompletionResponse(
@@ -59,8 +58,6 @@ def _response(
         headline=headline,
         detail=detail,
         task_id=task_id,
-        item_id=item_id,
-        item_kind=item_kind,
         chapter_id=chapter_id,
     )
 
@@ -123,8 +120,8 @@ def _audit_problem(
             project_id,
             state="preparing",
             action="wait",
-            headline="正在整理下一件要补的事",
-            detail=f"正在查看“{preparation.chapter.title}”，整理好后会直接显示一个问题。",
+            headline="正在整理下一处值得补充的内容",
+            detail=f"正在查看“{preparation.chapter.title}”，整理好后会显示一个优先方向。",
             chapter_id=preparation.chapter.id,
         )
     if job is None:
@@ -132,8 +129,8 @@ def _audit_problem(
             project_id,
             state="needs_preparation",
             action="prepare",
-            headline="先整理下一件要补的事",
-            detail="系统会根据现有书稿找出一个最值得补充的问题。",
+            headline="先整理下一处值得补充的内容",
+            detail="系统会根据现有书稿找出一个最值得优先补充的方向。",
             chapter_id=preparation.chapter.id,
         )
     return None
@@ -250,13 +247,10 @@ async def _chapter_completion_status(
             title=chapter.title,
             sort_order=chapter.sort_order,
             state="in_progress",
-            headline="这一章有一段正在补充",
+            headline="这一章有一个方向正在补充",
             detail="可以回到刚才的语音访谈继续讲。",
-            remaining_count=len(interview_items),
-            focus_areas=[item.question for item in interview_items[:3]],
+            focus_areas=[in_progress.question],
             task_id=in_progress.task_id,
-            item_id=in_progress.id,
-            item_kind=in_progress.kind.value,
             active_session_id=in_progress.active_session_id,
         )
 
@@ -275,17 +269,14 @@ async def _chapter_completion_status(
             title=chapter.title,
             sort_order=chapter.sort_order,
             state="ready",
-            headline=("有一段经历留到以后再补" if deferred else "还有一段重要经历值得补充"),
+            headline=("有一个补充方向留到以后" if deferred else "还有一个重要方向值得补充"),
             detail=(
                 "准备好后，可以从这里继续。"
                 if deferred
-                else "先讲完整经过，不需要逐个回答细节。"
+                else _INTERVIEW_GUIDANCE
             ),
-            remaining_count=len(interview_items),
-            focus_areas=[candidate.question for candidate in interview_items[:3]],
+            focus_areas=[item.question],
             task_id=item.task_id,
-            item_id=item.id,
-            item_kind=item.kind.value,
         )
 
     if any(item.requires_manual_review for item in items):
@@ -403,10 +394,8 @@ async def prepare_book_completion_chapter(
             state="in_progress",
             action="start_interview",
             headline=in_progress.question,
-            detail="先讲完整经过，不需要逐个回答细节。",
+            detail=_INTERVIEW_GUIDANCE,
             task_id=in_progress.task_id,
-            item_id=in_progress.id,
-            item_kind=in_progress.kind.value,
             chapter_id=chapter.id,
         )
 
@@ -425,7 +414,7 @@ async def prepare_book_completion_chapter(
             state="preparing",
             action="wait",
             headline="正在查看本章还缺什么",
-            detail="整理完成后，这里会显示最值得补充的一段经历。",
+            detail="整理完成后，这里会显示最值得优先补充的方向。",
             chapter_id=chapter.id,
         )
     if audit_job.status in _ACTIVE_JOB_STATUSES:
@@ -492,10 +481,8 @@ async def prepare_book_completion_chapter(
             state="ready",
             action="start_interview",
             headline=item.question,
-            detail="先讲完整经过，不需要逐个回答细节。",
+            detail=_INTERVIEW_GUIDANCE,
             task_id=item.task_id,
-            item_id=item.id,
-            item_kind=item.kind.value,
             chapter_id=chapter.id,
         )
 

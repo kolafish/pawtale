@@ -44,7 +44,7 @@ type ChapterTapEvent = PageDatasetEvent<ChapterDataset>;
 
 function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: string): ChapterView {
   const stateCopy = {
-    ready: "可以补充",
+    ready: "值得补充",
     in_progress: "正在补充",
     preparing: "正在整理",
     needs_preparation: "等待整理",
@@ -53,7 +53,7 @@ function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: stri
     failed: "整理未完成",
   }[item.state];
   const actionText = {
-    ready: "查看补全方向",
+    ready: "查看补全建议",
     in_progress: "继续刚才的讲述",
     preparing: "正在整理",
     needs_preparation: "整理这一章",

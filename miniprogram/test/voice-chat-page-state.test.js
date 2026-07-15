@@ -197,6 +197,7 @@ test("book completion renders one task question without disabling unrelated reco
   });
 
   assert.equal(patch.showCompletionTaskPanel, true);
+  assert.equal(patch.topSubtitle, "一次只补一个重点");
   assert.equal(patch.showAssistantPanel, true);
   assert.equal(patch.showAssistantOpening, false);
   assert.equal(patch.assistantDisplayText, "模型生成的另一个问法");

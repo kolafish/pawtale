@@ -46,7 +46,6 @@ export type MemoirBookCompletionAction =
   | "wait"
   | "prepare"
   | "open_chapter"
-  | "open_book"
   | "retry"
   | "none";
 
@@ -67,7 +66,6 @@ export interface MemoirBookCompletionChapter {
   state: MemoirBookCompletionState;
   headline: string;
   detail: string;
-  remaining_count: number;
   focus_areas: string[];
   task_id?: string | null;
   active_session_id?: string | null;

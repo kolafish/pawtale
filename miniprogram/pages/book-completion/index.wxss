@@ -44,6 +44,7 @@
   color: #665d57;
   font-size: 28rpx;
   line-height: 42rpx;
+  text-wrap: pretty;
 }
 
 .progress-text {
@@ -100,6 +101,7 @@
   font-size: 38rpx;
   font-weight: 700;
   line-height: 50rpx;
+  text-wrap: balance;
 }
 
 .chapter-headline {
@@ -114,6 +116,7 @@
   color: #6f655f;
   font-size: 26rpx;
   line-height: 40rpx;
+  text-wrap: pretty;
 }
 
 .focus-list {
@@ -134,6 +137,7 @@
   margin-top: 8rpx;
   font-size: 27rpx;
   line-height: 42rpx;
+  text-wrap: pretty;
 }
 
 .chapter-action {

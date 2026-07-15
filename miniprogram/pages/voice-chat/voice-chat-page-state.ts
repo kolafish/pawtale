@@ -541,7 +541,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
     finishButtonText: state.finishingSession ? "保存中" : "保存离开",
     topModeLabel: isBookCompletion ? (isHumanInterview ? "人工补访" : "补全成书") : (isHumanInterview ? "人工访谈" : "AI 访谈"),
-    topSubtitle: isBookCompletion ? "一次补完整一段经历" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
+    topSubtitle: isBookCompletion ? "一次只补一个重点" : (isHumanInterview ? "实时记录采访者和被访者" : "小余陪您慢慢讲"),
     topicTitleText: state.projectTitle || "这段回忆",
     showHumanRecordActions,
     showControlBar,
