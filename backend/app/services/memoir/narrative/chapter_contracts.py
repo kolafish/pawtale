@@ -682,32 +682,6 @@ async def _legacy_framing_story_ids(
     return framing
 
 
-def _framing_node_has_supported_claim(
-    *,
-    node_type: str,
-    story_ids: set[str],
-    shapes: set[tuple[str, str, bool]],
-) -> bool:
-    if node_type == MemoirChapterNodeType.OPENING.value:
-        return any(
-            story_id in story_ids and is_core
-            for story_id, _, is_core in shapes
-        )
-    if node_type == MemoirChapterNodeType.REFLECTION.value:
-        roles = {MemoirStoryNarrativeRole.REFLECTION.value}
-    elif node_type == MemoirChapterNodeType.CLOSING.value:
-        roles = {
-            MemoirStoryNarrativeRole.OUTCOME.value,
-            MemoirStoryNarrativeRole.REFLECTION.value,
-        }
-    else:
-        return True
-    return any(
-        story_id in story_ids and narrative_role in roles
-        for story_id, narrative_role, _ in shapes
-    )
-
-
 def _legacy_core_questions(
     *,
     chapter: MemoirBookPlanChapter,

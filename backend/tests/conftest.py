@@ -4,10 +4,10 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.main import app
-from app.database import Base, get_db, register_models
+from app.database import Base, create_database_engine, get_db, register_models, settings
 from app.migrations.audit import migrate_audit_schema
 from app.migrations.memoir_images import migrate_memoir_image_schema
 from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
@@ -23,10 +23,15 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 async def test_db():
     """创建测试数据库"""
     register_models()
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    test_settings = settings.model_copy(
+        update={"app_env": "test", "database_url": TEST_DATABASE_URL}
+    )
+    engine = create_database_engine(test_settings)
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     async with engine.begin() as conn:
+        foreign_keys = await conn.exec_driver_sql("PRAGMA foreign_keys")
+        assert foreign_keys.scalar_one() == 1
         await conn.run_sync(Base.metadata.create_all)
     await migrate_memoir_voice_schema(engine)
     await migrate_memoir_semantic_schema(engine)

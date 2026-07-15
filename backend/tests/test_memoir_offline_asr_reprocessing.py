@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
+from app.models.users import User
 from app.services.memoir.multi_asr_verification import (
     MultiASRVerificationRequest,
     build_multi_asr_verification_prompt,
@@ -64,6 +65,14 @@ def test_offline_asr_hotwords_omit_default_project_title():
 
 
 async def _create_project(test_db):
+    test_db.add(
+        User(
+            id="user-1",
+            email="offline-asr@example.com",
+            password_hash="test-only",
+            display_name="离线 ASR 测试用户",
+        )
+    )
     project = Project(
         title="余仲尤的往事",
         type="memoir",

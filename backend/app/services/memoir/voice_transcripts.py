@@ -26,13 +26,15 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirChapterSourceLink,
+    MemoirImageAsset,
+    MemoirMaterialShareVideo,
     MemoirSourceCard,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.models.memoir_narrative import MemoirClaimEvidence
+from app.models.memoir_narrative import MemoirClaimEvidence, MemoirFollowupTaskUtterance
 from app.schemas.memoir_voice import (
     MemoirMaterialOfflineASRStateResponse,
     MemoirVoiceTranscriptIncludedChapterResponse,
@@ -97,6 +99,10 @@ TRANSCRIPTION_STATUS_PENDING = "pending_transcription"
 TRANSCRIPTION_STATUS_EMPTY = "empty"
 PENDING_TRANSCRIPTION_TITLE = "音频已保存，等待转写"
 PENDING_TRANSCRIPTION_SUMMARY = "这段录音已经保存，但还没有识别成文字。"
+TRANSCRIPT_DELETE_CONFLICT_DETAIL = (
+    "这条讲述已用于回忆录证据、追问结果或衍生内容，不能单独物理删除；"
+    "如需彻底移除其可溯源数据，请删除整个回忆录项目。"
+)
 
 
 @dataclass(frozen=True)
@@ -1255,12 +1261,34 @@ async def _mark_book_sources_deleted(
     )
 
 
+async def _ensure_voice_transcript_can_be_deleted(
+    db: AsyncSession,
+    *,
+    utterance_id: str,
+) -> None:
+    protected_references = (
+        (MemoirClaimEvidence.id, MemoirClaimEvidence.utterance_id),
+        (MemoirFollowupTaskUtterance.id, MemoirFollowupTaskUtterance.utterance_id),
+        (MemoirMaterialShareVideo.id, MemoirMaterialShareVideo.utterance_id),
+        (MemoirImageAsset.id, MemoirImageAsset.source_utterance_id),
+    )
+    for reference_id, utterance_column in protected_references:
+        if await db.scalar(
+            select(reference_id).where(utterance_column == utterance_id).limit(1)
+        ):
+            raise HTTPException(status_code=409, detail=TRANSCRIPT_DELETE_CONFLICT_DETAIL)
+
+
 async def delete_voice_transcript(
     db: AsyncSession,
     utterance_id: str,
     user_id: str,
 ) -> None:
     utterance = await _load_owned_utterance(db, utterance_id, user_id)
+    await _ensure_voice_transcript_can_be_deleted(
+        db,
+        utterance_id=utterance.id,
+    )
     project_id = utterance.voice_session.project_id
     message = utterance.chat_message
     delete_message = False
@@ -1277,6 +1305,9 @@ async def delete_voice_transcript(
         utterance_ids=[utterance.id],
     )
     await _mark_book_sources_deleted(db, project_id=project_id, utterance_id=utterance.id)
+    await db.execute(
+        delete(MemoirSourceCard).where(MemoirSourceCard.utterance_id == utterance.id)
+    )
     await db.delete(utterance)
     await db.flush()
 
