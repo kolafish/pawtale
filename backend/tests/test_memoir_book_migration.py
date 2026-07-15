@@ -41,6 +41,30 @@ async def test_runtime_schema_assert_rejects_extra_columns_without_mutating_sche
         await engine.dispose()
 
 
+async def test_runtime_schema_assert_rejects_unexpected_tables_without_deleting_them():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("CREATE TABLE obsolete_runtime_data (id TEXT)"))
+
+        with pytest.raises(RuntimeError, match="unexpected tables") as exc_info:
+            await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
+
+        assert "obsolete_runtime_data" in str(exc_info.value)
+        async with engine.begin() as conn:
+            table_exists = await conn.scalar(
+                text(
+                    "SELECT 1 FROM sqlite_master "
+                    "WHERE type = 'table' AND name = 'obsolete_runtime_data'"
+                )
+            )
+        assert table_exists == 1
+    finally:
+        await engine.dispose()
+
+
 async def test_runtime_schema_assert_rejects_disabled_sqlite_foreign_keys():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
