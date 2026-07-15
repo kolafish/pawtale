@@ -43,6 +43,7 @@ TERMINAL_GAP_STATUSES = {
 }
 AUTO_RULE_RESOLUTION_NOTE = "系统规则复查：触发条件已不再成立。"
 SEMANTIC_AUDIT_RESOLUTION_NOTE = "系统语义复查：本轮未再检测到该问题。"
+SEMANTIC_DUPLICATE_RESOLUTION_NOTE = "系统语义合并：同一补全方向已由本书中的另一章节统一处理。"
 
 
 def _utcnow() -> datetime:
@@ -87,7 +88,11 @@ def _auto_resolution_kind(gap: MemoirNarrativeGap) -> str | None:
         return "rule"
     if (
         gap.detected_by == MemoirNarrativeGapDetectedBy.AI.value
-        and gap.resolution_note == SEMANTIC_AUDIT_RESOLUTION_NOTE
+        and gap.resolution_note
+        in {
+            SEMANTIC_AUDIT_RESOLUTION_NOTE,
+            SEMANTIC_DUPLICATE_RESOLUTION_NOTE,
+        }
     ):
         return "semantic"
     return None
