@@ -349,6 +349,20 @@ button[disabled] {
   gap: 10rpx;
 }
 
+.gap-resolution-input {
+  width: 100%;
+  height: 76rpx;
+  margin-top: 18rpx;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #cfc5bb;
+  border-radius: 6rpx;
+  background: #fffefc;
+  color: #2b211e;
+  font-size: 24rpx;
+  line-height: 76rpx;
+}
+
 .confirmation-actions button {
   min-width: 0;
   min-height: 70rpx;
@@ -453,6 +467,134 @@ button[disabled] {
   background: transparent;
   color: #93473b;
   font-size: 23rpx;
+  line-height: 34rpx;
+}
+
+.draft-inline-actions {
+  margin-top: 12rpx;
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4rpx 18rpx;
+}
+
+.draft-inline-actions .text-action {
+  margin: 0;
+  padding-left: 8rpx;
+}
+
+.draft-source-panel {
+  margin-top: 16rpx;
+  padding: 18rpx 20rpx;
+  border-left: 4rpx solid #608273;
+  background: #f3f6f3;
+}
+
+.draft-source-summary,
+.draft-source-kind,
+.draft-source-title,
+.draft-source-quote {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.draft-revision-panel {
+  margin-top: 18rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid #e3dcd4;
+}
+
+.draft-revision-input {
+  width: 100%;
+  height: 72rpx;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+  border: 1rpx solid #cfc5bb;
+  border-radius: 6rpx;
+  background: #fffefc;
+  color: #2b211e;
+  font-size: 23rpx;
+  line-height: 72rpx;
+}
+
+.revision-action {
+  min-height: 62rpx;
+  margin: 12rpx 0 0 auto;
+  padding: 8rpx 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6rpx;
+  background: #f0ebe5;
+  color: #6b5f58;
+  font-size: 22rpx;
+  font-weight: 600;
+  line-height: 32rpx;
+}
+
+.revision-action::after {
+  border: 0;
+}
+
+.revision-status,
+.suggestion-label,
+.suggestion-content {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.revision-status {
+  margin-top: 12rpx;
+  color: #756963;
+  font-size: 22rpx;
+  line-height: 34rpx;
+}
+
+.draft-suggestion {
+  margin-top: 14rpx;
+  padding: 18rpx 20rpx;
+  border-left: 4rpx solid #a64b3e;
+  background: #fff7f4;
+}
+
+.suggestion-label {
+  color: #93473b;
+  font-size: 21rpx;
+  font-weight: 700;
+  line-height: 31rpx;
+}
+
+.suggestion-content {
+  margin-top: 8rpx;
+  color: #342925;
+  font-size: 25rpx;
+  line-height: 40rpx;
+  white-space: pre-wrap;
+}
+
+.draft-source-summary,
+.draft-source-kind {
+  color: #527061;
+  font-size: 21rpx;
+  font-weight: 700;
+  line-height: 31rpx;
+}
+
+.draft-source-row {
+  margin-top: 16rpx;
+}
+
+.draft-source-title {
+  margin-top: 4rpx;
+  color: #342925;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.draft-source-quote {
+  margin-top: 6rpx;
+  color: #756963;
+  font-size: 22rpx;
   line-height: 34rpx;
 }
 

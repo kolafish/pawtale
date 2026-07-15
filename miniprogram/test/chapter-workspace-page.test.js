@@ -147,8 +147,8 @@ function sampleDraftBlock(overrides = {}) {
       id: "version-1",
       content: "十八岁那年，我第一次离开家。",
       version: 1,
-      claims: [],
-      stories: [],
+      claims: [{ claim_id: "claim-1", usage_role: "core" }],
+      stories: [{ story_id: "story-1", story_revision_id: "story-revision-1", usage_role: "primary" }],
     },
     version_count: 1,
     ...overrides,
@@ -183,11 +183,20 @@ function loadWorkspacePage({
     enqueueMemoirDraftBlockGeneration: async () => {
       throw new Error("enqueueMemoirDraftBlockGeneration was not mocked");
     },
+    enqueueMemoirDraftBlockRevision: async () => {
+      throw new Error("enqueueMemoirDraftBlockRevision was not mocked");
+    },
+    applyMemoirDraftBlockRevision: async () => {
+      throw new Error("applyMemoirDraftBlockRevision was not mocked");
+    },
     getMemoirDraftBlockJob: async () => {
       throw new Error("getMemoirDraftBlockJob was not mocked");
     },
     manuallyReviseMemoirDraftBlock: async () => {
       throw new Error("manuallyReviseMemoirDraftBlock was not mocked");
+    },
+    decideMemoirDraftBlock: async () => {
+      throw new Error("decideMemoirDraftBlock was not mocked");
     },
     assembleMemoirChapterDraftBlocks: async () => {
       throw new Error("assembleMemoirChapterDraftBlocks was not mocked");
@@ -215,7 +224,7 @@ test("chapter overview reports the whole chapter without exposing internal model
     sampleWorkspace(),
     [
       sampleTask(),
-      sampleTask({ id: "task-2", priority: 1000 }),
+      sampleTask({ id: "task-2", gap_id: "gap-3", priority: 1000 }),
       sampleTask({ id: "task-confirm", gap_id: "gap-1", priority: 3000 }),
     ],
     [sampleDraftBlock()],
@@ -270,6 +279,151 @@ test("selected completion direction starts the existing realtime voice-chat chai
   assert.equal(created[0].options.projectId, "project-1");
   assert.match(navigations[0], /pages\/voice-chat\/index/);
   assert.match(navigations[0], /voiceSessionId=voice-1/);
+  delete global.wx;
+});
+
+test("a required fact check cannot be resolved without recording the correct statement", async () => {
+  const resolutions = [];
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    workspace: sampleWorkspace({ answer_updates: [] }),
+    tasks: [sampleTask()],
+    voiceApiExports: {
+      resolveMemoirNarrativeGap: async (_projectId, gapId, action, input) => {
+        resolutions.push({ gapId, action, input });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+
+  const event = { currentTarget: { dataset: { gapId: "gap-1", action: "resolve" } } };
+  await page.applyGapAction.call(context, event);
+  assert.equal(resolutions.length, 0);
+  assert.match(context.data.auditError, /正确说法/);
+
+  page.changeGapResolution.call(context, {
+    currentTarget: { dataset: { gapId: "gap-1" } },
+    detail: { value: "正确的是十八岁，十九岁是记错了。" },
+  });
+  await page.applyGapAction.call(context, event);
+  assert.equal(resolutions[0].input.note, "正确的是十八岁，十九岁是记错了。");
+  delete global.wx;
+});
+
+test("a protected paragraph must be unlocked before manual editing", async () => {
+  const decisions = [];
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    blocks: [sampleDraftBlock({ locked: true })],
+    voiceApiExports: {
+      decideMemoirDraftBlock: async (_projectId, blockId, action, input) => {
+        decisions.push({ blockId, action, input });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+  const event = { currentTarget: { dataset: { blockId: "block-1" } } };
+
+  page.startDraftBlockEdit.call(context, event);
+  assert.equal(context.data.editingBlockId, "");
+  await page.toggleDraftBlockProtection.call(context, event);
+
+  assert.equal(decisions[0].action, "unlock");
+  assert.equal(decisions[0].input.expected_current_version_id, "version-1");
+  assert.equal(context.data.draftBlocks[0].sourceFacts[0].statement, "十八岁时离开家乡。");
+  delete global.wx;
+});
+
+test("a reviewed paragraph can be confirmed for chapter completion", async () => {
+  const decisions = [];
+  global.wx = { showToast() {} };
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      decideMemoirDraftBlock: async (_projectId, blockId, action, input) => {
+        decisions.push({ blockId, action, input });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+
+  await page.confirmDraftBlock.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+  });
+
+  assert.equal(decisions[0].action, "confirm");
+  assert.match(decisions[0].input.reason, /用于成书/);
+  delete global.wx;
+});
+
+test("an AI paragraph revision stays a suggestion until the user adopts it", async () => {
+  const applied = [];
+  const job = {
+    id: "revision-job-1",
+    status: "succeeded",
+    result_json: { content: "十八岁那年，我带着一个旧箱子离开了家。" },
+    error_message: "",
+  };
+  global.wx = {};
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      enqueueMemoirDraftBlockRevision: async () => job,
+      applyMemoirDraftBlockRevision: async (_projectId, blockId, input) => {
+        applied.push({ blockId, input });
+        return {};
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+  page.changeDraftRevisionFeedback.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+    detail: { value: "补上当时带着的旧箱子，只改这一段" },
+  });
+
+  const event = { currentTarget: { dataset: { blockId: "block-1" } } };
+  await page.requestDraftBlockRevision.call(context, event);
+  assert.equal(context.data.draftBlocks[0].current_version.content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.revisionSuggestion, "十八岁那年，我带着一个旧箱子离开了家。");
+  assert.equal(applied.length, 0);
+
+  await page.applyDraftBlockSuggestion.call(context, event);
+  assert.equal(applied[0].input.generation_job_id, "revision-job-1");
+  delete global.wx;
+});
+
+test("an empty AI paragraph revision releases the editing state", async () => {
+  global.wx = {};
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      enqueueMemoirDraftBlockRevision: async () => ({
+        id: "revision-job-empty",
+        status: "succeeded",
+        result_json: { content: "   " },
+        error_message: "",
+      }),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
+  page.changeDraftRevisionFeedback.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+    detail: { value: "补上离家时带着的旧箱子" },
+  });
+
+  await page.requestDraftBlockRevision.call(context, {
+    currentTarget: { dataset: { blockId: "block-1" } },
+  });
+
+  assert.equal(context.data.revisionBlockId, "");
+  assert.equal(context.data.revisionJobId, "");
+  assert.equal(context.data.revisionSuggestion, "");
+  assert.match(context.data.draftError, /修改建议内容为空/);
   delete global.wx;
 });
 

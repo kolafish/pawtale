@@ -122,8 +122,16 @@
           disabled="{{startingFollowupTaskId !== ''}}"
           bindtap="startFollowupInterview"
         >通过语音说明</button>
+        <input
+          class="gap-resolution-input"
+          value="{{item.resolutionText}}"
+          placeholder="如：正确的是十八岁，十九岁是记错了"
+          maxlength="1000"
+          data-gap-id="{{item.id}}"
+          bindinput="changeGapResolution"
+        />
         <view class="confirmation-actions">
-          <button data-gap-id="{{item.id}}" data-action="resolve" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">已核对</button>
+          <button data-gap-id="{{item.id}}" data-action="resolve" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">保存正确说法</button>
           <button data-gap-id="{{item.id}}" data-action="accept-incomplete" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">先按现有内容</button>
           <button data-gap-id="{{item.id}}" data-action="not-applicable" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">与本章无关</button>
         </view>
@@ -183,13 +191,13 @@
           <button
             class="secondary-action"
             loading="{{draftGenerationBusy}}"
-            disabled="{{draftGenerationBusy || !workspace.contract || workspace.contract.status !== 'confirmed'}}"
+            disabled="{{draftGenerationBusy || editingBlockId || revisionBlockId || !workspace.contract || workspace.contract.status !== 'confirmed'}}"
             bindtap="generateDraftBlocks"
           >{{draftBlocks.length ? "重新整理" : "生成正文"}}</button>
           <button
             class="secondary-action strong"
             loading="{{assemblingDraft}}"
-            disabled="{{assemblingDraft || !draftBlocks.length}}"
+            disabled="{{assemblingDraft || editingBlockId || revisionBlockId || !draftBlocks.length}}"
             bindtap="assembleChapterDraft"
           >保存章节稿</button>
         </view>
@@ -219,7 +227,71 @@
           </block>
           <block wx:else>
             <text class="draft-content">{{item.current_version.content}}</text>
-            <button class="text-action" data-block-id="{{item.id}}" disabled="{{item.busy}}" bindtap="startDraftBlockEdit">编辑这一段</button>
+            <view class="draft-inline-actions">
+              <button class="text-action" data-block-id="{{item.id}}" bindtap="toggleDraftBlockSources">
+                {{sourceBlockId === item.id ? "收起依据" : "查看依据"}}
+              </button>
+              <button
+                wx:if="{{item.editorial_status !== 'confirmed' && item.freshness_status !== 'stale'}}"
+                class="text-action"
+                data-block-id="{{item.id}}"
+                loading="{{item.busy}}"
+                disabled="{{item.busy || revisionBlockId}}"
+                bindtap="confirmDraftBlock"
+              >这段可以</button>
+              <button
+                class="text-action"
+                data-block-id="{{item.id}}"
+                loading="{{item.busy}}"
+                disabled="{{item.busy || revisionBlockId}}"
+                bindtap="toggleDraftBlockProtection"
+              >{{item.locked ? "解除保护" : "保护这段"}}</button>
+              <button
+                wx:if="{{!item.locked}}"
+                class="text-action"
+                data-block-id="{{item.id}}"
+                disabled="{{item.busy || revisionBlockId}}"
+                bindtap="startDraftBlockEdit"
+              >编辑这一段</button>
+            </view>
+            <view wx:if="{{sourceBlockId === item.id}}" class="draft-source-panel">
+              <text class="draft-source-summary">{{item.sourceCountText}}</text>
+              <view wx:for="{{item.sourceStories}}" wx:for-item="sourceStory" wx:key="id" class="draft-source-row">
+                <text class="draft-source-kind">相关讲述</text>
+                <text class="draft-source-title">{{sourceStory.title}}</text>
+              </view>
+              <view wx:for="{{item.sourceFacts}}" wx:for-item="sourceFact" wx:key="id" class="draft-source-row">
+                <text class="draft-source-kind">正文依据</text>
+                <text class="draft-source-title">{{sourceFact.statement}}</text>
+                <text wx:if="{{sourceFact.evidenceText}}" class="draft-source-quote">原话：{{sourceFact.evidenceText}}</text>
+              </view>
+            </view>
+            <view class="draft-revision-panel">
+              <input
+                class="draft-revision-input"
+                value="{{item.revisionFeedback}}"
+                placeholder="例如：把单位改成具体名称，只调整这一段"
+                maxlength="4000"
+                data-block-id="{{item.id}}"
+                bindinput="changeDraftRevisionFeedback"
+              />
+              <button
+                class="revision-action"
+                data-block-id="{{item.id}}"
+                loading="{{revisionBlockId === item.id && !revisionSuggestion}}"
+                disabled="{{item.locked || item.busy || revisionBlockId || draftGenerationBusy || editingBlockId}}"
+                bindtap="requestDraftBlockRevision"
+              >按修改意见生成建议</button>
+              <text wx:if="{{revisionBlockId === item.id && revisionStatus}}" class="revision-status">{{revisionStatus}}</text>
+              <view wx:if="{{revisionBlockId === item.id && revisionSuggestion}}" class="draft-suggestion">
+                <text class="suggestion-label">建议版本</text>
+                <text class="suggestion-content">{{revisionSuggestion}}</text>
+                <view class="edit-actions">
+                  <button bindtap="discardDraftBlockRevision">放弃</button>
+                  <button class="save" data-block-id="{{item.id}}" loading="{{item.busy}}" disabled="{{item.busy}}" bindtap="applyDraftBlockSuggestion">采用建议</button>
+                </view>
+              </view>
+            </view>
           </block>
         </view>
       </view>
