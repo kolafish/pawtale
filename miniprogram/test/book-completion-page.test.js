@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule } = require("./page-harness");
 
-function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
+function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookCompletionOverview: async () => {
       throw new Error("getMemoirBookCompletionOverview was not mocked");
@@ -14,18 +14,10 @@ function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
     prepareMemoirBookCompletionChapter: async () => {
       throw new Error("prepareMemoirBookCompletionChapter was not mocked");
     },
-    createMemoirVoiceSession: async () => {
-      throw new Error("createMemoirVoiceSession was not mocked");
-    },
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", {
     routeAuthError: () => false,
-  });
-  mockModule("../services/voice-authorization.ts", {
-    readVoiceAuthorizationConsent: () => consent,
-    syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
-    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
   });
   return loadPageModule("../pages/book-completion/index.ts");
 }
@@ -73,13 +65,13 @@ test("book completion overview exposes chapter-level progress without internal m
   const patch = bookCompletionViewPatch(readyOverview());
 
   assert.equal(patch.progressText, "1 / 2 章目前不需要再补");
-  assert.equal(patch.chapters[0].actionText, "开始讲这一段");
-  assert.equal(patch.chapters[1].disabled, true);
+  assert.equal(patch.chapters[0].actionText, "查看补全方向");
+  assert.equal(patch.chapters[1].actionText, "查看本章情况");
+  assert.equal(patch.chapters[1].disabled, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract/);
 });
 
-test("book completion starts the existing realtime interview chain for a selected chapter", async () => {
-  const created = [];
+test("book completion opens the chapter overview before starting an interview", async () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -87,14 +79,7 @@ test("book completion starts the existing realtime interview chain for a selecte
     },
   };
   const overview = readyOverview();
-  const { page, mod } = loadBookCompletionPage({
-    voiceApiExports: {
-      createMemoirVoiceSession: async (input, options) => {
-        created.push({ input, options });
-        return { session: { id: "voice-1" } };
-      },
-    },
-  });
+  const { page, mod } = loadBookCompletionPage();
   const context = {
     ...page,
     data: {
@@ -112,11 +97,7 @@ test("book completion starts the existing realtime interview chain for a selecte
     currentTarget: { dataset: { chapterId: "chapter-1" } },
   });
 
-  assert.equal(created[0].input.guidance_mode, "guided_interview");
-  assert.equal(created[0].input.session_goal, "book_completion");
-  assert.equal(created[0].input.current_followup_task_id, "task-1");
-  assert.equal(created[0].options.projectId, "project-1");
-  assert.match(navigations[0], /pages\/voice-chat\/index/);
-  assert.match(navigations[0], /voiceSessionId=voice-1/);
+  assert.match(navigations[0], /pages\/chapter-workspace\/index/);
+  assert.match(navigations[0], /chapterId=chapter-1/);
   delete global.wx;
 });

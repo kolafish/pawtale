@@ -107,18 +107,6 @@ export function chapterNextAction(
       disabled: false,
     };
   }
-  const task = followupTasks.find((item) => item.status === "pending")
-    || followupTasks.find((item) => item.status === "deferred");
-  if (task) {
-    return {
-      kind: "open_followups",
-      eyebrow: "先补这一件事",
-      title: task.question,
-      detail: "记得多少就回答多少，这次不用处理其他问题。",
-      actionText: "回答这个问题",
-      disabled: false,
-    };
-  }
   const mustHandle = workspace.gaps.must_handle[0];
   if (mustHandle) {
     return {
@@ -128,6 +116,20 @@ export function chapterNextAction(
       detail: mustHandle.description,
       actionText: "处理这件事",
       disabled: false,
+    };
+  }
+  const task = followupTasks.find((item) => item.status === "in_progress")
+    || followupTasks.find((item) => item.status === "pending")
+    || followupTasks.find((item) => item.status === "deferred");
+  if (task) {
+    return {
+      kind: "open_followups",
+      eyebrow: "选择一个方向继续讲",
+      title: task.question,
+      detail: "下方会同时列出最多三个方向，您可以自己决定先讲哪一个。",
+      actionText: task.status === "in_progress" ? "继续刚才的回答" : "从这个方向开始",
+      disabled: false,
+      taskId: task.id,
     };
   }
   if (!draftBlocks.length) {

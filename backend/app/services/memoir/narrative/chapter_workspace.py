@@ -6,7 +6,6 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
-    MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
@@ -33,6 +32,7 @@ from app.services.memoir.narrative import (
     gaps,
 )
 from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
+from app.services.memoir.narrative.readiness_policy import gap_blocks_formalization
 
 
 async def get_chapter_workspace(
@@ -176,14 +176,19 @@ async def get_chapter_workspace(
             gap
             for gap in gap_responses
             if gap.status == MemoirNarrativeGapStatus.OPEN
-            and gap.severity == MemoirNarrativeGapSeverity.HIGH
+            and gap_blocks_formalization(
+                gap_type=gap.gap_type.value,
+                severity=gap.severity.value,
+            )
         ],
         suggested=[
             gap
             for gap in gap_responses
             if gap.status == MemoirNarrativeGapStatus.OPEN
-            and gap.severity
-            in {MemoirNarrativeGapSeverity.MEDIUM, MemoirNarrativeGapSeverity.LOW}
+            and not gap_blocks_formalization(
+                gap_type=gap.gap_type.value,
+                severity=gap.severity.value,
+            )
         ],
         accepted_incomplete=[
             gap
