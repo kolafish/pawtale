@@ -42,6 +42,7 @@ TERMINAL_GAP_STATUSES = {
     MemoirNarrativeGapStatus.DISMISSED,
 }
 AUTO_RULE_RESOLUTION_NOTE = "系统规则复查：触发条件已不再成立。"
+SEMANTIC_AUDIT_RESOLUTION_NOTE = "系统语义复查：本轮未再检测到该问题。"
 
 
 def _utcnow() -> datetime:
@@ -376,6 +377,52 @@ async def reconcile_chapter_rule_gaps(
             gap_id=gap.id,
             idempotency_key=f"chapter-rule-gap-obsolete:{chapter_id}:{gap.id}:{gap.detection_count}",
             note=AUTO_RULE_RESOLUTION_NOTE,
+        )
+        resolved_count += 1
+    return resolved_count
+
+
+async def reconcile_chapter_semantic_gaps(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    complete_candidates: list[MemoirNarrativeGapCandidate],
+) -> int:
+    active_fingerprints = {
+        gap_fingerprint(candidate)
+        for candidate in complete_candidates
+        if candidate.detected_by == MemoirNarrativeGapDetectedBy.AI
+        and candidate.target_slot.startswith("semantic:")
+    }
+    open_semantic_gaps = (
+        await db.scalars(
+            select(MemoirNarrativeGap).where(
+                MemoirNarrativeGap.project_id == project_id,
+                MemoirNarrativeGap.detected_by
+                == MemoirNarrativeGapDetectedBy.AI.value,
+                MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+                MemoirNarrativeGap.target_slot.like("semantic:%"),
+                (
+                    (MemoirNarrativeGap.primary_chapter_id == chapter_id)
+                    | MemoirNarrativeGap.chapters.any(chapter_id=chapter_id)
+                ),
+            )
+        )
+    ).all()
+    resolved_count = 0
+    for gap in open_semantic_gaps:
+        if gap.fingerprint in active_fingerprints:
+            continue
+        await resolve_gap_by_system(
+            db,
+            project_id=project_id,
+            gap_id=gap.id,
+            idempotency_key=(
+                f"chapter-semantic-gap-obsolete:{chapter_id}:"
+                f"{gap.id}:{gap.detection_count}"
+            ),
+            note=SEMANTIC_AUDIT_RESOLUTION_NOTE,
         )
         resolved_count += 1
     return resolved_count

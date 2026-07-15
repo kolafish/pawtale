@@ -24,7 +24,7 @@ from app.services.memoir.narrative.gap_rules import (
 )
 
 
-GAP_AUDIT_ENGINE_VERSION = "1"
+GAP_AUDIT_ENGINE_VERSION = "2"
 
 
 def chapter_gap_audit_content_signature(context: ChapterAuditContext) -> str:
@@ -74,6 +74,19 @@ def chapter_gap_audit_content_signature(context: ChapterAuditContext) -> str:
             for story_id, slots in sorted(context.slots.items())
             for slot in sorted(slots.values(), key=lambda item: item.slot_key)
         ],
+        "draft_blocks": [
+            [
+                block.id,
+                block.node_id,
+                block.block_role,
+                block.sort_order,
+                block.current_version_id,
+                block.editorial_status,
+                block.freshness_status,
+                sha256(block.content.encode("utf-8")).hexdigest(),
+            ]
+            for block in context.draft_blocks
+        ],
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return sha256(encoded.encode("utf-8")).hexdigest()
@@ -100,6 +113,7 @@ async def current_chapter_gap_audit_job(
     project_id: str,
     chapter_id: str,
     content_signature: str,
+    include_semantic_audit: bool,
 ) -> MemoirEditingJob | None:
     jobs = list(
         (
@@ -122,6 +136,8 @@ async def current_chapter_gap_audit_job(
         for job in jobs
         if isinstance(job.payload_json, dict)
         and job.payload_json.get("content_signature") == content_signature
+        and bool(job.payload_json.get("include_semantic_audit"))
+        == include_semantic_audit
     ]
     for statuses in (
         {MemoirEditingJobStatus.SUCCEEDED.value},
@@ -230,6 +246,7 @@ async def run_chapter_gap_audit_job(
         complete_candidates=deterministic_candidates,
     )
     semantic_created = 0
+    semantic_resolved = 0
     if semantic_error is not None:
         await followup_jobs.schedule_followup_task_generation(
             db,
@@ -246,6 +263,7 @@ async def run_chapter_gap_audit_job(
                 "deterministic_resolved_count": deterministic_resolved,
                 "semantic_gap_count": 0,
                 "semantic_created_count": 0,
+                "semantic_resolved_count": 0,
                 "partial_result": True,
                 "engine_version": GAP_AUDIT_ENGINE_VERSION,
             },
@@ -256,6 +274,13 @@ async def run_chapter_gap_audit_job(
             db,
             project_id=job.project_id,
             candidates=semantic_candidates,
+        )
+    if include_semantic:
+        semantic_resolved = await gaps.reconcile_chapter_semantic_gaps(
+            db,
+            project_id=job.project_id,
+            chapter_id=chapter_id,
+            complete_candidates=semantic_candidates,
         )
 
     await followup_jobs.schedule_followup_task_generation(
@@ -271,6 +296,7 @@ async def run_chapter_gap_audit_job(
         "deterministic_resolved_count": deterministic_resolved,
         "semantic_gap_count": len(semantic_candidates),
         "semantic_created_count": semantic_created,
+        "semantic_resolved_count": semantic_resolved,
         "partial_result": False,
         "provider": provider,
         "model": model,

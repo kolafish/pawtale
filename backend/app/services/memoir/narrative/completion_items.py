@@ -33,6 +33,7 @@ _SEVERITY_PRIORITY = {
     MemoirNarrativeGapSeverity.MEDIUM.value: 2000,
     MemoirNarrativeGapSeverity.LOW.value: 1000,
 }
+MAX_VISIBLE_INTERVIEW_ITEMS_PER_CHAPTER = 3
 
 
 def _task_kind(task: MemoirFollowupTask) -> MemoirCompletionItemKind:
@@ -76,7 +77,7 @@ async def chapter_completion_items(
     project_id: str,
     chapter_id: str,
 ) -> list[MemoirCompletionItem]:
-    tasks = list(
+    all_tasks = list(
         (
             await db.scalars(
                 select(MemoirFollowupTask)
@@ -101,7 +102,8 @@ async def chapter_completion_items(
             )
         ).all()
     )
-    task_by_gap = {task.gap_id: task for task in tasks}
+    tasks = all_tasks[:MAX_VISIBLE_INTERVIEW_ITEMS_PER_CHAPTER]
+    task_by_gap = {task.gap_id: task for task in all_tasks}
     gap_filters = [
         MemoirNarrativeGap.project_id == project_id,
         or_(

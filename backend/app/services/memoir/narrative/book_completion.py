@@ -97,6 +97,7 @@ async def _chapter_preparations(
                     project_id=project_id,
                     chapter_id=chapter.id,
                     content_signature=gap_audit.chapter_gap_audit_content_signature(context),
+                    include_semantic_audit=True,
                 ),
             )
         )
@@ -415,7 +416,7 @@ async def prepare_book_completion_chapter(
             db,
             project_id=project_id,
             chapter_id=chapter.id,
-            include_semantic_audit=False,
+            include_semantic_audit=True,
             ai_model=None,
             source="book_completion",
         )

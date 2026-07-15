@@ -39,6 +39,48 @@ SEMANTIC_GAP_TYPES = {
     MemoirNarrativeGapType.UNCLEAR_REFERENCE,
     MemoirNarrativeGapType.UNSUPPORTED_FACT,
 }
+SEMANTIC_DRAFT_BLOCK_CHAR_BUDGET = 24000
+SEMANTIC_DRAFT_BLOCK_CHAR_LIMIT = 6000
+SEMANTIC_GAP_LIMIT = 3
+SEMANTIC_DIMENSION_GAP_TYPES = {
+    "causality": MemoirNarrativeGapType.CAUSALITY,
+    "chapter_context": MemoirNarrativeGapType.CAUSALITY,
+    "chapter_focus": MemoirNarrativeGapType.CAUSALITY,
+    "opening": MemoirNarrativeGapType.CAUSALITY,
+    "closing": MemoirNarrativeGapType.CAUSALITY,
+    "transition": MemoirNarrativeGapType.CAUSALITY,
+    "list_style": MemoirNarrativeGapType.CAUSALITY,
+    "person_introduction": MemoirNarrativeGapType.RELATIONSHIP,
+    "relationship_clarity": MemoirNarrativeGapType.RELATIONSHIP,
+    "reference": MemoirNarrativeGapType.UNCLEAR_REFERENCE,
+    "repetition": MemoirNarrativeGapType.REPETITION,
+    "contradiction": MemoirNarrativeGapType.CONTRADICTION,
+    "unsupported_fact": MemoirNarrativeGapType.UNSUPPORTED_FACT,
+}
+
+
+def _draft_block_payload(context: ChapterAuditContext) -> list[dict[str, object]]:
+    payload: list[dict[str, object]] = []
+    remaining = SEMANTIC_DRAFT_BLOCK_CHAR_BUDGET
+    for block in context.draft_blocks:
+        if remaining <= 0:
+            break
+        content = block.content.strip()
+        visible_content = content[: min(SEMANTIC_DRAFT_BLOCK_CHAR_LIMIT, remaining)]
+        remaining -= len(visible_content)
+        payload.append(
+            {
+                "id": block.id,
+                "node_id": block.node_id,
+                "block_role": block.block_role,
+                "sort_order": block.sort_order,
+                "editorial_status": block.editorial_status,
+                "freshness_status": block.freshness_status,
+                "content": visible_content,
+                "content_truncated": len(visible_content) < len(content),
+            }
+        )
+    return payload
 
 
 def build_semantic_gap_prompt(context: ChapterAuditContext) -> str:
@@ -63,6 +105,7 @@ def build_semantic_gap_prompt(context: ChapterAuditContext) -> str:
             }
             for node in context.nodes
         ],
+        "draft_blocks": _draft_block_payload(context),
         "stories": [
             {
                 "id": story.id,
@@ -106,8 +149,8 @@ input:
     {{
       "gap_type": "causality|relationship|contradiction|repetition|unclear_reference|unsupported_fact",
       "severity": "high|medium|low",
-      "dimension": "causality|person_introduction|reference|transition|list_style|repetition|contradiction|unsupported_fact",
-      "title": "简短问题标题",
+      "dimension": "chapter_context|chapter_focus|opening|closing|person_introduction|relationship_clarity|transition|list_style|causality|reference|repetition|contradiction|unsupported_fact",
+      "title": "适合直接展示给用户的简短问题标题",
       "description": "说明问题及为何需要处理，不提供虚构补写",
       "story_ids": ["必须来自 input.stories.id"],
       "claim_ids": ["必须来自 input.stories.claims.id"]
@@ -115,8 +158,17 @@ input:
   ]
 }}
 
+审计顺序：
+1. 先看整章是否缺少进入本章所需的背景、开头是否突兀、结尾是否缺少收束、章节重点是否分散。
+2. 再看人物首次出现和人物关系是否清楚、相邻段落是否缺少转场、是否只是履历式罗列。
+3. 最后才看核心事件是否因缺少关键前因后果而无法理解。
+
 约束：
-- 只检查因果缺口、人物首次出现缺少介绍、指代不清、转场缺失、履历式罗列、可能重复、可能矛盾和可能无来源事实。
+- 最多输出 3 个问题，按“最影响读者理解且一次补充能明显改善”的价值从高到低排序；宁缺毋滥。
+- 一本回忆录可以有意对次要事件一笔带过。不能仅因为事件简短、没有完整起因经过结果，就要求继续展开。
+- opening、closing、chapter_context、chapter_focus、transition、list_style 使用 causality gap_type；person_introduction、relationship_clarity 使用 relationship；reference 使用 unclear_reference。
+- draft_blocks 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有 draft_blocks 时才主要依据结构与 Story 摘要。
+- 不把纯润色偏好当成需要采访的问题；只有补充讲述者掌握的信息才能实质改善时才输出。
 - 每个问题必须引用至少一个输入中的 Story 或 Claim；不能用不存在的 ID。
 - contradiction 必须引用至少两条互相冲突的 Claim。
 - unsupported_fact 必须引用具体 Claim，不能凭写作风格猜测。
@@ -148,9 +200,11 @@ def _validated_candidates(
         and not claim.superseded_by_claim_id
     }
     candidates: list[MemoirNarrativeGapCandidate] = []
-    for item in output.gaps:
+    for item in output.gaps[:SEMANTIC_GAP_LIMIT]:
         if item.gap_type not in SEMANTIC_GAP_TYPES:
             raise ValueError("semantic audit returned a deterministic-only gap type")
+        if item.gap_type != SEMANTIC_DIMENSION_GAP_TYPES[item.dimension]:
+            raise ValueError("semantic gap dimension does not match its gap type")
         story_ids = set(item.story_ids)
         claim_ids = set(item.claim_ids)
         if not story_ids and not claim_ids:

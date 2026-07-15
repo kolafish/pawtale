@@ -10,8 +10,14 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
     MemoirClaimTimePrecision,
+    MemoirCompletionItemAction,
+    MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
+    MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapScopeType,
+    MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
@@ -26,12 +32,13 @@ from app.models.memoir_narrative import (
     MemoirChapterNode,
     MemoirChapterNodeStory,
     MemoirFollowupTask,
+    MemoirNarrativeGap,
     MemoirStory,
     MemoirStorySlot,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import gap_audit, story_slots
+from app.services.memoir.narrative import completion_items, gap_audit, story_slots
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -167,6 +174,26 @@ async def _run_completion_preparation(client, test_db, project_id: str, chapter_
         MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
     )
     assert audit_job is not None
+    assert audit_job.payload_json["include_semantic_audit"] is True
+
+    class EmptySemanticClient:
+        provider_name = "test"
+        model_name = "test-chapter-audit"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            return '{"schema_version":"1","gaps":[]}'
+
+    async def semantic_audit_handler(db, job):
+        return await gap_audit.run_chapter_gap_audit_job(
+            db,
+            job,
+            semantic_ai_client=EmptySemanticClient(),
+        )
+
+    register_editing_job_handler(
+        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+        semantic_audit_handler,
+    )
     assert await run_test_editing_job(test_db, audit_job.id) is True
 
     generation_job = await _latest_job(
@@ -188,26 +215,7 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     assert initial.status_code == 200
     assert initial.json()["chapters"][0]["state"] == "needs_preparation"
 
-    register_memoir_editing_job_handlers()
-    started = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare"
-    )
-    assert started.status_code == 200
-    assert started.json()["state"] == "preparing"
-    audit_job = await _latest_job(
-        test_db,
-        project_id,
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
-    )
-    assert audit_job is not None
-    assert await run_test_editing_job(test_db, audit_job.id) is True
-    generation_job = await _latest_job(
-        test_db,
-        project_id,
-        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
-    )
-    assert generation_job is not None
-    assert await run_test_editing_job(test_db, generation_job.id) is True
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
 
     ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     chapter_state = ready.json()["chapters"][0]
@@ -216,7 +224,7 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     assert chapter_state["task_id"]
     assert chapter_state["item_id"]
     assert chapter_state["item_kind"] == "narrator_followup"
-    assert "按您记得的顺序" in chapter_state["focus_areas"][0]
+    assert "最关键的经过" in chapter_state["focus_areas"][0]
     assert not any(term in ready.text for term in ("Story", "Claim", "slot", "Contract"))
 
     voice = await post_mobile_memoir_voice_session(
@@ -289,6 +297,60 @@ async def test_book_completion_prepare_rejects_a_chapter_outside_the_project(
 
     assert response.status_code == 404
     assert response.json()["detail"] == "章节不存在"
+
+
+async def test_book_completion_exposes_at_most_three_interview_directions(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=True,
+    )
+    for index in range(4):
+        gap = MemoirNarrativeGap(
+            project_id=project_id,
+            scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+            primary_chapter_id=chapter.id,
+            gap_type=MemoirNarrativeGapType.CAUSALITY.value,
+            severity=MemoirNarrativeGapSeverity.MEDIUM.value,
+            target_slot=f"semantic:opening:{index}",
+            title=f"章节方向 {index + 1}",
+            description="需要补充一段章节层面的说明。",
+            fingerprint=f"{index + 1:064d}",
+            detected_by=MemoirNarrativeGapDetectedBy.AI.value,
+        )
+        test_db.add(gap)
+        await test_db.flush()
+        test_db.add(
+            MemoirFollowupTask(
+                project_id=project_id,
+                gap_id=gap.id,
+                chapter_id=chapter.id,
+                target_slot=gap.target_slot,
+                answer_use=MemoirFollowupAnswerUse.CLARIFICATION.value,
+                question=gap.title,
+                purpose=gap.description,
+                priority=4000 - index,
+                status=MemoirFollowupTaskStatus.PENDING.value,
+                created_by=MemoirNarrativeActorType.SYSTEM.value,
+            )
+        )
+    await test_db.commit()
+
+    items = await completion_items.chapter_completion_items(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    interview_items = [
+        item for item in items if item.action == MemoirCompletionItemAction.INTERVIEW
+    ]
+
+    assert len(interview_items) == 3
+    assert [item.priority for item in interview_items] == [4000, 3999, 3998]
+    assert "章节方向 4" not in {item.title for item in items}
 
 
 async def test_book_completion_overview_marks_audited_complete_chapter(

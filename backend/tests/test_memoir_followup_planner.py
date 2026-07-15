@@ -560,7 +560,44 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
     assert tasks[0].story_id == fixture["story"].id
     assert tasks[0].target_slot == MEMOIR_STORY_NARRATION_TARGET
     assert tasks[0].answer_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value
-    assert "按您记得的顺序" in tasks[0].question
+    assert "最关键的经过" in tasks[0].question
+
+
+def test_story_narration_questions_follow_story_type_and_editorial_value():
+    relationship = MemoirStory(title="与姐姐的关系", story_type="relationship")
+    life_stage = MemoirStory(title="下乡的日子", story_type="life_stage")
+    theme = MemoirStory(title="一生坚持学习", story_type="theme")
+
+    assert "共同经历" in followup_planner._story_narration_question(relationship)
+    assert "主要承担什么" in followup_planner._story_narration_question(life_stage)
+    assert "一两件最能说明这个主题" in followup_planner._story_narration_question(theme)
+
+    opening_gap = MemoirNarrativeGap(
+        severity=MemoirNarrativeGapSeverity.MEDIUM.value,
+        target_slot="semantic:opening:opening-gap",
+    )
+    event_detail_gap = MemoirNarrativeGap(
+        severity=MemoirNarrativeGapSeverity.MEDIUM.value,
+        target_slot="background",
+    )
+    assert followup_planner._task_priority(
+        opening_gap,
+        story_required=False,
+        chapter_order=0,
+    ) > followup_planner._task_priority(
+        event_detail_gap,
+        story_required=True,
+        chapter_order=0,
+    )
+    assert (
+        followup_planner._answer_use(opening_gap)
+        == MemoirFollowupAnswerUse.DIRECT_NARRATIVE
+    )
+    assert "具体场景开始这一章" in followup_planner._task_question(
+        opening_gap,
+        None,
+        "",
+    )
 
 
 async def test_required_framing_node_does_not_promote_its_supporting_story(

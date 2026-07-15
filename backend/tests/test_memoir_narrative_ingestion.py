@@ -47,7 +47,10 @@ from app.schemas.memoir_narrative import (
 )
 from app.services.memoir.narrative.backfill import run_narrative_ingestion_backfill
 from app.services.memoir.narrative import decisions
-from app.services.memoir.narrative.ingestion import ingest_transcript_version
+from app.services.memoir.narrative.ingestion import (
+    _extraction_followup_target_slot,
+    ingest_transcript_version,
+)
 from app.services.memoir.narrative.ingestion_jobs import (
     run_narrative_ingestion_job,
     schedule_narrative_ingestion_job,
@@ -100,6 +103,21 @@ def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
     assert "Story 是可独立讲述的叙事单元，不是 Claim 的同义包装" in prompt
     assert "孤立的时间范围、身份、属性、症状清单" in prompt
     assert "不要为了覆盖每条 Claim 而拆成多个" in prompt
+
+
+def test_extraction_only_receives_real_story_slot_from_followup():
+    assert _extraction_followup_target_slot(
+        story_type="event",
+        target_slot="background",
+    ) == "background"
+    assert _extraction_followup_target_slot(
+        story_type="event",
+        target_slot="semantic:opening:gap-id",
+    ) is None
+    assert _extraction_followup_target_slot(
+        story_type="event",
+        target_slot="__story_narration__",
+    ) is None
 
 
 def _extraction_payload(source_text: str) -> dict:

@@ -36,6 +36,7 @@ from app.schemas.memoir_narrative import (
     MemoirStoryClaimInput,
 )
 from app.schemas.memoir_narrative.extraction import MemoirNarrativeExtractedClaim
+from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.ai_types import AITextClient
 from app.services.memoir.narrative import (
     chapter_contracts,
@@ -74,6 +75,17 @@ class NarrativeIngestionResult:
 
 def transcript_text_hash(content: str) -> str:
     return sha256(content.encode("utf-8")).hexdigest()
+
+
+def _extraction_followup_target_slot(
+    *,
+    story_type: str,
+    target_slot: str,
+) -> str | None:
+    if not story_type:
+        return None
+    schema = story_slot_schema(story_type)
+    return target_slot if target_slot in schema.slot_keys else None
 
 
 def _speaker_role(utterance: MemoirVoiceUtterance) -> MemoirClaimEvidenceSpeakerRole:
@@ -196,6 +208,14 @@ async def ingest_transcript_version(
         project_id=project.id,
         utterance=utterance,
     )
+    extraction_target_slot = (
+        _extraction_followup_target_slot(
+            story_type=active_followup.story_type,
+            target_slot=active_followup.target_slot,
+        )
+        if active_followup
+        else None
+    )
     extraction_text = (
         active_followup.direct_narrative_text
         if active_followup
@@ -218,7 +238,7 @@ async def ingest_transcript_version(
                 "task_id": active_followup.task_id,
                 "question": active_followup.question,
                 "answer_kind": active_followup.answer_kind,
-                "target_slot": active_followup.target_slot,
+                "target_slot": extraction_target_slot,
                 "story_id": active_followup.story_id,
                 "story_title": active_followup.story_title,
                 "story_type": active_followup.story_type,
