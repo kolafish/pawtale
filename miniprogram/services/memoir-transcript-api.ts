@@ -169,7 +169,7 @@ export function memoirShareVideoDownloadUrl(downloadUrl: string): string {
 }
 
 export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<string> {
-  const downloadUrl = job.download_url?.trim();
+  const downloadUrl = job.output?.download_url.trim();
   if (!downloadUrl) {
     throw new ApiError(400, "视频还没有生成完成", job);
   }

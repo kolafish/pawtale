@@ -62,7 +62,7 @@ def _share_video_paths(job: MemoirMaterialShareVideo) -> set[str]:
     return {
         value
         for value in (
-            job.video_storage_path,
+            job.output.storage_path if job.output is not None else None,
             *_metadata_storage_paths(job.metadata_json),
         )
         if value

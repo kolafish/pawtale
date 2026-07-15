@@ -14,6 +14,7 @@ REALTIME_VOICE_TABLES = (
     "memoir_voice_utterances",
     "memoir_transcript_alignments",
     "memoir_material_share_videos",
+    "memoir_share_video_outputs",
     "memoir_transcript_versions",
     "memoir_voice_authorization_consents",
 )

@@ -426,9 +426,11 @@ test("share video APIs encode routes and download preview with session cookie", 
     start_ms: 0,
     end_ms: 4200,
     duration_ms: 4200,
-    video_mime_type: "video/mp4",
-    video_size_bytes: 4096,
-    download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    output: {
+      mime_type: "video/mp4",
+      size_bytes: 4096,
+      download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    },
     error_message: "",
     created_at: "2026-07-01T08:00:00.000Z",
     updated_at: "2026-07-01T08:00:02.000Z",
@@ -557,7 +559,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.equal(context.segments[0].text, "爷爷退休后还在帮公司做事。");
   assert.equal(context.background_modes[2].value, "smart_multi");
   assert.equal(created.status, "succeeded");
-  assert.equal(detail.download_url, "/api/mobile/memoir/share-video/jobs/job-1/download");
+  assert.equal(detail.output.download_url, "/api/mobile/memoir/share-video/jobs/job-1/download");
   assert.equal(path, "/tmp/share.mp4");
   assert.equal(downloads[0].url, "http://backend.local:8000/api/mobile/memoir/share-video/jobs/job-1/download");
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");

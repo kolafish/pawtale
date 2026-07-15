@@ -615,7 +615,7 @@ export class TranscriptShareVideoController {
     requestToken: number,
     statusText = "正在准备预览",
   ): Promise<string> {
-    if (!job.download_url) {
+    if (!job.output?.download_url) {
       throw new Error("视频还没有生成完成");
     }
     if (this.state.shareVideoJob?.id === job.id && this.state.shareVideoPreviewPath) {

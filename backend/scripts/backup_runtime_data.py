@@ -33,7 +33,7 @@ SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 OBJECT_REFERENCE_COLUMNS = {
     "audio_files": ("storage_path",),
     "memoir_image_assets": ("storage_path", "thumbnail_storage_path"),
-    "memoir_material_share_videos": ("video_storage_path",),
+    "memoir_share_video_outputs": ("storage_path",),
 }
 
 

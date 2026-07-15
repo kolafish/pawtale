@@ -604,6 +604,12 @@ export type MemoirBookImagePlacementType =
   | "cover"
   | "back_cover";
 
+export interface MemoirShareVideoOutput {
+  mime_type: string;
+  size_bytes: number;
+  download_url: string;
+}
+
 export interface MemoirShareVideoJob {
   id: string;
   project_id: string;
@@ -627,9 +633,7 @@ export interface MemoirShareVideoJob {
   background_model?: string | null;
   background_cache_hit?: boolean | null;
   background_error_message?: string;
-  video_mime_type: string;
-  video_size_bytes?: number | null;
-  download_url?: string | null;
+  output: MemoirShareVideoOutput | null;
   error_message: string;
   created_at: string;
   updated_at: string;

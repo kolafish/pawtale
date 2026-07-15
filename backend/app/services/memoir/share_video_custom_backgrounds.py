@@ -365,7 +365,6 @@ async def create_custom_share_video_background_asset(
         provider="user_upload",
         model="ffmpeg-background-processor",
         metadata_json=metadata,
-        include_in_book=False,
     )
     db.add(asset)
     await db.commit()

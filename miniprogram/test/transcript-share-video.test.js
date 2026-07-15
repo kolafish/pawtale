@@ -16,7 +16,11 @@ function shareVideoJob(overrides = {}) {
     background_status: "ready",
     background_effective_mode: "single",
     background_scene_count: 1,
-    download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    output: {
+      mime_type: "video/mp4",
+      size_bytes: 4096,
+      download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
+    },
     error_message: "",
     ...overrides,
   };

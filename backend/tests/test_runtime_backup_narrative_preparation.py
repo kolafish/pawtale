@@ -14,6 +14,7 @@ from scripts.backup_runtime_data import (
     SQLITE_SIDECAR_SUFFIXES,
     create_backup,
     validate_backup_checksums,
+    write_object_references,
 )
 from scripts.prepare_memoir_narrative_data import (
     _validate_backup_manifest,
@@ -239,6 +240,33 @@ def test_runtime_backup_counts_every_narrative_table(tmp_path):
     manifest = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
 
     assert set(MEMOIR_NARRATIVE_TABLES) <= set(manifest["table_counts"])
+
+
+def test_runtime_backup_indexes_share_video_output_files(tmp_path):
+    database = tmp_path / "pawtale.db"
+    with sqlite3.connect(database) as conn:
+        conn.execute(
+            "CREATE TABLE memoir_share_video_outputs ("
+            "id TEXT PRIMARY KEY, storage_path TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO memoir_share_video_outputs (id, storage_path) "
+            "VALUES ('output-1', 'memoir/share-videos/user/job.mp4')"
+        )
+    output_path = tmp_path / "object-references.json"
+
+    counts = write_object_references(database, output_path)
+    references = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert counts["memoir_share_video_outputs"] == 1
+    assert references == [
+        {
+            "table": "memoir_share_video_outputs",
+            "id": "output-1",
+            "column": "storage_path",
+            "path": "memoir/share-videos/user/job.mp4",
+        }
+    ]
 
 
 def test_restore_replaces_projects_memoir_and_backend_data_trees(tmp_path):

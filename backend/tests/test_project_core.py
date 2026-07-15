@@ -5,7 +5,14 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.models.audit import AuditEvent, AuditSession
-from app.models.memoir import MemoirImageAsset
+from app.models.memoir import (
+    MemoirImageAsset,
+    MemoirMaterialShareVideo,
+    MemoirShareVideoOutput,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
+from app.models.memoir_common import AudioFile
 from app.models.memoir_narrative import MemoirNarrativeDecision
 from app.models.users import User
 from project_helpers import create_project, project_payload
@@ -151,6 +158,7 @@ class TestProjectAPI:
         monkeypatch,
     ):
         monkeypatch.setattr("app.services.memoir.project_deletion.DATA_DIR", tmp_path)
+        monkeypatch.setattr("app.services.memoir.audio_files.DATA_DIR", tmp_path)
         project = await create_project(client, "完整删除", "memoir")
         user = await test_db.scalar(
             select(User).where(User.email == "tester@example.com")
@@ -158,9 +166,13 @@ class TestProjectAPI:
         assert user is not None
         image_path = tmp_path / "memoir" / project["id"] / "asset.png"
         thumbnail_path = tmp_path / "memoir" / project["id"] / "asset.thumb.png"
+        audio_path = tmp_path / "memoir" / project["id"] / "source.wav"
+        video_path = tmp_path / "memoir" / project["id"] / "share.mp4"
         image_path.parent.mkdir(parents=True)
         image_path.write_bytes(b"image")
         thumbnail_path.write_bytes(b"thumbnail")
+        audio_path.write_bytes(b"audio")
+        video_path.write_bytes(b"video")
         test_db.add_all(
             [
                 AuditSession(
@@ -188,6 +200,46 @@ class TestProjectAPI:
                     storage_path=str(image_path.relative_to(tmp_path)),
                     thumbnail_storage_path=str(thumbnail_path.relative_to(tmp_path)),
                     mime_type="image/png",
+                ),
+                AudioFile(
+                    id="delete-project-audio",
+                    user_id=user.id,
+                    storage_path=str(audio_path.relative_to(tmp_path)),
+                    mime_type="audio/wav",
+                    size_bytes=audio_path.stat().st_size,
+                ),
+                MemoirVoiceSession(
+                    id="delete-project-voice-session",
+                    project_id=project["id"],
+                ),
+                MemoirVoiceUtterance(
+                    id="delete-project-utterance",
+                    voice_session_id="delete-project-voice-session",
+                    audio_file_id="delete-project-audio",
+                    transcript_raw="要删除的语音",
+                ),
+                MemoirMaterialShareVideo(
+                    id="delete-project-video-job",
+                    project_id=project["id"],
+                    utterance_id="delete-project-utterance",
+                    audio_file_id="delete-project-audio",
+                    user_id=user.id,
+                    status="succeeded",
+                    text_source="raw",
+                    text_hash="delete-project-hash",
+                    selected_text="要删除的语音",
+                    start_char=0,
+                    end_char=6,
+                    start_ms=0,
+                    end_ms=3000,
+                ),
+                MemoirShareVideoOutput(
+                    id="delete-project-video-output",
+                    job_id="delete-project-video-job",
+                    project_id=project["id"],
+                    storage_path=str(video_path.relative_to(tmp_path)),
+                    mime_type="video/mp4",
+                    size_bytes=video_path.stat().st_size,
                 ),
             ]
         )
@@ -228,8 +280,15 @@ class TestProjectAPI:
                 MemoirImageAsset.project_id == project["id"]
             )
         ) == 0
+        assert await test_db.scalar(
+            select(func.count(MemoirShareVideoOutput.id)).where(
+                MemoirShareVideoOutput.project_id == project["id"]
+            )
+        ) == 0
         assert not image_path.exists()
         assert not thumbnail_path.exists()
+        assert not audio_path.exists()
+        assert not video_path.exists()
         audit_event = await test_db.scalar(
             select(AuditEvent).where(
                 AuditEvent.client_event_id == "delete-project-event"
