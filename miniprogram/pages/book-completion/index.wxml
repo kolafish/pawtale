@@ -27,7 +27,7 @@
       <text class="chapter-headline">{{item.headline}}</text>
       <text class="chapter-detail">{{item.detail}}</text>
       <view wx:if="{{item.focus_areas.length}}" class="focus-list">
-        <text class="focus-label">最值得补充</text>
+        <text class="focus-label">建议先从这里讲</text>
         <text wx:for="{{item.focus_areas}}" wx:key="*this" class="focus-item">{{item}}</text>
       </view>
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">

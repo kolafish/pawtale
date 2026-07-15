@@ -35,10 +35,9 @@ function readyOverview() {
         title: "学校里的比赛",
         sort_order: 0,
         state: "ready",
-        headline: "还有一段重要经历值得补充",
-        detail: "先讲完整经过，不需要逐个回答细节。",
-        remaining_count: 1,
-        focus_areas: ["请按顺序讲讲比赛的完整经过和结果。"],
+        headline: "还有一个重要方向值得补充",
+        detail: "围绕这个方向讲您记得的内容，不必逐项作答。",
+        focus_areas: ["这段回忆为什么适合作为本章开头？"],
         task_id: "task-1",
       },
       {
@@ -48,7 +47,6 @@ function readyOverview() {
         state: "complete",
         headline: "目前不需要再补",
         detail: "以后有新素材时会重新整理。",
-        remaining_count: 0,
         focus_areas: [],
       },
     ],
@@ -65,7 +63,8 @@ test("book completion overview exposes chapter-level progress without internal m
   const patch = bookCompletionViewPatch(readyOverview());
 
   assert.equal(patch.progressText, "1 / 2 章目前不需要再补");
-  assert.equal(patch.chapters[0].actionText, "查看补全方向");
+  assert.equal(patch.chapters[0].actionText, "查看补全建议");
+  assert.deepEqual(patch.chapters[0].focus_areas, ["这段回忆为什么适合作为本章开头？"]);
   assert.equal(patch.chapters[1].actionText, "查看本章情况");
   assert.equal(patch.chapters[1].disabled, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract/);

@@ -220,11 +220,14 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     chapter_state = ready.json()["chapters"][0]
     assert chapter_state["state"] == "ready"
-    assert chapter_state["remaining_count"] == 1
     assert chapter_state["task_id"]
-    assert chapter_state["item_id"]
-    assert chapter_state["item_kind"] == "narrator_followup"
+    assert len(chapter_state["focus_areas"]) == 1
     assert "最关键的经过" in chapter_state["focus_areas"][0]
+    assert chapter_state["headline"] == "还有一个重要方向值得补充"
+    assert chapter_state["detail"] == "围绕这个方向讲您记得的内容，不必逐项作答。"
+    assert "remaining_count" not in chapter_state
+    assert "item_id" not in chapter_state
+    assert "item_kind" not in chapter_state
     assert not any(term in ready.text for term in ("Story", "Claim", "slot", "Contract"))
 
     voice = await post_mobile_memoir_voice_session(
@@ -242,7 +245,7 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     resumed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     resumed_chapter = resumed.json()["chapters"][0]
     assert resumed_chapter["state"] == "in_progress"
-    assert resumed_chapter["item_id"] == chapter_state["item_id"]
+    assert resumed_chapter["task_id"] == chapter_state["task_id"]
     assert resumed_chapter["active_session_id"] == voice.json()["session"]["id"]
 
 
