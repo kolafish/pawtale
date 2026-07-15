@@ -194,4 +194,3 @@ async def chapter_completion_items(
             item.id,
         ),
     )
-

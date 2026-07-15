@@ -26,4 +26,3 @@ class MemoirCompletionItem(BaseModel):
     priority: int = 0
     active_session_id: str | None = None
     requires_manual_review: bool = False
-
