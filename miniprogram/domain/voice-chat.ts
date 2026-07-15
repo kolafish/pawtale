@@ -289,6 +289,21 @@ export interface MemoirFollowupAnswerInterpretation {
   reason: string;
 }
 
+export interface MemoirCompletionOutcome {
+  status: "processing" | "incorporated" | "context_recorded" | "needs_confirmation" | "not_used";
+  voice_session_id: string;
+  task_id?: string | null;
+  task_status?: MemoirFollowupTask["status"] | null;
+  chapter_id?: string | null;
+  chapter_title: string;
+  utterance_id?: string | null;
+  answer_kind?: MemoirFollowupAnswerKind | null;
+  route_action: string;
+  reason: string;
+  message: string;
+  review_event_id?: string | null;
+}
+
 export interface MemoirBookSourceReviewItem {
   id: string;
   project_id: string;

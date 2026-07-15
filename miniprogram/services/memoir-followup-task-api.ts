@@ -1,4 +1,5 @@
 import type {
+  MemoirCompletionOutcome,
   MemoirFollowupTask,
   MemoirFollowupTaskActionRequest,
   MemoirFollowupTaskCannotRecallRequest,
@@ -46,6 +47,18 @@ export function getMemoirFollowupTask(
   taskId: string,
 ): Promise<MemoirFollowupTask> {
   return memoirRequest<MemoirFollowupTask>(followupTaskPath(projectId, taskId));
+}
+
+export function getMemoirCompletionOutcome(
+  projectId: string,
+  voiceSessionId: string,
+): Promise<MemoirCompletionOutcome> {
+  return memoirRequest<MemoirCompletionOutcome>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/voice-sessions/${encodeURIComponent(voiceSessionId)}/completion-outcome`,
+    ),
+  );
 }
 
 export function deferMemoirFollowupTask(

@@ -83,6 +83,7 @@ from .gaps import (
     MemoirSemanticGapAuditOutput,
 )
 from .followup_tasks import (
+    MemoirCompletionOutcomeResponse,
     MemoirFollowupTaskActionRequest,
     MemoirFollowupTaskCannotRecallRequest,
     MemoirFollowupTaskClaimResponse,
@@ -189,6 +190,7 @@ __all__ = [
     "MemoirNarrativeGapResolutionRequest",
     "MemoirNarrativeGapResponse",
     "MemoirSemanticGapAuditOutput",
+    "MemoirCompletionOutcomeResponse",
     "MemoirFollowupTaskActionRequest",
     "MemoirFollowupTaskCannotRecallRequest",
     "MemoirFollowupTaskClaimResponse",

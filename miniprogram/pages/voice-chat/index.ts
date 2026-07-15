@@ -1,4 +1,5 @@
 import type {
+  MemoirCompletionOutcome,
   MemoirFollowupCannotRecallResolution,
   MemoirGuidanceMode,
   MemoirInterviewType,
@@ -37,6 +38,7 @@ import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
+  getMemoirCompletionOutcome,
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
@@ -109,8 +111,10 @@ import {
   voiceRecordingUnavailablePatch,
 } from "./voice-chat-recording-flow";
 import { VoiceChatCompletionTaskRuntime } from "./voice-chat-completion-task-runtime";
+import { completionOutcomeDialog } from "./voice-chat-completion-outcome";
 import {
   datasetString,
+  pageUrl,
   queryChoice,
   queryParam,
   type PageDatasetEvent,
@@ -118,6 +122,12 @@ import {
 } from "../../services/page-input";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
+const COMPLETION_OUTCOME_POLL_ATTEMPTS = 8;
+const COMPLETION_OUTCOME_POLL_INTERVAL_MS = 1000;
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 interface CheckboxChangeEvent {
   detail: {
@@ -1815,6 +1825,11 @@ definePage<VoiceChatData>()({
       setVoiceChatData(this, finishSessionSavedPatch());
       await this.refreshVoiceSessionSnapshot();
       setVoiceChatData(this, { persistenceStateText: "已保存" });
+      if (this.data.sessionGoal === "book_completion") {
+        const outcome = await this.waitForCompletionOutcome();
+        this.showCompletionOutcome(outcome);
+        return;
+      }
       wx.showModal({
         title: "本次讲述已保存",
         content: "可以到讲述记录里查看和整理文字。",
@@ -1832,6 +1847,70 @@ definePage<VoiceChatData>()({
     } finally {
       setVoiceChatData(this, { finishingSession: false });
     }
+  },
+
+  async waitForCompletionOutcome(): Promise<MemoirCompletionOutcome | null> {
+    if (!this.data.projectId || !this.data.voiceSessionId) {
+      return null;
+    }
+    let latest: MemoirCompletionOutcome | null = null;
+    for (let attempt = 0; attempt < COMPLETION_OUTCOME_POLL_ATTEMPTS; attempt += 1) {
+      try {
+        latest = await getMemoirCompletionOutcome(
+          this.data.projectId,
+          this.data.voiceSessionId,
+        );
+      } catch (error) {
+        console.warn("load completion outcome failed", error);
+        return latest;
+      }
+      if (latest.status !== "processing") {
+        return latest;
+      }
+      if (attempt < COMPLETION_OUTCOME_POLL_ATTEMPTS - 1) {
+        await wait(COMPLETION_OUTCOME_POLL_INTERVAL_MS);
+      }
+    }
+    return latest;
+  },
+
+  showCompletionOutcome(outcome: MemoirCompletionOutcome | null) {
+    if (!outcome) {
+      wx.showModal({
+        title: "回答已经保存",
+        content: "处理结果暂时没有返回，请回到章节后刷新查看。",
+        confirmText: "返回章节",
+        cancelText: "留在本页",
+        success: (result) => {
+          if (result.confirm) {
+            wx.navigateBack({ delta: 1 });
+          }
+        },
+      });
+      return;
+    }
+    const dialog = completionOutcomeDialog(outcome);
+    wx.showModal({
+      title: dialog.title,
+      content: dialog.content,
+      confirmText: dialog.confirmText,
+      cancelText: "留在本页",
+      success: (result) => {
+        if (!result.confirm) {
+          return;
+        }
+        if (dialog.action === "review" && outcome.review_event_id) {
+          wx.navigateTo({
+            url: pageUrl("/pages/source-review/index", {
+              projectId: this.data.projectId,
+              eventId: outcome.review_event_id,
+            }),
+          });
+          return;
+        }
+        wx.navigateBack({ delta: 1 });
+      },
+    });
   },
 
   handleStatus(status: VoiceChatConnectionStatus) {

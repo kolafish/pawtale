@@ -11,6 +11,7 @@
   <block wx:else>
     <view class="page-intro">
       <text class="page-kicker">需要您确认一下</text>
+      <text wx:if="{{chapterTitle}}" class="chapter-title">正在补充《{{chapterTitle}}》</text>
       <text class="page-title">{{questionText || "这段话该怎么使用？"}}</text>
     </view>
 

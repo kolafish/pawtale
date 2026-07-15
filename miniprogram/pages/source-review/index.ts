@@ -47,6 +47,7 @@ interface SourceReviewData extends MixedAnswerParts {
   success: boolean;
   error: string;
   questionText: string;
+  chapterTitle: string;
   taskId: string;
   confirmationType: "answer_usage" | "fact_resolution";
   sourceText: string;
@@ -97,13 +98,14 @@ const CHOICES: AnswerChoice[] = [
 
 function reviewItemPatch(item: MemoirBookSourceReviewItem): Pick<
   SourceReviewData,
-  "questionText" | "sourceText" | "taskId" | "confirmationType"
+  "questionText" | "chapterTitle" | "sourceText" | "taskId" | "confirmationType"
 > {
   const followup = item.followup_answer;
   return {
     questionText: followup?.confirmation_question.trim()
       || item.summary_text.trim()
       || "这段话是要写进书里，还是只用来解释已有内容？",
+    chapterTitle: item.target_chapter_title?.trim() || "",
     sourceText: item.source_text.trim(),
     taskId: followup?.task_id || "",
     confirmationType: followup?.confirmation_type || "answer_usage",
@@ -121,6 +123,7 @@ definePage<SourceReviewData>()({
     success: false,
     error: "",
     questionText: "",
+    chapterTitle: "",
     taskId: "",
     confirmationType: "answer_usage",
     sourceText: "",
@@ -261,7 +264,7 @@ definePage<SourceReviewData>()({
             mode: "guided_interview",
             interviewType: "ai_interview",
             sessionGoal: "book_completion",
-            projectTitle: "补全本章",
+            projectTitle: this.data.chapterTitle || "补全本章",
           }),
         });
         return;
@@ -293,7 +296,7 @@ definePage<SourceReviewData>()({
           mode: "guided_interview",
           interviewType: "ai_interview",
           sessionGoal: "book_completion",
-          projectTitle: "补全本章",
+          projectTitle: this.data.chapterTitle || "补全本章",
         }),
       });
     } catch (error) {

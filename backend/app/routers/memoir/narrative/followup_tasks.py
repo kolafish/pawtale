@@ -9,6 +9,7 @@ from app.database import get_db
 from app.domain.memoir.narrative_types import MemoirFollowupTaskStatus
 from app.models.users import User
 from app.schemas.memoir_narrative import (
+    MemoirCompletionOutcomeResponse,
     MemoirFollowupTaskActionRequest,
     MemoirFollowupTaskCannotRecallRequest,
     MemoirFollowupTaskDeferRequest,
@@ -19,6 +20,7 @@ from app.schemas.memoir_narrative import (
     MemoirFollowupTaskSwitchRequest,
 )
 from app.services.memoir.narrative import (
+    completion_outcomes,
     followup_actions,
     followup_jobs,
     followup_tasks as task_service,
@@ -28,6 +30,27 @@ from .common import authorize_project, decision_error
 
 
 router = APIRouter()
+
+
+@router.get(
+    "/projects/{project_id}/voice-sessions/{voice_session_id}/completion-outcome",
+    response_model=MemoirCompletionOutcomeResponse,
+)
+async def get_memoir_completion_outcome(
+    project_id: str,
+    voice_session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        return await completion_outcomes.completion_outcome(
+            db,
+            project_id=project_id,
+            voice_session_id=voice_session_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="补全会话不存在") from exc
 
 
 async def _raise_mutation_error(
