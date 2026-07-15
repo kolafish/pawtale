@@ -1,23 +1,38 @@
 import json
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
+from app.domain.memoir.narrative_types import (
+    MemoirChapterContractStatus,
+    MemoirNarrativeActorType,
+)
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
+    MemoirBookImagePlacementType,
     MemoirBookChapterDraftStatus,
     MemoirChapterSourceAssignedBy,
     MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+    MemoirImageAssetSourceType,
+    MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirBookImagePlacement,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterCard,
     MemoirChapterSourceLink,
+    MemoirEditingJob,
+    MemoirImageAsset,
 )
+from app.models.memoir_narrative import MemoirChapterContract
 from app.services.memoir.book_plan_ai import ChapterTitleSourceDigest, build_chapter_title_prompt
 from app.services.memoir.book_plan_sources import (
     find_chapter_by_id,
@@ -901,6 +916,45 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
     created_chapter = create_response.json()["chapters"][1]
     assert created_chapter["title"] == "后来我又讲了一个认识很多年的朋友"
     assert created_chapter["source_refs"][0]["utterance_id"] == later["utterance_id"]
+    plan = await test_db.scalar(
+        select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id)
+    )
+    now = datetime.now(UTC).replace(tzinfo=None)
+    editing_job = MemoirEditingJob(
+        project_id=project_id,
+        chapter_id=created_chapter["id"],
+        job_type=MemoirEditingJobType.GENERATE_DRAFT_BLOCKS.value,
+        status=MemoirEditingJobStatus.RUNNING.value,
+        run_after=now,
+        locked_at=now,
+        lease_token="lease-before-chapter-delete",
+        lease_expires_at=now + timedelta(minutes=5),
+    )
+    chapter_card = MemoirChapterCard(
+        project_id=project_id,
+        plan_id=plan.id,
+        chapter_id=created_chapter["id"],
+        input_signature="deleted-chapter-card",
+        engine="rules_v1",
+        status=MemoirSemanticCacheStatus.READY.value,
+    )
+    image_asset = MemoirImageAsset(
+        project_id=project_id,
+        user_id=first["user_id"],
+        source_type=MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value,
+        source_signature="deleted-chapter-image",
+        source_chapter_id=created_chapter["id"],
+    )
+    test_db.add_all([editing_job, chapter_card, image_asset])
+    await test_db.flush()
+    image_placement = MemoirBookImagePlacement(
+        project_id=project_id,
+        image_asset_id=image_asset.id,
+        placement_type=MemoirBookImagePlacementType.CHAPTER_OPENING.value,
+        chapter_id=created_chapter["id"],
+    )
+    test_db.add(image_placement)
+    await test_db.commit()
     await _assert_source_held_event_resolved(
         test_db,
         held_event.id,
@@ -914,9 +968,98 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
 
     assert delete_response.status_code == 200, delete_response.json()
     assert [chapter["title"] for chapter in delete_response.json()["chapters"]] == ["童年和外婆家"]
+    await test_db.refresh(held_event)
+    assert held_event.chapter_id is None
+    deleted_chapter = held_event.metadata_json["deleted_chapter"]
+    assert deleted_chapter["id"] == created_chapter["id"]
+    assert deleted_chapter["title"] == "后来我又讲了一个认识很多年的朋友"
+    assert deleted_chapter["detached_at"]
+    await test_db.refresh(editing_job)
+    assert editing_job.chapter_id is None
+    assert editing_job.status == MemoirEditingJobStatus.SKIPPED.value
+    assert editing_job.locked_at is None
+    assert editing_job.lease_token is None
+    assert editing_job.lease_expires_at is None
+    assert editing_job.error_message == "章节已删除，任务已跳过"
+    assert await test_db.get(MemoirChapterCard, chapter_card.id) is None
+    assert await test_db.get(MemoirBookImagePlacement, image_placement.id) is None
+    await test_db.refresh(image_asset)
+    assert image_asset.source_chapter_id is None
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
     assert [item["utterance_id"] for item in coverage.json()["uncovered_sources"]] == [later["utterance_id"]]
+
+
+async def test_book_plan_destructive_changes_reject_chapters_with_narrative_contract(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    confirmed = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {"title": "外婆家的童年", "source_refs": [memoir_source_ref(first)]},
+                {"title": "离家求学", "source_refs": [memoir_source_ref(second)]},
+            ]
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    first_chapter, protected_chapter = confirmed.json()["chapters"]
+    contract = MemoirChapterContract(
+        project_id=project_id,
+        chapter_id=protected_chapter["id"],
+        version=1,
+        objective="讲清第一次离家求学的经过。",
+        reader_takeaway="理解这次离家如何改变了讲述者。",
+        status=MemoirChapterContractStatus.DRAFT.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(contract)
+    await test_db.commit()
+
+    responses = [
+        await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+            json={"type": "delete_chapter", "chapter_id": protected_chapter["id"]},
+        ),
+        await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+            json={
+                "type": "merge_chapters",
+                "chapter_id": protected_chapter["id"],
+                "target_chapter_id": first_chapter["id"],
+            },
+        ),
+        await client.patch(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan",
+            json={
+                "chapters": [
+                    {
+                        "id": first_chapter["id"],
+                        "title": first_chapter["title"],
+                        "source_refs": [memoir_source_ref(first)],
+                    }
+                ]
+            },
+        ),
+        await client.put(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan",
+            json={
+                "chapters": [
+                    {"title": "重新规划", "source_refs": [memoir_source_ref(first)]}
+                ]
+            },
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 409, response.text
+        assert "已进入结构化写作" in response.json()["detail"]
+    assert await test_db.get(MemoirChapterContract, contract.id) is not None
+    assert await test_db.get(MemoirBookPlanChapter, protected_chapter["id"]) is not None
 
 
 async def test_mobile_memoir_book_plan_reconfirm_removes_replaced_chapter_drafts(

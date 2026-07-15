@@ -235,6 +235,85 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
 
 
+async def test_delete_transcript_rejects_ingested_claim_evidence(client, test_db):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    project.metadata_json = {
+        "memoir_profile": {"narrator_name": "余爷爷", "narrator_origin": "四川成都"}
+    }
+    await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=FakeNarrativeAI([_extraction_payload(source_text)]),
+    )
+    await test_db.commit()
+
+    response = await client.delete(
+        f"/api/mobile/memoir/voice-transcripts/{utterance.id}"
+    )
+
+    assert response.status_code == 409, response.text
+    assert "已用于回忆录证据" in response.json()["detail"]
+    assert await test_db.get(MemoirVoiceUtterance, utterance.id) is not None
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirClaimEvidence)
+        .where(MemoirClaimEvidence.utterance_id == utterance.id)
+    ) == 2
+
+
+async def test_delete_transcript_rejects_followup_answer_lineage(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, text="那位经理就是后来邀请我创业的人。")
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    project_id = created["session"]["project_id"]
+    assert utterance is not None
+    gap = MemoirNarrativeGap(
+        project_id=project_id,
+        scope_type="book",
+        gap_type="contradiction",
+        severity="high",
+        title="经理和创业邀请人是否为同一人",
+        description="需要确认两处人物称呼。",
+        fingerprint=sha256(b"delete-followup-answer-lineage").hexdigest(),
+        status="open",
+        detected_by="rules",
+    )
+    test_db.add(gap)
+    await test_db.flush()
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=gap.id,
+        answer_use="fact_resolution",
+        question="这两个称呼指的是同一个人吗？",
+        purpose="确认人物身份。",
+        priority=100,
+        status="pending",
+        created_by="system",
+    )
+    test_db.add(task)
+    await test_db.flush()
+    relation = MemoirFollowupTaskUtterance(
+        project_id=project_id,
+        task_id=task.id,
+        utterance_id=utterance.id,
+        result_role="target_answer",
+        is_assignment_snapshot=True,
+    )
+    test_db.add(relation)
+    await test_db.commit()
+
+    response = await client.delete(
+        f"/api/mobile/memoir/voice-transcripts/{utterance.id}"
+    )
+
+    assert response.status_code == 409, response.text
+    assert await test_db.get(MemoirVoiceUtterance, utterance.id) is not None
+    assert await test_db.get(MemoirFollowupTaskUtterance, relation.id) is not None
+
+
 async def test_control_only_utterance_creates_no_claim_or_story(client, test_db):
     source_text = "我们接着聊那个朋友吧"
     created = await create_test_voice_transcript(client, test_db, text=source_text)

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,11 +13,25 @@ from app.domain.memoir.types import (
     MemoirBookPlanStatus,
     MemoirChapterSourceAssignedBy,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
 )
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirBookChapterDraft,
+    MemoirBookImagePlacement,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterCard,
+    MemoirEditingJob,
+    MemoirImageAsset,
+)
+from app.models.memoir_narrative import (
+    MemoirChapterContract,
+    MemoirChapterNode,
+    MemoirDraftBlock,
+    MemoirFollowupTask,
+    MemoirNarrativeGap,
+    MemoirNarrativeGapChapter,
 )
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
@@ -80,6 +94,107 @@ class ValidatedChapterUpdate:
     source_refs: list[MemoirBookChapterSourceRef]
 
 
+CHAPTER_DELETE_CONFLICT_DETAIL = (
+    "章节已进入结构化写作并建立可溯源内容，不能删除、合并或替换；"
+    "请保留该章节并调整标题、顺序或内容。"
+)
+
+
+async def _ensure_chapters_can_be_deleted(
+    db: AsyncSession,
+    chapters: list[MemoirBookPlanChapter],
+) -> None:
+    chapter_ids = {chapter.id for chapter in chapters}
+    if not chapter_ids:
+        return
+    protected_chapter_columns = (
+        MemoirChapterContract.chapter_id,
+        MemoirChapterNode.chapter_id,
+        MemoirDraftBlock.chapter_id,
+        MemoirNarrativeGap.primary_chapter_id,
+        MemoirNarrativeGapChapter.chapter_id,
+        MemoirFollowupTask.chapter_id,
+    )
+    for chapter_id_column in protected_chapter_columns:
+        protected_chapter_id = await db.scalar(
+            select(chapter_id_column)
+            .where(chapter_id_column.in_(chapter_ids))
+            .limit(1)
+        )
+        if protected_chapter_id:
+            raise HTTPException(status_code=409, detail=CHAPTER_DELETE_CONFLICT_DETAIL)
+
+
+async def _detach_chapter_operational_references(
+    db: AsyncSession,
+    chapters: list[MemoirBookPlanChapter],
+) -> None:
+    chapter_ids = {chapter.id for chapter in chapters}
+    if not chapter_ids:
+        return
+    chapter_titles = {chapter.id: chapter.title for chapter in chapters}
+    detached_at = datetime.now(UTC).isoformat()
+
+    events = list(
+        (
+            await db.scalars(
+                select(MemoirAutomationEvent).where(
+                    MemoirAutomationEvent.chapter_id.in_(chapter_ids)
+                )
+            )
+        ).all()
+    )
+    for event in events:
+        deleted_chapter_id = event.chapter_id
+        event.chapter_id = None
+        event.metadata_json = {
+            **(event.metadata_json or {}),
+            "deleted_chapter": {
+                "id": deleted_chapter_id,
+                "title": chapter_titles.get(deleted_chapter_id or "", ""),
+                "detached_at": detached_at,
+            },
+        }
+        db.add(event)
+
+    jobs = list(
+        (
+            await db.scalars(
+                select(MemoirEditingJob).where(
+                    MemoirEditingJob.chapter_id.in_(chapter_ids)
+                )
+            )
+        ).all()
+    )
+    for job in jobs:
+        job.chapter_id = None
+        if job.status in {
+            MemoirEditingJobStatus.PENDING.value,
+            MemoirEditingJobStatus.RUNNING.value,
+        }:
+            job.status = MemoirEditingJobStatus.SKIPPED.value
+            job.locked_at = None
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.error_message = "章节已删除，任务已跳过"
+        db.add(job)
+
+    await db.execute(
+        delete(MemoirChapterCard).where(MemoirChapterCard.chapter_id.in_(chapter_ids))
+    )
+    await db.execute(
+        delete(MemoirBookImagePlacement).where(
+            MemoirBookImagePlacement.chapter_id.in_(chapter_ids)
+        )
+    )
+    await db.execute(
+        update(MemoirImageAsset)
+        .where(MemoirImageAsset.source_chapter_id.in_(chapter_ids))
+        .values(source_chapter_id=None)
+    )
+    await db.flush()
+
+
 def _link_assigned_by_for_created_by(created_by: MemoirCreatedBy) -> MemoirChapterSourceAssignedBy:
     if created_by == MemoirCreatedBy.AI:
         return MemoirChapterSourceAssignedBy.AI
@@ -134,6 +249,8 @@ async def _delete_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> None:
     chapters = list(plan.chapters)
     if not chapters:
         return
+    await _ensure_chapters_can_be_deleted(db, chapters)
+    await _detach_chapter_operational_references(db, chapters)
     chapter_ids = [chapter.id for chapter in chapters]
     drafts = (
         await db.execute(
@@ -467,6 +584,12 @@ async def update_book_plan(
     unknown_ids = retained_ids - set(existing_by_id)
     if unknown_ids:
         raise HTTPException(status_code=404, detail="章节不存在")
+    removed_chapters = [
+        chapter
+        for chapter_id, chapter in existing_by_id.items()
+        if chapter_id not in retained_ids
+    ]
+    await _ensure_chapters_can_be_deleted(db, removed_chapters)
 
     for index, chapter in enumerate(plan.chapters):
         chapter.sort_order = 10000 + index
@@ -509,10 +632,7 @@ async def update_book_plan(
             db.add(chapter)
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
 
-    removed_chapters = [
-        chapter for chapter_id, chapter in existing_by_id.items()
-        if chapter_id not in retained_ids
-    ]
+    await _detach_chapter_operational_references(db, removed_chapters)
     for chapter in removed_chapters:
         if chapter in plan.chapters:
             plan.chapters.remove(chapter)
@@ -584,6 +704,12 @@ async def apply_book_plan_structure_command(
             structure_operation=req.type,
         )
 
+    if req.type in {"delete_chapter", "merge_chapters"}:
+        await _ensure_chapters_can_be_deleted(
+            db,
+            [_chapter_by_id(plan, _require_command_chapter_id(req))],
+        )
+
     chapters = _sorted_plan_chapters(plan)
     _set_temporary_chapter_orders(chapters)
     for chapter in chapters:
@@ -617,6 +743,7 @@ async def apply_book_plan_structure_command(
         source=source,
     )
     chapters = mutation.chapters
+    await _detach_chapter_operational_references(db, mutation.deleted_chapters)
     for chapter in mutation.deleted_chapters:
         if chapter in plan.chapters:
             plan.chapters.remove(chapter)

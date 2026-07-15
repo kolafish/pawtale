@@ -2275,6 +2275,7 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
 
 async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, test_db):
     created = await create_test_voice_transcript(client, test_db)
+    source_card = await add_ready_source_card(test_db, created)
 
     response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
 
@@ -2289,6 +2290,7 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     )
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == created["audio_file_id"]))
+    deleted_source_card = await test_db.get(MemoirSourceCard, source_card.id)
     versions = (
         await test_db.execute(
             select(MemoirTranscriptVersion).where(
@@ -2300,6 +2302,7 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert utterance is None
     assert message is None
     assert audio_file is not None
+    assert deleted_source_card is None
     assert len(versions) == 1
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
 
