@@ -241,14 +241,6 @@ async def active_mobile_memoir_project(
     return None
 
 
-async def get_mobile_memoir_project(
-    db: AsyncSession,
-    user_id: str,
-    project_id: str,
-) -> ProjectResponse:
-    return await _load_memoir_project_response(db, project_id, user_id)
-
-
 async def mobile_project_list(
     db: AsyncSession,
     user_id: str,
