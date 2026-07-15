@@ -942,7 +942,10 @@ test("book completion finish shows the actual chapter outcome", async () => {
   ]);
   assert.equal(modals.length, 1);
   assert.equal(modals[0].title, "已经收入章节素材");
-  assert.equal(modals[0].content, "这段回答已收入《观鸟与晚餐》的章节素材。");
+  assert.equal(
+    modals[0].content,
+    "这段回答已收入《观鸟与晚餐》的章节素材。\n回到章节工作台整理正文后，书稿才会更新。",
+  );
   assert.equal(modals[0].confirmText, "返回章节");
   delete global.wx;
 });

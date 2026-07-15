@@ -14,7 +14,7 @@ export function completionOutcomeDialog(
   if (outcome.status === "incorporated") {
     return {
       title: "已经收入章节素材",
-      content: outcome.message,
+      content: `${outcome.message}\n回到章节工作台整理正文后，书稿才会更新。`,
       confirmText: "返回章节",
       action: "back",
     };
@@ -22,7 +22,7 @@ export function completionOutcomeDialog(
   if (outcome.status === "context_recorded") {
     return {
       title: "章节说明已经保存",
-      content: outcome.message,
+      content: `${outcome.message}\n这类说明不会直接写成经历，重新整理正文时会用于调整表达。`,
       confirmText: "返回章节",
       action: "back",
     };

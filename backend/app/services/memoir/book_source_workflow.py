@@ -68,6 +68,7 @@ async def _mark_chapter_drafts_sources_changed(
     *,
     project_id: str,
     chapter_ids: set[str],
+    status_reason: str = SOURCES_CHANGED_STATUS_REASON,
 ) -> None:
     if not chapter_ids:
         return
@@ -81,7 +82,7 @@ async def _mark_chapter_drafts_sources_changed(
     ).scalars().all()
     for draft in drafts:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-        draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
+        draft.metadata_json = _draft_status_metadata(draft.metadata_json, status_reason)
         db.add(draft)
     await draft_blocks.mark_chapter_blocks_stale(
         db,
@@ -246,22 +247,12 @@ async def assign_book_sources_to_chapters(
             utterance_ids=assigned_utterance_ids,
         )
     if affected_chapter_ids:
-        drafts = (
-            await db.execute(
-                select(MemoirBookChapterDraft).where(
-                    MemoirBookChapterDraft.project_id == project_id,
-                    MemoirBookChapterDraft.chapter_id.in_(affected_chapter_ids),
-                )
-            )
-        ).scalars().all()
-        for draft in drafts:
-            if draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value:
-                draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-                draft.metadata_json = _draft_status_metadata(
-                    draft.metadata_json,
-                    NEW_SOURCES_ASSIGNED_STATUS_REASON,
-                )
-                db.add(draft)
+        await _mark_chapter_drafts_sources_changed(
+            db,
+            project_id=project_id,
+            chapter_ids=affected_chapter_ids,
+            status_reason=NEW_SOURCES_ASSIGNED_STATUS_REASON,
+        )
 
     await db.commit()
     refreshed = await _load_plan(db, project_id)
