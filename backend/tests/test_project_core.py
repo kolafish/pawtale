@@ -1,6 +1,8 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+import pytest
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from app.models.audit import AuditEvent, AuditSession
 from app.models.memoir import MemoirImageAsset
@@ -203,6 +205,15 @@ class TestProjectAPI:
             )
         )
         await test_db.commit()
+
+        with pytest.raises(IntegrityError, match="append-only"):
+            await test_db.execute(
+                delete(MemoirNarrativeDecision).where(
+                    MemoirNarrativeDecision.project_id == project["id"]
+                )
+            )
+            await test_db.commit()
+        await test_db.rollback()
 
         response = await client.delete(f"/api/projects/{project['id']}")
 
