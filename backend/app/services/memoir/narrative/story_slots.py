@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import select
@@ -40,7 +41,11 @@ class StorySlotRecomputeResult:
         return bool(self.changed_slot_ids or self.completion_changed)
 
 
-async def ensure_story_slots(db: AsyncSession, *, story: MemoirStory) -> list[MemoirStorySlot]:
+async def load_story_slots(
+    db: AsyncSession,
+    *,
+    story: MemoirStory,
+) -> list[MemoirStorySlot]:
     schema = story_slot_schema(MemoirStoryType(story.story_type), story.slot_schema_version)
     existing = list(
         (
@@ -59,9 +64,23 @@ async def ensure_story_slots(db: AsyncSession, *, story: MemoirStory) -> list[Me
     }
     if unexpected:
         raise ValueError("story slots require an explicit schema migration")
+    return existing
+
+
+async def ensure_story_slot_keys(
+    db: AsyncSession,
+    *,
+    story: MemoirStory,
+    slot_keys: Collection[str],
+) -> list[MemoirStorySlot]:
+    schema = story_slot_schema(MemoirStoryType(story.story_type), story.slot_schema_version)
+    requested_keys = set(slot_keys)
+    if not requested_keys.issubset(set(schema.slot_keys)):
+        raise ValueError("story slot does not belong to the story schema")
+    existing = await load_story_slots(db, story=story)
     by_key = {slot.slot_key: slot for slot in existing}
     for definition in schema.slots:
-        if definition.key in by_key:
+        if definition.key not in requested_keys or definition.key in by_key:
             continue
         slot = MemoirStorySlot(
             project_id=story.project_id,
@@ -73,7 +92,7 @@ async def ensure_story_slots(db: AsyncSession, *, story: MemoirStory) -> list[Me
         db.add(slot)
         by_key[definition.key] = slot
     await db.flush()
-    return [by_key[definition.key] for definition in schema.slots]
+    return [by_key[definition.key] for definition in schema.slots if definition.key in requested_keys]
 
 
 def _slot_status(
@@ -96,7 +115,7 @@ async def recompute_story_slots(
     *,
     story: MemoirStory,
 ) -> StorySlotRecomputeResult:
-    slots = await ensure_story_slots(db, story=story)
+    slots = await load_story_slots(db, story=story)
     slot_ids = [slot.id for slot in slots]
     links = []
     if slot_ids:
@@ -186,7 +205,15 @@ async def recompute_story_slots(
             changed_slot_ids.append(slot.id)
 
     schema = story_slot_schema(MemoirStoryType(story.story_type), story.slot_schema_version)
-    statuses = {slot.slot_key: slot.status for slot in slots}
+    persisted_by_key = {slot.slot_key: slot for slot in slots}
+    statuses = {
+        definition.key: (
+            persisted_by_key[definition.key].status
+            if definition.key in persisted_by_key
+            else MemoirStorySlotStatus.MISSING.value
+        )
+        for definition in schema.slots
+    }
     required_statuses = [statuses[key] for key in schema.required_slot_keys]
     if any(
         status in {MemoirStorySlotStatus.MISSING.value, MemoirStorySlotStatus.PARTIAL.value}

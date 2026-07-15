@@ -178,7 +178,11 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
     contract.status = MemoirChapterContractStatus.CONFIRMED.value
     contract.confirmed_by_user_id = user_id
     contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
-    await story_slots.ensure_story_slots(test_db, story=story)
+    await story_slots.ensure_story_slot_keys(
+        test_db,
+        story=story,
+        slot_keys={"outcome"},
+    )
     outcome_slot = await test_db.scalar(
         select(MemoirStorySlot).where(
             MemoirStorySlot.project_id == project_id,

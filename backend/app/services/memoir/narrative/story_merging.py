@@ -70,8 +70,12 @@ async def merge_stories(
 
     source_before = await story_revisions.story_snapshot(db, source)
     retained_before = await story_revisions.story_snapshot(db, retained)
-    source_slots = await story_slots.ensure_story_slots(db, story=source)
-    retained_slots = await story_slots.ensure_story_slots(db, story=retained)
+    source_slots = await story_slots.load_story_slots(db, story=source)
+    retained_slots = await story_slots.ensure_story_slot_keys(
+        db,
+        story=retained,
+        slot_keys={slot.slot_key for slot in source_slots},
+    )
     source_slots_by_key = {slot.slot_key: slot for slot in source_slots}
     retained_slots_by_key = {slot.slot_key: slot for slot in retained_slots}
     for slot_key, source_slot in source_slots_by_key.items():

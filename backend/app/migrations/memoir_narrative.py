@@ -255,6 +255,23 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
+async def _remove_derived_empty_story_slots(conn) -> None:
+    if not await _table_exists(conn, "memoir_story_slots"):
+        return
+    await conn.execute(
+        text(
+            "DELETE FROM memoir_story_slots "
+            "WHERE status = 'missing' "
+            "AND resolution_actor_type IS NULL "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM memoir_story_slot_claims AS relation "
+            "WHERE relation.project_id = memoir_story_slots.project_id "
+            "AND relation.story_slot_id = memoir_story_slots.id"
+            ")"
+        )
+    )
+
+
 async def _ensure_decision_schema(conn) -> bool:
     table_name = "memoir_narrative_decisions"
     table_sql = await _table_sql(conn, table_name)
@@ -584,6 +601,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
             await _ensure_followup_task_utterance_interpretation_columns(conn)
         )
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
+        await _remove_derived_empty_story_slots(conn)
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))

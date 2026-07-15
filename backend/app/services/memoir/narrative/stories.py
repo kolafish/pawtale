@@ -7,6 +7,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirStoryLifecycleStatus,
     MemoirStoryRevisionChangeType,
+    MemoirStorySlotStatus,
     MemoirStoryType,
 )
 from app.models.memoir_narrative import (
@@ -41,7 +42,6 @@ async def create_story(
     reason: str = "",
 ) -> MemoirStory:
     story = await MemoirStoryRepository(db).create(data, story_id=story_id)
-    await story_slots.ensure_story_slots(db, story=story)
     await story_revisions.create_initial_story_revision(
         db,
         story=story,
@@ -110,7 +110,16 @@ async def attach_claims_to_story(
             raise ValueError("story claim references a slot outside the story schema")
 
     before = await story_revisions.story_snapshot(db, story)
-    slots = await story_slots.ensure_story_slots(db, story=story)
+    requested_slot_keys = {
+        slot_key
+        for item in claims
+        for slot_key in item.slot_keys
+    }
+    slots = await story_slots.ensure_story_slot_keys(
+        db,
+        story=story,
+        slot_keys=requested_slot_keys,
+    )
     slots_by_key = {slot.slot_key: slot for slot in slots}
     existing_story_claims = {
         link.claim_id: link
@@ -210,7 +219,7 @@ async def _story_relations(
             )
         ).all()
     )
-    slots = await story_slots.ensure_story_slots(db, story=story)
+    slots = await story_slots.load_story_slots(db, story=story)
     slot_ids = [slot.id for slot in slots]
     slot_claims = []
     if slot_ids:
@@ -244,7 +253,7 @@ async def _story_relations(
 async def story_response(db: AsyncSession, *, story: MemoirStory) -> MemoirStoryResponse:
     claims, slots, slot_claims, revisions = await _story_relations(db, story=story)
     schema = story_slot_schema(MemoirStoryType(story.story_type), story.slot_schema_version)
-    required_by_key = {definition.key: definition.required for definition in schema.slots}
+    slots_by_key = {slot.slot_key: slot for slot in slots}
     slot_claims_by_slot: dict[str, list[MemoirStorySlotClaimResponse]] = {}
     for link in slot_claims:
         slot_claims_by_slot.setdefault(link.story_slot_id, []).append(
@@ -256,20 +265,25 @@ async def story_response(db: AsyncSession, *, story: MemoirStory) -> MemoirStory
         claims=[MemoirStoryClaimLinkResponse.model_validate(link) for link in claims],
         slots=[
             MemoirStorySlotResponse(
-                id=slot.id,
-                schema_version=slot.schema_version,
-                slot_key=slot.slot_key,
-                required=required_by_key[slot.slot_key],
-                status=slot.status,
-                assessment_summary=slot.assessment_summary,
-                user_resolution_note=slot.user_resolution_note,
-                resolution_actor_type=slot.resolution_actor_type,
-                resolved_by_user_id=slot.resolved_by_user_id,
-                resolved_at=slot.resolved_at,
-                claims=slot_claims_by_slot.get(slot.id, []),
-                updated_at=slot.updated_at,
+                id=slot.id if slot else None,
+                schema_version=schema.version,
+                slot_key=definition.key,
+                required=definition.required,
+                status=(
+                    slot.status
+                    if slot is not None
+                    else MemoirStorySlotStatus.MISSING.value
+                ),
+                assessment_summary=(slot.assessment_summary if slot else ""),
+                user_resolution_note=(slot.user_resolution_note if slot else ""),
+                resolution_actor_type=(slot.resolution_actor_type if slot else None),
+                resolved_by_user_id=(slot.resolved_by_user_id if slot else None),
+                resolved_at=(slot.resolved_at if slot else None),
+                claims=(slot_claims_by_slot.get(slot.id, []) if slot else []),
+                updated_at=(slot.updated_at if slot else None),
             )
-            for slot in slots
+            for definition in schema.slots
+            for slot in [slots_by_key.get(definition.key)]
         ],
         revisions=[MemoirStoryRevisionResponse.model_validate(revision) for revision in revisions],
     )
