@@ -2,14 +2,7 @@ import json
 
 from sqlalchemy import select
 
-from app.domain.memoir.types import (
-    MemoirEditingJobStatus,
-    MemoirEditingJobType,
-)
-from app.models.memoir import (
-    MemoirEditingJob,
-    MemoirChapterSourceLink,
-)
+from app.models.memoir import MemoirChapterSourceLink
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
     create_test_book_plan_with_chapters,
@@ -312,17 +305,6 @@ async def test_mobile_memoir_book_voice_command_merge_schedules_target_chapter_r
         first["utterance_id"],
     ]
     assert target_chapter["pending_source_count"] == 1
-
-    revision_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"revise_chapter:{chapters[1].id}")
-    )
-    assert revision_job is not None
-    assert revision_job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert revision_job.status == MemoirEditingJobStatus.PENDING.value
-    assert revision_job.chapter_id == chapters[1].id
-    assert revision_job.payload_json["base_version_id"] == base_version_id
-    assert revision_job.payload_json["pending_source_utterance_ids"] == [first["utterance_id"]]
-
 
 async def test_mobile_memoir_book_voice_command_execute_assigns_uncovered_source(client, test_db):
     created = await create_test_voice_transcript(client, test_db, "我第一次进厂的时候，师傅带我熟悉车间。")

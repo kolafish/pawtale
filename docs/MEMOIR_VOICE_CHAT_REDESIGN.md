@@ -84,10 +84,11 @@ miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 backend/app/routers/memoir/book.py            # 成书章节规划、章节稿、全书稿和朗读 mobile API
 backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 source ref 校验
-backend/app/services/memoir/book_drafts.py    # 逐章成稿、版本追加和正文确认
-backend/app/services/memoir/book_outputs.py   # 全书稿合成、版本追加和全书朗读
+backend/app/services/memoir/narrative/draft_blocks.py # 基于事实节点生成、确认正文块
+backend/app/services/memoir/narrative/draft_assembly.py # 已确认正文块组装章节与全书投影
+backend/app/services/memoir/book_drafts.py    # 章节投影读取、确认和朗读
+backend/app/services/memoir/book_outputs.py   # 全书投影读取、编辑性文案、导出和朗读
 backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片、缓存和音频落库
-backend/app/services/memoir/book_auto_revision.py # 已归章新增 source 的后台章节补写
 
 backend/app/routers/memoir/voice.py           # 本地/服务端 voice session API
 backend/app/services/memoir/voice_gateway.py  # WebSocket voice gateway + Streaming ASR
@@ -401,9 +402,9 @@ BookAutomationEvent
 
 AI 访谈只允许播报这些结构化快照和事件里的事实。为了避免机械刷数字，prompt policy 应要求进度鼓励“有变化才说、一次只说一个重点、说完仍回到一个具体问题”。
 
-### Background Source Routing And Auto Editing
+### Background Source Routing And Structured Drafting
 
-现有 `book_auto_revision.py` 负责“章节已有新增 source refs 后如何补写正文”。下一阶段缺的是前置判断：新记录到底应该进入哪一章，还是暂缓处理。
+新记录先由 `source_router.py` 判断进入哪一章或暂缓处理；已归章素材进入 narrative ingestion，更新事实节点并将受影响的正文块标记为过期。用户在章节工作台重新生成并确认受影响的正文块，系统不会再把新素材直接交给整章 LLM 覆写。
 
 建议新增 `source_router.py`，输入是新讲述记录、现有章节标题和 source 摘要、最近几条归章事件、当前项目画像；输出是结构化决策：
 
@@ -418,7 +419,7 @@ SourceRoutingDecision
 └─ evidence_summary
 ```
 
-只有高置信度 `assign_to_chapter` 才自动写入章节 source refs，并触发已有自动补写任务。明显切换话题、信息过短或不确定时只能进入待确认或候选章节，不自动删除原始记录。
+只有高置信度 `assign_to_chapter` 才自动写入章节 source refs，并触发叙事摄取、章节完整度重算和受影响 DraftBlock 的 stale 传播。明显切换话题、信息过短或不确定时只能进入待确认或候选章节，不自动删除原始记录，也不自动重写整章。
 
 ### Book Quality Audit
 
@@ -711,7 +712,7 @@ AI 下一轮追问当前走单独的 WebSocket：
    - 所有判断写入 automation event，保证能解释和回溯。
 
 5. PR 5: Auto Assignment To Auto Revision
-   - 把 PR 4 的高置信度归章结果接到现有 `book_auto_revision.py`。
+   - 把 PR 4 的高置信度归章结果接到叙事摄取、完整度重算和 DraftBlock stale 传播；不再触发整章自动重写。
    - 自动归章后触发章节补写，并把补写完成事件暴露给成书页和 AI 访谈。
    - 支持 AI 播报“新增记录已补进某章”这类具体进展。
 

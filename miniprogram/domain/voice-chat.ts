@@ -906,16 +906,6 @@ export interface MemoirBookPlanStructureCommandRequest {
   utterance_ids?: string[];
 }
 
-export interface MemoirBookChapterDraftGenerateRequest {
-  ai_model?: string;
-  force_regenerate?: boolean;
-  feedback?: string;
-}
-
-export interface MemoirBookChapterDraftUpdateRequest {
-  content: string;
-}
-
 export interface MemoirBookChapterDraftVersion {
   id: string;
   draft_id: string;
@@ -1055,19 +1045,6 @@ export interface MemoirBookVoiceCommandExecuteResponse {
   summary: string;
   plan: MemoirBookPlan;
   source_coverage?: MemoirBookSourceCoverage | null;
-}
-
-export interface MemoirBookOutputGenerateRequest {
-  ai_model?: string | null;
-  title?: string | null;
-  subtitle?: string | null;
-  narrator_name?: string | null;
-  prepared_by?: string | null;
-  preface?: string | null;
-  afterword?: string | null;
-  back_cover_quote?: string | null;
-  cover_style?: MemoirBookCoverStyle | null;
-  force_regenerate?: boolean;
 }
 
 export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard" | "navy_gilt";

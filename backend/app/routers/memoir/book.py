@@ -11,14 +11,11 @@ from app.services.file_exports import content_disposition
 from app.schemas.memoir_book import (
     MemoirBookAudioRequest,
     MemoirBookAudioResponse,
-    MemoirBookChapterDraftGenerateRequest,
     MemoirBookChapterDraftResponse,
-    MemoirBookChapterDraftUpdateRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
-    MemoirBookOutputGenerateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookPlanConfirmRequest,
@@ -570,66 +567,6 @@ async def get_mobile_memoir_book_chapter_draft(
 
 
 @router.post(
-    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft",
-    response_model=MemoirBookChapterDraftResponse,
-)
-async def generate_mobile_memoir_book_chapter_draft(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_drafts.generate_chapter_draft(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/jobs",
-    response_model=MemoirAutomationEventResponse,
-)
-async def enqueue_mobile_memoir_book_chapter_draft_generation(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_generation_jobs.enqueue_chapter_draft_generation_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
-    )
-
-
-@router.patch(
-    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft",
-    response_model=MemoirBookChapterDraftResponse,
-)
-async def update_mobile_memoir_book_chapter_draft(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterDraftUpdateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_drafts.update_chapter_draft(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
-    )
-
-
-@router.post(
     "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/confirm",
     response_model=MemoirBookChapterDraftResponse,
 )
@@ -677,36 +614,6 @@ async def get_mobile_memoir_book_output(
         db,
         user_id=current_user.id,
         project_id=project_id,
-    )
-
-
-@router.post("/projects/{project_id}/book-output/generate", response_model=MemoirBookOutputResponse)
-async def generate_mobile_memoir_book_output(
-    project_id: str,
-    req: MemoirBookOutputGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_outputs.generate_book_output(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.post("/projects/{project_id}/book-output/generate/jobs", response_model=MemoirAutomationEventResponse)
-async def enqueue_mobile_memoir_book_output_generation(
-    project_id: str,
-    req: MemoirBookOutputGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_generation_jobs.enqueue_book_output_generation_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
     )
 
 

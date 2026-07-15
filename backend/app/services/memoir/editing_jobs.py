@@ -66,10 +66,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
-    MemoirEditingJobType.REVISE_CHAPTER: MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
     MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
-    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
     MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
 }
 
@@ -80,10 +77,7 @@ _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: "正文块生成失败，已有正文和锁定内容未受影响，可稍后重试。",
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: "全书一致性检查失败，已有事实和正文未受影响，可稍后重试。",
     MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
-    MemoirEditingJobType.REVISE_CHAPTER: "章节自动补写失败，稍后可重试。",
     MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: "章节初稿生成失败，稍后可重试。",
-    MemoirEditingJobType.GENERATE_BOOK_OUTPUT: "全书稿生成失败，稍后可重试。",
     MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: "成书文案生成失败，稍后可重试。",
 }
 

@@ -10,10 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirAutomationEventStatus, MemoirAutomationEventType
 from app.models.memoir import MemoirAutomationEvent
 from app.services.memoir.automation_event_metadata import (
-    CHAPTER_AUTO_REVISED_REASON,
+    CHAPTER_DRAFT_ASSEMBLED_REASON,
     DELETED_UTTERANCE_IDS_KEY,
     RESOLVED_AT_KEY,
-    RESOLVED_BY_EVENT_ID_KEY,
     RESOLVED_CHAPTER_ID_KEY,
     RESOLVED_CHAPTER_TITLE_KEY,
     RESOLVED_RESULT_VERSION_ID_KEY,
@@ -161,7 +160,11 @@ def _metadata_chapter_id(value: object) -> str:
     return value.strip()
 
 
-def _audit_event_matches_revised_chapter(event: MemoirAutomationEvent, *, chapter_id: str) -> bool:
+def _audit_event_matches_assembled_chapter(
+    event: MemoirAutomationEvent,
+    *,
+    chapter_id: str,
+) -> bool:
     if event.event_type != MemoirAutomationEventType.AUDIT_COMPLETED.value:
         return False
     if not _event_is_visible(event):
@@ -173,26 +176,29 @@ def _audit_event_matches_revised_chapter(event: MemoirAutomationEvent, *, chapte
 
     primary_action = _metadata_dict(metadata.get("primary_action"))
     action_chapter_id = _metadata_chapter_id(primary_action.get("chapter_id"))
-    if primary_action.get("type") == "revise_chapter" and action_chapter_id == chapter_id:
-        return metadata.get("overall_status") == "needs_updates"
+    if (
+        primary_action.get("type") == "open_chapter_workspace"
+        and action_chapter_id == chapter_id
+    ):
+        return True
 
     primary_chapter = _metadata_dict(metadata.get("primary_chapter"))
     return (
         _metadata_chapter_id(primary_chapter.get("chapter_id")) == chapter_id
-        and primary_chapter.get("status") == "needs_update"
+        and primary_chapter.get("status")
+        in {"needs_update", "needs_draft", "thin_draft"}
     )
 
 
-def _apply_revised_chapter_audit_resolution(
+def _apply_assembled_chapter_audit_resolution(
     event: MemoirAutomationEvent,
     *,
     chapter_id: str,
     now_iso: str,
     reason: str,
-    revision_event_id: str | None,
     result_version_id: str | None,
 ) -> bool:
-    if not _audit_event_matches_revised_chapter(event, chapter_id=chapter_id):
+    if not _audit_event_matches_assembled_chapter(event, chapter_id=chapter_id):
         return False
 
     metadata = dict(event.metadata_json or {})
@@ -200,8 +206,6 @@ def _apply_revised_chapter_audit_resolution(
     metadata[RESOLUTION_REASON_KEY] = reason
     metadata[RESOLVED_AT_KEY] = now_iso
     metadata[RESOLVED_CHAPTER_ID_KEY] = chapter_id
-    if revision_event_id:
-        metadata[RESOLVED_BY_EVENT_ID_KEY] = revision_event_id
     if result_version_id:
         metadata[RESOLVED_RESULT_VERSION_ID_KEY] = result_version_id
     event.metadata_json = metadata
@@ -318,14 +322,13 @@ async def resolve_followup_source_review_events(
     return updated_count
 
 
-async def resolve_revised_chapter_audit_events(
+async def resolve_assembled_chapter_audit_events(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
-    revision_event_id: str | None = None,
     result_version_id: str | None = None,
-    reason: str = CHAPTER_AUTO_REVISED_REASON,
+    reason: str = CHAPTER_DRAFT_ASSEMBLED_REASON,
 ) -> AutomationEventChapterAuditResolutionResult:
     if not chapter_id:
         return AutomationEventChapterAuditResolutionResult()
@@ -339,12 +342,11 @@ async def resolve_revised_chapter_audit_events(
     now_iso = _utcnow_iso()
     updated_count = 0
     for event in result.scalars().all():
-        if _apply_revised_chapter_audit_resolution(
+        if _apply_assembled_chapter_audit_resolution(
             event,
             chapter_id=chapter_id,
             now_iso=now_iso,
             reason=reason,
-            revision_event_id=revision_event_id,
             result_version_id=result_version_id,
         ):
             db.add(event)

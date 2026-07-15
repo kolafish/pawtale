@@ -3,13 +3,10 @@ from sqlalchemy import select
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChapterSourceLinkStatus,
-    MemoirEditingJobStatus,
-    MemoirEditingJobType,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirChapterSourceLink,
-    MemoirEditingJob,
 )
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
@@ -99,16 +96,6 @@ async def test_memoir_chapter_source_editor_assignment_marks_existing_draft_for_
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "new_sources_assigned"
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter_id)
-    )
-    assert job is not None
-    assert job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert job.status == MemoirEditingJobStatus.PENDING.value
-    assert job.payload_json["pending_source_utterance_ids"] == [later["utterance_id"]]
-    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
-
-
 async def test_memoir_chapter_source_editor_move_returns_updated_current_chapter(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     first = await create_test_voice_transcript(client, test_db, "第一条年节记忆。", project_id=project_id)
@@ -191,8 +178,3 @@ async def test_memoir_chapter_source_editor_removal_marks_removed_link_and_revis
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
     assert refreshed_draft.metadata_json["status_reason"] == "sources_changed"
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter_id)
-    )
-    assert job is not None
-    assert job.payload_json["removed_source_utterance_ids"] == [second["utterance_id"]]

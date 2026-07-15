@@ -8,8 +8,8 @@ import { chapterCollectionData, trimText } from "./book-view-model";
 export const CHAPTER_MOVE_DIRECTIONS = ["up", "down"] as const;
 export type ChapterMoveDirection = typeof CHAPTER_MOVE_DIRECTIONS[number];
 
-export function bookChapterDetailUrl(projectId: string, chapterId: string, tab = "content"): string {
-  return pageUrl("/pages/book-chapter/index", { projectId, chapterId, tab });
+export function bookChapterDetailUrl(projectId: string, chapterId: string): string {
+  return pageUrl("/pages/chapter-workspace/index", { projectId, chapterId });
 }
 
 export function bookExportPageUrl(projectId: string, action = "preview"): string {

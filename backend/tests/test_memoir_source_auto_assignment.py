@@ -27,13 +27,11 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTaskClaim,
     MemoirFollowupTask,
     MemoirFollowupTaskUtterance,
     MemoirNarrativeDecision,
-    MemoirNarrativeEntity,
     MemoirNarrativeGap,
     MemoirNarrativeGapClaim,
     MemoirStory,
@@ -449,14 +447,6 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert existing_link.assigned_by == MemoirChapterSourceAssignedBy.SYSTEM.value
     assert existing_link.assignment_reason == "sync_existing_source_ref"
 
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.chapter_id == chapter.id)
-    )
-    assert job is not None
-    assert job.job_type == MemoirEditingJobType.REVISE_CHAPTER.value
-    assert job.status == MemoirEditingJobStatus.PENDING.value
-    assert job.payload_json["pending_source_utterance_ids"] == [uncovered["utterance_id"]]
-    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
     source_card_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == project_id,

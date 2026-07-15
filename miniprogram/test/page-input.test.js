@@ -47,8 +47,8 @@ test("page input reads dataset values and picker indexes consistently", () => {
 
 test("pageUrl builds encoded mini program page URLs", () => {
   assert.equal(
-    pageUrl("/pages/book-chapter/index", { projectId: "project/1", chapterId: "chapter 1", empty: "" }),
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%201",
+    pageUrl("/pages/chapter-workspace/index", { projectId: "project/1", chapterId: "chapter 1", empty: "" }),
+    "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter%201",
   );
   assert.equal(pageUrl("/pages/project-edit/index"), "/pages/project-edit/index");
 });

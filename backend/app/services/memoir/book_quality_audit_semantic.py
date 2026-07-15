@@ -36,8 +36,7 @@ VALID_PRIMARY_ACTION_TYPES = {
     "generate_plan",
     "assign_sources",
     "continue_interview",
-    "revise_chapter",
-    "generate_chapter_draft",
+    "open_chapter_workspace",
     "review_book",
     "none",
 }

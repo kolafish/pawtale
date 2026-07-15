@@ -82,10 +82,7 @@ class MemoirEditingJobType(str, Enum):
     AUDIT_BOOK_CONSISTENCY = "audit_book_consistency"
     ROUTE_SOURCES = "route_sources"
     GENERATE_SOURCE_CARD = "generate_source_card"
-    REVISE_CHAPTER = "revise_chapter"
     QUALITY_AUDIT = "quality_audit"
-    GENERATE_CHAPTER_DRAFT = "generate_chapter_draft"
-    GENERATE_BOOK_OUTPUT = "generate_book_output"
     GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"
 
 

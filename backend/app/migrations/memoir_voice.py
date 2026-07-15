@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -10,6 +11,7 @@ from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirChatMessageRole,
+    MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirInterviewType,
     MemoirSessionGoal,
@@ -41,6 +43,20 @@ TRANSCRIPT_FTS_TRIGGERS = (
     "memoir_voice_utterances_fts_au",
 )
 TRANSCRIPT_VERSION_RETENTION_LIMIT = 3
+OBSOLETE_EDITING_JOB_TYPES = (
+    "generate_book_output",
+    "generate_chapter_draft",
+    "revise_chapter",
+)
+ACTIVE_EDITING_JOB_STATUSES = (
+    MemoirEditingJobStatus.PENDING.value,
+    MemoirEditingJobStatus.RUNNING.value,
+)
+TERMINAL_EDITING_JOB_STATUSES = (
+    MemoirEditingJobStatus.SUCCEEDED.value,
+    MemoirEditingJobStatus.FAILED.value,
+    MemoirEditingJobStatus.SKIPPED.value,
+)
 
 
 def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
@@ -144,41 +160,69 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
-async def _ensure_enum_check_constraint(conn, table_name: str, enum_values: set[str]) -> bool:
+async def _ensure_enum_check_constraint(
+    conn,
+    table_name: str,
+    column_name: str,
+    enum_values: set[str],
+) -> bool:
     if not await _table_exists(conn, table_name):
         return False
     table_sql = await _table_sql(conn, table_name)
-    if enum_values and all(value in table_sql for value in enum_values):
+    pattern = re.compile(
+        rf"CHECK\s*\(\s*{re.escape(column_name)}\s+IN\s*\((?P<values>[^)]*)\)\s*\)",
+        re.IGNORECASE | re.DOTALL,
+    )
+    match = pattern.search(table_sql)
+    actual_values = (
+        set(re.findall(r"'([^']*)'", match.group("values")))
+        if match
+        else set()
+    )
+    if actual_values == enum_values:
         return False
+
+    foreign_keys_enabled = int(
+        (await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()
+    )
+    if foreign_keys_enabled:
+        raise RuntimeError(
+            "SQLite table rebuild requires a migration connection with foreign keys disabled; "
+            "run scripts/migrate_runtime_schema.py"
+        )
 
     register_models()
     table = Base.metadata.tables[table_name]
     columns = [column.name for column in table.columns]
     column_sql = ", ".join(columns)
     old_table_name = f"{table_name}_old"
-    await conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table_name}"))
-    old_indexes = (await conn.execute(text(f"PRAGMA index_list({old_table_name})"))).fetchall()
-    for index in old_indexes:
-        index_name = str(index[1])
-        if index_name and not index_name.startswith("sqlite_autoindex"):
-            await conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
-    await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
-    select_sql = ", ".join(
-        f"COALESCE({column}, CURRENT_TIMESTAMP) AS {column}"
-        if column in {"created_at", "updated_at"}
-        else column
-        for column in columns
-    )
-    await conn.execute(
-        text(
-            f"""
-            INSERT INTO {table_name} ({column_sql})
-            SELECT {select_sql}
-            FROM {old_table_name}
-            """
+    await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+    try:
+        await conn.execute(text(f"ALTER TABLE {table_name} RENAME TO {old_table_name}"))
+        old_indexes = (await conn.execute(text(f"PRAGMA index_list({old_table_name})"))).fetchall()
+        for index in old_indexes:
+            index_name = str(index[1])
+            if index_name and not index_name.startswith("sqlite_autoindex"):
+                await conn.execute(text(f"DROP INDEX IF EXISTS {index_name}"))
+        await conn.run_sync(lambda sync_conn: table.create(sync_conn, checkfirst=True))
+        select_sql = ", ".join(
+            f"COALESCE({column}, CURRENT_TIMESTAMP) AS {column}"
+            if column in {"created_at", "updated_at"}
+            else column
+            for column in columns
         )
-    )
-    await conn.execute(text(f"DROP TABLE {old_table_name}"))
+        await conn.execute(
+            text(
+                f"""
+                INSERT INTO {table_name} ({column_sql})
+                SELECT {select_sql}
+                FROM {old_table_name}
+                """
+            )
+        )
+        await conn.execute(text(f"DROP TABLE {old_table_name}"))
+    finally:
+        await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
     return True
 
 
@@ -186,6 +230,7 @@ async def _ensure_editing_jobs_type_constraint(conn) -> bool:
     return await _ensure_enum_check_constraint(
         conn,
         "memoir_editing_jobs",
+        "job_type",
         {item.value for item in MemoirEditingJobType},
     )
 
@@ -194,6 +239,7 @@ async def _ensure_automation_events_type_constraint(conn) -> bool:
     return await _ensure_enum_check_constraint(
         conn,
         "memoir_automation_events",
+        "event_type",
         {item.value for item in MemoirAutomationEventType},
     )
 
@@ -202,19 +248,25 @@ async def _ensure_chat_messages_role_constraint(conn) -> bool:
     return await _ensure_enum_check_constraint(
         conn,
         "memoir_chat_messages",
+        "role",
         {item.value for item in MemoirChatMessageRole},
     )
 
 
 async def _ensure_voice_sessions_enum_constraints(conn) -> bool:
-    return await _ensure_enum_check_constraint(
+    interview_type_changed = await _ensure_enum_check_constraint(
         conn,
         "memoir_voice_sessions",
-        {
-            *(item.value for item in MemoirInterviewType),
-            *(item.value for item in MemoirSessionGoal),
-        },
+        "interview_type",
+        {item.value for item in MemoirInterviewType},
     )
+    session_goal_changed = await _ensure_enum_check_constraint(
+        conn,
+        "memoir_voice_sessions",
+        "session_goal",
+        {item.value for item in MemoirSessionGoal},
+    )
+    return interview_type_changed or session_goal_changed
 
 
 async def _drop_transcript_fts(conn) -> None:
@@ -407,10 +459,74 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
                     )
                     changed_columns.append(f"memoir_editing_jobs.{column_name}")
 
+            active_obsolete_jobs = (
+                await conn.execute(
+                    text(
+                        "SELECT job_type, status, COUNT(*) AS job_count "
+                        "FROM memoir_editing_jobs "
+                        "WHERE job_type IN (:book_output, :chapter_draft, :chapter_revision) "
+                        "AND status IN (:pending, :running) "
+                        "GROUP BY job_type, status "
+                        "ORDER BY job_type, status"
+                    ),
+                    {
+                        "book_output": OBSOLETE_EDITING_JOB_TYPES[0],
+                        "chapter_draft": OBSOLETE_EDITING_JOB_TYPES[1],
+                        "chapter_revision": OBSOLETE_EDITING_JOB_TYPES[2],
+                        "pending": ACTIVE_EDITING_JOB_STATUSES[0],
+                        "running": ACTIVE_EDITING_JOB_STATUSES[1],
+                    },
+                )
+            ).fetchall()
+            if active_obsolete_jobs:
+                active_summary = ", ".join(
+                    f"{job_type}/{status}={job_count}"
+                    for job_type, status, job_count in active_obsolete_jobs
+                )
+                raise RuntimeError(
+                    "memoir narrative cutover is blocked by active legacy editing jobs: "
+                    f"{active_summary}"
+                )
+
+            obsolete_jobs = await conn.execute(
+                text(
+                    "DELETE FROM memoir_editing_jobs "
+                    "WHERE job_type IN (:book_output, :chapter_draft, :chapter_revision) "
+                    "AND status IN (:succeeded, :failed, :skipped)"
+                ),
+                {
+                    "book_output": OBSOLETE_EDITING_JOB_TYPES[0],
+                    "chapter_draft": OBSOLETE_EDITING_JOB_TYPES[1],
+                    "chapter_revision": OBSOLETE_EDITING_JOB_TYPES[2],
+                    "succeeded": TERMINAL_EDITING_JOB_STATUSES[0],
+                    "failed": TERMINAL_EDITING_JOB_STATUSES[1],
+                    "skipped": TERMINAL_EDITING_JOB_STATUSES[2],
+                },
+            )
+            if obsolete_jobs.rowcount:
+                changed_rows.append(
+                    f"memoir_editing_jobs.obsolete:{obsolete_jobs.rowcount}"
+                )
+
         if await _ensure_editing_jobs_type_constraint(conn):
             changed_tables.append("memoir_editing_jobs")
         if await _ensure_automation_events_type_constraint(conn):
             changed_tables.append("memoir_automation_events")
+        if await _table_exists(conn, "memoir_automation_events"):
+            stopped_events = await conn.execute(
+                text(
+                    "UPDATE memoir_automation_events "
+                    "SET status = 'failed', "
+                    "summary_text = '旧版生成任务已停止，请使用章节工作台。' "
+                    "WHERE status = 'pending' "
+                    "AND event_type IN ('chapter_auto_revised', 'book_output_generated')"
+                )
+            )
+            if stopped_events.rowcount:
+                changed_rows.append(
+                    "memoir_automation_events.obsolete_pending:"
+                    f"{stopped_events.rowcount}"
+                )
 
         if not await _table_exists(conn, "memoir_voice_authorization_consents"):
             await _create_metadata_table(conn, "memoir_voice_authorization_consents")

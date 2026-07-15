@@ -235,8 +235,8 @@ function chapterTextFromAuditItem(item: Record<string, unknown>, fallback = ""):
 }
 
 function actionSuggestionLabel(actionType: string): string {
-  if (actionType === "revise_chapter") {
-    return "建议补写";
+  if (actionType === "open_chapter_workspace") {
+    return "建议整理本章";
   }
   if (actionType === "continue_interview") {
     return "建议补问";

@@ -410,11 +410,11 @@ function loadBookPage({
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
-    enqueueMemoirBookChapterDraftGeneration: async () => {
-      throw new Error("enqueueMemoirBookChapterDraftGeneration was not mocked");
+    assembleMemoirBookDraftBlocks: async () => {
+      throw new Error("assembleMemoirBookDraftBlocks was not mocked");
     },
-    enqueueMemoirBookOutputGeneration: async () => {
-      throw new Error("enqueueMemoirBookOutputGeneration was not mocked");
+    updateMemoirBookOutput: async () => {
+      throw new Error("updateMemoirBookOutput was not mocked");
     },
     executeMemoirBookVoiceCommand: async () => {
       throw new Error("executeMemoirBookVoiceCommand was not mocked");
@@ -564,7 +564,7 @@ test("book page exposes finished-book share entry points", () => {
   assert.equal(page.onShareTimeline, undefined);
 });
 
-test("book page routes chapter card actions to the chapter detail page", () => {
+test("book page routes chapter card actions to the chapter workspace", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -575,14 +575,14 @@ test("book page routes chapter card actions to the chapter detail page", () => {
   const context = pageContext(page, { projectId: "project/1" });
 
   assert.equal(
-    mod.bookChapterDetailUrl("project/1", "chapter/1", "sources"),
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=sources",
+    mod.bookChapterDetailUrl("project/1", "chapter/1"),
+    "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter%2F1",
   );
 
   page.openChapterEditor.call(context, { currentTarget: { dataset: { id: "chapter/1" } } });
 
   assert.deepEqual(navigations, [
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter%2F1&tab=content",
+    "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter%2F1",
   ]);
   delete global.wx;
 });
@@ -611,7 +611,7 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   const navigations = [];
   const actionSheets = [];
   const audioCalls = [];
-  const tapIndexes = [0, 1, 2, 99];
+  const tapIndexes = [0, 1, 99];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
@@ -636,19 +636,16 @@ test("book page opens secondary chapter actions from the more sheet", () => {
 
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
-  page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
   context.data.ttsBusyTarget = "chapter:chapter-2";
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
-    ["调整章节", "看素材", "朗读"],
-    ["调整章节", "看素材", "朗读"],
-    ["调整章节", "看素材", "朗读"],
-    ["调整章节", "看素材"],
+    ["整理本章", "朗读"],
+    ["整理本章", "朗读"],
+    ["整理本章"],
   ]);
   assert.deepEqual(navigations, [
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=more",
-    "/pages/book-chapter/index?projectId=project%2F1&chapterId=chapter-1&tab=sources",
+    "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter-1",
   ]);
   assert.deepEqual(audioCalls, ["chapter-1"]);
   delete global.wx;
@@ -1025,32 +1022,6 @@ test("book page groups source assignment automation events with expandable detai
   assert.deepEqual(context.data.automationEventItems, []);
 });
 
-test("book page keeps background generation busy when automation polling fails", async () => {
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      listMemoirAutomationEvents: async () => {
-        throw new Error("network unavailable");
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  const context = pageContext(page, {
-    projectId: "project/1",
-    chapters: mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1, "draft", "第一版正文") }),
-  });
-  page.applyAutomationEvents.call(context, [
-    sampleAutomationEvent({ id: "event-draft-pending", chapter_id: "chapter-1" }),
-  ]);
-  page.clearBookGenerationEventPoll.call(context);
-
-  await page.refreshAutomationEventsAfterGeneration.call(context);
-
-  assert.equal(context.data.automationEventError, "network unavailable");
-  assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
-  page.clearBookGenerationEventPoll.call(context);
-});
-
 test("book page builds detailed automation event views", () => {
   const { mod } = loadBookPage();
 
@@ -1095,8 +1066,8 @@ test("book page builds detailed automation event views", () => {
             detail: "建议先补写本章，再继续补充人物、地点和细节。",
           },
           primary_action: {
-            type: "revise_chapter",
-            cta_text: "补写本章",
+            type: "open_chapter_workspace",
+            cta_text: "整理本章",
             chapter_id: "chapter-1",
             utterance_count: 1,
           },
@@ -1130,8 +1101,8 @@ test("book page builds detailed automation event views", () => {
           detail: "旧展示详情。",
         },
         primary_action: {
-          type: "revise_chapter",
-          cta_text: "旧操作",
+          type: "open_chapter_workspace",
+          cta_text: "整理本章",
           chapter_id: "chapter-1",
           utterance_count: 1,
         },
@@ -1172,10 +1143,10 @@ test("book page builds detailed automation event views", () => {
   assert.equal(items[1].titleText, "「院子里的童年」有新内容待写入");
   assert.equal(items[1].summaryText, "有 1 条新讲述还没有补进正文。");
   assert.equal(items[1].detailText, "建议先补写本章，再继续补充人物、地点和细节。");
-  assert.equal(items[1].suggestedActionText, "补写本章");
+  assert.equal(items[1].suggestedActionText, "整理本章");
   assert.equal(items[1].hasSuggestions, true);
-  assert.equal(items[1].suggestionItems[0].labelText, "建议补写");
-  assert.equal(items[1].suggestionItems[0].bodyText, "补写本章");
+  assert.equal(items[1].suggestionItems[0].labelText, "建议整理本章");
+  assert.equal(items[1].suggestionItems[0].bodyText, "整理本章");
   assert.equal(items[1].suggestionItems[1].labelText, "待整理素材");
   assert.equal(items[1].suggestionItems[1].bodyText, "还有 2 条讲述需要归章或确认。");
   assert.equal(items[1].suggestionItems[2].labelText, "建议补问");
@@ -1745,7 +1716,7 @@ test("book page splits selected chapter sources into a new chapter", async () =>
   delete global.wx;
 });
 
-test("book page merges chapters and regenerates title plus draft for confirmed plans", async () => {
+test("book page merges chapters and directs the user back to the workspace", async () => {
   const calls = [];
   global.wx = {
     showModal(options) {
@@ -1766,14 +1737,6 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
         updated.chapters[0].title = "童年里的离别";
         return updated;
       },
-      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
-        calls.push({ kind: "draft", projectId, chapterId, data });
-        return sampleAutomationEvent({
-          id: "event-merged-draft",
-          chapter_id: chapterId,
-          summary_text: "「童年里的离别」已提交后台生成。",
-        });
-      },
       getMemoirBookChapterDraft: async () => null,
       getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
       getMemoirBookOutput: async () => null,
@@ -1790,34 +1753,28 @@ test("book page merges chapters and regenerates title plus draft for confirmed p
     detail: { value: 0 },
   });
 
-  assert.deepEqual(calls.map((call) => call.kind), ["update", "title", "draft"]);
+  assert.deepEqual(calls.map((call) => call.kind), ["update", "title"]);
   assert.deepEqual(calls[0].data, {
     type: "merge_chapters",
     chapter_id: "chapter-2",
     target_chapter_id: "chapter-1",
   });
-  assert.deepEqual(calls[2].data, { force_regenerate: false });
   assert.equal(context.data.chapters[0].title, "童年里的离别");
-  assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
-  page.clearBookGenerationEventPoll.call(context);
+  assert.equal(context.data.chapters[0].draftError, "章节已合并，请进入章节工作台重新整理正文");
   delete global.wx;
 });
 
-test("book page submits full book output generation as a background job", async () => {
+test("book page assembles confirmed blocks and updates the full-book projection", async () => {
   const calls = [];
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      enqueueMemoirBookOutputGeneration: async (projectId, data) => {
-        calls.push({ projectId, data });
-        return sampleAutomationEvent({
-          id: "event-book-output",
-          event_type: "book_output_generated",
-          status: "pending",
-          chapter_id: null,
-          summary_text: "全书已提交后台生成。",
-        });
+      assembleMemoirBookDraftBlocks: async (projectId) => {
+        calls.push({ kind: "assemble", projectId });
+      },
+      updateMemoirBookOutput: async (projectId, data) => {
+        calls.push({ kind: "update", projectId, data });
+        return sampleBookOutput(2, "全书第二版正文", false, [], null, [], sampleBookManuscript("外婆回忆录", "moonlit_courtyard"));
       },
     },
   });
@@ -1834,10 +1791,11 @@ test("book page submits full book output generation as a background job", async 
 
   await page.generateBook.call(context);
 
-  assert.deepEqual(calls[0], {
+  assert.deepEqual(calls[0], { kind: "assemble", projectId: "project/1" });
+  assert.deepEqual(calls[1], {
+    kind: "update",
     projectId: "project/1",
     data: {
-      force_regenerate: true,
       title: "外婆回忆录",
       subtitle: "根据口述访谈整理",
       prepared_by: "家人整理",
@@ -1847,18 +1805,16 @@ test("book page submits full book output generation as a background job", async 
       cover_style: "moonlit_courtyard",
     },
   });
-  assert.equal(context.data.generatingBook, true);
-  assert.equal(context.data.automationEventItems.length, 1);
-  assert.equal(context.data.automationEventItems[0].titleText, "书稿整理中");
-  page.clearBookGenerationEventPoll.call(context);
+  assert.equal(context.data.generatingBook, false);
+  assert.equal(context.data.bookContent, "全书第二版正文");
   delete global.wx;
 });
 
-test("book page shows submit errors when full-book background generation cannot be queued", async () => {
+test("book page shows assembly errors without leaving the page busy", async () => {
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      enqueueMemoirBookOutputGeneration: async () => {
+      assembleMemoirBookDraftBlocks: async () => {
         throw new Error("request:fail network");
       },
     },
@@ -2711,101 +2667,4 @@ test("book page releases transient voice gateway when hidden", async () => {
   assert.equal(context.data.bookVoiceAssistantConversationActive, false);
   assert.equal(context.data.bookVoiceLiveText, "");
   assert.equal(context.data.bookVoiceCaptureStateText, "麦克风未开始");
-});
-
-test("book page regenerates an existing chapter draft with force flag", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        return sampleAutomationEvent({ id: "event-draft-regenerate", chapter_id: chapterId });
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  const context = pageContext(page, {
-    projectId: "project/1",
-    chapters: mod.buildChapterViews(plan, { "chapter-1": sampleDraft(1, "draft", "第一版正文") }),
-  });
-
-  await page.generateChapterDraftById.call(context, "chapter-1");
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: { force_regenerate: true },
-  });
-  assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
-  page.clearBookGenerationEventPoll.call(context);
-  delete global.wx;
-});
-
-test("book page supplements pending sources without force regeneration", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        return sampleAutomationEvent({ id: "event-draft-supplement", chapter_id: chapterId });
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].pending_source_count = 1;
-  const context = pageContext(page, {
-    projectId: "project/1",
-    chapters: mod.buildChapterViews(plan, {
-      "chapter-1": sampleDraft(1, "draft", "第一版正文"),
-    }),
-  });
-
-  await page.generateChapterDraftById.call(context, "chapter-1");
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: { force_regenerate: false },
-  });
-  assert.equal(context.data.chapters[0].pendingSourceCount, 1);
-  assert.equal(context.data.chapters[0].draftBusy, true);
-  assert.equal(context.data.automationEventItems[0].titleText, "章节生成中");
-  page.clearBookGenerationEventPoll.call(context);
-  delete global.wx;
-});
-
-test("book page force regenerates when source removals also need cleanup", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { mod, page } = loadBookPage({
-    voiceApiExports: {
-      enqueueMemoirBookChapterDraftGeneration: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        return sampleAutomationEvent({ id: "event-draft-cleanup", chapter_id: chapterId });
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  plan.chapters[0].pending_source_count = 1;
-  plan.chapters[0].removed_source_count = 1;
-  const context = pageContext(page, {
-    projectId: "project/1",
-    chapters: mod.buildChapterViews(plan, {
-      "chapter-1": sampleDraft(1, "draft", "第一版正文"),
-    }),
-  });
-
-  await page.generateChapterDraftById.call(context, "chapter-1");
-
-  assert.deepEqual(calls[0], {
-    projectId: "project/1",
-    chapterId: "chapter-1",
-    data: { force_regenerate: true },
-  });
-  assert.equal(context.data.chapters[0].draftBusy, true);
-  page.clearBookGenerationEventPoll.call(context);
-  delete global.wx;
 });

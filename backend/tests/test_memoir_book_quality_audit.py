@@ -154,8 +154,8 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
         "detail": "建议先补写本章，再继续补充人物、地点和细节。",
     }
     assert data["primary_action"] == {
-        "type": "revise_chapter",
-        "cta_text": "补写本章",
+        "type": "open_chapter_workspace",
+        "cta_text": "整理本章",
         "chapter_id": chapter.id,
         "utterance_count": 1,
     }
@@ -176,7 +176,7 @@ async def test_book_quality_audit_flags_pending_chapter_update_and_records_event
     assert event.metadata_json["overall_status"] == "needs_updates"
     assert "chapter_items" not in event.metadata_json
     assert event.metadata_json["display"]["title"] == "「院子里的童年」有新内容待写入"
-    assert event.metadata_json["primary_action"]["cta_text"] == "补写本章"
+    assert event.metadata_json["primary_action"]["cta_text"] == "整理本章"
     assert event.metadata_json["primary_chapter"]["chapter_id"] == chapter.id
     assert event.metadata_json["event_signature"].startswith("book_quality_audit|needs_updates")
 
@@ -202,8 +202,8 @@ async def test_book_quality_audit_writes_semantic_snapshot_when_requested(client
                 "detail": "先补写剥青豆的经过，再继续追问细节。",
             },
             "primary_action": {
-                "type": "revise_chapter",
-                "cta_text": "补写本章",
+                "type": "open_chapter_workspace",
+                "cta_text": "整理本章",
                 "chapter_id": chapter.id,
                 "utterance_count": 1,
             },
@@ -276,7 +276,11 @@ async def test_book_quality_audit_reuses_semantic_snapshot_for_same_input(client
             "overall_status": "needs_updates",
             "summary_text": "语义审计认为需要补写。",
             "display": {"title": "语义审计待补写", "summary": "需要补写。", "detail": ""},
-            "primary_action": {"type": "revise_chapter", "cta_text": "补写本章", "chapter_id": chapter.id},
+            "primary_action": {
+                "type": "open_chapter_workspace",
+                "cta_text": "整理本章",
+                "chapter_id": chapter.id,
+            },
             "chapter_audits": [
                 {
                     "chapter_id": chapter.id,
@@ -442,8 +446,8 @@ async def test_book_quality_audit_job_records_semantic_event_by_default(client, 
                 "detail": "先补写剥青豆的经过，再继续追问细节。",
             },
             "primary_action": {
-                "type": "revise_chapter",
-                "cta_text": "补写本章",
+                "type": "open_chapter_workspace",
+                "cta_text": "整理本章",
                 "chapter_id": chapter.id,
                 "utterance_count": 1,
             },
@@ -610,10 +614,10 @@ async def test_book_quality_audit_display_covers_needs_drafts(client, test_db):
     assert response.status_code == 200
     data = response.json()
     assert data["overall_status"] == "needs_drafts"
-    assert data["display"]["title"] == "「院子里的童年」可以生成正文"
-    assert data["display"]["summary"] == "本章已有 1 条素材，但还没有章节正文。"
-    assert data["primary_action"]["type"] == "generate_chapter_draft"
-    assert data["primary_action"]["cta_text"] == "生成本章"
+    assert data["display"]["title"] == "「院子里的童年」可以开始整理"
+    assert data["display"]["summary"] == "本章已有 1 条素材，可以按章节结构整理正文。"
+    assert data["primary_action"]["type"] == "open_chapter_workspace"
+    assert data["primary_action"]["cta_text"] == "开始整理"
     assert data["primary_chapter"]["chapter_id"] == chapter.id
 
 

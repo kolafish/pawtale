@@ -12,6 +12,37 @@ from app.migrations.memoir_voice import (
 )
 
 
+async def _create_legacy_editing_jobs_table(conn) -> None:
+    await conn.execute(
+        text(
+            """
+            CREATE TABLE memoir_editing_jobs (
+                id VARCHAR(36) NOT NULL,
+                project_id VARCHAR(36) NOT NULL,
+                chapter_id VARCHAR(36),
+                job_type VARCHAR(40) NOT NULL,
+                status VARCHAR(20) NOT NULL,
+                run_after DATETIME NOT NULL,
+                locked_at DATETIME,
+                attempts INTEGER NOT NULL,
+                dedupe_key VARCHAR(200),
+                payload_json JSON NOT NULL,
+                result_json JSON NOT NULL,
+                error_message TEXT NOT NULL,
+                created_at DATETIME,
+                updated_at DATETIME,
+                PRIMARY KEY (id),
+                CONSTRAINT ck_memoir_editing_jobs_type
+                    CHECK (job_type IN ('route_sources', 'revise_chapter', 'quality_audit')),
+                CONSTRAINT ck_memoir_editing_jobs_status
+                    CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'skipped')),
+                UNIQUE (dedupe_key)
+            )
+            """
+        )
+    )
+
+
 async def test_memoir_voice_migration_adds_transcript_voice_session_column():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
@@ -505,34 +536,7 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
                     """
                 )
             )
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE memoir_editing_jobs (
-                        id VARCHAR(36) NOT NULL,
-                        project_id VARCHAR(36) NOT NULL,
-                        chapter_id VARCHAR(36),
-                        job_type VARCHAR(40) NOT NULL,
-                        status VARCHAR(20) NOT NULL,
-                        run_after DATETIME NOT NULL,
-                        locked_at DATETIME,
-                        attempts INTEGER NOT NULL,
-                        dedupe_key VARCHAR(200),
-                        payload_json JSON NOT NULL,
-                        result_json JSON NOT NULL,
-                        error_message TEXT NOT NULL,
-                        created_at DATETIME,
-                        updated_at DATETIME,
-                        PRIMARY KEY (id),
-                        CONSTRAINT ck_memoir_editing_jobs_type
-                            CHECK (job_type IN ('route_sources', 'revise_chapter', 'quality_audit')),
-                        CONSTRAINT ck_memoir_editing_jobs_status
-                            CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'skipped')),
-                        UNIQUE (dedupe_key)
-                    )
-                    """
-                )
-            )
+            await _create_legacy_editing_jobs_table(conn)
             await conn.execute(
                 text(
                     """
@@ -583,6 +587,76 @@ async def test_memoir_voice_migration_updates_editing_job_type_constraint():
         assert "generate_followup_tasks" in str(table_sql)
         assert "audit_book_consistency" in str(table_sql)
         assert rows == [("job-1", "route_sources")]
+    finally:
+        await engine.dispose()
+
+
+async def test_memoir_voice_migration_blocks_active_legacy_editing_jobs():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    CREATE TABLE memoir_transcript_versions (
+                        id VARCHAR(36) NOT NULL,
+                        answer_id VARCHAR(36),
+                        voice_session_id VARCHAR(36),
+                        source_artifact_id VARCHAR(36),
+                        version_type VARCHAR(30) NOT NULL,
+                        content TEXT NOT NULL,
+                        provider VARCHAR(100),
+                        confidence FLOAT,
+                        created_by VARCHAR(20) NOT NULL,
+                        created_at DATETIME,
+                        PRIMARY KEY (id)
+                    )
+                    """
+                )
+            )
+            await _create_legacy_editing_jobs_table(conn)
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO memoir_editing_jobs (
+                        id, project_id, job_type, status, run_after, attempts,
+                        payload_json, result_json, error_message
+                    )
+                    VALUES
+                        ('active-job', 'project-1', 'revise_chapter', 'running',
+                         '2026-06-27 16:00:00', 1, '{}', '{}', ''),
+                        ('terminal-job', 'project-1', 'revise_chapter', 'succeeded',
+                         '2026-06-27 15:00:00', 1, '{}', '{}', '')
+                    """
+                )
+            )
+
+        with pytest.raises(RuntimeError, match="revise_chapter/running=1"):
+            await migrate_memoir_voice_schema(engine)
+
+        async with engine.begin() as conn:
+            rows = (
+                await conn.execute(
+                    text("SELECT id, status FROM memoir_editing_jobs ORDER BY id")
+                )
+            ).fetchall()
+            await conn.execute(
+                text(
+                    "UPDATE memoir_editing_jobs SET status = 'failed' "
+                    "WHERE id = 'active-job'"
+                )
+            )
+
+        result = await migrate_memoir_voice_schema(engine)
+
+        async with engine.begin() as conn:
+            remaining_jobs = await conn.scalar(
+                text("SELECT COUNT(*) FROM memoir_editing_jobs")
+            )
+
+        assert rows == [("active-job", "running"), ("terminal-job", "succeeded")]
+        assert result["changed_rows"] == ["memoir_editing_jobs.obsolete:2"]
+        assert remaining_jobs == 0
     finally:
         await engine.dispose()
 
