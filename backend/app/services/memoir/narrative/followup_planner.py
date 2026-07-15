@@ -128,6 +128,19 @@ def _story_slot_key(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
     return gap.target_slot if gap.target_slot in schema.slot_keys else ""
 
 
+def _task_target_slot(
+    gap: MemoirNarrativeGap,
+    story: MemoirStory | None,
+    *,
+    is_story_narration: bool,
+) -> str:
+    if is_story_narration:
+        return MEMOIR_STORY_NARRATION_TARGET
+    if _semantic_dimension(gap):
+        return gap.target_slot
+    return _story_slot_key(gap, story)
+
+
 def _semantic_dimension(gap: MemoirNarrativeGap) -> str:
     parts = gap.target_slot.split(":", 2)
     return parts[1] if len(parts) == 3 and parts[0] == "semantic" else ""
@@ -698,7 +711,11 @@ async def generate_followup_tasks(
         values = {
             "chapter_id": chapter.id if chapter else None,
             "story_id": story.id if story else None,
-            "target_slot": MEMOIR_STORY_NARRATION_TARGET if is_story_narration else slot_key,
+            "target_slot": _task_target_slot(
+                gap,
+                story,
+                is_story_narration=is_story_narration,
+            ),
             "answer_use": _answer_use(gap).value,
             "question": (
                 _story_narration_question(story)
@@ -796,7 +813,11 @@ async def _task_is_selectable(
         )
         if story is None:
             return False
-        if task.target_slot and task.target_slot != MEMOIR_STORY_NARRATION_TARGET:
+        if (
+            task.target_slot
+            and task.target_slot != MEMOIR_STORY_NARRATION_TARGET
+            and not task.target_slot.startswith("semantic:")
+        ):
             slot_status = await db.scalar(
                 select(MemoirStorySlot.status).where(
                     MemoirStorySlot.project_id == task.project_id,

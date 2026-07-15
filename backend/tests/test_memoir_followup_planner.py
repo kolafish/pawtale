@@ -600,6 +600,50 @@ def test_story_narration_questions_follow_story_type_and_editorial_value():
     )
 
 
+async def test_semantic_followup_task_preserves_gap_target_slot(client, test_db):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    semantic_gaps, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=fixture["project_id"],
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.STORY,
+                primary_story_id=fixture["story"].id,
+                gap_type=MemoirNarrativeGapType.RELATIONSHIP,
+                severity=MemoirNarrativeGapSeverity.MEDIUM,
+                target_slot="semantic:opening:test-opening-gap",
+                title="章节开头还可以更清楚",
+                description="需要补充一个能自然带入本章的开场。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+                story_roles={
+                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
+                },
+                chapter_roles={
+                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.INVOLVED,
+                },
+            )
+        ],
+    )
+    await test_db.commit()
+
+    await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=fixture["chapter"].id,
+    )
+    await test_db.commit()
+
+    task = await test_db.scalar(
+        select(MemoirFollowupTask).where(
+            MemoirFollowupTask.project_id == fixture["project_id"],
+            MemoirFollowupTask.gap_id == semantic_gaps[0].id,
+        )
+    )
+    assert task is not None
+    assert task.target_slot == "semantic:opening:test-opening-gap"
+    assert task.answer_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value
+
+
 async def test_required_framing_node_does_not_promote_its_supporting_story(
     client,
     test_db,
