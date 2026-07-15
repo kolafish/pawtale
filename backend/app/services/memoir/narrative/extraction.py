@@ -182,6 +182,8 @@ def build_narrative_extraction_repair_prompt(
 - time_start/time_end 必须同时为 null，或同时为完整 ISO 8601 datetime（例如 1982-01-01T00:00:00）。
 - relationship claim 必须同时引用已声明的 subject 和 object person entity。
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
+- Story 必须是可独立讲述的事件、持续关系、人生阶段或贯穿主题；孤立的时间、身份、属性、症状或背景事实只保留为 Claim。
+- 同一段经历的多条 Claim 应归入同一个 Story，不得拆成一批只有单个事实片段的微型 Story。
 - validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
 - active_followup 非空且原文确实回答该问题时，保留对 active_followup.story_id 和 active_followup.target_slot 的关联；原文无关时不得强行关联。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
@@ -459,6 +461,9 @@ source_text:
 - “接着聊那个朋友吧”“换个话题”等只控制访谈流程的句子不是人物关系或回忆事实；整条 source_text 只有这类话语时，entities、claims、stories 全部返回空数组。
 - aliases 只能来自原文，不能因为名称相似自行判断是同一个人。
 - story 必须引用本次 claims，不能脱离有逐字证据的 claim 创建。
+- Story 是可独立讲述的叙事单元，不是 Claim 的同义包装：孤立的时间范围、身份、属性、症状清单、地点或一句背景事实只创建 Claim，不单独创建 Story。
+- event 必须包含明确发生的行动、变化或转折；relationship 表达持续的人物关系；life_stage 表达一段人生阶段及其职责或转变；theme 用多个具体事例共同支撑一个贯穿主题。
+- 同一段经历的背景、行动、结果和感受应尽量归入同一个 Story；不要为了覆盖每条 Claim 而拆成多个只有一个事实片段的微型 Story。
 - 同一条 source_text 中多条可证实 Claim 共享同一非叙述者人物或地点锚点时，不得把这个候选簇留在 Story 之外；应按真实事件、关系或人生阶段分成一个或多个 Story，不得机械地按素材数量创建 Story。
 - narrative_role 描述叙事作用，slot_keys 描述结构槽位，两者不能混用。
 - event 槽位：background, trigger, people, difficulty, actions, turning_point, outcome, reflection。

@@ -18,6 +18,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
+    MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirChapterSourceLinkStatus
@@ -49,6 +50,14 @@ from app.services.memoir.narrative.readiness_policy import story_can_support_dra
 
 LEGACY_SUGGESTION_IDEMPOTENCY_KEY = "chapter-structure-backfill-v1"
 LEGACY_CORE_STORY_PLACEHOLDER_TITLE = "待补充核心故事"
+LEGACY_ANCHOR_STORY_LIMIT = 3
+
+_LEGACY_STORY_TYPE_PRIORITY = {
+    MemoirStoryType.LIFE_STAGE.value: 3,
+    MemoirStoryType.RELATIONSHIP.value: 2,
+    MemoirStoryType.THEME.value: 1,
+    MemoirStoryType.EVENT.value: 0,
+}
 
 
 def _utcnow() -> datetime:
@@ -542,21 +551,61 @@ async def legacy_story_candidates(
     )
 
 
-async def _required_legacy_story(
+async def _legacy_anchor_stories(
     db: AsyncSession,
     *,
     project_id: str,
     candidates: list[MemoirStory],
-) -> MemoirStory | None:
+    preferred_required_story_id: str | None = None,
+) -> tuple[list[MemoirStory], MemoirStory | None]:
+    if not candidates:
+        return [], None
     confirmable_ids = await story_decisions.confirmable_story_ids(
         db,
         project_id=project_id,
         story_ids={story.id for story in candidates},
     )
-    return next(
-        (story for story in candidates if story.id in confirmable_ids),
+    shapes = await eligible_story_claim_shapes(
+        db,
+        project_id=project_id,
+        story_ids={story.id for story in candidates},
+    )
+    shapes_by_story: dict[str, set[tuple[str, bool]]] = {}
+    for story_id, narrative_role, is_core in shapes:
+        shapes_by_story.setdefault(story_id, set()).add((narrative_role, is_core))
+
+    supported_candidates = [
+        story for story in candidates if story.id in shapes_by_story
+    ]
+    candidate_order = {story.id: index for index, story in enumerate(candidates)}
+    ranked = sorted(
+        supported_candidates,
+        key=lambda story: (
+            story.id in confirmable_ids,
+            story.verification_status
+            == MemoirStoryVerificationStatus.CONFIRMED.value,
+            sum(is_core for _, is_core in shapes_by_story[story.id]),
+            len({role for role, _ in shapes_by_story[story.id]}),
+            _LEGACY_STORY_TYPE_PRIORITY.get(story.story_type, -1),
+            -candidate_order[story.id],
+        ),
+        reverse=True,
+    )
+    required_story = next(
+        (
+            story
+            for story in ranked
+            if story.id == preferred_required_story_id
+            and story.id in confirmable_ids
+        ),
+        None,
+    ) or next(
+        (story for story in ranked if story.id in confirmable_ids),
         None,
     )
+    if required_story is not None:
+        ranked = [required_story, *[story for story in ranked if story != required_story]]
+    return ranked[:LEGACY_ANCHOR_STORY_LIMIT], required_story
 
 
 async def eligible_story_claim_shapes(
@@ -736,7 +785,7 @@ async def create_legacy_contract_suggestion(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    required_story = await _required_legacy_story(
+    anchor_stories, required_story = await _legacy_anchor_stories(
         db,
         project_id=project_id,
         candidates=candidates,
@@ -744,16 +793,16 @@ async def create_legacy_contract_suggestion(
     framing_story_ids = await _legacy_framing_story_ids(
         db,
         project_id=project_id,
-        candidates=candidates,
+        candidates=anchor_stories,
         required_story=required_story,
     )
-    questions = _legacy_core_questions(chapter=chapter, candidates=candidates)
+    questions = _legacy_core_questions(chapter=chapter, candidates=anchor_stories)
     supported_story_ids = {
         story_id
         for story_id, _, _ in await eligible_story_claim_shapes(
             db,
             project_id=project_id,
-            story_ids={story.id for story in candidates},
+            story_ids={story.id for story in anchor_stories},
         )
     }
     contract = MemoirChapterContract(
@@ -797,7 +846,7 @@ async def create_legacy_contract_suggestion(
                 story.id == required_story.id if required_story is not None else False,
                 story,
             )
-            for story in candidates
+            for story in anchor_stories
         ],
         (
             MemoirChapterNodeType.REFLECTION,
@@ -891,12 +940,7 @@ async def repair_legacy_contract_suggestion(
     contract: MemoirChapterContract,
 ) -> str:
     if (
-        contract.id
-        != legacy_contract_suggestion_id(
-            project_id=contract.project_id,
-            chapter_id=contract.chapter_id,
-        )
-        or contract.status != MemoirChapterContractStatus.DRAFT.value
+        contract.status != MemoirChapterContractStatus.DRAFT.value
         or contract.created_by != MemoirNarrativeActorType.SYSTEM.value
     ):
         return "not_applicable"
@@ -946,6 +990,8 @@ async def repair_legacy_contract_suggestion(
     ]
     if len(placeholder_nodes) > 1 or any(
         len(links_by_node.get(node.id, [])) != 1
+        or links_by_node[node.id][0].story_role
+        != MemoirChapterNodeStoryRole.PRIMARY.value
         for node in story_nodes
         if node not in placeholder_nodes
     ):
@@ -972,17 +1018,29 @@ async def repair_legacy_contract_suggestion(
         project_id=contract.project_id,
         chapter_id=contract.chapter_id,
     )
-    required_story = await _required_legacy_story(
+    preferred_required_story_id = (
+        constraints.include_story_ids[0] if constraints.include_story_ids else None
+    )
+    anchor_stories, required_story = await _legacy_anchor_stories(
         db,
         project_id=contract.project_id,
-        candidates=[story for story in candidates if story.id in story_node_story_ids],
+        candidates=candidates,
+        preferred_required_story_id=preferred_required_story_id,
     )
     framing_story_ids = await _legacy_framing_story_ids(
         db,
         project_id=contract.project_id,
-        candidates=candidates,
+        candidates=anchor_stories,
         required_story=required_story,
     )
+    supported_story_ids = {
+        story_id
+        for story_id, _, _ in await eligible_story_claim_shapes(
+            db,
+            project_id=contract.project_id,
+            story_ids={story.id for story in anchor_stories},
+        )
+    }
     required_story_id = required_story.id if required_story is not None else None
     desired_include_ids = [required_story_id] if required_story_id else []
     changed = constraints.include_story_ids != desired_include_ids
@@ -993,21 +1051,159 @@ async def repair_legacy_contract_suggestion(
         db.add(contract)
 
     placeholder = placeholder_nodes[0] if placeholder_nodes else None
-    for node in story_nodes:
-        node_links = links_by_node.get(node.id, [])
-        node_required = (node is placeholder and required_story_id is None) or any(
-            link.story_id == required_story_id for link in node_links
+    existing_story_ids = [
+        links_by_node[node.id][0].story_id
+        for node in story_nodes
+        if node is not placeholder
+    ]
+    desired_story_ids = [story.id for story in anchor_stories]
+    story_shape_changed = existing_story_ids != desired_story_ids
+    if story_shape_changed:
+        insertion_index = next(
+            (
+                index
+                for index, node in enumerate(nodes)
+                if node.node_type == MemoirChapterNodeType.STORY.value
+            ),
+            min(1, len(nodes)),
         )
-        if node.required != node_required:
-            node.required = node_required
+        for node in story_nodes:
+            nodes.remove(node)
+            await db.delete(node)
+        await db.flush()
+
+        story_specs: list[tuple[str, str, bool, MemoirStory | None]] = []
+        if required_story_id is None:
+            story_specs.append(
+                (
+                    LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+                    "选择一个有证据支撑的 Story 作为本章叙事核心。",
+                    True,
+                    None,
+                )
+            )
+        story_specs.extend(
+            (
+                story.title,
+                f"完整讲述“{story.title}”在本章中的叙事作用。",
+                story.id == required_story_id,
+                story,
+            )
+            for story in anchor_stories
+        )
+        for offset, (title, purpose, required, story) in enumerate(story_specs):
+            node = MemoirChapterNode(
+                project_id=contract.project_id,
+                chapter_id=contract.chapter_id,
+                contract_id=contract.id,
+                node_type=MemoirChapterNodeType.STORY.value,
+                title=title,
+                purpose=purpose,
+                sort_order=20000 + offset,
+                required=required,
+                status=(
+                    MemoirChapterNodeStatus.NEEDS_WORK.value
+                    if story is None
+                    else (
+                        MemoirChapterNodeStatus.READY.value
+                        if story_can_support_draft(story)
+                        and story.id in supported_story_ids
+                        else MemoirChapterNodeStatus.NEEDS_WORK.value
+                    )
+                ),
+                created_by=MemoirNarrativeActorType.SYSTEM.value,
+                updated_by=MemoirNarrativeActorType.SYSTEM.value,
+            )
             db.add(node)
+            await db.flush()
+            nodes.insert(insertion_index + offset, node)
+            if story is not None:
+                db.add(
+                    MemoirChapterNodeStory(
+                        project_id=contract.project_id,
+                        node_id=node.id,
+                        story_id=story.id,
+                        story_role=MemoirChapterNodeStoryRole.PRIMARY.value,
+                        sort_order=0,
+                        required=required,
+                        created_by=MemoirNarrativeActorType.SYSTEM.value,
+                    )
+                )
+        changed = True
+    else:
+        stories_by_id = {story.id: story for story in anchor_stories}
+        for node in story_nodes:
+            node_links = links_by_node.get(node.id, [])
+            story = (
+                stories_by_id.get(node_links[0].story_id) if node_links else None
+            )
+            node_required = story is None or story.id == required_story_id
+            expected_title = (
+                LEGACY_CORE_STORY_PLACEHOLDER_TITLE
+                if story is None
+                else story.title
+            )
+            expected_purpose = (
+                "选择一个有证据支撑的 Story 作为本章叙事核心。"
+                if story is None
+                else f"完整讲述“{story.title}”在本章中的叙事作用。"
+            )
+            expected_status = (
+                MemoirChapterNodeStatus.NEEDS_WORK.value
+                if story is None
+                else (
+                    MemoirChapterNodeStatus.READY.value
+                    if story_can_support_draft(story)
+                    and story.id in supported_story_ids
+                    else MemoirChapterNodeStatus.NEEDS_WORK.value
+                )
+            )
+            for attribute, expected in (
+                ("title", expected_title),
+                ("purpose", expected_purpose),
+                ("required", node_required),
+                ("status", expected_status),
+            ):
+                if getattr(node, attribute) != expected:
+                    setattr(node, attribute, expected)
+                    db.add(node)
+                    changed = True
+            for link in node_links:
+                link_required = link.story_id == required_story_id
+                if link.required != link_required:
+                    link.required = link_required
+                    db.add(link)
+                    changed = True
+
+        if required_story_id is None and placeholder is None:
+            insertion_index = next(
+                (
+                    index
+                    for index, node in enumerate(nodes)
+                    if node.node_type == MemoirChapterNodeType.STORY.value
+                ),
+                min(1, len(nodes)),
+            )
+            placeholder = MemoirChapterNode(
+                project_id=contract.project_id,
+                chapter_id=contract.chapter_id,
+                contract_id=contract.id,
+                node_type=MemoirChapterNodeType.STORY.value,
+                title=LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+                purpose="选择一个有证据支撑的 Story 作为本章叙事核心。",
+                sort_order=20000,
+                required=True,
+                status=MemoirChapterNodeStatus.NEEDS_WORK.value,
+                created_by=MemoirNarrativeActorType.SYSTEM.value,
+                updated_by=MemoirNarrativeActorType.SYSTEM.value,
+            )
+            nodes.insert(insertion_index, placeholder)
+            db.add(placeholder)
             changed = True
-        for link in node_links:
-            link_required = link.story_id == required_story_id
-            if link.required != link_required:
-                link.required = link_required
-                db.add(link)
-                changed = True
+        elif required_story_id is not None and placeholder is not None:
+            nodes.remove(placeholder)
+            await db.delete(placeholder)
+            changed = True
 
     for node in framing_nodes:
         node_links = links_by_node.get(node.id, [])
@@ -1041,60 +1237,75 @@ async def repair_legacy_contract_suggestion(
             )
             changed = True
 
-    if required_story_id is None and placeholder is None:
-        insertion_index = next(
-            (
-                index
-                for index, node in enumerate(nodes)
-                if node.node_type == MemoirChapterNodeType.STORY.value
-            ),
-            min(1, len(nodes)),
+    chapter = await load_chapter(
+        db,
+        project_id=contract.project_id,
+        chapter_id=contract.chapter_id,
+    )
+    desired_questions = [
+        question.model_dump(mode="json")
+        for question in _legacy_core_questions(
+            chapter=chapter,
+            candidates=anchor_stories,
         )
-        placeholder = MemoirChapterNode(
-            project_id=contract.project_id,
-            chapter_id=contract.chapter_id,
-            contract_id=contract.id,
-            node_type=MemoirChapterNodeType.STORY.value,
-            title=LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
-            purpose="选择一个有证据支撑的 Story 作为本章叙事核心。",
-            sort_order=20000,
-            required=True,
-            status=MemoirChapterNodeStatus.NEEDS_WORK.value,
-            created_by=MemoirNarrativeActorType.SYSTEM.value,
-            updated_by=MemoirNarrativeActorType.SYSTEM.value,
-        )
-        nodes.insert(insertion_index, placeholder)
-        db.add(placeholder)
-        changed = True
-    elif required_story_id is not None and placeholder is not None:
-        nodes.remove(placeholder)
-        await db.delete(placeholder)
+    ]
+    if contract.core_questions_json != desired_questions:
+        contract.core_questions_json = desired_questions
+        db.add(contract)
         changed = True
 
     if not changed:
         return "unchanged"
 
     for index, node in enumerate(nodes):
-        if node is placeholder and required_story_id is not None:
-            continue
         node.sort_order = 10000 + index
         db.add(node)
     await db.flush()
     for index, node in enumerate(nodes):
         node.sort_order = index
         db.add(node)
-    chapter = await load_chapter(
-        db,
-        project_id=contract.project_id,
-        chapter_id=contract.chapter_id,
-    )
-    contract.core_questions_json = [
-        question.model_dump(mode="json")
-        for question in _legacy_core_questions(chapter=chapter, candidates=candidates)
-    ]
-    db.add(contract)
     await db.flush()
     return "repaired"
+
+
+async def refresh_legacy_contract_suggestions_for_utterance(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+) -> tuple[str, ...]:
+    contracts = list(
+        (
+            await db.scalars(
+                select(MemoirChapterContract)
+                .join(
+                    MemoirChapterSourceLink,
+                    (MemoirChapterSourceLink.project_id == MemoirChapterContract.project_id)
+                    & (
+                        MemoirChapterSourceLink.chapter_id
+                        == MemoirChapterContract.chapter_id
+                    ),
+                )
+                .where(
+                    MemoirChapterContract.project_id == project_id,
+                    MemoirChapterContract.status
+                    == MemoirChapterContractStatus.DRAFT.value,
+                    MemoirChapterContract.created_by
+                    == MemoirNarrativeActorType.SYSTEM.value,
+                    MemoirChapterSourceLink.utterance_id == utterance_id,
+                    MemoirChapterSourceLink.status
+                    == MemoirChapterSourceLinkStatus.ACTIVE.value,
+                )
+                .distinct()
+                .order_by(MemoirChapterContract.chapter_id)
+            )
+        ).all()
+    )
+    repaired_contract_ids: list[str] = []
+    for contract in contracts:
+        if await repair_legacy_contract_suggestion(db, contract=contract) == "repaired":
+            repaired_contract_ids.append(contract.id)
+    return tuple(repaired_contract_ids)
 
 
 async def confirm_contract(

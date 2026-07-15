@@ -38,6 +38,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_narrative.extraction import MemoirNarrativeExtractedClaim
 from app.services.ai_types import AITextClient
 from app.services.memoir.narrative import (
+    chapter_contracts,
     decisions,
     entities,
     followup_completion,
@@ -449,6 +450,12 @@ async def ingest_transcript_version(
         utterance=utterance,
         transcript_version=version,
     )
+    if created_story_ids or changed_story_ids:
+        await chapter_contracts.refresh_legacy_contract_suggestions_for_utterance(
+            db,
+            project_id=project.id,
+            utterance_id=utterance.id,
+        )
 
     return NarrativeIngestionResult(
         created_claim_ids=tuple(created_claim_ids),

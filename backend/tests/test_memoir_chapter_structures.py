@@ -16,6 +16,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirChapterNodeStoryRole,
     MemoirNarrativeActorType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
@@ -38,6 +39,7 @@ from app.models.memoir_narrative import (
     MemoirStoryRevision,
 )
 from app.models.projects import Project
+from app.services.memoir.narrative import chapter_contracts
 from app.services.memoir.narrative.chapter_structure_backfill import (
     run_chapter_structure_backfill,
 )
@@ -1255,3 +1257,95 @@ async def test_chapter_structure_backfill_uses_placeholder_and_skips_user_modifi
         dry_run=False,
     )
     assert skipped["skipped_modified_contract_ids"] == [contract.id]
+
+
+async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["工作经历"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+    )
+    stories: list[MemoirStory] = []
+    for index in range(5):
+        story, _ = await _create_ready_story(
+            test_db,
+            created=created,
+            title=f"工作故事 {index + 1}",
+        )
+        story.updated_at = datetime(2026, 1, index + 1)
+        stories.append(story)
+    test_db.add_all(stories)
+    await test_db.commit()
+
+    report = await run_chapter_structure_backfill(
+        test_db,
+        project_id=project_id,
+        dry_run=False,
+    )
+    contract = await test_db.get(
+        MemoirChapterContract,
+        report["created_contract_ids"][0],
+    )
+    assert contract is not None
+    initial_required_story_id = stories[4].id
+    assert contract.constraints_json["include_story_ids"] == [initial_required_story_id]
+
+    primary_story_ids = list(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNodeStory.story_id)
+                .join(MemoirChapterNode, MemoirChapterNode.id == MemoirChapterNodeStory.node_id)
+                .where(
+                    MemoirChapterNode.contract_id == contract.id,
+                    MemoirChapterNodeStory.story_role
+                    == MemoirChapterNodeStoryRole.PRIMARY.value,
+                )
+                .order_by(MemoirChapterNode.sort_order)
+            )
+        ).all()
+    )
+    assert primary_story_ids == [story.id for story in reversed(stories[2:])]
+    assert len(contract.core_questions_json) == 4
+
+    new_story, _ = await _create_ready_story(
+        test_db,
+        created=created,
+        title="后来补充的关键转折",
+    )
+    new_story.updated_at = datetime(2026, 1, 6)
+    test_db.add(new_story)
+    await test_db.commit()
+
+    repaired_contract_ids = (
+        await chapter_contracts.refresh_legacy_contract_suggestions_for_utterance(
+            test_db,
+            project_id=project_id,
+            utterance_id=created["utterance_id"],
+        )
+    )
+    assert repaired_contract_ids == (contract.id,)
+    await test_db.refresh(contract)
+    assert contract.constraints_json["include_story_ids"] == [initial_required_story_id]
+    refreshed_story_ids = set(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNodeStory.story_id)
+                .join(MemoirChapterNode, MemoirChapterNode.id == MemoirChapterNodeStory.node_id)
+                .where(
+                    MemoirChapterNode.contract_id == contract.id,
+                    MemoirChapterNodeStory.story_role
+                    == MemoirChapterNodeStoryRole.PRIMARY.value,
+                )
+            )
+        ).all()
+    )
+    assert len(refreshed_story_ids) == 3
+    assert new_story.id in refreshed_story_ids
+    assert initial_required_story_id in refreshed_story_ids
+    assert await test_db.scalar(select(func.count()).select_from(MemoirStory)) == 6
