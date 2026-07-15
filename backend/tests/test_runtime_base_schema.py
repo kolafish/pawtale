@@ -200,3 +200,48 @@ async def test_exact_base_migration_is_idempotent_for_current_schema():
         await assert_base_runtime_schema(engine)
     finally:
         await engine.dispose()
+
+
+async def test_legacy_draft_block_reset_rejects_current_node_based_rows():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_draft_blocks "
+                    "ADD COLUMN legacy_draft_id VARCHAR(36)"
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO memoir_draft_blocks (
+                        id, project_id, chapter_id, node_id, block_role, sort_order,
+                        editorial_status, freshness_status, locked, current_version_id,
+                        legacy_draft_id, created_at, updated_at
+                    ) VALUES (
+                        'current-block', 'project', 'chapter', 'node', 'transition', 0,
+                        'draft', 'current', 0, NULL, NULL,
+                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+
+        with pytest.raises(RuntimeError, match="found 1 current node-based rows"):
+            await migrate_base_runtime_schema(engine)
+
+        async with engine.begin() as conn:
+            remaining = (
+                await conn.execute(
+                    text(
+                        "SELECT COUNT(*) FROM memoir_draft_blocks "
+                        "WHERE id = 'current-block'"
+                    )
+                )
+            ).scalar_one()
+        assert remaining == 1
+    finally:
+        await engine.dispose()

@@ -146,6 +146,22 @@ async def migrate_base_runtime_schema(engine: AsyncEngine) -> dict[str, list[str
         if await table_exists(conn, "memoir_draft_blocks") and "legacy_draft_id" in (
             await table_columns(conn, "memoir_draft_blocks")
         ):
+            current_block_count = int(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT COUNT(*) FROM memoir_draft_blocks "
+                            "WHERE block_role != 'legacy_snapshot' "
+                            "OR node_id IS NOT NULL OR legacy_draft_id IS NULL"
+                        )
+                    )
+                ).scalar_one()
+            )
+            if current_block_count:
+                raise RuntimeError(
+                    "Cannot reset legacy DraftBlock schema; "
+                    f"found {current_block_count} current node-based rows"
+                )
             for table_name in LEGACY_DRAFT_BLOCK_TABLES:
                 if not await table_exists(conn, table_name):
                     continue
