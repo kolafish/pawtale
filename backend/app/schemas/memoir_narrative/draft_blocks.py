@@ -53,7 +53,6 @@ class MemoirDraftBlockVersionResponse(BaseModel):
     model: str | None
     prompt_snapshot: str
     feedback: str | None
-    legacy_draft_version_id: str | None
     claims: list[MemoirDraftBlockClaimSource]
     stories: list[MemoirDraftBlockStorySource]
     created_at: datetime
@@ -65,14 +64,13 @@ class MemoirDraftBlockResponse(BaseModel):
     id: str
     project_id: str
     chapter_id: str
-    node_id: str | None
+    node_id: str
     block_role: MemoirDraftBlockRole
     sort_order: int
     editorial_status: MemoirDraftBlockEditorialStatus
     freshness_status: MemoirDraftBlockFreshnessStatus
     locked: bool
     current_version_id: str
-    legacy_draft_id: str | None
     current_version: MemoirDraftBlockVersionResponse
     version_count: int
     created_at: datetime

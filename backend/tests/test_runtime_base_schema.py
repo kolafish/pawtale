@@ -3,8 +3,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.database import Base, register_models
+from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 from app.migrations.runtime_base import (
+    LEGACY_DRAFT_BLOCK_TABLES,
     OBSOLETE_RUNTIME_TABLES,
     assert_base_runtime_schema,
     migrate_base_runtime_schema,
@@ -89,6 +91,18 @@ async def test_exact_base_migration_drops_obsolete_schema_without_compatibility(
             )
             await conn.execute(
                 text(
+                    "ALTER TABLE memoir_draft_blocks "
+                    "ADD COLUMN legacy_draft_id VARCHAR(36)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_draft_block_versions "
+                    "ADD COLUMN legacy_draft_version_id VARCHAR(36)"
+                )
+            )
+            await conn.execute(
+                text(
                     "UPDATE memoir_voice_sessions "
                     "SET memoir_session_id = 'obsolete-session'"
                 )
@@ -111,7 +125,9 @@ async def test_exact_base_migration_drops_obsolete_schema_without_compatibility(
                 "memoir_voice_sessions",
                 "memoir_transcript_versions",
             ],
+            "reset_tables": list(LEGACY_DRAFT_BLOCK_TABLES),
         }
+        await migrate_memoir_narrative_schema(engine)
         await assert_base_runtime_schema(engine)
         async with engine.begin() as conn:
             tables = {
@@ -179,6 +195,7 @@ async def test_exact_base_migration_is_idempotent_for_current_schema():
         assert await migrate_base_runtime_schema(engine) == {
             "dropped_tables": [],
             "rebuilt_tables": [],
+            "reset_tables": [],
         }
         await assert_base_runtime_schema(engine)
     finally:

@@ -256,7 +256,6 @@ def evaluate_book_consistency_rules(
         block = item.block
         if (
             block.editorial_status == MemoirDraftBlockEditorialStatus.EXCLUDED.value
-            or block.block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT.value
         ):
             continue
         if block.locked and item.locked_version_id and item.locked_version_id != item.version.id:

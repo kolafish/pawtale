@@ -24,14 +24,13 @@ from app.services.memoir.narrative.chapter_structure_backfill import (
 )
 from app.services.memoir.narrative.cutover_checks import (
     assert_ingestion_complete,
-    assert_story_candidates_materialized,
+    assert_story_graph_complete,
     collect_migration_report,
 )
-from app.services.memoir.narrative.story_backfill import run_story_backfill
 from scripts.backup_runtime_data import sqlite_database_path, validate_backup_manifest
 
 
-EXECUTABLE_STAGES = {"ingest", "process-ingestion", "stories", "structures"}
+EXECUTABLE_STAGES = {"ingest", "process-ingestion", "structures"}
 
 
 def _args() -> argparse.Namespace:
@@ -42,7 +41,6 @@ def _args() -> argparse.Namespace:
             "inventory",
             "ingest",
             "process-ingestion",
-            "stories",
             "structures",
         ),
         nargs="?",
@@ -68,7 +66,7 @@ def _args() -> argparse.Namespace:
 def _validate_run_args(args: argparse.Namespace) -> None:
     if args.execute and args.stage not in EXECUTABLE_STAGES:
         raise RuntimeError(
-            "execute mode is only valid for ingest, process-ingestion, stories, or structures"
+            "execute mode is only valid for ingest, process-ingestion, or structures"
         )
     if args.execute and not args.application_writers_stopped:
         raise RuntimeError(
@@ -195,17 +193,9 @@ async def _run(args: argparse.Namespace) -> int:
                 execute=args.execute,
                 limit=args.limit,
             )
-        elif args.stage == "stories":
-            await assert_ingestion_complete(db, project_id=args.project_id)
-            action = await run_story_backfill(
-                db,
-                project_id=args.project_id,
-                dry_run=not args.execute,
-                limit=args.limit,
-            )
         elif args.stage == "structures":
             await assert_ingestion_complete(db, project_id=args.project_id)
-            await assert_story_candidates_materialized(db, project_id=args.project_id)
+            await assert_story_graph_complete(db, project_id=args.project_id)
             action = await run_chapter_structure_backfill(
                 db,
                 project_id=args.project_id,

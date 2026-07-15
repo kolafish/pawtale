@@ -7,7 +7,6 @@ from sqlalchemy.schema import Column, Table
 from app.database import Base, register_models
 from app.migrations.memoir_draft_blocks import (
     MEMOIR_DRAFT_BLOCK_TRIGGERS,
-    backfill_legacy_chapter_drafts,
     ensure_draft_block_triggers,
 )
 
@@ -562,7 +561,6 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
     changed_triggers: list[str] = []
-    legacy_backfill: dict[str, int]
     async with engine.begin() as conn:
         for table in _narrative_tables_from_metadata():
             if not await _table_exists(conn, table.name):
@@ -589,13 +587,11 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
-        legacy_backfill = await backfill_legacy_chapter_drafts(conn)
     return {
         "changed_tables": changed_tables,
         "changed_columns": changed_columns,
         "changed_indexes": changed_indexes,
         "changed_triggers": changed_triggers,
-        "legacy_backfill": legacy_backfill,
     }
 
 

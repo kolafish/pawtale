@@ -117,7 +117,6 @@ def _version_response(
         model=version.model,
         prompt_snapshot=version.prompt_snapshot,
         feedback=version.feedback,
-        legacy_draft_version_id=version.legacy_draft_version_id,
         claims=claims,
         stories=stories,
         created_at=version.created_at,
@@ -183,7 +182,6 @@ async def _block_responses(
                 freshness_status=block.freshness_status,
                 locked=block.locked,
                 current_version_id=version.id,
-                legacy_draft_id=block.legacy_draft_id,
                 current_version=_version_response(
                     version,
                     claims=claims_by_version.get(version.id, []),

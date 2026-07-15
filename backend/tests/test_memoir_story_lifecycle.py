@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirClaimEvidenceSourceType,
-    MemoirClaimPredicate,
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
@@ -21,17 +20,10 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirSemanticCacheStatus
-from app.models.memoir import (
-    MemoirChapterEventClusterSnapshot,
-    MemoirSourceCard,
-    MemoirTranscriptVersion,
-    MemoirVoiceUtterance,
-)
+from app.models.memoir import MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
-    MemoirNarrativeDecision,
     MemoirStory,
     MemoirStoryClaim,
 )
@@ -60,13 +52,12 @@ from app.services.memoir.narrative import (
     story_merging,
     story_matching,
 )
-from app.services.memoir.narrative.cutover_checks import project_migration_report
-from app.services.memoir.narrative.ingestion import ingest_transcript_version, transcript_text_hash
-from app.services.memoir.narrative.story_backfill import (
-    collect_story_backfill_candidates,
-    run_story_backfill,
+from app.services.memoir.narrative.cutover_checks import (
+    assert_story_graph_complete,
+    project_migration_report,
 )
-from tests.memoir_helpers import create_test_book_plan, create_test_voice_transcript
+from app.services.memoir.narrative.ingestion import ingest_transcript_version, transcript_text_hash
+from tests.memoir_helpers import create_test_voice_transcript
 
 
 class FakeNarrativeAI:
@@ -378,12 +369,13 @@ async def test_manual_incomplete_resolution_survives_new_claims(client, test_db)
         project_id=project_id,
         text="我们最终到了新家。",
     )
+    claim_id = claim.id
     await stories.attach_claims_to_story(
         test_db,
         story=story,
         claims=[
             MemoirStoryClaimInput(
-                claim_id=claim.id,
+                claim_id=claim_id,
                 narrative_role=MemoirStoryNarrativeRole.OUTCOME,
                 slot_keys=["outcome"],
                 is_core=True,
@@ -732,325 +724,57 @@ async def test_manual_story_merge_moves_claims_and_is_idempotent(client, test_db
     assert retained_outcome.status == MemoirStorySlotStatus.SUFFICIENT.value
 
 
-async def _claim_utterance_id(test_db, claim_id: str) -> str:
-    utterance_id = await test_db.scalar(
-        select(MemoirClaimEvidence.utterance_id).where(
-            MemoirClaimEvidence.claim_id == claim_id,
-            MemoirClaimEvidence.utterance_id.is_not(None),
-        )
-    )
-    assert utterance_id is not None
-    return utterance_id
-
-
-async def test_story_backfill_groups_historical_person_claims_without_reingestion(
+async def test_offline_audit_requires_evidence_backed_claims_in_active_stories(
     client,
     test_db,
 ):
-    source_text = (
-        "李阅是我的高中同学，现在也是朋友。"
-        "每次回成都，我都会找她玩。"
-        "我们认识二十多年了。"
+    created = await create_test_voice_transcript(client, test_db, text="初始化项目。")
+    project_id = created["session"]["project_id"]
+    claim = await _create_confirmed_claim(
+        client,
+        test_db,
+        project_id=project_id,
+        text="我第一次独自去成都。",
     )
-    created = await create_test_voice_transcript(client, test_db, text=source_text)
-    project, utterance, version = await _load_source(test_db, created)
-    project_id = project.id
-    narrator = await entities.ensure_narrator_entity(test_db, project=project)
-    friend = await MemoirNarrativeEntityRepository(test_db).create(
-        MemoirNarrativeEntityCreate(
-            project_id=project.id,
-            entity_type=MemoirNarrativeEntityType.PERSON,
-            canonical_name="李阅",
-            aliases=["她"],
-            created_by=MemoirNarrativeActorType.AI,
-        )
-    )
-    claim_specs = (
-        (
-            MemoirClaimType.RELATIONSHIP,
-            "李阅是讲述者的高中同学，现在也是朋友。",
-            "李阅是我的高中同学，现在也是朋友",
-            MemoirClaimPredicate.SOCIAL_RELATIONSHIP,
-        ),
-        (
-            MemoirClaimType.EVENT,
-            "讲述者每次回成都都会找李阅玩。",
-            "每次回成都，我都会找她玩",
-            MemoirClaimPredicate.NARRATIVE_FACT,
-        ),
-        (
-            MemoirClaimType.CHRONOLOGY,
-            "讲述者和李阅认识二十多年了。",
-            "我们认识二十多年了",
-            MemoirClaimPredicate.NARRATIVE_FACT,
-        ),
-    )
-    claim_ids: list[str] = []
-    repository = MemoirClaimRepository(test_db)
-    for claim_type, statement, quote, predicate in claim_specs:
-        claim = await repository.create(
-            MemoirClaimCreate(
-                project_id=project.id,
-                claim_type=claim_type,
-                statement=statement,
-                subject_entity_id=narrator.id,
-                predicate_code=predicate,
-                object_entity_id=friend.id,
-                time_precision=MemoirClaimTimePrecision.UNKNOWN,
-                verification_status=MemoirClaimVerificationStatus.UNREVIEWED,
-                created_by=MemoirNarrativeActorType.AI,
-            )
-        )
-        await repository.add_evidence(
-            MemoirClaimEvidenceCreate(
-                project_id=project.id,
-                claim_id=claim.id,
-                evidence_role=MemoirClaimEvidenceRole.SUPPORTS,
-                evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT,
-                utterance_id=utterance.id,
-                transcript_version_id=version.id,
-                speaker_entity_id=narrator.id,
-                speaker_role="narrator",
-                quote=quote,
-                source_text_hash=transcript_text_hash(source_text),
-                created_by=MemoirNarrativeActorType.AI,
-            )
-        )
-        claim_ids.append(claim.id)
-    existing_story = await stories.create_story(
+    claim_id = claim.id
+    await test_db.commit()
+
+    before = await project_migration_report(test_db, project_id=project_id)
+    assert before["claims_without_story_count"] == 1
+    assert "evidence-backed Claims are not grouped into active Stories" in before[
+        "migration_blockers"
+    ]
+    with pytest.raises(RuntimeError, match="must belong to active Stories"):
+        await assert_story_graph_complete(test_db, project_id=project_id)
+
+    story = await stories.create_story(
         test_db,
         data=MemoirStoryCreate(
             project_id=project_id,
-            title="与李阅的关系",
-            story_type=MemoirStoryType.RELATIONSHIP,
+            title="第一次独自去成都",
+            story_type=MemoirStoryType.EVENT,
             created_by=MemoirNarrativeActorType.USER,
             created_by_user_id=created["user_id"],
         ),
     )
     await stories.attach_claims_to_story(
         test_db,
-        story=existing_story,
+        story=story,
         claims=[
             MemoirStoryClaimInput(
-                claim_id=claim_ids[0],
-                narrative_role=MemoirStoryNarrativeRole.BACKGROUND,
+                claim_id=claim_id,
+                narrative_role=MemoirStoryNarrativeRole.ACTION,
                 sort_order=0,
                 is_core=True,
-                slot_keys=["relationship_change"],
+                slot_keys=["actions"],
             )
         ],
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=created["user_id"],
-        reason="用户已经确认的部分关系事实",
+        reason="offline audit fixture",
     )
-    await decisions.decide_claim_verification(
-        test_db,
-        project_id=project_id,
-        claim_id=claim_ids[0],
-        confirmed=True,
-        actor_user_id=created["user_id"],
-        idempotency_key="confirm-existing-friend-claim",
-    )
-    await story_decisions.decide_story_verification(
-        test_db,
-        project_id=project_id,
-        story_id=existing_story.id,
-        confirmed=True,
-        actor_user_id=created["user_id"],
-        idempotency_key="confirm-existing-friend-story",
-    )
-    existing_story_id = existing_story.id
-    existing_story_version = existing_story.version
     await test_db.commit()
-
-    before = await project_migration_report(test_db, project_id=project_id)
-    candidates = await collect_story_backfill_candidates(
-        test_db,
-        project_id=project_id,
-    )
-
-    assert before["ungrouped_claim_cluster_count"] == 1
-    assert "evidence-backed Claim clusters are not grouped into Stories" in before[
-        "migration_blockers"
-    ]
-    assert len(candidates) == 1
-    assert candidates[0].origin.startswith("claim_anchor_cluster:")
-    assert candidates[0].title == "与李阅的关系"
-    assert candidates[0].story_type == MemoirStoryType.RELATIONSHIP
-    assert set(candidates[0].claim_ids) == set(claim_ids)
-    assert candidates[0].existing_story_ids == (existing_story_id,)
-
-    executed = await run_story_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-    repeated = await run_story_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-
-    assert executed["claim_anchor_candidate_count"] == 1
-    assert executed["created_story_count"] == 1
-    assert repeated["claim_anchor_candidate_count"] == 0
-    assert repeated["created_story_count"] == 0
-    story = await test_db.get(MemoirStory, executed["created_story_ids"][0])
-    assert story is not None
-    assert story.id != existing_story_id
-    assert story.story_type == MemoirStoryType.RELATIONSHIP.value
-    assert story.verification_status == MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value
-    response = await stories.story_response(test_db, story=story)
-    assert {link.claim_id for link in response.claims} == set(claim_ids)
-    slot_claim_ids = {
-        link.claim_id
-        for slot in response.slots
-        if slot.slot_key in {"relationship_change", "representative_scene"}
-        for link in slot.claims
-    }
-    assert slot_claim_ids == set(claim_ids)
-    persisted_claims = list(
-        (
-            await test_db.scalars(
-                select(MemoirClaim).where(MemoirClaim.project_id == project_id)
-            )
-        ).all()
-    )
-    assert {claim.id for claim in persisted_claims} == set(claim_ids)
-    await test_db.refresh(existing_story)
-    assert existing_story.verification_status == MemoirStoryVerificationStatus.CONFIRMED.value
-    assert existing_story.version == existing_story_version
-    existing_links = list(
-        (
-            await test_db.scalars(
-                select(MemoirStoryClaim).where(
-                    MemoirStoryClaim.project_id == project_id,
-                    MemoirStoryClaim.story_id == existing_story_id,
-                )
-            )
-        ).all()
-    )
-    assert {link.claim_id for link in existing_links} == {claim_ids[0]}
-    review_decision = await test_db.scalar(
-        select(MemoirNarrativeDecision).where(
-            MemoirNarrativeDecision.project_id == project_id,
-            MemoirNarrativeDecision.target_id == story.id,
-            MemoirNarrativeDecision.action == "needs_review",
-        )
-    )
-    assert review_decision is not None
-    assert review_decision.after_state_json["candidate_story_ids"] == [existing_story_id]
 
     after = await project_migration_report(test_db, project_id=project_id)
-    assert after["ungrouped_claim_cluster_count"] == 0
-    assert "evidence-backed Claim clusters are not grouped into Stories" not in after[
-        "migration_blockers"
-    ]
-
-
-async def test_story_backfill_creates_review_only_candidates_and_is_repeatable(client, test_db):
-    created = await create_test_voice_transcript(client, test_db, text="回填项目。")
-    project_id = created["session"]["project_id"]
-    event_claim = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="我们全家搬到了成都。",
-    )
-    theme_claim_1 = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="上学时我每天很早起床。",
-    )
-    theme_claim_2 = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="读书让我养成了坚持的习惯。",
-    )
-    event_utterance_id = await _claim_utterance_id(test_db, event_claim.id)
-    theme_utterance_ids = [
-        await _claim_utterance_id(test_db, theme_claim_1.id),
-        await _claim_utterance_id(test_db, theme_claim_2.id),
-    ]
-    plan, chapter = await create_test_book_plan(test_db, project_id=project_id)
-    test_db.add(
-        MemoirChapterEventClusterSnapshot(
-            project_id=project_id,
-            plan_id=plan.id,
-            chapter_id=chapter.id,
-            engine="legacy-cluster-v1",
-            input_signature="cluster-signature",
-            status=MemoirSemanticCacheStatus.READY.value,
-            clusters_json=[
-                {
-                    "title": "搬到成都",
-                    "summary": "全家搬到成都的经历。",
-                    "source_ids": [event_utterance_id],
-                }
-            ],
-            source_ids_json=[event_utterance_id],
-            source_fingerprints_json={event_utterance_id: "fingerprint"},
-        )
-    )
-    for index, utterance_id in enumerate(theme_utterance_ids):
-        test_db.add(
-            MemoirSourceCard(
-                project_id=project_id,
-                utterance_id=utterance_id,
-                source_text_hash=f"theme-hash-{index}",
-                engine="legacy-source-card-v1",
-                status=MemoirSemanticCacheStatus.READY.value,
-                card_json={
-                    "summary": "求学经历",
-                    "event_tags": ["求学与坚持"],
-                },
-            )
-        )
-    await test_db.commit()
-
-    pending_story = await stories.create_story(
-        test_db,
-        data=MemoirStoryCreate(
-            project_id=project_id,
-            title="验证 dry-run 不影响调用方事务",
-            story_type=MemoirStoryType.EVENT,
-            created_by=MemoirNarrativeActorType.AI,
-        ),
-    )
-    dry_run = await run_story_backfill(test_db, project_id=project_id, dry_run=True)
-    assert dry_run["candidate_count"] == 2
-    assert dry_run["event_cluster_candidate_count"] == 1
-    assert dry_run["source_card_candidate_count"] == 1
-    assert await test_db.get(MemoirStory, pending_story.id) is not None
-    await test_db.rollback()
-    assert await test_db.get(MemoirStory, pending_story.id) is None
-
-    executed = await run_story_backfill(test_db, project_id=project_id, dry_run=False)
-    repeated = await run_story_backfill(test_db, project_id=project_id, dry_run=False)
-
-    assert executed["created_story_count"] == 2
-    assert repeated["created_story_count"] == 0
-    assert repeated["reused_story_count"] == 2
-    backfilled = list(
-        (
-            await test_db.scalars(select(MemoirStory).where(MemoirStory.project_id == project_id))
-        ).all()
-    )
-    assert len(backfilled) == 2
-    assert {story.verification_status for story in backfilled} == {
-        MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value
-    }
-    review_decisions = list(
-        (
-            await test_db.scalars(
-                select(MemoirNarrativeDecision).where(
-                    MemoirNarrativeDecision.project_id == project_id,
-                    MemoirNarrativeDecision.target_type == "story",
-                    MemoirNarrativeDecision.action == "needs_review",
-                )
-            )
-        ).all()
-    )
-    assert len(review_decisions) == 2
+    assert after["claims_without_story_count"] == 0
+    await assert_story_graph_complete(test_db, project_id=project_id)

@@ -13,6 +13,7 @@ OBSOLETE_RUNTIME_TABLES = (
     "scenes",
     "memoir_answers",
     "memoir_book_auto_revision_jobs",
+    "memoir_chapter_event_cluster_snapshots",
     "memoir_coverage_snapshots",
     "memoir_coverage_topics",
     "memoir_drafts",
@@ -43,6 +44,13 @@ RUNTIME_MANAGED_TABLES = {
 EXACT_REBUILD_TABLES = (
     "memoir_voice_sessions",
     "memoir_transcript_versions",
+)
+
+LEGACY_DRAFT_BLOCK_TABLES = (
+    "memoir_draft_block_claims",
+    "memoir_draft_block_stories",
+    "memoir_draft_block_versions",
+    "memoir_draft_blocks",
 )
 
 
@@ -116,11 +124,12 @@ async def _rebuild_exact_table(conn, table_name: str) -> None:
 async def migrate_base_runtime_schema(engine: AsyncEngine) -> dict[str, list[str]]:
     """Remove structures that are not part of the current runtime model."""
     if engine.dialect.name != "sqlite":
-        return {"dropped_tables": [], "rebuilt_tables": []}
+        return {"dropped_tables": [], "rebuilt_tables": [], "reset_tables": []}
 
     register_models()
     dropped_tables: list[str] = []
     rebuilt_tables: list[str] = []
+    reset_tables: list[str] = []
     async with engine.begin() as conn:
         if int((await conn.execute(text("PRAGMA foreign_keys"))).scalar_one()):
             raise RuntimeError(
@@ -134,6 +143,15 @@ async def migrate_base_runtime_schema(engine: AsyncEngine) -> dict[str, list[str
             await conn.execute(text(f'DROP TABLE "{table_name}"'))
             dropped_tables.append(table_name)
 
+        if await table_exists(conn, "memoir_draft_blocks") and "legacy_draft_id" in (
+            await table_columns(conn, "memoir_draft_blocks")
+        ):
+            for table_name in LEGACY_DRAFT_BLOCK_TABLES:
+                if not await table_exists(conn, table_name):
+                    continue
+                await conn.execute(text(f'DROP TABLE "{table_name}"'))
+                reset_tables.append(table_name)
+
         for table_name in EXACT_REBUILD_TABLES:
             if not await table_exists(conn, table_name):
                 continue
@@ -146,6 +164,7 @@ async def migrate_base_runtime_schema(engine: AsyncEngine) -> dict[str, list[str
     return {
         "dropped_tables": dropped_tables,
         "rebuilt_tables": rebuilt_tables,
+        "reset_tables": reset_tables,
     }
 
 

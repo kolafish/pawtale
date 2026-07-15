@@ -142,7 +142,6 @@ function sampleDraftBlock(overrides = {}) {
     freshness_status: "current",
     locked: false,
     current_version_id: "version-1",
-    legacy_draft_id: null,
     current_version: {
       id: "version-1",
       content: "十八岁那年，我第一次离开家。",

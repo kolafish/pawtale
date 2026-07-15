@@ -108,7 +108,6 @@ MemoirAutomationEvent             # 用户可见的后台处理事件
 ### 3.3 逐步降级或删除的旧职责
 
 ```text
-MemoirChapterEventClusterSnapshot # 仅用于回填 Story 候选，Story 落地后退出主流程
 MemoirChapterSourceLink           # 迁移期间保留为来源投影，不再作为目标叙事主关系
 MemoirBookPlanChapter.source_refs_json
                                    # 只保留历史快照/迁移输入，不再驱动新成书主链路
@@ -1100,17 +1099,12 @@ MemoirSourceCard.key_facts
 MemoirSourceCard.people / places / time_hints
  -> Entity 和时间候选
 
-MemoirChapterEventClusterSnapshot
- -> Story 候选，仅作为低置信度种子
-
 MemoirChapterSourceLink
  -> Story/Chapter 迁移检查和来源覆盖校验
 
 MemoirBookChapterDraftVersion
- -> 初始 legacy DraftBlockVersion 或历史组装快照
+ -> 仅保留 DraftBlock 组装后的历史快照
 ```
-
-EventCluster 不能直接成为 confirmed Story；同一事件可能在不同章节存在不同聚类，需要项目级去重和 review。
 
 ### 14.2 切换阶段
 

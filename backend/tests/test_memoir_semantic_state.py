@@ -17,7 +17,6 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterCard,
-    MemoirChapterEventClusterSnapshot,
     MemoirChapterSourceLink,
     MemoirSourceCard,
     MemoirVoiceSession,
@@ -27,7 +26,6 @@ from app.models.projects import Project
 from app.services.memoir.semantic_state import (
     upsert_book_quality_audit_snapshot,
     upsert_chapter_card,
-    upsert_chapter_event_cluster_snapshot,
     upsert_source_card,
 )
 
@@ -59,58 +57,8 @@ async def test_memoir_semantic_migration_creates_missing_tables():
         async with engine.begin() as conn:
             assert "source_text_hash" in await _table_columns(conn, "memoir_source_cards")
             assert "input_signature" in await _table_columns(conn, "memoir_chapter_cards")
-            assert "clusters_json" in await _table_columns(conn, "memoir_chapter_event_cluster_snapshots")
-            assert "source_fingerprints_json" in await _table_columns(
-                conn,
-                "memoir_chapter_event_cluster_snapshots",
-            )
             assert "chapter_audits_json" in await _table_columns(conn, "memoir_book_quality_audit_snapshots")
             assert "assignment_reason" in await _table_columns(conn, "memoir_chapter_source_links")
-    finally:
-        await engine.dispose()
-
-
-async def test_memoir_semantic_migration_adds_cluster_source_fingerprints_column():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP TABLE memoir_chapter_event_cluster_snapshots"))
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE memoir_chapter_event_cluster_snapshots (
-                        id VARCHAR(36) PRIMARY KEY,
-                        project_id VARCHAR(36) NOT NULL,
-                        plan_id VARCHAR(36) NOT NULL,
-                        chapter_id VARCHAR(36) NOT NULL,
-                        engine VARCHAR(80) NOT NULL,
-                        input_signature VARCHAR(128) NOT NULL,
-                        status VARCHAR(20) NOT NULL,
-                        clusters_json JSON NOT NULL,
-                        source_ids_json JSON NOT NULL,
-                        error_message TEXT NOT NULL,
-                        created_at DATETIME,
-                        updated_at DATETIME
-                    )
-                    """
-                )
-            )
-
-        result = await migrate_memoir_semantic_schema(engine)
-        second_result = await migrate_memoir_semantic_schema(engine)
-
-        assert result["changed_tables"] == []
-        assert result["changed_columns"] == [
-            "memoir_chapter_event_cluster_snapshots.source_fingerprints_json"
-        ]
-        assert second_result["changed_columns"] == []
-        async with engine.begin() as conn:
-            assert "source_fingerprints_json" in await _table_columns(
-                conn,
-                "memoir_chapter_event_cluster_snapshots",
-            )
     finally:
         await engine.dispose()
 
@@ -158,14 +106,6 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
                     )
                 )
             ).scalar_one()
-            cluster_snapshot_sql = (
-                await conn.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'table' AND name = 'memoir_chapter_event_cluster_snapshots'"
-                    )
-                )
-            ).scalar_one()
             source_link_sql = (
                 await conn.execute(
                     text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'memoir_chapter_source_links'")
@@ -176,8 +116,6 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
             assert "ck_memoir_source_cards_status" in source_sql
             assert "uq_memoir_chapter_cards_signature" in chapter_sql
             assert "ck_memoir_chapter_cards_status" in chapter_sql
-            assert "uq_memoir_chapter_event_cluster_snapshots_signature" in cluster_snapshot_sql
-            assert "ck_memoir_chapter_event_cluster_snapshots_status" in cluster_snapshot_sql
             assert "uq_memoir_book_quality_audit_snapshots_signature" in snapshot_sql
             assert "uq_memoir_chapter_source_links_chapter_utterance" in source_link_sql
             assert "ck_memoir_chapter_source_links_status" in source_link_sql
@@ -185,7 +123,6 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
 
             source_indexes = await _index_names(conn, "memoir_source_cards")
             chapter_indexes = await _index_names(conn, "memoir_chapter_cards")
-            cluster_snapshot_indexes = await _index_names(conn, "memoir_chapter_event_cluster_snapshots")
             snapshot_indexes = await _index_names(conn, "memoir_book_quality_audit_snapshots")
             source_link_indexes = await _index_names(conn, "memoir_chapter_source_links")
 
@@ -193,9 +130,6 @@ async def test_memoir_semantic_tables_define_constraints_and_indexes():
             assert "ix_memoir_source_cards_utterance_id" in source_indexes
             assert "ix_memoir_chapter_cards_project_id" in chapter_indexes
             assert "ix_memoir_chapter_cards_chapter_id" in chapter_indexes
-            assert "ix_memoir_chapter_event_cluster_snapshots_project_id" in cluster_snapshot_indexes
-            assert "ix_memoir_chapter_event_cluster_snapshots_chapter_id" in cluster_snapshot_indexes
-            assert "ix_memoir_chapter_event_cluster_snapshots_input_signature" in cluster_snapshot_indexes
             assert "ix_memoir_book_quality_audit_snapshots_project_id" in snapshot_indexes
             assert "ix_memoir_book_quality_audit_snapshots_input_signature" in snapshot_indexes
             assert "ix_memoir_chapter_source_links_project_id" in source_link_indexes
@@ -296,42 +230,6 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
         card_json={"summary": "更新后的章节摘要"},
     )
 
-    cluster_snapshot = await upsert_chapter_event_cluster_snapshot(
-        test_db,
-        project_id=project.id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        engine="llm_event_cluster_v1",
-        input_signature="cluster-signature-1",
-        clusters_json=[
-            {
-                "title": "厨房回忆",
-                "source_ids": [utterance.id],
-                "summary": "一条素材讲外婆家厨房。",
-            }
-        ],
-        source_ids_json=[utterance.id],
-        source_fingerprints_json={utterance.id: "fingerprint-1"},
-    )
-    cluster_snapshot_again = await upsert_chapter_event_cluster_snapshot(
-        test_db,
-        project_id=project.id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        engine="llm_event_cluster_v1",
-        input_signature="cluster-signature-1",
-        status=MemoirSemanticCacheStatus.STALE,
-        clusters_json=[
-            {
-                "title": "更新后的厨房回忆",
-                "source_ids": [utterance.id],
-                "summary": "更新后的聚类摘要。",
-            }
-        ],
-        source_ids_json=[utterance.id],
-        source_fingerprints_json={utterance.id: "fingerprint-2"},
-    )
-
     snapshot = await upsert_book_quality_audit_snapshot(
         test_db,
         project_id=project.id,
@@ -359,15 +257,10 @@ async def test_semantic_state_upserts_reuse_signature_rows(test_db):
     assert source_card_again.card_json["summary"] == "更新后的厨房回忆"
     assert chapter_card_again.id == chapter_card.id
     assert chapter_card_again.card_json["summary"] == "更新后的章节摘要"
-    assert cluster_snapshot_again.id == cluster_snapshot.id
-    assert cluster_snapshot_again.status == MemoirSemanticCacheStatus.STALE.value
-    assert cluster_snapshot_again.clusters_json[0]["title"] == "更新后的厨房回忆"
-    assert cluster_snapshot_again.source_fingerprints_json == {utterance.id: "fingerprint-2"}
     assert snapshot_again.id == snapshot.id
     assert snapshot_again.overall_status == "healthy"
 
     assert await test_db.scalar(select(func.count()).select_from(MemoirSourceCard)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirChapterCard)) == 1
-    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterEventClusterSnapshot)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirBookQualityAuditSnapshot)) == 1
     assert await test_db.scalar(select(func.count()).select_from(MemoirChapterSourceLink)) == 0
