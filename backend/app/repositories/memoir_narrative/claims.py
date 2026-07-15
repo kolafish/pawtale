@@ -145,11 +145,10 @@ class MemoirClaimRepository:
                 await self._db.execute(
                     select(
                         MemoirTranscriptVersion.voice_session_id,
-                        MemoirTranscriptVersion.answer_id,
                         MemoirTranscriptVersion.content,
                         MemoirVoiceSession.project_id,
                     )
-                    .outerjoin(
+                    .join(
                         MemoirVoiceSession,
                         MemoirVoiceSession.id == MemoirTranscriptVersion.voice_session_id,
                     )
@@ -158,11 +157,7 @@ class MemoirClaimRepository:
             ).one_or_none()
             if source is None:
                 raise ValueError("transcript evidence source does not exist")
-            voice_session_id, _answer_id, source_content, source_project_id = source
-            if voice_session_id is None:
-                raise ValueError(
-                    "legacy transcript ownership must be resolved before creating narrative evidence"
-                )
+            voice_session_id, source_content, source_project_id = source
             if source_project_id != data.project_id:
                 raise ValueError("transcript evidence source belongs to another project")
             if data.quote not in source_content:
