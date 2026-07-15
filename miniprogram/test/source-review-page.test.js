@@ -13,6 +13,8 @@ function reviewItem() {
     utterance_id: "utterance-1",
     source_index: 3,
     route_action: "hold_for_review",
+    target_chapter_id: "chapter-1",
+    target_chapter_title: "界限与邀约",
     reason: "回答用途不明确",
     summary_text: "请确认这段话怎么使用",
     source_text: "这句话是我当时想发给他的消息，但最后没有发出去。",
@@ -77,6 +79,7 @@ test("source review page confirms the full answer as clarification", async () =>
 
   await page.onLoad.call(context, { projectId: "project-1", eventId: "event-1" });
   assert.equal(context.data.questionText, "这段话要写进书里，还是只用于解释原文？");
+  assert.equal(context.data.chapterTitle, "界限与邀约");
   assert.equal(context.data.sourceText, reviewItem().source_text);
   assert.equal(context.data.choices[0].title, "作为正文素材");
 
@@ -127,6 +130,7 @@ test("source review continues fact confirmation through the existing AI voice ch
   assert.equal(created[0].input.current_followup_task_id, "task-1");
   assert.equal(created[0].options.projectId, "project-1");
   assert.match(navigations[0], /voiceSessionId=voice-fact-1/);
+  assert.match(navigations[0], /projectTitle=%E7%95%8C%E9%99%90%E4%B8%8E%E9%82%80%E7%BA%A6/);
   delete global.wx;
 });
 

@@ -60,6 +60,9 @@ function loadVoiceChatPage({
     getMemoirFollowupTask: async () => {
       throw new Error("getMemoirFollowupTask was not mocked");
     },
+    getMemoirCompletionOutcome: async () => {
+      throw new Error("getMemoirCompletionOutcome was not mocked");
+    },
     switchMemoirFollowupTask: async () => {
       throw new Error("switchMemoirFollowupTask was not mocked");
     },
@@ -861,6 +864,86 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(modals.length, 1);
+  delete global.wx;
+});
+
+test("book completion finish shows the actual chapter outcome", async () => {
+  const modals = [];
+  const outcomeCalls = [];
+  global.wx = {
+    showModal(options) {
+      modals.push(options);
+    },
+  };
+  const page = loadVoiceChatPage({
+    streamingExports: {
+      MemoirStreamingAsrClient: class {
+        async connect() {}
+        async finishSession() {}
+        close() {}
+      },
+    },
+    voiceApiExports: {
+      getMemoirVoiceSession: async () => ({
+        session: {
+          id: "voice-completion-1",
+          project_id: "project-1",
+          status: "stopped",
+          guidance_mode: "guided_interview",
+          current_guidance_module: "",
+          interview_type: "ai_interview",
+          session_goal: "book_completion",
+          current_followup_task_id: "task-1",
+          error_message: "",
+        },
+        messages: [],
+        utterances: [],
+      }),
+      getMemoirCompletionOutcome: async (projectId, voiceSessionId) => {
+        outcomeCalls.push({ projectId, voiceSessionId });
+        return {
+          status: "incorporated",
+          voice_session_id: voiceSessionId,
+          task_id: "task-1",
+          task_status: "answered",
+          chapter_id: "chapter-1",
+          chapter_title: "观鸟与晚餐",
+          utterance_id: "utterance-1",
+          answer_kind: "direct_narrative",
+          route_action: "assign_to_chapter",
+          reason: "回答补充了章节开头。",
+          message: "这段回答已收入《观鸟与晚餐》的章节素材。",
+          review_event_id: null,
+        };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-completion-1",
+      projectId: "project-1",
+      projectTitle: "观鸟与晚餐",
+      sessionGoal: "book_completion",
+      status: "ready",
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.connectGateway.call(context);
+  await page.finishSession.call(context);
+
+  assert.deepEqual(outcomeCalls, [
+    { projectId: "project-1", voiceSessionId: "voice-completion-1" },
+  ]);
+  assert.equal(modals.length, 1);
+  assert.equal(modals[0].title, "已经收入章节素材");
+  assert.equal(modals[0].content, "这段回答已收入《观鸟与晚餐》的章节素材。");
+  assert.equal(modals[0].confirmText, "返回章节");
   delete global.wx;
 });
 

@@ -71,6 +71,27 @@ class MemoirFollowupTaskListResponse(BaseModel):
     total: int = 0
 
 
+class MemoirCompletionOutcomeResponse(BaseModel):
+    status: Literal[
+        "processing",
+        "incorporated",
+        "context_recorded",
+        "needs_confirmation",
+        "not_used",
+    ]
+    voice_session_id: str
+    task_id: str | None = None
+    task_status: MemoirFollowupTaskStatus | None = None
+    chapter_id: str | None = None
+    chapter_title: str = ""
+    utterance_id: str | None = None
+    answer_kind: MemoirFollowupAnswerKind | None = None
+    route_action: str = ""
+    reason: str = ""
+    message: str
+    review_event_id: str | None = None
+
+
 class MemoirFollowupTaskGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

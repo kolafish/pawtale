@@ -18,6 +18,7 @@
 }
 
 .page-kicker,
+.chapter-title,
 .page-title,
 .section-label,
 .section-title,
@@ -41,6 +42,13 @@
   font-size: 26rpx;
   font-weight: 700;
   line-height: 38rpx;
+}
+
+.chapter-title {
+  margin-top: 12rpx;
+  color: #645b55;
+  font-size: 27rpx;
+  line-height: 40rpx;
 }
 
 .page-title,
