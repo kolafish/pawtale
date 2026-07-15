@@ -1006,6 +1006,9 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
         "video_size_bytes",
         "download_url",
     } & detail.keys()
+    openapi = (await client.get("/openapi.json")).json()
+    response_schema = openapi["components"]["schemas"]["MemoirShareVideoJobResponse"]
+    assert "output" in response_schema["required"]
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
     stored_job = await test_db.scalar(

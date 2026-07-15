@@ -487,7 +487,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     background_model: str | None = None
     background_cache_hit: bool | None = None
     background_error_message: str = ""
-    output: MemoirShareVideoOutputResponse | None = None
+    output: MemoirShareVideoOutputResponse | None
     error_message: str = ""
     created_at: datetime
     updated_at: datetime
