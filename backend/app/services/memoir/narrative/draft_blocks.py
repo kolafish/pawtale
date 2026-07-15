@@ -489,6 +489,41 @@ async def mark_blocks_stale_for_claim(
     )
     return int(result.rowcount or 0)
 
+
+async def mark_blocks_stale_for_editorial_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    story_id: str | None,
+) -> int:
+    conditions = [
+        MemoirDraftBlock.project_id == project_id,
+        MemoirDraftBlock.chapter_id == chapter_id,
+        MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
+        MemoirDraftBlock.freshness_status
+        == MemoirDraftBlockFreshnessStatus.CURRENT.value,
+    ]
+    if story_id:
+        dependent_versions = select(MemoirDraftBlockStory.block_version_id).where(
+            MemoirDraftBlockStory.project_id == project_id,
+            MemoirDraftBlockStory.story_id == story_id,
+        )
+        conditions.append(
+            MemoirDraftBlock.current_version_id.in_(dependent_versions)
+        )
+    result = await db.execute(
+        update(MemoirDraftBlock)
+        .where(*conditions)
+        .values(
+            freshness_status=MemoirDraftBlockFreshnessStatus.STALE.value,
+            updated_at=_utcnow(),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    return int(result.rowcount or 0)
+
+
 async def mark_blocks_stale_for_story_revision(
     db: AsyncSession,
     *,

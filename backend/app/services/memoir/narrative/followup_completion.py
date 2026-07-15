@@ -30,7 +30,6 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskClaim,
     MemoirFollowupTaskUtterance,
     MemoirStory,
     MemoirStoryClaim,
@@ -40,7 +39,13 @@ from app.models.memoir_narrative import (
 from app.schemas.memoir_book import MemoirFollowupAnswerInterpretationResponse
 from app.services.memoir import automation_event_resolution
 from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
-from app.services.memoir.narrative import fact_resolution, followup_tasks, gap_audit, gaps
+from app.services.memoir.narrative import (
+    draft_blocks,
+    fact_resolution,
+    followup_tasks,
+    gap_audit,
+    gaps,
+)
 
 
 @dataclass(frozen=True)
@@ -458,6 +463,13 @@ async def complete_task_from_semantic_interpretation(
         resolved_by_utterance_id=relation.utterance_id,
     )
     if task.chapter_id:
+        if relation.clarification_text.strip():
+            await draft_blocks.mark_blocks_stale_for_editorial_context(
+                db,
+                project_id=project_id,
+                chapter_id=task.chapter_id,
+                story_id=task.story_id,
+            )
         await gap_audit.enqueue_chapter_gap_audit(
             db,
             project_id=project_id,
@@ -618,6 +630,18 @@ async def evaluate_after_narrative_ingestion(
             idempotency_key=f"gap-resolved-by-followup:{task.id}:{transcript_version.id}",
             note="新的讲述者事实证据已补足目标缺口。",
         )
+        if (
+            is_current_task
+            and ingestion_context is not None
+            and ingestion_context.clarification_text.strip()
+            and task.chapter_id
+        ):
+            await draft_blocks.mark_blocks_stale_for_editorial_context(
+                db,
+                project_id=project_id,
+                chapter_id=task.chapter_id,
+                story_id=task.story_id,
+            )
         answered_task_ids.append(task.id)
         if (
             task.target_slot == MEMOIR_STORY_NARRATION_TARGET
