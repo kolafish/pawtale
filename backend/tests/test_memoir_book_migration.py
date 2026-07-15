@@ -11,7 +11,7 @@ async def _table_columns(conn, table_name: str) -> set[str]:
     return {row[1] for row in rows}
 
 
-async def test_runtime_schema_assert_does_not_remove_extra_columns():
+async def test_runtime_schema_assert_rejects_extra_columns_without_mutating_schema():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
@@ -21,7 +21,10 @@ async def test_runtime_schema_assert_does_not_remove_extra_columns():
                 text("ALTER TABLE memoir_book_plan_chapters ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
             )
 
-        await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
+        with pytest.raises(RuntimeError, match="unexpected columns") as exc_info:
+            await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
+
+        assert "memoir_book_plan_chapters.summary" in str(exc_info.value)
 
         async with engine.begin() as conn:
             columns = await _table_columns(conn, "memoir_book_plan_chapters")

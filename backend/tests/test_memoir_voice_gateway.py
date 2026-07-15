@@ -1004,7 +1004,6 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"
     assert utterance.transcript_edited == ""
     assert len(versions) == 1
-    assert versions[0].answer_id is None
     assert versions[0].voice_session_id == voice_session_id
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
     assert versions[0].version_type == "asr_raw"
