@@ -9,6 +9,7 @@ from app.models.projects import DocumentGroup, Project
 from app.models.users import User
 from app.schemas.projects import ProjectCreate, ProjectListItem, ProjectResponse, ProjectUpdate
 import app.services.project_documents as project_docs
+from app.services.memoir import project_deletion as memoir_project_deletion
 from app.services.projects.access import load_project
 
 
@@ -116,4 +117,7 @@ async def update_project(
 
 async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> None:
     project = await load_project(db, project_id, user_id)
+    if project.type == ProjectType.MEMOIR.value:
+        await memoir_project_deletion.delete_project(db, project)
+        return
     await project_docs.delete_project(db, project)

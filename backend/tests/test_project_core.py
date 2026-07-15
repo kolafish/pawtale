@@ -1,5 +1,12 @@
-from sqlalchemy import select
+from datetime import datetime
 
+import pytest
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
+
+from app.models.audit import AuditEvent, AuditSession
+from app.models.memoir import MemoirImageAsset
+from app.models.memoir_narrative import MemoirNarrativeDecision
 from app.models.users import User
 from project_helpers import create_project, project_payload
 
@@ -135,6 +142,101 @@ class TestProjectAPI:
         assert response.status_code == 204
         get_resp = await client.get(f"/api/projects/{project['id']}")
         assert get_resp.status_code == 404
+
+    async def test_generic_delete_purges_memoir_narrative_data_and_media(
+        self,
+        client,
+        test_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        monkeypatch.setattr("app.services.memoir.project_deletion.DATA_DIR", tmp_path)
+        project = await create_project(client, "完整删除", "memoir")
+        user = await test_db.scalar(
+            select(User).where(User.email == "tester@example.com")
+        )
+        assert user is not None
+        image_path = tmp_path / "memoir" / project["id"] / "asset.png"
+        thumbnail_path = tmp_path / "memoir" / project["id"] / "asset.thumb.png"
+        image_path.parent.mkdir(parents=True)
+        image_path.write_bytes(b"image")
+        thumbnail_path.write_bytes(b"thumbnail")
+        test_db.add_all(
+            [
+                AuditSession(
+                    id="delete-project-audit-session",
+                    user_id=user.id,
+                    client_session_id="delete-project-client-session",
+                    platform="web",
+                ),
+                MemoirNarrativeDecision(
+                    project_id=project["id"],
+                    target_type="story",
+                    target_id="story-1",
+                    action="confirm",
+                    actor_type="system",
+                    before_state_json={},
+                    after_state_json={"confirmed": True},
+                    reason="deletion regression",
+                    idempotency_key="delete-project-decision",
+                ),
+                MemoirImageAsset(
+                    project_id=project["id"],
+                    user_id=user.id,
+                    source_type="cover_candidate",
+                    source_signature="delete-project-image",
+                    storage_path=str(image_path.relative_to(tmp_path)),
+                    thumbnail_storage_path=str(thumbnail_path.relative_to(tmp_path)),
+                    mime_type="image/png",
+                ),
+            ]
+        )
+        await test_db.commit()
+        test_db.add(
+            AuditEvent(
+                user_id=user.id,
+                session_id="delete-project-audit-session",
+                client_event_id="delete-project-event",
+                event_type="page_view",
+                event_date=datetime.now().date(),
+                platform="web",
+                project_id=project["id"],
+                occurred_at=datetime.now(),
+            )
+        )
+        await test_db.commit()
+
+        with pytest.raises(IntegrityError, match="append-only"):
+            await test_db.execute(
+                delete(MemoirNarrativeDecision).where(
+                    MemoirNarrativeDecision.project_id == project["id"]
+                )
+            )
+            await test_db.commit()
+        await test_db.rollback()
+
+        response = await client.delete(f"/api/projects/{project['id']}")
+
+        assert response.status_code == 204
+        assert await test_db.scalar(
+            select(func.count(MemoirNarrativeDecision.id)).where(
+                MemoirNarrativeDecision.project_id == project["id"]
+            )
+        ) == 0
+        assert await test_db.scalar(
+            select(func.count(MemoirImageAsset.id)).where(
+                MemoirImageAsset.project_id == project["id"]
+            )
+        ) == 0
+        assert not image_path.exists()
+        assert not thumbnail_path.exists()
+        audit_event = await test_db.scalar(
+            select(AuditEvent).where(
+                AuditEvent.client_event_id == "delete-project-event"
+            )
+        )
+        assert audit_event is not None
+        assert audit_event.project_id is None
 
     async def test_project_not_found(self, client):
         response = await client.get("/api/projects/nonexistent")

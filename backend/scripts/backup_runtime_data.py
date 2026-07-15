@@ -26,39 +26,10 @@ DATA_DIR = REPO_ROOT / "data"
 BACKEND_DATA_DIR = REPO_ROOT / "backend" / "data"
 DB_PATH = DATA_DIR / "pawtale.db"
 PROJECTS_DIR = DATA_DIR / "projects"
+MEMOIR_DIR = DATA_DIR / "memoir"
 BACKUPS_DIR = DATA_DIR / "backups"
 SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
 
-
-TABLES_TO_COUNT = [
-    "users",
-    "projects",
-    "document_groups",
-    "documents",
-    "reference_items",
-    "document_references",
-    "writing_sessions",
-    "characters",
-    "scenes",
-    "audio_files",
-    "memoir_voice_sessions",
-    "memoir_chat_messages",
-    "memoir_voice_utterances",
-    "memoir_transcript_versions",
-    "memoir_book_plans",
-    "memoir_book_plan_chapters",
-    "memoir_book_chapter_drafts",
-    "memoir_book_chapter_draft_versions",
-    "memoir_book_outputs",
-    "memoir_book_output_versions",
-    "memoir_chapter_contracts",
-    "memoir_chapter_nodes",
-    "memoir_stories",
-    "memoir_claims",
-    "memoir_claim_evidence",
-    "memoir_draft_blocks",
-    "memoir_draft_block_versions",
-]
 OBJECT_REFERENCE_COLUMNS = {
     "audio_files": ("storage_path",),
     "memoir_image_assets": ("storage_path", "thumbnail_storage_path"),
@@ -125,19 +96,27 @@ def write_schema(db_path: Path, schema_path: Path) -> None:
 def table_counts(db_path: Path) -> dict[str, int | None]:
     counts: dict[str, int | None] = {}
     with sqlite3.connect(db_path) as conn:
-        existing = {
-            row[0]
+        table_names = [
+            str(row[0])
             for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+                "ORDER BY name"
             )
-        }
-        for table in TABLES_TO_COUNT:
-            if table not in existing:
-                counts[table] = None
-                continue
-            (count,) = conn.execute(f"SELECT count(*) FROM {table}").fetchone()
-            counts[table] = int(count)
+        ]
+        for table_name in table_names:
+            quoted_name = table_name.replace('"', '""')
+            (count,) = conn.execute(
+                f'SELECT count(*) FROM "{quoted_name}"'
+            ).fetchone()
+            counts[table_name] = int(count)
     return counts
+
+
+def tree_file_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(1 for item in path.rglob("*") if item.is_file())
 
 
 def write_object_references(db_path: Path, output_path: Path) -> dict[str, int]:
@@ -275,11 +254,13 @@ def create_backup(
     *,
     db_path: Path = DB_PATH,
     projects_dir: Path = PROJECTS_DIR,
+    memoir_dir: Path = MEMOIR_DIR,
     backend_data_dir: Path = BACKEND_DATA_DIR,
     backups_dir: Path = BACKUPS_DIR,
 ) -> Path:
     db_path = db_path.expanduser().resolve()
     projects_dir = projects_dir.expanduser().resolve()
+    memoir_dir = memoir_dir.expanduser().resolve()
     backend_data_dir = backend_data_dir.expanduser().resolve()
     backups_dir = backups_dir.expanduser().resolve()
     if not db_path.is_file():
@@ -301,6 +282,7 @@ def create_backup(
     )
 
     projects_copied = copy_optional_tree(projects_dir, backup_dir / "projects")
+    memoir_copied = copy_optional_tree(memoir_dir, backup_dir / "memoir")
     backend_data_copied = copy_optional_tree(
         backend_data_dir,
         backup_dir / "backend_data",
@@ -310,17 +292,26 @@ def create_backup(
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "repo_root": str(REPO_ROOT),
         "source_database": str(db_path),
+        "source_projects_dir": str(projects_dir),
+        "source_memoir_dir": str(memoir_dir),
+        "source_backend_data_dir": str(backend_data_dir),
         "backup_database": str(db_backup),
+        "backup_projects_dir": str(backup_dir / "projects"),
+        "backup_memoir_dir": str(backup_dir / "memoir"),
+        "backup_backend_data_dir": str(backup_dir / "backend_data"),
         "backup_database_sha256": sha256_file(db_backup),
         "sqlite_integrity_check": integrity_check(db_backup),
         "table_counts": table_counts(db_backup),
         "object_reference_counts": object_reference_counts,
         "object_reference_count": sum(object_reference_counts.values()),
         "projects_dir_copied": projects_copied,
+        "memoir_dir_copied": memoir_copied,
         "backend_data_dir_copied": backend_data_copied,
         "project_markdown_file_count": (
             len(list((backup_dir / "projects").rglob("*.md"))) if projects_copied else 0
         ),
+        "memoir_file_count": tree_file_count(backup_dir / "memoir"),
+        "backend_data_file_count": tree_file_count(backup_dir / "backend_data"),
     }
     (backup_dir / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -337,6 +328,7 @@ def main() -> None:
     parser.add_argument("--label", help="Optional suffix for the backup directory.")
     parser.add_argument("--database", type=Path, default=DB_PATH)
     parser.add_argument("--projects-dir", type=Path, default=PROJECTS_DIR)
+    parser.add_argument("--memoir-dir", type=Path, default=MEMOIR_DIR)
     parser.add_argument("--backend-data-dir", type=Path, default=BACKEND_DATA_DIR)
     parser.add_argument("--backup-root", type=Path, default=BACKUPS_DIR)
     args = parser.parse_args()
@@ -345,6 +337,7 @@ def main() -> None:
         args.label,
         db_path=args.database,
         projects_dir=args.projects_dir,
+        memoir_dir=args.memoir_dir,
         backend_data_dir=args.backend_data_dir,
         backups_dir=args.backup_root,
     )

@@ -1,10 +1,15 @@
 import hashlib
 import json
+import os
 import sqlite3
 from argparse import Namespace
+from pathlib import Path
 
 import pytest
+from sqlalchemy import create_engine
 
+from app.database import Base, register_models
+from app.migrations.memoir_narrative import MEMOIR_NARRATIVE_TABLES
 from scripts.backup_runtime_data import (
     SQLITE_SIDECAR_SUFFIXES,
     create_backup,
@@ -54,6 +59,7 @@ def test_runtime_backup_manifest_is_bound_to_its_source_database(tmp_path):
         "cutover",
         db_path=database,
         projects_dir=tmp_path / "projects",
+        memoir_dir=tmp_path / "memoir",
         backend_data_dir=tmp_path / "backend-data",
         backups_dir=tmp_path / "backups",
     )
@@ -82,6 +88,7 @@ def test_runtime_backup_checksums_are_stable_for_wal_database(tmp_path):
         backup_dir = create_backup(
             db_path=database,
             projects_dir=tmp_path / "projects",
+            memoir_dir=tmp_path / "memoir",
             backend_data_dir=tmp_path / "backend-data",
             backups_dir=tmp_path / "backups",
         )
@@ -112,6 +119,7 @@ def test_data_preparation_rejects_wrong_or_modified_backup(tmp_path):
     backup_dir = create_backup(
         db_path=database,
         projects_dir=tmp_path / "projects",
+        memoir_dir=tmp_path / "memoir",
         backend_data_dir=tmp_path / "backend-data",
         backups_dir=tmp_path / "backups",
     )
@@ -140,6 +148,7 @@ def test_restore_preserves_current_database_then_restores_validated_backup(tmp_p
     backup_dir = create_backup(
         db_path=database,
         projects_dir=tmp_path / "projects",
+        memoir_dir=tmp_path / "memoir",
         backend_data_dir=tmp_path / "backend-data",
         backups_dir=tmp_path / "backups",
     )
@@ -184,6 +193,7 @@ def test_restore_copy_failure_leaves_current_database_untouched(tmp_path, monkey
     backup_dir = create_backup(
         db_path=database,
         projects_dir=tmp_path / "projects",
+        memoir_dir=tmp_path / "memoir",
         backend_data_dir=tmp_path / "backend-data",
         backups_dir=tmp_path / "backups",
     )
@@ -208,3 +218,125 @@ def test_restore_copy_failure_leaves_current_database_untouched(tmp_path, monkey
             ("current-production",)
         ]
     assert not list(tmp_path.glob(".pawtale.db.restore-*.tmp"))
+
+
+def test_runtime_backup_counts_every_narrative_table(tmp_path):
+    database = tmp_path / "pawtale.db"
+    register_models()
+    engine = create_engine(f"sqlite:///{database}")
+    try:
+        Base.metadata.create_all(engine)
+    finally:
+        engine.dispose()
+
+    backup_dir = create_backup(
+        db_path=database,
+        projects_dir=tmp_path / "projects",
+        memoir_dir=tmp_path / "memoir",
+        backend_data_dir=tmp_path / "backend-data",
+        backups_dir=tmp_path / "backups",
+    )
+    manifest = json.loads((backup_dir / "manifest.json").read_text(encoding="utf-8"))
+
+    assert set(MEMOIR_NARRATIVE_TABLES) <= set(manifest["table_counts"])
+
+
+def test_restore_replaces_projects_memoir_and_backend_data_trees(tmp_path):
+    database = tmp_path / "pawtale.db"
+    projects_dir = tmp_path / "projects"
+    memoir_dir = tmp_path / "memoir"
+    backend_data_dir = tmp_path / "backend-data"
+    (projects_dir / "project-1").mkdir(parents=True)
+    (memoir_dir / "audio").mkdir(parents=True)
+    backend_data_dir.mkdir(parents=True)
+    (projects_dir / "project-1" / "document.md").write_text(
+        "backup document", encoding="utf-8"
+    )
+    (memoir_dir / "audio" / "utterance.pcm").write_bytes(b"backup audio")
+    (backend_data_dir / "runtime.json").write_text("backup", encoding="utf-8")
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)")
+
+    backup_dir = create_backup(
+        db_path=database,
+        projects_dir=projects_dir,
+        memoir_dir=memoir_dir,
+        backend_data_dir=backend_data_dir,
+        backups_dir=tmp_path / "backups",
+    )
+    (projects_dir / "project-1" / "document.md").write_text(
+        "current document", encoding="utf-8"
+    )
+    (memoir_dir / "audio" / "utterance.pcm").write_bytes(b"current audio")
+    (backend_data_dir / "runtime.json").write_text("current", encoding="utf-8")
+
+    restored = restore_database(
+        backup_dir / "manifest.json",
+        target_database=database,
+        execute=True,
+        writers_stopped=True,
+    )
+
+    assert (projects_dir / "project-1" / "document.md").read_text(
+        encoding="utf-8"
+    ) == "backup document"
+    assert (memoir_dir / "audio" / "utterance.pcm").read_bytes() == b"backup audio"
+    assert (backend_data_dir / "runtime.json").read_text(
+        encoding="utf-8"
+    ) == "backup"
+    snapshots = restored["data_trees"]
+    assert Path(snapshots["projects"]["current_snapshot"]).joinpath(
+        "project-1", "document.md"
+    ).read_text(encoding="utf-8") == "current document"
+    assert Path(snapshots["memoir"]["current_snapshot"]).joinpath(
+        "audio", "utterance.pcm"
+    ).read_bytes() == b"current audio"
+
+
+def test_restore_tree_failure_rolls_back_database_and_applied_trees(
+    tmp_path,
+    monkeypatch,
+):
+    database = tmp_path / "pawtale.db"
+    projects_dir = tmp_path / "projects"
+    memoir_dir = tmp_path / "memoir"
+    backend_data_dir = tmp_path / "backend-data"
+    for directory in (projects_dir, memoir_dir, backend_data_dir):
+        directory.mkdir()
+        (directory / "value.txt").write_text("backup", encoding="utf-8")
+    with sqlite3.connect(database) as conn:
+        conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY)")
+        conn.execute("INSERT INTO projects (id) VALUES ('backup')")
+    backup_dir = create_backup(
+        db_path=database,
+        projects_dir=projects_dir,
+        memoir_dir=memoir_dir,
+        backend_data_dir=backend_data_dir,
+        backups_dir=tmp_path / "backups",
+    )
+    for directory in (projects_dir, memoir_dir, backend_data_dir):
+        (directory / "value.txt").write_text("current", encoding="utf-8")
+    with sqlite3.connect(database) as conn:
+        conn.execute("UPDATE projects SET id = 'current'")
+
+    real_replace = os.replace
+
+    def fail_memoir_restore(source, destination):
+        if Path(source).name.startswith(".memoir.restore-"):
+            raise OSError("memoir restore failed")
+        return real_replace(source, destination)
+
+    monkeypatch.setattr("scripts.restore_runtime_data.os.replace", fail_memoir_restore)
+
+    with pytest.raises(OSError, match="memoir restore failed"):
+        restore_database(
+            backup_dir / "manifest.json",
+            target_database=database,
+            execute=True,
+            writers_stopped=True,
+        )
+
+    with sqlite3.connect(database) as conn:
+        assert conn.execute("SELECT id FROM projects").fetchall() == [("current",)]
+    for directory in (projects_dir, memoir_dir, backend_data_dir):
+        assert (directory / "value.txt").read_text(encoding="utf-8") == "current"
