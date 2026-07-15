@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirClaimEvidenceSourceType,
+    MemoirClaimEvidenceSpeakerRole,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
@@ -25,6 +26,9 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
+    MemoirChapterContract,
+    MemoirChapterNode,
+    MemoirChapterNodeStory,
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
@@ -48,9 +52,16 @@ from app.services.memoir.narrative.ingestion_jobs import (
     run_narrative_ingestion_job,
     schedule_narrative_ingestion_job,
 )
-from app.services.memoir.narrative.extraction import is_narrative_control_only
+from app.services.memoir.narrative.extraction import (
+    build_narrative_extraction_prompt,
+    is_narrative_control_only,
+)
 from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
-from tests.memoir_helpers import create_test_voice_transcript
+from tests.memoir_helpers import (
+    create_test_book_plan_with_chapters,
+    create_test_voice_transcript,
+    memoir_source_ref,
+)
 
 
 class FakeNarrativeAI:
@@ -75,6 +86,20 @@ class FakeNarrativeAI:
         if isinstance(response, str):
             return response
         return json.dumps(response, ensure_ascii=False)
+
+
+def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
+    prompt = build_narrative_extraction_prompt(
+        source_text="最近十年我一直腿疼。",
+        speaker_role=MemoirClaimEvidenceSpeakerRole.NARRATOR,
+        narrator_name="讲述者",
+        narrator_origin="",
+        existing_story_candidates=[],
+    )
+
+    assert "Story 是可独立讲述的叙事单元，不是 Claim 的同义包装" in prompt
+    assert "孤立的时间范围、身份、属性、症状清单" in prompt
+    assert "不要为了覆盖每条 Claim 而拆成多个" in prompt
 
 
 def _extraction_payload(source_text: str) -> dict:
@@ -233,6 +258,94 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence is not None
     assert evidence.quote == "七二年前后，我搬到了成都"
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
+
+
+async def test_ingestion_adds_new_story_to_unmodified_system_chapter_plan(
+    client,
+    test_db,
+):
+    source_text = "七二年前后，我搬到了成都，那时我和外婆一起生活。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project.id,
+        chapter_titles=["来到成都"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+    )
+    suggested = await client.post(
+        f"/api/memoir/projects/{project.id}/chapters/{chapters[0].id}/contract/suggest",
+        json={"idempotency_key": "ingestion-story-bridge"},
+    )
+    assert suggested.status_code == 200, suggested.text
+    contract = await test_db.get(
+        MemoirChapterContract,
+        suggested.json()["id"],
+    )
+    assert contract is not None
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirChapterNode)
+        .where(
+            MemoirChapterNode.contract_id == contract.id,
+            MemoirChapterNode.title == "待补充核心故事",
+        )
+    ) == 1
+
+    extraction = _extraction_payload(source_text)
+    extraction["stories"] = [
+        {
+            "key": "move_story",
+            "title": "搬到成都",
+            "story_type": "event",
+            "summary": "七二年前后搬到成都。",
+            "time_start": None,
+            "time_end": None,
+            "time_precision": "year",
+            "primary_place_entity_key": "chengdu",
+            "existing_story_id": None,
+            "match_confidence": 0.0,
+            "claims": [
+                {
+                    "claim_key": "move",
+                    "narrative_role": "action",
+                    "slot_keys": ["actions"],
+                    "evidence_role": "supports",
+                    "is_core": True,
+                }
+            ],
+        }
+    ]
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=FakeNarrativeAI([extraction]),
+    )
+
+    assert len(result.created_story_ids) == 1
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirChapterNode)
+        .where(
+            MemoirChapterNode.contract_id == contract.id,
+            MemoirChapterNode.title == "待补充核心故事",
+        )
+    ) == 0
+    linked_story_ids = set(
+        (
+            await test_db.scalars(
+                select(MemoirChapterNodeStory.story_id)
+                .join(MemoirChapterNode, MemoirChapterNode.id == MemoirChapterNodeStory.node_id)
+                .where(
+                    MemoirChapterNode.contract_id == contract.id,
+                    MemoirChapterNodeStory.story_role == "primary",
+                )
+            )
+        ).all()
+    )
+    assert linked_story_ids == set(result.created_story_ids)
 
 
 async def test_delete_transcript_rejects_ingested_claim_evidence(client, test_db):
