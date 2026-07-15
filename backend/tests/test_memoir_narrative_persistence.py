@@ -349,6 +349,75 @@ async def test_narrative_migration_backfills_followup_answer_use_from_gap_type()
         await engine.dispose()
 
 
+async def test_narrative_migration_backfills_semantic_followup_target_slot_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, email, password_hash, role, display_name, created_at, updated_at) "
+                    "VALUES ('semantic-user', 'semantic@example.com', 'hash', 'user', "
+                    "'Semantic User', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO projects "
+                    "(id, user_id, type, title, metadata_json, created_at, updated_at) "
+                    "VALUES ('semantic-project', 'semantic-user', 'memoir', "
+                    "'Semantic Project', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gaps "
+                    "(id, project_id, scope_type, primary_story_id, primary_chapter_id, "
+                    "gap_type, severity, target_slot, title, description, fingerprint, "
+                    "status, detected_by, detection_count, resolution_note, resolved_by, "
+                    "resolved_by_user_id, resolved_at, first_detected_at, last_detected_at, "
+                    "created_at, updated_at) VALUES "
+                    "('semantic-gap', 'semantic-project', 'book', NULL, NULL, "
+                    "'relationship', 'medium', 'semantic:opening:semantic-gap', "
+                    "'章节开头还可以更清楚', '', "
+                    "'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', "
+                    "'open', 'ai', 1, '', NULL, NULL, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_tasks "
+                    "(id, project_id, gap_id, chapter_id, story_id, target_slot, answer_use, "
+                    "question, purpose, known_context_summary, priority, status, "
+                    "assigned_session_id, defer_until, defer_reason, created_by, started_at, "
+                    "completed_at, created_at, updated_at) VALUES "
+                    "('semantic-task', 'semantic-project', 'semantic-gap', NULL, NULL, '', "
+                    "'direct_narrative', '这一章从哪一幕开始？', '补充章节开头', '', 10, "
+                    "'pending', NULL, NULL, '', 'system', NULL, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP)"
+                )
+            )
+
+        await migrate_memoir_narrative_schema(engine)
+        await migrate_memoir_narrative_schema(engine)
+
+        async with engine.begin() as conn:
+            target_slot = (
+                await conn.execute(
+                    text(
+                        "SELECT target_slot FROM memoir_followup_tasks "
+                        "WHERE id = 'semantic-task'"
+                    )
+                )
+            ).scalar_one()
+        assert target_slot == "semantic:opening:semantic-gap"
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_migration_rebuilds_legacy_decisions_and_preserves_rows():
     register_models()
     engine = _sqlite_engine()

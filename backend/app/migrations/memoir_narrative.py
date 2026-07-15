@@ -247,6 +247,29 @@ async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
     return [f"{table_name}.{FOLLOWUP_TASK_ANSWER_USE_COLUMN}"]
 
 
+async def _backfill_semantic_followup_task_target_slots(conn) -> None:
+    if not await _table_exists(conn, "memoir_followup_tasks") or not await _table_exists(
+        conn,
+        "memoir_narrative_gaps",
+    ):
+        return
+    await conn.execute(
+        text(
+            "UPDATE memoir_followup_tasks AS task "
+            "SET target_slot = ("
+            "SELECT gap.target_slot FROM memoir_narrative_gaps AS gap "
+            "WHERE gap.project_id = task.project_id AND gap.id = task.gap_id"
+            ") "
+            "WHERE COALESCE(task.target_slot, '') = '' "
+            "AND EXISTS ("
+            "SELECT 1 FROM memoir_narrative_gaps AS gap "
+            "WHERE gap.project_id = task.project_id AND gap.id = task.gap_id "
+            "AND gap.target_slot LIKE 'semantic:%'"
+            ")"
+        )
+    )
+
+
 async def _table_sql(conn, table_name: str) -> str:
     result = await conn.execute(
         text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = :table_name"),
@@ -601,6 +624,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
             await _ensure_followup_task_utterance_interpretation_columns(conn)
         )
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
+        await _backfill_semantic_followup_task_target_slots(conn)
         await _remove_derived_empty_story_slots(conn)
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
