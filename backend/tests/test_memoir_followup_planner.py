@@ -385,6 +385,94 @@ async def _add_narrative_evidence(
     return utterance, version
 
 
+async def _add_story_chapter_gap(
+    test_db,
+    fixture: dict,
+    *,
+    title: str,
+    node_type: MemoirChapterNodeType,
+    node_required: bool,
+    story_role: MemoirChapterNodeStoryRole,
+    link_required: bool,
+    target_slot: str,
+):
+    chapter = MemoirBookPlanChapter(
+        plan_id=fixture["chapter"].plan_id,
+        project_id=fixture["project_id"],
+        title=title,
+        sort_order=fixture["chapter"].sort_order + 1,
+    )
+    test_db.add(chapter)
+    await test_db.flush()
+    contract = MemoirChapterContract(
+        project_id=fixture["project_id"],
+        chapter_id=chapter.id,
+        version=1,
+        objective=f"说明“{title}”的章节重点。",
+        reader_takeaway=f"读者能够理解“{title}”。",
+        status=MemoirChapterContractStatus.DRAFT.value,
+        created_by=MemoirNarrativeActorType.USER.value,
+        created_by_user_id=fixture["user_id"],
+    )
+    test_db.add(contract)
+    await test_db.flush()
+    node = MemoirChapterNode(
+        project_id=fixture["project_id"],
+        chapter_id=chapter.id,
+        contract_id=contract.id,
+        node_type=node_type.value,
+        title="回望" if node_type == MemoirChapterNodeType.REFLECTION else "比赛经过",
+        purpose="说明这个故事在本章中的作用。",
+        sort_order=0,
+        required=node_required,
+        status=MemoirChapterNodeStatus.PLANNED.value,
+        created_by=MemoirNarrativeActorType.USER.value,
+        created_by_user_id=fixture["user_id"],
+        updated_by=MemoirNarrativeActorType.USER.value,
+        updated_by_user_id=fixture["user_id"],
+    )
+    test_db.add(node)
+    await test_db.flush()
+    test_db.add(
+        MemoirChapterNodeStory(
+            project_id=fixture["project_id"],
+            node_id=node.id,
+            story_id=fixture["story"].id,
+            story_role=story_role.value,
+            sort_order=0,
+            required=link_required,
+            created_by=MemoirNarrativeActorType.USER.value,
+            created_by_user_id=fixture["user_id"],
+        )
+    )
+    await test_db.flush()
+    contract.status = MemoirChapterContractStatus.CONFIRMED.value
+    contract.confirmed_by_user_id = fixture["user_id"]
+    contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
+    gap_items, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=fixture["project_id"],
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.STORY,
+                primary_story_id=fixture["story"].id,
+                gap_type=MemoirNarrativeGapType.MISSING_SLOT,
+                severity=MemoirNarrativeGapSeverity.MEDIUM,
+                target_slot=target_slot,
+                title=f"“{fixture['story'].title}”还缺少内容",
+                description="需要继续补充。",
+                detected_by=MemoirNarrativeGapDetectedBy.RULES,
+                story_roles={
+                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
+                },
+                chapter_roles={chapter.id: MemoirNarrativeGapRelationRole.INVOLVED},
+            )
+        ],
+    )
+    await test_db.commit()
+    return chapter, gap_items[0]
+
+
 async def test_followup_generation_exposes_one_broad_question_for_one_core_story(
     client,
     test_db,
@@ -469,6 +557,114 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
     assert tasks[0].target_slot == MEMOIR_STORY_NARRATION_TARGET
     assert tasks[0].answer_use == MemoirFollowupAnswerUse.DIRECT_NARRATIVE.value
     assert "按您记得的顺序" in tasks[0].question
+
+
+async def test_required_framing_node_does_not_promote_its_supporting_story(
+    client,
+    test_db,
+):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    supporting_chapter, supporting_gap = await _add_story_chapter_gap(
+        test_db,
+        fixture,
+        title="比赛后的回望",
+        node_type=MemoirChapterNodeType.REFLECTION,
+        node_required=True,
+        story_role=MemoirChapterNodeStoryRole.SUPPORTING,
+        link_required=False,
+        target_slot="trigger",
+    )
+    leaked_task = MemoirFollowupTask(
+        project_id=fixture["project_id"],
+        gap_id=supporting_gap.id,
+        chapter_id=supporting_chapter.id,
+        story_id=fixture["story"].id,
+        target_slot=MEMOIR_STORY_NARRATION_TARGET,
+        question="这道题不应该继续出现。",
+        purpose="模拟旧规划器错误提升 supporting Story 后留下的任务。",
+        priority=1,
+        status=MemoirFollowupTaskStatus.PENDING.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(leaked_task)
+    await test_db.commit()
+
+    core_result = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=fixture["chapter"].id,
+    )
+    supporting_result = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=supporting_chapter.id,
+    )
+    await test_db.commit()
+
+    assert supporting_result.created_task_ids == ()
+    assert len(core_result.created_task_ids) == 1
+    await test_db.refresh(leaked_task)
+    assert leaked_task.status == MemoirFollowupTaskStatus.CANCELLED.value
+    tasks = list(
+        (
+            await test_db.scalars(
+                select(MemoirFollowupTask).where(
+                    MemoirFollowupTask.project_id == fixture["project_id"],
+                    MemoirFollowupTask.status == MemoirFollowupTaskStatus.PENDING.value,
+                )
+            )
+        ).all()
+    )
+    assert [(task.chapter_id, task.story_id) for task in tasks] == [
+        (fixture["chapter"].id, fixture["story"].id)
+    ]
+
+
+async def test_required_story_shared_by_two_chapters_has_one_active_narration_task(
+    client,
+    test_db,
+):
+    fixture = await _create_story_gap(client, test_db, generate=False)
+    second_chapter, _ = await _add_story_chapter_gap(
+        test_db,
+        fixture,
+        title="另一章也引用这次比赛",
+        node_type=MemoirChapterNodeType.STORY,
+        node_required=True,
+        story_role=MemoirChapterNodeStoryRole.PRIMARY,
+        link_required=True,
+        target_slot="trigger",
+    )
+
+    first = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=fixture["chapter"].id,
+    )
+    second = await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=second_chapter.id,
+    )
+    await test_db.commit()
+
+    assert len(first.created_task_ids) == 1
+    assert second.created_task_ids == ()
+    tasks = list(
+        (
+            await test_db.scalars(
+                select(MemoirFollowupTask).where(
+                    MemoirFollowupTask.project_id == fixture["project_id"],
+                    MemoirFollowupTask.status.in_(
+                        [status.value for status in followup_tasks.ACTIVE_TASK_STATUSES]
+                    ),
+                )
+            )
+        ).all()
+    )
+    assert len(tasks) == 1
+    assert tasks[0].id == first.created_task_ids[0]
+    assert tasks[0].story_id == fixture["story"].id
 
 
 async def test_followup_generation_marks_chapter_causality_as_clarification(

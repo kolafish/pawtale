@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.narrative_types import (
     MEMOIR_STORY_NARRATION_TARGET,
     MemoirChapterContractStatus,
+    MemoirChapterNodeStoryRole,
     MemoirClaimPublicationStatus,
     MemoirClaimEvidenceRole,
     MemoirClaimVerificationStatus,
@@ -47,7 +48,7 @@ from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "3"
+FOLLOWUP_PLANNER_VERSION = "4"
 NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
@@ -110,6 +111,13 @@ def _gap_chapter_id(gap: MemoirNarrativeGap) -> str | None:
         return gap.primary_chapter_id
     primary = next((relation.chapter_id for relation in gap.chapters if relation.role == "primary"), None)
     return primary or next((relation.chapter_id for relation in gap.chapters), None)
+
+
+def _gap_chapter_ids(gap: MemoirNarrativeGap) -> set[str]:
+    chapter_ids = {relation.chapter_id for relation in gap.chapters}
+    if gap.primary_chapter_id:
+        chapter_ids.add(gap.primary_chapter_id)
+    return chapter_ids
 
 
 def _story_slot_key(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
@@ -201,7 +209,11 @@ def _known_context_summary(story: MemoirStory | None, claims: list[MemoirClaim])
     return "；".join(dict.fromkeys(parts))[:2000]
 
 
-async def _required_story_ids(db: AsyncSession, *, project_id: str) -> set[str]:
+async def _required_story_ids_by_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> dict[str, set[str]]:
     contracts = (
         await db.execute(
             select(
@@ -233,26 +245,49 @@ async def _required_story_ids(db: AsyncSession, *, project_id: str) -> set[str]:
     for contract_id, chapter_id, _, _ in contracts:
         current_contract_ids.setdefault(chapter_id, contract_id)
     if not current_contract_ids:
-        return set()
-    return set(
-        (
-            await db.scalars(
-                select(MemoirChapterNodeStory.story_id)
-                .join(
-                    MemoirChapterNode,
-                    MemoirChapterNode.id == MemoirChapterNodeStory.node_id,
-                )
-                .where(
-                    MemoirChapterNodeStory.project_id == project_id,
-                    MemoirChapterNode.project_id == project_id,
-                    MemoirChapterNode.contract_id.in_(tuple(current_contract_ids.values())),
-                    or_(
-                        MemoirChapterNodeStory.required.is_(True),
-                        MemoirChapterNode.required.is_(True),
-                    ),
-                )
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                MemoirChapterNode.chapter_id,
+                MemoirChapterNodeStory.story_id,
             )
-        ).all()
+            .join(
+                MemoirChapterNode,
+                MemoirChapterNode.id == MemoirChapterNodeStory.node_id,
+            )
+            .where(
+                MemoirChapterNodeStory.project_id == project_id,
+                MemoirChapterNode.project_id == project_id,
+                MemoirChapterNode.contract_id.in_(tuple(current_contract_ids.values())),
+                or_(
+                    MemoirChapterNodeStory.required.is_(True),
+                    (
+                        MemoirChapterNode.required.is_(True)
+                        & (
+                            MemoirChapterNodeStory.story_role
+                            == MemoirChapterNodeStoryRole.PRIMARY.value
+                        )
+                    ),
+                ),
+            )
+        )
+    ).all()
+    required_by_chapter: dict[str, set[str]] = {}
+    for chapter_id, story_id in rows:
+        required_by_chapter.setdefault(chapter_id, set()).add(story_id)
+    return required_by_chapter
+
+
+def _story_is_required_for_gap(
+    gap: MemoirNarrativeGap,
+    *,
+    story_id: str,
+    required_by_chapter: dict[str, set[str]],
+) -> bool:
+    return any(
+        story_id in required_by_chapter.get(chapter_id, set())
+        for chapter_id in _gap_chapter_ids(gap)
     )
 
 
@@ -334,7 +369,20 @@ async def generate_followup_tasks(
             )
         ).all()
     } if chapter_ids else {}
-    required_story_ids = await _required_story_ids(db, project_id=project_id)
+    required_by_chapter = await _required_story_ids_by_chapter(
+        db,
+        project_id=project_id,
+    )
+    required_gap_ids = {
+        gap.id
+        for gap in gaps
+        if (story_id := _gap_story_id(gap)) is not None
+        and _story_is_required_for_gap(
+            gap,
+            story_id=story_id,
+            required_by_chapter=required_by_chapter,
+        )
+    }
 
     slot_claim_ids: dict[tuple[str, str], set[str]] = {}
     if story_ids:
@@ -398,41 +446,99 @@ async def generate_followup_tasks(
         ).all()
     } if gaps else {}
     missing_slot_leaders: dict[str, str] = {}
-    handled_missing_story_ids = set(
+    narration_tasks = list(
         (
             await db.scalars(
-                select(MemoirFollowupTask.story_id).where(
+                select(MemoirFollowupTask).where(
                     MemoirFollowupTask.project_id == project_id,
-                    MemoirFollowupTask.story_id.is_not(None),
+                    MemoirFollowupTask.story_id.in_(story_ids),
                     MemoirFollowupTask.target_slot == MEMOIR_STORY_NARRATION_TARGET,
-                    MemoirFollowupTask.status.in_(
-                        [
-                            MemoirFollowupTaskStatus.ANSWERED.value,
-                            MemoirFollowupTaskStatus.CANNOT_RECALL.value,
-                            MemoirFollowupTaskStatus.EXCLUDED.value,
-                        ]
-                    ),
+                    MemoirFollowupTask.status
+                    != MemoirFollowupTaskStatus.CANCELLED.value,
                 )
             )
         ).all()
-    )
+    ) if story_ids else []
+    active_statuses = {
+        status.value for status in followup_tasks.ACTIVE_TASK_STATUSES
+    }
+    eligible_narration_tasks: list[MemoirFollowupTask] = []
+    for task in narration_tasks:
+        if (
+            task.status in active_statuses
+            and task.story_id is not None
+            and task.chapter_id is not None
+            and task.story_id not in required_by_chapter.get(task.chapter_id, set())
+        ):
+            await followup_tasks.transition_task(
+                db,
+                project_id=project_id,
+                task_id=task.id,
+                status=MemoirFollowupTaskStatus.CANCELLED,
+                actor_type=MemoirNarrativeActorType.SYSTEM,
+                actor_user_id=None,
+                idempotency_key=(
+                    f"planner-cancel:{FOLLOWUP_PLANNER_VERSION}:"
+                    f"chapter-story-scope:{task.id}"
+                ),
+                reason="story is no longer required in the task chapter",
+            )
+            continue
+        eligible_narration_tasks.append(task)
+    narration_tasks = eligible_narration_tasks
+    handled_missing_story_ids = {
+        task.story_id
+        for task in narration_tasks
+        if task.story_id is not None
+        and task.status
+        in {
+            MemoirFollowupTaskStatus.ANSWERED.value,
+            MemoirFollowupTaskStatus.CANNOT_RECALL.value,
+            MemoirFollowupTaskStatus.EXCLUDED.value,
+        }
+    }
+    active_narration_tasks: dict[str, MemoirFollowupTask] = {}
+    active_status_rank = {
+        MemoirFollowupTaskStatus.IN_PROGRESS.value: 0,
+        MemoirFollowupTaskStatus.PENDING.value: 1,
+        MemoirFollowupTaskStatus.DEFERRED.value: 2,
+    }
+    for task in sorted(
+        (
+            item
+            for item in narration_tasks
+            if item.story_id is not None and item.status in active_status_rank
+        ),
+        key=lambda item: (
+            active_status_rank[item.status],
+            item.created_at,
+            item.id,
+        ),
+    ):
+        active_narration_tasks.setdefault(task.story_id, task)
     handled_statuses = {
         MemoirFollowupTaskStatus.ANSWERED.value,
         MemoirFollowupTaskStatus.CANNOT_RECALL.value,
         MemoirFollowupTaskStatus.EXCLUDED.value,
     }
+    missing_slot_gap_ids_by_story: dict[str, list[str]] = {}
     for gap in gaps:
         story_id = _gap_story_id(gap)
         if (
             gap.gap_type != MemoirNarrativeGapType.MISSING_SLOT.value
             or not story_id
-            or story_id not in required_story_ids
+            or gap.id not in required_gap_ids
         ):
             continue
-        missing_slot_leaders.setdefault(story_id, gap.id)
+        missing_slot_gap_ids_by_story.setdefault(story_id, []).append(gap.id)
         existing = existing_tasks.get(gap.id)
         if existing is not None and existing.status in handled_statuses:
             handled_missing_story_ids.add(story_id)
+    for story_id, gap_ids in missing_slot_gap_ids_by_story.items():
+        active = active_narration_tasks.get(story_id)
+        missing_slot_leaders[story_id] = (
+            active.gap_id if active is not None and active.gap_id in gap_ids else gap_ids[0]
+        )
 
     created: list[str] = []
     updated: list[str] = []
@@ -462,17 +568,33 @@ async def generate_followup_tasks(
         is_story_narration = bool(
             story
             and gap_type == MemoirNarrativeGapType.MISSING_SLOT
-            and story.id in required_story_ids
+            and gap.id in required_gap_ids
             and story.id not in handled_missing_story_ids
             and missing_slot_leaders.get(story.id) == gap.id
         )
+        active_narration = active_narration_tasks.get(story.id) if story else None
+        blocked_by_other_narration = bool(
+            is_story_narration
+            and active_narration is not None
+            and (existing is None or active_narration.id != existing.id)
+        )
+        if blocked_by_other_narration:
+            is_story_narration = False
         actionable = (
             is_story_narration
             if gap_type == MemoirNarrativeGapType.MISSING_SLOT
             else gap_type not in NON_INTERVIEW_GAP_TYPES
             and (bool(claim_roles) or story is not None)
         )
-        if existing is not None and existing.status == MemoirFollowupTaskStatus.IN_PROGRESS.value:
+        if (
+            existing is not None
+            and existing.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+            and (
+                gap_type != MemoirNarrativeGapType.MISSING_SLOT
+                or gap.id in required_gap_ids
+            )
+            and not blocked_by_other_narration
+        ):
             actionable = True
         if story is not None and (
             story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value
@@ -522,7 +644,7 @@ async def generate_followup_tasks(
             "known_context_summary": _known_context_summary(story, related_claims),
             "priority": _task_priority(
                 gap,
-                story_required=bool(story and story.id in required_story_ids),
+                story_required=gap.id in required_gap_ids,
                 chapter_order=chapter.sort_order if chapter else None,
             ),
         }
