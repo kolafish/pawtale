@@ -4,7 +4,6 @@ import type {
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import {
-  createMemoirVoiceSession,
   getMemoirBookCompletionOverview,
   prepareMemoirBookCompletionChapter,
 } from "../../services/memoir-voice-api";
@@ -16,12 +15,6 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
-} from "../../services/voice-authorization";
-
 const POLL_INTERVAL_MS = 1500;
 
 interface ChapterView extends MemoirBookCompletionChapter {
@@ -60,12 +53,12 @@ function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: stri
     failed: "整理未完成",
   }[item.state];
   const actionText = {
-    ready: "开始讲这一段",
+    ready: "查看补全方向",
     in_progress: "继续刚才的讲述",
     preparing: "正在整理",
     needs_preparation: "整理这一章",
     needs_review: "查看并确认",
-    complete: "暂时不用补",
+    complete: "查看本章情况",
     failed: "重新整理",
   }[item.state];
   const busy = preparingChapterId === item.chapter_id || item.state === "preparing";
@@ -74,7 +67,7 @@ function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: stri
     stateText: busy ? "正在整理" : stateCopy,
     actionText: busy ? "正在整理" : actionText,
     chapterClass: `chapter-item ${item.state}`,
-    disabled: busy || item.state === "complete",
+    disabled: busy,
   };
 }
 
@@ -178,15 +171,15 @@ definePage<BookCompletionData>()({
     if (!chapter || chapter.disabled || this.data.preparingChapterId) {
       return;
     }
-    if (chapter.state === "ready" && chapter.task_id) {
-      await this.startInterview(chapter);
-      return;
-    }
     if (chapter.state === "in_progress" && chapter.active_session_id) {
       this.openVoiceChat(chapter.active_session_id, chapter.title);
       return;
     }
-    if (chapter.state === "needs_review") {
+    if (
+      chapter.state === "ready"
+      || chapter.state === "needs_review"
+      || chapter.state === "complete"
+    ) {
       wx.navigateTo({
         url: pageUrl("/pages/chapter-workspace/index", {
           projectId: this.data.projectId,
@@ -215,38 +208,6 @@ definePage<BookCompletionData>()({
         preparingChapterId: "",
         error: error instanceof Error ? error.message : "本章整理失败",
         chapters: this.data.chapters.map((item) => chapterView(item, "")),
-      });
-    }
-  },
-
-  async startInterview(chapter: ChapterView) {
-    if (!readVoiceAuthorizationConsent()) {
-      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
-      return;
-    }
-    this.setData({ preparingChapterId: chapter.chapter_id, error: "" });
-    try {
-      await syncVoiceAuthorizationConsent();
-      const detail = await createMemoirVoiceSession({
-        guidance_mode: "guided_interview",
-        interview_type: "ai_interview",
-        session_goal: "book_completion",
-        current_followup_task_id: chapter.task_id || undefined,
-        provider: "volc_streaming_asr",
-        input_format: "pcm_s16le_16000_mono",
-        metadata_json: {
-          entry: "miniprogram_book_completion_overview",
-          chapter_id: chapter.chapter_id,
-        },
-      }, { projectId: this.data.projectId });
-      this.openVoiceChat(detail.session.id, chapter.title);
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      this.setData({
-        preparingChapterId: "",
-        error: error instanceof Error ? error.message : "语音访谈创建失败",
       });
     }
   },

@@ -2,378 +2,228 @@
   <view class="page-header">
     <view class="back-hit" bindtap="goBack"><text class="back-mark">‹</text></view>
     <view class="header-main">
-      <text class="page-title">{{workspace ? workspace.chapter_title : "章节工作台"}}</text>
-      <text class="page-meta">{{contractStatusText}}</text>
+      <text class="page-title">{{workspace ? workspace.chapter_title : "章节情况"}}</text>
+      <text class="page-meta">先看全章，再决定下一步</text>
     </view>
-    <button wx:if="{{activeTab !== 'overview'}}" class="audit-button" loading="{{auditBusy}}" disabled="{{auditBusy}}" bindtap="startAudit">
-      {{auditBusy ? "检查中" : "重新检查"}}
-    </button>
   </view>
 
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
-  <view wx:if="{{activeTab !== 'overview'}}" class="audit-state {{auditError ? 'failed' : ''}}">
-    <text class="audit-state-title">{{auditStatusText}}</text>
-    <text wx:if="{{auditError}}" class="audit-state-error">{{auditError}}</text>
-  </view>
-
-  <view wx:if="{{loading && !workspace}}" class="empty-state">正在加载</view>
+  <view wx:if="{{loading && !workspace}}" class="loading-state">正在读取本章内容</view>
 
   <block wx:if="{{workspace}}">
-    <view wx:if="{{activeTab === 'overview'}}" class="overview-section">
-      <text class="overview-eyebrow">{{nextAction.eyebrow}}</text>
-      <text class="overview-title">{{nextAction.title}}</text>
-      <text class="overview-detail">{{nextAction.detail}}</text>
-      <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
+    <view class="summary-band">
+      <view class="summary-heading">
+        <text class="section-eyebrow">本章完整情况</text>
+        <text class="summary-title">{{readinessTitle}}</text>
+        <text class="summary-detail">{{readinessDetail}}</text>
+      </view>
+      <view class="summary-grid">
+        <view class="summary-cell">
+          <text class="summary-number">{{recordedCount}}</text>
+          <text class="summary-label">件事已讲清</text>
+        </view>
+        <view class="summary-cell important">
+          <text class="summary-number">{{mustConfirmCount}}</text>
+          <text class="summary-label">件需要确认</text>
+        </view>
+        <view class="summary-cell optional">
+          <text class="summary-number">{{suggestionCount}}</text>
+          <text class="summary-label">个可选补充</text>
+        </view>
+        <view class="summary-cell accepted">
+          <text class="summary-number">{{acceptedIncompleteCount}}</text>
+          <text class="summary-label">项已接受现状</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{workspace.contract}}" class="chapter-direction">
+      <text class="section-eyebrow">这章准备写</text>
+      <text class="direction-title">{{workspace.contract.objective}}</text>
+      <text wx:if="{{workspace.contract.reader_takeaway}}" class="direction-detail">{{workspace.contract.reader_takeaway}}</text>
+      <view wx:if="{{outlineTitles.length}}" class="outline-line">
+        <text wx:for="{{outlineTitles}}" wx:key="*this" class="outline-item">{{index + 1}}. {{item}}</text>
+      </view>
+    </view>
+
+    <view class="next-action-band">
+      <text class="section-eyebrow">{{nextAction.eyebrow}}</text>
+      <text class="next-action-title">{{nextAction.title}}</text>
+      <text class="next-action-detail">{{nextAction.detail}}</text>
       <button
         wx:if="{{nextAction.actionText}}"
-        class="overview-primary-action"
-        loading="{{contractRevisionBusy || auditBusy || draftGenerationBusy}}"
-        disabled="{{nextAction.disabled || contractRevisionBusy || auditBusy || draftGenerationBusy}}"
+        class="primary-action"
+        loading="{{contractBusy || auditBusy || draftGenerationBusy}}"
+        disabled="{{nextAction.disabled || contractBusy || auditBusy || draftGenerationBusy}}"
         bindtap="runNextAction"
       >{{nextAction.actionText}}</button>
-      <view wx:if="{{appliedAnswerUpdates.length}}" class="answer-update-band">
-        <text class="answer-update-label">最近已根据您的回答更新</text>
-        <view wx:for="{{appliedAnswerUpdates}}" wx:key="id" class="answer-update-row">
-          <text class="answer-update-question">{{item.question}}</text>
-          <text class="answer-update-summary">{{item.summaryText}}</text>
-        </view>
-      </view>
-      <button class="overview-detail-action" data-tab="structure" bindtap="changeTab">查看详细内容</button>
+      <view wx:if="{{auditError}}" class="message error-message">{{auditError}}</view>
     </view>
 
-    <block wx:else>
-      <button class="overview-return" data-tab="overview" bindtap="changeTab">返回本章下一步</button>
-      <view class="tab-bar">
-        <view class="tab {{activeTab === 'structure' ? 'active' : ''}}" data-tab="structure" bindtap="changeTab">本章方向</view>
-        <view class="tab {{activeTab === 'stories' ? 'active' : ''}}" data-tab="stories" bindtap="changeTab">素材内容</view>
-        <view class="tab {{activeTab === 'drafts' ? 'active' : ''}}" data-tab="drafts" bindtap="changeTab">本章正文</view>
-        <view class="tab {{activeTab === 'checks' ? 'active' : ''}}" data-tab="checks" bindtap="changeTab">待处理</view>
-        <view class="tab {{activeTab === 'followups' ? 'active' : ''}}" data-tab="followups" bindtap="changeTab">补充问题</view>
-      </view>
+    <view wx:if="{{followupError}}" class="message error-message">{{followupError}}</view>
 
-    <view wx:if="{{activeTab === 'structure'}}" class="content-section">
-      <view wx:if="{{workspace.contract}}" class="contract-band">
-        <text class="section-label">这章主要写什么</text>
-        <text class="contract-objective">{{workspace.contract.objective}}</text>
-        <text class="contract-takeaway">{{workspace.contract.reader_takeaway}}</text>
-      </view>
-      <view wx:else class="empty-state">本章方向还没有确定</view>
-
+    <view wx:if="{{directions.length}}" class="content-section" id="directions">
       <view class="section-heading">
-        <text class="section-title">内容顺序</text>
-        <text class="section-count">{{nodes.length}} 个</text>
+        <view>
+          <text class="section-eyebrow">您来选择</text>
+          <text class="section-title">想从哪个方向继续讲</text>
+        </view>
+        <text class="section-count">最多显示 3 个</text>
       </view>
-      <view wx:if="{{nodes.length}}" class="node-list">
-        <view wx:for="{{nodes}}" wx:for-item="node" wx:key="id" class="node-row">
-          <view class="node-order">{{index + 1}}</view>
-          <view class="node-main">
-            <view class="row-title-line">
-              <text class="row-title">{{node.title}}</text>
-              <text class="status-label">{{node.statusText}}</text>
-            </view>
-            <text class="row-copy">{{node.purpose}}</text>
-            <text class="row-meta">{{node.storyText}}</text>
+      <view class="direction-list">
+        <view wx:for="{{directions}}" wx:key="id" class="direction-row">
+          <view class="direction-copy">
+            <text class="direction-state">{{item.statusText}}</text>
+            <text class="direction-question">{{item.question}}</text>
+            <text wx:if="{{item.contextText}}" class="direction-context">{{item.contextText}}</text>
           </view>
+          <button
+            class="row-action"
+            data-task-id="{{item.id}}"
+            loading="{{startingFollowupTaskId === item.id}}"
+            disabled="{{startingFollowupTaskId !== ''}}"
+            bindtap="startFollowupInterview"
+          >{{item.actionText}}</button>
         </view>
       </view>
-      <view wx:else class="empty-state">本章还没有安排内容顺序</view>
     </view>
 
-    <view wx:elif="{{activeTab === 'stories'}}" class="content-section">
+    <view wx:if="{{confirmations.length || reviewGaps.length}}" class="content-section" id="confirmations">
       <view class="section-heading">
-        <text class="section-title">本章故事</text>
-        <text class="section-count">{{stories.length}} 个</text>
-      </view>
-      <view wx:if="{{stories.length}}" class="story-list">
-        <view wx:for="{{stories}}" wx:for-item="story" wx:key="id" class="story-item">
-          <view class="row-title-line">
-            <text class="story-title">{{story.title}}</text>
-            <text class="status-label">{{story.statusText}}</text>
-          </view>
-          <text class="story-summary">{{story.summary || "暂无故事摘要"}}</text>
-
-          <view class="slot-grid">
-            <view wx:for="{{story.slots}}" wx:for-item="slot" wx:key="slot_key" class="slot-row">
-              <text class="slot-name">{{slot.labelText}}</text>
-              <text class="slot-status {{slot.statusClass}}">{{slot.statusText}}</text>
-            </view>
-          </view>
-
-          <view class="claim-list">
-            <view wx:for="{{story.claims}}" wx:for-item="claim" wx:key="id" class="claim-row">
-              <view class="claim-head">
-                <text class="claim-label">已记录的内容</text>
-                <text class="claim-status">{{claim.verificationStatusText}}</text>
-                <text class="claim-evidence-count">{{claim.evidenceCountText}}</text>
-              </view>
-              <text class="claim-statement">{{claim.statement}}</text>
-              <view wx:if="{{claim.evidence.length}}" class="evidence-list">
-                <text wx:for="{{claim.evidence}}" wx:for-item="evidence" wx:key="id" class="evidence-quote">
-                  {{evidence.quote || evidence.evidence_note}}
-                </text>
-              </view>
-            </view>
-          </view>
+        <view>
+          <text class="section-eyebrow">成书前要核对</text>
+          <text class="section-title">需要您确认的内容</text>
         </view>
+        <text class="section-count">{{mustConfirmCount}} 件</text>
       </view>
-      <view wx:else class="empty-state">本章还没有加入可用的素材内容</view>
 
-      <view class="section-heading available-story-heading">
-        <text class="section-title">可加入本章</text>
-        <text class="section-count">{{availableStories.length}} 个</text>
-      </view>
-      <view wx:if="{{contractRevisionError}}" class="message error-message">{{contractRevisionError}}</view>
-      <view wx:if="{{availableStories.length && workspace.contract && workspace.contract.status === 'confirmed'}}" class="story-edit-state">
-        <view class="story-edit-copy">
-          <text class="story-edit-title">章节结构已确认</text>
-          <text class="story-edit-hint">开始调整后，再选择要加入的内容</text>
-        </view>
+      <view wx:for="{{confirmations}}" wx:key="id" class="confirmation-row">
+        <text class="confirmation-label">刚才的回答还不能准确对应</text>
+        <text class="confirmation-title">{{item.question}}</text>
+        <text wx:if="{{item.answerText}}" class="confirmation-answer">您刚才说：{{item.answerText}}</text>
         <button
-          class="secondary-action-button story-revision-button"
-          loading="{{contractRevisionBusy}}"
-          disabled="{{contractRevisionBusy}}"
-          bindtap="createContractRevision"
-        >开始调整</button>
+          class="row-action"
+          data-task-id="{{item.taskId}}"
+          loading="{{startingFollowupTaskId === item.taskId}}"
+          disabled="{{startingFollowupTaskId !== ''}}"
+          bindtap="startFollowupInterview"
+        >再说明一句</button>
       </view>
-      <view wx:if="{{availableStories.length}}" class="available-story-list">
-        <view wx:for="{{availableStories}}" wx:for-item="story" wx:key="id" class="available-story-row">
-          <view class="available-story-main">
-            <view class="row-title-line">
-              <text class="story-title">{{story.title}}</text>
-              <text class="status-label">{{story.statusText}}</text>
-            </view>
-            <text class="story-summary">{{story.summary || "暂无故事摘要"}}</text>
-            <text wx:if="{{story.excluded_from_chapter}}" class="available-story-note">此前已从本章移出</text>
-            <text wx:if="{{story.error}}" class="available-story-error">{{story.error}}</text>
-          </view>
-          <button
-            wx:if="{{workspace.contract && workspace.contract.status === 'draft'}}"
-            class="primary-small-button available-story-action"
-            data-story-id="{{story.id}}"
-            loading="{{story.busy}}"
-            disabled="{{story.busy}}"
-            bindtap="includeAvailableStory"
-          >{{story.actionText}}</button>
+
+      <view wx:for="{{reviewGaps}}" wx:key="id" class="confirmation-row">
+        <text class="confirmation-label">请确认是否准确</text>
+        <text class="confirmation-title">{{item.title}}</text>
+        <text class="confirmation-answer">{{item.description}}</text>
+        <button
+          wx:if="{{item.taskId}}"
+          class="row-action explain-action"
+          data-task-id="{{item.taskId}}"
+          loading="{{startingFollowupTaskId === item.taskId}}"
+          disabled="{{startingFollowupTaskId !== ''}}"
+          bindtap="startFollowupInterview"
+        >通过语音说明</button>
+        <view class="confirmation-actions">
+          <button data-gap-id="{{item.id}}" data-action="resolve" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">已核对</button>
+          <button data-gap-id="{{item.id}}" data-action="accept-incomplete" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">先按现有内容</button>
+          <button data-gap-id="{{item.id}}" data-action="not-applicable" disabled="{{actionBusyGapId !== ''}}" bindtap="applyGapAction">与本章无关</button>
         </view>
       </view>
-      <view wx:elif="{{!workspace.contract}}" class="empty-state">确定本章方向后，可以从现有素材中加入内容</view>
-      <view wx:else class="empty-state">没有其他适合加入本章的内容</view>
     </view>
 
-    <view wx:elif="{{activeTab === 'drafts'}}" class="content-section">
-      <view class="draft-toolbar">
-        <view class="draft-toolbar-copy">
-          <text class="section-title">本章正文</text>
-          <text class="draft-toolbar-hint">{{draftBlocks.length}} 段</text>
+    <view class="content-section">
+      <view class="section-heading">
+        <view>
+          <text class="section-eyebrow">已经掌握</text>
+          <text class="section-title">本章目前讲清的内容</text>
         </view>
-        <view class="draft-toolbar-actions">
+        <text class="section-count">{{recordedCount}} 件</text>
+      </view>
+      <view wx:if="{{recordedStories.length}}" class="recorded-list">
+        <view wx:for="{{recordedStories}}" wx:key="id" class="recorded-row">
+          <text class="recorded-title">{{item.title}}</text>
+          <text wx:if="{{item.summary}}" class="recorded-summary">{{item.summary}}</text>
+        </view>
+      </view>
+      <text wx:else class="empty-copy">本章还没有可用于成书的讲述。</text>
+    </view>
+
+    <view wx:if="{{!directions.length && suggestionHints.length}}" class="content-section">
+      <view class="section-heading">
+        <view>
+          <text class="section-eyebrow">有空再讲</text>
+          <text class="section-title">可选补充方向</text>
+        </view>
+      </view>
+      <view wx:for="{{suggestionHints}}" wx:key="id" class="suggestion-row">
+        <text class="suggestion-title">{{item.title}}</text>
+        <text class="suggestion-detail">{{item.description}}</text>
+      </view>
+    </view>
+
+    <view wx:if="{{appliedAnswerUpdates.length}}" class="content-section update-section">
+      <view class="section-heading">
+        <view>
+          <text class="section-eyebrow">最近变化</text>
+          <text class="section-title">回答已经放回本章</text>
+        </view>
+      </view>
+      <view wx:for="{{appliedAnswerUpdates}}" wx:key="id" class="update-row">
+        <text class="update-question">{{item.question}}</text>
+        <text class="update-summary">{{item.summaryText}}</text>
+      </view>
+    </view>
+
+    <view class="content-section draft-section" id="chapter-draft">
+      <view class="draft-heading">
+        <view>
+          <text class="section-eyebrow">本章正文</text>
+          <text class="section-title">通读和修改</text>
+        </view>
+        <view class="draft-actions">
           <button
-            class="secondary-action-button"
+            class="secondary-action"
             loading="{{draftGenerationBusy}}"
-            disabled="{{draftGenerationBusy || revisionBlockId || !workspace.contract || workspace.contract.status !== 'confirmed'}}"
+            disabled="{{draftGenerationBusy || !workspace.contract || workspace.contract.status !== 'confirmed'}}"
             bindtap="generateDraftBlocks"
-          >
-            {{draftBlocks.length ? "补齐正文" : "生成正文"}}
-          </button>
+          >{{draftBlocks.length ? "重新整理" : "生成正文"}}</button>
           <button
-            class="primary-action-button"
+            class="secondary-action strong"
             loading="{{assemblingDraft}}"
             disabled="{{assemblingDraft || !draftBlocks.length}}"
             bindtap="assembleChapterDraft"
-          >
-            组装章节稿
-          </button>
+          >保存章节稿</button>
         </view>
       </view>
 
-      <view wx:if="{{draftGenerationStatus}}" class="draft-job-state">{{draftGenerationStatus}}</view>
+      <text wx:if="{{draftGenerationStatus}}" class="job-state">{{draftGenerationStatus}}</text>
       <view wx:if="{{draftError}}" class="message error-message">{{draftError}}</view>
-      <view wx:if="{{draftLoading}}" class="empty-state">正在加载正文</view>
-      <view wx:elif="{{draftBlocks.length}}" class="draft-block-list">
-        <view wx:for="{{draftBlocks}}" wx:for-item="block" wx:key="id" class="draft-block-row {{block.freshness_status === 'stale' ? 'stale' : ''}}">
-          <view class="draft-block-head">
-            <view class="draft-block-heading">
-              <text class="draft-block-role">{{block.roleText}}</text>
-              <text class="draft-block-node">{{block.nodeTitle}}</text>
-            </view>
-            <view class="draft-block-badges">
-              <text class="draft-status-label {{block.editorial_status}}">{{block.editorialStatusText}}</text>
-              <text class="draft-status-label {{block.freshness_status}}">{{block.freshnessStatusText}}</text>
-              <text wx:if="{{block.locked}}" class="draft-status-label locked">已锁定</text>
-            </view>
+      <view wx:if="{{draftBlocks.length}}" class="draft-list">
+        <view wx:for="{{draftBlocks}}" wx:key="id" class="draft-row {{item.freshness_status === 'stale' ? 'stale' : ''}}">
+          <view class="draft-row-head">
+            <text class="draft-section-title">{{item.sectionTitle}}</text>
+            <text class="draft-status">{{item.statusText}}</text>
           </view>
-
-          <block wx:if="{{editingBlockId === block.id}}">
+          <block wx:if="{{editingBlockId === item.id}}">
             <textarea
-              class="draft-block-editor"
+              class="draft-editor"
               value="{{editingBlockContent}}"
               maxlength="-1"
               auto-height
               cursor-spacing="24"
               bindinput="changeDraftBlockContent"
             />
-            <view class="draft-inline-actions">
-              <button class="text-action-button" bindtap="cancelDraftBlockEdit">取消</button>
-              <button
-                class="primary-small-button"
-                data-block-id="{{block.id}}"
-                loading="{{block.busy}}"
-                disabled="{{block.busy}}"
-                bindtap="saveDraftBlockEdit"
-              >保存</button>
+            <view class="edit-actions">
+              <button bindtap="cancelDraftBlockEdit">取消</button>
+              <button class="save" data-block-id="{{item.id}}" loading="{{item.busy}}" disabled="{{item.busy}}" bindtap="saveDraftBlockEdit">保存修改</button>
             </view>
           </block>
-          <text wx:else class="draft-block-content">{{block.current_version.content}}</text>
-
-          <view class="draft-block-meta">
-            <text>版本 {{block.current_version.version}} · {{block.sourceCountText}}</text>
-          </view>
-          <view class="draft-inline-actions wrap">
-            <button
-              class="text-action-button"
-              data-block-id="{{block.id}}"
-              bindtap="toggleDraftBlockSources"
-            >{{sourceBlockId === block.id ? "收起来源" : "查看来源"}}</button>
-            <button
-              wx:if="{{!block.isLegacy}}"
-              class="text-action-button"
-              data-block-id="{{block.id}}"
-              disabled="{{block.busy || editingBlockId === block.id}}"
-              bindtap="startDraftBlockEdit"
-            >编辑</button>
-            <button
-              wx:if="{{!block.isLegacy && block.editorial_status !== 'confirmed'}}"
-              class="text-action-button"
-              data-block-id="{{block.id}}"
-              loading="{{block.busy}}"
-              disabled="{{block.busy}}"
-              bindtap="confirmDraftBlock"
-            >确认</button>
-            <button
-              wx:if="{{!block.isLegacy}}"
-              class="text-action-button"
-              data-block-id="{{block.id}}"
-              loading="{{block.busy}}"
-              disabled="{{block.busy}}"
-              bindtap="toggleDraftBlockLock"
-            >{{block.locked ? "解锁" : "锁定"}}</button>
-          </view>
-
-          <view wx:if="{{sourceBlockId === block.id}}" class="draft-source-panel">
-            <text wx:if="{{!block.sourceClaims.length && !block.sourceStories.length}}" class="draft-source-empty">这段旧稿没有可查看的详细来源</text>
-            <view wx:for="{{block.sourceStories}}" wx:for-item="sourceStory" wx:key="id" class="draft-source-story">
-              <text class="draft-source-kind">故事</text>
-              <text class="draft-source-title">{{sourceStory.title}}</text>
-            </view>
-            <view wx:for="{{block.sourceClaims}}" wx:for-item="sourceClaim" wx:key="id" class="draft-source-claim">
-              <text class="draft-source-kind">事实依据</text>
-              <text class="draft-source-statement">{{sourceClaim.statement}}</text>
-              <text wx:if="{{sourceClaim.evidenceText}}" class="draft-source-evidence">{{sourceClaim.evidenceText}}</text>
-            </view>
-          </view>
-
-          <view wx:if="{{!block.isLegacy}}" class="draft-revision-panel">
-            <input
-              class="draft-revision-input"
-              value="{{block.revisionFeedback}}"
-              placeholder="例如：把‘单位’改成具体名称，只调整这一段"
-              maxlength="4000"
-              data-block-id="{{block.id}}"
-              bindinput="changeDraftRevisionFeedback"
-            />
-            <button
-              class="secondary-action-button revision-button"
-              data-block-id="{{block.id}}"
-              loading="{{revisionBlockId === block.id && !revisionSuggestion}}"
-              disabled="{{block.locked || block.busy || revisionBlockId || draftGenerationBusy}}"
-              bindtap="requestDraftBlockRevision"
-            >生成本段修改建议</button>
-            <text wx:if="{{revisionBlockId === block.id && revisionStatus}}" class="draft-revision-status">{{revisionStatus}}</text>
-            <view wx:if="{{revisionBlockId === block.id && revisionSuggestion}}" class="draft-suggestion">
-              <text class="draft-suggestion-label">建议版本</text>
-              <text class="draft-suggestion-content">{{revisionSuggestion}}</text>
-              <view class="draft-inline-actions">
-                <button class="text-action-button" bindtap="discardDraftBlockRevision">放弃</button>
-                <button
-                  class="primary-small-button"
-                  data-block-id="{{block.id}}"
-                  loading="{{block.busy}}"
-                  disabled="{{block.busy}}"
-                  bindtap="applyDraftBlockSuggestion"
-                >采用建议</button>
-              </view>
-            </view>
-          </view>
+          <block wx:else>
+            <text class="draft-content">{{item.current_version.content}}</text>
+            <button class="text-action" data-block-id="{{item.id}}" disabled="{{item.busy}}" bindtap="startDraftBlockEdit">编辑这一段</button>
+          </block>
         </view>
       </view>
-      <view wx:else class="empty-state">本章还没有正文</view>
+      <text wx:else class="empty-copy">确认本章方向后，就可以根据现有讲述生成正文。</text>
     </view>
-
-    <view wx:elif="{{activeTab === 'checks'}}" class="content-section">
-      <view wx:for="{{gapGroups}}" wx:for-item="group" wx:key="key" class="gap-section">
-        <view class="section-heading">
-          <text class="section-title">{{group.title}}</text>
-          <text class="section-count">{{group.items.length}} 项</text>
-        </view>
-        <view wx:if="{{group.items.length}}" class="gap-list">
-          <view wx:for="{{group.items}}" wx:for-item="gap" wx:key="id" class="gap-item severity-{{gap.severity}}">
-            <view class="row-title-line">
-              <text class="gap-title">{{gap.title}}</text>
-              <text class="status-label">{{gap.statusText}}</text>
-            </view>
-            <text class="gap-description">{{gap.description}}</text>
-            <text class="gap-severity">{{gap.severityText}}</text>
-            <block wx:if="{{group.actionable}}">
-              <input
-                class="gap-note-input"
-                value="{{gap.note}}"
-                placeholder="处理说明（忽略问题时必填）"
-                maxlength="1000"
-                data-gap-id="{{gap.id}}"
-                bindinput="changeGapNote"
-              />
-              <view class="gap-actions">
-                <button data-gap-id="{{gap.id}}" data-action="resolve" disabled="{{actionBusyGapId === gap.id}}" bindtap="applyGapAction">标记已处理</button>
-                <button data-gap-id="{{gap.id}}" data-action="accept-incomplete" disabled="{{actionBusyGapId === gap.id}}" bindtap="applyGapAction">接受不完整</button>
-                <button data-gap-id="{{gap.id}}" data-action="not-applicable" disabled="{{actionBusyGapId === gap.id}}" bindtap="applyGapAction">不适用</button>
-                <button data-gap-id="{{gap.id}}" data-action="dismiss" disabled="{{actionBusyGapId === gap.id}}" bindtap="applyGapAction">忽略</button>
-              </view>
-            </block>
-            <text wx:elif="{{gap.resolution_note}}" class="resolution-note">{{gap.resolution_note}}</text>
-          </view>
-        </view>
-        <view wx:else class="empty-row">{{group.emptyText}}</view>
-      </view>
-    </view>
-
-    <view wx:else class="content-section">
-      <view class="section-heading">
-        <text class="section-title">本章补访问题</text>
-        <text class="section-count">{{followupTasks.length}} 项</text>
-      </view>
-      <view wx:if="{{followupError}}" class="message error-message">{{followupError}}</view>
-      <view wx:if="{{followupLoading}}" class="empty-state">正在加载补访问题</view>
-      <view wx:elif="{{followupTasks.length}}" class="followup-list">
-        <view wx:for="{{followupTasks}}" wx:for-item="task" wx:key="id" class="followup-item">
-          <view class="row-title-line">
-            <text class="followup-priority">{{task.priorityText}}</text>
-            <text class="status-label">{{task.statusText}}</text>
-          </view>
-          <text class="followup-question">{{task.question}}</text>
-          <button
-            wx:if="{{task.canInterview}}"
-            class="followup-interview-button"
-            data-task-id="{{task.id}}"
-            loading="{{startingFollowupTaskId === task.id}}"
-            disabled="{{startingFollowupTaskId === task.id}}"
-            bindtap="startFollowupInterview"
-          >
-            {{task.actionText}}
-          </button>
-        </view>
-      </view>
-      <view wx:else class="empty-state">本章目前没有待补访的问题</view>
-    </view>
-    </block>
   </block>
 </view>

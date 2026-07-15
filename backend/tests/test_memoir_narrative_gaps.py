@@ -13,7 +13,12 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimType,
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
+    MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapRelationRole,
+    MemoirNarrativeGapScopeType,
+    MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
+    MemoirNarrativeGapType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
@@ -36,6 +41,7 @@ from app.services.memoir.narrative.gap_rules import (
     evaluate_deterministic_gaps,
     load_chapter_audit_context,
 )
+from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -193,6 +199,62 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     assert body["gaps"]["must_handle"] == []
     assert [item["id"] for item in body["gaps"]["accepted_incomplete"]] == [gap_id]
     assert "percentage" not in str(body).lower()
+
+
+async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["第一次离家"],
+    )
+    chapter_id = chapters[0].id
+    relation = {chapter_id: MemoirNarrativeGapRelationRole.PRIMARY}
+    created_gaps, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapter_id,
+                gap_type=MemoirNarrativeGapType.MISSING_SLOT,
+                severity=MemoirNarrativeGapSeverity.HIGH,
+                target_slot="reflection",
+                title="还可以补充离家后的感受",
+                detected_by=MemoirNarrativeGapDetectedBy.RULES,
+                chapter_roles=relation,
+            ),
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapter_id,
+                gap_type=MemoirNarrativeGapType.CONTRADICTION,
+                severity=MemoirNarrativeGapSeverity.HIGH,
+                target_slot="departure_age",
+                title="离家年龄存在冲突",
+                detected_by=MemoirNarrativeGapDetectedBy.RULES,
+                chapter_roles=relation,
+            ),
+        ],
+    )
+    await test_db.commit()
+
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/workspace"
+    )
+
+    assert workspace.status_code == 200, workspace.text
+    groups = workspace.json()["gaps"]
+    gaps_by_type = {gap.gap_type: gap.id for gap in created_gaps}
+    assert [item["id"] for item in groups["must_handle"]] == [
+        gaps_by_type[MemoirNarrativeGapType.CONTRADICTION.value]
+    ]
+    assert [item["id"] for item in groups["suggested"]] == [
+        gaps_by_type[MemoirNarrativeGapType.MISSING_SLOT.value]
+    ]
 
 
 async def test_project_rule_audit_resolves_obsolete_gap_and_reopens_it_if_condition_returns(
