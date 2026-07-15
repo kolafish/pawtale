@@ -82,6 +82,7 @@ async def _create_ready_story(
     *,
     created: dict,
     title: str = "离开家乡",
+    story_type: MemoirStoryType = MemoirStoryType.EVENT,
     is_core: bool = True,
     narrative_role: MemoirStoryNarrativeRole = MemoirStoryNarrativeRole.ACTION,
     verification_status: MemoirStoryVerificationStatus = MemoirStoryVerificationStatus.CONFIRMED,
@@ -107,7 +108,7 @@ async def _create_ready_story(
         project_id=project_id,
         title=title,
         title_normalized=title,
-        story_type=MemoirStoryType.EVENT.value,
+        story_type=story_type.value,
         summary=quote,
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
@@ -1272,11 +1273,16 @@ async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
         source_refs_by_chapter=[[memoir_source_ref(created)]],
     )
     stories: list[MemoirStory] = []
-    for index in range(5):
+    for index in range(21):
         story, _ = await _create_ready_story(
             test_db,
             created=created,
             title=f"工作故事 {index + 1}",
+            story_type=(
+                MemoirStoryType.LIFE_STAGE
+                if index == 0
+                else MemoirStoryType.EVENT
+            ),
         )
         story.updated_at = datetime(2026, 1, index + 1)
         stories.append(story)
@@ -1293,7 +1299,14 @@ async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
         report["created_contract_ids"][0],
     )
     assert contract is not None
-    initial_required_story_id = stories[4].id
+    assert len(
+        await chapter_contracts.legacy_story_candidates(
+            test_db,
+            project_id=project_id,
+            chapter_id=contract.chapter_id,
+        )
+    ) == 21
+    initial_required_story_id = stories[0].id
     assert contract.constraints_json["include_story_ids"] == [initial_required_story_id]
 
     primary_story_ids = list(
@@ -1310,7 +1323,7 @@ async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
             )
         ).all()
     )
-    assert primary_story_ids == [story.id for story in reversed(stories[2:])]
+    assert primary_story_ids == [stories[0].id, stories[20].id, stories[19].id]
     assert len(contract.core_questions_json) == 4
 
     new_story, _ = await _create_ready_story(
@@ -1318,7 +1331,7 @@ async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
         created=created,
         title="后来补充的关键转折",
     )
-    new_story.updated_at = datetime(2026, 1, 6)
+    new_story.updated_at = datetime(2026, 1, 22)
     test_db.add(new_story)
     await test_db.commit()
 
@@ -1348,4 +1361,4 @@ async def test_system_chapter_plan_keeps_three_anchors_and_absorbs_new_story(
     assert len(refreshed_story_ids) == 3
     assert new_story.id in refreshed_story_ids
     assert initial_required_story_id in refreshed_story_ids
-    assert await test_db.scalar(select(func.count()).select_from(MemoirStory)) == 6
+    assert await test_db.scalar(select(func.count()).select_from(MemoirStory)) == 22

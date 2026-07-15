@@ -545,7 +545,6 @@ async def legacy_story_candidates(
                 )
                 .distinct()
                 .order_by(MemoirStory.updated_at.desc(), MemoirStory.id)
-                .limit(20)
             )
         ).all()
     )
