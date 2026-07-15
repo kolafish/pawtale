@@ -14,9 +14,13 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
-from app.models.memoir import MemoirMaterialShareVideo
+from app.models.memoir import MemoirMaterialShareVideo, MemoirShareVideoOutput
 from app.models.projects import Project
-from app.schemas.memoir_voice import MemoirShareVideoJobCreateRequest, MemoirShareVideoJobResponse
+from app.schemas.memoir_voice import (
+    MemoirShareVideoJobCreateRequest,
+    MemoirShareVideoJobResponse,
+    MemoirShareVideoOutputResponse,
+)
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
 from app.services.memoir.audio_files import audio_file_path
@@ -72,8 +76,13 @@ def _storage_path(user_id: str, job_id: str) -> str:
     return f"memoir/share-videos/{user_id}/{job_id}.mp4"
 
 
-def share_video_file_path(job: MemoirMaterialShareVideo) -> Path:
-    storage_path = Path(job.video_storage_path or _storage_path(job.user_id, job.id))
+def share_video_file_path(
+    job: MemoirMaterialShareVideo,
+    output: MemoirShareVideoOutput | None = None,
+) -> Path:
+    storage_path = Path(
+        output.storage_path if output else _storage_path(job.user_id, job.id)
+    )
     try:
         relative_path = storage_path.relative_to(Path("memoir") / "share-videos")
     except ValueError:
@@ -129,11 +138,12 @@ def _trim_selection(text: str, start_char: int, end_char: int) -> tuple[int, int
 
 def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
     metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
-    download_url = (
-        f"/api/mobile/memoir/share-video/jobs/{job.id}/download"
-        if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.video_storage_path
-        else None
-    )
+    output = job.output
+    succeeded = job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
+    if succeeded != (output is not None):
+        raise RuntimeError(
+            f"share video job/output invariant violated for job {job.id}"
+        )
     return MemoirShareVideoJobResponse(
         id=job.id,
         project_id=job.project_id,
@@ -157,9 +167,15 @@ def _job_response(job: MemoirMaterialShareVideo) -> MemoirShareVideoJobResponse:
         background_model=metadata.background_model,
         background_cache_hit=metadata.background_cache_hit,
         background_error_message=metadata.background_error_message,
-        video_mime_type=job.video_mime_type,
-        video_size_bytes=job.video_size_bytes,
-        download_url=download_url,
+        output=(
+            MemoirShareVideoOutputResponse(
+                mime_type=output.mime_type,
+                size_bytes=output.size_bytes,
+                download_url=f"/api/mobile/memoir/share-video/jobs/{job.id}/download",
+            )
+            if output is not None
+            else None
+        ),
         error_message=job.error_message,
         created_at=job.created_at,
         updated_at=job.updated_at,
@@ -249,7 +265,6 @@ async def create_share_video_job(
                 ai_background_enabled=get_settings().memoir_share_video_ai_background_enabled,
             ),
         ).to_json(),
-        video_mime_type=_VIDEO_MIME_TYPE,
     )
     db.add(job)
     await db.commit()
@@ -299,14 +314,15 @@ async def load_completed_share_video_job(
     user_id: str,
     *,
     allow_admin: bool = False,
-) -> tuple[MemoirMaterialShareVideo, Path]:
+) -> tuple[MemoirShareVideoOutput, Path]:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
-    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or not job.video_storage_path:
+    output = job.output
+    if job.status != MemoirShareVideoJobStatus.SUCCEEDED.value or output is None:
         raise HTTPException(status_code=409, detail="分享视频还没有生成完成")
-    path = share_video_file_path(job)
+    path = share_video_file_path(job, output)
     if not path.exists():
         raise HTTPException(status_code=404, detail="分享视频文件不存在")
-    return job, path
+    return output, path
 
 
 def _claimable_share_video_job(now: datetime, max_attempts: int):
@@ -368,8 +384,6 @@ async def _fail_exhausted_share_video_jobs(
                 locked_at=None,
                 lease_token=None,
                 lease_expires_at=None,
-                video_storage_path=None,
-                video_size_bytes=None,
                 error_message="分享视频任务执行中断，已达到最大重试次数",
                 completed_at=now,
             )
@@ -544,15 +558,25 @@ async def _complete_share_video_job(
             locked_at=None,
             lease_token=None,
             lease_expires_at=None,
-            video_storage_path=storage_path,
-            video_size_bytes=size_bytes,
             error_message="",
             completed_at=completed_at,
         )
+        .returning(MemoirMaterialShareVideo.project_id)
     )
-    if result.rowcount != 1:
+    project_id = result.scalar_one_or_none()
+    if project_id is None:
         await db.rollback()
         return False
+    db.add(
+        MemoirShareVideoOutput(
+            job_id=lease.job_id,
+            project_id=project_id,
+            storage_path=storage_path,
+            mime_type=_VIDEO_MIME_TYPE,
+            size_bytes=size_bytes,
+            created_at=completed_at,
+        )
+    )
     await db.commit()
     return True
 
@@ -565,8 +589,8 @@ async def _recover_published_share_video(
         job = await db.get(MemoirMaterialShareVideo, lease.job_id)
         if job is None:
             return False
-        if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.video_storage_path:
-            _remove_video_completion_marker(share_video_file_path(job))
+        if job.status == MemoirShareVideoJobStatus.SUCCEEDED.value and job.output is not None:
+            _remove_video_completion_marker(share_video_file_path(job, job.output))
             return True
         if (
             job.status != MemoirShareVideoJobStatus.RUNNING.value
@@ -653,8 +677,6 @@ async def _fail_share_video_job(
                 locked_at=None,
                 lease_token=None,
                 lease_expires_at=None,
-                video_storage_path=None,
-                video_size_bytes=None,
                 error_message=error_message,
                 completed_at=None if should_retry else failed_at,
             )

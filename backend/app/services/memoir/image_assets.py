@@ -174,7 +174,7 @@ def _asset_response(
         share_video_job_id=asset.share_video_job_id,
         source_quote=asset.source_quote,
         metadata_json=asset.metadata_json or {},
-        include_in_book=asset.include_in_book,
+        include_in_book=any(placement.enabled for placement in asset.placements),
         placements=placements,
         created_at=asset.created_at,
         updated_at=asset.updated_at,
@@ -232,7 +232,9 @@ async def list_image_assets(
     }
     chapter_titles = await _chapter_titles(db, chapter_ids)
     ready_count = sum(1 for item in items if item.status == MemoirImageAssetStatus.READY.value)
-    included_count = sum(1 for item in items if item.include_in_book)
+    included_count = sum(
+        1 for item in items if any(placement.enabled for placement in item.placements)
+    )
     return MemoirImageAssetListResponse(
         items=[_asset_response(item, chapter_titles=chapter_titles) for item in items],
         total=len(items),
@@ -258,7 +260,7 @@ async def update_image_asset(
         asset.caption = req.caption
     if "alt_text" in fields_set and req.alt_text is not None:
         asset.alt_text = req.alt_text
-    if asset.include_in_book:
+    if any(placement.enabled for placement in asset.placements):
         await sync_latest_book_output_image_snapshots(db, project_id=project_id)
     await db.commit()
     await db.refresh(asset)
@@ -282,7 +284,6 @@ async def delete_image_asset(
 ) -> None:
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
     asset.status = MemoirImageAssetStatus.DELETED.value
-    asset.include_in_book = False
     for placement in asset.placements:
         placement.enabled = False
         db.add(placement)
@@ -348,7 +349,6 @@ async def create_image_placement(
     placement.caption_override = req.caption_override or placement.caption_override
     placement.display_size = req.display_size
     placement.enabled = True
-    asset.include_in_book = True
     db.add(asset)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
     await db.commit()
@@ -384,7 +384,6 @@ async def update_image_placement(
         placement.display_size = req.display_size
     if "enabled" in fields_set and req.enabled is not None:
         placement.enabled = req.enabled
-    asset.include_in_book = any(item.enabled for item in asset.placements)
     await sync_latest_book_output_image_snapshots(db, project_id=project_id)
     await db.commit()
     await db.refresh(asset)
@@ -579,7 +578,7 @@ async def register_share_video_background_asset(
         existing.source_quote = context.source_quote
         existing.metadata_json = {**(existing.metadata_json or {}), **metadata}
         flag_modified(existing, "metadata_json")
-        if existing.include_in_book:
+        if any(placement.enabled for placement in existing.placements):
             await sync_latest_book_output_image_snapshots(db, project_id=job.project_id)
         return existing
 

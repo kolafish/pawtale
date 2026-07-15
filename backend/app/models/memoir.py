@@ -294,9 +294,6 @@ class MemoirMaterialShareVideo(Base):
     start_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     end_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    video_storage_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    video_mime_type: Mapped[str] = mapped_column(String(100), default="video/mp4", nullable=False)
-    video_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -305,6 +302,56 @@ class MemoirMaterialShareVideo(Base):
     project: Mapped["Project"] = orm_relationship("Project")
     utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
     audio_file: Mapped[AudioFile] = orm_relationship("AudioFile")
+    output: Mapped["MemoirShareVideoOutput | None"] = orm_relationship(
+        "MemoirShareVideoOutput",
+        back_populates="job",
+        cascade="all, delete-orphan",
+        lazy="joined",
+        uselist=False,
+    )
+
+
+class MemoirShareVideoOutput(Base):
+    __tablename__ = "memoir_share_video_outputs"
+    __table_args__ = (
+        UniqueConstraint(
+            "job_id",
+            name="uq_memoir_share_video_outputs_job_id",
+        ),
+        CheckConstraint(
+            "size_bytes > 0",
+            name="ck_memoir_share_video_outputs_positive_size",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    job_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_material_share_videos.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    job: Mapped[MemoirMaterialShareVideo] = orm_relationship(
+        "MemoirMaterialShareVideo",
+        back_populates="output",
+    )
+    project: Mapped["Project"] = orm_relationship("Project")
 
 
 class MemoirTranscriptVersion(Base):
@@ -389,7 +436,6 @@ class MemoirImageAsset(Base):
     )
     source_quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    include_in_book: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

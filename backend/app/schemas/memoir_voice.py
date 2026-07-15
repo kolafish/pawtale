@@ -458,6 +458,12 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
         return self
 
 
+class MemoirShareVideoOutputResponse(BaseModel):
+    mime_type: str
+    size_bytes: int
+    download_url: str
+
+
 class MemoirShareVideoJobResponse(BaseModel):
     id: str
     project_id: str
@@ -481,9 +487,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     background_model: str | None = None
     background_cache_hit: bool | None = None
     background_error_message: str = ""
-    video_mime_type: str = "video/mp4"
-    video_size_bytes: int | None = None
-    download_url: str | None = None
+    output: MemoirShareVideoOutputResponse | None = None
     error_message: str = ""
     created_at: datetime
     updated_at: datetime

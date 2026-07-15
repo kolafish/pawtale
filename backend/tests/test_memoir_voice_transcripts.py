@@ -983,6 +983,7 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert response.status_code == 201
     created_job = response.json()
     assert created_job["status"] == "pending"
+    assert created_job["output"] is None
     job_id = created_job["id"]
     assert await _claim_and_run_share_video_job(test_db, job_id) is True
     detail_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}")
@@ -997,15 +998,22 @@ async def test_mobile_memoir_creates_and_downloads_share_video_job(client, test_
     assert detail["background_effective_mode"] == "single"
     assert detail["background_status"] == "failed"
     assert "provider unavailable" in detail["background_error_message"]
-    assert detail["video_size_bytes"] == len(b"fake mp4")
-    assert detail["download_url"] == f"/api/mobile/memoir/share-video/jobs/{job_id}/download"
+    assert detail["output"]["size_bytes"] == len(b"fake mp4")
+    assert detail["output"]["download_url"] == f"/api/mobile/memoir/share-video/jobs/{job_id}/download"
+    assert not {
+        "video_storage_path",
+        "video_mime_type",
+        "video_size_bytes",
+        "download_url",
+    } & detail.keys()
     assert len(render_requests) == 1
     assert render_requests[0].background_image_path is None
     stored_job = await test_db.scalar(
         select(MemoirMaterialShareVideo).where(MemoirMaterialShareVideo.id == job_id)
     )
     assert stored_job is not None
-    assert stored_job.video_storage_path
+    assert stored_job.output is not None
+    assert stored_job.output.storage_path
 
     download_response = await client.get(f"/api/mobile/memoir/share-video/jobs/{job_id}/download")
 
@@ -1183,8 +1191,9 @@ async def test_share_video_worker_recovers_when_completion_write_stalls(
     stored_job = await test_db.get(MemoirMaterialShareVideo, job_id)
     await test_db.refresh(stored_job)
     assert stored_job.status == MemoirShareVideoJobStatus.SUCCEEDED.value
-    assert stored_job.video_size_bytes == len(b"complete mp4")
-    target_path = share_video_jobs.share_video_file_path(stored_job)
+    assert stored_job.output is not None
+    assert stored_job.output.size_bytes == len(b"complete mp4")
+    target_path = share_video_jobs.share_video_file_path(stored_job, stored_job.output)
     assert target_path.read_bytes() == b"complete mp4"
     assert not share_video_jobs._completion_marker_path(target_path).exists()
 
@@ -1317,7 +1326,7 @@ async def test_mobile_memoir_share_video_job_uses_custom_background_asset(
     assert detail["background_status"] == "ready"
     assert detail["background_provider"] == "user_upload"
     assert detail["background_model"] == "ffmpeg-background-processor"
-    assert detail["video_size_bytes"] == len(b"fake custom mp4")
+    assert detail["output"]["size_bytes"] == len(b"fake custom mp4")
     assert len(render_requests) == 1
     render_request = render_requests[0]
     assert render_request.background_segments == []
