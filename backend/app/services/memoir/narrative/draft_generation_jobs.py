@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeType,
+    MemoirDraftBlockFreshnessStatus,
     MemoirDraftBlockRole,
     MemoirNarrativeActorType,
 )
@@ -25,6 +26,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import draft_block_queries, draft_blocks
 from app.services.memoir.narrative.draft_block_ai import (
+    DraftBlockEditorialContextInput,
     DraftBlockLLMOutput,
     generate_draft_block_text,
     validate_generation_output,
@@ -33,6 +35,10 @@ from app.services.memoir.narrative.draft_generation_context import (
     build_node_generation_context,
     load_current_contract_nodes,
     select_generation_nodes,
+)
+from app.services.memoir.narrative.draft_editorial_contexts import (
+    editorial_context_signature,
+    load_chapter_editorial_contexts,
 )
 
 
@@ -61,6 +67,26 @@ def _string_list(value: object) -> list[str]:
 
 def job_response(job: MemoirEditingJob) -> MemoirDraftBlockJobResponse:
     return MemoirDraftBlockJobResponse.model_validate(job)
+
+
+async def _load_verified_editorial_contexts(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    payload: dict[str, object],
+) -> list[DraftBlockEditorialContextInput]:
+    contexts = await load_chapter_editorial_contexts(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    current_signature = editorial_context_signature(contexts)
+    if payload.get("editorial_context_signature") != current_signature:
+        raise ValueError(
+            "chapter editorial context changed after the generation job was queued"
+        )
+    return contexts
 
 
 async def load_draft_generation_job(
@@ -93,10 +119,17 @@ async def enqueue_chapter_block_generation(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    editorial_contexts = await load_chapter_editorial_contexts(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    context_signature = editorial_context_signature(editorial_contexts)
     signature_payload = {
         "contract_id": contract.id,
         "node_ids": request.node_ids,
         "ai_model": request.ai_model or "default",
+        "editorial_context_signature": context_signature,
     }
     return await enqueue_editing_job(
         db,
@@ -109,6 +142,7 @@ async def enqueue_chapter_block_generation(
             "contract_id": contract.id,
             "node_ids": request.node_ids,
             "ai_model": request.ai_model,
+            "editorial_context_signature": context_signature,
             "input_signature": _signature(signature_payload),
             "source": "chapter_workspace",
         },
@@ -135,11 +169,18 @@ async def enqueue_block_revision(
         raise ValueError("unlock the draft block before requesting a revision")
     if block.block_role == MemoirDraftBlockRole.LEGACY_SNAPSHOT.value or block.node_id is None:
         raise ValueError("legacy snapshot blocks cannot be revised by the node generator")
+    editorial_contexts = await load_chapter_editorial_contexts(
+        db,
+        project_id=project_id,
+        chapter_id=block.chapter_id,
+    )
+    context_signature = editorial_context_signature(editorial_contexts)
     signature_payload = {
         "block_id": block.id,
         "current_version_id": block.current_version_id,
         "feedback": request.feedback,
         "ai_model": request.ai_model or "default",
+        "editorial_context_signature": context_signature,
     }
     return await enqueue_editing_job(
         db,
@@ -153,6 +194,7 @@ async def enqueue_block_revision(
             "expected_current_version_id": block.current_version_id,
             "feedback": request.feedback,
             "ai_model": request.ai_model,
+            "editorial_context_signature": context_signature,
             "input_signature": _signature(signature_payload),
             "source": "chapter_workspace",
         },
@@ -179,24 +221,37 @@ async def _run_initial_generation(
     )
     if payload.get("contract_id") != contract.id:
         raise ValueError("chapter contract changed after the generation job was queued")
+    editorial_contexts = await _load_verified_editorial_contexts(
+        db,
+        project_id=job.project_id,
+        chapter_id=chapter_id,
+        payload=payload,
+    )
     selected_nodes = select_generation_nodes(
         nodes,
         requested_node_ids=_string_list(payload.get("node_ids")),
     )
     if not selected_nodes:
         raise ValueError("the current chapter direction has no ready nodes")
-    existing_node_ids = set(
+    existing_blocks = list(
         (
             await db.scalars(
-                select(MemoirDraftBlock.node_id).where(
+                select(MemoirDraftBlock).where(
                     MemoirDraftBlock.project_id == job.project_id,
                     MemoirDraftBlock.chapter_id == chapter_id,
                     MemoirDraftBlock.node_id.in_([node.id for node in nodes]),
-                    MemoirDraftBlock.block_role != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
+                    MemoirDraftBlock.block_role
+                    != MemoirDraftBlockRole.LEGACY_SNAPSHOT.value,
                 )
             )
         ).all()
     )
+    blocks_by_node: dict[str, MemoirDraftBlock] = {}
+    for block in existing_blocks:
+        node_id = str(block.node_id)
+        if node_id in blocks_by_node:
+            raise ValueError("chapter direction has multiple draft blocks for one node")
+        blocks_by_node[node_id] = block
     used_orders = set(
         (
             await db.scalars(
@@ -209,8 +264,32 @@ async def _run_initial_generation(
         ).all()
     )
     created_block_ids_by_node: dict[str, str] = {}
-    skipped_node_ids = [node.id for node in selected_nodes if node.id in existing_node_ids]
-    nodes_to_generate = [node for node in selected_nodes if node.id not in existing_node_ids]
+    updated_block_ids_by_node: dict[str, str] = {}
+    skipped_node_ids = [
+        node.id
+        for node in selected_nodes
+        if (block := blocks_by_node.get(node.id)) is not None
+        and (
+            block.freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
+            or block.locked
+        )
+    ]
+    skipped_locked_node_ids = [
+        node.id
+        for node in selected_nodes
+        if (block := blocks_by_node.get(node.id)) is not None
+        and block.freshness_status == MemoirDraftBlockFreshnessStatus.STALE.value
+        and block.locked
+    ]
+    nodes_to_generate = [
+        node
+        for node in selected_nodes
+        if (block := blocks_by_node.get(node.id)) is None
+        or (
+            block.freshness_status == MemoirDraftBlockFreshnessStatus.STALE.value
+            and not block.locked
+        )
+    ]
     if not nodes_to_generate:
         return EditingJobResult(
             result_json={
@@ -218,7 +297,9 @@ async def _run_initial_generation(
                 "chapter_id": chapter_id,
                 "contract_id": contract.id,
                 "created_block_ids": [],
+                "updated_block_ids": [],
                 "skipped_node_ids": skipped_node_ids,
+                "skipped_locked_node_ids": skipped_locked_node_ids,
                 "model": None,
             }
         )
@@ -240,32 +321,56 @@ async def _run_initial_generation(
             contract=contract,
             nodes=nodes,
             node=node,
+            editorial_contexts=editorial_contexts,
         )
         generated = await generate_draft_block_text(client, context=context.ai_input)
         claims, stories = context.sources_for_claims(generated.used_claim_ids)
-        sort_order = node.sort_order * 1000
-        while sort_order in used_orders:
-            sort_order += 1
-        used_orders.add(sort_order)
-        block = await draft_blocks.create_block(
-            db,
-            project_id=job.project_id,
-            chapter_id=chapter_id,
-            node_id=node.id,
-            block_role=context.ai_input.block_role,
-            sort_order=sort_order,
-            content=generated.content,
-            created_by=MemoirNarrativeActorType.AI,
-            claims=claims,
-            stories=stories,
-            model=getattr(client, "model_name", None),
-            prompt_snapshot=generated.prompt_snapshot,
-        )
-        created_block_ids_by_node[node.id] = block.id
+        existing_block = blocks_by_node.get(node.id)
+        if existing_block is not None:
+            if not existing_block.current_version_id:
+                raise ValueError("stale draft block has no current version")
+            await draft_blocks.append_version(
+                db,
+                block=existing_block,
+                expected_current_version_id=existing_block.current_version_id,
+                content=generated.content,
+                created_by=MemoirNarrativeActorType.AI,
+                claims=claims,
+                stories=stories,
+                model=getattr(client, "model_name", None),
+                prompt_snapshot=generated.prompt_snapshot,
+                sources_refreshed=True,
+            )
+            updated_block_ids_by_node[node.id] = existing_block.id
+        else:
+            sort_order = node.sort_order * 1000
+            while sort_order in used_orders:
+                sort_order += 1
+            used_orders.add(sort_order)
+            block = await draft_blocks.create_block(
+                db,
+                project_id=job.project_id,
+                chapter_id=chapter_id,
+                node_id=node.id,
+                block_role=context.ai_input.block_role,
+                sort_order=sort_order,
+                content=generated.content,
+                created_by=MemoirNarrativeActorType.AI,
+                claims=claims,
+                stories=stories,
+                model=getattr(client, "model_name", None),
+                prompt_snapshot=generated.prompt_snapshot,
+            )
+            created_block_ids_by_node[node.id] = block.id
     created_block_ids = [
         created_block_ids_by_node[node.id]
         for node in selected_nodes
         if node.id in created_block_ids_by_node
+    ]
+    updated_block_ids = [
+        updated_block_ids_by_node[node.id]
+        for node in selected_nodes
+        if node.id in updated_block_ids_by_node
     ]
     return EditingJobResult(
         result_json={
@@ -273,7 +378,9 @@ async def _run_initial_generation(
             "chapter_id": chapter_id,
             "contract_id": contract.id,
             "created_block_ids": created_block_ids,
+            "updated_block_ids": updated_block_ids,
             "skipped_node_ids": skipped_node_ids,
+            "skipped_locked_node_ids": skipped_locked_node_ids,
             "model": getattr(client, "model_name", None),
         }
     )
@@ -302,6 +409,12 @@ async def _run_revision_generation(
         project_id=job.project_id,
         chapter_id=block.chapter_id,
     )
+    editorial_contexts = await _load_verified_editorial_contexts(
+        db,
+        project_id=job.project_id,
+        chapter_id=block.chapter_id,
+        payload=payload,
+    )
     node = next((item for item in nodes if item.id == block.node_id), None)
     if node is None:
         raise ValueError("draft block node is not part of the current chapter direction")
@@ -312,6 +425,7 @@ async def _run_revision_generation(
         nodes=nodes,
         node=node,
         feedback=str(payload.get("feedback") or ""),
+        editorial_contexts=editorial_contexts,
     )
     client = ai_client or get_ai_service(
         str(payload.get("ai_model") or "").strip() or None
@@ -331,6 +445,9 @@ async def _run_revision_generation(
             "prompt_snapshot": generated.prompt_snapshot,
             "feedback": str(payload.get("feedback") or ""),
             "model": getattr(client, "model_name", None),
+            "editorial_context_signature": payload.get(
+                "editorial_context_signature"
+            ),
         }
     )
 
@@ -381,6 +498,12 @@ async def apply_generated_revision(
         project_id=project_id,
         chapter_id=block.chapter_id,
     )
+    editorial_contexts = await _load_verified_editorial_contexts(
+        db,
+        project_id=project_id,
+        chapter_id=block.chapter_id,
+        payload=payload,
+    )
     node = next((item for item in nodes if item.id == block.node_id), None)
     if node is None:
         raise ValueError("draft block node is not part of the current chapter direction")
@@ -391,6 +514,7 @@ async def apply_generated_revision(
         nodes=nodes,
         node=node,
         feedback=str(result.get("feedback") or ""),
+        editorial_contexts=editorial_contexts,
     )
     used_claim_ids = _string_list(result.get("used_claim_ids"))
     output = DraftBlockLLMOutput(

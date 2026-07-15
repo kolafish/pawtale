@@ -36,9 +36,14 @@ from app.schemas.memoir_narrative import (
 )
 from app.services.memoir.narrative.draft_block_ai import (
     DraftBlockClaimInput,
+    DraftBlockEditorialContextInput,
     DraftBlockEvidenceInput,
     DraftBlockGenerationInput,
     DraftBlockStoryInput,
+)
+from app.services.memoir.narrative.draft_editorial_contexts import (
+    editorial_contexts_for_node,
+    load_chapter_editorial_contexts,
 )
 from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
@@ -237,6 +242,7 @@ async def build_node_generation_context(
     nodes: list[MemoirChapterNode],
     node: MemoirChapterNode,
     feedback: str = "",
+    editorial_contexts: list[DraftBlockEditorialContextInput] | None = None,
 ) -> DraftNodeGenerationContext:
     role = block_role_for_node(node.node_type)
     previous_context, next_context = await _adjacent_contexts(
@@ -247,6 +253,12 @@ async def build_node_generation_context(
     )
     node_links = sorted(node.stories, key=lambda item: (item.sort_order, item.id))
     story_ids = [link.story_id for link in node_links]
+    if editorial_contexts is None:
+        editorial_contexts = await load_chapter_editorial_contexts(
+            db,
+            project_id=project_id,
+            chapter_id=node.chapter_id,
+        )
     stories = {
         story.id: story
         for story in (
@@ -455,6 +467,10 @@ async def build_node_generation_context(
             node_purpose=node.purpose,
             block_role=role,
             stories=prompt_stories,
+            editorial_contexts=editorial_contexts_for_node(
+                editorial_contexts,
+                story_ids=set(story_ids),
+            ),
             previous_block_context=previous_context,
             next_block_context=next_context,
             feedback=feedback.strip(),
