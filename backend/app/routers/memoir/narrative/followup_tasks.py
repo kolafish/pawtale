@@ -104,7 +104,7 @@ async def list_memoir_followup_tasks(
         offset=offset,
     )
     return MemoirFollowupTaskListResponse(
-        items=[await task_service.task_response(db, task=item) for item in items],
+        items=await task_service.task_responses(db, tasks=items),
         total=total,
     )
 

@@ -6,8 +6,6 @@ import json
 from pydantic import ValidationError
 
 from app.domain.memoir.narrative_types import (
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
@@ -25,6 +23,9 @@ from app.schemas.memoir_narrative import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
+)
 from app.services.memoir.narrative.gap_rules import ChapterAuditContext
 
 
@@ -126,13 +127,7 @@ def build_semantic_gap_prompt(context: ChapterAuditContext) -> str:
                     }
                     for link in context.story_claims.get(story.id, [])
                     if (claim := context.claims.get(link.claim_id)) is not None
-                    and claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-                    and claim.verification_status
-                    not in {
-                        MemoirClaimVerificationStatus.DISPUTED.value,
-                        MemoirClaimVerificationStatus.REJECTED.value,
-                    }
-                    and not claim.superseded_by_claim_id
+                    and claim_usable_for_publication(claim)
                 ],
             }
             for story in context.stories.values()
@@ -199,13 +194,7 @@ def _validated_candidates(
     valid_claim_ids = {
         claim.id
         for claim in context.claims.values()
-        if claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-        and claim.verification_status
-        not in {
-            MemoirClaimVerificationStatus.DISPUTED.value,
-            MemoirClaimVerificationStatus.REJECTED.value,
-        }
-        and not claim.superseded_by_claim_id
+        if claim_usable_for_publication(claim)
     }
     candidates: list[MemoirNarrativeGapCandidate] = []
     selected_dimensions: set[str] = set()

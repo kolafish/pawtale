@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from hashlib import sha256
 
+import pytest
 from sqlalchemy import func, select
 
 from app.domain.memoir.narrative_types import (
@@ -22,6 +23,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimVerificationStatus,
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
+    MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeDecisionAction,
@@ -1454,7 +1456,18 @@ async def test_stop_asking_closes_only_task_and_keeps_content_and_gap(client, te
     assert decision is not None
 
 
-async def test_followup_prompt_drops_task_after_claim_becomes_private(client, test_db):
+@pytest.mark.parametrize(
+    "publication_status",
+    [
+        MemoirClaimPublicationStatus.PRIVATE,
+        MemoirClaimPublicationStatus.EXCLUDED,
+    ],
+)
+async def test_followup_prompt_keeps_restricted_claim_only_as_do_not_repeat_context(
+    client,
+    test_db,
+    publication_status,
+):
     fixture = await _create_story_gap(client, test_db)
     started = await post_mobile_memoir_voice_session(
         client,
@@ -1478,20 +1491,139 @@ async def test_followup_prompt_drops_task_after_claim_becomes_private(client, te
     assert context is not None
     assert fixture["claim"].statement in context.prompt_text
 
-    fixture["claim"].publication_status = MemoirClaimPublicationStatus.PRIVATE.value
+    fixture["claim"].publication_status = publication_status.value
     fixture["claim"].publication_decided_by_user_id = fixture["user_id"]
     fixture["claim"].updated_by = MemoirNarrativeActorType.USER.value
     fixture["claim"].updated_by_user_id = fixture["user_id"]
     test_db.add(fixture["claim"])
     await test_db.commit()
-    assert await followup_planner.prompt_context_for_session(
+    restricted_context = await followup_planner.prompt_context_for_session(
         test_db,
         voice_session=voice_session,
-    ) is None
-    assert await followup_planner.select_next_task(
+    )
+    assert restricted_context is not None
+    assert (
+        "用户已讲过但明确不用于成书，不要要求重复或展开："
+        + fixture["claim"].statement
+    ) in restricted_context.prompt_text
+    assert (
+        "可承接的已知事实：" + fixture["claim"].statement
+    ) not in restricted_context.prompt_text
+    response = await followup_tasks.task_response(test_db, task=fixture["task"])
+    assert fixture["claim"].statement not in response.known_context_summary
+
+
+async def test_followup_prompt_hides_rejected_claim_statement_but_keeps_conflict_context(
+    client,
+    test_db,
+):
+    fixture = await _create_story_gap(client, test_db)
+    started = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    voice_session = await test_db.get(
+        MemoirVoiceSession,
+        started.json()["session"]["id"],
+    )
+    assert voice_session is not None
+    fixture["claim"].verification_status = MemoirClaimVerificationStatus.REJECTED.value
+    fixture["claim"].updated_by = MemoirNarrativeActorType.USER.value
+    fixture["claim"].updated_by_user_id = fixture["user_id"]
+    await test_db.commit()
+
+    context = await followup_planner.prompt_context_for_session(
+        test_db,
+        voice_session=voice_session,
+    )
+
+    assert context is not None
+    assert fixture["claim"].statement not in context.prompt_text
+    assert "存在已被否定或仍有争议的旧说法" in context.prompt_text
+
+
+async def test_followup_planner_replaces_superseded_do_not_repeat_claim(client, test_db):
+    fixture = await _create_story_gap(client, test_db)
+    successor = MemoirClaim(
+        project_id=fixture["project_id"],
+        claim_type=MemoirClaimType.EVENT.value,
+        statement="后来确认，比赛结束后大家一起走回了学校。",
+        predicate_code=MemoirClaimPredicate.NARRATIVE_FACT.value,
+        time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
+        certainty=MemoirClaimCertainty.EXACT.value,
+        verification_status=MemoirClaimVerificationStatus.CONFIRMED.value,
+        publication_status=MemoirClaimPublicationStatus.ELIGIBLE.value,
+        created_by=MemoirNarrativeActorType.USER.value,
+        created_by_user_id=fixture["user_id"],
+        updated_by=MemoirNarrativeActorType.USER.value,
+        updated_by_user_id=fixture["user_id"],
+    )
+    test_db.add(successor)
+    await test_db.flush()
+    fixture["claim"].superseded_by_claim_id = successor.id
+    test_db.add(
+        MemoirStorySlotClaim(
+            project_id=fixture["project_id"],
+            story_slot_id=fixture["slot"].id,
+            claim_id=successor.id,
+            evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
+            created_by=MemoirNarrativeActorType.USER.value,
+            created_by_user_id=fixture["user_id"],
+        )
+    )
+    await test_db.commit()
+
+    result = await followup_planner.generate_followup_tasks(
         test_db,
         project_id=fixture["project_id"],
-    ) is None
+        chapter_id=fixture["chapter"].id,
+    )
+    await test_db.commit()
+    assert result.updated_task_ids == (fixture["task"].id,)
+    refreshed = await followup_tasks.get_task(
+        test_db,
+        project_id=fixture["project_id"],
+        task_id=fixture["task"].id,
+    )
+    assert refreshed is not None
+    assert {
+        (relation.claim_id, relation.context_role)
+        for relation in refreshed.claims
+    } == {
+        (
+            successor.id,
+            MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value,
+        )
+    }
+
+    started = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": refreshed.id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    voice_session = await test_db.get(
+        MemoirVoiceSession,
+        started.json()["session"]["id"],
+    )
+    assert voice_session is not None
+    context = await followup_planner.prompt_context_for_session(
+        test_db,
+        voice_session=voice_session,
+    )
+    assert context is not None
+    assert fixture["claim"].statement not in context.prompt_text
+    assert successor.statement in context.prompt_text
 
 
 async def test_followup_prompt_uses_the_pending_fact_confirmation_question(client, test_db):

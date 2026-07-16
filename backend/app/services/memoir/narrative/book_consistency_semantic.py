@@ -6,8 +6,6 @@ import json
 from pydantic import ValidationError
 
 from app.domain.memoir.narrative_types import (
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
@@ -23,6 +21,9 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.narrative.book_consistency_context import BookConsistencyContext
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
+)
 
 
 BOOK_SEMANTIC_SYSTEM_PROMPT = (
@@ -120,13 +121,7 @@ def build_book_semantic_prompt(
             }
             for claim in sorted(context.claims.values(), key=lambda item: item.id)
             if claim.id in selected_claim_ids
-            and claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-            and claim.verification_status
-            not in {
-                MemoirClaimVerificationStatus.DISPUTED.value,
-                MemoirClaimVerificationStatus.REJECTED.value,
-            }
-            and not claim.superseded_by_claim_id
+            and claim_usable_for_publication(claim)
         ],
     }
     return f"""检查下面整本回忆录是否存在需要人工处理的跨章语义问题。
@@ -192,13 +187,7 @@ def _validated_book_candidates(
         claim.id
         for claim in context.claims.values()
         if claim.id in scoped_claim_ids
-        and claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-        and claim.verification_status
-        not in {
-            MemoirClaimVerificationStatus.DISPUTED.value,
-            MemoirClaimVerificationStatus.REJECTED.value,
-        }
-        and not claim.superseded_by_claim_id
+        and claim_usable_for_publication(claim)
     }
     story_chapter_ids: dict[str, set[str]] = {}
     claim_chapter_ids: dict[str, set[str]] = {}

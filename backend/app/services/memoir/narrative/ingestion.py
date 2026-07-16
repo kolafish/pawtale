@@ -47,6 +47,9 @@ from app.services.memoir.narrative import (
     story_decisions,
     story_matching,
 )
+from app.services.memoir.narrative.claim_usage_policy import (
+    known_for_conversation_filters,
+)
 from app.services.memoir.narrative.extraction import extract_narrative_state
 
 
@@ -138,8 +141,7 @@ async def _find_matching_claim(
         MemoirClaim.time_precision == candidate.time_precision.value,
         MemoirClaim.certainty == candidate.certainty.value,
         _optional_equals(MemoirClaim.object_text, candidate.object_text),
-        MemoirClaim.superseded_by_claim_id.is_(None),
-        MemoirClaim.verification_status != MemoirClaimVerificationStatus.REJECTED.value,
+        *known_for_conversation_filters(),
     )
     return await db.scalar(statement.order_by(MemoirClaim.created_at, MemoirClaim.id).limit(1))
 

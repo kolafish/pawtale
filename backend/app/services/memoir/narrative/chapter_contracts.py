@@ -12,8 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
     MemoirClaimEvidenceRole,
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
@@ -45,6 +43,9 @@ from app.schemas.memoir_narrative import (
     MemoirChapterStructureResponse,
 )
 from app.services.memoir.narrative import story_decisions
+from app.services.memoir.narrative.claim_usage_policy import (
+    usable_for_publication_filters,
+)
 from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
 
@@ -656,15 +657,7 @@ async def eligible_story_claim_shapes(
                         MemoirStoryVerificationStatus.REJECTED.value,
                     }
                 ),
-                MemoirClaim.publication_status
-                == MemoirClaimPublicationStatus.ELIGIBLE.value,
-                MemoirClaim.verification_status.not_in(
-                    {
-                        MemoirClaimVerificationStatus.DISPUTED.value,
-                        MemoirClaimVerificationStatus.REJECTED.value,
-                    }
-                ),
-                MemoirClaim.superseded_by_claim_id.is_(None),
+                *usable_for_publication_filters(),
                 MemoirClaimEvidence.evidence_role
                 == MemoirClaimEvidenceRole.SUPPORTS.value,
                 or_(

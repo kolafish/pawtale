@@ -9,8 +9,6 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
     MemoirChapterNodeType,
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
     MemoirDraftBlockRole,
@@ -35,6 +33,9 @@ from app.services.memoir.narrative.book_consistency_context import (
     BookConsistencyContext,
     book_consistency_signature,
     load_book_consistency_context,
+)
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
 )
 from app.services.memoir.narrative.readiness_policy import (
     gap_blocks_formalization,
@@ -120,14 +121,7 @@ def _structure_blockers(context: BookConsistencyContext) -> list[MemoirBookReadi
                     continue
                 has_supported_claim = any(
                     (claim := chapter.claims.get(story_claim.claim_id)) is not None
-                    and claim.superseded_by_claim_id is None
-                    and claim.publication_status
-                    == MemoirClaimPublicationStatus.ELIGIBLE.value
-                    and claim.verification_status
-                    not in {
-                        MemoirClaimVerificationStatus.DISPUTED.value,
-                        MemoirClaimVerificationStatus.REJECTED.value,
-                    }
+                    and claim_usable_for_publication(claim)
                     and chapter.evidence_counts.get(claim.id, 0) > 0
                     for story_claim in chapter.story_claims.get(story.id, [])
                 )
@@ -190,13 +184,8 @@ def _source_blockers(context: BookConsistencyContext) -> list[MemoirBookReadines
                 reason = "Claim 不存在"
             elif claim.superseded_by_claim_id:
                 reason = "Claim 已被新版本取代"
-            elif claim.publication_status != MemoirClaimPublicationStatus.ELIGIBLE.value:
-                reason = "Claim 不允许进入正文"
-            elif claim.verification_status in {
-                MemoirClaimVerificationStatus.DISPUTED.value,
-                MemoirClaimVerificationStatus.REJECTED.value,
-            }:
-                reason = "Claim 尚有争议或已被否定"
+            elif not claim_usable_for_publication(claim):
+                reason = "Claim 不允许进入正文、尚有争议或已被否定"
             elif context.evidence_counts.get(claim_id, 0) < 1:
                 reason = "Claim 没有有效支持证据"
             if reason:
