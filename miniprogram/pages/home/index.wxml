@@ -82,6 +82,13 @@
 
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <button
+        class="{{resumeAskButtonClass}} topic-map"
+        bindtap="openTopicMap"
+        hover-class="{{resumeAskButtonHoverClass}}"
+      >
+        看看聊过的话题
+      </button>
+      <button
         class="{{resumeAskButtonClass}} completion"
         bindtap="startBookCompletion"
         hover-class="{{resumeAskButtonHoverClass}}"

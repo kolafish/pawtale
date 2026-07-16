@@ -398,6 +398,14 @@
     0 6rpx 14rpx rgba(93, 61, 42, 0.06);
 }
 
+.resume-ask-button.topic-map {
+  background: #f1f6f2;
+  color: #386552;
+  box-shadow:
+    0 0 0 1rpx rgba(56, 101, 82, 0.14),
+    0 6rpx 14rpx rgba(93, 61, 42, 0.06);
+}
+
 .voice-auth-panel {
   margin-top: 32rpx;
   padding: 24rpx;

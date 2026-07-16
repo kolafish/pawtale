@@ -581,6 +581,37 @@ test("home opens the whole-book completion overview without waiting for backgrou
   delete global.wx;
 });
 
+test("home opens the topic map without requiring microphone consent", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project/1",
+      hasProject: true,
+      voiceAuthorizationAgreed: false,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.openTopicMap.call(context);
+
+  assert.equal(
+    navigations[0],
+    "/pages/topic-map/index?projectId=project%2F1",
+  );
+  assert.equal(context.data.error, "");
+  delete global.wx;
+});
+
 test("home does not create voice sessions when consent audit sync fails", async () => {
   let createCalls = 0;
   const { page } = loadHomePage({

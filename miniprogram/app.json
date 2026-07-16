@@ -5,6 +5,7 @@
     "pages/login/index",
     "pages/voice-authorization/index",
     "pages/voice-chat/index",
+    "pages/topic-map/index",
     "pages/book-completion/index",
     "pages/source-review/index",
     "pages/transcripts/index",

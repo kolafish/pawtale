@@ -1,0 +1,49 @@
+<view class="{{pageClass}}">
+  <view class="page-intro">
+    <text class="page-kicker">人生话题</text>
+    <text class="page-title">{{headline}}</text>
+    <text class="page-detail">{{detail}}</text>
+    <view class="map-note">
+      <text class="map-note-title">按自己的节奏来</text>
+      <text class="map-note-text">“还可以聊”只是一个方向，不是欠着没完成。小余不会因为这里空着就打断您正在讲的故事。</text>
+    </view>
+  </view>
+
+  <view wx:if="{{error}}" class="error-strip">{{error}}</view>
+  <view wx:if="{{loading}}" class="loading-state">正在看看聊过的话题...</view>
+
+  <view wx:else class="module-list">
+    <view wx:for="{{modules}}" wx:key="module_key" class="topic-module">
+      <text class="module-title">{{item.title}}</text>
+      <view class="topic-list">
+        <view
+          wx:for="{{item.items}}"
+          wx:for-item="topic"
+          wx:key="id"
+          class="{{topic.itemClass}}"
+        >
+          <view class="topic-heading">
+            <text class="topic-title">{{topic.title}}</text>
+            <text class="state-chip">{{topic.state_text}}</text>
+          </view>
+          <text class="topic-intent">{{topic.intent}}</text>
+          <text class="state-detail">{{topic.state_detail}}</text>
+          <button
+            class="topic-action {{topic.actionDisabled ? 'disabled' : ''}}"
+            data-item-id="{{topic.id}}"
+            catchtap="chooseResolution"
+            hover-class="{{topic.actionDisabled ? 'none' : 'topic-action-hover'}}"
+            disabled="{{topic.actionDisabled}}"
+          >
+            {{topic.actionText}}
+          </button>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{!modules.length}}" class="empty-state">
+      <text>暂时还没有可展示的话题。</text>
+      <text>您仍然可以先自由讲一段。</text>
+    </view>
+  </view>
+</view>
