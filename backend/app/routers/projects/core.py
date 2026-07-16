@@ -53,4 +53,4 @@ async def delete_project(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await project_core.delete_project(db, project_id, current_user.id)
+    await project_core.delete_project(db, project_id, current_user)

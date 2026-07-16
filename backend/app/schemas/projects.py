@@ -72,6 +72,7 @@ class ProjectListItem(BaseModel):
     owner_email: str | None = None
     owner_display_name: str | None = None
     can_edit: bool = True
+    can_delete: bool
     can_edit_memoir_materials: bool = True
     total_word_count: int = 0
     group_count: int = 0
@@ -94,6 +95,7 @@ class ProjectResponse(BaseModel):
     owner_email: str | None = None
     owner_display_name: str | None = None
     can_edit: bool = True
+    can_delete: bool
     can_edit_memoir_materials: bool = True
     metadata_json: dict = Field(default_factory=dict)
     total_word_count: int = 0

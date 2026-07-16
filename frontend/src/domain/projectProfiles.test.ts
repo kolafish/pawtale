@@ -8,6 +8,7 @@ function project(overrides: Partial<ProjectListItem>): ProjectListItem {
     id: 'project-1',
     type: 'novel',
     title: '项目',
+    can_delete: true,
     total_word_count: 0,
     group_count: 1,
     document_count: 1,

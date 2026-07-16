@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 
-from app.models.audit import AuditEvent, AuditSession
+from app.models.audit import AuditDailyFeatureUsage, AuditEvent, AuditSession
 from app.models.memoir import (
     MemoirImageAsset,
     MemoirMaterialShareVideo,
@@ -96,6 +96,7 @@ class TestProjectAPI:
         assert listed_project["owner_email"] == owner["email"]
         assert listed_project["owner_display_name"] == owner["display_name"]
         assert listed_project["can_edit"] is False
+        assert listed_project["can_delete"] is True
         assert listed_project["can_edit_memoir_materials"] is True
 
         detail_response = await client.get(f"/api/projects/{project['id']}")
@@ -104,6 +105,7 @@ class TestProjectAPI:
         assert detail["title"] == "余仲尤的往事"
         assert detail["owner_user_id"] == owner["id"]
         assert detail["can_edit"] is False
+        assert detail["can_delete"] is True
         assert detail["can_edit_memoir_materials"] is True
 
         update_response = await client.put(
@@ -111,6 +113,44 @@ class TestProjectAPI:
             json={"title": "管理员不应改项目标题"},
         )
         assert update_response.status_code == 404
+
+    async def test_admin_can_delete_other_users_project_with_server_audit(self, client, test_db):
+        owner = (await client.get("/api/auth/me")).json()
+        project = await create_project(client, "需要管理员清理的项目", "memoir")
+
+        await _register_admin(client, test_db)
+
+        response = await client.delete(f"/api/projects/{project['id']}")
+
+        assert response.status_code == 204
+        assert (await client.get(f"/api/projects/{project['id']}")).status_code == 404
+        assert await test_db.get(User, owner["id"]) is not None
+
+        event = await test_db.scalar(
+            select(AuditEvent).where(AuditEvent.feature_code == "admin.project.delete")
+        )
+        assert event is not None
+        assert event.platform == "web"
+        assert event.page_path == "/admin/projects"
+        assert event.project_id is None
+        assert event.metadata_json == {
+            "deleted_project_id": project["id"],
+            "deleted_project_type": "memoir",
+            "deleted_project_title": "需要管理员清理的项目",
+            "owner_user_id": owner["id"],
+            "owner_email": owner["email"],
+            "owner_display_name": owner["display_name"],
+            "actor_role": "admin",
+        }
+        feature_usage = await test_db.scalar(
+            select(AuditDailyFeatureUsage).where(
+                AuditDailyFeatureUsage.user_id == event.user_id,
+                AuditDailyFeatureUsage.platform == "web",
+                AuditDailyFeatureUsage.feature_code == "admin.project.delete",
+            )
+        )
+        assert feature_usage is not None
+        assert feature_usage.event_count == 1
 
     async def test_non_admin_cannot_view_other_users_project(self, client):
         project = await create_project(client, "别人项目", "memoir")
@@ -131,6 +171,9 @@ class TestProjectAPI:
 
         detail_response = await client.get(f"/api/projects/{project['id']}")
         assert detail_response.status_code == 404
+
+        delete_response = await client.delete(f"/api/projects/{project['id']}")
+        assert delete_response.status_code == 404
 
     async def test_update_project(self, client):
         project = await create_project(client, "原标题")
