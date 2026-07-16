@@ -17,6 +17,10 @@ function sampleGap(overrides = {}) {
     title: "离家时间有两个说法",
     description: "一处是十八岁，一处是十九岁。",
     status: "open",
+    recommended_action: "manual_review",
+    action_reason_code: "fact_conflict_detected",
+    action_decision_source: "deterministic_policy",
+    action_policy_version: "1",
     claims: [],
     stories: [],
     chapters: [],
@@ -94,7 +98,22 @@ function sampleWorkspace(overrides = {}) {
     }],
     gaps: {
       must_handle: [sampleGap()],
-      suggested: [sampleGap({ id: "gap-2", severity: "medium", title: "可以再讲讲到达后的感受" })],
+      suggested: [
+        sampleGap({
+          id: "gap-2",
+          severity: "medium",
+          title: "可以再讲讲到达后的感受",
+          recommended_action: "interview",
+          action_reason_code: "missing_new_evidence",
+        }),
+        sampleGap({
+          id: "gap-3",
+          severity: "low",
+          title: "还可以讲讲这次离家的影响",
+          recommended_action: "interview",
+          action_reason_code: "missing_new_evidence",
+        }),
+      ],
       accepted_incomplete: [],
     },
     latest_audit_job: {
@@ -250,6 +269,37 @@ test("a required fact check stays ahead of optional interview directions", () =>
 
   assert.equal(action.kind, "open_checks");
   assert.equal(action.title, "离家时间有两个说法");
+});
+
+test("existing material fixes stay out of the interview directions", () => {
+  const { chapterWorkspaceViewPatch } = loadWorkspacePage().mod;
+  const editorialGap = sampleGap({
+    id: "gap-editorial",
+    title: "开头可以直接补入已有背景",
+    recommended_action: "editorial",
+    action_reason_code: "existing_material_available",
+  });
+  const workspace = sampleWorkspace({
+    answer_updates: [],
+    gaps: {
+      must_handle: [],
+      suggested: [editorialGap],
+      accepted_incomplete: [],
+    },
+  });
+
+  const patch = chapterWorkspaceViewPatch(
+    workspace,
+    [sampleTask({ gap_id: editorialGap.id })],
+    [sampleDraftBlock()],
+  );
+
+  assert.equal(patch.editorialCount, 1);
+  assert.equal(patch.editorialGaps[0].title, editorialGap.title);
+  assert.equal(patch.directions.length, 0);
+  assert.equal(patch.suggestionCount, 0);
+  assert.equal(patch.nextAction.kind, "open_editorial_fix");
+  assert.match(patch.readinessDetail, /不需要继续采访/);
 });
 
 test("selected completion direction starts the existing realtime voice-chat chain", async () => {

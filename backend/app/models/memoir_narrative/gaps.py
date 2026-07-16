@@ -13,14 +13,18 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
+    MemoirNarrativeGapActionDecisionSource,
+    MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
@@ -63,6 +67,22 @@ class MemoirNarrativeGap(Base):
         CheckConstraint(
             f"status IN ({_enum_values(MemoirNarrativeGapStatus)})",
             name="ck_memoir_narrative_gaps_status",
+        ),
+        CheckConstraint(
+            f"recommended_action IN ({_enum_values(MemoirNarrativeGapRecommendedAction)})",
+            name="ck_memoir_narrative_gaps_recommended_action",
+        ),
+        CheckConstraint(
+            f"action_reason_code IN ({_enum_values(MemoirNarrativeGapActionReasonCode)})",
+            name="ck_memoir_narrative_gaps_action_reason_code",
+        ),
+        CheckConstraint(
+            f"action_decision_source IN ({_enum_values(MemoirNarrativeGapActionDecisionSource)})",
+            name="ck_memoir_narrative_gaps_action_decision_source",
+        ),
+        CheckConstraint(
+            "length(trim(action_policy_version)) > 0",
+            name="ck_memoir_narrative_gaps_action_policy_version",
         ),
         CheckConstraint(
             f"detected_by IN ({_enum_values(MemoirNarrativeGapDetectedBy)})",
@@ -108,6 +128,13 @@ class MemoirNarrativeGap(Base):
             "status",
         ),
         Index(
+            "ix_memoir_narrative_gaps_project_action",
+            "project_id",
+            "status",
+            "recommended_action",
+            "severity",
+        ),
+        Index(
             "ix_memoir_narrative_gaps_project_story",
             "project_id",
             "primary_story_id",
@@ -132,6 +159,30 @@ class MemoirNarrativeGap(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(
         String(24), default=MemoirNarrativeGapStatus.OPEN.value, nullable=False
+    )
+    recommended_action: Mapped[str] = mapped_column(
+        String(24),
+        default=MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW.value,
+        server_default=text("'manual_review'"),
+        nullable=False,
+    )
+    action_reason_code: Mapped[str] = mapped_column(
+        String(48),
+        default=MemoirNarrativeGapActionReasonCode.MIGRATION_REVIEW_REQUIRED.value,
+        server_default=text("'migration_review_required'"),
+        nullable=False,
+    )
+    action_decision_source: Mapped[str] = mapped_column(
+        String(32),
+        default=MemoirNarrativeGapActionDecisionSource.MIGRATION.value,
+        server_default=text("'migration'"),
+        nullable=False,
+    )
+    action_policy_version: Mapped[str] = mapped_column(
+        String(24),
+        default="migration-1",
+        server_default=text("'migration-1'"),
+        nullable=False,
     )
     detected_by: Mapped[str] = mapped_column(String(12), nullable=False)
     detection_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)

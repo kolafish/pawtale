@@ -11,6 +11,7 @@ export type ChapterNextActionKind =
   | "continue_fact_confirmation"
   | "open_followups"
   | "open_checks"
+  | "open_editorial_fix"
   | "generate_draft"
   | "open_drafts"
   | "complete";
@@ -107,20 +108,61 @@ export function chapterNextAction(
       disabled: false,
     };
   }
-  const mustHandle = workspace.gaps.must_handle[0];
-  if (mustHandle) {
+  const allOpenGaps = Array.from(
+    new Map(
+      [...workspace.gaps.must_handle, ...workspace.gaps.suggested]
+        .map((gap) => [gap.id, gap] as const),
+    ).values(),
+  );
+  const gapById = new Map(allOpenGaps.map((gap) => [gap.id, gap]));
+  const inProgressTask = followupTasks.find((item) => (
+    item.status === "in_progress"
+    && gapById.get(item.gap_id)?.recommended_action === "interview"
+  ));
+  if (inProgressTask) {
+    return {
+      kind: "open_followups",
+      eyebrow: "继续刚才的讲述",
+      title: inProgressTask.question,
+      detail: "这个方向正在补充，可以接着刚才的位置继续讲。",
+      actionText: "继续刚才的回答",
+      disabled: false,
+      taskId: inProgressTask.id,
+    };
+  }
+  const manualReview = allOpenGaps.find(
+    (gap) => gap.recommended_action === "manual_review",
+  );
+  if (manualReview) {
     return {
       kind: "open_checks",
       eyebrow: "先确认一件事",
-      title: mustHandle.title,
-      detail: mustHandle.description,
+      title: manualReview.title,
+      detail: manualReview.description,
       actionText: "处理这件事",
       disabled: false,
     };
   }
-  const task = followupTasks.find((item) => item.status === "in_progress")
-    || followupTasks.find((item) => item.status === "pending")
-    || followupTasks.find((item) => item.status === "deferred");
+  const editorialGap = allOpenGaps.find(
+    (gap) => gap.recommended_action === "editorial",
+  );
+  if (editorialGap) {
+    return {
+      kind: "open_editorial_fix",
+      eyebrow: "可以直接整理",
+      title: editorialGap.title,
+      detail: "相关素材已经存在，不需要继续采访，调整结构或正文即可。",
+      actionText: "查看并整理正文",
+      disabled: false,
+    };
+  }
+  const task = followupTasks.find((item) => (
+    item.status === "pending"
+    && gapById.get(item.gap_id)?.recommended_action === "interview"
+  )) || followupTasks.find((item) => (
+    item.status === "deferred"
+    && gapById.get(item.gap_id)?.recommended_action === "interview"
+  ));
   if (task) {
     return {
       kind: "open_followups",

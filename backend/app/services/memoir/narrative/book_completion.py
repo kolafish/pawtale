@@ -289,6 +289,25 @@ async def _chapter_completion_status(
             detail="这不是靠继续录音能解决的问题，请到本章查看。",
         )
 
+    editorial_item = next(
+        (
+            item
+            for item in items
+            if item.action == MemoirCompletionItemAction.EDIT
+        ),
+        None,
+    )
+    if editorial_item is not None:
+        return MemoirBookCompletionChapterResponse(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="needs_review",
+            headline="已有素材，可以直接重新整理",
+            detail="这处问题不需要继续采访，请到本章调整结构或正文。",
+            focus_areas=[editorial_item.title],
+        )
+
     return MemoirBookCompletionChapterResponse(
         chapter_id=chapter.id,
         title=chapter.title,
@@ -483,6 +502,42 @@ async def prepare_book_completion_chapter(
             headline=item.question,
             detail=_INTERVIEW_GUIDANCE,
             task_id=item.task_id,
+            chapter_id=chapter.id,
+        )
+
+    manual_item = next(
+        (
+            item
+            for item in items
+            if item.action == MemoirCompletionItemAction.REVIEW
+        ),
+        None,
+    )
+    if manual_item is not None:
+        return _response(
+            project_id,
+            state="needs_review",
+            action="open_chapter",
+            headline=manual_item.title,
+            detail="这不是靠继续录音能解决的问题，请到本章确认。",
+            chapter_id=chapter.id,
+        )
+
+    editorial_item = next(
+        (
+            item
+            for item in items
+            if item.action == MemoirCompletionItemAction.EDIT
+        ),
+        None,
+    )
+    if editorial_item is not None:
+        return _response(
+            project_id,
+            state="needs_review",
+            action="open_chapter",
+            headline=editorial_item.title,
+            detail="已有素材可以处理这处问题，请到本章调整结构或正文。",
             chapter_id=chapter.id,
         )
 

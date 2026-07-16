@@ -141,6 +141,7 @@ definePage<ChapterWorkspacePageData>()({
     nextAction: LOADING_NEXT_ACTION,
     recordedCount: 0,
     mustConfirmCount: 0,
+    editorialCount: 0,
     suggestionCount: 0,
     acceptedIncompleteCount: 0,
     readinessTitle: "正在整理本章",
@@ -149,6 +150,7 @@ definePage<ChapterWorkspacePageData>()({
     directions: [],
     confirmations: [],
     reviewGaps: [],
+    editorialGaps: [],
     suggestionHints: [],
     appliedAnswerUpdates: [],
     outlineTitles: [],
@@ -270,11 +272,17 @@ definePage<ChapterWorkspacePageData>()({
       await this.beginFollowupInterview(action.taskId || this.data.directions[0]?.id || "");
     } else if (action.kind === "open_checks") {
       scrollToSection("#confirmations");
+    } else if (action.kind === "open_editorial_fix") {
+      scrollToSection("#editorial-fixes");
     } else if (action.kind === "generate_draft") {
       await this.generateDraftBlocks();
     } else if (action.kind === "open_drafts") {
       scrollToSection("#chapter-draft");
     }
+  },
+
+  openEditorialFix() {
+    scrollToSection("#chapter-draft");
   },
 
   async suggestCurrentDirection() {

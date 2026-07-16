@@ -20,6 +20,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeGapClaimRole,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
@@ -50,8 +51,7 @@ from app.services.memoir.narrative import gaps as gap_service
 from app.services.memoir.narrative import followup_tasks
 
 
-FOLLOWUP_PLANNER_VERSION = "6"
-NON_INTERVIEW_GAP_TYPES = {MemoirNarrativeGapType.REPETITION}
+FOLLOWUP_PLANNER_VERSION = "7"
 TERMINAL_SLOT_STATUSES = {
     MemoirStorySlotStatus.SUFFICIENT.value,
     MemoirStorySlotStatus.ACCEPTED_INCOMPLETE.value,
@@ -725,14 +725,18 @@ async def generate_followup_tasks(
         )
         if blocked_by_other_narration:
             is_story_narration = False
-        actionable = (
+        interview_action = (
+            gap.recommended_action
+            == MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+        )
+        actionable = interview_action and (
             is_story_narration
             if gap_type == MemoirNarrativeGapType.MISSING_SLOT
-            else gap_type not in NON_INTERVIEW_GAP_TYPES
-            and (bool(claim_roles) or story is not None)
+            else bool(claim_roles) or story is not None
         )
         if (
-            existing is not None
+            interview_action
+            and existing is not None
             and existing.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
             and (
                 gap_type != MemoirNarrativeGapType.MISSING_SLOT
@@ -862,6 +866,8 @@ async def _task_is_selectable(
             MemoirNarrativeGap.project_id == task.project_id,
             MemoirNarrativeGap.id == task.gap_id,
             MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
+            MemoirNarrativeGap.recommended_action
+            == MemoirNarrativeGapRecommendedAction.INTERVIEW.value,
         )
     )
     if gap is None:

@@ -26,6 +26,7 @@ from app.domain.memoir.types import (
 from app.migrations.memoir_narrative import (
     MEMOIR_NARRATIVE_TABLES,
     MEMOIR_NARRATIVE_TRIGGERS,
+    _ensure_narrative_gap_action_columns,
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
@@ -272,6 +273,84 @@ async def test_narrative_migration_adds_followup_assignment_snapshot_column_once
             "memoir_followup_task_utterances.is_assignment_snapshot"
         ]
         assert second["changed_columns"] == []
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_backfills_gap_actions_without_guessing():
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_narrative_gaps ("
+                    "id TEXT PRIMARY KEY, project_id TEXT NOT NULL, gap_type TEXT NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_tasks ("
+                    "id TEXT PRIMARY KEY, project_id TEXT NOT NULL, "
+                    "gap_id TEXT NOT NULL, status TEXT NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gaps (id, project_id, gap_type) VALUES "
+                    "('gap-active', 'project-1', 'causality'), "
+                    "('gap-repetition', 'project-1', 'repetition'), "
+                    "('gap-unknown', 'project-1', 'causality')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_tasks "
+                    "(id, project_id, gap_id, status) VALUES "
+                    "('task-active', 'project-1', 'gap-active', 'pending')"
+                )
+            )
+            first = await _ensure_narrative_gap_action_columns(conn)
+            second = await _ensure_narrative_gap_action_columns(conn)
+            rows = (
+                await conn.execute(
+                    text(
+                        "SELECT id, recommended_action, action_reason_code, "
+                        "action_decision_source, action_policy_version "
+                        "FROM memoir_narrative_gaps ORDER BY id"
+                    )
+                )
+            ).fetchall()
+
+        assert first == [
+            "memoir_narrative_gaps.recommended_action",
+            "memoir_narrative_gaps.action_reason_code",
+            "memoir_narrative_gaps.action_decision_source",
+            "memoir_narrative_gaps.action_policy_version",
+        ]
+        assert second == []
+        assert rows == [
+            (
+                "gap-active",
+                "interview",
+                "missing_new_evidence",
+                "migration",
+                "migration-1",
+            ),
+            (
+                "gap-repetition",
+                "editorial",
+                "existing_material_available",
+                "migration",
+                "migration-1",
+            ),
+            (
+                "gap-unknown",
+                "manual_review",
+                "migration_review_required",
+                "migration",
+                "migration-1",
+            ),
+        ]
     finally:
         await engine.dispose()
 

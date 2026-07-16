@@ -6,6 +6,21 @@ export type MemoirNarrativeGapStatus =
   | "dismissed";
 
 export type MemoirNarrativeGapSeverity = "high" | "medium" | "low";
+export type MemoirNarrativeGapRecommendedAction =
+  | "interview"
+  | "editorial"
+  | "manual_review";
+export type MemoirNarrativeGapActionReasonCode =
+  | "missing_new_evidence"
+  | "existing_material_available"
+  | "fact_conflict_detected"
+  | "publication_decision_required"
+  | "draft_usage_problem"
+  | "migration_review_required";
+export type MemoirNarrativeGapActionDecisionSource =
+  | "deterministic_policy"
+  | "migration"
+  | "manual_override";
 export type MemoirEditingJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
 
 export interface MemoirChapterWorkspaceEvidence {
@@ -136,6 +151,10 @@ export interface MemoirNarrativeGap {
   description: string;
   fingerprint: string;
   status: MemoirNarrativeGapStatus;
+  recommended_action: MemoirNarrativeGapRecommendedAction;
+  action_reason_code: MemoirNarrativeGapActionReasonCode;
+  action_decision_source: MemoirNarrativeGapActionDecisionSource;
+  action_policy_version: string;
   detected_by: string;
   detection_count: number;
   resolution_note: string;

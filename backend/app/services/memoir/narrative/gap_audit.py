@@ -16,7 +16,12 @@ from app.models.memoir import MemoirEditingJob
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import followup_jobs, gap_semantic, gaps
+from app.services.memoir.narrative import (
+    completion_planner,
+    followup_jobs,
+    gap_semantic,
+    gaps,
+)
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
     evaluate_deterministic_gaps,
@@ -24,12 +29,13 @@ from app.services.memoir.narrative.gap_rules import (
 )
 
 
-GAP_AUDIT_ENGINE_VERSION = "2"
+GAP_AUDIT_ENGINE_VERSION = "3"
 
 
 def chapter_gap_audit_content_signature(context: ChapterAuditContext) -> str:
     payload = {
         "engine_version": GAP_AUDIT_ENGINE_VERSION,
+        "gap_action_policy_version": completion_planner.GAP_ACTION_POLICY_VERSION,
         "chapter_id": context.chapter.id,
         "contract": (
             {
@@ -83,6 +89,8 @@ def chapter_gap_audit_content_signature(context: ChapterAuditContext) -> str:
                 block.current_version_id,
                 block.editorial_status,
                 block.freshness_status,
+                list(block.claim_ids),
+                list(block.story_ids),
                 sha256(block.content.encode("utf-8")).hexdigest(),
             ]
             for block in context.draft_blocks

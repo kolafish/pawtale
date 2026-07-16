@@ -62,6 +62,21 @@
 
     <view wx:if="{{followupError}}" class="message error-message">{{followupError}}</view>
 
+    <view wx:if="{{editorialGaps.length}}" class="content-section" id="editorial-fixes">
+      <view class="section-heading">
+        <view>
+          <text class="section-eyebrow">已有素材可以处理</text>
+          <text class="section-title">不需要继续采访</text>
+        </view>
+        <text class="section-count">{{editorialCount}} 处</text>
+      </view>
+      <view wx:for="{{editorialGaps}}" wx:key="id" class="suggestion-row">
+        <text class="suggestion-title">{{item.title}}</text>
+        <text class="suggestion-detail">{{item.description}}</text>
+        <button class="row-action" bindtap="openEditorialFix">{{item.actionText}}</button>
+      </view>
+    </view>
+
     <view wx:if="{{directions.length}}" class="content-section" id="directions">
       <view class="section-heading">
         <view>
