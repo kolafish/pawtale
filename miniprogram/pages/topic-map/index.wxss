@@ -1,0 +1,257 @@
+.topic-map-page {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 38rpx 30rpx 96rpx;
+  background: #f8f2e8;
+  color: #2b1713;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page-intro {
+  padding: 10rpx 4rpx 34rpx;
+}
+
+.page-kicker,
+.page-title,
+.page-detail,
+.map-note-title,
+.map-note-text,
+.module-title,
+.topic-title,
+.topic-intent,
+.state-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.page-kicker {
+  color: #a64b3e;
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 38rpx;
+}
+
+.page-title {
+  margin-top: 12rpx;
+  font-size: 46rpx;
+  font-weight: 700;
+  line-height: 60rpx;
+  text-wrap: balance;
+}
+
+.page-detail {
+  margin-top: 16rpx;
+  color: #665d57;
+  font-size: 30rpx;
+  line-height: 46rpx;
+  text-wrap: pretty;
+}
+
+.map-note {
+  margin-top: 28rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: #fff9f3;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.05),
+    0 8rpx 20rpx rgba(93, 61, 42, 0.05);
+}
+
+.map-note-title {
+  color: #8f3e35;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.map-note-text {
+  margin-top: 8rpx;
+  color: #5f554f;
+  font-size: 27rpx;
+  line-height: 42rpx;
+  text-wrap: pretty;
+}
+
+.module-list {
+  display: flex;
+  flex-direction: column;
+  gap: 38rpx;
+}
+
+.topic-module {
+  min-width: 0;
+}
+
+.module-title {
+  padding: 0 4rpx;
+  color: #6f625b;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.topic-list {
+  margin-top: 16rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.topic-item {
+  padding: 28rpx;
+  border-radius: 30rpx;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1rpx rgba(43, 23, 19, 0.06),
+    0 6rpx 14rpx -6rpx rgba(43, 23, 19, 0.12),
+    0 20rpx 42rpx rgba(93, 61, 42, 0.08);
+}
+
+.topic-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.topic-title {
+  min-width: 0;
+  flex: 1;
+  font-size: 36rpx;
+  font-weight: 700;
+  line-height: 50rpx;
+  text-wrap: balance;
+}
+
+.state-chip {
+  flex: 0 0 auto;
+  max-width: 240rpx;
+  padding: 8rpx 16rpx;
+  border-radius: 999rpx;
+  background: #f3efea;
+  color: #675c55;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 34rpx;
+  text-align: center;
+}
+
+.topic-item.already_shared .state-chip {
+  background: #eaf4ee;
+  color: #386552;
+}
+
+.topic-item.enough_for_now .state-chip {
+  background: #edf1f5;
+  color: #53677a;
+}
+
+.topic-item.not_applicable .state-chip,
+.topic-item.do_not_discuss .state-chip {
+  background: #f2edeb;
+  color: #746863;
+}
+
+.topic-intent {
+  margin-top: 16rpx;
+  color: #3a2a25;
+  font-size: 29rpx;
+  line-height: 44rpx;
+  text-wrap: pretty;
+}
+
+.state-detail {
+  margin-top: 12rpx;
+  color: #746a64;
+  font-size: 26rpx;
+  line-height: 40rpx;
+  text-wrap: pretty;
+}
+
+.topic-action {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 24rpx;
+  padding: 0 24rpx;
+  border: 0;
+  border-radius: 18rpx;
+  background: #fff7f1;
+  color: #8f3e35;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 0 0 1rpx rgba(166, 75, 62, 0.14),
+    0 5rpx 12rpx rgba(93, 61, 42, 0.05);
+  transition-property: transform, background-color, box-shadow, opacity;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.topic-action::after {
+  border: 0;
+}
+
+.topic-action-hover {
+  transform: scale(0.96);
+  background: #ffefe6;
+  box-shadow:
+    0 0 0 1rpx rgba(166, 75, 62, 0.18),
+    0 3rpx 8rpx rgba(93, 61, 42, 0.04);
+}
+
+.topic-action.disabled {
+  opacity: 0.62;
+}
+
+.error-strip,
+.loading-state,
+.empty-state {
+  margin-top: 24rpx;
+  padding: 26rpx 24rpx;
+  font-size: 28rpx;
+  line-height: 42rpx;
+  text-wrap: pretty;
+}
+
+.error-strip {
+  border-left: 6rpx solid #b84a5a;
+  background: #fff0f2;
+  color: #9f3345;
+}
+
+.loading-state,
+.empty-state {
+  color: #675e58;
+  text-align: center;
+}
+
+.empty-state text {
+  display: block;
+}
+
+.large-text .page-title {
+  font-size: 52rpx;
+  line-height: 68rpx;
+}
+
+.large-text .page-detail,
+.large-text .map-note-text,
+.large-text .topic-intent {
+  font-size: 34rpx;
+  line-height: 52rpx;
+}
+
+.large-text .topic-title {
+  font-size: 42rpx;
+  line-height: 56rpx;
+}
+
+.large-text .state-detail,
+.large-text .topic-action {
+  font-size: 32rpx;
+  line-height: 48rpx;
+}

@@ -480,6 +480,17 @@ definePage<HomeData>()({
     });
   },
 
+  openTopicMap() {
+    if (!this.canStartVoiceChat(false)) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/topic-map/index", {
+        projectId: this.data.projectId,
+      }),
+    });
+  },
+
   async startHumanInterview() {
     await this.startVoiceChatWithMode("free_narration", "home_resume", "human_interview");
   },

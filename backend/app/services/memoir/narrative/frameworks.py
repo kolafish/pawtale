@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,7 +52,7 @@ class FrameworkReconcileResult:
 
 def _validate_stored_framework(
     framework: MemoirProjectFramework,
-) -> None:
+) -> FrameworkTemplateDefinition:
     snapshot = framework.template_snapshot_json
     if (
         not isinstance(snapshot, dict)
@@ -74,6 +75,13 @@ def _validate_stored_framework(
     }
     if expected_items != actual_items:
         raise ValueError("stored topic map items do not match its snapshot")
+    return template
+
+
+def template_for_framework(
+    framework: MemoirProjectFramework,
+) -> FrameworkTemplateDefinition:
+    return _validate_stored_framework(framework)
 
 
 async def initialize_project_framework(
@@ -142,6 +150,43 @@ async def framework_for_project(
     if framework is not None:
         _validate_stored_framework(framework)
     return framework
+
+
+async def set_framework_user_resolution(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    item_id: str,
+    user_resolution: MemoirFrameworkUserResolution,
+    actor_user_id: str,
+) -> MemoirFrameworkItem:
+    item = await db.scalar(
+        select(MemoirFrameworkItem)
+        .join(
+            MemoirProjectFramework,
+            MemoirProjectFramework.id == MemoirFrameworkItem.project_framework_id,
+        )
+        .where(
+            MemoirProjectFramework.project_id == project_id,
+            MemoirFrameworkItem.id == item_id,
+        )
+    )
+    if item is None:
+        raise ValueError("topic map item does not belong to the project")
+    if item.user_resolution == user_resolution.value:
+        return item
+    item.user_resolution = user_resolution.value
+    if user_resolution == MemoirFrameworkUserResolution.NONE:
+        item.user_resolution_note = ""
+        item.resolved_by_user_id = None
+        item.resolved_at = None
+    else:
+        item.user_resolution_note = ""
+        item.resolved_by_user_id = actor_user_id
+        item.resolved_at = datetime.now(UTC).replace(tzinfo=None)
+    db.add(item)
+    await db.flush()
+    return item
 
 
 async def recompute_framework_items(

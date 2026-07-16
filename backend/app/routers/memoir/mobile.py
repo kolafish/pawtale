@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -10,8 +10,15 @@ from app.schemas.memoir_projects import (
     MemoirProjectListResponse,
     MemoirProjectUpdate,
 )
+from app.schemas.memoir_topic_map import (
+    MemoirTopicMapItemResponse,
+    MemoirTopicMapResolutionRequest,
+    MemoirTopicMapResponse,
+)
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir.access import load_memoir_project
+from app.services.memoir.narrative import topic_map
 
 
 router = APIRouter()
@@ -92,3 +99,47 @@ async def delete_mobile_memoir_project(
         current_user.id,
         project_id,
     )
+
+
+@router.get(
+    "/projects/{project_id}/topic-map",
+    response_model=MemoirTopicMapResponse,
+)
+async def get_mobile_memoir_topic_map(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await load_memoir_project(db, project_id, current_user.id)
+    try:
+        return await topic_map.get_project_topic_map(db, project_id=project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.patch(
+    "/projects/{project_id}/topic-map/items/{item_id}/resolution",
+    response_model=MemoirTopicMapItemResponse,
+)
+async def update_mobile_memoir_topic_map_resolution(
+    project_id: str,
+    item_id: str,
+    req: MemoirTopicMapResolutionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await load_memoir_project(db, project_id, current_user.id)
+    try:
+        item = await topic_map.update_user_resolution(
+            db,
+            project_id=project_id,
+            item_id=item_id,
+            user_resolution=req.user_resolution,
+            actor_user_id=current_user.id,
+        )
+        await db.commit()
+        return item
+    except ValueError as exc:
+        await db.rollback()
+        status_code = 404 if "does not belong" in str(exc) else 409
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
