@@ -23,6 +23,11 @@ from .followup_tasks import (
     MemoirFollowupTaskAnswer,
     MemoirFollowupTaskClaim,
 )
+from .frameworks import (
+    MemoirFrameworkItem,
+    MemoirFrameworkItemClaim,
+    MemoirProjectFramework,
+)
 from .interview_policy import (
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
@@ -55,6 +60,9 @@ __all__ = [
     "MemoirFollowupTask",
     "MemoirFollowupTaskAnswer",
     "MemoirFollowupTaskClaim",
+    "MemoirProjectFramework",
+    "MemoirFrameworkItem",
+    "MemoirFrameworkItemClaim",
     "MemoirInterviewPolicyDecision",
     "MemoirInterviewPolicyEvaluation",
     "MemoirUtteranceInterviewAssignment",

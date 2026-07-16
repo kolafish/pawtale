@@ -31,6 +31,9 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_followup_tasks",
     "memoir_followup_task_claims",
     "memoir_followup_task_answers",
+    "memoir_project_frameworks",
+    "memoir_framework_items",
+    "memoir_framework_item_claims",
     "memoir_interview_policy_decisions",
     "memoir_interview_policy_evaluations",
     "memoir_utterance_interview_assignments",
@@ -113,6 +116,11 @@ INTERVIEW_POLICY_FAILURE_CODES = (
     "repeated_question",
     "wrong_topic_switch",
     "privacy_violation",
+)
+FRAMEWORK_TABLES = (
+    "memoir_project_frameworks",
+    "memoir_framework_items",
+    "memoir_framework_item_claims",
 )
 
 
@@ -761,6 +769,93 @@ async def _migrate_followup_answer_assignment_schema(
     return changed
 
 
+async def _ensure_assignment_framework_schema(engine: AsyncEngine) -> bool:
+    """Add the constrained framework target without changing historical targets."""
+    register_models()
+    table_name = "memoir_utterance_interview_assignments"
+    async with engine.connect() as conn:
+        if not await _table_exists(conn, table_name):
+            await conn.rollback()
+            return False
+        table_sql = await _table_sql(conn, table_name)
+        columns = {
+            str(column["name"])
+            for column in await _table_column_schema(conn, table_name)
+        }
+        if (
+            "framework_item_id" in columns
+            and "ck_memoir_utterance_interview_assignments_one_target" in table_sql
+        ):
+            await conn.rollback()
+            return False
+
+        await conn.rollback()
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        legacy_table_name = f"{table_name}_before_framework_target"
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                for trigger_name in MEMOIR_INTERVIEW_POLICY_TRIGGERS:
+                    await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+                for index_name in await _index_names(conn, table_name):
+                    if not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(
+                            text(f'DROP INDEX IF EXISTS "{index_name}"')
+                        )
+                await conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        f"RENAME TO {legacy_table_name}"
+                    )
+                )
+                table = Base.metadata.tables[table_name]
+                await conn.run_sync(
+                    lambda sync_conn: table.create(sync_conn, checkfirst=False)
+                )
+                legacy_columns = {
+                    str(column["name"])
+                    for column in await _table_column_schema(
+                        conn,
+                        legacy_table_name,
+                    )
+                }
+                copied_columns = [
+                    column.name
+                    for column in table.columns
+                    if column.name in legacy_columns
+                ]
+                insert_columns = ", ".join(
+                    f'"{name}"' for name in copied_columns
+                )
+                select_columns = ", ".join(
+                    f'"{name}"' for name in copied_columns
+                )
+                await conn.execute(
+                    text(
+                        f"INSERT INTO {table_name} ({insert_columns}) "
+                        f"SELECT {select_columns} FROM {legacy_table_name}"
+                    )
+                )
+                await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with conn.begin():
+            violations = (
+                await conn.execute(text("PRAGMA foreign_key_check"))
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Framework assignment migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    return True
+
+
 async def _backfill_semantic_followup_task_target_slots(conn) -> None:
     if not await _table_exists(conn, "memoir_followup_tasks") or not await _table_exists(
         conn,
@@ -971,6 +1066,7 @@ async def _ensure_interview_policy_triggers(conn) -> list[str]:
             CREATE TRIGGER memoir_utterance_interview_assignments_immutable_update
             BEFORE UPDATE ON memoir_utterance_interview_assignments
             WHEN NEW.utterance_id IS NOT OLD.utterance_id
+              OR NEW.framework_item_id IS NOT OLD.framework_item_id
               OR NEW.followup_task_id IS NOT OLD.followup_task_id
               OR NEW.policy_decision_id IS NOT OLD.policy_decision_id
             BEGIN
@@ -1286,6 +1382,7 @@ async def _ensure_chapter_structure_triggers(conn) -> list[str]:
 async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, object]:
     """Create and advance the narrative fact schema."""
     changed_tables: list[str] = []
+    precreated_tables: set[str] = set()
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
     changed_triggers: list[str] = []
@@ -1297,10 +1394,27 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         await _migrate_followup_answer_assignment_schema(engine)
     )
     async with engine.begin() as conn:
+        for table_name in FRAMEWORK_TABLES:
+            if await _table_exists(conn, table_name):
+                continue
+            table = Base.metadata.tables[table_name]
+            await conn.run_sync(
+                lambda sync_conn, table=table: table.create(
+                    sync_conn,
+                    checkfirst=True,
+                )
+            )
+            precreated_tables.add(table_name)
+    if await _ensure_assignment_framework_schema(engine):
+        changed_tables.append("memoir_utterance_interview_assignments")
+    async with engine.begin() as conn:
         await _retire_legacy_completion_rows(conn)
         for table in _narrative_tables_from_metadata():
+            created = table.name in precreated_tables
             if not await _table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
+                created = True
+            if created:
                 changed_tables.append(table.name)
         if await _ensure_decision_schema(conn):
             changed_tables.append("memoir_narrative_decisions")

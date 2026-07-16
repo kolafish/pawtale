@@ -362,6 +362,7 @@ async def claim_due_editing_jobs(
                             (
                                 MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
                                 MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
+                                MemoirEditingJobType.EVALUATE_TOPIC_MAP_CLAIMS.value,
                             )
                         ),
                         1,

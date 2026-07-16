@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import MemoirFrameworkMatchSource
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import (
     MemoirEditingJob,
@@ -13,6 +14,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
+from app.services.memoir.narrative import framework_matching
 from app.services.memoir.narrative.ingestion import (
     NARRATIVE_EXTRACTION_SCHEMA_VERSION,
     NARRATIVE_INGESTION_ENGINE,
@@ -184,6 +186,21 @@ async def run_narrative_ingestion_job(
         utterance=utterance,
         version=version,
         ai_model=payload.get("ai_model") if isinstance(payload.get("ai_model"), str) else None,
+    )
+    await framework_matching.schedule_framework_matching_jobs(
+        db,
+        project_id=project.id,
+        claim_ids=list(
+            dict.fromkeys(
+                (*result.created_claim_ids, *result.reused_claim_ids)
+            )
+        ),
+        match_source=MemoirFrameworkMatchSource.EVALUATOR,
+        ai_model=(
+            payload.get("ai_model")
+            if isinstance(payload.get("ai_model"), str)
+            else None
+        ),
     )
     return EditingJobResult(
         result_json={

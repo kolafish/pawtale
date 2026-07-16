@@ -22,9 +22,11 @@ from app.domain.memoir.narrative_types import (
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
+    MemoirFrameworkItem,
     MemoirFollowupTask,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
+    MemoirProjectFramework,
     MemoirUtteranceInterviewAssignment,
 )
 
@@ -290,6 +292,7 @@ async def assign_utterance(
     *,
     utterance: MemoirVoiceUtterance,
     followup_task: MemoirFollowupTask | None,
+    framework_item: MemoirFrameworkItem | None = None,
     policy_decision: MemoirInterviewPolicyDecision | None = None,
 ) -> MemoirUtteranceInterviewAssignment:
     session = await db.get(MemoirVoiceSession, utterance.voice_session_id)
@@ -297,6 +300,20 @@ async def assign_utterance(
         raise ValueError("讲述记录对应的访谈会话不存在")
     if followup_task is not None and followup_task.project_id != session.project_id:
         raise ValueError("补访任务不属于讲述记录所在项目")
+    if followup_task is not None and framework_item is not None:
+        raise ValueError("讲述记录只能归属一个访谈目标")
+    if framework_item is not None:
+        framework_project_id = await db.scalar(
+            select(MemoirProjectFramework.project_id)
+            .join(
+                MemoirFrameworkItem,
+                MemoirFrameworkItem.project_framework_id
+                == MemoirProjectFramework.id,
+            )
+            .where(MemoirFrameworkItem.id == framework_item.id)
+        )
+        if framework_project_id != session.project_id:
+            raise ValueError("话题地图方向不属于讲述记录所在项目")
     if policy_decision is None:
         policy_decision = await _policy_decision_for_parent_message(
             db,
@@ -313,8 +330,15 @@ async def assign_utterance(
         snapshot_task_id = (
             policy_decision.state_snapshot_json or {}
         ).get("followup_task_id")
+        snapshot_framework_item_id = (
+            policy_decision.state_snapshot_json or {}
+        ).get("framework_item_id")
         expected_task_id = followup_task.id if followup_task else None
-        if snapshot_task_id != expected_task_id:
+        expected_framework_item_id = framework_item.id if framework_item else None
+        if (
+            snapshot_task_id != expected_task_id
+            or snapshot_framework_item_id != expected_framework_item_id
+        ):
             raise ValueError("策略决策与讲述记录的补访目标不一致")
 
     existing = await db.scalar(
@@ -324,7 +348,9 @@ async def assign_utterance(
     )
     if existing is not None:
         if (
-            existing.followup_task_id
+            existing.framework_item_id
+            != (framework_item.id if framework_item else None)
+            or existing.followup_task_id
             != (followup_task.id if followup_task else None)
             or existing.policy_decision_id
             != (policy_decision.id if policy_decision else None)
@@ -334,6 +360,7 @@ async def assign_utterance(
 
     assignment = MemoirUtteranceInterviewAssignment(
         utterance_id=utterance.id,
+        framework_item_id=framework_item.id if framework_item else None,
         followup_task_id=followup_task.id if followup_task else None,
         policy_decision_id=policy_decision.id if policy_decision else None,
     )
