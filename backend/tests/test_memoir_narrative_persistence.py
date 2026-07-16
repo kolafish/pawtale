@@ -26,6 +26,8 @@ from app.domain.memoir.types import (
 from app.migrations.memoir_narrative import (
     MEMOIR_NARRATIVE_TABLES,
     MEMOIR_NARRATIVE_TRIGGERS,
+    NARRATIVE_GAP_ACTION_COLUMNS,
+    NARRATIVE_GAP_ACTION_CONSTRAINTS,
     _ensure_narrative_gap_action_columns,
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
@@ -351,6 +353,166 @@ async def test_narrative_migration_backfills_gap_actions_without_guessing():
                 "migration-1",
             ),
         ]
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_rebuilds_legacy_gap_action_schema_with_constraints():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, email, password_hash, role, display_name, created_at, updated_at) "
+                    "VALUES ('gap-action-user', 'gap-action@example.com', 'hash', 'user', "
+                    "'Gap Action User', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO projects "
+                    "(id, user_id, type, title, metadata_json, created_at, updated_at) "
+                    "VALUES ('gap-action-project', 'gap-action-user', 'memoir', "
+                    "'Gap Action Project', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gaps "
+                    "(id, project_id, scope_type, primary_story_id, primary_chapter_id, "
+                    "gap_type, severity, target_slot, title, description, fingerprint, "
+                    "status, detected_by, detection_count, resolution_note, resolved_by, "
+                    "resolved_by_user_id, resolved_at, first_detected_at, last_detected_at, "
+                    "created_at, updated_at) VALUES "
+                    "('gap-action-gap', 'gap-action-project', 'book', NULL, NULL, "
+                    "'causality', 'medium', '', '事件结果还不清楚', '', "
+                    "'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc', "
+                    "'open', 'rules', 1, '', NULL, NULL, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_tasks "
+                    "(id, project_id, gap_id, chapter_id, story_id, target_slot, answer_use, "
+                    "question, purpose, known_context_summary, priority, status, "
+                    "assigned_session_id, defer_until, defer_reason, created_by, started_at, "
+                    "completed_at, created_at, updated_at) VALUES "
+                    "('gap-action-task', 'gap-action-project', 'gap-action-gap', NULL, NULL, "
+                    "'', 'clarification', '后来结果怎么样？', '补充事件结果', '', 10, "
+                    "'pending', NULL, NULL, '', 'system', NULL, NULL, CURRENT_TIMESTAMP, "
+                    "CURRENT_TIMESTAMP)"
+                )
+            )
+
+        action_schema_names = (
+            set(NARRATIVE_GAP_ACTION_COLUMNS) | NARRATIVE_GAP_ACTION_CONSTRAINTS
+        )
+        async with engine.connect() as conn:
+            current_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_narrative_gaps'"
+                        )
+                    )
+                ).scalar_one()
+            )
+            legacy_sql = "\n".join(
+                line
+                for line in current_sql.splitlines()
+                if not any(name in line for name in action_schema_names)
+            )
+            await conn.rollback()
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.commit()
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_narrative_gaps "
+                        "RENAME TO memoir_narrative_gaps_current_schema"
+                    )
+                )
+                await conn.execute(text(legacy_sql))
+                legacy_columns = [
+                    row[1]
+                    for row in (
+                        await conn.execute(
+                            text("PRAGMA table_info(memoir_narrative_gaps)")
+                        )
+                    ).fetchall()
+                ]
+                column_names = ", ".join(f'"{name}"' for name in legacy_columns)
+                await conn.execute(
+                    text(
+                        f"INSERT INTO memoir_narrative_gaps ({column_names}) "
+                        f"SELECT {column_names} "
+                        "FROM memoir_narrative_gaps_current_schema"
+                    )
+                )
+                await conn.execute(
+                    text("DROP TABLE memoir_narrative_gaps_current_schema")
+                )
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_narrative_gaps.recommended_action",
+            "memoir_narrative_gaps.action_reason_code",
+            "memoir_narrative_gaps.action_decision_source",
+            "memoir_narrative_gaps.action_policy_version",
+        ]
+        assert "memoir_narrative_gaps" in first["changed_tables"]
+        assert second["changed_tables"] == []
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            migrated = (
+                await conn.execute(
+                    text(
+                        "SELECT recommended_action, action_reason_code, "
+                        "action_decision_source, action_policy_version "
+                        "FROM memoir_narrative_gaps WHERE id = 'gap-action-gap'"
+                    )
+                )
+            ).one()
+            task_gap_id = (
+                await conn.execute(
+                    text(
+                        "SELECT gap_id FROM memoir_followup_tasks "
+                        "WHERE id = 'gap-action-task'"
+                    )
+                )
+            ).scalar_one()
+            assert (
+                await conn.execute(text("PRAGMA foreign_key_check"))
+            ).fetchall() == []
+        assert migrated == (
+            "interview",
+            "missing_new_evidence",
+            "migration",
+            "migration-1",
+        )
+        assert task_gap_id == "gap-action-gap"
+
+        with pytest.raises(IntegrityError):
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        "UPDATE memoir_narrative_gaps "
+                        "SET recommended_action = 'invalid' "
+                        "WHERE id = 'gap-action-gap'"
+                    )
+                )
     finally:
         await engine.dispose()
 

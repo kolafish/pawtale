@@ -72,6 +72,12 @@ NARRATIVE_GAP_ACTION_COLUMNS = {
     "action_decision_source": "VARCHAR(32) NOT NULL DEFAULT 'migration'",
     "action_policy_version": "VARCHAR(24) NOT NULL DEFAULT 'migration-1'",
 }
+NARRATIVE_GAP_ACTION_CONSTRAINTS = {
+    "ck_memoir_narrative_gaps_recommended_action",
+    "ck_memoir_narrative_gaps_action_reason_code",
+    "ck_memoir_narrative_gaps_action_decision_source",
+    "ck_memoir_narrative_gaps_action_policy_version",
+}
 FOLLOWUP_TASK_OUTCOME_STATUS_RENAMES = {
     "cannot_recall": "unable_to_answer",
     "excluded": "closed_without_answer",
@@ -331,6 +337,79 @@ async def _ensure_narrative_gap_action_columns(conn) -> list[str]:
         )
     )
     return changed
+
+
+async def _ensure_narrative_gap_action_constraints(engine: AsyncEngine) -> bool:
+    """Rebuild the SQLite table when action columns lack their CHECK constraints."""
+    register_models()
+    table_name = "memoir_narrative_gaps"
+    legacy_table_name = f"{table_name}_before_action_policy"
+    async with engine.connect() as conn:
+        table_sql = await _table_sql(conn, table_name)
+        if not table_sql or all(
+            constraint_name in table_sql
+            for constraint_name in NARRATIVE_GAP_ACTION_CONSTRAINTS
+        ):
+            await conn.rollback()
+            return False
+
+        columns = {
+            str(column["name"])
+            for column in await _table_column_schema(conn, table_name)
+        }
+        missing_columns = sorted(set(NARRATIVE_GAP_ACTION_COLUMNS) - columns)
+        if missing_columns:
+            raise RuntimeError(
+                "Cannot rebuild memoir narrative gap action constraints before "
+                f"adding columns: {', '.join(missing_columns)}"
+            )
+
+        await conn.rollback()
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}")
+                )
+                for index_name in await _index_names(conn, legacy_table_name):
+                    if not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+
+                table = Base.metadata.tables[table_name]
+                await conn.run_sync(
+                    lambda sync_conn: table.create(sync_conn, checkfirst=False)
+                )
+                legacy_columns = {
+                    str(column["name"])
+                    for column in await _table_column_schema(conn, legacy_table_name)
+                }
+                copied_columns = [
+                    column.name for column in table.columns if column.name in legacy_columns
+                ]
+                column_names = ", ".join(f'"{name}"' for name in copied_columns)
+                await conn.execute(
+                    text(
+                        f"INSERT INTO {table_name} ({column_names}) "
+                        f"SELECT {column_names} FROM {legacy_table_name}"
+                    )
+                )
+                await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with conn.begin():
+            violations = (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Narrative gap action migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    return True
 
 
 async def _ensure_followup_task_outcome_schema(engine: AsyncEngine) -> bool:
@@ -794,6 +873,8 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
+    if await _ensure_narrative_gap_action_constraints(engine):
+        changed_tables.append("memoir_narrative_gaps")
     return {
         "changed_tables": changed_tables,
         "changed_columns": changed_columns,
