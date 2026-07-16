@@ -1,6 +1,6 @@
 import type {
   MemoirCompletionOutcome,
-  MemoirFollowupCannotRecallResolution,
+  MemoirFollowupUnableToAnswerResolution,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
@@ -523,44 +523,44 @@ definePage<VoiceChatData>()({
     await this.completionTasks().deferTask();
   },
 
-  chooseCannotRecallResolution() {
+  chooseUnableToAnswerResolution() {
     if (this.data.completionTaskAction) {
       return;
     }
     wx.showActionSheet({
-      itemList: ["接受暂时不完整", "问过家人以后再补"],
+      itemList: ["这个问题暂时答不上来", "问过家人以后再补"],
       success: (result) => {
-        const resolution: MemoirFollowupCannotRecallResolution = result.tapIndex === 0
-          ? "accept_incomplete"
+        const resolution: MemoirFollowupUnableToAnswerResolution = result.tapIndex === 0
+          ? "unable_to_answer"
           : "ask_family_later";
-        void this.applyCannotRecallResolution(resolution);
+        void this.applyUnableToAnswerResolution(resolution);
       },
     });
   },
 
-  async applyCannotRecallResolution(resolution: MemoirFollowupCannotRecallResolution) {
-    await this.completionTasks().applyCannotRecall(resolution);
+  async applyUnableToAnswerResolution(resolution: MemoirFollowupUnableToAnswerResolution) {
+    await this.completionTasks().applyUnableToAnswer(resolution);
   },
 
-  confirmExcludeCompletionTask() {
+  confirmStopAskingCompletionTask() {
     if (this.data.completionTaskAction) {
       return;
     }
     wx.showModal({
-      title: "不把这项写进书里？",
-      content: "确认后，与这个问题关联的故事和事实将不再用于成书。",
-      confirmText: "不收录",
+      title: "以后不再问这个问题？",
+      content: "只会关闭这个补充问题，不会删除或排除已经讲过的故事和事实。",
+      confirmText: "不再问",
       confirmColor: "#a64b3e",
       success: (result) => {
         if (result.confirm) {
-          void this.excludeCompletionTask();
+          void this.stopAskingCompletionTask();
         }
       },
     });
   },
 
-  async excludeCompletionTask() {
-    await this.completionTasks().excludeTask();
+  async stopAskingCompletionTask() {
+    await this.completionTasks().stopAsking();
   },
 
   async continueToNextCompletionTask() {

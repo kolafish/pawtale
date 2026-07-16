@@ -69,7 +69,7 @@ class MemoirFollowupTask(Base):
             "AND defer_until IS NULL AND length(trim(defer_reason)) = 0) OR "
             "(status = 'deferred' AND assigned_session_id IS NULL "
             "AND completed_at IS NULL AND length(trim(defer_reason)) > 0) OR "
-            "(status IN ('answered', 'cannot_recall', 'excluded', 'cancelled') "
+            "(status IN ('answered', 'unable_to_answer', 'closed_without_answer', 'cancelled') "
             "AND completed_at IS NOT NULL AND defer_until IS NULL "
             "AND length(trim(defer_reason)) = 0)",
             name="ck_memoir_followup_tasks_state_shape",

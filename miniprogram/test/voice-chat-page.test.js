@@ -69,11 +69,11 @@ function loadVoiceChatPage({
     deferMemoirFollowupTask: async () => {
       throw new Error("deferMemoirFollowupTask was not mocked");
     },
-    cannotRecallMemoirFollowupTask: async () => {
-      throw new Error("cannotRecallMemoirFollowupTask was not mocked");
+    markMemoirFollowupTaskUnableToAnswer: async () => {
+      throw new Error("markMemoirFollowupTaskUnableToAnswer was not mocked");
     },
-    excludeMemoirFollowupTask: async () => {
-      throw new Error("excludeMemoirFollowupTask was not mocked");
+    stopAskingMemoirFollowupTask: async () => {
+      throw new Error("stopAskingMemoirFollowupTask was not mocked");
     },
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
     stopMemoirVoiceSession: async () => {

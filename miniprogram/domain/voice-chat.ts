@@ -26,12 +26,12 @@ export type MemoirFollowupTaskStatus =
   | "in_progress"
   | "answered"
   | "deferred"
-  | "cannot_recall"
-  | "excluded"
+  | "unable_to_answer"
+  | "closed_without_answer"
   | "cancelled";
 export type MemoirFollowupTaskClaimRole = "known" | "do_not_repeat" | "expected_evidence";
 export type MemoirFollowupTaskUtteranceRole = "target_answer" | "related_context";
-export type MemoirFollowupCannotRecallResolution = "accept_incomplete" | "ask_family_later";
+export type MemoirFollowupUnableToAnswerResolution = "unable_to_answer" | "ask_family_later";
 export type MemoirNarrativeActorType = "ai" | "user" | "system";
 export type MemoirBookCompletionState =
   | "ready"
@@ -127,10 +127,6 @@ export interface MemoirFollowupTaskActionRequest {
 
 export interface MemoirFollowupTaskDeferRequest extends MemoirFollowupTaskActionRequest {
   defer_until?: string | null;
-}
-
-export interface MemoirFollowupTaskCannotRecallRequest extends MemoirFollowupTaskActionRequest {
-  resolution: MemoirFollowupCannotRecallResolution;
 }
 
 export interface MemoirFollowupTaskSwitchRequest extends MemoirFollowupTaskActionRequest {

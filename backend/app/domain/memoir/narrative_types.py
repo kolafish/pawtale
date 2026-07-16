@@ -108,6 +108,8 @@ class MemoirNarrativeDecisionAction(str, Enum):
     LOCK = "lock"
     UNLOCK = "unlock"
     NEEDS_REVIEW = "needs_review"
+    UNABLE_TO_ANSWER = "unable_to_answer"
+    STOP_ASKING = "stop_asking"
 
 
 class MemoirStoryType(str, Enum):
@@ -310,8 +312,8 @@ class MemoirFollowupTaskStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     ANSWERED = "answered"
     DEFERRED = "deferred"
-    CANNOT_RECALL = "cannot_recall"
-    EXCLUDED = "excluded"
+    UNABLE_TO_ANSWER = "unable_to_answer"
+    CLOSED_WITHOUT_ANSWER = "closed_without_answer"
     CANCELLED = "cancelled"
 
 

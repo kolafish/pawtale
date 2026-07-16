@@ -16,6 +16,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimVerificationStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeEntityType,
+    MemoirFollowupTaskStatus,
 )
 from app.domain.memoir.types import (
     MemoirCreatedBy,
@@ -28,8 +29,20 @@ from app.migrations.memoir_narrative import (
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
-from app.models.memoir import MemoirImageAsset, MemoirTranscriptVersion, MemoirVoiceSession
-from app.models.memoir_narrative import MemoirClaimEvidence, MemoirStory, MemoirStorySlot
+from app.models.memoir import (
+    MemoirImageAsset,
+    MemoirTranscriptVersion,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
+from app.models.memoir_narrative import (
+    MemoirClaimEvidence,
+    MemoirFollowupTask,
+    MemoirFollowupTaskUtterance,
+    MemoirNarrativeGap,
+    MemoirStory,
+    MemoirStorySlot,
+)
 from app.models.projects import Project
 from app.models.users import User
 from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarrativeEntityRepository
@@ -259,6 +272,145 @@ async def test_narrative_migration_adds_followup_assignment_snapshot_column_once
             "memoir_followup_task_utterances.is_assignment_snapshot"
         ]
         assert second["changed_columns"] == []
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_renames_followup_outcomes_without_losing_relations():
+    register_models()
+    engine = _sqlite_engine()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as db:
+            project = Project(type="memoir", title="补访结果迁移")
+            db.add(project)
+            await db.flush()
+            gap = MemoirNarrativeGap(
+                project_id=project.id,
+                scope_type="book",
+                gap_type="relationship",
+                severity="medium",
+                title="人物关系需要补充",
+                fingerprint=sha256(b"followup-outcome-migration").hexdigest(),
+                status="open",
+                detected_by="rules",
+            )
+            db.add(gap)
+            await db.flush()
+            session = MemoirVoiceSession(
+                project_id=project.id,
+                guidance_mode="guided_interview",
+                session_goal="book_completion",
+            )
+            db.add(session)
+            await db.flush()
+            task = MemoirFollowupTask(
+                project_id=project.id,
+                gap_id=gap.id,
+                answer_use="clarification",
+                question="当时是什么关系？",
+                purpose="补充人物关系",
+                priority=1,
+                status="in_progress",
+                assigned_session_id=session.id,
+                started_at=session.created_at,
+                created_by="system",
+            )
+            db.add(task)
+            await db.flush()
+            session.current_followup_task_id = task.id
+            utterance = MemoirVoiceUtterance(
+                voice_session_id=session.id,
+                transcript_raw="我暂时想不起来。",
+            )
+            db.add(utterance)
+            await db.flush()
+            relation = MemoirFollowupTaskUtterance(
+                project_id=project.id,
+                task_id=task.id,
+                utterance_id=utterance.id,
+                result_role="target_answer",
+                is_assignment_snapshot=True,
+            )
+            db.add(relation)
+            await db.commit()
+            task_id = task.id
+            relation_id = relation.id
+            session_id = session.id
+
+        async with engine.connect() as conn:
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.commit()
+            async with conn.begin():
+                current_sql = str(
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT sql FROM sqlite_master "
+                                "WHERE type = 'table' AND name = 'memoir_followup_tasks'"
+                            )
+                        )
+                    ).scalar_one()
+                )
+                legacy_sql = current_sql.replace(
+                    "'unable_to_answer'", "'cannot_recall'"
+                ).replace("'closed_without_answer'", "'excluded'")
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_followup_tasks "
+                        "RENAME TO memoir_followup_tasks_current_schema"
+                    )
+                )
+                await conn.execute(text(legacy_sql))
+                columns = [
+                    row[1]
+                    for row in (
+                        await conn.execute(
+                            text("PRAGMA table_info(memoir_followup_tasks)")
+                        )
+                    ).fetchall()
+                ]
+                column_list = ", ".join(f'"{column}"' for column in columns)
+                await conn.execute(
+                    text(
+                        f"INSERT INTO memoir_followup_tasks ({column_list}) "
+                        f"SELECT {column_list} FROM memoir_followup_tasks_current_schema"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "UPDATE memoir_followup_tasks "
+                        "SET status = 'cannot_recall', completed_at = CURRENT_TIMESTAMP "
+                        "WHERE id = :task_id"
+                    ),
+                    {"task_id": task_id},
+                )
+                await conn.execute(text("DROP TABLE memoir_followup_tasks_current_schema"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert "memoir_followup_tasks" in first["changed_tables"]
+        assert second["changed_tables"] == []
+        async with session_factory() as db:
+            migrated = await db.get(MemoirFollowupTask, task_id)
+            relation = await db.get(MemoirFollowupTaskUtterance, relation_id)
+            session = await db.get(MemoirVoiceSession, session_id)
+            assert migrated is not None
+            assert migrated.status == MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value
+            assert relation is not None
+            assert relation.task_id == task_id
+            assert session is not None
+            assert session.current_followup_task_id == task_id
+        async with engine.begin() as conn:
+            assert (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall() == []
     finally:
         await engine.dispose()
 

@@ -109,8 +109,8 @@ async def _semantic_task_leaders(
     status_rank = {
         MemoirFollowupTaskStatus.IN_PROGRESS.value: 0,
         MemoirFollowupTaskStatus.ANSWERED.value: 1,
-        MemoirFollowupTaskStatus.CANNOT_RECALL.value: 1,
-        MemoirFollowupTaskStatus.EXCLUDED.value: 1,
+        MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value: 1,
+        MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER.value: 1,
         MemoirFollowupTaskStatus.PENDING.value: 2,
         MemoirFollowupTaskStatus.DEFERRED.value: 3,
     }
@@ -617,8 +617,8 @@ async def generate_followup_tasks(
         and task.status
         in {
             MemoirFollowupTaskStatus.ANSWERED.value,
-            MemoirFollowupTaskStatus.CANNOT_RECALL.value,
-            MemoirFollowupTaskStatus.EXCLUDED.value,
+            MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value,
+            MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER.value,
         }
     }
     active_narration_tasks: dict[str, MemoirFollowupTask] = {}
@@ -642,8 +642,8 @@ async def generate_followup_tasks(
         active_narration_tasks.setdefault(task.story_id, task)
     handled_statuses = {
         MemoirFollowupTaskStatus.ANSWERED.value,
-        MemoirFollowupTaskStatus.CANNOT_RECALL.value,
-        MemoirFollowupTaskStatus.EXCLUDED.value,
+        MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value,
+        MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER.value,
     }
     missing_slot_gap_ids_by_story: dict[str, list[str]] = {}
     for gap in gaps:

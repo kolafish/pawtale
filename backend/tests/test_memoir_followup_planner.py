@@ -24,6 +24,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
+    MemoirNarrativeDecisionAction,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
@@ -61,6 +62,7 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirFollowupTask,
     MemoirFollowupTaskUtterance,
+    MemoirNarrativeDecision,
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
@@ -1335,7 +1337,7 @@ async def test_followup_generation_runs_on_existing_background_worker(client, te
     assert len(job.result_json["created_task_ids"]) == 1
 
 
-async def test_cannot_recall_accepts_incomplete_and_prevents_reselection(client, test_db):
+async def test_unable_to_answer_is_local_to_task_and_prevents_reselection(client, test_db):
     fixture = await _create_story_gap(client, test_db)
     started = await post_mobile_memoir_voice_session(
         client,
@@ -1348,18 +1350,25 @@ async def test_cannot_recall_accepts_incomplete_and_prevents_reselection(client,
     )
     session = started.json()["session"]
     response = await client.post(
-        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/cannot-recall",
+        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/unable-to-answer",
         json={
-            "idempotency_key": "cannot-recall-accept",
-            "note": "确实想不起来，接受这部分暂时不完整。",
-            "resolution": "accept_incomplete",
+            "idempotency_key": "unable-to-answer",
+            "note": "确实想不起来这个具体问题。",
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == MemoirFollowupTaskStatus.CANNOT_RECALL.value
+    assert response.json()["status"] == MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
     assert gap is not None
-    assert gap.status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
+    assert gap.status == MemoirNarrativeGapStatus.OPEN.value
+    decision = await test_db.scalar(
+        select(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.target_id == fixture["task"].id,
+            MemoirNarrativeDecision.action
+            == MemoirNarrativeDecisionAction.UNABLE_TO_ANSWER.value,
+        )
+    )
+    assert decision is not None
 
     next_session = await post_mobile_memoir_voice_session(
         client,
@@ -1387,11 +1396,10 @@ async def test_ask_family_later_keeps_gap_open_and_task_resumable(client, test_d
     )
     assert started.status_code == 201, started.text
     deferred = await client.post(
-        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/cannot-recall",
+        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/defer",
         json={
-            "idempotency_key": "cannot-recall-family",
+            "idempotency_key": "ask-family-later",
             "note": "先问问当时一起参赛的家人。",
-            "resolution": "ask_family_later",
         },
     )
     assert deferred.status_code == 200, deferred.text
@@ -1408,7 +1416,7 @@ async def test_ask_family_later_keeps_gap_open_and_task_resumable(client, test_d
     assert resumed.json()["status"] == MemoirFollowupTaskStatus.PENDING.value
 
 
-async def test_excluding_followup_excludes_related_story_claim_and_gap(client, test_db):
+async def test_stop_asking_closes_only_task_and_keeps_content_and_gap(client, test_db):
     fixture = await _create_story_gap(client, test_db)
     started = await post_mobile_memoir_voice_session(
         client,
@@ -1421,21 +1429,29 @@ async def test_excluding_followup_excludes_related_story_claim_and_gap(client, t
     )
     assert started.status_code == 201, started.text
     response = await client.post(
-        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/exclude",
+        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/stop-asking",
         json={
-            "idempotency_key": "exclude-followup",
-            "note": "这件事不放进回忆录。",
+            "idempotency_key": "stop-asking-followup",
+            "note": "以后不要再问这个具体问题。",
         },
     )
     assert response.status_code == 200, response.text
-    assert response.json()["status"] == MemoirFollowupTaskStatus.EXCLUDED.value
+    assert response.json()["status"] == MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER.value
     await test_db.refresh(fixture["story"])
     await test_db.refresh(fixture["claim"])
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
-    assert fixture["story"].publication_status == MemoirStoryPublicationStatus.EXCLUDED.value
-    assert fixture["claim"].publication_status == MemoirClaimPublicationStatus.EXCLUDED.value
+    assert fixture["story"].publication_status == MemoirStoryPublicationStatus.ELIGIBLE.value
+    assert fixture["claim"].publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
     assert gap is not None
-    assert gap.status == MemoirNarrativeGapStatus.NOT_APPLICABLE.value
+    assert gap.status == MemoirNarrativeGapStatus.OPEN.value
+    decision = await test_db.scalar(
+        select(MemoirNarrativeDecision).where(
+            MemoirNarrativeDecision.target_id == fixture["task"].id,
+            MemoirNarrativeDecision.action
+            == MemoirNarrativeDecisionAction.STOP_ASKING.value,
+        )
+    )
+    assert decision is not None
 
 
 async def test_followup_prompt_drops_task_after_claim_becomes_private(client, test_db):
