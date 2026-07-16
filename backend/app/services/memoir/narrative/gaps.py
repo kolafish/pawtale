@@ -10,18 +10,23 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
+    MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
+    MemoirNarrativeGapActionDecisionSource,
+    MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapStatus,
 )
 from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import (
     MemoirClaim,
+    MemoirFollowupTask,
     MemoirNarrativeGap,
     MemoirNarrativeGapChapter,
     MemoirNarrativeGapClaim,
@@ -32,7 +37,7 @@ from app.schemas.memoir_narrative import (
     MemoirNarrativeGapCandidate,
     MemoirNarrativeGapResponse,
 )
-from app.services.memoir.narrative import decision_log
+from app.services.memoir.narrative import completion_planner, decision_log
 
 
 TERMINAL_GAP_STATUSES = {
@@ -68,6 +73,10 @@ def gap_fingerprint(candidate: MemoirNarrativeGapCandidate) -> str:
 def _gap_state(gap: MemoirNarrativeGap) -> dict[str, object]:
     return {
         "status": gap.status,
+        "recommended_action": gap.recommended_action,
+        "action_reason_code": gap.action_reason_code,
+        "action_decision_source": gap.action_decision_source,
+        "action_policy_version": gap.action_policy_version,
         "resolution_note": gap.resolution_note,
         "resolved_by": gap.resolved_by,
         "resolved_by_user_id": gap.resolved_by_user_id,
@@ -252,6 +261,7 @@ async def upsert_gap(
     candidate: MemoirNarrativeGapCandidate,
 ) -> tuple[MemoirNarrativeGap, bool]:
     await _validate_candidate_relations(db, project_id=project_id, candidate=candidate)
+    action_plan = completion_planner.plan_gap_action(candidate)
     fingerprint = gap_fingerprint(candidate)
     gap = await db.scalar(
         select(MemoirNarrativeGap).where(
@@ -274,6 +284,10 @@ async def upsert_gap(
             description=candidate.description,
             fingerprint=fingerprint,
             status=MemoirNarrativeGapStatus.OPEN.value,
+            recommended_action=action_plan.recommended_action.value,
+            action_reason_code=action_plan.reason_code.value,
+            action_decision_source=action_plan.decision_source.value,
+            action_policy_version=action_plan.policy_version,
             detected_by=candidate.detected_by.value,
             detection_count=1,
             first_detected_at=now,
@@ -294,6 +308,7 @@ async def upsert_gap(
                 raise
             created = False
     if not created:
+        previous_action = gap.recommended_action
         resolution_kind = _auto_resolution_kind(gap)
         if resolution_kind is not None:
             await _reopen_auto_resolved_gap(
@@ -305,6 +320,48 @@ async def upsert_gap(
         gap.title = candidate.title
         gap.description = candidate.description
         gap.detected_by = candidate.detected_by.value
+        in_progress_task = await db.scalar(
+            select(MemoirFollowupTask.id).where(
+                MemoirFollowupTask.project_id == project_id,
+                MemoirFollowupTask.gap_id == gap.id,
+                MemoirFollowupTask.status
+                == MemoirFollowupTaskStatus.IN_PROGRESS.value,
+            )
+        )
+        if in_progress_task is not None:
+            gap.recommended_action = MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+            gap.action_reason_code = (
+                MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE.value
+            )
+            gap.action_decision_source = (
+                MemoirNarrativeGapActionDecisionSource.DETERMINISTIC_POLICY.value
+            )
+            gap.action_policy_version = action_plan.policy_version
+        elif (
+            gap.action_decision_source
+            != MemoirNarrativeGapActionDecisionSource.MANUAL_OVERRIDE.value
+        ):
+            gap.recommended_action = action_plan.recommended_action.value
+            gap.action_reason_code = action_plan.reason_code.value
+            gap.action_decision_source = action_plan.decision_source.value
+            gap.action_policy_version = action_plan.policy_version
+        if (
+            previous_action != MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+            and gap.recommended_action
+            == MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+        ):
+            from app.services.memoir.narrative import followup_tasks
+
+            await followup_tasks.reactivate_cancelled_task_for_gap(
+                db,
+                project_id=project_id,
+                gap_id=gap.id,
+                reason="gap action returned to interview after re-audit",
+                decision_identity=(
+                    f"gap-action-interview:{gap.id}:"
+                    f"{action_plan.policy_version}:{gap.detection_count + 1}"
+                ),
+            )
         gap.detection_count += 1
         gap.last_detected_at = now
         db.add(gap)

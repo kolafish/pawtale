@@ -13,10 +13,13 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirCompletionItemAction,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
+    MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
@@ -37,7 +40,14 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
 )
-from app.services.memoir.narrative import gap_audit, gap_semantic, gaps
+from app.services.memoir.narrative import (
+    completion_items,
+    completion_planner,
+    followup_planner,
+    gap_audit,
+    gap_semantic,
+    gaps,
+)
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import claim_editing_job, run_editing_job
 from app.services.memoir.narrative.gap_rules import (
@@ -427,6 +437,149 @@ async def test_semantic_reaudit_resolves_then_reopens_gap_and_task_if_it_recurs(
     assert task.status == MemoirFollowupTaskStatus.PENDING.value
 
 
+async def test_gap_reaudit_does_not_switch_an_in_progress_interview(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["求学"],
+    )
+    candidate = MemoirNarrativeGapCandidate(
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+        primary_chapter_id=chapters[0].id,
+        gap_type=MemoirNarrativeGapType.CAUSALITY,
+        severity=MemoirNarrativeGapSeverity.MEDIUM,
+        target_slot="semantic:chapter_context:stable-gap",
+        title="离家前的背景还不清楚",
+        description="需要补充讲述者掌握的背景。",
+        detected_by=MemoirNarrativeGapDetectedBy.AI,
+        action_reason_signal=MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE,
+    )
+    stored, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[candidate],
+    )
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=stored[0].id,
+        chapter_id=chapters[0].id,
+        answer_use=MemoirFollowupAnswerUse.CLARIFICATION.value,
+        question="离家前，当时家里是什么情况？",
+        purpose="补充章节背景",
+        priority=2000,
+        status=MemoirFollowupTaskStatus.IN_PROGRESS.value,
+        assigned_session_id=created["session"]["id"],
+        started_at=datetime.now(UTC).replace(tzinfo=None),
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(task)
+    await test_db.flush()
+
+    reaudited, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[
+            candidate.model_copy(
+                update={
+                    "action_reason_signal": (
+                        MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE
+                    )
+                }
+            )
+        ],
+    )
+
+    assert created_count == 0
+    assert (
+        reaudited[0].recommended_action
+        == MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+    )
+    assert task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+
+
+async def test_gap_reaudit_cancels_a_pending_task_that_no_longer_needs_interview(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["求学"],
+    )
+    candidate = MemoirNarrativeGapCandidate(
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+        primary_chapter_id=chapters[0].id,
+        gap_type=MemoirNarrativeGapType.CAUSALITY,
+        severity=MemoirNarrativeGapSeverity.MEDIUM,
+        target_slot="semantic:opening:channel-change",
+        title="开头缺少进入故事的背景",
+        description="需要判断是否还要补充新素材。",
+        detected_by=MemoirNarrativeGapDetectedBy.AI,
+        action_reason_signal=MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE,
+    )
+    stored, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[candidate],
+    )
+    task = MemoirFollowupTask(
+        project_id=project_id,
+        gap_id=stored[0].id,
+        chapter_id=chapters[0].id,
+        answer_use=MemoirFollowupAnswerUse.CLARIFICATION.value,
+        question="故事开始前发生了什么？",
+        purpose="补充章节背景",
+        priority=2000,
+        status=MemoirFollowupTaskStatus.PENDING.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(task)
+    await test_db.flush()
+
+    reaudited, _ = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[
+            candidate.model_copy(
+                update={
+                    "action_reason_signal": (
+                        MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE
+                    )
+                }
+            )
+        ],
+    )
+    items = await completion_items.chapter_completion_items(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+    )
+    await followup_planner.generate_followup_tasks(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+    )
+    await test_db.flush()
+
+    assert (
+        reaudited[0].recommended_action
+        == MemoirNarrativeGapRecommendedAction.EDITORIAL.value
+    )
+    assert [
+        (item.action, item.task_id)
+        for item in items
+        if item.gap_id == reaudited[0].id
+    ] == [(MemoirCompletionItemAction.EDIT, None)]
+    assert task.status == MemoirFollowupTaskStatus.CANCELLED.value
+
+
 def _semantic_context() -> ChapterAuditContext:
     now = datetime.now(UTC).replace(tzinfo=None)
     chapter = MemoirBookPlanChapter(
@@ -499,11 +652,12 @@ def _semantic_context() -> ChapterAuditContext:
 async def test_semantic_gap_audit_rejects_evidence_outside_chapter():
     context = _semantic_context()
     invalid_payload = """{
-      "schema_version": "1",
+      "schema_version": "2",
       "gaps": [{
         "gap_type": "unsupported_fact",
         "severity": "high",
         "dimension": "unsupported_fact",
+        "reason_signal": "publication_decision_required",
         "title": "事实缺少来源",
         "description": "需要核对这条事实。",
         "story_ids": ["story-1"],
@@ -519,6 +673,29 @@ async def test_semantic_gap_audit_rejects_evidence_outside_chapter():
 
     assert context.claims["claim-1"].statement == "十八岁时离开家乡。"
     assert context.stories["story-1"].summary == "十八岁时离开家乡。"
+
+
+async def test_semantic_gap_audit_rejects_migration_only_reason_signal():
+    context = _semantic_context()
+    invalid_payload = """{
+      "schema_version": "2",
+      "gaps": [{
+        "gap_type": "causality",
+        "severity": "medium",
+        "dimension": "opening",
+        "reason_signal": "migration_review_required",
+        "title": "开头需要处理",
+        "description": "模型不能把迁移兜底原因作为语义判断。",
+        "story_ids": ["story-1"],
+        "claim_ids": ["claim-1"]
+      }]
+    }"""
+
+    with pytest.raises(ValueError, match="evidence schema"):
+        await gap_semantic.evaluate_semantic_gaps(
+            context,
+            ai_client=FakeAIClient(invalid_payload),
+        )
 
 
 async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_issue():
@@ -543,11 +720,12 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
     assert "禁止套用" in prompt
 
     payload = """{
-      "schema_version": "1",
+      "schema_version": "2",
       "gaps": [{
         "gap_type": "causality",
         "severity": "medium",
         "dimension": "opening",
+        "reason_signal": "draft_usage_problem",
         "title": "开头缺少搬家背景",
         "description": "当前开头直接进入新学校，读者不知道为什么搬家。",
         "story_ids": ["story-1"],
@@ -561,6 +739,12 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
 
     assert len(candidates) == 1
     assert candidates[0].target_slot.startswith("semantic:opening:")
+    action = completion_planner.plan_gap_action(candidates[0])
+    assert action.recommended_action == MemoirNarrativeGapRecommendedAction.EDITORIAL
+    assert (
+        action.reason_code
+        == MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
+    )
     changed_context = replace(
         context,
         draft_blocks=(replace(draft_block, content="先交代搬家原因，再写进入新学校。"),),
@@ -570,15 +754,46 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
     ) != gap_audit.chapter_gap_audit_content_signature(changed_context)
 
 
+async def test_semantic_gap_routes_truly_missing_background_to_interview():
+    context = _semantic_context()
+    payload = """{
+      "schema_version": "2",
+      "gaps": [{
+        "gap_type": "causality",
+        "severity": "medium",
+        "dimension": "chapter_context",
+        "reason_signal": "missing_new_evidence",
+        "title": "离家前的处境还不清楚",
+        "description": "现有素材没有说明为什么必须在那时离家。",
+        "story_ids": ["story-1"],
+        "claim_ids": ["claim-1"]
+      }]
+    }"""
+
+    candidates, _, _ = await gap_semantic.evaluate_semantic_gaps(
+        context,
+        ai_client=FakeAIClient(payload),
+    )
+
+    assert len(candidates) == 1
+    action = completion_planner.plan_gap_action(candidates[0])
+    assert action.recommended_action == MemoirNarrativeGapRecommendedAction.INTERVIEW
+    assert (
+        action.reason_code
+        == MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE
+    )
+
+
 async def test_semantic_gap_audit_keeps_one_question_per_editorial_dimension():
     context = _semantic_context()
     payload = """{
-      "schema_version": "1",
+      "schema_version": "2",
       "gaps": [
         {
           "gap_type": "causality",
           "severity": "medium",
           "dimension": "causality",
+          "reason_signal": "missing_new_evidence",
           "title": "离家原因不清楚",
           "description": "读者不知道为什么离家。",
           "story_ids": ["story-1"],
@@ -588,6 +803,7 @@ async def test_semantic_gap_audit_keeps_one_question_per_editorial_dimension():
           "gap_type": "causality",
           "severity": "medium",
           "dimension": "causality",
+          "reason_signal": "missing_new_evidence",
           "title": "到校经过不清楚",
           "description": "读者不知道怎样到校。",
           "story_ids": ["story-1"],
@@ -597,6 +813,7 @@ async def test_semantic_gap_audit_keeps_one_question_per_editorial_dimension():
           "gap_type": "causality",
           "severity": "medium",
           "dimension": "opening",
+          "reason_signal": "missing_new_evidence",
           "title": "开头进入得太突然",
           "description": "章节直接写离家，没有进入场景。",
           "story_ids": ["story-1"],
@@ -606,6 +823,7 @@ async def test_semantic_gap_audit_keeps_one_question_per_editorial_dimension():
           "gap_type": "relationship",
           "severity": "medium",
           "dimension": "person_introduction",
+          "reason_signal": "missing_new_evidence",
           "title": "陪同者没有介绍",
           "description": "关键人物首次出现时身份不清楚。",
           "story_ids": ["story-1"],

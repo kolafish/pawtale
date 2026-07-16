@@ -11,6 +11,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
 )
@@ -54,9 +55,15 @@ def _gap_kind(gap: MemoirNarrativeGap) -> MemoirCompletionItemKind:
 
 
 def _gap_action(gap: MemoirNarrativeGap) -> MemoirCompletionItemAction:
-    if gap.gap_type == MemoirNarrativeGapType.MISSING_SLOT.value:
-        return MemoirCompletionItemAction.NONE
-    if gap.gap_type == MemoirNarrativeGapType.REPETITION.value:
+    if (
+        gap.recommended_action
+        == MemoirNarrativeGapRecommendedAction.INTERVIEW.value
+    ):
+        return MemoirCompletionItemAction.INTERVIEW
+    if (
+        gap.recommended_action
+        == MemoirNarrativeGapRecommendedAction.EDITORIAL.value
+    ):
         return MemoirCompletionItemAction.EDIT
     return MemoirCompletionItemAction.REVIEW
 
@@ -81,10 +88,19 @@ async def chapter_completion_items(
         (
             await db.scalars(
                 select(MemoirFollowupTask)
+                .join(
+                    MemoirNarrativeGap,
+                    MemoirNarrativeGap.id == MemoirFollowupTask.gap_id,
+                )
                 .where(
                     MemoirFollowupTask.project_id == project_id,
                     MemoirFollowupTask.chapter_id == chapter_id,
                     MemoirFollowupTask.status.in_(_ACTIVE_TASK_STATUSES),
+                    MemoirNarrativeGap.project_id == project_id,
+                    MemoirNarrativeGap.status
+                    == MemoirNarrativeGapStatus.OPEN.value,
+                    MemoirNarrativeGap.recommended_action
+                    == MemoirNarrativeGapRecommendedAction.INTERVIEW.value,
                 )
                 .order_by(
                     (
@@ -164,6 +180,8 @@ async def chapter_completion_items(
         if gap.id in task_by_gap or gap.status != MemoirNarrativeGapStatus.OPEN.value:
             continue
         action = _gap_action(gap)
+        if action == MemoirCompletionItemAction.INTERVIEW:
+            continue
         items.append(
             MemoirCompletionItem(
                 id=gap.id,

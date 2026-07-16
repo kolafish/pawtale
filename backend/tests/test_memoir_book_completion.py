@@ -181,7 +181,7 @@ async def _run_completion_preparation(client, test_db, project_id: str, chapter_
         model_name = "test-chapter-audit"
 
         async def _call_llm(self, *_args, **_kwargs):
-            return '{"schema_version":"1","gaps":[]}'
+            return '{"schema_version":"2","gaps":[]}'
 
     async def semantic_audit_handler(db, job):
         return await gap_audit.run_chapter_gap_audit_job(
@@ -320,10 +320,14 @@ async def test_book_completion_exposes_at_most_three_interview_directions(
             severity=MemoirNarrativeGapSeverity.MEDIUM.value,
             target_slot=f"semantic:opening:{index}",
             title=f"章节方向 {index + 1}",
-            description="需要补充一段章节层面的说明。",
-            fingerprint=f"{index + 1:064d}",
-            detected_by=MemoirNarrativeGapDetectedBy.AI.value,
-        )
+                description="需要补充一段章节层面的说明。",
+                fingerprint=f"{index + 1:064d}",
+                recommended_action="interview",
+                action_reason_code="missing_new_evidence",
+                action_decision_source="deterministic_policy",
+                action_policy_version="1",
+                detected_by=MemoirNarrativeGapDetectedBy.AI.value,
+            )
         test_db.add(gap)
         await test_db.flush()
         test_db.add(
@@ -533,7 +537,7 @@ async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, t
         model_name = "test-model"
 
         async def _call_llm(self, *_args, **_kwargs):
-            return '{"schema_version":"1","gaps":[]}'
+            return '{"schema_version":"2","gaps":[]}'
 
     async def semantic_handler(db, job):
         return await gap_audit.run_chapter_gap_audit_job(

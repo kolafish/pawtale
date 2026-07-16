@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
@@ -52,6 +53,8 @@ class ChapterAuditDraftBlock:
     freshness_status: str
     current_version_id: str
     content: str
+    claim_ids: tuple[str, ...] = ()
+    story_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -223,6 +226,25 @@ async def load_chapter_audit_context(
             )
         ).all():
             story_slots[slot.story_id][slot.slot_key] = slot
+    draft_rows = (
+        await db.execute(
+            select(MemoirDraftBlock, MemoirDraftBlockVersion)
+            .options(
+                selectinload(MemoirDraftBlockVersion.claims),
+                selectinload(MemoirDraftBlockVersion.stories),
+            )
+            .join(
+                MemoirDraftBlockVersion,
+                (MemoirDraftBlockVersion.project_id == MemoirDraftBlock.project_id)
+                & (MemoirDraftBlockVersion.id == MemoirDraftBlock.current_version_id),
+            )
+            .where(
+                MemoirDraftBlock.project_id == project_id,
+                MemoirDraftBlock.chapter_id == chapter_id,
+            )
+            .order_by(MemoirDraftBlock.sort_order, MemoirDraftBlock.id)
+        )
+    ).all()
     draft_blocks = tuple(
         ChapterAuditDraftBlock(
             id=block.id,
@@ -233,22 +255,10 @@ async def load_chapter_audit_context(
             freshness_status=block.freshness_status,
             current_version_id=version.id,
             content=version.content,
+            claim_ids=tuple(relation.claim_id for relation in version.claims),
+            story_ids=tuple(relation.story_id for relation in version.stories),
         )
-        for block, version in (
-            await db.execute(
-                select(MemoirDraftBlock, MemoirDraftBlockVersion)
-                .join(
-                    MemoirDraftBlockVersion,
-                    (MemoirDraftBlockVersion.project_id == MemoirDraftBlock.project_id)
-                    & (MemoirDraftBlockVersion.id == MemoirDraftBlock.current_version_id),
-                )
-                .where(
-                    MemoirDraftBlock.project_id == project_id,
-                    MemoirDraftBlock.chapter_id == chapter_id,
-                )
-                .order_by(MemoirDraftBlock.sort_order, MemoirDraftBlock.id)
-            )
-        ).all()
+        for block, version in draft_rows
     )
     return ChapterAuditContext(
         chapter=chapter,

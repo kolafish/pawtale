@@ -42,6 +42,9 @@ async def followup_generation_signature(
                 MemoirNarrativeGap.id,
                 MemoirNarrativeGap.last_detected_at,
                 MemoirNarrativeGap.status,
+                MemoirNarrativeGap.recommended_action,
+                MemoirNarrativeGap.action_reason_code,
+                MemoirNarrativeGap.action_policy_version,
             )
             .where(*filters)
             .order_by(MemoirNarrativeGap.id)
@@ -51,8 +54,22 @@ async def followup_generation_signature(
         "planner_version": followup_planner.FOLLOWUP_PLANNER_VERSION,
         "chapter_id": chapter_id,
         "gaps": [
-            [gap_id, detected_at.isoformat(), status]
-            for gap_id, detected_at, status in rows
+            [
+                gap_id,
+                detected_at.isoformat(),
+                status,
+                recommended_action,
+                action_reason_code,
+                action_policy_version,
+            ]
+            for (
+                gap_id,
+                detected_at,
+                status,
+                recommended_action,
+                action_reason_code,
+                action_policy_version,
+            ) in rows
         ],
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)

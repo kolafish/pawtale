@@ -268,6 +268,27 @@ class MemoirNarrativeGapStatus(str, Enum):
     DISMISSED = "dismissed"
 
 
+class MemoirNarrativeGapRecommendedAction(str, Enum):
+    INTERVIEW = "interview"
+    EDITORIAL = "editorial"
+    MANUAL_REVIEW = "manual_review"
+
+
+class MemoirNarrativeGapActionReasonCode(str, Enum):
+    MISSING_NEW_EVIDENCE = "missing_new_evidence"
+    EXISTING_MATERIAL_AVAILABLE = "existing_material_available"
+    FACT_CONFLICT_DETECTED = "fact_conflict_detected"
+    PUBLICATION_DECISION_REQUIRED = "publication_decision_required"
+    DRAFT_USAGE_PROBLEM = "draft_usage_problem"
+    MIGRATION_REVIEW_REQUIRED = "migration_review_required"
+
+
+class MemoirNarrativeGapActionDecisionSource(str, Enum):
+    DETERMINISTIC_POLICY = "deterministic_policy"
+    MIGRATION = "migration"
+    MANUAL_OVERRIDE = "manual_override"
+
+
 class MemoirNarrativeGapDetectedBy(str, Enum):
     RULES = "rules"
     AI = "ai"

@@ -6,8 +6,11 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.narrative_types import (
+    MemoirNarrativeGapActionDecisionSource,
+    MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
@@ -34,6 +37,7 @@ class MemoirNarrativeGapCandidate(BaseModel):
     claim_roles: dict[str, MemoirNarrativeGapClaimRole] = Field(default_factory=dict)
     story_roles: dict[str, MemoirNarrativeGapRelationRole] = Field(default_factory=dict)
     chapter_roles: dict[str, MemoirNarrativeGapRelationRole] = Field(default_factory=dict)
+    action_reason_signal: MemoirNarrativeGapActionReasonCode | None = None
 
     @field_validator("target_slot", "title", "description")
     @classmethod
@@ -89,6 +93,10 @@ class MemoirNarrativeGapResponse(BaseModel):
     description: str
     fingerprint: str
     status: MemoirNarrativeGapStatus
+    recommended_action: MemoirNarrativeGapRecommendedAction
+    action_reason_code: MemoirNarrativeGapActionReasonCode
+    action_decision_source: MemoirNarrativeGapActionDecisionSource
+    action_policy_version: str
     detected_by: MemoirNarrativeGapDetectedBy
     detection_count: int
     resolution_note: str
@@ -240,6 +248,7 @@ class MemoirSemanticGapCandidate(BaseModel):
         "contradiction",
         "unsupported_fact",
     ]
+    reason_signal: MemoirNarrativeGapActionReasonCode
     title: str = Field(min_length=1, max_length=240)
     description: str = Field(min_length=1, max_length=4000)
     story_ids: list[str] = Field(default_factory=list, max_length=20)
@@ -250,6 +259,16 @@ class MemoirSemanticGapCandidate(BaseModel):
     def strip_text(cls, value: str) -> str:
         return value.strip()
 
+    @field_validator("reason_signal")
+    @classmethod
+    def reject_migration_reason(
+        cls,
+        value: MemoirNarrativeGapActionReasonCode,
+    ) -> MemoirNarrativeGapActionReasonCode:
+        if value == MemoirNarrativeGapActionReasonCode.MIGRATION_REVIEW_REQUIRED:
+            raise ValueError("migration reason cannot come from semantic audit")
+        return value
+
     @field_validator("story_ids", "claim_ids")
     @classmethod
     def normalize_ids(cls, values: list[str]) -> list[str]:
@@ -259,12 +278,12 @@ class MemoirSemanticGapCandidate(BaseModel):
 class MemoirSemanticGapAuditOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "1"
+    schema_version: str = "2"
     gaps: list[MemoirSemanticGapCandidate] = Field(default_factory=list, max_length=40)
 
     @field_validator("schema_version")
     @classmethod
     def require_schema_version(cls, value: str) -> str:
-        if value != "1":
+        if value != "2":
             raise ValueError("unsupported semantic gap schema version")
         return value

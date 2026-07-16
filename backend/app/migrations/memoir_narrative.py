@@ -64,6 +64,14 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
 MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN = "include_in_book"
 FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
+NARRATIVE_GAP_ACTION_COLUMNS = {
+    "recommended_action": "VARCHAR(24) NOT NULL DEFAULT 'manual_review'",
+    "action_reason_code": (
+        "VARCHAR(48) NOT NULL DEFAULT 'migration_review_required'"
+    ),
+    "action_decision_source": "VARCHAR(32) NOT NULL DEFAULT 'migration'",
+    "action_policy_version": "VARCHAR(24) NOT NULL DEFAULT 'migration-1'",
+}
 FOLLOWUP_TASK_OUTCOME_STATUS_RENAMES = {
     "cannot_recall": "unable_to_answer",
     "excluded": "closed_without_answer",
@@ -270,6 +278,59 @@ async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
         )
     )
     return [f"{table_name}.{FOLLOWUP_TASK_ANSWER_USE_COLUMN}"]
+
+
+async def _ensure_narrative_gap_action_columns(conn) -> list[str]:
+    table_name = "memoir_narrative_gaps"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    changed: list[str] = []
+    for column_name, column_type in NARRATIVE_GAP_ACTION_COLUMNS.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+        )
+        changed.append(f"{table_name}.{column_name}")
+
+    await conn.execute(
+        text(
+            "UPDATE memoir_narrative_gaps AS gap "
+            "SET recommended_action = 'interview', "
+            "action_reason_code = 'missing_new_evidence', "
+            "action_decision_source = 'migration', "
+            "action_policy_version = 'migration-1' "
+            "WHERE gap.action_decision_source = 'migration' "
+            "AND EXISTS ("
+            "SELECT 1 FROM memoir_followup_tasks AS task "
+            "WHERE task.project_id = gap.project_id "
+            "AND task.gap_id = gap.id "
+            "AND task.status IN ('pending', 'in_progress', 'deferred')"
+            ")"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE memoir_narrative_gaps AS gap "
+            "SET recommended_action = 'editorial', "
+            "action_reason_code = 'existing_material_available', "
+            "action_decision_source = 'migration', "
+            "action_policy_version = 'migration-1' "
+            "WHERE gap.gap_type = 'repetition' "
+            "AND gap.action_decision_source = 'migration' "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM memoir_followup_tasks AS task "
+            "WHERE task.project_id = gap.project_id "
+            "AND task.gap_id = gap.id "
+            "AND task.status IN ('pending', 'in_progress', 'deferred')"
+            ")"
+        )
+    )
+    return changed
 
 
 async def _ensure_followup_task_outcome_schema(engine: AsyncEngine) -> bool:
@@ -710,6 +771,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 changed_tables.append(table.name)
         if await _ensure_decision_schema(conn):
             changed_tables.append("memoir_narrative_decisions")
+        changed_columns.extend(await _ensure_narrative_gap_action_columns(conn))
         for table in _narrative_tables_from_metadata():
             existing_indexes = await _index_names(conn, table.name)
             for index in table.indexes:
