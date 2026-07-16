@@ -122,6 +122,10 @@ FRAMEWORK_TABLES = (
     "memoir_framework_items",
     "memoir_framework_item_claims",
 )
+GAP_INVOLVED_RELATION_TABLES = {
+    "memoir_narrative_gap_stories": ("story_id", "primary_story_id"),
+    "memoir_narrative_gap_chapters": ("chapter_id", "primary_chapter_id"),
+}
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -412,6 +416,167 @@ async def _ensure_narrative_gap_action_constraints(engine: AsyncEngine) -> bool:
                     + ", ".join(str(tuple(row)) for row in violations)
                 )
     return True
+
+
+async def _ensure_gap_involved_relation_schema(
+    engine: AsyncEngine,
+) -> list[str]:
+    """Remove duplicated primary roles; Gap.primary_* is the sole scope owner."""
+    register_models()
+    rebuild_tables: list[str] = []
+    async with engine.connect() as conn:
+        for table_name, (target_column, primary_column) in (
+            GAP_INVOLVED_RELATION_TABLES.items()
+        ):
+            if not await _table_exists(conn, table_name):
+                continue
+            columns = {
+                str(column["name"])
+                for column in await _table_column_schema(conn, table_name)
+            }
+            if "role" not in columns:
+                continue
+            invalid_role_count = int(
+                (
+                    await conn.execute(
+                        text(
+                            f"SELECT COUNT(*) FROM {table_name} "
+                            "WHERE role NOT IN ('primary', 'involved')"
+                        )
+                    )
+                ).scalar_one()
+            )
+            if invalid_role_count:
+                raise RuntimeError(
+                    f"Cannot migrate {table_name}: found invalid relation roles"
+                )
+            mismatched_primary_count = int(
+                (
+                    await conn.execute(
+                        text(
+                            f"SELECT COUNT(*) FROM {table_name} AS relation "
+                            "JOIN memoir_narrative_gaps AS gap "
+                            "ON gap.project_id = relation.project_id "
+                            "AND gap.id = relation.gap_id "
+                            "WHERE relation.role = 'primary' "
+                            f"AND (gap.{primary_column} IS NULL "
+                            f"OR gap.{primary_column} != relation.{target_column})"
+                        )
+                    )
+                ).scalar_one()
+            )
+            missing_primary_count = int(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT COUNT(*) "
+                            "FROM memoir_narrative_gaps AS gap "
+                            f"WHERE gap.{primary_column} IS NOT NULL "
+                            "AND NOT EXISTS ("
+                            f"SELECT 1 FROM {table_name} AS relation "
+                            "WHERE relation.project_id = gap.project_id "
+                            "AND relation.gap_id = gap.id "
+                            "AND relation.role = 'primary' "
+                            f"AND relation.{target_column} = "
+                            f"gap.{primary_column}"
+                            ")"
+                        )
+                    )
+                ).scalar_one()
+            )
+            involved_primary_count = int(
+                (
+                    await conn.execute(
+                        text(
+                            f"SELECT COUNT(*) FROM {table_name} AS relation "
+                            "JOIN memoir_narrative_gaps AS gap "
+                            "ON gap.project_id = relation.project_id "
+                            "AND gap.id = relation.gap_id "
+                            "WHERE relation.role = 'involved' "
+                            f"AND gap.{primary_column} = relation.{target_column}"
+                        )
+                    )
+                ).scalar_one()
+            )
+            if (
+                mismatched_primary_count
+                or missing_primary_count
+                or involved_primary_count
+            ):
+                raise RuntimeError(
+                    f"Cannot migrate {table_name}: primary and involved "
+                    "relations are inconsistent"
+                )
+            rebuild_tables.append(table_name)
+        await conn.rollback()
+        if not rebuild_tables:
+            return []
+
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                for table_name in rebuild_tables:
+                    target_column, _ = GAP_INVOLVED_RELATION_TABLES[table_name]
+                    legacy_table_name = f"{table_name}_before_involved_only"
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE {table_name} "
+                            f"RENAME TO {legacy_table_name}"
+                        )
+                    )
+                    for index_name in await _index_names(
+                        conn,
+                        legacy_table_name,
+                    ):
+                        if not index_name.startswith("sqlite_autoindex"):
+                            await conn.execute(
+                                text(f'DROP INDEX IF EXISTS "{index_name}"')
+                            )
+                    table = Base.metadata.tables[table_name]
+                    await conn.run_sync(
+                        lambda sync_conn, table=table: table.create(
+                            sync_conn,
+                            checkfirst=False,
+                        )
+                    )
+                    copied_columns = (
+                        "id",
+                        "project_id",
+                        "gap_id",
+                        target_column,
+                        "created_at",
+                    )
+                    column_names = ", ".join(
+                        f'"{name}"' for name in copied_columns
+                    )
+                    await conn.execute(
+                        text(
+                            f"INSERT INTO {table_name} ({column_names}) "
+                            f"SELECT {column_names} FROM {legacy_table_name} "
+                            "WHERE role = 'involved'"
+                        )
+                    )
+                    await conn.execute(
+                        text(f"DROP TABLE {legacy_table_name}")
+                    )
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with conn.begin():
+            violations = (
+                await conn.execute(text("PRAGMA foreign_key_check"))
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Gap relation migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    return rebuild_tables
 
 
 async def _ensure_editing_job_type_constraint(engine: AsyncEngine) -> bool:
@@ -1390,6 +1555,9 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_tables.append("memoir_editing_jobs")
     if await _ensure_followup_task_outcome_schema(engine):
         changed_tables.append("memoir_followup_tasks")
+    changed_tables.extend(
+        await _ensure_gap_involved_relation_schema(engine)
+    )
     changed_tables.extend(
         await _migrate_followup_answer_assignment_schema(engine)
     )

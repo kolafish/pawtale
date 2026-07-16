@@ -19,7 +19,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRecommendedAction,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
@@ -226,7 +225,6 @@ async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
         chapter_titles=["第一次离家"],
     )
     chapter_id = chapters[0].id
-    relation = {chapter_id: MemoirNarrativeGapRelationRole.PRIMARY}
     created_gaps, _ = await gaps.upsert_gaps(
         test_db,
         project_id=project_id,
@@ -239,7 +237,6 @@ async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
                 target_slot="reflection",
                 title="还可以补充离家后的感受",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                chapter_roles=relation,
             ),
             MemoirNarrativeGapCandidate(
                 scope_type=MemoirNarrativeGapScopeType.CHAPTER,
@@ -249,7 +246,6 @@ async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
                 target_slot="departure_age",
                 title="离家年龄存在冲突",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                chapter_roles=relation,
             ),
         ],
     )

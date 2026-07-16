@@ -36,6 +36,7 @@ from app.services.memoir.automation_event_metadata import (
     VOICE_SELECTED_MESSAGE_ID_KEY,
     VOICE_SELECTED_SESSION_ID_KEY,
     _clean_utterance_ids,
+    _event_utterance_ids,
     _event_is_visible,
     _event_is_voice_unannounced,
     _event_signature,
@@ -130,12 +131,12 @@ async def _without_recovered_job_failures(
     events: list[MemoirAutomationEvent],
 ) -> list[MemoirAutomationEvent]:
     job_ids = {
-        str(metadata.get("editing_job_id") or "").strip()
+        event.editing_job_id
         for event in events
-        for metadata in [event.metadata_json or {}]
-        if metadata.get("source") == EDITING_JOB_FAILURE_SOURCE
+        if event.editing_job_id
+        and (event.metadata_json or {}).get("source")
+        == EDITING_JOB_FAILURE_SOURCE
     }
-    job_ids.discard("")
     if not job_ids:
         return events
     succeeded_job_ids = set(
@@ -153,8 +154,7 @@ async def _without_recovered_job_failures(
     return [
         event
         for event in events
-        if str((event.metadata_json or {}).get("editing_job_id") or "").strip()
-        not in succeeded_job_ids
+        if event.editing_job_id not in succeeded_job_ids
     ]
 
 
@@ -172,7 +172,10 @@ def event_response(
         event_type=MemoirAutomationEventType(event.event_type),
         status=MemoirAutomationEventStatus(event.status),
         chapter_id=event.chapter_id,
-        utterance_ids=_clean_utterance_ids(event.utterance_ids_json),
+        review_utterance_id=event.review_utterance_id,
+        followup_task_id=event.followup_task_id,
+        editing_job_id=event.editing_job_id,
+        utterance_ids=_event_utterance_ids(event),
         summary_text=event.summary_text,
         confidence=event.confidence,
         metadata_json=metadata,
@@ -191,15 +194,34 @@ async def record_automation_event(
     status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
+    review_utterance_id: str | None = None,
+    followup_task_id: str | None = None,
+    editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
 ) -> MemoirAutomationEvent:
+    clean_utterance_ids = _clean_utterance_ids(utterance_ids)
+    review_id = (review_utterance_id or "").strip() or None
+    if (
+        event_type == MemoirAutomationEventType.SOURCE_HELD
+        and status == MemoirAutomationEventStatus.NEEDS_REVIEW
+    ):
+        if review_id is None and len(clean_utterance_ids) == 1:
+            review_id = clean_utterance_ids[0]
+        if review_id is None:
+            raise ValueError(
+                "source review event requires one review utterance"
+            )
+        clean_utterance_ids = []
     event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=chapter_id,
+        review_utterance_id=review_id,
+        followup_task_id=(followup_task_id or "").strip() or None,
+        editing_job_id=(editing_job_id or "").strip() or None,
         event_type=event_type.value,
         status=status.value,
-        utterance_ids_json=_clean_utterance_ids(utterance_ids),
+        utterance_ids_json=clean_utterance_ids,
         summary_text=summary_text.strip(),
         confidence=confidence,
         metadata_json=metadata_json or {},
@@ -219,6 +241,9 @@ async def record_or_update_automation_event(
     status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
+    review_utterance_id: str | None = None,
+    followup_task_id: str | None = None,
+    editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
 ) -> MemoirAutomationEvent:
@@ -243,14 +268,36 @@ async def record_or_update_automation_event(
             status=status,
             chapter_id=chapter_id,
             utterance_ids=utterance_ids,
+            review_utterance_id=review_utterance_id,
+            followup_task_id=followup_task_id,
+            editing_job_id=editing_job_id,
             summary_text=summary_text,
             confidence=confidence,
             metadata_json=metadata,
         )
 
     existing.chapter_id = chapter_id
+    existing.review_utterance_id = (
+        (review_utterance_id or "").strip() or None
+    )
+    existing.followup_task_id = (followup_task_id or "").strip() or None
+    existing.editing_job_id = (editing_job_id or "").strip() or None
     existing.status = status.value
     existing.utterance_ids_json = _clean_utterance_ids(utterance_ids)
+    if (
+        event_type == MemoirAutomationEventType.SOURCE_HELD
+        and status == MemoirAutomationEventStatus.NEEDS_REVIEW
+    ):
+        if (
+            existing.review_utterance_id is None
+            and len(existing.utterance_ids_json) == 1
+        ):
+            existing.review_utterance_id = existing.utterance_ids_json[0]
+        if existing.review_utterance_id is None:
+            raise ValueError(
+                "source review event requires one review utterance"
+            )
+        existing.utterance_ids_json = []
     existing.summary_text = summary_text.strip()
     existing.confidence = confidence
     existing.metadata_json = {

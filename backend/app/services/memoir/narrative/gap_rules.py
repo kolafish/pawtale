@@ -15,7 +15,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceRole,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapType,
@@ -416,10 +415,7 @@ def _chapter_candidate(
         description=description,
         detected_by=MemoirNarrativeGapDetectedBy.RULES,
         claim_roles=claim_roles or {},
-        story_roles={
-            story_id: MemoirNarrativeGapRelationRole.INVOLVED
-            for story_id in story_ids or []
-        },
+        involved_story_ids=set(story_ids or []),
     )
 
 
@@ -538,8 +534,7 @@ def evaluate_deterministic_gaps(
                         else "这部分还没有可用于成书的具体信息。"
                     ),
                     detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                    story_roles={story_id: MemoirNarrativeGapRelationRole.PRIMARY},
-                    chapter_roles={context.chapter.id: MemoirNarrativeGapRelationRole.INVOLVED},
+                    involved_chapter_ids={context.chapter.id},
                 )
             )
         for story_claim in context.story_claims.get(story_id, []):
@@ -565,8 +560,7 @@ def evaluate_deterministic_gaps(
                     description=claim.statement,
                     detected_by=MemoirNarrativeGapDetectedBy.RULES,
                     claim_roles={claim.id: MemoirNarrativeGapClaimRole.UNSUPPORTED_CANDIDATE},
-                    story_roles={story_id: MemoirNarrativeGapRelationRole.PRIMARY},
-                    chapter_roles={context.chapter.id: MemoirNarrativeGapRelationRole.INVOLVED},
+                    involved_chapter_ids={context.chapter.id},
                 )
             )
 

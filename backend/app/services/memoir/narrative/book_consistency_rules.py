@@ -14,7 +14,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeEntityVerificationStatus,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapType,
@@ -58,14 +57,8 @@ def _book_candidate(
         description=description,
         detected_by=MemoirNarrativeGapDetectedBy.RULES,
         claim_roles=claim_roles or {},
-        story_roles={
-            story_id: MemoirNarrativeGapRelationRole.INVOLVED
-            for story_id in sorted(story_ids or set())
-        },
-        chapter_roles={
-            chapter_id: MemoirNarrativeGapRelationRole.INVOLVED
-            for chapter_id in sorted(chapter_ids or set())
-        },
+        involved_story_ids=set(story_ids or set()),
+        involved_chapter_ids=set(chapter_ids or set()),
     )
 
 

@@ -9,7 +9,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapType,
@@ -262,10 +261,7 @@ def _validated_candidates(
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
                 action_reason_signal=item.reason_signal,
                 claim_roles={claim_id: claim_role for claim_id in sorted(claim_ids)},
-                story_roles={
-                    story_id: MemoirNarrativeGapRelationRole.INVOLVED
-                    for story_id in sorted(story_ids)
-                },
+                involved_story_ids=set(story_ids),
             )
         )
         selected_dimensions.add(item.dimension)

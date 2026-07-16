@@ -92,7 +92,14 @@ def _apply_deleted_utterance_cleanup(
     metadata[SOURCE_DELETED_AT_KEY] = now_iso
 
     remaining_direct_ids = _without_deleted_ids(event.utterance_ids_json, deleted_ids)
-    remaining_ids = _clean_utterance_ids(remaining_direct_ids + _metadata_utterance_ids(metadata))
+    if event.review_utterance_id in deleted_ids:
+        event.review_utterance_id = None
+        event.followup_task_id = None
+    remaining_ids = _clean_utterance_ids(
+        ([event.review_utterance_id] if event.review_utterance_id else [])
+        + remaining_direct_ids
+        + _metadata_utterance_ids(metadata)
+    )
     should_hide = not remaining_ids or event.status in {
         MemoirAutomationEventStatus.PENDING.value,
         MemoirAutomationEventStatus.NEEDS_REVIEW.value,
@@ -144,14 +151,6 @@ def _apply_assigned_source_review_resolution(
 
 def _metadata_dict(value: object) -> dict:
     return value if isinstance(value, dict) else {}
-
-
-def _event_followup_task_id(event: MemoirAutomationEvent) -> str:
-    metadata = _metadata_dict(event.metadata_json)
-    route = _metadata_dict(metadata.get("route")) or metadata
-    followup_answer = _metadata_dict(route.get("followup_answer"))
-    task_id = followup_answer.get("task_id")
-    return task_id.strip() if isinstance(task_id, str) else ""
 
 
 def _metadata_chapter_id(value: object) -> str:
@@ -257,13 +256,18 @@ async def resolve_assigned_source_review_events(
     if not assigned_sources:
         return AutomationEventSourceReviewResolutionResult()
 
-    result = await db.execute(
-        select(MemoirAutomationEvent).where(
-            MemoirAutomationEvent.project_id == project_id,
-            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
-            MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        )
+    event_query = select(MemoirAutomationEvent).where(
+        MemoirAutomationEvent.project_id == project_id,
+        MemoirAutomationEvent.event_type
+        == MemoirAutomationEventType.SOURCE_HELD.value,
+        MemoirAutomationEvent.status
+        == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
     )
+    if clean_ids is not None:
+        event_query = event_query.where(
+            MemoirAutomationEvent.review_utterance_id.in_(clean_ids)
+        )
+    result = await db.execute(event_query)
     now_iso = _utcnow_iso()
     updated_count = 0
     resolved_ids: list[str] = []
@@ -300,13 +304,12 @@ async def resolve_followup_source_review_events(
             MemoirAutomationEvent.project_id == project_id,
             MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
             MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+            MemoirAutomationEvent.followup_task_id == task_id,
         )
     )
     now_iso = _utcnow_iso()
     updated_count = 0
     for event in result.scalars().all():
-        if _event_followup_task_id(event) != task_id:
-            continue
         metadata = dict(event.metadata_json or {})
         metadata[RESOLUTION_KEY] = "confirmed"
         metadata[RESOLUTION_REASON_KEY] = "followup_answer_resolved"

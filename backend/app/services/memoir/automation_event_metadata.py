@@ -4,6 +4,7 @@ from typing import Protocol
 
 class AutomationEventMetadataCarrier(Protocol):
     utterance_ids_json: object
+    review_utterance_id: str | None
     metadata_json: dict | None
 
 ACKNOWLEDGED_AT_KEY = "acknowledged_at"
@@ -74,7 +75,8 @@ def _metadata_utterance_ids(metadata: dict) -> list[str]:
 
 def _event_utterance_ids(event: AutomationEventMetadataCarrier) -> list[str]:
     return _clean_utterance_ids(
-        _clean_unknown_utterance_ids(event.utterance_ids_json)
+        ([event.review_utterance_id] if event.review_utterance_id else [])
+        + _clean_unknown_utterance_ids(event.utterance_ids_json)
         + _metadata_utterance_ids(event.metadata_json or {})
     )
 

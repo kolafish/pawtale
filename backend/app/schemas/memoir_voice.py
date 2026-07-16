@@ -217,6 +217,9 @@ class MemoirAutomationEventResponse(BaseModel):
     event_type: MemoirAutomationEventType
     status: MemoirAutomationEventStatus
     chapter_id: str | None = None
+    review_utterance_id: str | None = None
+    followup_task_id: str | None = None
+    editing_job_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
     summary_text: str
     confidence: float | None = None

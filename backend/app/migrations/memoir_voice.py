@@ -32,6 +32,19 @@ VOICE_SESSION_ANCHOR_TRIGGERS = (
     "memoir_voice_sessions_anchor_insert",
     "memoir_voice_sessions_anchor_update",
 )
+AUTOMATION_EVENT_LINK_TRIGGERS = (
+    "memoir_automation_events_links_insert",
+    "memoir_automation_events_links_update",
+)
+AUXILIARY_QUERY_INDEXES = (
+    "ix_memoir_automation_events_project_timeline",
+    "ix_memoir_automation_events_review_utterance",
+    "ix_memoir_automation_events_review_task",
+    "ix_memoir_automation_events_editing_job",
+    "ix_memoir_editing_jobs_chapter_lookup",
+    "ix_memoir_editing_jobs_pending_due",
+    "ix_memoir_editing_jobs_running_lease",
+)
 
 
 def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
@@ -296,6 +309,325 @@ async def _ensure_voice_session_anchor_schema(
     }
 
 
+async def _ensure_automation_event_link_schema(
+    conn,
+) -> dict[str, list[str] | int]:
+    changed_columns: list[str] = []
+    changed_indexes: list[str] = []
+    changed_triggers: list[str] = []
+    columns = {
+        str(row[1])
+        for row in (
+            await conn.execute(
+                text('PRAGMA table_info("memoir_automation_events")')
+            )
+        ).fetchall()
+    }
+    column_sql = {
+        "review_utterance_id": (
+            "VARCHAR(36) REFERENCES memoir_voice_utterances(id) "
+            "ON DELETE CASCADE"
+        ),
+        "followup_task_id": (
+            "VARCHAR(36) REFERENCES memoir_followup_tasks(id) "
+            "ON DELETE SET NULL"
+        ),
+        "editing_job_id": (
+            "VARCHAR(36) REFERENCES memoir_editing_jobs(id) "
+            "ON DELETE SET NULL"
+        ),
+    }
+    for column_name, sql in column_sql.items():
+        if column_name in columns:
+            continue
+        await conn.execute(
+            text(
+                "ALTER TABLE memoir_automation_events "
+                f"ADD COLUMN {column_name} {sql}"
+            )
+        )
+        changed_columns.append(
+            f"memoir_automation_events.{column_name}"
+        )
+
+    invalid_review_count = int(
+        (
+            await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM memoir_automation_events "
+                    "WHERE event_type = 'source_held' "
+                    "AND status = 'needs_review' "
+                    "AND ("
+                    "(review_utterance_id IS NULL AND ("
+                    "json_valid(utterance_ids_json) = 0 "
+                    "OR json_array_length(utterance_ids_json) != 1 "
+                    "OR NOT EXISTS ("
+                    "SELECT 1 FROM memoir_voice_utterances AS utterance "
+                    "JOIN memoir_voice_sessions AS session "
+                    "ON session.id = utterance.voice_session_id "
+                    "WHERE utterance.id = json_extract("
+                    "memoir_automation_events.utterance_ids_json, '$[0]') "
+                    "AND session.project_id = "
+                    "memoir_automation_events.project_id"
+                    "))) "
+                    "OR (review_utterance_id IS NOT NULL AND ("
+                    "NOT EXISTS ("
+                    "SELECT 1 FROM memoir_voice_utterances AS utterance "
+                    "JOIN memoir_voice_sessions AS session "
+                    "ON session.id = utterance.voice_session_id "
+                    "WHERE utterance.id = "
+                    "memoir_automation_events.review_utterance_id "
+                    "AND session.project_id = "
+                    "memoir_automation_events.project_id"
+                    ") "
+                    "OR json_valid(utterance_ids_json) = 0 "
+                    "OR (json_array_length(utterance_ids_json) NOT IN (0, 1)) "
+                    "OR (json_array_length(utterance_ids_json) = 1 "
+                    "AND json_extract(utterance_ids_json, '$[0]') "
+                    "!= review_utterance_id)"
+                    "))"
+                    ")"
+                )
+            )
+        ).scalar_one()
+    )
+    if invalid_review_count:
+        raise RuntimeError(
+            "Cannot migrate source review events without exactly one "
+            "project-owned utterance"
+        )
+
+    await conn.execute(
+        text(
+            "UPDATE memoir_automation_events "
+            "SET review_utterance_id = "
+            "json_extract(utterance_ids_json, '$[0]') "
+            "WHERE event_type = 'source_held' "
+            "AND status = 'needs_review' "
+            "AND review_utterance_id IS NULL"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE memoir_automation_events AS event "
+            "SET followup_task_id = COALESCE("
+            "json_extract(event.metadata_json, "
+            "'$.route.followup_answer.task_id'), "
+            "json_extract(event.metadata_json, "
+            "'$.followup_answer.task_id')"
+            ") "
+            "WHERE event.event_type = 'source_held' "
+            "AND event.status = 'needs_review' "
+            "AND event.followup_task_id IS NULL "
+            "AND EXISTS ("
+            "SELECT 1 FROM memoir_followup_tasks AS task "
+            "WHERE task.id = COALESCE("
+            "json_extract(event.metadata_json, "
+            "'$.route.followup_answer.task_id'), "
+            "json_extract(event.metadata_json, "
+            "'$.followup_answer.task_id')"
+            ") "
+            "AND task.project_id = event.project_id"
+            ")"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE memoir_automation_events AS event "
+            "SET editing_job_id = COALESCE("
+            "json_extract(event.metadata_json, '$.editing_job_id'), "
+            "json_extract(event.metadata_json, '$.job_id'), "
+            "json_extract(event.metadata_json, '$.route.editing_job_id'), "
+            "json_extract(event.metadata_json, "
+            "'$.routes[0].editing_job_id')"
+            ") "
+            "WHERE event.editing_job_id IS NULL "
+            "AND EXISTS ("
+            "SELECT 1 FROM memoir_editing_jobs AS job "
+            "WHERE job.id = COALESCE("
+            "json_extract(event.metadata_json, '$.editing_job_id'), "
+            "json_extract(event.metadata_json, '$.job_id'), "
+            "json_extract(event.metadata_json, '$.route.editing_job_id'), "
+            "json_extract(event.metadata_json, "
+            "'$.routes[0].editing_job_id')"
+            ") "
+            "AND job.project_id = event.project_id"
+            ")"
+        )
+    )
+    invalid_direct_link_count = int(
+        (
+            await conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM memoir_automation_events AS event "
+                    "WHERE ("
+                    "(event.event_type = 'source_held' "
+                    "AND event.status = 'needs_review' "
+                    "AND event.review_utterance_id IS NULL) "
+                    "OR ((event.review_utterance_id IS NOT NULL "
+                    "OR event.followup_task_id IS NOT NULL) "
+                    "AND event.event_type != 'source_held') "
+                    "OR (event.followup_task_id IS NOT NULL "
+                    "AND event.review_utterance_id IS NULL) "
+                    "OR (event.review_utterance_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "SELECT 1 FROM memoir_voice_utterances AS utterance "
+                    "JOIN memoir_voice_sessions AS session "
+                    "ON session.id = utterance.voice_session_id "
+                    "WHERE utterance.id = event.review_utterance_id "
+                    "AND session.project_id = event.project_id"
+                    ")) "
+                    "OR (event.followup_task_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "SELECT 1 FROM memoir_followup_tasks AS task "
+                    "WHERE task.id = event.followup_task_id "
+                    "AND task.project_id = event.project_id"
+                    ")) "
+                    "OR (event.editing_job_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "SELECT 1 FROM memoir_editing_jobs AS job "
+                    "WHERE job.id = event.editing_job_id "
+                    "AND job.project_id = event.project_id"
+                    "))"
+                    ")"
+                )
+            )
+        ).scalar_one()
+    )
+    if invalid_direct_link_count:
+        raise RuntimeError(
+            "Cannot migrate invalid automation event direct links"
+        )
+    cleared_review_payloads = (
+        await conn.execute(
+            text(
+                "UPDATE memoir_automation_events "
+                "SET utterance_ids_json = '[]' "
+                "WHERE event_type = 'source_held' "
+                "AND status = 'needs_review' "
+                "AND json_array_length(utterance_ids_json) > 0"
+            )
+        )
+    ).rowcount or 0
+
+    for table_name in ("memoir_automation_events", "memoir_editing_jobs"):
+        table = Base.metadata.tables[table_name]
+        existing_indexes = {
+            str(row[1])
+            for row in (
+                await conn.execute(
+                    text(f'PRAGMA index_list("{table_name}")')
+                )
+            ).fetchall()
+        }
+        for index in table.indexes:
+            if (
+                not index.name
+                or index.name in existing_indexes
+                or index.name not in AUXILIARY_QUERY_INDEXES
+            ):
+                continue
+            await conn.run_sync(
+                lambda sync_conn, index=index: index.create(
+                    sync_conn,
+                    checkfirst=True,
+                )
+            )
+            changed_indexes.append(index.name)
+
+    validation = """
+        (
+            NEW.event_type = 'source_held'
+            AND NEW.status = 'needs_review'
+            AND (
+                NEW.review_utterance_id IS NULL
+                OR json_array_length(NEW.utterance_ids_json) != 0
+            )
+        )
+        OR (
+            (NEW.review_utterance_id IS NOT NULL
+             OR NEW.followup_task_id IS NOT NULL)
+            AND NEW.event_type != 'source_held'
+        )
+        OR (
+            NEW.followup_task_id IS NOT NULL
+            AND NEW.review_utterance_id IS NULL
+        )
+        OR (
+            NEW.review_utterance_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM memoir_voice_utterances AS utterance
+                JOIN memoir_voice_sessions AS session
+                  ON session.id = utterance.voice_session_id
+                WHERE utterance.id = NEW.review_utterance_id
+                  AND session.project_id = NEW.project_id
+            )
+        )
+        OR (
+            NEW.followup_task_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM memoir_followup_tasks AS task
+                WHERE task.id = NEW.followup_task_id
+                  AND task.project_id = NEW.project_id
+            )
+        )
+        OR (
+            NEW.editing_job_id IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM memoir_editing_jobs AS job
+                WHERE job.id = NEW.editing_job_id
+                  AND job.project_id = NEW.project_id
+            )
+        )
+    """
+    statements = {
+        "memoir_automation_events_links_insert": f"""
+            CREATE TRIGGER memoir_automation_events_links_insert
+            BEFORE INSERT ON memoir_automation_events
+            WHEN {validation}
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'invalid memoir automation event direct links'
+                );
+            END
+        """,
+        "memoir_automation_events_links_update": f"""
+            CREATE TRIGGER memoir_automation_events_links_update
+            BEFORE UPDATE OF
+                project_id,
+                event_type,
+                status,
+                utterance_ids_json,
+                review_utterance_id,
+                followup_task_id,
+                editing_job_id
+            ON memoir_automation_events
+            WHEN {validation}
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'invalid memoir automation event direct links'
+                );
+            END
+        """,
+    }
+    for trigger_name, statement in statements.items():
+        if await _trigger_exists(conn, trigger_name):
+            continue
+        await conn.execute(text(statement))
+        changed_triggers.append(trigger_name)
+    return {
+        "changed_columns": changed_columns,
+        "changed_indexes": changed_indexes,
+        "changed_triggers": changed_triggers,
+        "changed_rows": int(cleared_review_payloads),
+    }
+
+
 async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
     """Drop and recreate the current realtime voice schema for development."""
     tables = _memoir_voice_tables_from_metadata()
@@ -316,7 +648,16 @@ async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
                     checkfirst=True,
                 )
             )
+        if not await _table_exists(conn, "memoir_followup_tasks"):
+            followup_table = Base.metadata.tables["memoir_followup_tasks"]
+            await conn.run_sync(
+                lambda sync_conn: followup_table.create(
+                    sync_conn,
+                    checkfirst=True,
+                )
+            )
         await _ensure_voice_session_anchor_schema(conn)
+        await _ensure_automation_event_link_schema(conn)
         await _ensure_transcript_fts(conn)
         await conn.execute(text("PRAGMA foreign_keys=ON"))
 
@@ -333,19 +674,27 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
                 "Missing required tables: " + ", ".join(sorted(missing_tables))
             )
         anchor_result = await _ensure_voice_session_anchor_schema(conn)
+        event_link_result = await _ensure_automation_event_link_schema(conn)
         fts_result = await _ensure_transcript_fts(conn)
 
     await assert_memoir_voice_schema(engine)
 
     return {
         "changed_tables": fts_result["changed_tables"],
-        "changed_columns": anchor_result["changed_columns"],
-        "changed_indexes": anchor_result["changed_indexes"],
+        "changed_columns": [
+            *anchor_result["changed_columns"],
+            *event_link_result["changed_columns"],
+        ],
+        "changed_indexes": [
+            *anchor_result["changed_indexes"],
+            *event_link_result["changed_indexes"],
+        ],
         "changed_triggers": [
             *anchor_result["changed_triggers"],
+            *event_link_result["changed_triggers"],
             *fts_result["changed_triggers"],
         ],
-        "changed_rows": [],
+        "changed_rows": event_link_result["changed_rows"],
     }
 
 
@@ -405,6 +754,12 @@ async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
             missing_tables.append(
                 "index:ix_memoir_voice_sessions_anchor_framework_item_id"
             )
+        for trigger_name in AUTOMATION_EVENT_LINK_TRIGGERS:
+            if not await _trigger_exists(conn, trigger_name):
+                missing_tables.append(f"trigger:{trigger_name}")
+        for index_name in AUXILIARY_QUERY_INDEXES:
+            if not await _index_exists(conn, index_name):
+                missing_tables.append(f"index:{index_name}")
 
     details: list[str] = []
     for values, label in (

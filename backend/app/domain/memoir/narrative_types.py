@@ -319,11 +319,6 @@ class MemoirNarrativeGapClaimRole(str, Enum):
     UNSUPPORTED_CANDIDATE = "unsupported_candidate"
 
 
-class MemoirNarrativeGapRelationRole(str, Enum):
-    PRIMARY = "primary"
-    INVOLVED = "involved"
-
-
 class MemoirFollowupTaskStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

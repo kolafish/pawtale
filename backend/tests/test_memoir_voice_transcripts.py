@@ -2331,9 +2331,10 @@ async def test_mobile_memoir_delete_transcript_hides_related_automation_events(c
     project_id = deleted_source["session"]["project_id"]
     held_event = MemoirAutomationEvent(
         project_id=project_id,
+        review_utterance_id=deleted_source["utterance_id"],
         event_type=MemoirAutomationEventType.SOURCE_HELD.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[deleted_source["utterance_id"]],
+        utterance_ids_json=[],
         summary_text="1 条讲述需要确认归属。",
         metadata_json={
             "route": {
@@ -2361,6 +2362,7 @@ async def test_mobile_memoir_delete_transcript_hides_related_automation_events(c
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == held_event.id)
     )
     assert refreshed_held.status == MemoirAutomationEventStatus.COMPLETED.value
+    assert refreshed_held.review_utterance_id is None
     assert refreshed_held.utterance_ids_json == []
     assert refreshed_held.metadata_json["resolution"] == "ignored"
     assert refreshed_held.metadata_json["resolution_reason"] == "source_deleted"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
 from app.database import Base
@@ -892,6 +892,23 @@ class MemoirEditingJob(Base):
             f"status IN ({_enum_values(MemoirEditingJobStatus)})",
             name="ck_memoir_editing_jobs_status",
         ),
+        Index(
+            "ix_memoir_editing_jobs_chapter_lookup",
+            "project_id",
+            "chapter_id",
+            "job_type",
+            "updated_at",
+        ),
+        Index(
+            "ix_memoir_editing_jobs_pending_due",
+            "status",
+            "run_after",
+        ),
+        Index(
+            "ix_memoir_editing_jobs_running_lease",
+            "status",
+            "lease_expires_at",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -936,6 +953,45 @@ class MemoirAutomationEvent(Base):
             f"status IN ({_enum_values(MemoirAutomationEventStatus)})",
             name="ck_memoir_automation_events_status",
         ),
+        CheckConstraint(
+            "event_type != 'source_held' OR status != 'needs_review' "
+            "OR review_utterance_id IS NOT NULL",
+            name="ck_memoir_automation_events_review_utterance",
+        ),
+        CheckConstraint(
+            "(review_utterance_id IS NULL AND followup_task_id IS NULL) "
+            "OR event_type = 'source_held'",
+            name="ck_memoir_automation_events_review_links",
+        ),
+        CheckConstraint(
+            "followup_task_id IS NULL OR review_utterance_id IS NOT NULL",
+            name="ck_memoir_automation_events_followup_review",
+        ),
+        Index(
+            "ix_memoir_automation_events_project_timeline",
+            "project_id",
+            "event_type",
+            "status",
+            "created_at",
+        ),
+        Index(
+            "ix_memoir_automation_events_review_utterance",
+            "project_id",
+            "event_type",
+            "status",
+            "review_utterance_id",
+        ),
+        Index(
+            "ix_memoir_automation_events_review_task",
+            "project_id",
+            "event_type",
+            "status",
+            "followup_task_id",
+        ),
+        Index(
+            "ix_memoir_automation_events_editing_job",
+            "editing_job_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -945,6 +1001,21 @@ class MemoirAutomationEvent(Base):
         ForeignKey("memoir_book_plan_chapters.id"),
         nullable=True,
         index=True,
+    )
+    review_utterance_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    followup_task_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_followup_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    editing_job_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_editing_jobs.id", ondelete="SET NULL"),
+        nullable=True,
     )
     event_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     status: Mapped[str] = mapped_column(

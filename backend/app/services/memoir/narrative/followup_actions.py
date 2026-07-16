@@ -39,27 +39,6 @@ async def defer_task(
     )
 
 
-async def resume_task(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    task_id: str,
-    actor_user_id: str,
-    idempotency_key: str,
-    reason: str,
-):
-    return await followup_tasks.transition_task(
-        db,
-        project_id=project_id,
-        task_id=task_id,
-        status=MemoirFollowupTaskStatus.PENDING,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        idempotency_key=idempotency_key,
-        reason=reason or "user resumed the follow-up task",
-    )
-
-
 async def mark_task_unable_to_answer(
     db: AsyncSession,
     *,
@@ -107,27 +86,6 @@ async def stop_asking_task(
         actor_user_id=actor_user_id,
         idempotency_key=idempotency_key,
         reason=reason,
-    )
-
-
-async def cancel_task(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    task_id: str,
-    actor_user_id: str,
-    idempotency_key: str,
-    reason: str,
-):
-    return await followup_tasks.transition_task(
-        db,
-        project_id=project_id,
-        task_id=task_id,
-        status=MemoirFollowupTaskStatus.CANCELLED,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        idempotency_key=idempotency_key,
-        reason=reason or "user cancelled the follow-up task",
     )
 
 

@@ -4,7 +4,7 @@
 
 本文档是 Pawtale 回忆录下一阶段“结构化访谈 + 成书补全重构”的规划基线，用于统一后续产品设计、数据模型、开发拆分和验收口径。
 
-- 状态：规划基线，后续实现 PR 必须以本文为依据。
+- 状态：第一轮阶段 0/A/B/C/D/E 已实现；本文继续作为当前实现边界和后续演进基线。
 - 当前修订：已吸收固定覆盖框架降级、Utterance 异步归属快照、刷新原子发布、Claim 双重用途和 LLM 受控策略层的 review 结论。
 - 适用范围：回忆录项目级采集框架、引导访谈、章节审计、成书补访及其小程序体验。
 - 上游事实架构：`docs/MEMOIR_NARRATIVE_ARCHITECTURE.md`。
@@ -13,6 +13,17 @@
 - 变更规则：如果实现证明本文的边界或约束不成立，必须先修改本文并说明证据、迁移影响和替代方案，不能通过临时 JSON、兼容分支或 Prompt 补丁绕开。
 
 本文先固定稳定的业务边界和目标模型。精确 PR 数量可以根据实际依赖调整，但不得改变本文规定的数据真相和职责分层。
+
+### 当前实现状态（2026-07-16）
+
+| 范围 | 状态 | 当前结果 |
+| --- | --- | --- |
+| 阶段 0 / A / B | 已完成 | 成书补全状态所有权、Gap action、统一 Claim policy、ChapterCompletionSummary 和单一 refresh Job 已切流，旧 CompletionItem/生成 Job 已删除 |
+| C1 / C2 | 已完成 | 受控策略动作、InterviewBrief、不可变决策日志、assignment/answer 分离和 shadow evaluation 已落地 |
+| C3 | 已完成 | `continue_listening`、`follow_current_story`、`summarize_and_confirm` 可按 rollout 配置低风险执行，其他动作仍受候选集和风险门禁约束 |
+| D0 / D1 / D2 | 已完成 | 话题地图被动匹配、用户 resolution、只读小程序入口、软锚点和 `offer_new_topic` 候选已落地 |
+| E | 已完成 | Gap primary/involved 单一真相、审阅事件/Job 直接关联与索引、无客户端使用的 resume/cancel API 已清理 |
+| 偏好学习 / 强化学习 | 未开始 | 继续等待足量真实 outcome、human rating、脱敏和权限审查数据，不属于第一轮完成范围 |
 
 ## 一、执行摘要
 
@@ -668,15 +679,15 @@ complete
 
 不得从 FollowupTaskClaim 的 known/do_not_repeat 关系推导要排除的 Claim 范围。
 
-### 5.4 Gap 关系的后续收敛
+### 5.4 Gap 关系的当前结构
 
-当前 Gap 同时保存 `primary_story_id/primary_chapter_id` 和 role=primary 的关系行。完成行为重构后再进行数据迁移：
+Gap 关系已经完成单一真相迁移：
 
 - `primary_*` 是 scope 的唯一权威字段；
 - GapStory/GapChapter 只保存额外 involved 对象；
 - API 需要完整关系列表时动态组合；
-- 迁移前校验两套关系一致性；
-- 不把此迁移与 recommended_action 或 Job 重构放在同一 PR。
+- 历史 role=primary 行已在迁移前校验与 `primary_*` 一致，再从关系表删除；
+- 新写入不再保存 relation role，也不允许把 primary 对象重复写成 involved。
 
 ## 六、端到端业务流程
 
@@ -1003,7 +1014,7 @@ complete
 
 验收：状态所有权表与代码写路径一一对应，没有依赖 Prompt 或客户端写入核心业务真相的隐藏入口。
 
-### 阶段 A：先修正成书补全语义
+### 阶段 A：先修正成书补全语义（已完成）
 
 #### A1：拆分“跳过问题”和“排除内容”
 
@@ -1030,7 +1041,7 @@ complete
 
 验收：已讲但不可入书的内容不会被重复追问，也不会进入书稿或被当作可发表的 editorial 素材。
 
-### 阶段 B：收敛补全读模型和 Job
+### 阶段 B：收敛补全读模型和 Job（已完成）
 
 #### B1：ChapterCompletionSummary
 
@@ -1057,7 +1068,7 @@ complete
 - Gap action 分流和刷新原子发布的回归稳定通过；
 - 不保留“以后再删”的永久兼容壳。
 
-### 阶段 C：建立 LLM 访谈策略层
+### 阶段 C：建立 LLM 访谈策略层（已完成第一轮）
 
 #### C1：策略动作、Brief 和决策日志
 
@@ -1084,7 +1095,7 @@ complete
 
 验收：启用策略没有提高打断、重复追问和异常结束率；模型不能修改任何事实或用户决定。
 
-### 阶段 D：建立项目级话题地图并作为策略候选
+### 阶段 D：建立项目级话题地图并作为策略候选（已完成）
 
 #### D0：话题地图 Shadow Mode
 
@@ -1111,7 +1122,7 @@ complete
 
 验收：策略能自然提供方向但不以填满地图为目标；自由叙述顺序和跨话题联想不受限制。
 
-### 阶段 E：数据关系与性能收尾
+### 阶段 E：数据关系与性能收尾（已完成）
 
 - 收敛 Gap primary/involved 关系。
 - 补齐 summary、review event 和 Job 查询索引/直接关联。

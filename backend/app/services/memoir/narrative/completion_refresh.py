@@ -363,6 +363,7 @@ async def run_chapter_completion_refresh_job(
         status=MemoirAutomationEventStatus.COMPLETED,
         chapter_id=chapter_id,
         utterance_ids=[],
+        editing_job_id=job_id,
         summary_text="章节补全状态已更新。",
         event_signature=f"chapter_completion_refresh:{job_id}",
         metadata_json={

@@ -217,9 +217,11 @@ async def test_completion_outcome_links_pending_review_event(client, test_db):
     event = MemoirAutomationEvent(
         project_id=case["project_id"],
         chapter_id=case["chapter"].id,
+        review_utterance_id=case["utterance"].id,
+        followup_task_id=case["task"].id,
         event_type="source_held",
         status="needs_review",
-        utterance_ids_json=[case["utterance"].id],
+        utterance_ids_json=[],
         summary_text=case["relation"].confirmation_question,
         metadata_json={
             "route": {
