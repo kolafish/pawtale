@@ -28,6 +28,10 @@ TRANSCRIPT_FTS_TRIGGERS = (
     "memoir_voice_utterances_fts_ad",
     "memoir_voice_utterances_fts_au",
 )
+VOICE_SESSION_ANCHOR_TRIGGERS = (
+    "memoir_voice_sessions_anchor_insert",
+    "memoir_voice_sessions_anchor_update",
+)
 
 
 def _memoir_voice_tables_from_metadata() -> tuple[Table, ...]:
@@ -69,6 +73,17 @@ async def _trigger_exists(conn, trigger_name: str) -> bool:
             "WHERE type = 'trigger' AND name = :trigger_name"
         ),
         {"trigger_name": trigger_name},
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _index_exists(conn, index_name: str) -> bool:
+    result = await conn.execute(
+        text(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'index' AND name = :index_name"
+        ),
+        {"index_name": index_name},
     )
     return result.scalar_one_or_none() is not None
 
@@ -189,6 +204,98 @@ async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
     }
 
 
+async def _ensure_voice_session_anchor_schema(
+    conn,
+) -> dict[str, list[str]]:
+    changed_columns: list[str] = []
+    changed_indexes: list[str] = []
+    changed_triggers: list[str] = []
+    columns = {
+        str(row[1])
+        for row in (
+            await conn.execute(
+                text('PRAGMA table_info("memoir_voice_sessions")')
+            )
+        ).fetchall()
+    }
+    if "anchor_framework_item_id" not in columns:
+        await conn.execute(
+            text(
+                "ALTER TABLE memoir_voice_sessions "
+                "ADD COLUMN anchor_framework_item_id VARCHAR(36) "
+                "REFERENCES memoir_framework_items(id) ON DELETE SET NULL"
+            )
+        )
+        changed_columns.append(
+            "memoir_voice_sessions.anchor_framework_item_id"
+        )
+    index_name = "ix_memoir_voice_sessions_anchor_framework_item_id"
+    if not await _index_exists(conn, index_name):
+        await conn.execute(
+            text(
+                f"CREATE INDEX {index_name} "
+                "ON memoir_voice_sessions(anchor_framework_item_id)"
+            )
+        )
+        changed_indexes.append(index_name)
+    validation = """
+        NEW.anchor_framework_item_id IS NOT NULL
+        AND (
+            NEW.current_followup_task_id IS NOT NULL
+            OR NEW.guidance_mode != 'guided_interview'
+            OR NEW.session_goal != 'open_narration'
+            OR NOT EXISTS (
+                SELECT 1
+                FROM memoir_framework_items AS item
+                JOIN memoir_project_frameworks AS framework
+                  ON framework.id = item.project_framework_id
+                WHERE item.id = NEW.anchor_framework_item_id
+                  AND framework.project_id = NEW.project_id
+            )
+        )
+    """
+    statements = {
+        "memoir_voice_sessions_anchor_insert": f"""
+            CREATE TRIGGER memoir_voice_sessions_anchor_insert
+            BEFORE INSERT ON memoir_voice_sessions
+            WHEN {validation}
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'invalid memoir voice session framework anchor'
+                );
+            END
+        """,
+        "memoir_voice_sessions_anchor_update": f"""
+            CREATE TRIGGER memoir_voice_sessions_anchor_update
+            BEFORE UPDATE OF
+                anchor_framework_item_id,
+                current_followup_task_id,
+                guidance_mode,
+                session_goal,
+                project_id
+            ON memoir_voice_sessions
+            WHEN {validation}
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'invalid memoir voice session framework anchor'
+                );
+            END
+        """,
+    }
+    for trigger_name, statement in statements.items():
+        if await _trigger_exists(conn, trigger_name):
+            continue
+        await conn.execute(text(statement))
+        changed_triggers.append(trigger_name)
+    return {
+        "changed_columns": changed_columns,
+        "changed_indexes": changed_indexes,
+        "changed_triggers": changed_triggers,
+    }
+
+
 async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
     """Drop and recreate the current realtime voice schema for development."""
     tables = _memoir_voice_tables_from_metadata()
@@ -209,6 +316,7 @@ async def rebuild_memoir_voice_schema(engine: AsyncEngine) -> None:
                     checkfirst=True,
                 )
             )
+        await _ensure_voice_session_anchor_schema(conn)
         await _ensure_transcript_fts(conn)
         await conn.execute(text("PRAGMA foreign_keys=ON"))
 
@@ -224,15 +332,19 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
             raise RuntimeError(
                 "Missing required tables: " + ", ".join(sorted(missing_tables))
             )
+        anchor_result = await _ensure_voice_session_anchor_schema(conn)
         fts_result = await _ensure_transcript_fts(conn)
 
     await assert_memoir_voice_schema(engine)
 
     return {
         "changed_tables": fts_result["changed_tables"],
-        "changed_columns": [],
-        "changed_indexes": [],
-        "changed_triggers": fts_result["changed_triggers"],
+        "changed_columns": anchor_result["changed_columns"],
+        "changed_indexes": anchor_result["changed_indexes"],
+        "changed_triggers": [
+            *anchor_result["changed_triggers"],
+            *fts_result["changed_triggers"],
+        ],
         "changed_rows": [],
     }
 
@@ -283,6 +395,16 @@ async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
         for trigger_name in TRANSCRIPT_FTS_TRIGGERS:
             if not await _trigger_exists(conn, trigger_name):
                 missing_tables.append(f"trigger:{trigger_name}")
+        for trigger_name in VOICE_SESSION_ANCHOR_TRIGGERS:
+            if not await _trigger_exists(conn, trigger_name):
+                missing_tables.append(f"trigger:{trigger_name}")
+        if not await _index_exists(
+            conn,
+            "ix_memoir_voice_sessions_anchor_framework_item_id",
+        ):
+            missing_tables.append(
+                "index:ix_memoir_voice_sessions_anchor_framework_item_id"
+            )
 
     details: list[str] = []
     for values, label in (

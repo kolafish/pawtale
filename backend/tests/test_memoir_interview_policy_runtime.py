@@ -25,9 +25,10 @@ from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
     MemoirNarrativeGap,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
-from app.services.memoir.narrative import interview_policy
+from app.services.memoir.narrative import frameworks, interview_policy
 from app.services.memoir.narrative import followup_completion
 from app.services.memoir.narrative.interview_policy_outcomes import (
     PolicyOutcomeSelectionError,
@@ -39,6 +40,8 @@ from app.services.memoir.narrative.interview_policy_runtime import (
     InterviewPolicySelectionError,
     _active_rollout_selected,
     active_reply_instruction,
+    anchored_opening_reply_instruction,
+    build_current_policy_context,
     persist_policy_turn_decision,
     prepare_active_policy_turn,
     run_shadow_policy_evaluation_job,
@@ -50,8 +53,14 @@ class FakePolicyAI:
     provider_name = "fake-policy"
     model_name = "fake-policy-model"
 
-    def __init__(self, selected_action: str) -> None:
+    def __init__(
+        self,
+        selected_action: str,
+        *,
+        framework_item_id: str | None = None,
+    ) -> None:
         self.selected_action = selected_action
+        self.framework_item_id = framework_item_id
         self.calls: list[dict[str, object]] = []
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs) -> str:
@@ -62,7 +71,15 @@ class FakePolicyAI:
                 "kwargs": kwargs,
             }
         )
-        return f'{{"selected_action":"{self.selected_action}"}}'
+        framework_item = (
+            f',"framework_item_id":"{self.framework_item_id}"'
+            if self.framework_item_id
+            else ""
+        )
+        return (
+            f'{{"selected_action":"{self.selected_action}"'
+            f"{framework_item}}}"
+        )
 
 
 class FakePolicyOutcomeAI:
@@ -248,6 +265,173 @@ async def test_active_policy_executes_low_risk_action_and_suggests_medium_action
     assert active_reply_instruction(suggest) == ""
 
 
+async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
+    test_db,
+):
+    project = Project(type="memoir", title="话题策略")
+    test_db.add(project)
+    await test_db.flush()
+    project_framework = await frameworks.initialize_project_framework(
+        test_db,
+        project_id=project.id,
+    )
+    session = MemoirVoiceSession(
+        project_id=project.id,
+        guidance_mode="guided_interview",
+        session_goal="open_narration",
+    )
+    test_db.add(session)
+    await test_db.flush()
+    start = int.from_bytes(
+        sha256(f"{session.id}:opening".encode("utf-8")).digest()[:4],
+        "big",
+    ) % len(project_framework.items)
+    selected_item = project_framework.items[start]
+    await test_db.commit()
+    await test_db.refresh(session, ["messages"])
+
+    policy_turn = await prepare_active_policy_turn(
+        test_db,
+        session=session,
+        followup_task_id=None,
+        requested_ai_model=None,
+        ai_client_factory=lambda model=None: FakePolicyAI(
+            "offer_new_topic",
+            framework_item_id=selected_item.id,
+        ),
+        enabled=True,
+        rollout_percent=100,
+    )
+
+    assert policy_turn is not None
+    assert policy_turn.execution_mode == MemoirInterviewPolicyExecutionMode.ACTIVE
+    assert policy_turn.context.brief.source_kind.value == "framework"
+    assert policy_turn.context.brief.target_id == selected_item.id
+    assert selected_item.id in str(
+        policy_turn.context.brief.target_id
+    )
+    assert "可拒绝的问题" in active_reply_instruction(policy_turn)
+
+    generated = MemoirChatMessage(
+        project_id=project.id,
+        voice_session_id=session.id,
+        role="assistant",
+        content_text=policy_turn.context.brief.opening_question,
+        turn_index=0,
+    )
+    test_db.add(generated)
+    await test_db.flush()
+    decision = await persist_policy_turn_decision(
+        test_db,
+        session=session,
+        generated_message=generated,
+        policy_turn=policy_turn,
+    )
+    response_message = MemoirChatMessage(
+        project_id=project.id,
+        voice_session_id=session.id,
+        role="user",
+        content_text="我先讲一件小时候在河边发生的事。",
+        parent_message_id=generated.id,
+        turn_index=1,
+    )
+    test_db.add(response_message)
+    await test_db.flush()
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=session.id,
+        chat_message_id=response_message.id,
+        transcript_raw=response_message.content_text,
+    )
+    test_db.add(utterance)
+    await test_db.flush()
+
+    await followup_completion.link_utterance_to_interview_target(
+        test_db,
+        voice_session=session,
+        utterance=utterance,
+    )
+    await test_db.commit()
+
+    assignment = await test_db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id == utterance.id
+        )
+    )
+    assert assignment is not None
+    assert assignment.framework_item_id == selected_item.id
+    assert assignment.policy_decision_id == decision.id
+    await test_db.refresh(session, ["messages"])
+    assert session.anchor_framework_item_id == selected_item.id
+
+    continued = await prepare_active_policy_turn(
+        test_db,
+        session=session,
+        followup_task_id=None,
+        requested_ai_model=None,
+        ai_client_factory=lambda model=None: FakePolicyAI(
+            "follow_current_story"
+        ),
+        enabled=True,
+        rollout_percent=100,
+    )
+    assert continued is not None
+    assert continued.context.brief.source_kind.value == "open_narration"
+    assert MemoirInterviewAction.OFFER_NEW_TOPIC not in {
+        candidate.action
+        for candidate in continued.context.brief.candidate_actions
+    }
+    assert continued.context.brief.target_id is None
+
+    switch_message = MemoirChatMessage(
+        project_id=project.id,
+        voice_session_id=session.id,
+        role="user",
+        content_text="这一段先讲到这里，换个话题吧。",
+        turn_index=2,
+    )
+    test_db.add(switch_message)
+    await test_db.commit()
+    await test_db.refresh(session, ["messages"])
+    switch_context = await build_current_policy_context(
+        test_db,
+        session=session,
+        followup_task_id=None,
+        policy_version=ACTIVE_POLICY_VERSION,
+    )
+    assert switch_context is not None
+    assert switch_context.topic_candidates
+    assert selected_item.id not in {
+        candidate.item_id for candidate in switch_context.topic_candidates
+    }
+    assert MemoirInterviewAction.OFFER_NEW_TOPIC in {
+        candidate.action
+        for candidate in switch_context.brief.candidate_actions
+    }
+
+    anchored_session = MemoirVoiceSession(
+        project_id=project.id,
+        guidance_mode="guided_interview",
+        session_goal="open_narration",
+        anchor_framework_item_id=selected_item.id,
+    )
+    test_db.add(anchored_session)
+    await test_db.commit()
+    await test_db.refresh(anchored_session, ["messages"])
+    fallback_instruction = await anchored_opening_reply_instruction(
+        test_db,
+        session=anchored_session,
+    )
+    selected_definition = next(
+        definition
+        for definition in frameworks.template_for_framework(
+            project_framework
+        ).items
+        if definition.item_key == selected_item.item_key
+    )
+    assert selected_definition.title in fallback_instruction
+    assert "必须完成" in fallback_instruction
+
+
 async def test_active_policy_only_executes_pause_when_safety_makes_it_mandatory(
     test_db,
 ):
@@ -319,7 +503,7 @@ async def test_active_policy_response_outcome_is_scheduled_and_recorded(
     )
     test_db.add(first_utterance)
     await test_db.flush()
-    await followup_completion.link_utterance_to_session_task(
+    await followup_completion.link_utterance_to_interview_target(
         test_db,
         voice_session=session,
         utterance=first_utterance,
@@ -341,7 +525,7 @@ async def test_active_policy_response_outcome_is_scheduled_and_recorded(
     )
     test_db.add(second_utterance)
     await test_db.flush()
-    await followup_completion.link_utterance_to_session_task(
+    await followup_completion.link_utterance_to_interview_target(
         test_db,
         voice_session=session,
         utterance=second_utterance,
@@ -413,7 +597,7 @@ async def test_policy_outcome_rejects_uncontrolled_value(test_db):
     )
     test_db.add(response_utterance)
     await test_db.flush()
-    await followup_completion.link_utterance_to_session_task(
+    await followup_completion.link_utterance_to_interview_target(
         test_db,
         voice_session=session,
         utterance=response_utterance,

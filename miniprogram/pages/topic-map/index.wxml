@@ -29,10 +29,20 @@
           <text class="topic-intent">{{topic.intent}}</text>
           <text class="state-detail">{{topic.state_detail}}</text>
           <button
-            class="topic-action {{topic.actionDisabled ? 'disabled' : ''}}"
+            wx:if="{{topic.user_resolution === 'none'}}"
+            class="topic-start-action {{topic.startDisabled ? 'disabled' : ''}}"
+            data-item-id="{{topic.id}}"
+            catchtap="startFromTopic"
+            hover-class="{{topic.startDisabled ? 'none' : 'topic-start-action-hover'}}"
+            disabled="{{topic.startDisabled}}"
+          >
+            {{topic.startText}}
+          </button>
+          <button
+            class="topic-choice-action {{topic.actionDisabled ? 'disabled' : ''}}"
             data-item-id="{{topic.id}}"
             catchtap="chooseResolution"
-            hover-class="{{topic.actionDisabled ? 'none' : 'topic-action-hover'}}"
+            hover-class="{{topic.actionDisabled ? 'none' : 'topic-choice-action-hover'}}"
             disabled="{{topic.actionDisabled}}"
           >
             {{topic.actionText}}

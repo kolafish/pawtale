@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from typing import Mapping
@@ -24,6 +24,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirGuidanceMode,
+    MemoirInterviewType,
     MemoirSessionGoal,
 )
 from app.models.memoir import (
@@ -43,7 +44,11 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import followup_tasks, interview_policy
+from app.services.memoir.narrative import (
+    followup_tasks,
+    interview_policy,
+    interview_topics,
+)
 from app.services.memoir.narrative.claim_usage_policy import (
     known_for_conversation_filters,
 )
@@ -106,10 +111,22 @@ class InterviewPolicySelectionError(ValueError):
 
 @dataclass(frozen=True)
 class InterviewPolicyContext:
+    project_id: str
     brief: InterviewBrief
     messages: tuple[MemoirChatMessage, ...]
     completion_context: str
     trigger_message_id: str | None
+    topic_candidates: tuple[
+        interview_topics.FrameworkTopicCandidate,
+        ...,
+    ] = ()
+    topic_offer_authorized: bool = False
+
+
+@dataclass(frozen=True)
+class InterviewPolicySelection:
+    action: MemoirInterviewAction
+    framework_item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -126,9 +143,16 @@ class ActivePolicyTurn:
 
 
 def _eligible_session(session: MemoirVoiceSession) -> bool:
-    return (
+    return session.interview_type == MemoirInterviewType.AI_INTERVIEW.value and (
         session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
-        or session.guidance_mode == MemoirGuidanceMode.FREE_NARRATION.value
+        or (
+            session.session_goal == MemoirSessionGoal.OPEN_NARRATION.value
+            and session.guidance_mode
+            in {
+                MemoirGuidanceMode.FREE_NARRATION.value,
+                MemoirGuidanceMode.GUIDED_INTERVIEW.value,
+            }
+        )
     )
 
 
@@ -376,6 +400,10 @@ async def _build_policy_context(
         safety_constraints=safety_constraints,
     )
     completion_context = ""
+    topic_candidates: tuple[
+        interview_topics.FrameworkTopicCandidate,
+        ...,
+    ] = ()
     if completion_session:
         if not followup_task_id:
             return None
@@ -397,21 +425,32 @@ async def _build_policy_context(
         )
         completion_context = await _completion_context(db, task)
     else:
+        topic_candidates = await interview_topics.candidate_topics(
+            db,
+            session=session,
+            latest_user_message=latest_user,
+        )
         brief = interview_policy.open_narration_brief(
             current_story_state=current_story_state,
             conversation_momentum=conversation_momentum,
             existing_material_refs=material_refs,
             known_claim_ids=known_claim_ids,
             do_not_repeat_claim_ids=do_not_repeat_claim_ids,
+            candidate_topic_ids=tuple(
+                candidate.item_id for candidate in topic_candidates
+            ),
             user_preferences=_user_preferences(session),
             safety_constraints=safety_constraints,
             policy_version=policy_version,
         )
     return InterviewPolicyContext(
+        project_id=session.project_id,
         brief=brief,
         messages=tuple(messages[-MAX_POLICY_CONTEXT_MESSAGES:]),
         completion_context=completion_context,
         trigger_message_id=latest_user.id if latest_user else None,
+        topic_candidates=topic_candidates,
+        topic_offer_authorized=bool(topic_candidates),
     )
 
 
@@ -462,6 +501,14 @@ def _selection_prompt(context: InterviewPolicyContext) -> str:
         for action in candidates
     )
     completion_context = context.completion_context or "本轮不是成书补访。"
+    topic_candidates = [
+        {
+            "framework_item_id": candidate.item_id,
+            "title": candidate.title,
+            "intent": candidate.intent,
+        }
+        for candidate in context.topic_candidates
+    ]
     return f"""你只负责选择回忆录访谈的下一步策略动作，不生成回复正文。
 
 必须遵守：
@@ -471,13 +518,18 @@ def _selection_prompt(context: InterviewPolicyContext) -> str:
 - 同时考虑章节/故事的背景交代、人物关系、因果、衔接和总结确认，不要只追事件细节。
 - 用户表示暂停、不愿讨论或涉及隐私时，必须服从 safety_constraint_codes。
 - 不得判断事实真假、隐私能否入书或覆盖用户决定。
-- 只输出 JSON：{{"selected_action":"candidate action"}}。
+- 仅当选择 offer_new_topic 时，从 topic_candidates 选择一个 framework_item_id。
+- 话题候选只在用户选择强引导开场或明确请求方向时提供；不得以填满地图为目标。
+- 只输出 JSON：{{"selected_action":"candidate action","framework_item_id":null}}。
 
 brief（只含受控状态和对象引用）：
 {json.dumps(snapshot, ensure_ascii=False, sort_keys=True)}
 
 candidate_actions：
 {candidate_lines}
+
+topic_candidates（模板摘要，不是待完成清单）：
+{json.dumps(topic_candidates, ensure_ascii=False, sort_keys=True)}
 
 补访上下文：
 {completion_context}
@@ -491,7 +543,7 @@ async def select_policy_action(
     *,
     context: InterviewPolicyContext,
     ai_client: AITextClient,
-) -> MemoirInterviewAction:
+) -> InterviewPolicySelection:
     content = await ai_client._call_llm(
         (
             "你是回忆录访谈策略分类器。"
@@ -499,7 +551,7 @@ async def select_policy_action(
         ),
         _selection_prompt(context),
         temperature=0.0,
-        max_tokens=100,
+        max_tokens=160,
         timeout=15.0,
     )
     payload = extract_json_payload(str(content))
@@ -517,7 +569,67 @@ async def select_policy_action(
         raise InterviewPolicySelectionError(
             "interview_policy_action_outside_candidates"
         )
-    return selected_action
+    raw_framework_item_id = str(
+        payload.get("framework_item_id") or ""
+    ).strip() or None
+    candidate_topic_ids = {
+        candidate.item_id for candidate in context.topic_candidates
+    }
+    if selected_action == MemoirInterviewAction.OFFER_NEW_TOPIC:
+        if (
+            not raw_framework_item_id
+            or raw_framework_item_id not in candidate_topic_ids
+        ):
+            raise InterviewPolicySelectionError(
+                "interview_policy_topic_outside_candidates"
+            )
+    elif raw_framework_item_id is not None:
+        raise InterviewPolicySelectionError(
+            "interview_policy_unexpected_topic_selection"
+        )
+    return InterviewPolicySelection(
+        action=selected_action,
+        framework_item_id=raw_framework_item_id,
+    )
+
+
+async def _context_for_selection(
+    db: AsyncSession,
+    *,
+    context: InterviewPolicyContext,
+    selection: InterviewPolicySelection,
+) -> InterviewPolicyContext:
+    if selection.action != MemoirInterviewAction.OFFER_NEW_TOPIC:
+        return context
+    candidate = next(
+        (
+            item
+            for item in context.topic_candidates
+            if item.item_id == selection.framework_item_id
+        ),
+        None,
+    )
+    if candidate is None:
+        raise InterviewPolicySelectionError(
+            "interview_policy_topic_outside_candidates"
+        )
+    try:
+        brief = await interview_topics.brief_for_candidate(
+            db,
+            project_id=context.project_id,
+            base_brief=context.brief,
+            candidate=candidate,
+        )
+    except interview_topics.InterviewTopicUnavailableError as exc:
+        raise InterviewPolicySelectionError(str(exc)) from exc
+    return replace(
+        context,
+        brief=replace(
+            brief,
+            candidate_actions=context.brief.candidate_actions,
+            candidate_topic_ids=context.brief.candidate_topic_ids,
+        ),
+    )
 
 
 def _active_rollout_selected(
@@ -543,6 +655,12 @@ def _execution_mode_for_selection(
     selected_action: MemoirInterviewAction,
 ) -> MemoirInterviewPolicyExecutionMode:
     if selected_action in LOW_RISK_ACTIVE_ACTIONS:
+        return MemoirInterviewPolicyExecutionMode.ACTIVE
+    if (
+        selected_action == MemoirInterviewAction.OFFER_NEW_TOPIC
+        and context.topic_offer_authorized
+        and context.brief.target_id is not None
+    ):
         return MemoirInterviewPolicyExecutionMode.ACTIVE
     if (
         selected_action == MemoirInterviewAction.PAUSE_OR_END
@@ -597,14 +715,22 @@ async def prepare_active_policy_turn(
         or (requested_ai_model or "").strip()
     )
     client = ai_client_factory(selected_model or None)
-    selected_action = await select_policy_action(
+    selection = await select_policy_action(
         context=context,
         ai_client=client,
     )
+    context = await _context_for_selection(
+        db,
+        context=context,
+        selection=selection,
+    )
     return ActivePolicyTurn(
         context=context,
-        selected_action=selected_action,
-        execution_mode=_execution_mode_for_selection(context, selected_action),
+        selected_action=selection.action,
+        execution_mode=_execution_mode_for_selection(
+            context,
+            selection.action,
+        ),
         model_provider=client.provider_name,
         model_name=client.model_name,
     )
@@ -630,8 +756,57 @@ def active_reply_instruction(policy_turn: ActivePolicyTurn | None) -> str:
             "叙述者已明确要求暂停、结束或不愿讨论；本轮只尊重这一决定并自然收尾，"
             "不得继续提问或换一个话题追问。"
         ),
+        MemoirInterviewAction.OFFER_NEW_TOPIC:
+            topic_offer_reply_instruction(policy_turn.context.brief),
     }
     return instructions.get(policy_turn.selected_action, "")
+
+
+def topic_offer_reply_instruction(brief: InterviewBrief) -> str:
+    return (
+        "本轮提供一个新方向，这是用户主动选择强引导或明确请求方向后的回应。"
+        f"请自然地只提出这个可拒绝的问题：{brief.opening_question}"
+        "不要列出多个话题，不要把它说成必须完成的内容；"
+        "用户若不接这个方向，后续顺着用户讲述。"
+    )
+
+
+async def anchored_opening_reply_instruction(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+) -> str:
+    if (
+        not session.anchor_framework_item_id
+        or session.guidance_mode
+        != MemoirGuidanceMode.GUIDED_INTERVIEW.value
+        or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
+        or any(
+            message.role == MemoirChatMessageRole.USER.value
+            and message.content_status == MemoirChatContentStatus.FINAL.value
+            and message.content_text.strip()
+            for message in session.messages
+        )
+    ):
+        return ""
+    context = await build_current_policy_context(
+        db,
+        session=session,
+        followup_task_id=None,
+        policy_version=ACTIVE_POLICY_VERSION,
+    )
+    if context is None or len(context.topic_candidates) != 1:
+        return ""
+    try:
+        brief = await interview_topics.brief_for_candidate(
+            db,
+            project_id=context.project_id,
+            base_brief=context.brief,
+            candidate=context.topic_candidates[0],
+        )
+    except interview_topics.InterviewTopicUnavailableError:
+        return ""
+    return topic_offer_reply_instruction(brief)
 
 
 async def persist_policy_turn_decision(
@@ -800,18 +975,23 @@ async def run_shadow_policy_evaluation_job(
         )
     model = str(payload.get("ai_model") or "").strip() or None
     client = ai_client or get_ai_service(model)
-    selected_action = await select_policy_action(
+    selection = await select_policy_action(
         context=context,
         ai_client=client,
+    )
+    context = await _context_for_selection(
+        db,
+        context=context,
+        selection=selection,
     )
     decision = await interview_policy.create_policy_decision(
         db,
         session_id=session.id,
         trigger_message_id=context.trigger_message_id,
         brief=context.brief,
-        selected_action=selected_action,
-        reason_code=f"shadow_{selected_action.value}",
-        reason_summary=_REASON_SUMMARIES[selected_action],
+        selected_action=selection.action,
+        reason_code=f"shadow_{selection.action.value}",
+        reason_summary=_REASON_SUMMARIES[selection.action],
         execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW,
         model_provider=client.provider_name,
         model_name=client.model_name,
@@ -824,7 +1004,7 @@ async def run_shadow_policy_evaluation_job(
     return EditingJobResult(
         result_json={
             "decision_id": decision.id,
-            "selected_action": selected_action.value,
+            "selected_action": selection.action.value,
             "brief_fingerprint": decision.brief_fingerprint,
             "generated_message_id": generated_message.id,
             "provider": client.provider_name,

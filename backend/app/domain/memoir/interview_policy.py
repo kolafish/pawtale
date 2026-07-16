@@ -62,6 +62,7 @@ class InterviewBrief:
     unresolved_gaps: tuple[str, ...]
     known_claims: tuple[str, ...]
     do_not_repeat_claims: tuple[str, ...]
+    candidate_topic_ids: tuple[str, ...]
     expected_evidence_hint: str
     completion_policy: str
     template_version: str | None
@@ -82,6 +83,11 @@ def build_candidate_actions(
         or "do_not_continue" in safety_constraints
     ):
         actions = (MemoirInterviewAction.PAUSE_OR_END,)
+    elif (
+        brief.current_story_state == MemoirInterviewStoryState.OPENING
+        and brief.candidate_topic_ids
+    ):
+        actions = (MemoirInterviewAction.OFFER_NEW_TOPIC,)
     else:
         selected: list[MemoirInterviewAction] = [
             MemoirInterviewAction.CONTINUE_LISTENING,
@@ -104,7 +110,10 @@ def build_candidate_actions(
             and brief.existing_material
         ):
             selected.append(MemoirInterviewAction.RETURN_TO_PRIOR_STORY)
-        if brief.source_kind == MemoirInterviewBriefSourceKind.FRAMEWORK:
+        if (
+            brief.source_kind == MemoirInterviewBriefSourceKind.FRAMEWORK
+            or brief.candidate_topic_ids
+        ):
             selected.append(MemoirInterviewAction.OFFER_NEW_TOPIC)
         selected.append(MemoirInterviewAction.PAUSE_OR_END)
         actions = tuple(dict.fromkeys(selected))
@@ -161,6 +170,9 @@ def brief_context_snapshot(brief: InterviewBrief) -> dict[str, object]:
         "unresolved_gap_ids": sorted(set(brief.unresolved_gaps)),
         "known_claim_ids": sorted(set(brief.known_claims)),
         "do_not_repeat_claim_ids": sorted(set(brief.do_not_repeat_claims)),
+        "candidate_framework_item_ids": sorted(
+            set(brief.candidate_topic_ids)
+        ),
     }
     canonical = json.dumps(
         snapshot,

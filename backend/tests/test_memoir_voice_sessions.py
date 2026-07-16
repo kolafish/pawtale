@@ -20,6 +20,7 @@ from app.models.memoir import (
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
 from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir.narrative import frameworks
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
@@ -27,6 +28,7 @@ from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_chapter_draft,
     create_test_voice_transcript,
+    ensure_mobile_memoir_project,
     memoir_source_ref,
     post_mobile_memoir_voice_session,
 )
@@ -109,6 +111,65 @@ async def test_mobile_memoir_creates_voice_session_for_existing_project(client, 
     assert listening.session.status == "listening"
     await test_db.refresh(stored)
     assert stored.status == "listening"
+
+
+async def test_mobile_memoir_guided_session_accepts_only_project_topic_anchor(
+    client,
+    test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    project_framework = await frameworks.framework_for_project(
+        test_db,
+        project_id=project_id,
+    )
+    assert project_framework is not None
+    anchor = project_framework.items[0]
+
+    response = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "open_narration",
+            "anchor_framework_item_id": anchor.id,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["session"]["anchor_framework_item_id"] == anchor.id
+    stored = await test_db.get(
+        MemoirVoiceSession,
+        response.json()["session"]["id"],
+    )
+    assert stored is not None
+    assert stored.anchor_framework_item_id == anchor.id
+
+    invalid_mode = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "free_narration",
+            "session_goal": "open_narration",
+            "anchor_framework_item_id": anchor.id,
+        },
+    )
+    assert invalid_mode.status_code == 422
+
+    other_project = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "另一本回忆录"},
+    )
+    assert other_project.status_code == 201
+    wrong_project = await post_mobile_memoir_voice_session(
+        client,
+        project_id=other_project.json()["id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "open_narration",
+            "anchor_framework_item_id": anchor.id,
+        },
+    )
+    assert wrong_project.status_code == 404
 
 
 async def test_mobile_memoir_creates_human_interview_session(client, test_db):

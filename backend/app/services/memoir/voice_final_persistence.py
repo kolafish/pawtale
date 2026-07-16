@@ -157,7 +157,7 @@ class VoiceFinalPersistenceService:
             transcript_version.source_artifact_id = utterance.id
             await self.db.flush()
             if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
-                await followup_completion.link_utterance_to_session_task(
+                await followup_completion.link_utterance_to_interview_target(
                     self.db,
                     voice_session=voice_session,
                     utterance=utterance,
@@ -262,7 +262,7 @@ class VoiceFinalPersistenceService:
             self.db.add(utterance)
             await self.db.flush()
             if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
-                await followup_completion.link_utterance_to_session_task(
+                await followup_completion.link_utterance_to_interview_target(
                     self.db,
                     voice_session=voice_session,
                     utterance=utterance,
