@@ -60,8 +60,6 @@
       <view wx:if="{{auditError}}" class="message error-message">{{auditError}}</view>
     </view>
 
-    <view wx:if="{{followupError}}" class="message error-message">{{followupError}}</view>
-
     <view wx:if="{{editorialGaps.length}}" class="content-section" id="editorial-fixes">
       <view class="section-heading">
         <view>
@@ -168,19 +166,6 @@
         </view>
       </view>
       <text wx:else class="empty-copy">本章还没有可用于成书的讲述。</text>
-    </view>
-
-    <view wx:if="{{!directions.length && suggestionHints.length}}" class="content-section">
-      <view class="section-heading">
-        <view>
-          <text class="section-eyebrow">有空再讲</text>
-          <text class="section-title">可选补充方向</text>
-        </view>
-      </view>
-      <view wx:for="{{suggestionHints}}" wx:key="id" class="suggestion-row">
-        <text class="suggestion-title">{{item.title}}</text>
-        <text class="suggestion-detail">{{item.description}}</text>
-      </view>
     </view>
 
     <view wx:if="{{appliedAnswerUpdates.length}}" class="content-section update-section">

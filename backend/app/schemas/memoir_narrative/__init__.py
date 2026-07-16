@@ -1,7 +1,10 @@
 from .book_completion import (
-    MemoirBookCompletionChapterResponse,
     MemoirBookCompletionOverviewResponse,
     MemoirBookCompletionResponse,
+    MemoirChapterCompletionGap,
+    MemoirChapterCompletionNextAction,
+    MemoirChapterCompletionSummary,
+    MemoirChapterCompletionTask,
 )
 from .book_consistency import (
     MemoirBookConsistencyAuditJobResponse,
@@ -118,6 +121,11 @@ from .stories import (
 
 __all__ = [
     "MemoirBookCompletionResponse",
+    "MemoirBookCompletionOverviewResponse",
+    "MemoirChapterCompletionGap",
+    "MemoirChapterCompletionNextAction",
+    "MemoirChapterCompletionSummary",
+    "MemoirChapterCompletionTask",
     "MemoirBookConsistencyAuditJobResponse",
     "MemoirBookConsistencyAuditRequest",
     "MemoirBookFormalizeRequest",

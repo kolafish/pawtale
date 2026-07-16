@@ -18,6 +18,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapType,
 )
 from app.domain.memoir.types import MemoirEditingJobStatus
+from app.schemas.memoir_narrative.book_completion import MemoirChapterCompletionSummary
 from app.schemas.memoir_narrative.chapter_structures import MemoirChapterContractResponse
 from app.schemas.memoir_narrative.responses import MemoirClaimResponse
 
@@ -216,6 +217,7 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     project_id: str
     chapter_id: str
     chapter_title: str
+    completion_summary: MemoirChapterCompletionSummary
     contract: MemoirChapterContractResponse | None = None
     stories: list[MemoirChapterWorkspaceStoryResponse] = Field(default_factory=list)
     available_stories: list[MemoirChapterWorkspaceAvailableStoryResponse] = Field(

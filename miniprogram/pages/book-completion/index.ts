@@ -1,7 +1,7 @@
 import type {
-  MemoirBookCompletionChapter,
+  MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
-} from "../../domain/voice-chat";
+} from "../../domain/chapter-completion";
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirBookCompletionOverview,
@@ -17,11 +17,12 @@ import {
 } from "../../services/page-input";
 const POLL_INTERVAL_MS = 1500;
 
-interface ChapterView extends MemoirBookCompletionChapter {
+interface ChapterView extends MemoirChapterCompletionSummary {
   stateText: string;
   actionText: string;
   chapterClass: string;
   disabled: boolean;
+  focusAreas: string[];
 }
 
 interface BookCompletionData {
@@ -42,7 +43,7 @@ interface ChapterDataset {
 
 type ChapterTapEvent = PageDatasetEvent<ChapterDataset>;
 
-function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: string): ChapterView {
+function chapterView(item: MemoirChapterCompletionSummary, preparingChapterId: string): ChapterView {
   const stateCopy = {
     ready: "值得补充",
     in_progress: "正在补充",
@@ -52,22 +53,16 @@ function chapterView(item: MemoirBookCompletionChapter, preparingChapterId: stri
     complete: "目前完整",
     failed: "整理未完成",
   }[item.state];
-  const actionText = {
-    ready: "查看补全建议",
-    in_progress: "继续刚才的讲述",
-    preparing: "正在整理",
-    needs_preparation: "整理这一章",
-    needs_review: "查看并确认",
-    complete: "查看本章情况",
-    failed: "重新整理",
-  }[item.state];
   const busy = preparingChapterId === item.chapter_id || item.state === "preparing";
   return {
     ...item,
     stateText: busy ? "正在整理" : stateCopy,
-    actionText: busy ? "正在整理" : actionText,
+    actionText: busy
+      ? "正在整理"
+      : (item.next_action.action_text || "查看本章情况"),
     chapterClass: `chapter-item ${item.state}`,
-    disabled: busy,
+    disabled: busy || item.next_action.kind === "wait",
+    focusAreas: item.visible_tasks.map((task) => task.question),
   };
 }
 
@@ -171,24 +166,24 @@ definePage<BookCompletionData>()({
     if (!chapter || chapter.disabled || this.data.preparingChapterId) {
       return;
     }
-    if (chapter.state === "in_progress" && chapter.active_session_id) {
-      this.openVoiceChat(chapter.active_session_id, chapter.title);
-      return;
-    }
     if (
-      chapter.state === "ready"
-      || chapter.state === "needs_review"
-      || chapter.state === "complete"
+      chapter.next_action.kind === "start_interview"
+      && chapter.active_task?.status === "in_progress"
+      && chapter.active_task.active_session_id
     ) {
-      wx.navigateTo({
-        url: pageUrl("/pages/chapter-workspace/index", {
-          projectId: this.data.projectId,
-          chapterId: chapter.chapter_id,
-        }),
-      });
+      this.openVoiceChat(chapter.active_task.active_session_id, chapter.title);
       return;
     }
-    await this.prepareChapter(chapter.chapter_id);
+    if (chapter.next_action.kind === "refresh_audit") {
+      await this.prepareChapter(chapter.chapter_id);
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/chapter-workspace/index", {
+        projectId: this.data.projectId,
+        chapterId: chapter.chapter_id,
+      }),
+    });
   },
 
   async prepareChapter(chapterId: string) {

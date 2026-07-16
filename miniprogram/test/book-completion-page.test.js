@@ -35,19 +35,72 @@ function readyOverview() {
         title: "学校里的比赛",
         sort_order: 0,
         state: "ready",
+        audit_status: "succeeded",
+        audit_is_current: true,
+        next_action: {
+          kind: "start_interview",
+          eyebrow: "选择一个方向继续讲",
+          title: "这段回忆为什么适合作为本章开头？",
+          detail: "围绕这个方向讲您记得的内容，不必逐项作答。",
+          action_text: "从这个方向开始",
+          disabled: false,
+          task_id: "task-1",
+        },
+        must_handle_count: 0,
+        suggested_count: 1,
+        accepted_incomplete_count: 0,
+        active_task: {
+          id: "task-1",
+          gap_id: "gap-1",
+          question: "这段回忆为什么适合作为本章开头？",
+          purpose: "补充开头。",
+          known_context_summary: "",
+          priority: 2000,
+          status: "pending",
+          active_session_id: null,
+        },
+        visible_tasks: [{
+          id: "task-1",
+          gap_id: "gap-1",
+          question: "这段回忆为什么适合作为本章开头？",
+          purpose: "补充开头。",
+          known_context_summary: "",
+          priority: 2000,
+          status: "pending",
+          active_session_id: null,
+        }],
+        editorial_gaps: [],
+        review_gaps: [],
+        draft_readiness: "blocked",
         headline: "还有一个重要方向值得补充",
         detail: "围绕这个方向讲您记得的内容，不必逐项作答。",
-        focus_areas: ["这段回忆为什么适合作为本章开头？"],
-        task_id: "task-1",
       },
       {
         chapter_id: "chapter-2",
         title: "参加工作",
         sort_order: 1,
         state: "complete",
+        audit_status: "succeeded",
+        audit_is_current: true,
+        next_action: {
+          kind: "complete",
+          eyebrow: "本章已整理",
+          title: "这一章目前没有必须处理的内容",
+          detail: "以后增加新素材时，系统会重新给出下一步。",
+          action_text: "",
+          disabled: true,
+          task_id: null,
+        },
+        must_handle_count: 0,
+        suggested_count: 0,
+        accepted_incomplete_count: 0,
+        active_task: null,
+        visible_tasks: [],
+        editorial_gaps: [],
+        review_gaps: [],
+        draft_readiness: "ready",
         headline: "目前不需要再补",
         detail: "以后有新素材时会重新整理。",
-        focus_areas: [],
       },
     ],
   };
@@ -63,8 +116,8 @@ test("book completion overview exposes chapter-level progress without internal m
   const patch = bookCompletionViewPatch(readyOverview());
 
   assert.equal(patch.progressText, "1 / 2 章目前不需要再补");
-  assert.equal(patch.chapters[0].actionText, "查看补全建议");
-  assert.deepEqual(patch.chapters[0].focus_areas, ["这段回忆为什么适合作为本章开头？"]);
+  assert.equal(patch.chapters[0].actionText, "从这个方向开始");
+  assert.deepEqual(patch.chapters[0].focusAreas, ["这段回忆为什么适合作为本章开头？"]);
   assert.equal(patch.chapters[1].actionText, "查看本章情况");
   assert.equal(patch.chapters[1].disabled, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract/);

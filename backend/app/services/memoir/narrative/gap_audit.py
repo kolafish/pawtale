@@ -158,6 +158,43 @@ async def current_chapter_gap_audit_job(
     return None
 
 
+async def latest_current_chapter_gap_audit_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    content_signature: str,
+) -> MemoirEditingJob | None:
+    jobs = list(
+        (
+            await db.scalars(
+                select(MemoirEditingJob)
+                .where(
+                    MemoirEditingJob.project_id == project_id,
+                    MemoirEditingJob.chapter_id == chapter_id,
+                    MemoirEditingJob.job_type
+                    == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+                )
+                .order_by(
+                    MemoirEditingJob.updated_at.desc(),
+                    MemoirEditingJob.created_at.desc(),
+                )
+                .limit(20)
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+    )
+    return next(
+        (
+            job
+            for job in jobs
+            if isinstance(job.payload_json, dict)
+            and job.payload_json.get("content_signature") == content_signature
+        ),
+        None,
+    )
+
+
 def chapter_gap_audit_dedupe_key(
     *,
     project_id: str,

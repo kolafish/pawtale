@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.narrative_types import (
@@ -36,9 +37,16 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStorySlot,
 )
+from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import completion_items, gap_audit, story_slots
+from app.services.memoir.narrative import (
+    completion_items,
+    followup_jobs,
+    gap_audit,
+    gaps,
+    story_slots,
+)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -220,15 +228,20 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     chapter_state = ready.json()["chapters"][0]
     assert chapter_state["state"] == "ready"
-    assert chapter_state["task_id"]
-    assert len(chapter_state["focus_areas"]) == 1
-    assert "最关键的经过" in chapter_state["focus_areas"][0]
-    assert chapter_state["headline"] == "还有一个重要方向值得补充"
+    assert chapter_state["active_task"]["id"]
+    assert len(chapter_state["visible_tasks"]) == 1
+    assert "最关键的经过" in chapter_state["visible_tasks"][0]["question"]
+    assert chapter_state["next_action"]["kind"] == "start_interview"
     assert chapter_state["detail"] == "围绕这个方向讲您记得的内容，不必逐项作答。"
     assert "remaining_count" not in chapter_state
     assert "item_id" not in chapter_state
     assert "item_kind" not in chapter_state
     assert not any(term in ready.text for term in ("Story", "Claim", "slot", "Contract"))
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["completion_summary"] == chapter_state
 
     voice = await post_mobile_memoir_voice_session(
         client,
@@ -236,7 +249,7 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
-            "current_followup_task_id": chapter_state["task_id"],
+            "current_followup_task_id": chapter_state["active_task"]["id"],
             "provider": "volc_streaming_asr",
         },
     )
@@ -245,11 +258,11 @@ async def test_book_completion_overview_prepares_and_resumes_one_chapter(
     resumed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     resumed_chapter = resumed.json()["chapters"][0]
     assert resumed_chapter["state"] == "in_progress"
-    assert resumed_chapter["task_id"] == chapter_state["task_id"]
-    assert resumed_chapter["active_session_id"] == voice.json()["session"]["id"]
+    assert resumed_chapter["active_task"]["id"] == chapter_state["active_task"]["id"]
+    assert resumed_chapter["active_task"]["active_session_id"] == voice.json()["session"]["id"]
 
 
-async def test_book_completion_can_prepare_from_a_draft_chapter_direction(
+async def test_book_completion_keeps_draft_chapter_direction_as_the_next_decision(
     client,
     test_db,
 ):
@@ -262,14 +275,16 @@ async def test_book_completion_can_prepare_from_a_draft_chapter_direction(
 
     initial = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert initial.status_code == 200, initial.text
-    assert initial.json()["chapters"][0]["state"] == "needs_preparation"
+    assert initial.json()["chapters"][0]["state"] == "needs_review"
+    assert initial.json()["chapters"][0]["next_action"]["kind"] == "confirm_direction"
 
     await _run_completion_preparation(client, test_db, project_id, chapter.id)
 
     ready = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert ready.status_code == 200, ready.text
-    assert ready.json()["chapters"][0]["state"] == "ready"
-    assert ready.json()["chapters"][0]["task_id"]
+    assert ready.json()["chapters"][0]["state"] == "needs_review"
+    assert ready.json()["chapters"][0]["next_action"]["kind"] == "confirm_direction"
+    assert ready.json()["chapters"][0]["visible_tasks"]
 
 
 async def test_book_completion_voice_session_rejects_an_empty_task_boundary(client, test_db):
@@ -360,6 +375,77 @@ async def test_book_completion_exposes_at_most_three_interview_directions(
     assert "章节方向 4" not in {item.title for item in items}
 
 
+@pytest.mark.parametrize(
+    ("recommended_action", "gap_type", "expected_next_action", "expected_gap_key"),
+    (
+        (
+            "editorial",
+            MemoirNarrativeGapType.REPETITION,
+            "open_editorial_fix",
+            "editorial_gaps",
+        ),
+        (
+            "manual_review",
+            MemoirNarrativeGapType.CONTRADICTION,
+            "open_manual_review",
+            "review_gaps",
+        ),
+    ),
+)
+async def test_book_completion_summary_routes_editorial_and_manual_review_actions(
+    client,
+    test_db,
+    recommended_action,
+    gap_type,
+    expected_next_action,
+    expected_gap_key,
+):
+    register_memoir_editing_job_handlers()
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=True,
+    )
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
+    stored_gaps, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapter.id,
+                gap_type=gap_type,
+                severity=MemoirNarrativeGapSeverity.HIGH,
+                target_slot=f"summary-routing:{recommended_action}",
+                title="需要处理的章节问题",
+                description="验证章节补全摘要的确定性动作分流。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+            )
+        ],
+    )
+    assert created_count == 1
+    assert stored_gaps[0].recommended_action == recommended_action
+    await test_db.commit()
+
+    generation_job = await followup_jobs.schedule_followup_task_generation(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        source="test_chapter_completion_summary",
+    )
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, generation_job.id) is True
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert overview.status_code == 200, overview.text
+    summary = overview.json()["chapters"][0]
+    assert summary["next_action"]["kind"] == expected_next_action
+    assert summary["visible_tasks"] == []
+    assert len(summary[expected_gap_key]) == 1
+
+
 async def test_book_completion_overview_marks_audited_complete_chapter(
     client,
     test_db,
@@ -417,8 +503,9 @@ async def test_book_completion_overview_can_resume_a_deferred_chapter(
     overview = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     chapter_state = overview.json()["chapters"][0]
     assert chapter_state["state"] == "ready"
-    assert chapter_state["task_id"] in {task.id for task in tasks}
-    assert "留到以后" in chapter_state["headline"]
+    task_id = chapter_state["active_task"]["id"]
+    assert task_id in {task.id for task in tasks}
+    assert chapter_state["active_task"]["status"] == "deferred"
 
     restored = await post_mobile_memoir_voice_session(
         client,
@@ -426,11 +513,11 @@ async def test_book_completion_overview_can_resume_a_deferred_chapter(
         json={
             "guidance_mode": "guided_interview",
             "session_goal": "book_completion",
-            "current_followup_task_id": chapter_state["task_id"],
+            "current_followup_task_id": task_id,
         },
     )
     assert restored.status_code == 201, restored.text
-    restored_task = await test_db.get(MemoirFollowupTask, chapter_state["task_id"])
+    restored_task = await test_db.get(MemoirFollowupTask, task_id)
     assert restored_task is not None
     assert restored_task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
 
@@ -443,7 +530,7 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     await _run_completion_preparation(client, test_db, project_id, chapter.id)
     first = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert first.json()["chapters"][0]["state"] == "ready"
-    old_task_id = first.json()["chapters"][0]["task_id"]
+    old_task_id = first.json()["chapters"][0]["active_task"]["id"]
 
     slots = (
         await test_db.scalars(
@@ -460,7 +547,10 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     await test_db.commit()
 
     stale = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
-    assert stale.json()["chapters"][0]["state"] == "needs_preparation"
+    stale_chapter = stale.json()["chapters"][0]
+    assert stale_chapter["state"] == "needs_preparation"
+    assert stale_chapter["next_action"]["kind"] == "refresh_audit"
+    assert stale_chapter["headline"] == stale_chapter["next_action"]["title"]
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )
@@ -471,7 +561,8 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
 
     refreshed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert refreshed.json()["chapters"][0]["state"] == "complete"
-    assert refreshed.json()["chapters"][0]["task_id"] is None
+    assert refreshed.json()["chapters"][0]["active_task"] is None
+    assert refreshed.json()["chapters"][0]["visible_tasks"] == []
     old_task = await test_db.get(MemoirFollowupTask, old_task_id)
     assert old_task is not None
     assert old_task.status == MemoirFollowupTaskStatus.CANCELLED.value

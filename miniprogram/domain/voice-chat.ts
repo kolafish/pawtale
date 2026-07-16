@@ -1,3 +1,5 @@
+import type { MemoirChapterCompletionState } from "./chapter-completion";
+
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirInterviewType = "ai_interview" | "human_interview";
 export type MemoirSessionGoal = "open_narration" | "book_completion";
@@ -33,14 +35,8 @@ export type MemoirFollowupTaskClaimRole = "known" | "do_not_repeat" | "expected_
 export type MemoirFollowupTaskUtteranceRole = "target_answer" | "related_context";
 export type MemoirFollowupUnableToAnswerResolution = "unable_to_answer" | "ask_family_later";
 export type MemoirNarrativeActorType = "ai" | "user" | "system";
-export type MemoirBookCompletionState =
-  | "ready"
-  | "in_progress"
-  | "preparing"
-  | "needs_preparation"
-  | "needs_review"
-  | "complete"
-  | "failed";
+
+export type MemoirBookCompletionState = MemoirChapterCompletionState;
 export type MemoirBookCompletionAction =
   | "start_interview"
   | "wait"
@@ -57,27 +53,6 @@ export interface MemoirBookCompletion {
   detail: string;
   task_id?: string | null;
   chapter_id?: string | null;
-}
-
-export interface MemoirBookCompletionChapter {
-  chapter_id: string;
-  title: string;
-  sort_order: number;
-  state: MemoirBookCompletionState;
-  headline: string;
-  detail: string;
-  focus_areas: string[];
-  task_id?: string | null;
-  active_session_id?: string | null;
-}
-
-export interface MemoirBookCompletionOverview {
-  project_id: string;
-  headline: string;
-  detail: string;
-  total_chapters: number;
-  completed_chapters: number;
-  chapters: MemoirBookCompletionChapter[];
 }
 
 export interface MemoirFollowupTaskClaim {

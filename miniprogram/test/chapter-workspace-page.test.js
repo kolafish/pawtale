@@ -33,6 +33,7 @@ function sampleWorkspace(overrides = {}) {
     project_id: "project-1",
     chapter_id: "chapter-1",
     chapter_title: "第一次离家",
+    completion_summary: sampleCompletionSummary(),
     contract: {
       id: "contract-1",
       version: 1,
@@ -149,6 +150,65 @@ function sampleTask(overrides = {}) {
   };
 }
 
+function completionTask(task) {
+  return {
+    id: task.id,
+    gap_id: task.gap_id,
+    question: task.question,
+    purpose: task.purpose,
+    known_context_summary: task.known_context_summary,
+    priority: task.priority,
+    status: task.status,
+    active_session_id: task.assigned_session_id,
+  };
+}
+
+function completionGap(gap) {
+  return {
+    id: gap.id,
+    title: gap.title,
+    description: gap.description,
+    recommended_action: gap.recommended_action,
+  };
+}
+
+function sampleCompletionSummary(overrides = {}) {
+  const direction = completionTask(sampleTask());
+  const confirmation = completionTask(sampleTask({
+    id: "task-confirm",
+    gap_id: "gap-1",
+    priority: 3000,
+  }));
+  return {
+    chapter_id: "chapter-1",
+    title: "第一次离家",
+    sort_order: 0,
+    state: "needs_review",
+    audit_status: "succeeded",
+    audit_is_current: true,
+    next_action: {
+      kind: "continue_confirmation",
+      eyebrow: "还需要您说明一句",
+      title: "您离家时到底是十八岁还是十九岁？",
+      detail: "刚才的回答还不能唯一对应到书里的人物或事实，直接再说明一句即可。",
+      action_text: "继续说明",
+      disabled: false,
+      task_id: confirmation.id,
+    },
+    must_handle_count: 1,
+    suggested_count: 2,
+    accepted_incomplete_count: 0,
+    active_task: confirmation,
+    visible_tasks: [direction],
+    editorial_gaps: [],
+    review_gaps: [],
+    draft_readiness: "needs_review",
+    headline: "有 1 件事需要先确认",
+    detail: "这些内容会影响人物、时间或事实是否准确，确认后再进入正文。",
+    ...overrides,
+  };
+}
+
 function sampleDraftBlock(overrides = {}) {
   return {
     id: "block-1",
@@ -175,13 +235,11 @@ function sampleDraftBlock(overrides = {}) {
 
 function loadWorkspacePage({
   workspace = sampleWorkspace(),
-  tasks = [sampleTask(), sampleTask({ id: "task-confirm", gap_id: "gap-1", priority: 3000 })],
   blocks = [sampleDraftBlock()],
   voiceApiExports = {},
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => workspace,
-    listMemoirFollowupTasks: async () => ({ items: tasks, total: tasks.length }),
     listMemoirDraftBlocks: async () => ({ chapter_id: workspace.chapter_id, blocks }),
     suggestMemoirChapterDirection: async () => {
       throw new Error("suggestMemoirChapterDirection was not mocked");
@@ -241,13 +299,17 @@ function loadWorkspacePage({
 
 test("chapter overview reports the whole chapter without exposing internal model names", () => {
   const { chapterWorkspaceViewPatch } = loadWorkspacePage().mod;
+  const secondDirection = completionTask(sampleTask({
+    id: "task-2",
+    gap_id: "gap-3",
+    priority: 1000,
+  }));
   const patch = chapterWorkspaceViewPatch(
-    sampleWorkspace(),
-    [
-      sampleTask(),
-      sampleTask({ id: "task-2", gap_id: "gap-3", priority: 1000 }),
-      sampleTask({ id: "task-confirm", gap_id: "gap-1", priority: 3000 }),
-    ],
+    sampleWorkspace({
+      completion_summary: sampleCompletionSummary({
+        visible_tasks: [completionTask(sampleTask()), secondDirection],
+      }),
+    }),
     [sampleDraftBlock()],
   );
 
@@ -263,11 +325,27 @@ test("chapter overview reports the whole chapter without exposing internal model
 
 test("a required fact check stays ahead of optional interview directions", () => {
   const { chapterNextAction } = loadWorkspacePage().mod;
-  const workspace = sampleWorkspace({ answer_updates: [] });
+  const manualGap = completionGap(sampleGap());
+  const workspace = sampleWorkspace({
+    answer_updates: [],
+    completion_summary: sampleCompletionSummary({
+      next_action: {
+        kind: "open_manual_review",
+        eyebrow: "先确认一件事",
+        title: manualGap.title,
+        detail: manualGap.description,
+        action_text: "处理这件事",
+        disabled: false,
+        task_id: null,
+      },
+      active_task: null,
+      review_gaps: [manualGap],
+    }),
+  });
 
-  const action = chapterNextAction(workspace, [sampleTask()], [sampleDraftBlock()]);
+  const action = chapterNextAction(workspace.completion_summary);
 
-  assert.equal(action.kind, "open_checks");
+  assert.equal(action.kind, "open_manual_review");
   assert.equal(action.title, "离家时间有两个说法");
 });
 
@@ -281,6 +359,25 @@ test("existing material fixes stay out of the interview directions", () => {
   });
   const workspace = sampleWorkspace({
     answer_updates: [],
+    completion_summary: sampleCompletionSummary({
+      next_action: {
+        kind: "open_editorial_fix",
+        eyebrow: "可以直接整理",
+        title: editorialGap.title,
+        detail: "相关素材已经存在，不需要继续采访，调整结构或正文即可。",
+        action_text: "查看并整理正文",
+        disabled: false,
+        task_id: null,
+      },
+      must_handle_count: 0,
+      suggested_count: 0,
+      active_task: null,
+      visible_tasks: [],
+      editorial_gaps: [completionGap(editorialGap)],
+      review_gaps: [],
+      headline: "有 1 处可以直接重新整理",
+      detail: "相关素材已经存在，不需要继续采访，调整结构或正文即可。",
+    }),
     gaps: {
       must_handle: [],
       suggested: [editorialGap],
@@ -290,7 +387,6 @@ test("existing material fixes stay out of the interview directions", () => {
 
   const patch = chapterWorkspaceViewPatch(
     workspace,
-    [sampleTask({ gap_id: editorialGap.id })],
     [sampleDraftBlock()],
   );
 
@@ -336,10 +432,25 @@ test("selected completion direction starts the existing realtime voice-chat chai
 
 test("a required fact check cannot be resolved without recording the correct statement", async () => {
   const resolutions = [];
+  const manualGap = completionGap(sampleGap());
   global.wx = { showToast() {} };
   const { page } = loadWorkspacePage({
-    workspace: sampleWorkspace({ answer_updates: [] }),
-    tasks: [sampleTask()],
+    workspace: sampleWorkspace({
+      answer_updates: [],
+      completion_summary: sampleCompletionSummary({
+        next_action: {
+          kind: "open_manual_review",
+          eyebrow: "先确认一件事",
+          title: manualGap.title,
+          detail: manualGap.description,
+          action_text: "处理这件事",
+          disabled: false,
+          task_id: null,
+        },
+        active_task: null,
+        review_gaps: [manualGap],
+      }),
+    }),
     voiceApiExports: {
       resolveMemoirNarrativeGap: async (_projectId, gapId, action, input) => {
         resolutions.push({ gapId, action, input });
@@ -535,22 +646,16 @@ test("draft generation reports both newly created and refreshed paragraphs", asy
   delete global.wx;
 });
 
-test("a follow-up read failure keeps the chapter overview visible and blocks an unreliable next step", async () => {
+test("the chapter workspace consumes completion tasks from its unified summary", async () => {
   global.wx = {};
-  const { page } = loadWorkspacePage({
-    voiceApiExports: {
-      listMemoirFollowupTasks: async () => {
-        throw new Error("补充方向暂时不可用");
-      },
-    },
-  });
+  const { page } = loadWorkspacePage();
   const context = pageContext(page);
 
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
   assert.equal(context.data.workspace.chapter_title, "第一次离家");
   assert.equal(context.data.recordedCount, 1);
-  assert.equal(context.data.followupError, "补充方向暂时不可用");
-  assert.equal(context.data.nextAction.disabled, true);
+  assert.equal(context.data.directions[0].id, "task-1");
+  assert.equal(context.data.nextAction.kind, "continue_confirmation");
   delete global.wx;
 });
