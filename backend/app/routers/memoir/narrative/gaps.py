@@ -1,6 +1,6 @@
 from typing import NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +13,6 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionRefreshRequest,
     MemoirChapterWorkspaceResponse,
     MemoirNarrativeGapDismissRequest,
-    MemoirNarrativeGapListResponse,
     MemoirNarrativeGapResolutionRequest,
     MemoirNarrativeGapResponse,
 )
@@ -85,34 +84,6 @@ async def refresh_memoir_chapter_completion(
         return MemoirChapterCompletionRefreshJobResponse.model_validate(job)
     except (ValueError, IntegrityError) as exc:
         await _raise_mutation_error(db, exc)
-
-
-@router.get(
-    "/projects/{project_id}/gaps",
-    response_model=MemoirNarrativeGapListResponse,
-)
-async def list_memoir_narrative_gaps(
-    project_id: str,
-    chapter_id: str | None = None,
-    gap_status: MemoirNarrativeGapStatus | None = Query(default=None, alias="status"),
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    items, total = await gaps.list_gaps(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        status=gap_status,
-        limit=limit,
-        offset=offset,
-    )
-    return MemoirNarrativeGapListResponse(
-        items=[await gaps.gap_response(db, gap=item) for item in items],
-        total=total,
-    )
 
 
 async def _resolve(

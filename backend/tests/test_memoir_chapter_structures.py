@@ -449,18 +449,7 @@ async def test_owner_can_atomically_include_an_available_story_in_a_draft_contra
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
     )
     assert before.status_code == 200, before.text
-    assert before.json()["available_stories"] == [
-        {
-            "id": story.id,
-            "title": story.title,
-            "story_type": story.story_type,
-            "summary": story.summary,
-            "completion_status": story.completion_status,
-            "verification_status": "needs_verification",
-            "story_version": 1,
-            "excluded_from_chapter": True,
-        }
-    ]
+    assert before.json()["stories"] == []
 
     payload = {
         "idempotency_key": "include-li-yue-in-friends-chapter",
@@ -518,7 +507,6 @@ async def test_owner_can_atomically_include_an_available_story_in_a_draft_contra
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
     )
     assert after.status_code == 200, after.text
-    assert after.json()["available_stories"] == []
     assert [item["id"] for item in after.json()["stories"]] == [story.id]
 
 

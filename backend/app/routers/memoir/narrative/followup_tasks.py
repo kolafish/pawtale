@@ -1,17 +1,15 @@
 from typing import NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.domain.memoir.narrative_types import MemoirFollowupTaskStatus
 from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirCompletionOutcomeResponse,
     MemoirFollowupTaskDeferRequest,
-    MemoirFollowupTaskListResponse,
     MemoirFollowupTaskOutcomeRequest,
     MemoirFollowupTaskResponse,
     MemoirFollowupTaskSwitchRequest,
@@ -75,34 +73,6 @@ async def _commit_task(
     if loaded is None:
         raise ValueError("follow-up task does not belong to the project")
     return await task_service.task_response(db, task=loaded)
-
-
-@router.get(
-    "/projects/{project_id}/followup-tasks",
-    response_model=MemoirFollowupTaskListResponse,
-)
-async def list_memoir_followup_tasks(
-    project_id: str,
-    task_status: list[MemoirFollowupTaskStatus] | None = Query(default=None, alias="status"),
-    chapter_id: str | None = None,
-    limit: int = Query(default=100, ge=1, le=500),
-    offset: int = Query(default=0, ge=0),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    items, total = await task_service.list_tasks(
-        db,
-        project_id=project_id,
-        statuses=set(task_status) if task_status else None,
-        chapter_id=chapter_id,
-        limit=limit,
-        offset=offset,
-    )
-    return MemoirFollowupTaskListResponse(
-        items=await task_service.task_responses(db, tasks=items),
-        total=total,
-    )
 
 
 @router.get(

@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 import json
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -537,50 +537,6 @@ async def get_gap(
             MemoirNarrativeGap.id == gap_id,
         )
     )
-
-
-async def list_gaps(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str | None = None,
-    status: MemoirNarrativeGapStatus | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> tuple[list[MemoirNarrativeGap], int]:
-    filters = [MemoirNarrativeGap.project_id == project_id]
-    if chapter_id:
-        filters.append(
-            or_(
-                MemoirNarrativeGap.primary_chapter_id == chapter_id,
-                MemoirNarrativeGap.id.in_(
-                    select(MemoirNarrativeGapChapter.gap_id).where(
-                        MemoirNarrativeGapChapter.project_id == project_id,
-                        MemoirNarrativeGapChapter.chapter_id == chapter_id,
-                    )
-                )
-            )
-        )
-    if status:
-        filters.append(MemoirNarrativeGap.status == status.value)
-    total = await db.scalar(select(func.count(MemoirNarrativeGap.id)).where(*filters)) or 0
-    items = list(
-        (
-            await db.scalars(
-                select(MemoirNarrativeGap)
-                .options(*_with_relations())
-                .where(*filters)
-                .order_by(
-                    MemoirNarrativeGap.status,
-                    MemoirNarrativeGap.severity,
-                    MemoirNarrativeGap.last_detected_at.desc(),
-                )
-                .offset(offset)
-                .limit(limit)
-            )
-        ).unique().all()
-    )
-    return items, int(total)
 
 
 async def gap_response(

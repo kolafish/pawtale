@@ -208,8 +208,9 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     )
     assert workspace.status_code == 200, workspace.text
     body = workspace.json()
-    assert body["gaps"]["must_handle"] == []
-    assert [item["id"] for item in body["gaps"]["accepted_incomplete"]] == [gap_id]
+    summary = body["completion_summary"]
+    assert summary["must_handle_count"] == 0
+    assert summary["accepted_incomplete_count"] == 1
     assert "percentage" not in str(body).lower()
 
 
@@ -256,14 +257,12 @@ async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
     )
 
     assert workspace.status_code == 200, workspace.text
-    groups = workspace.json()["gaps"]
+    summary = workspace.json()["completion_summary"]
     gaps_by_type = {gap.gap_type: gap.id for gap in created_gaps}
-    assert [item["id"] for item in groups["must_handle"]] == [
+    assert [item["id"] for item in summary["review_gaps"]] == [
         gaps_by_type[MemoirNarrativeGapType.CONTRADICTION.value]
     ]
-    assert [item["id"] for item in groups["suggested"]] == [
-        gaps_by_type[MemoirNarrativeGapType.MISSING_SLOT.value]
-    ]
+    assert summary["suggested_count"] == 1
 
 
 async def test_project_rule_audit_resolves_obsolete_gap_and_reopens_it_if_condition_returns(
