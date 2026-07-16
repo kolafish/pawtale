@@ -6,6 +6,8 @@
 
 回忆录“事实命题、跨访谈故事、章节契约、成书缺口、补访任务和结构化正文块”的下一阶段设计统一由 [回忆录叙事架构与成书质量演进方案](MEMOIR_NARRATIVE_ARCHITECTURE.md) 约束。本文继续负责实时录音、Streaming ASR、LLM 动态追问、Streaming TTS 和 voice session 状态机；不在本文重复维护叙事领域模型和成书 PR 计划。
 
+项目级结构化访谈框架、`guided_interview` 的持久覆盖状态、统一 InterviewBrief，以及成书补全的下一轮收敛由 [回忆录结构化访谈与成书补全重构规划](MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md) 约束。本文只负责它们共同复用的实时语音基础能力。
+
 当前实现已经从 Streaming ASR MVP 进入语音聊天第一版闭环：
 
 - 小程序已通过 `home` / `voice-chat` 进入 voice session，实时发送 PCM 帧并显示 ASR partial/final。

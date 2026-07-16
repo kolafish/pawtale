@@ -8,6 +8,7 @@
 - 适用范围：新版回忆录项目的叙事领域层、成书链路和成书驱动访谈。
 - 不取代：实时录音、Streaming ASR、LLM/TTS 对话状态机等语音基础能力。
 - 上游文档：`docs/MEMOIR_VOICE_CHAT_REDESIGN.md`。
+- 下游规划：`docs/MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`，负责项目级结构化访谈框架与成书补全收敛；本文继续约束共同事实底座和成书质量不变量。
 - 历史基础：`docs/MEMOIR_SEMANTIC_AUDIT_REFACTOR_PLAN.md` 已完成的素材卡、章节卡、SourceLink 和审计快照重构。
 - 执行原则：如果实现发现本设计不成立，必须先在对应 PR 中修改本文档、说明证据和影响，再调整实现；不能通过临时字段、兼容分支或提示词补丁绕开设计问题。
 
