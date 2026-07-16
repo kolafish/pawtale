@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
@@ -125,6 +125,51 @@ async def chapter_answer_updates_by_chapter(
             )
         )
 
+    source_relation_id = (
+        MemoirNarrativeDecision.source_followup_task_utterance_id
+    )
+    ranked_relation_ids = (
+        select(
+            source_relation_id.label("relation_id"),
+            func.row_number()
+            .over(
+                partition_by=MemoirFollowupTask.chapter_id,
+                order_by=(
+                    func.max(MemoirNarrativeDecision.created_at).desc(),
+                    source_relation_id.desc(),
+                ),
+            )
+            .label("chapter_rank"),
+        )
+        .join(
+            MemoirFollowupTaskUtterance,
+            and_(
+                MemoirNarrativeDecision.project_id
+                == MemoirFollowupTaskUtterance.project_id,
+                source_relation_id == MemoirFollowupTaskUtterance.id,
+            ),
+        )
+        .join(
+            MemoirFollowupTask,
+            and_(
+                MemoirFollowupTask.project_id
+                == MemoirFollowupTaskUtterance.project_id,
+                MemoirFollowupTask.id
+                == MemoirFollowupTaskUtterance.task_id,
+            ),
+        )
+        .where(
+            MemoirNarrativeDecision.project_id == project_id,
+            MemoirNarrativeDecision.action.in_(_FACT_DECISION_ACTIONS),
+            source_relation_id.is_not(None),
+            MemoirFollowupTask.chapter_id.in_(chapter_ids),
+        )
+        .group_by(MemoirFollowupTask.chapter_id, source_relation_id)
+        .subquery()
+    )
+    latest_relation_ids = select(ranked_relation_ids.c.relation_id).where(
+        ranked_relation_ids.c.chapter_rank <= 5
+    )
     decision_rows = (
         await db.execute(
             select(
@@ -153,9 +198,7 @@ async def chapter_answer_updates_by_chapter(
             .where(
                 MemoirNarrativeDecision.project_id == project_id,
                 MemoirNarrativeDecision.action.in_(_FACT_DECISION_ACTIONS),
-                MemoirNarrativeDecision.source_followup_task_utterance_id.is_not(
-                    None
-                ),
+                source_relation_id.in_(latest_relation_ids),
                 MemoirFollowupTask.chapter_id.in_(chapter_ids),
             )
             .order_by(
@@ -181,19 +224,7 @@ async def chapter_answer_updates_by_chapter(
                 (decision, relation, task)
             )
 
-    selected_group_keys: list[tuple[str, str]] = []
-    keys_by_chapter: dict[str, list[tuple[str, str]]] = defaultdict(list)
-    for key in grouped_rows:
-        keys_by_chapter[key[0]].append(key)
-    for chapter_id, keys in keys_by_chapter.items():
-        keys.sort(
-            key=lambda key: (
-                max(row[0].created_at for row in grouped_rows[key]),
-                key[1],
-            ),
-            reverse=True,
-        )
-        selected_group_keys.extend(keys[:5])
+    selected_group_keys = list(grouped_rows)
 
     claim_ids = {
         decision.target_id
