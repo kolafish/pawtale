@@ -209,6 +209,7 @@ class VoiceFinalPersistenceService:
         audio: bytes | None = None,
         *,
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
+        speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
     ) -> VoiceFinalPersistenceResult | None:
         if not audio and staged_audio is None:
             return None
@@ -216,6 +217,11 @@ class VoiceFinalPersistenceService:
         owned_staged_audio = staged_audio
         try:
             voice_session = await self._load_voice_session()
+            normalized_speaker_role = _normalize_speaker_role(speaker_role)
+            _validate_speaker_role_for_session(
+                voice_session,
+                normalized_speaker_role,
+            )
             owned_staged_audio = await self._stage_audio_input(audio, owned_staged_audio)
             if owned_staged_audio is None:
                 return None
@@ -225,15 +231,42 @@ class VoiceFinalPersistenceService:
                 transcript_raw="",
                 transcript_edited="",
                 provider=self.provider,
-                provider_payload_json={"source": "unfinalized_audio"},
+                provider_payload_json={
+                    "source": "unfinalized_audio",
+                    **(
+                        {"speaker_role": normalized_speaker_role}
+                        if normalized_speaker_role
+                        == MemoirSpeakerRole.INTERVIEWER.value
+                        else {}
+                    ),
+                },
+                source_material_type=(
+                    INTERVIEWER_SOURCE_MATERIAL_TYPE
+                    if normalized_speaker_role
+                    == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
+                source_route_action=(
+                    IGNORED_SOURCE_ROUTE_ACTION
+                    if normalized_speaker_role
+                    == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
+                source_route_reason=(
+                    "真人采访者问题只作为上下文，不作为回忆录正文素材。"
+                    if normalized_speaker_role
+                    == MemoirSpeakerRole.INTERVIEWER.value
+                    else ""
+                ),
             )
             self.db.add(utterance)
             await self.db.flush()
-            await followup_completion.link_utterance_to_session_task(
-                self.db,
-                voice_session=voice_session,
-                utterance=utterance,
-            )
+            if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
+                await followup_completion.link_utterance_to_session_task(
+                    self.db,
+                    voice_session=voice_session,
+                    utterance=utterance,
+                )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
                 message_id=None,
