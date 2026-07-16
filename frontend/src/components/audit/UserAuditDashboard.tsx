@@ -94,6 +94,8 @@ const FEATURE_LABELS: Record<string, string> = {
   'project.create': '新建项目',
   'project.update': '更新项目',
   'project.activate': '切换项目',
+  'project.delete': '删除项目',
+  'admin.project.delete': '管理员删除项目',
 };
 
 function toDateInput(date: Date): string {

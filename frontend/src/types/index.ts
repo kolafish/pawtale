@@ -150,6 +150,7 @@ export interface Project {
   owner_email?: string | null;
   owner_display_name?: string | null;
   can_edit?: boolean;
+  can_delete: boolean;
   can_edit_memoir_materials?: boolean;
   total_word_count: number;
   groups: DocumentGroup[];
@@ -168,6 +169,7 @@ export interface ProjectListItem {
   owner_email?: string | null;
   owner_display_name?: string | null;
   can_edit?: boolean;
+  can_delete: boolean;
   can_edit_memoir_materials?: boolean;
   total_word_count: number;
   group_count: number;

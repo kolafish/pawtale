@@ -78,6 +78,7 @@ def project_response(
         owner_email=owner.email if owner else None,
         owner_display_name=owner.display_name if owner else None,
         can_edit=can_edit,
+        can_delete=can_edit or viewer_is_admin,
         can_edit_memoir_materials=can_edit_memoir_materials,
         metadata_json=project.metadata_json or {},
         total_word_count=project_total_words(project),

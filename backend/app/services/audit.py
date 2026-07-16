@@ -150,6 +150,8 @@ async def ingest_events(
     db: AsyncSession,
     user_id: str,
     req: AuditEventsIngestRequest,
+    *,
+    commit: bool = True,
 ) -> AuditEventsIngestResponse:
     ordered_events = sorted(req.events, key=lambda item: item.occurred_at)
     first_seen_at = _utc_naive(ordered_events[0].occurred_at)
@@ -232,7 +234,10 @@ async def ingest_events(
 
         accepted += 1
 
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     return AuditEventsIngestResponse(accepted=accepted, duplicate=duplicate, session_id=session.id)
 
 

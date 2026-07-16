@@ -5,6 +5,7 @@ import { projectsApi } from '../api';
 import { getInitialProjectDocumentId } from '../domain/projectNavigation';
 import { formatProjectStructure, getProjectProfile } from '../domain/projectProfiles';
 import { useAppStore } from '../stores/appStore';
+import { ProjectDeleteDialog } from './ProjectDeleteDialog';
 import type { Project, ProjectListItem } from '../types';
 
 export function ProjectHome() {
@@ -14,6 +15,8 @@ export function ProjectHome() {
   const [showCreate, setShowCreate] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
+  const [projectPendingDeletion, setProjectPendingDeletion] = useState<ProjectListItem | null>(null);
+  const [deleteError, setDeleteError] = useState('');
   const novelProfile = getProjectProfile('novel');
 
   const openLoadedProject = (project: Project) => {
@@ -38,8 +41,25 @@ export function ProjectHome() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => projectsApi.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects'] }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['projects'] });
+      setProjectPendingDeletion(null);
+      setDeleteError('');
+    },
+    onError: () => setDeleteError('删除失败，项目尚未从列表中移除。请刷新后重试。'),
   });
+
+  const requestProjectDeletion = (project: ProjectListItem) => {
+    if (!project.can_delete || deleteMutation.isPending) return;
+    setDeleteError('');
+    setProjectPendingDeletion(project);
+  };
+
+  const cancelProjectDeletion = () => {
+    if (deleteMutation.isPending) return;
+    setProjectPendingDeletion(null);
+    setDeleteError('');
+  };
 
   const renameMutation = useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) => projectsApi.update(id, { title }),
@@ -95,7 +115,7 @@ export function ProjectHome() {
           </div>
           <button
             onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-pink-500 text-white hover:bg-pink-600 transition-colors"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-pink-500 px-4 py-2 text-white transition-[background-color,scale] duration-150 ease-out hover:bg-pink-600 active:scale-[0.96]"
           >
             <Plus size={16} />
             新建项目
@@ -122,13 +142,13 @@ export function ProjectHome() {
               <button
                 onClick={() => newTitle.trim() && createMutation.mutate({ title: newTitle.trim() })}
                 disabled={!newTitle.trim() || createMutation.isPending}
-                className="px-4 py-2 rounded-lg bg-pink-500 text-white hover:bg-pink-600 disabled:opacity-60 transition-colors"
+                className="min-h-10 rounded-lg bg-pink-500 px-4 py-2 text-white transition-[background-color,scale] duration-150 ease-out hover:bg-pink-600 active:scale-[0.96] disabled:opacity-60 disabled:active:scale-100"
               >
                 {createMutation.isPending ? <RefreshCw size={16} className="animate-spin" /> : '创建'}
               </button>
               <button
                 onClick={() => { setShowCreate(false); setNewTitle(''); }}
-                className="px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+                className="min-h-10 rounded-lg border border-gray-200 px-4 py-2 text-gray-600 transition-[background-color,scale] duration-150 ease-out hover:bg-gray-50 active:scale-[0.96]"
               >
                 取消
               </button>
@@ -147,7 +167,7 @@ export function ProjectHome() {
             <p className="text-gray-500 mb-2">还没有任何项目</p>
             <button
               onClick={() => setShowCreate(true)}
-              className="text-pink-500 hover:text-pink-600 font-medium"
+              className="min-h-10 rounded-lg px-3 font-medium text-pink-500 transition-[color,background-color,scale] duration-150 ease-out hover:bg-pink-50 hover:text-pink-600 active:scale-[0.96]"
             >
               创建第一个项目
             </button>
@@ -163,39 +183,39 @@ export function ProjectHome() {
                 <div
                   key={proj.id}
                   onClick={() => openProject(proj)}
-                  className="group rounded-2xl border border-gray-100 bg-white p-5 hover:border-pink-200 hover:shadow-md transition-all cursor-pointer"
+                  className="group cursor-pointer rounded-2xl border border-gray-100 bg-white p-5 transition-[border-color,box-shadow] duration-150 ease-out hover:border-pink-200 hover:shadow-md"
                 >
                   <div className="flex items-start justify-between">
                     {editingProjectId === proj.id && canEditProject ? (
-                    <div className="flex flex-1 items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        value={editingTitle}
-                        onChange={(e) => setEditingTitle(e.target.value)}
-                        autoFocus
-                        className="flex-1 rounded-md border border-pink-200 px-2 py-1 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-400"
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') commitRename(proj);
-                          if (e.key === 'Escape') cancelRename();
-                        }}
-                      />
-                      <button
-                        onClick={() => commitRename(proj)}
-                        disabled={!editingTitle.trim() || renameMutation.isPending}
-                        className="p-1 rounded text-green-600 hover:bg-green-50 disabled:opacity-40"
-                        title="保存名称"
-                      >
-                        {renameMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
-                      </button>
-                      <button
-                        onClick={cancelRename}
-                        className="p-1 rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                        title="取消"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ) : (
-                    <>
+                      <div className="flex flex-1 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          value={editingTitle}
+                          onChange={(e) => setEditingTitle(e.target.value)}
+                          autoFocus
+                          className="flex-1 rounded-md border border-pink-200 px-2 py-1 text-sm font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-pink-400"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') commitRename(proj);
+                            if (e.key === 'Escape') cancelRename();
+                          }}
+                        />
+                        <button
+                          onClick={() => commitRename(proj)}
+                          disabled={!editingTitle.trim() || renameMutation.isPending}
+                          className="flex size-10 items-center justify-center rounded-lg text-green-600 transition-[background-color,scale] duration-150 ease-out hover:bg-green-50 active:scale-[0.96] disabled:opacity-40 disabled:active:scale-100"
+                          title="保存名称"
+                        >
+                          {renameMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Check size={14} />}
+                        </button>
+                        <button
+                          onClick={cancelRename}
+                          className="flex size-10 items-center justify-center rounded-lg text-gray-400 transition-[color,background-color,scale] duration-150 ease-out hover:bg-gray-100 hover:text-gray-600 active:scale-[0.96]"
+                          title="取消"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
                         <div className="min-w-0 flex-1">
                           <h3 className="font-semibold text-gray-800 group-hover:text-pink-600 transition-colors truncate">
                             {proj.title}
@@ -204,32 +224,38 @@ export function ProjectHome() {
                             <p className="mt-1 truncate text-xs text-gray-400">所属：{ownerLabel}</p>
                           )}
                         </div>
-                        {canEditProject && (
-                          <>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                startRename(proj);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-all"
-                              title="重命名项目"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('确定删除该项目？')) deleteMutation.mutate(proj.id);
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-all"
-                              title="删除项目"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </>
+                        {(canEditProject || proj.can_delete) && (
+                          <div className="ml-2 flex items-center gap-1">
+                            {canEditProject && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startRename(proj);
+                                }}
+                                className="flex size-10 items-center justify-center rounded-lg text-gray-400 opacity-100 transition-[opacity,color,background-color,scale] duration-150 ease-out hover:bg-gray-100 hover:text-gray-600 active:scale-[0.96] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                                title="重命名项目"
+                                aria-label={`重命名项目 ${proj.title}`}
+                              >
+                                <Pencil size={14} />
+                              </button>
+                            )}
+                            {proj.can_delete && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  requestProjectDeletion(proj);
+                                }}
+                                className="flex size-10 items-center justify-center rounded-lg text-gray-400 opacity-100 transition-[opacity,color,background-color,scale] duration-150 ease-out hover:bg-red-50 hover:text-red-600 active:scale-[0.96] sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
+                                title="删除项目及全部数据"
+                                aria-label={`删除项目及全部数据 ${proj.title}`}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
+                          </div>
                         )}
-                    </>
-                  )}
+                      </>
+                    )}
                   </div>
                   {proj.description && (
                     <p className="text-sm text-gray-500 mt-1 line-clamp-2">{proj.description}</p>
@@ -246,7 +272,7 @@ export function ProjectHome() {
                   {showWritingStats && proj.word_count_target && proj.word_count_target > 0 && (
                     <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-r from-pink-400 to-purple-400 rounded-full transition-all"
+                        className="h-full rounded-full bg-gradient-to-r from-pink-400 to-purple-400 transition-[width] duration-150"
                         style={{ width: `${Math.min(100, (proj.total_word_count / proj.word_count_target) * 100)}%` }}
                       />
                     </div>
@@ -257,6 +283,15 @@ export function ProjectHome() {
           </div>
         )}
       </div>
+      {projectPendingDeletion && (
+        <ProjectDeleteDialog
+          project={projectPendingDeletion}
+          isDeleting={deleteMutation.isPending}
+          errorMessage={deleteError}
+          onCancel={cancelProjectDeletion}
+          onConfirm={() => deleteMutation.mutate(projectPendingDeletion.id)}
+        />
+      )}
     </div>
   );
 }

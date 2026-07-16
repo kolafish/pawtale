@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -7,7 +10,9 @@ from app.domain.projects.types import ProjectType
 from app.domain.projects.templates import initialize_project_template
 from app.models.projects import DocumentGroup, Project
 from app.models.users import User
+from app.schemas.audit import AuditEventIngestItem, AuditEventsIngestRequest
 from app.schemas.projects import ProjectCreate, ProjectListItem, ProjectResponse, ProjectUpdate
+from app.services import audit as audit_service
 import app.services.project_documents as project_docs
 from app.services.memoir import project_deletion as memoir_project_deletion
 from app.services.projects.access import load_project
@@ -24,6 +29,46 @@ def _project_owner_fields(owner: User | None) -> dict[str, str | None]:
 def _can_edit_memoir_materials(project: Project, current_user: User, *, current_user_is_admin: bool) -> bool:
     return project.user_id == current_user.id or (
         current_user_is_admin and project.type == ProjectType.MEMOIR.value
+    )
+
+
+async def _stage_project_delete_audit(
+    db: AsyncSession,
+    *,
+    project: Project,
+    owner: User | None,
+    current_user: User,
+    current_user_is_admin: bool,
+) -> None:
+    occurred_at = datetime.now(timezone.utc)
+    is_admin_action = current_user_is_admin and project.user_id != current_user.id
+    await audit_service.ingest_events(
+        db,
+        current_user.id,
+        AuditEventsIngestRequest(
+            client_session_id=f"server-project-delete:{current_user.id}:{occurred_at.date().isoformat()}",
+            platform="web",
+            metadata_json={"source": "server"},
+            events=[
+                AuditEventIngestItem(
+                    client_event_id=f"project-delete:{uuid4()}",
+                    event_type="action",
+                    occurred_at=occurred_at,
+                    page_path="/admin/projects" if is_admin_action else "/projects",
+                    feature_code="admin.project.delete" if is_admin_action else "project.delete",
+                    metadata_json={
+                        "deleted_project_id": project.id,
+                        "deleted_project_type": project.type,
+                        "deleted_project_title": project.title,
+                        "owner_user_id": owner.id if owner else project.user_id,
+                        "owner_email": owner.email if owner else None,
+                        "owner_display_name": owner.display_name if owner else None,
+                        "actor_role": "admin" if current_user_is_admin else "user",
+                    },
+                )
+            ],
+        ),
+        commit=False,
     )
 
 
@@ -49,6 +94,7 @@ async def list_projects(db: AsyncSession, current_user: User) -> list[ProjectLis
             word_count_target=p.word_count_target,
             **_project_owner_fields(owner),
             can_edit=p.user_id == current_user.id,
+            can_delete=p.user_id == current_user.id or current_user_is_admin,
             can_edit_memoir_materials=_can_edit_memoir_materials(
                 p,
                 current_user,
@@ -115,8 +161,22 @@ async def update_project(
     return project_docs.project_response(project)
 
 
-async def delete_project(db: AsyncSession, project_id: str, user_id: str) -> None:
-    project = await load_project(db, project_id, user_id)
+async def delete_project(db: AsyncSession, project_id: str, current_user: User) -> None:
+    current_user_is_admin = is_admin_user(current_user)
+    project = await load_project(
+        db,
+        project_id,
+        current_user.id,
+        allow_admin=current_user_is_admin,
+    )
+    owner = await db.get(User, project.user_id) if project.user_id else None
+    await _stage_project_delete_audit(
+        db,
+        project=project,
+        owner=owner,
+        current_user=current_user,
+        current_user_is_admin=current_user_is_admin,
+    )
     if project.type == ProjectType.MEMOIR.value:
         await memoir_project_deletion.delete_project(db, project)
         return
