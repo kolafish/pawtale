@@ -53,10 +53,6 @@ from app.services.memoir.narrative import (
     story_merging,
     story_matching,
 )
-from app.services.memoir.narrative.cutover_checks import (
-    assert_story_graph_complete,
-    project_migration_report,
-)
 from app.services.memoir.narrative.ingestion import ingest_transcript_version, transcript_text_hash
 from tests.memoir_helpers import create_test_voice_transcript
 
@@ -744,59 +740,3 @@ async def test_manual_story_merge_moves_claims_and_is_idempotent(client, test_db
         slot for slot in retained_response.slots if slot.slot_key == "outcome"
     )
     assert retained_outcome.status == MemoirStorySlotStatus.SUFFICIENT.value
-
-
-async def test_offline_audit_requires_evidence_backed_claims_in_active_stories(
-    client,
-    test_db,
-):
-    created = await create_test_voice_transcript(client, test_db, text="初始化项目。")
-    project_id = created["session"]["project_id"]
-    claim = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="我第一次独自去成都。",
-    )
-    claim_id = claim.id
-    await test_db.commit()
-
-    before = await project_migration_report(test_db, project_id=project_id)
-    assert before["claims_without_story_count"] == 1
-    assert "evidence-backed Claims are not grouped into active Stories" in before[
-        "migration_blockers"
-    ]
-    with pytest.raises(RuntimeError, match="must belong to active Stories"):
-        await assert_story_graph_complete(test_db, project_id=project_id)
-
-    story = await stories.create_story(
-        test_db,
-        data=MemoirStoryCreate(
-            project_id=project_id,
-            title="第一次独自去成都",
-            story_type=MemoirStoryType.EVENT,
-            created_by=MemoirNarrativeActorType.USER,
-            created_by_user_id=created["user_id"],
-        ),
-    )
-    await stories.attach_claims_to_story(
-        test_db,
-        story=story,
-        claims=[
-            MemoirStoryClaimInput(
-                claim_id=claim_id,
-                narrative_role=MemoirStoryNarrativeRole.ACTION,
-                sort_order=0,
-                is_core=True,
-                slot_keys=["actions"],
-            )
-        ],
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=created["user_id"],
-        reason="offline audit fixture",
-    )
-    await test_db.commit()
-
-    after = await project_migration_report(test_db, project_id=project_id)
-    assert after["claims_without_story_count"] == 0
-    await assert_story_graph_complete(test_db, project_id=project_id)

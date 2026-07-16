@@ -54,7 +54,7 @@ async def suggest_memoir_chapter_contract(
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
-        contract = await chapter_contracts.create_legacy_contract_suggestion(
+        contract = await chapter_contracts.create_system_contract_suggestion(
             db,
             project_id=project_id,
             chapter_id=chapter_id,

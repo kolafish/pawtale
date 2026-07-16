@@ -23,6 +23,7 @@
 | C3 | 已完成 | `continue_listening`、`follow_current_story`、`summarize_and_confirm` 可按 rollout 配置低风险执行，其他动作仍受候选集和风险门禁约束 |
 | D0 / D1 / D2 | 已完成 | 话题地图被动匹配、用户 resolution、只读小程序入口、软锚点和 `offer_new_topic` 候选已落地 |
 | E | 已完成 | Gap primary/involved 单一真相、审阅事件/Job 直接关联与索引、无客户端使用的 resume/cancel API 已清理 |
+| 成书补全旧实现清理 | 已完成 | 未使用的列表 API、精细章节结构编辑、一次性叙事回填/切换/质量评估工具已删除；章节方向收敛为系统建议、素材同步、workspace 读取和用户确认 |
 | 偏好学习 / 强化学习 | 未开始 | 继续等待足量真实 outcome、human rating、脱敏和权限审查数据，不属于第一轮完成范围 |
 
 ## 一、执行摘要
