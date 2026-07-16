@@ -13,8 +13,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
     MemoirClaimEvidenceRole,
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRelationRole,
@@ -41,6 +39,9 @@ from app.models.memoir_narrative import (
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
+)
 
 
 @dataclass(frozen=True)
@@ -425,13 +426,7 @@ def evaluate_deterministic_gaps(
             claim = context.claims.get(story_claim.claim_id)
             if (
                 claim is None
-                or claim.publication_status != MemoirClaimPublicationStatus.ELIGIBLE.value
-                or claim.verification_status
-                in {
-                    MemoirClaimVerificationStatus.DISPUTED.value,
-                    MemoirClaimVerificationStatus.REJECTED.value,
-                }
-                or claim.superseded_by_claim_id
+                or not claim_usable_for_publication(claim)
                 or context.evidence_counts.get(claim.id, 0) > 0
             ):
                 continue

@@ -12,9 +12,12 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
 )
-from app.models.memoir_narrative import MemoirFollowupTask
+from app.models.memoir_narrative import MemoirClaim, MemoirFollowupTask
 from app.schemas.memoir_narrative import MemoirFollowupTaskResponse
 from app.services.memoir.narrative import decision_log
+from app.services.memoir.narrative.claim_usage_policy import (
+    publication_safe_context_summary,
+)
 
 
 ACTIVE_TASK_STATUSES = {
@@ -91,7 +94,50 @@ async def task_response(
         if loaded is None:
             raise ValueError("follow-up task does not belong to the project")
         task = loaded
-    return MemoirFollowupTaskResponse.model_validate(task)
+    return (await task_responses(db, tasks=[task]))[0]
+
+
+async def task_responses(
+    db: AsyncSession,
+    *,
+    tasks: list[MemoirFollowupTask],
+) -> list[MemoirFollowupTaskResponse]:
+    project_ids = {task.project_id for task in tasks}
+    claim_ids = {
+        relation.claim_id
+        for task in tasks
+        for relation in task.claims
+    }
+    claims = list(
+        (
+            await db.scalars(
+                select(MemoirClaim).where(
+                    MemoirClaim.project_id.in_(project_ids),
+                    MemoirClaim.id.in_(claim_ids),
+                )
+            )
+        ).all()
+    ) if claim_ids else []
+    claims_by_id = {claim.id: claim for claim in claims}
+    responses: list[MemoirFollowupTaskResponse] = []
+    for task in tasks:
+        task_claims = [
+            claims_by_id[relation.claim_id]
+            for relation in task.claims
+            if relation.claim_id in claims_by_id
+            and claims_by_id[relation.claim_id].project_id == task.project_id
+        ]
+        response = MemoirFollowupTaskResponse.model_validate(task)
+        responses.append(
+            response.model_copy(
+                update={
+                    "known_context_summary": publication_safe_context_summary(
+                        task_claims,
+                    )
+                }
+            )
+        )
+    return responses
 
 
 async def list_tasks(

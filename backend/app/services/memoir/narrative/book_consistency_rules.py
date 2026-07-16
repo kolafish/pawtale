@@ -7,7 +7,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimPublicationStatus,
     MemoirClaimTimePrecision,
     MemoirClaimType,
-    MemoirClaimVerificationStatus,
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
     MemoirDraftBlockRole,
@@ -25,6 +24,10 @@ from app.domain.memoir.narrative_types import (
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.narrative.book_consistency_context import BookConsistencyContext
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_known_for_conversation,
+    claim_usable_for_publication,
+)
 
 
 EXPLICIT_TIME_PRECISIONS = {
@@ -181,9 +184,8 @@ def evaluate_book_consistency_rules(
     for claim in context.claims.values():
         if (
             claim.conflict_group_id
-            and not claim.superseded_by_claim_id
+            and claim_known_for_conversation(claim)
             and claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-            and claim.verification_status != MemoirClaimVerificationStatus.REJECTED.value
         ):
             conflict_groups[claim.conflict_group_id].append(claim)
     for conflict_group_id, claims in conflict_groups.items():
@@ -315,13 +317,8 @@ def evaluate_book_consistency_rules(
             invalid_reason = ""
             if claim.superseded_by_claim_id:
                 invalid_reason = "Claim 已被新版本取代"
-            elif claim.publication_status != MemoirClaimPublicationStatus.ELIGIBLE.value:
-                invalid_reason = "Claim 不允许进入公开正文"
-            elif claim.verification_status in {
-                MemoirClaimVerificationStatus.DISPUTED.value,
-                MemoirClaimVerificationStatus.REJECTED.value,
-            }:
-                invalid_reason = "Claim 尚有争议或已被否定"
+            elif not claim_usable_for_publication(claim):
+                invalid_reason = "Claim 不允许进入公开正文、尚有争议或已被否定"
             elif context.evidence_counts.get(claim.id, 0) < 1:
                 invalid_reason = "Claim 没有有效支持证据"
             if invalid_reason:

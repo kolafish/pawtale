@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import and_, delete, not_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -13,7 +13,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirClaimPublicationStatus,
     MemoirClaimEvidenceRole,
-    MemoirClaimVerificationStatus,
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
@@ -49,6 +48,13 @@ from app.models.memoir_narrative import (
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import gaps as gap_service
 from app.services.memoir.narrative import followup_tasks
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_known_for_conversation,
+    claim_usable_for_publication,
+    evaluate_claim_usage,
+    known_for_conversation_filters,
+    publication_safe_context_summary,
+)
 
 
 FOLLOWUP_PLANNER_VERSION = "7"
@@ -313,20 +319,11 @@ def _task_priority(
     return severity + required_bonus + editorial_value_bonus + chapter_bonus
 
 
-def _safe_claim(claim: MemoirClaim) -> bool:
-    return (
-        claim.superseded_by_claim_id is None
-        and claim.verification_status != MemoirClaimVerificationStatus.REJECTED.value
-        and claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-    )
-
-
 def _known_context_summary(story: MemoirStory | None, claims: list[MemoirClaim]) -> str:
-    parts: list[str] = []
-    if story and story.summary.strip():
-        parts.append(story.summary.strip())
-    parts.extend(claim.statement.strip() for claim in claims if claim.statement.strip())
-    return "；".join(dict.fromkeys(parts))[:2000]
+    return publication_safe_context_summary(
+        claims,
+        story_summary=story.summary if story is not None else "",
+    )
 
 
 async def _required_story_ids_by_chapter(
@@ -675,17 +672,26 @@ async def generate_followup_tasks(
         claim_roles: dict[str, MemoirFollowupTaskClaimRole] = {}
         for relation in gap.claims:
             claim = claims.get(relation.claim_id)
-            if claim is None or not _safe_claim(claim):
+            if claim is None:
                 continue
-            claim_roles[claim.id] = (
-                MemoirFollowupTaskClaimRole.EXPECTED_EVIDENCE
-                if relation.role == MemoirNarrativeGapClaimRole.UNSUPPORTED_CANDIDATE.value
-                else MemoirFollowupTaskClaimRole.KNOWN
-            )
+            usage = evaluate_claim_usage(claim)
+            if not usage.known_for_conversation:
+                continue
+            if (
+                relation.role
+                == MemoirNarrativeGapClaimRole.UNSUPPORTED_CANDIDATE.value
+                and claim.publication_status
+                == MemoirClaimPublicationStatus.ELIGIBLE.value
+            ):
+                claim_roles[claim.id] = MemoirFollowupTaskClaimRole.EXPECTED_EVIDENCE
+            elif usage.usable_for_publication:
+                claim_roles[claim.id] = MemoirFollowupTaskClaimRole.KNOWN
+            else:
+                claim_roles[claim.id] = MemoirFollowupTaskClaimRole.DO_NOT_REPEAT
         if story_id and slot_key:
             for claim_id in slot_claim_ids.get((story_id, slot_key), set()):
                 claim = claims.get(claim_id)
-                if claim is not None and _safe_claim(claim):
+                if claim is not None and claim_known_for_conversation(claim):
                     claim_roles.setdefault(claim_id, MemoirFollowupTaskClaimRole.DO_NOT_REPEAT)
 
         existing = existing_tasks.get(gap.id)
@@ -899,17 +905,30 @@ async def _task_is_selectable(
             )
             if slot_status in TERMINAL_SLOT_STATUSES:
                 return False
-    claim_ids = [relation.claim_id for relation in task.claims]
-    if claim_ids:
-        private_claim_exists = await db.scalar(
-            select(MemoirClaim.id).where(
-                MemoirClaim.project_id == task.project_id,
-                MemoirClaim.id.in_(claim_ids),
-                MemoirClaim.publication_status != MemoirClaimPublicationStatus.ELIGIBLE.value,
-            ).limit(1)
+    invalid_expected_claim_exists = await db.scalar(
+        select(MemoirClaim.id)
+        .join(
+            MemoirFollowupTaskClaim,
+            and_(
+                MemoirFollowupTaskClaim.project_id == MemoirClaim.project_id,
+                MemoirFollowupTaskClaim.claim_id == MemoirClaim.id,
+            ),
         )
-        if private_claim_exists:
-            return False
+        .where(
+            MemoirFollowupTaskClaim.project_id == task.project_id,
+            MemoirFollowupTaskClaim.task_id == task.id,
+            MemoirFollowupTaskClaim.context_role
+            == MemoirFollowupTaskClaimRole.EXPECTED_EVIDENCE.value,
+            or_(
+                MemoirClaim.publication_status
+                != MemoirClaimPublicationStatus.ELIGIBLE.value,
+                not_(and_(*known_for_conversation_filters())),
+            ),
+        )
+        .limit(1)
+    )
+    if invalid_expected_claim_exists:
+        return False
     return True
 
 
@@ -1059,9 +1078,6 @@ async def prompt_context_for_session(
                 select(MemoirClaim).where(
                     MemoirClaim.project_id == task.project_id,
                     MemoirClaim.id.in_(claim_ids),
-                    MemoirClaim.superseded_by_claim_id.is_(None),
-                    MemoirClaim.verification_status != MemoirClaimVerificationStatus.REJECTED.value,
-                    MemoirClaim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value,
                 )
             )
         ).all()
@@ -1072,13 +1088,30 @@ async def prompt_context_for_session(
         for relation in task.claims
         if relation.context_role == MemoirFollowupTaskClaimRole.KNOWN.value
         and relation.claim_id in claims_by_id
+        and claim_usable_for_publication(claims_by_id[relation.claim_id])
     ]
     do_not_repeat = [
         claims_by_id[relation.claim_id].statement
         for relation in task.claims
         if relation.context_role == MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value
         and relation.claim_id in claims_by_id
+        and claim_usable_for_publication(claims_by_id[relation.claim_id])
     ]
+    restricted_do_not_repeat = [
+        claims_by_id[relation.claim_id].statement
+        for relation in task.claims
+        if relation.claim_id in claims_by_id
+        and claims_by_id[relation.claim_id].publication_status
+        != MemoirClaimPublicationStatus.ELIGIBLE.value
+        and evaluate_claim_usage(claims_by_id[relation.claim_id]).known_for_conversation
+    ]
+    has_conflict_context = any(
+        evaluate_claim_usage(
+            claims_by_id[relation.claim_id]
+        ).retain_as_conflict_context
+        for relation in task.claims
+        if relation.claim_id in claims_by_id
+    )
     pending_confirmation_question = await db.scalar(
         select(MemoirFollowupTaskUtterance.confirmation_question)
         .where(
@@ -1105,6 +1138,16 @@ async def prompt_context_for_session(
         lines.append("可承接的已知事实：" + "；".join(dict.fromkeys(known)))
     if do_not_repeat:
         lines.append("已经充分问过、不要重复追问：" + "；".join(dict.fromkeys(do_not_repeat)))
+    if restricted_do_not_repeat:
+        lines.append(
+            "用户已讲过但明确不用于成书，不要要求重复或展开："
+            + "；".join(dict.fromkeys(restricted_do_not_repeat))
+        )
+    if has_conflict_context:
+        lines.append(
+            "相关材料中存在已被否定或仍有争议的旧说法；不得把它当成事实，"
+            "可以继续询问用户认可的正确版本。"
+        )
     lines.append("只能围绕这一项补访；请邀请叙述者完整讲一段，不得拆成连续的细节盘问，也不得编造未给出的事实。")
     return FollowupPromptContext(
         task_id=task.id,

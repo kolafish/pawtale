@@ -11,8 +11,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
     MemoirChapterNodeType,
     MemoirClaimEvidenceRole,
-    MemoirClaimPublicationStatus,
-    MemoirClaimVerificationStatus,
     MemoirDraftBlockClaimUsageRole,
     MemoirDraftBlockRole,
     MemoirDraftBlockStoryUsageRole,
@@ -44,6 +42,9 @@ from app.services.memoir.narrative.draft_block_ai import (
 from app.services.memoir.narrative.draft_editorial_contexts import (
     editorial_contexts_for_node,
     load_chapter_editorial_contexts,
+)
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
 )
 from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
@@ -135,13 +136,7 @@ def _claim_links_for_block_role(
 
 def _eligible_claim(claim: MemoirClaim) -> bool:
     return (
-        claim.publication_status == MemoirClaimPublicationStatus.ELIGIBLE.value
-        and claim.verification_status
-        not in {
-            MemoirClaimVerificationStatus.DISPUTED.value,
-            MemoirClaimVerificationStatus.REJECTED.value,
-        }
-        and claim.superseded_by_claim_id is None
+        claim_usable_for_publication(claim)
         and any(
             evidence.evidence_role == MemoirClaimEvidenceRole.SUPPORTS.value
             and bool((evidence.quote or evidence.evidence_note or "").strip())
