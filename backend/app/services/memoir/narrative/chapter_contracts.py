@@ -45,11 +45,10 @@ from app.services.memoir.narrative.claim_usage_policy import (
 from app.services.memoir.narrative.readiness_policy import story_can_support_draft
 
 
-LEGACY_SUGGESTION_IDEMPOTENCY_KEY = "chapter-structure-backfill-v1"
-LEGACY_CORE_STORY_PLACEHOLDER_TITLE = "待补充核心故事"
-LEGACY_ANCHOR_STORY_LIMIT = 3
+CORE_STORY_PLACEHOLDER_TITLE = "待补充核心故事"
+ANCHOR_STORY_LIMIT = 3
 
-_LEGACY_STORY_TYPE_PRIORITY = {
+_STORY_TYPE_PRIORITY = {
     MemoirStoryType.LIFE_STAGE.value: 3,
     MemoirStoryType.RELATIONSHIP.value: 2,
     MemoirStoryType.THEME.value: 1,
@@ -210,33 +209,25 @@ async def contract_response(
     )
 
 
-def contract_constraints(
+def _contract_constraints(
     contract: MemoirChapterContract,
 ) -> MemoirChapterContractConstraints:
     return MemoirChapterContractConstraints.model_validate(contract.constraints_json)
 
 
-def _contract_id(
+def _system_direction_contract_id(
     *,
     project_id: str,
     chapter_id: str,
-    actor_key: str,
     idempotency_key: str,
 ) -> str:
+    # Keep the original namespace segment stable because contract IDs are persisted.
     return str(
         uuid5(
             NAMESPACE_URL,
-            f"pawtale:chapter-contract:{project_id}:{chapter_id}:{actor_key}:{idempotency_key}",
+            f"pawtale:chapter-contract:{project_id}:{chapter_id}:"
+            f"legacy-suggestion:{idempotency_key}",
         )
-    )
-
-
-def legacy_contract_suggestion_id(*, project_id: str, chapter_id: str) -> str:
-    return _contract_id(
-        project_id=project_id,
-        chapter_id=chapter_id,
-        actor_key="legacy-suggestion",
-        idempotency_key=LEGACY_SUGGESTION_IDEMPOTENCY_KEY,
     )
 
 
@@ -255,7 +246,7 @@ async def _next_contract_version(
     return int(latest or 0) + 1
 
 
-async def legacy_story_candidates(
+async def _chapter_story_candidates(
     db: AsyncSession,
     *,
     project_id: str,
@@ -298,7 +289,7 @@ async def legacy_story_candidates(
     )
 
 
-async def _legacy_anchor_stories(
+async def _anchor_stories(
     db: AsyncSession,
     *,
     project_id: str,
@@ -333,7 +324,7 @@ async def _legacy_anchor_stories(
             == MemoirStoryVerificationStatus.CONFIRMED.value,
             sum(is_core for _, is_core in shapes_by_story[story.id]),
             len({role for role, _ in shapes_by_story[story.id]}),
-            _LEGACY_STORY_TYPE_PRIORITY.get(story.story_type, -1),
+            _STORY_TYPE_PRIORITY.get(story.story_type, -1),
             -candidate_order[story.id],
         ),
         reverse=True,
@@ -352,7 +343,7 @@ async def _legacy_anchor_stories(
     )
     if required_story is not None:
         ranked = [required_story, *[story for story in ranked if story != required_story]]
-    return ranked[:LEGACY_ANCHOR_STORY_LIMIT], required_story
+    return ranked[:ANCHOR_STORY_LIMIT], required_story
 
 
 async def eligible_story_claim_shapes(
@@ -422,7 +413,7 @@ async def eligible_story_claim_shapes(
     }
 
 
-async def _legacy_framing_story_ids(
+async def _framing_story_ids(
     db: AsyncSession,
     *,
     project_id: str,
@@ -470,7 +461,7 @@ async def _legacy_framing_story_ids(
     return framing
 
 
-def _legacy_core_questions(
+def _core_questions(
     *,
     chapter: MemoirBookPlanChapter,
     candidates: list[MemoirStory],
@@ -490,7 +481,7 @@ def _legacy_core_questions(
     ]
 
 
-async def create_legacy_contract_suggestion(
+async def create_system_contract_suggestion(
     db: AsyncSession,
     *,
     project_id: str,
@@ -507,10 +498,9 @@ async def create_legacy_contract_suggestion(
     )
     if current_draft is not None:
         return current_draft
-    contract_id = _contract_id(
+    contract_id = _system_direction_contract_id(
         project_id=project_id,
         chapter_id=chapter_id,
-        actor_key="legacy-suggestion",
         idempotency_key=idempotency_key,
     )
     existing = await db.scalar(
@@ -519,23 +509,23 @@ async def create_legacy_contract_suggestion(
     if existing is not None:
         return existing
 
-    candidates = await legacy_story_candidates(
+    candidates = await _chapter_story_candidates(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    anchor_stories, required_story = await _legacy_anchor_stories(
+    anchor_stories, required_story = await _anchor_stories(
         db,
         project_id=project_id,
         candidates=candidates,
     )
-    framing_story_ids = await _legacy_framing_story_ids(
+    framing_story_ids = await _framing_story_ids(
         db,
         project_id=project_id,
         candidates=anchor_stories,
         required_story=required_story,
     )
-    questions = _legacy_core_questions(chapter=chapter, candidates=anchor_stories)
+    questions = _core_questions(chapter=chapter, candidates=anchor_stories)
     supported_story_ids = {
         story_id
         for story_id, _, _ in await eligible_story_claim_shapes(
@@ -607,7 +597,7 @@ async def create_legacy_contract_suggestion(
             1,
             (
                 MemoirChapterNodeType.STORY,
-                LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+                CORE_STORY_PLACEHOLDER_TITLE,
                 "选择一个有证据支撑的 Story 作为本章叙事核心。",
                 True,
                 None,
@@ -673,16 +663,16 @@ async def create_legacy_contract_suggestion(
     return contract
 
 
-async def repair_legacy_contract_suggestion(
+async def _sync_system_draft_contract(
     db: AsyncSession,
     *,
     contract: MemoirChapterContract,
-) -> str:
+) -> bool:
     if (
         contract.status != MemoirChapterContractStatus.DRAFT.value
         or contract.created_by != MemoirNarrativeActorType.SYSTEM.value
     ):
-        return "not_applicable"
+        return False
 
     nodes = await _contract_nodes(db, contract=contract)
     links_by_node = await node_story_links(
@@ -691,7 +681,7 @@ async def repair_legacy_contract_suggestion(
         node_ids=[node.id for node in nodes],
     )
     links = [link for node_links in links_by_node.values() for link in node_links]
-    constraints = contract_constraints(contract)
+    constraints = _contract_constraints(contract)
     if (
         any(
             node.created_by != MemoirNarrativeActorType.SYSTEM.value
@@ -706,7 +696,7 @@ async def repair_legacy_contract_suggestion(
         or constraints.include_topics
         or constraints.exclude_topics
     ):
-        return "skipped_modified"
+        return False
 
     story_nodes = [
         node for node in nodes if node.node_type == MemoirChapterNodeType.STORY.value
@@ -724,7 +714,7 @@ async def repair_legacy_contract_suggestion(
     placeholder_nodes = [
         node
         for node in story_nodes
-        if node.title == LEGACY_CORE_STORY_PLACEHOLDER_TITLE
+        if node.title == CORE_STORY_PLACEHOLDER_TITLE
         and not links_by_node.get(node.id)
     ]
     if len(placeholder_nodes) > 1 or any(
@@ -734,7 +724,7 @@ async def repair_legacy_contract_suggestion(
         for node in story_nodes
         if node not in placeholder_nodes
     ):
-        return "skipped_modified"
+        return False
     story_node_story_ids = {
         link.story_id
         for node in story_nodes
@@ -750,9 +740,9 @@ async def repair_legacy_contract_suggestion(
         )
         for node in framing_nodes
     ):
-        return "skipped_modified"
+        return False
 
-    candidates = await legacy_story_candidates(
+    candidates = await _chapter_story_candidates(
         db,
         project_id=contract.project_id,
         chapter_id=contract.chapter_id,
@@ -760,13 +750,13 @@ async def repair_legacy_contract_suggestion(
     preferred_required_story_id = (
         constraints.include_story_ids[0] if constraints.include_story_ids else None
     )
-    anchor_stories, required_story = await _legacy_anchor_stories(
+    anchor_stories, required_story = await _anchor_stories(
         db,
         project_id=contract.project_id,
         candidates=candidates,
         preferred_required_story_id=preferred_required_story_id,
     )
-    framing_story_ids = await _legacy_framing_story_ids(
+    framing_story_ids = await _framing_story_ids(
         db,
         project_id=contract.project_id,
         candidates=anchor_stories,
@@ -815,7 +805,7 @@ async def repair_legacy_contract_suggestion(
         if required_story_id is None:
             story_specs.append(
                 (
-                    LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+                    CORE_STORY_PLACEHOLDER_TITLE,
                     "选择一个有证据支撑的 Story 作为本章叙事核心。",
                     True,
                     None,
@@ -878,7 +868,7 @@ async def repair_legacy_contract_suggestion(
             )
             node_required = story is None or story.id == required_story_id
             expected_title = (
-                LEGACY_CORE_STORY_PLACEHOLDER_TITLE
+                CORE_STORY_PLACEHOLDER_TITLE
                 if story is None
                 else story.title
             )
@@ -928,7 +918,7 @@ async def repair_legacy_contract_suggestion(
                 chapter_id=contract.chapter_id,
                 contract_id=contract.id,
                 node_type=MemoirChapterNodeType.STORY.value,
-                title=LEGACY_CORE_STORY_PLACEHOLDER_TITLE,
+                title=CORE_STORY_PLACEHOLDER_TITLE,
                 purpose="选择一个有证据支撑的 Story 作为本章叙事核心。",
                 sort_order=20000,
                 required=True,
@@ -983,7 +973,7 @@ async def repair_legacy_contract_suggestion(
     )
     desired_questions = [
         question.model_dump(mode="json")
-        for question in _legacy_core_questions(
+        for question in _core_questions(
             chapter=chapter,
             candidates=anchor_stories,
         )
@@ -994,7 +984,7 @@ async def repair_legacy_contract_suggestion(
         changed = True
 
     if not changed:
-        return "unchanged"
+        return False
 
     for index, node in enumerate(nodes):
         node.sort_order = 10000 + index
@@ -1004,10 +994,10 @@ async def repair_legacy_contract_suggestion(
         node.sort_order = index
         db.add(node)
     await db.flush()
-    return "repaired"
+    return True
 
 
-async def refresh_legacy_contract_suggestions_for_utterance(
+async def sync_system_drafts_for_utterance(
     db: AsyncSession,
     *,
     project_id: str,
@@ -1040,11 +1030,11 @@ async def refresh_legacy_contract_suggestions_for_utterance(
             )
         ).all()
     )
-    repaired_contract_ids: list[str] = []
+    updated_contract_ids: list[str] = []
     for contract in contracts:
-        if await repair_legacy_contract_suggestion(db, contract=contract) == "repaired":
-            repaired_contract_ids.append(contract.id)
-    return tuple(repaired_contract_ids)
+        if await _sync_system_draft_contract(db, contract=contract):
+            updated_contract_ids.append(contract.id)
+    return tuple(updated_contract_ids)
 
 
 async def confirm_contract(

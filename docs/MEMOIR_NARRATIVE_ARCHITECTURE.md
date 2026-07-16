@@ -974,17 +974,17 @@ Story 顺序变化只影响节点顺序和必要过渡块；不能无故重写�
 
 目标 API 按领域职责拆分，不能继续全部追加到现有大 `book.py` router。
 
-目标资源边界：
+当前章节补全的主要资源边界：
 
 ```text
 /memoir/projects/{project_id}/entities
 /memoir/projects/{project_id}/claims
 /memoir/projects/{project_id}/stories
-/memoir/projects/{project_id}/stories/{story_id}/slots
-/memoir/projects/{project_id}/chapters/{chapter_id}/contract
-/memoir/projects/{project_id}/chapters/{chapter_id}/nodes
-/memoir/projects/{project_id}/gaps
-/memoir/projects/{project_id}/followup-tasks
+/memoir/projects/{project_id}/chapters/{chapter_id}/workspace
+/memoir/projects/{project_id}/chapters/{chapter_id}/contract/suggest
+/memoir/projects/{project_id}/chapter-contracts/{contract_id}/confirm
+/memoir/projects/{project_id}/gaps/{gap_id}/{action}
+/memoir/projects/{project_id}/followup-tasks/{task_id}
 /memoir/projects/{project_id}/chapters/{chapter_id}/draft-blocks
 /memoir/projects/{project_id}/book-consistency-audits
 ```
@@ -995,7 +995,8 @@ API 要求：
 - 所有更新带 project ownership 校验。
 - merge、resolve、lock、accept incomplete 等动作使用明确 endpoint 和状态转换。
 - AI 建议和用户确认分开；AI endpoint 不能伪装成已确认更新。
-- 列表接口支持增量加载，避免一次返回全项目所有 Claim 和 evidence。
+- 章节方向通过 workspace 统一读取，只暴露系统建议和用户确认，不提供未被产品使用的精细 node 编辑、章节拆并或单独 validation API。
+- 列表接口只在存在真实客户端消费时保留，并支持增量加载，避免一次返回全项目所有 Claim 和 evidence。
 
 ## 十二、代码组织
 
@@ -1017,7 +1018,6 @@ backend/app/services/memoir/narrative/
   extraction.py
   ingestion.py
   ingestion_jobs.py
-  backfill.py
   queries.py
   claims.py
   decisions.py
@@ -1094,97 +1094,19 @@ PostgreSQL 迁移单独立项，触发条件包括：
 
 第一阶段使用结构化字段、名称别名和现有摘要完成候选检索。向量检索仅用于提供 Entity/Story 候选，不能单独决定合并。
 
-## 十四、迁移与切换策略
+## 十四、迁移状态与数据保护
 
-不保留永久兼容链路，但必须保护已有用户数据和历史书稿。
+叙事事实层、系统章节方向和 DraftBlock 主链路已经完成切换。一次性摄取回填、章节结构回填、切换检查和新旧盲评执行器已退出运行时，不再作为长期维护接口；历史实现需要追溯时使用 Git。
 
-### 14.1 一次性回填来源
+当前只保留以下稳定约束：
 
-```text
-MemoirSourceCard.key_facts
- -> Claim / ClaimEvidence 候选
+- 不保留旧 source-to-whole-chapter 生成链路、永久 fallback 或双读双写。
+- 新转写通过正式 EditingJob 进入 Claim、Evidence 和 Story，不再依赖离线回填脚本。
+- 系统章节方向在用户请求时创建，并在相关新素材入库后同步仍未确认的系统草稿；已确认方向只由用户动作改变。
+- 迁移工具不得伪造确认人、隐私决定、事实确认或章节取舍。
+- 原始音频、Utterance、TranscriptVersion、历史 book output 和用户锁定内容必须继续可追溯。
 
-MemoirSourceCard.people / places / time_hints
- -> Entity 和时间候选
-
-MemoirChapterSourceLink
- -> Story/Chapter 迁移检查和来源覆盖校验
-
-MemoirBookChapterDraftVersion
- -> 仅保留 DraftBlock 组装后的历史快照
-```
-
-### 14.2 切换阶段
-
-```text
-1. 新表和 repository 落地，不改变行为。
-2. 对新转写 shadow 生成 Claim/Story，不参与现有成书。
-3. 对脱敏真实项目运行 backfill dry-run 和一致性检查。
-4. 章节工作台读取新模型，旧成书链继续可用。
-5. 补全访谈开始使用 FollowupTask。
-6. DraftBlock 新链路生成新章节，进行新旧质量对照。
-7. 新链路达到门槛后切换正式成书。
-8. 删除旧 source -> whole chapter prompt、旧事件聚类主读和永久 fallback。
-```
-
-临时双读/双写必须在 PR 描述中声明删除 PR，最迟在第十八章的最终切流 PR 清理。
-
-### 14.3 数据保护和回滚
-
-- 所有 backfill 脚本默认 dry-run，必须支持 `--project-id`。
-- 执行前生成数据库和对象存储引用清单。
-- 回填只新增叙事数据，不覆盖 utterance、transcript、audio 和历史 book output。
-- 切换前比较用户数、项目数、utterance 数、有效 transcript version、Claim evidence 覆盖和章节来源覆盖。
-- 回滚切换只切读路径；已经生成的新叙事数据保留用于排查，不反向污染旧事实层。
-- 最终切流 PR 删除旧代码前必须确认所有活跃项目已完成迁移检查。
-
-### 14.4 最终切流前的安全迁移
-
-章节工作台的真实数据准备必须先于最终正式切流，并保持 14.2 的旧成书链可用。该阶段只做三件事：修复 SQLite 历史表重建遗留的外键目标、创建可验证且可恢复的完整备份、按阶段新增 Claim/Story/章节方向建议和 legacy DraftBlock 快照。不得在该阶段删除旧生成任务、停止旧成书事件或改变正式成书读路径。
-
-正式环境执行时必须先停止 API 和后台 worker。备份、迁移和所有写入阶段必须指向同一个文件型 SQLite 数据库；每个写入阶段必须使用同一份由备份工具生成的 `manifest.json`。manifest 必须绑定源数据库绝对路径、独立备份库 SHA-256、`PRAGMA integrity_check`、核心表行数、对象引用清单和目录校验和，不能用手工复制的 SQLite 主文件代替。
-
-```bash
-cd backend
-
-# 1. 停止所有数据库写进程后创建可恢复备份。
-PYTHONPATH=. venv/bin/python scripts/backup_runtime_data.py \
-  --label pre-narrative-backfill
-
-# 2. 使用迁移专用连接修复历史外键并校验完整 runtime schema。
-PYTHONPATH=. venv/bin/python scripts/migrate_runtime_schema.py --skip-backup
-
-# 3. 每个阶段先 dry-run，再带同一份 manifest 执行。
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py inventory
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py ingest \
-  --execute --application-writers-stopped \
-  --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py process-ingestion \
-  --execute --application-writers-stopped \
-  --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py stories \
-  --execute --application-writers-stopped \
-  --backup-manifest /controlled/backup/manifest.json
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures
-PYTHONPATH=. venv/bin/python scripts/prepare_memoir_narrative_data.py structures \
-  --execute --application-writers-stopped \
-  --backup-manifest /controlled/backup/manifest.json
-```
-
-`cutover_data_ready` 只表示历史叙事数据已回填、Claim 均有 evidence、同一 transcript version 中共享人物或地点锚点的叙事 Claim 簇均已进入 Story 候选、章节方向建议已物化且没有失败的摄取任务。它不表示 Story 已被用户确认。`chapter_workflow_ready` 单独表示章节已有当前方向和结构化 DraftBlock；迁移脚本不得伪造确认人或产品决策。两者都不能替代来源校验、一致性审校和真实章节质量验收。
-
-恢复操作默认只做预检。只有确认所有写进程仍处于停止状态时才允许执行；工具会先保存当前数据库调查快照，再清理目标库侧车并原子替换为经过 SHA-256 和完整性校验的备份。
-
-```bash
-PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
-  --backup-manifest /controlled/backup/manifest.json
-
-PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
-  --backup-manifest /controlled/backup/manifest.json \
-  --execute --database-writers-stopped
-```
+备份与恢复工具仍作为通用运维能力保留。任何需要直接修改生产数据库或运行 schema migration 的操作，都必须先停止写入进程、创建带 SHA-256、完整性检查、表计数和对象引用清单的备份，并在恢复前再次校验 manifest。一次性叙事数据回填不得重新引入正式代码；确需处理历史异常时，应新增有明确删除期限、可 dry-run、可限定项目并经过独立评审的迁移。
 
 ## 十五、质量评估和测试策略
 
@@ -1230,11 +1152,11 @@ PYTHONPATH=. venv/bin/python scripts/restore_runtime_data.py \
 - 全书 Gap 可以显式关联多个 Story、Chapter 和 Claim。
 - FollowupTask 只有在新证据补足槽位后才 answered。
 - `cannot_recall`、excluded/private publication 和跑题事件序列。
-- ChapterContract/Node/Story 关系和拆并章。
+- ChapterContract/Node/Story 关系、系统方向创建、素材同步和用户确认。
 - Claim 更新只使相关 DraftBlock stale。
 - locked DraftBlock 不被局部或全书生成修改。
 - high gap 正式成书门槛。
-- backfill dry-run、重复执行、部分失败和项目隔离。
+- 生产迁移若确有必要，必须覆盖 dry-run、重复执行、部分失败和项目隔离，并在迁移完成后删除一次性代码。
 
 ### 15.3 不增加的低价值测试
 

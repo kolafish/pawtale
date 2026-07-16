@@ -21,10 +21,9 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirChatMessageRole,
     MemoirEditingJobStatus,
-    MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
-from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
+from app.models.memoir import MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -46,7 +45,6 @@ from app.schemas.memoir_narrative import (
     MemoirNarrativeExtraction,
     MemoirNarrativeEntityCreate,
 )
-from app.services.memoir.narrative.backfill import run_narrative_ingestion_backfill
 from app.services.memoir.narrative import decisions
 from app.services.memoir.narrative.ingestion import (
     _extraction_followup_target_slot,
@@ -1435,60 +1433,3 @@ async def test_pruning_preserves_evidence_referenced_transcript(client, test_db)
     assert deleted == 3
     assert pinned_version.id in remaining_ids
     assert len(remaining_ids) == 2
-
-
-async def test_backfill_dry_run_does_not_write_and_execute_only_queues(client, test_db):
-    created = await create_test_voice_transcript(client, test_db, text="我小时候住在成都。")
-    project_id = created["session"]["project_id"]
-
-    dry_run = await run_narrative_ingestion_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=True,
-    )
-    assert dry_run["candidate_count"] == 1
-    assert dry_run["enqueued_count"] == 0
-    assert await test_db.scalar(select(func.count()).select_from(MemoirEditingJob)) == 0
-
-    executed = await run_narrative_ingestion_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-    assert executed["enqueued_count"] == 1
-    job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.job_type == MemoirEditingJobType.INGEST_NARRATIVE_STATE.value
-        )
-    )
-    assert job is not None
-    assert job.payload_json["transcript_version_id"] == created["transcript_version_id"]
-
-    job.status = MemoirEditingJobStatus.FAILED.value
-    await test_db.commit()
-    failed_retry = await run_narrative_ingestion_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=True,
-    )
-    assert failed_retry["candidate_count"] == 1
-    assert failed_retry["skipped_existing_job_count"] == 0
-
-    retried = await run_narrative_ingestion_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-    assert retried["enqueued_count"] == 1
-    await test_db.refresh(job)
-    assert job.status == MemoirEditingJobStatus.PENDING.value
-
-    job.status = MemoirEditingJobStatus.SUCCEEDED.value
-    await test_db.commit()
-    completed = await run_narrative_ingestion_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=True,
-    )
-    assert completed["candidate_count"] == 0
-    assert completed["skipped_existing_job_count"] == 1

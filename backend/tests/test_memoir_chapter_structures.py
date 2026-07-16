@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from hashlib import sha256
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from app.domain.memoir.narrative_types import (
     MemoirClaimCertainty,
@@ -24,9 +24,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.models.memoir import MemoirBookPlanChapter
 from app.models.memoir_narrative import (
-    MemoirChapterContract,
     MemoirChapterNode,
     MemoirChapterNodeStory,
     MemoirClaim,
@@ -36,9 +34,6 @@ from app.models.memoir_narrative import (
     MemoirStoryRevision,
 )
 from app.services.memoir.narrative import chapter_contracts
-from app.services.memoir.narrative.chapter_structure_backfill import (
-    run_chapter_structure_backfill,
-)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -196,63 +191,6 @@ async def test_system_suggestion_builds_evidence_backed_structure_and_confirms(
     )
 
 
-async def test_structure_backfill_is_dry_run_and_never_confirms_contracts(
-    client,
-    test_db,
-):
-    created = await create_test_voice_transcript(client, test_db)
-    project_id = created["session"]["project_id"]
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db,
-        project_id=project_id,
-        chapter_titles=["第一章", "第二章"],
-    )
-
-    dry_run = await run_chapter_structure_backfill(test_db, project_id=project_id)
-    assert dry_run["candidate_count"] == 2
-    assert dry_run["created_count"] == 0
-    assert await test_db.scalar(
-        select(func.count()).select_from(MemoirChapterContract)
-    ) == 0
-
-    executed = await run_chapter_structure_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-    assert executed["created_count"] == 2
-    contracts = list(
-        (
-            await test_db.scalars(
-                select(MemoirChapterContract).where(
-                    MemoirChapterContract.chapter_id.in_(
-                        [chapter.id for chapter in chapters]
-                    )
-                )
-            )
-        ).all()
-    )
-    assert {contract.status for contract in contracts} == {"draft"}
-
-    repeated = await run_chapter_structure_backfill(
-        test_db,
-        project_id=project_id,
-        dry_run=False,
-    )
-    assert repeated["candidate_count"] == 0
-    assert repeated["created_count"] == 0
-    assert await test_db.scalar(select(func.count()).select_from(MemoirChapterNode)) == 8
-    assert set(
-        (
-            await test_db.scalars(
-                select(MemoirBookPlanChapter.title).where(
-                    MemoirBookPlanChapter.project_id == project_id
-                )
-            )
-        ).all()
-    ) == {"第一章", "第二章"}
-
-
 async def test_system_draft_absorbs_new_story_without_changing_required_anchor(
     client,
     test_db,
@@ -274,7 +212,7 @@ async def test_system_draft_absorbs_new_story_without_changing_required_anchor(
     test_db.add(first_story)
     await test_db.commit()
 
-    contract = await chapter_contracts.create_legacy_contract_suggestion(
+    contract = await chapter_contracts.create_system_contract_suggestion(
         test_db,
         project_id=project_id,
         chapter_id=chapters[0].id,
@@ -292,14 +230,14 @@ async def test_system_draft_absorbs_new_story_without_changing_required_anchor(
     test_db.add(new_story)
     await test_db.commit()
 
-    repaired_contract_ids = (
-        await chapter_contracts.refresh_legacy_contract_suggestions_for_utterance(
+    updated_contract_ids = (
+        await chapter_contracts.sync_system_drafts_for_utterance(
             test_db,
             project_id=project_id,
             utterance_id=created["utterance_id"],
         )
     )
-    assert repaired_contract_ids == (contract.id,)
+    assert updated_contract_ids == (contract.id,)
     await test_db.refresh(contract)
     assert contract.constraints_json["include_story_ids"] == [first_story.id]
     primary_story_ids = set(

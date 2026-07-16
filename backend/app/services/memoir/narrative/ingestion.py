@@ -473,7 +473,7 @@ async def ingest_transcript_version(
         transcript_version=version,
     )
     if created_story_ids or changed_story_ids:
-        await chapter_contracts.refresh_legacy_contract_suggestions_for_utterance(
+        await chapter_contracts.sync_system_drafts_for_utterance(
             db,
             project_id=project.id,
             utterance_id=utterance.id,

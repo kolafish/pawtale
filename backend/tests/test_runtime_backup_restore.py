@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import sqlite3
-from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -14,40 +13,14 @@ from scripts.backup_runtime_data import (
     SQLITE_SIDECAR_SUFFIXES,
     create_backup,
     validate_backup_checksums,
+    validate_backup_manifest,
     write_object_references,
-)
-from scripts.prepare_memoir_narrative_data import (
-    _validate_backup_manifest,
-    _validate_run_args,
 )
 from scripts.restore_runtime_data import restore_database
 
 
 def _sha256(path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
-def test_process_ingestion_is_an_executable_data_preparation_stage():
-    args = Namespace(
-        stage="process-ingestion",
-        project_id=None,
-        execute=True,
-        application_writers_stopped=True,
-    )
-
-    _validate_run_args(args)
-
-
-def test_data_preparation_execute_requires_stopped_application_writers():
-    args = Namespace(
-        stage="ingest",
-        project_id=None,
-        execute=True,
-        application_writers_stopped=False,
-    )
-
-    with pytest.raises(RuntimeError, match="application writers are stopped"):
-        _validate_run_args(args)
 
 
 def test_runtime_backup_manifest_is_bound_to_its_source_database(tmp_path):
@@ -72,9 +45,9 @@ def test_runtime_backup_manifest_is_bound_to_its_source_database(tmp_path):
         backup_dir / "pawtale.db"
     )
     assert manifest["table_counts"]["projects"] == 1
-    assert _validate_backup_manifest(
+    assert validate_backup_manifest(
         manifest_path,
-        runtime_database=database,
+        expected_source_database=database,
     ) == manifest
 
 
@@ -106,9 +79,9 @@ def test_runtime_backup_checksums_are_stable_for_wal_database(tmp_path):
 
     (backup_dir / "object-references.json").write_text("[{}]\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="backup checksum does not match"):
-        _validate_backup_manifest(
+        validate_backup_manifest(
             backup_dir / "manifest.json",
-            runtime_database=database,
+            expected_source_database=database,
         )
 
 
@@ -127,17 +100,17 @@ def test_data_preparation_rejects_wrong_or_modified_backup(tmp_path):
     manifest_path = backup_dir / "manifest.json"
 
     with pytest.raises(RuntimeError, match="does not match the runtime database"):
-        _validate_backup_manifest(
+        validate_backup_manifest(
             manifest_path,
-            runtime_database=tmp_path / "another.db",
+            expected_source_database=tmp_path / "another.db",
         )
 
     with (backup_dir / "pawtale.db").open("ab") as file:
         file.write(b"modified")
     with pytest.raises(RuntimeError, match="SHA-256 does not match"):
-        _validate_backup_manifest(
+        validate_backup_manifest(
             manifest_path,
-            runtime_database=database,
+            expected_source_database=database,
         )
 
 
