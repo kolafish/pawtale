@@ -63,7 +63,8 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
+    MemoirUtteranceInterviewAssignment,
     MemoirNarrativeDecision,
     MemoirNarrativeGap,
     MemoirStory,
@@ -914,7 +915,7 @@ async def test_followup_task_finishes_after_new_slot_evidence_without_confirmati
     assert task is not None
     assert task.status == MemoirFollowupTaskStatus.DEFERRED.value
     assert task.completed_at is None
-    assert task.utterances == []
+    assert task.answers == []
 
     resumed = await post_mobile_memoir_voice_session(
         client,
@@ -950,7 +951,7 @@ async def test_followup_task_finishes_after_new_slot_evidence_without_confirmati
     )
     assert task is not None
     assert task.status == MemoirFollowupTaskStatus.ANSWERED.value
-    assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
+    assert [(item.utterance_id, item.result_role) for item in task.answers] == [
         (utterance.id, "target_answer")
     ]
     await test_db.refresh(fixture["slot"])
@@ -1034,14 +1035,21 @@ async def test_voice_persistence_snapshots_current_followup_task(client, test_db
     )
 
     relation = await test_db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.task_id == fixture["task"].id,
-            MemoirFollowupTaskUtterance.utterance_id == persisted.utterance_id,
+        select(MemoirFollowupTaskAnswer).where(
+            MemoirFollowupTaskAnswer.task_id == fixture["task"].id,
+            MemoirFollowupTaskAnswer.utterance_id == persisted.utterance_id,
         )
     )
     assert relation is not None
     assert relation.result_role == "related_context"
-    assert relation.is_assignment_snapshot is True
+    assignment = await test_db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == persisted.utterance_id,
+        )
+    )
+    assert assignment is not None
+    assert assignment.followup_task_id == fixture["task"].id
 
 
 async def test_saved_answer_completes_task_after_session_stops_before_ingestion(client, test_db):
@@ -1106,7 +1114,7 @@ async def test_saved_answer_completes_task_after_session_stops_before_ingestion(
     )
     assert task is not None
     assert task.status == MemoirFollowupTaskStatus.ANSWERED.value
-    assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
+    assert [(item.utterance_id, item.result_role) for item in task.answers] == [
         (utterance.id, "target_answer")
     ]
     retry_context = await followup_completion.ingestion_context_for_utterance(
@@ -1156,7 +1164,7 @@ async def test_story_narration_task_completes_after_one_valid_answer(client, tes
     )
     assert task is not None
     assert task.status == MemoirFollowupTaskStatus.ANSWERED.value
-    assert [(item.utterance_id, item.result_role) for item in task.utterances] == [
+    assert [(item.utterance_id, item.result_role) for item in task.answers] == [
         (utterance.id, "target_answer")
     ]
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
@@ -1235,6 +1243,13 @@ async def test_interviewer_evidence_cannot_complete_narrator_followup(client, te
         voice_session_id=session["id"],
         speaker_role=MemoirClaimEvidenceSpeakerRole.INTERVIEWER,
     )
+    voice_session = await test_db.get(MemoirVoiceSession, session["id"])
+    assert voice_session is not None
+    await followup_completion.link_utterance_to_session_task(
+        test_db,
+        voice_session=voice_session,
+        utterance=utterance,
+    )
 
     completion = await followup_completion.evaluate_after_narrative_ingestion(
         test_db,
@@ -1312,9 +1327,9 @@ async def test_concurrent_answer_does_not_rollback_new_narrative_evidence(
     assert completion.status == MemoirFollowupTaskStatus.ANSWERED
     assert completion.answered_task_ids == (fixture["task"].id,)
     relation = await test_db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.task_id == fixture["task"].id,
-            MemoirFollowupTaskUtterance.utterance_id == utterance.id,
+        select(MemoirFollowupTaskAnswer).where(
+            MemoirFollowupTaskAnswer.task_id == fixture["task"].id,
+            MemoirFollowupTaskAnswer.utterance_id == utterance.id,
         )
     )
     assert relation is not None
@@ -1635,18 +1650,23 @@ async def test_followup_planner_replaces_superseded_do_not_repeat_claim(client, 
 async def test_followup_prompt_uses_the_pending_fact_confirmation_question(client, test_db):
     fixture = await _create_story_gap(client, test_db)
     confirmation_question = "您说的是比赛获奖了，还是只记得比赛结束了？"
-    test_db.add(
-        MemoirFollowupTaskUtterance(
-            project_id=fixture["project_id"],
-            task_id=fixture["task"].id,
-            utterance_id=fixture["created"]["utterance_id"],
-            result_role="related_context",
-            is_assignment_snapshot=True,
-            interpretation_status=(
-                MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
+    test_db.add_all(
+        [
+            MemoirFollowupTaskAnswer(
+                project_id=fixture["project_id"],
+                task_id=fixture["task"].id,
+                utterance_id=fixture["created"]["utterance_id"],
+                result_role="related_context",
+                interpretation_status=(
+                    MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
+                ),
+                confirmation_question=confirmation_question,
             ),
-            confirmation_question=confirmation_question,
-        )
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=fixture["created"]["utterance_id"],
+                followup_task_id=fixture["task"].id,
+            ),
+        ]
     )
     await test_db.commit()
     started = await post_mobile_memoir_voice_session(

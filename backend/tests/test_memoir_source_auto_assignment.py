@@ -37,11 +37,12 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirFollowupTaskClaim,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
     MemoirNarrativeGap,
     MemoirNarrativeGapClaim,
     MemoirStory,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.repositories.memoir_narrative import (
     MemoirClaimRepository,
@@ -344,14 +345,21 @@ async def _create_fact_resolution_case(client, test_db):
                 context_role="known",
             )
         )
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="related_context",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
     return {
         "project_id": project_id,
@@ -813,14 +821,21 @@ async def test_completion_mixed_answer_assigns_narrative_part_to_task_chapter(
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="related_context",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
     _patch_source_router_ai(
         monkeypatch,
@@ -965,7 +980,7 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
             await test_db.scalars(
                 select(MemoirNarrativeDecision).where(
                     MemoirNarrativeDecision.project_id == case["project_id"],
-                    MemoirNarrativeDecision.source_followup_task_utterance_id
+                    MemoirNarrativeDecision.source_followup_task_answer_id
                     == case["relation"].id,
                 )
             )
@@ -1170,14 +1185,21 @@ async def test_semantic_completion_clarification_closes_task_and_review_event(
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="related_context",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     review_event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -1291,14 +1313,21 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="related_context",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
     confirmation_question = "这段话是在解释原有内容，还是希望作为新的回忆内容写进书里？"
     _patch_source_router_ai(

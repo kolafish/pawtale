@@ -23,7 +23,7 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
     MemoirNarrativeGapClaim,
@@ -57,7 +57,7 @@ async def _answer_sources(
     db: AsyncSession,
     *,
     project_id: str,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
 ) -> tuple[Project, MemoirVoiceUtterance, MemoirTranscriptVersion]:
     project = await db.scalar(
         select(Project).where(Project.id == project_id)
@@ -278,7 +278,7 @@ async def _record_answer_evidence(
     *,
     project_id: str,
     claim_id: str,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     utterance: MemoirVoiceUtterance,
     transcript_version: MemoirTranscriptVersion,
     actor_user_id: str,
@@ -325,7 +325,7 @@ async def _apply_fact_resolution_operations(
     db: AsyncSession,
     *,
     project_id: str,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     plan: MemoirFactResolutionPlan,
     project: Project,
     utterance: MemoirVoiceUtterance,
@@ -334,7 +334,7 @@ async def _apply_fact_resolution_operations(
     await decision_log.validate_source(
         db,
         project_id=project_id,
-        source_followup_task_utterance_id=relation.id,
+        source_followup_task_answer_id=relation.id,
         source_transcript_version_id=transcript_version.id,
     )
     fact_text = relation.fact_resolution_text.strip()
@@ -349,7 +349,7 @@ async def _apply_fact_resolution_operations(
             "project_id": project_id,
             "actor_user_id": project.user_id,
             "reason": operation.reason,
-            "source_followup_task_utterance_id": relation.id,
+            "source_followup_task_answer_id": relation.id,
             "source_transcript_version_id": transcript_version.id,
         }
         if isinstance(operation, MemoirEntityMergeResolution):
@@ -400,7 +400,7 @@ async def _prepare_resolved_fact_plan(
     *,
     project_id: str,
     task: MemoirFollowupTask,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     plan: MemoirFactResolutionPlan,
 ) -> tuple[Project, MemoirVoiceUtterance, MemoirTranscriptVersion]:
     if plan.status != "resolved":
@@ -429,7 +429,7 @@ async def validate_resolved_fact_plan(
     *,
     project_id: str,
     task: MemoirFollowupTask,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     plan: MemoirFactResolutionPlan,
 ) -> None:
     await _prepare_resolved_fact_plan(
@@ -446,7 +446,7 @@ async def apply_resolved_fact_plan(
     *,
     project_id: str,
     task: MemoirFollowupTask,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     plan: MemoirFactResolutionPlan,
 ) -> tuple[MemoirNarrativeDecision, ...]:
     project, utterance, transcript_version = await _prepare_resolved_fact_plan(
@@ -472,7 +472,7 @@ async def resolve_fact_answer(
     *,
     project_id: str,
     task: MemoirFollowupTask,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> bool:
@@ -483,7 +483,7 @@ async def resolve_fact_answer(
         applied_decision = await db.scalar(
             select(MemoirNarrativeDecision.id).where(
                 MemoirNarrativeDecision.project_id == project_id,
-                MemoirNarrativeDecision.source_followup_task_utterance_id == relation.id,
+                MemoirNarrativeDecision.source_followup_task_answer_id == relation.id,
                 MemoirNarrativeDecision.action.in_(
                     [
                         MemoirNarrativeDecisionAction.MERGE.value,

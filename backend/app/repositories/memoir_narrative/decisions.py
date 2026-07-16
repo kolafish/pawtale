@@ -8,7 +8,7 @@ from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirClaim,
     MemoirDraftBlock,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirFollowupTask,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
@@ -46,7 +46,7 @@ class MemoirNarrativeDecisionRepository:
             action=data.action.value,
             actor_type=data.actor_type.value,
             actor_user_id=data.actor_user_id,
-            source_followup_task_utterance_id=data.source_followup_task_utterance_id,
+            source_followup_task_answer_id=data.source_followup_task_answer_id,
             source_transcript_version_id=data.source_transcript_version_id,
             before_state_json=data.before_state,
             after_state_json=data.after_state,
@@ -80,8 +80,8 @@ class MemoirNarrativeDecisionRepository:
             and existing.action == data.action.value
             and existing.actor_type == data.actor_type.value
             and existing.actor_user_id == data.actor_user_id
-            and existing.source_followup_task_utterance_id
-            == data.source_followup_task_utterance_id
+            and existing.source_followup_task_answer_id
+            == data.source_followup_task_answer_id
             and existing.source_transcript_version_id == data.source_transcript_version_id
         )
 
@@ -100,7 +100,7 @@ class MemoirNarrativeDecisionRepository:
 
         await self.validate_followup_source(
             project_id=data.project_id,
-            source_followup_task_utterance_id=data.source_followup_task_utterance_id,
+            source_followup_task_answer_id=data.source_followup_task_answer_id,
             source_transcript_version_id=data.source_transcript_version_id,
         )
 
@@ -169,21 +169,21 @@ class MemoirNarrativeDecisionRepository:
         self,
         *,
         project_id: str,
-        source_followup_task_utterance_id: str | None,
+        source_followup_task_answer_id: str | None,
         source_transcript_version_id: str | None,
     ) -> None:
-        if bool(source_followup_task_utterance_id) != bool(source_transcript_version_id):
+        if bool(source_followup_task_answer_id) != bool(source_transcript_version_id):
             raise ValueError(
-                "follow-up decision source requires both task utterance and transcript version"
+                "follow-up decision source requires both task answer and transcript version"
             )
-        if source_followup_task_utterance_id is None:
+        if source_followup_task_answer_id is None:
             return
 
         relation = await self._db.scalar(
-            select(MemoirFollowupTaskUtterance).where(
-                MemoirFollowupTaskUtterance.project_id == project_id,
-                MemoirFollowupTaskUtterance.id
-                == source_followup_task_utterance_id,
+            select(MemoirFollowupTaskAnswer).where(
+                MemoirFollowupTaskAnswer.project_id == project_id,
+                MemoirFollowupTaskAnswer.id
+                == source_followup_task_answer_id,
             )
         )
         if relation is None:

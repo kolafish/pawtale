@@ -13,7 +13,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimVerificationStatus,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerKind,
     MemoirFollowupAnswerUse,
@@ -30,11 +30,12 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirStory,
     MemoirStoryClaim,
     MemoirStorySlot,
     MemoirStorySlotClaim,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.schemas.memoir_book import MemoirFollowupAnswerInterpretationResponse
 from app.services.memoir import automation_event_resolution
@@ -45,6 +46,7 @@ from app.services.memoir.narrative import (
     followup_tasks,
     completion_refresh,
     gaps,
+    interview_policy,
 )
 
 
@@ -52,7 +54,7 @@ from app.services.memoir.narrative import (
 class FollowupCompletionResult:
     task_id: str | None = None
     status: MemoirFollowupTaskStatus | None = None
-    relation_role: MemoirFollowupTaskUtteranceRole | None = None
+    relation_role: MemoirFollowupTaskAnswerRole | None = None
     answered_task_ids: tuple[str, ...] = ()
 
 
@@ -144,46 +146,38 @@ async def _target_slot_received_evidence(
     return supporting_claim is not None
 
 
-async def _add_task_utterance_relation(
+async def _add_task_answer_relation(
     db: AsyncSession,
     *,
     project_id: str,
     task_id: str,
     utterance_id: str,
-    role: MemoirFollowupTaskUtteranceRole,
-    is_assignment_snapshot: bool = False,
-) -> None:
+    role: MemoirFollowupTaskAnswerRole,
+) -> MemoirFollowupTaskAnswer:
     relation = await db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.project_id == project_id,
-            MemoirFollowupTaskUtterance.task_id == task_id,
-            MemoirFollowupTaskUtterance.utterance_id == utterance_id,
+        select(MemoirFollowupTaskAnswer).where(
+            MemoirFollowupTaskAnswer.project_id == project_id,
+            MemoirFollowupTaskAnswer.task_id == task_id,
+            MemoirFollowupTaskAnswer.utterance_id == utterance_id,
         )
     )
     if relation is None:
-        db.add(
-            MemoirFollowupTaskUtterance(
-                project_id=project_id,
-                task_id=task_id,
-                utterance_id=utterance_id,
-                result_role=role.value,
-                is_assignment_snapshot=is_assignment_snapshot,
-            )
+        relation = MemoirFollowupTaskAnswer(
+            project_id=project_id,
+            task_id=task_id,
+            utterance_id=utterance_id,
+            result_role=role.value,
         )
+        db.add(relation)
     else:
-        changed = False
         if (
-            role == MemoirFollowupTaskUtteranceRole.TARGET_ANSWER
+            role == MemoirFollowupTaskAnswerRole.TARGET_ANSWER
             and relation.result_role != role.value
         ):
             relation.result_role = role.value
-            changed = True
-        if is_assignment_snapshot and not relation.is_assignment_snapshot:
-            relation.is_assignment_snapshot = True
-            changed = True
-        if changed:
             db.add(relation)
     await db.flush()
+    return relation
 
 
 async def link_utterance_to_session_task(
@@ -192,30 +186,36 @@ async def link_utterance_to_session_task(
     voice_session: MemoirVoiceSession,
     utterance: MemoirVoiceUtterance,
 ) -> str | None:
-    """Snapshot the task association before asynchronous transcript processing starts."""
+    """Persist the creation-time interview target before async processing starts."""
+    task: MemoirFollowupTask | None = None
     if (
-        voice_session.session_goal != MemoirSessionGoal.BOOK_COMPLETION.value
-        or not voice_session.current_followup_task_id
+        voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+        and voice_session.current_followup_task_id
     ):
-        return None
-    task = await followup_tasks.get_task(
+        candidate = await followup_tasks.get_task(
+            db,
+            project_id=voice_session.project_id,
+            task_id=voice_session.current_followup_task_id,
+        )
+        if (
+            candidate is not None
+            and candidate.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
+            and candidate.assigned_session_id == voice_session.id
+        ):
+            task = candidate
+    await interview_policy.assign_utterance(
         db,
-        project_id=voice_session.project_id,
-        task_id=voice_session.current_followup_task_id,
+        utterance=utterance,
+        followup_task=task,
     )
-    if (
-        task is None
-        or task.status != MemoirFollowupTaskStatus.IN_PROGRESS.value
-        or task.assigned_session_id != voice_session.id
-    ):
+    if task is None:
         return None
-    await _add_task_utterance_relation(
+    await _add_task_answer_relation(
         db,
         project_id=voice_session.project_id,
         task_id=task.id,
         utterance_id=utterance.id,
-        role=MemoirFollowupTaskUtteranceRole.RELATED_CONTEXT,
-        is_assignment_snapshot=True,
+        role=MemoirFollowupTaskAnswerRole.RELATED_CONTEXT,
     )
     return task.id
 
@@ -226,54 +226,33 @@ async def ingestion_context_for_utterance(
     project_id: str,
     utterance: MemoirVoiceUtterance,
 ) -> FollowupIngestionContext | None:
-    snapshotted_relation = await db.scalar(
-        select(MemoirFollowupTaskUtterance)
-        .where(
-            MemoirFollowupTaskUtterance.project_id == project_id,
-            MemoirFollowupTaskUtterance.utterance_id == utterance.id,
-            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
+    assignment = await db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id == utterance.id,
         )
-        .order_by(
-            MemoirFollowupTaskUtterance.created_at,
-            MemoirFollowupTaskUtterance.id,
-        )
-        .limit(1)
     )
-    if snapshotted_relation:
-        task = await followup_tasks.get_task(
-            db,
-            project_id=project_id,
-            task_id=snapshotted_relation.task_id,
+    if assignment is None or not assignment.followup_task_id:
+        return None
+    task = await followup_tasks.get_task(
+        db,
+        project_id=project_id,
+        task_id=assignment.followup_task_id,
+    )
+    if task is None:
+        return None
+    context_statuses = {
+        *followup_tasks.ACTIVE_TASK_STATUSES,
+        MemoirFollowupTaskStatus.ANSWERED,
+    }
+    if MemoirFollowupTaskStatus(task.status) not in context_statuses:
+        return None
+    assigned_answer = await db.scalar(
+        select(MemoirFollowupTaskAnswer).where(
+            MemoirFollowupTaskAnswer.project_id == project_id,
+            MemoirFollowupTaskAnswer.task_id == assignment.followup_task_id,
+            MemoirFollowupTaskAnswer.utterance_id == utterance.id,
         )
-        if task is None:
-            return None
-        context_statuses = {
-            *followup_tasks.ACTIVE_TASK_STATUSES,
-            MemoirFollowupTaskStatus.ANSWERED,
-        }
-        if MemoirFollowupTaskStatus(task.status) not in context_statuses:
-            return None
-    else:
-        voice_session = await db.scalar(
-            select(MemoirVoiceSession).where(
-                MemoirVoiceSession.project_id == project_id,
-                MemoirVoiceSession.id == utterance.voice_session_id,
-            )
-        )
-        if voice_session is None or not voice_session.current_followup_task_id:
-            return None
-        snapshotted_relation = None
-        task = await followup_tasks.get_task(
-            db,
-            project_id=project_id,
-            task_id=voice_session.current_followup_task_id,
-        )
-        if (
-            task is None
-            or task.status != MemoirFollowupTaskStatus.IN_PROGRESS.value
-            or task.assigned_session_id != voice_session.id
-        ):
-            return None
+    )
     story = None
     if task.story_id:
         story = await db.scalar(
@@ -295,19 +274,19 @@ async def ingestion_context_for_utterance(
         story_type=story.story_type if story else "",
         story_summary=story.summary if story else "",
         interpretation_status=(
-            snapshotted_relation.interpretation_status
-            if snapshotted_relation
+            assigned_answer.interpretation_status
+            if assigned_answer
             else MemoirFollowupAnswerInterpretationStatus.PENDING.value
         ),
-        answer_kind=snapshotted_relation.answer_kind if snapshotted_relation else None,
+        answer_kind=assigned_answer.answer_kind if assigned_answer else None,
         direct_narrative_text=(
-            snapshotted_relation.direct_narrative_text if snapshotted_relation else ""
+            assigned_answer.direct_narrative_text if assigned_answer else ""
         ),
         clarification_text=(
-            snapshotted_relation.clarification_text if snapshotted_relation else ""
+            assigned_answer.clarification_text if assigned_answer else ""
         ),
         fact_resolution_text=(
-            snapshotted_relation.fact_resolution_text if snapshotted_relation else ""
+            assigned_answer.fact_resolution_text if assigned_answer else ""
         ),
     )
 
@@ -318,13 +297,20 @@ async def record_answer_interpretation(
     project_id: str,
     utterance_id: str,
     interpretation: MemoirFollowupAnswerInterpretationResponse,
-) -> MemoirFollowupTaskUtterance:
+) -> MemoirFollowupTaskAnswer:
     relation = await db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.project_id == project_id,
-            MemoirFollowupTaskUtterance.task_id == interpretation.task_id,
-            MemoirFollowupTaskUtterance.utterance_id == utterance_id,
-            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
+        select(MemoirFollowupTaskAnswer)
+        .join(
+            MemoirUtteranceInterviewAssignment,
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == MemoirFollowupTaskAnswer.utterance_id,
+        )
+        .where(
+            MemoirFollowupTaskAnswer.project_id == project_id,
+            MemoirFollowupTaskAnswer.task_id == interpretation.task_id,
+            MemoirFollowupTaskAnswer.utterance_id == utterance_id,
+            MemoirUtteranceInterviewAssignment.followup_task_id
+            == MemoirFollowupTaskAnswer.task_id,
         )
     )
     if relation is None:
@@ -354,13 +340,20 @@ async def confirm_answer_interpretation(
     clarification_text: str,
     fact_resolution_text: str,
     ai_model: str | None = None,
-) -> MemoirFollowupTaskUtterance:
+) -> MemoirFollowupTaskAnswer:
     relation = await db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.project_id == project_id,
-            MemoirFollowupTaskUtterance.task_id == task_id,
-            MemoirFollowupTaskUtterance.utterance_id == utterance_id,
-            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
+        select(MemoirFollowupTaskAnswer)
+        .join(
+            MemoirUtteranceInterviewAssignment,
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == MemoirFollowupTaskAnswer.utterance_id,
+        )
+        .where(
+            MemoirFollowupTaskAnswer.project_id == project_id,
+            MemoirFollowupTaskAnswer.task_id == task_id,
+            MemoirFollowupTaskAnswer.utterance_id == utterance_id,
+            MemoirUtteranceInterviewAssignment.followup_task_id
+            == MemoirFollowupTaskAnswer.task_id,
         )
     )
     if relation is None:
@@ -405,7 +398,7 @@ async def complete_task_from_semantic_interpretation(
     db: AsyncSession,
     *,
     project_id: str,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     ai_model: str | None = None,
 ) -> bool:
     if relation.interpretation_status != MemoirFollowupAnswerInterpretationStatus.RESOLVED.value:
@@ -440,7 +433,7 @@ async def complete_task_from_semantic_interpretation(
             ai_model=ai_model,
         ):
             return False
-    relation.result_role = MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value
+    relation.result_role = MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value
     db.add(relation)
     if task.status != MemoirFollowupTaskStatus.ANSWERED.value:
         await followup_tasks.transition_task(
@@ -557,7 +550,7 @@ async def evaluate_after_narrative_ingestion(
     answered_task_ids: list[str] = []
     chapters_to_reaudit: set[str] = set()
     chapters_to_semantic_reaudit: set[str] = set()
-    current_relation_role: MemoirFollowupTaskUtteranceRole | None = None
+    current_relation_role: MemoirFollowupTaskAnswerRole | None = None
     for task in candidates:
         task_claim_roles = {
             relation.claim_id: relation.context_role for relation in task.claims
@@ -604,11 +597,11 @@ async def evaluate_after_narrative_ingestion(
         if not answered and not is_current_task:
             continue
         relation_role = (
-            MemoirFollowupTaskUtteranceRole.TARGET_ANSWER
+            MemoirFollowupTaskAnswerRole.TARGET_ANSWER
             if answered
-            else MemoirFollowupTaskUtteranceRole.RELATED_CONTEXT
+            else MemoirFollowupTaskAnswerRole.RELATED_CONTEXT
         )
-        await _add_task_utterance_relation(
+        await _add_task_answer_relation(
             db,
             project_id=project_id,
             task_id=task.id,
@@ -696,7 +689,7 @@ async def evaluate_after_narrative_ingestion(
         return FollowupCompletionResult(
             task_id=answered_task_ids[0],
             status=MemoirFollowupTaskStatus.ANSWERED,
-            relation_role=MemoirFollowupTaskUtteranceRole.TARGET_ANSWER,
+            relation_role=MemoirFollowupTaskAnswerRole.TARGET_ANSWER,
             answered_task_ids=tuple(answered_task_ids),
         )
     return FollowupCompletionResult()

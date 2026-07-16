@@ -1,11 +1,14 @@
 from datetime import UTC, datetime
 from hashlib import sha256
 
+from sqlalchemy import select
+
 from app.models.memoir import MemoirAutomationEvent, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeGap,
+    MemoirUtteranceInterviewAssignment,
 )
 from tests.memoir_helpers import (
     add_test_chapter_source_links,
@@ -66,14 +69,17 @@ async def _create_outcome_case(client, test_db):
     assert utterance is not None
     session.session_goal = "book_completion"
     session.current_followup_task_id = task.id
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=utterance.id,
         result_role="related_context",
-        is_assignment_snapshot=True,
     )
-    test_db.add_all([session, relation])
+    assignment = MemoirUtteranceInterviewAssignment(
+        utterance_id=utterance.id,
+        followup_task_id=task.id,
+    )
+    test_db.add_all([session, relation, assignment])
     await test_db.commit()
     return {
         "project_id": project_id,
@@ -88,7 +94,14 @@ async def _create_outcome_case(client, test_db):
 
 async def test_completion_outcome_waits_for_answer_assignment(client, test_db):
     case = await _create_outcome_case(client, test_db)
-    await test_db.delete(case["relation"])
+    assignment = await test_db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == case["utterance"].id,
+        )
+    )
+    assert assignment is not None
+    await test_db.delete(assignment)
     await test_db.commit()
 
     response = await client.get(

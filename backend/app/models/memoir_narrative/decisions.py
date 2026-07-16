@@ -34,10 +34,10 @@ class MemoirNarrativeDecision(Base):
             name="uq_memoir_narrative_decisions_project_idempotency",
         ),
         ForeignKeyConstraint(
-            ["project_id", "source_followup_task_utterance_id"],
+            ["project_id", "source_followup_task_answer_id"],
             [
-                "memoir_followup_task_utterances.project_id",
-                "memoir_followup_task_utterances.id",
+                "memoir_followup_task_answers.project_id",
+                "memoir_followup_task_answers.id",
             ],
             name="fk_memoir_narrative_decisions_followup_source_project",
         ),
@@ -66,9 +66,9 @@ class MemoirNarrativeDecision(Base):
             name="ck_memoir_narrative_decisions_idempotency_key",
         ),
         CheckConstraint(
-            "(source_followup_task_utterance_id IS NULL "
+            "(source_followup_task_answer_id IS NULL "
             "AND source_transcript_version_id IS NULL) OR "
-            "(source_followup_task_utterance_id IS NOT NULL "
+            "(source_followup_task_answer_id IS NOT NULL "
             "AND source_transcript_version_id IS NOT NULL)",
             name="ck_memoir_narrative_decisions_followup_source_shape",
         ),
@@ -81,7 +81,7 @@ class MemoirNarrativeDecision(Base):
         ),
         Index(
             "ix_memoir_narrative_decisions_followup_source",
-            "source_followup_task_utterance_id",
+            "source_followup_task_answer_id",
         ),
         Index(
             "ix_memoir_narrative_decisions_transcript_source",
@@ -104,7 +104,7 @@ class MemoirNarrativeDecision(Base):
         ForeignKey("users.id"),
         nullable=True,
     )
-    source_followup_task_utterance_id: Mapped[str | None] = mapped_column(
+    source_followup_task_answer_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
     )

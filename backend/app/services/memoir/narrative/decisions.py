@@ -56,7 +56,7 @@ async def decide_entity_verification(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
@@ -69,7 +69,7 @@ async def decide_entity_verification(
         action=action,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
@@ -77,7 +77,7 @@ async def decide_entity_verification(
     await decision_log.validate_source(
         db,
         project_id=project_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     entity = await db.scalar(
@@ -111,7 +111,7 @@ async def decide_entity_verification(
         after_state=_entity_state(entity),
         reason=reason,
         idempotency_key=idempotency_key,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
 
@@ -125,7 +125,7 @@ async def merge_entities(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     existing = await decision_log.existing_decision(
@@ -137,7 +137,7 @@ async def merge_entities(
         action=MemoirNarrativeDecisionAction.MERGE,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
@@ -145,7 +145,7 @@ async def merge_entities(
     await decision_log.validate_source(
         db,
         project_id=project_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     if source_entity_id == retained_entity_id:
@@ -282,7 +282,7 @@ async def merge_entities(
         },
         reason=reason,
         idempotency_key=idempotency_key,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     for claim in claims:
@@ -300,7 +300,7 @@ async def merge_entities(
                 f"entity; review required after merge decision {decision.id}."
             ),
             idempotency_key=f"entity-merge-self-relationship:{decision.id}:{claim.id}",
-            source_followup_task_utterance_id=source_followup_task_utterance_id,
+            source_followup_task_answer_id=source_followup_task_answer_id,
             source_transcript_version_id=source_transcript_version_id,
         )
     for story in place_stories:
@@ -325,7 +325,7 @@ async def decide_claim_verification(
     actor_user_id: str,
     idempotency_key: str,
     reason: str = "",
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     action = MemoirNarrativeDecisionAction.CONFIRM if confirmed else MemoirNarrativeDecisionAction.REJECT
@@ -338,7 +338,7 @@ async def decide_claim_verification(
         action=action,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
@@ -346,7 +346,7 @@ async def decide_claim_verification(
     await decision_log.validate_source(
         db,
         project_id=project_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     claim = await db.scalar(
@@ -390,7 +390,7 @@ async def decide_claim_verification(
         after_state=_claim_state(claim),
         reason=reason,
         idempotency_key=idempotency_key,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     await draft_blocks.mark_blocks_stale_for_claim(
@@ -480,7 +480,7 @@ async def mark_claim_needs_review(
     claim: MemoirClaim,
     reason: str,
     idempotency_key: str,
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     existing = await decision_log.existing_decision(
@@ -492,7 +492,7 @@ async def mark_claim_needs_review(
         action=MemoirNarrativeDecisionAction.NEEDS_REVIEW,
         actor_type=MemoirNarrativeActorType.SYSTEM,
         actor_user_id=None,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     if existing is not None:
@@ -500,7 +500,7 @@ async def mark_claim_needs_review(
     await decision_log.validate_source(
         db,
         project_id=claim.project_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     before = _claim_state(claim)
@@ -520,7 +520,7 @@ async def mark_claim_needs_review(
         after_state=_claim_state(claim),
         reason=reason,
         idempotency_key=idempotency_key,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
     await draft_blocks.mark_blocks_stale_for_claim(

@@ -12,13 +12,13 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerKind,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeGapStatus,
 )
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
     MemoirNarrativeGap,
@@ -30,7 +30,11 @@ from app.schemas.memoir_narrative import (
     MemoirFactResolutionPlan,
 )
 from app.services.memoir import automation_event_resolution
-from app.services.memoir.narrative import completion_refresh, fact_resolution
+from app.services.memoir.narrative import (
+    completion_refresh,
+    fact_resolution,
+    interview_policy,
+)
 
 
 class HistoricalFactAnswerRepairMismatch(ValueError):
@@ -102,7 +106,7 @@ def _fact_text_hash(text: str) -> str:
 
 
 def _candidate(
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
     task: MemoirFollowupTask,
     gap: MemoirNarrativeGap,
 ) -> HistoricalFactAnswerCandidate:
@@ -124,9 +128,9 @@ def _candidate(
 
 def _missing_decision_condition():
     return ~select(MemoirNarrativeDecision.id).where(
-        MemoirNarrativeDecision.project_id == MemoirFollowupTaskUtterance.project_id,
-        MemoirNarrativeDecision.source_followup_task_utterance_id
-        == MemoirFollowupTaskUtterance.id,
+        MemoirNarrativeDecision.project_id == MemoirFollowupTaskAnswer.project_id,
+        MemoirNarrativeDecision.source_followup_task_answer_id
+        == MemoirFollowupTaskAnswer.id,
     ).exists()
 
 
@@ -136,12 +140,12 @@ async def audit_historical_fact_answers(
     project_id: str | None = None,
 ) -> list[HistoricalFactAnswerCandidate]:
     query = (
-        select(MemoirFollowupTaskUtterance, MemoirFollowupTask, MemoirNarrativeGap)
+        select(MemoirFollowupTaskAnswer, MemoirFollowupTask, MemoirNarrativeGap)
         .join(
             MemoirFollowupTask,
             and_(
-                MemoirFollowupTask.project_id == MemoirFollowupTaskUtterance.project_id,
-                MemoirFollowupTask.id == MemoirFollowupTaskUtterance.task_id,
+                MemoirFollowupTask.project_id == MemoirFollowupTaskAnswer.project_id,
+                MemoirFollowupTask.id == MemoirFollowupTaskAnswer.task_id,
             ),
         )
         .join(
@@ -153,19 +157,19 @@ async def audit_historical_fact_answers(
         )
         .where(
             MemoirFollowupTask.answer_use == MemoirFollowupAnswerUse.FACT_RESOLUTION.value,
-            MemoirFollowupTaskUtterance.interpretation_status
+            MemoirFollowupTaskAnswer.interpretation_status
             == MemoirFollowupAnswerInterpretationStatus.RESOLVED.value,
-            MemoirFollowupTaskUtterance.answer_kind
+            MemoirFollowupTaskAnswer.answer_kind
             == MemoirFollowupAnswerKind.FACT_RESOLUTION.value,
             MemoirFollowupTask.status == MemoirFollowupTaskStatus.ANSWERED.value,
             MemoirNarrativeGap.status == MemoirNarrativeGapStatus.RESOLVED.value,
-            func.length(func.trim(MemoirFollowupTaskUtterance.fact_resolution_text)) > 0,
+            func.length(func.trim(MemoirFollowupTaskAnswer.fact_resolution_text)) > 0,
             _missing_decision_condition(),
         )
-        .order_by(MemoirFollowupTaskUtterance.created_at, MemoirFollowupTaskUtterance.id)
+        .order_by(MemoirFollowupTaskAnswer.created_at, MemoirFollowupTaskAnswer.id)
     )
     if project_id:
-        query = query.where(MemoirFollowupTaskUtterance.project_id == project_id)
+        query = query.where(MemoirFollowupTaskAnswer.project_id == project_id)
     return [
         _candidate(relation, task, gap)
         for relation, task, gap in (await db.execute(query)).all()
@@ -176,17 +180,17 @@ async def _load_repair_state(
     db: AsyncSession,
     *,
     spec: HistoricalFactAnswerRepairSpec,
-) -> tuple[MemoirFollowupTaskUtterance, MemoirFollowupTask, MemoirNarrativeGap]:
+) -> tuple[MemoirFollowupTaskAnswer, MemoirFollowupTask, MemoirNarrativeGap]:
     row = (
         await db.execute(
-            select(MemoirFollowupTaskUtterance, MemoirFollowupTask, MemoirNarrativeGap)
+            select(MemoirFollowupTaskAnswer, MemoirFollowupTask, MemoirNarrativeGap)
             .options(selectinload(MemoirFollowupTask.claims))
             .join(
                 MemoirFollowupTask,
                 and_(
                     MemoirFollowupTask.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
-                    MemoirFollowupTask.id == MemoirFollowupTaskUtterance.task_id,
+                    == MemoirFollowupTaskAnswer.project_id,
+                    MemoirFollowupTask.id == MemoirFollowupTaskAnswer.task_id,
                 ),
             )
             .join(
@@ -197,10 +201,10 @@ async def _load_repair_state(
                 ),
             )
             .where(
-                MemoirFollowupTaskUtterance.project_id == spec.project_id,
-                MemoirFollowupTaskUtterance.id == spec.relation_id,
-                MemoirFollowupTaskUtterance.task_id == spec.task_id,
-                MemoirFollowupTaskUtterance.utterance_id == spec.utterance_id,
+                MemoirFollowupTaskAnswer.project_id == spec.project_id,
+                MemoirFollowupTaskAnswer.id == spec.relation_id,
+                MemoirFollowupTaskAnswer.task_id == spec.task_id,
+                MemoirFollowupTaskAnswer.utterance_id == spec.utterance_id,
             )
         )
     ).one_or_none()
@@ -292,9 +296,16 @@ async def inspect_historical_fact_answer_repair(
     )
     relation, task, gap = await _load_repair_state(db, spec=spec)
     candidate = _candidate(relation, task, gap)
-    _require(relation.is_assignment_snapshot, "历史事实回答缺少任务快照")
     _require(
-        relation.result_role == MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value,
+        await interview_policy.answer_belongs_to_creation_assignment(
+            db,
+            utterance_id=relation.utterance_id,
+            followup_task_id=relation.task_id,
+        ),
+        "历史事实回答缺少任务归属",
+    )
+    _require(
+        relation.result_role == MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value,
         "历史事实回答尚未被标记为目标回答",
     )
     _require(
@@ -320,7 +331,7 @@ async def inspect_historical_fact_answer_repair(
     existing_decision = await db.scalar(
         select(MemoirNarrativeDecision.id).where(
             MemoirNarrativeDecision.project_id == spec.project_id,
-            MemoirNarrativeDecision.source_followup_task_utterance_id == spec.relation_id,
+            MemoirNarrativeDecision.source_followup_task_answer_id == spec.relation_id,
         ).limit(1)
     )
     _require(existing_decision is None, "历史事实回答已经存在语义决策")

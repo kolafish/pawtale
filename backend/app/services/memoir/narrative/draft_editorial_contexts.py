@@ -10,7 +10,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerKind,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
 )
 from app.models.memoir import (
     MemoirChatMessage,
@@ -19,7 +19,8 @@ from app.models.memoir import (
 )
 from app.models.memoir_narrative import (
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.services.memoir.followup_answer_parts import validate_resolved_answer_parts
 from app.services.memoir.narrative.draft_block_ai import (
@@ -42,7 +43,7 @@ async def load_chapter_editorial_contexts(
     rows = (
         await db.execute(
             select(
-                MemoirFollowupTaskUtterance,
+                MemoirFollowupTaskAnswer,
                 MemoirFollowupTask,
                 MemoirVoiceUtterance,
                 MemoirChatMessage.transcript_version_id,
@@ -51,14 +52,19 @@ async def load_chapter_editorial_contexts(
                 MemoirFollowupTask,
                 and_(
                     MemoirFollowupTask.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
-                    MemoirFollowupTask.id == MemoirFollowupTaskUtterance.task_id,
+                    == MemoirFollowupTaskAnswer.project_id,
+                    MemoirFollowupTask.id == MemoirFollowupTaskAnswer.task_id,
                 ),
             )
             .join(
                 MemoirVoiceUtterance,
                 MemoirVoiceUtterance.id
-                == MemoirFollowupTaskUtterance.utterance_id,
+                == MemoirFollowupTaskAnswer.utterance_id,
+            )
+            .join(
+                MemoirUtteranceInterviewAssignment,
+                MemoirUtteranceInterviewAssignment.utterance_id
+                == MemoirFollowupTaskAnswer.utterance_id,
             )
             .join(
                 MemoirVoiceSession,
@@ -72,11 +78,12 @@ async def load_chapter_editorial_contexts(
                 ),
             )
             .where(
-                MemoirFollowupTaskUtterance.project_id == project_id,
-                MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
-                MemoirFollowupTaskUtterance.result_role
-                == MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value,
-                MemoirFollowupTaskUtterance.interpretation_status
+                MemoirFollowupTaskAnswer.project_id == project_id,
+                MemoirUtteranceInterviewAssignment.followup_task_id
+                == MemoirFollowupTaskAnswer.task_id,
+                MemoirFollowupTaskAnswer.result_role
+                == MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value,
+                MemoirFollowupTaskAnswer.interpretation_status
                 == MemoirFollowupAnswerInterpretationStatus.RESOLVED.value,
                 MemoirFollowupTask.project_id == project_id,
                 MemoirFollowupTask.chapter_id == chapter_id,
@@ -84,8 +91,8 @@ async def load_chapter_editorial_contexts(
                 MemoirVoiceSession.project_id == project_id,
             )
             .order_by(
-                MemoirFollowupTaskUtterance.created_at,
-                MemoirFollowupTaskUtterance.id,
+                MemoirFollowupTaskAnswer.created_at,
+                MemoirFollowupTaskAnswer.id,
             )
         )
     ).all()

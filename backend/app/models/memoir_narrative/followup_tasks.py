@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 import uuid
 
 from sqlalchemy import (
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -23,7 +22,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeActorType,
 )
 from app.models.memoir_common import _enum_values
@@ -115,8 +114,8 @@ class MemoirFollowupTask(Base):
     claims: Mapped[list["MemoirFollowupTaskClaim"]] = relationship(
         "MemoirFollowupTaskClaim", cascade="all, delete-orphan"
     )
-    utterances: Mapped[list["MemoirFollowupTaskUtterance"]] = relationship(
-        "MemoirFollowupTaskUtterance", cascade="all, delete-orphan"
+    answers: Mapped[list["MemoirFollowupTaskAnswer"]] = relationship(
+        "MemoirFollowupTaskAnswer", cascade="all, delete-orphan"
     )
 
 
@@ -153,29 +152,29 @@ class MemoirFollowupTaskClaim(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
-class MemoirFollowupTaskUtterance(Base):
-    __tablename__ = "memoir_followup_task_utterances"
+class MemoirFollowupTaskAnswer(Base):
+    __tablename__ = "memoir_followup_task_answers"
     __table_args__ = (
         UniqueConstraint(
-            "project_id", "id", name="uq_memoir_followup_task_utterances_project_id"
+            "project_id", "id", name="uq_memoir_followup_task_answers_project_id"
         ),
         UniqueConstraint(
             "project_id",
             "task_id",
             "utterance_id",
-            name="uq_memoir_followup_task_utterances_relation",
+            name="uq_memoir_followup_task_answers_relation",
         ),
         ForeignKeyConstraint(
             ["project_id", "task_id"],
             ["memoir_followup_tasks.project_id", "memoir_followup_tasks.id"],
             ondelete="CASCADE",
-            name="fk_memoir_followup_task_utterances_task_project",
+            name="fk_memoir_followup_task_answers_task_project",
         ),
         CheckConstraint(
-            f"result_role IN ({_enum_values(MemoirFollowupTaskUtteranceRole)})",
-            name="ck_memoir_followup_task_utterances_role",
+            f"result_role IN ({_enum_values(MemoirFollowupTaskAnswerRole)})",
+            name="ck_memoir_followup_task_answers_role",
         ),
-        Index("ix_memoir_followup_task_utterances_task", "project_id", "task_id"),
+        Index("ix_memoir_followup_task_answers_task", "project_id", "task_id"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -185,11 +184,6 @@ class MemoirFollowupTaskUtterance(Base):
         String(36), ForeignKey("memoir_voice_utterances.id"), nullable=False
     )
     result_role: Mapped[str] = mapped_column(String(24), nullable=False)
-    is_assignment_snapshot: Mapped[bool] = mapped_column(
-        Boolean,
-        default=False,
-        nullable=False,
-    )
     interpretation_status: Mapped[str] = mapped_column(
         String(24),
         default=MemoirFollowupAnswerInterpretationStatus.PENDING.value,

@@ -13,7 +13,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
-from app.models.memoir_narrative import MemoirFollowupTaskUtterance
+from app.models.memoir_narrative import MemoirFollowupTaskAnswer
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
@@ -61,7 +61,7 @@ def _route_is_assignable(
 
 def _route_after_semantic_completion(
     route: MemoirBookSourceRouteResponse,
-    relation: MemoirFollowupTaskUtterance,
+    relation: MemoirFollowupTaskAnswer,
 ) -> MemoirBookSourceRouteResponse:
     if (
         relation.interpretation_status

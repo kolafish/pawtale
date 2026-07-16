@@ -581,7 +581,7 @@ updated_at
 
 ```text
 pending -> in_progress
-in_progress -> answered | deferred | cannot_recall | excluded | cancelled
+in_progress -> answered | deferred | unable_to_answer | closed_without_answer | cancelled
 deferred -> pending      # 用户主动恢复，或明确冷却期结束后允许
 ```
 
@@ -593,18 +593,24 @@ MemoirFollowupTaskClaim
   claim_id
   context_role            # known / do_not_repeat / expected_evidence
 
-MemoirFollowupTaskUtterance
+MemoirFollowupTaskAnswer
   task_id
   utterance_id
   result_role             # target_answer / related_context
+
+MemoirUtteranceInterviewAssignment
+  utterance_id             # UNIQUE，固定创建时的访谈目标
+  followup_task_id         # nullable
+  policy_decision_id       # nullable
 ```
 
 完成条件：
 
 - 用户结束录音不等于任务 answered。
+- 异步处理只读取 `MemoirUtteranceInterviewAssignment`，不能回读 Session 当前任务推断这句话原本在回答什么。
 - 新 utterance 完成 Claim/Story ingestion 后，目标槽位获得新有效证据，任务才能自动变为 answered。
-- 用户选择 `cannot_recall` 时，对应 Gap 应转为 accepted_incomplete 或保持待家人核实，由用户选择决定。
-- 用户选择“不想收录”时任务进入 `excluded`，相关 Claim/Story publication status 同步设为 excluded；更严格的 private 由单独隐私操作设置。
+- 用户选择无法回忆时任务进入 `unable_to_answer`，对应 Gap 应转为 accepted_incomplete 或保持待家人核实，由用户选择决定。
+- 用户选择“不再继续补问”时任务进入 `closed_without_answer`；是否排除素材或设为 private 仍由独立的内容决定处理。
 
 ### 5.9 DraftBlock：可追溯正文块
 
@@ -1393,11 +1399,11 @@ review 必须对照本文档检查范围和不变量。测试通过但违反领�
 
 范围：
 
-- 新增 FollowupTask、FollowupTaskClaim 和 FollowupTaskUtterance 模型及迁移。
+- 新增 FollowupTask、FollowupTaskClaim、FollowupTaskAnswer 和 UtteranceInterviewAssignment 模型及迁移。
 - Gap 到 FollowupTask 的生成、排序和状态机。
 - `session_goal`、`current_followup_task_id` 和任务上下文读取。
 - 新 utterance ingestion 后的 task completion 判断。
-- 跑题、cannot_recall、excluded/private publication 和 accepted incomplete 处理。
+- 跑题、unable_to_answer、closed_without_answer、private publication 和 accepted incomplete 处理。
 
 验收：
 

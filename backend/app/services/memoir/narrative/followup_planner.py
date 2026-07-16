@@ -39,7 +39,8 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirFollowupTask,
     MemoirFollowupTaskClaim,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
+    MemoirUtteranceInterviewAssignment,
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStorySlot,
@@ -1113,18 +1114,23 @@ async def prompt_context_for_session(
         if relation.claim_id in claims_by_id
     )
     pending_confirmation_question = await db.scalar(
-        select(MemoirFollowupTaskUtterance.confirmation_question)
+        select(MemoirFollowupTaskAnswer.confirmation_question)
+        .join(
+            MemoirUtteranceInterviewAssignment,
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == MemoirFollowupTaskAnswer.utterance_id,
+        )
         .where(
-            MemoirFollowupTaskUtterance.project_id == task.project_id,
-            MemoirFollowupTaskUtterance.task_id == task.id,
-            MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
-            MemoirFollowupTaskUtterance.interpretation_status
+            MemoirFollowupTaskAnswer.project_id == task.project_id,
+            MemoirFollowupTaskAnswer.task_id == task.id,
+            MemoirUtteranceInterviewAssignment.followup_task_id == task.id,
+            MemoirFollowupTaskAnswer.interpretation_status
             == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value,
-            MemoirFollowupTaskUtterance.confirmation_question != "",
+            MemoirFollowupTaskAnswer.confirmation_question != "",
         )
         .order_by(
-            MemoirFollowupTaskUtterance.created_at.desc(),
-            MemoirFollowupTaskUtterance.id.desc(),
+            MemoirFollowupTaskAnswer.created_at.desc(),
+            MemoirFollowupTaskAnswer.id.desc(),
         )
         .limit(1)
     )

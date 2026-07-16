@@ -14,12 +14,12 @@ async def validate_source(
     db: AsyncSession,
     *,
     project_id: str,
-    source_followup_task_utterance_id: str | None,
+    source_followup_task_answer_id: str | None,
     source_transcript_version_id: str | None,
 ) -> None:
     await MemoirNarrativeDecisionRepository(db).validate_followup_source(
         project_id=project_id,
-        source_followup_task_utterance_id=source_followup_task_utterance_id,
+        source_followup_task_answer_id=source_followup_task_answer_id,
         source_transcript_version_id=source_transcript_version_id,
     )
 
@@ -34,7 +34,7 @@ async def existing_decision(
     action: MemoirNarrativeDecisionAction,
     actor_type: MemoirNarrativeActorType,
     actor_user_id: str | None,
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision | None:
     decision = await MemoirNarrativeDecisionRepository(db).get_by_idempotency_key(
@@ -49,8 +49,8 @@ async def existing_decision(
         or decision.action != action.value
         or decision.actor_type != actor_type.value
         or decision.actor_user_id != actor_user_id
-        or decision.source_followup_task_utterance_id
-        != source_followup_task_utterance_id
+        or decision.source_followup_task_answer_id
+        != source_followup_task_answer_id
         or decision.source_transcript_version_id != source_transcript_version_id
     ):
         raise ValueError("idempotency key was already used for another decision")
@@ -70,7 +70,7 @@ async def record_decision(
     after_state: dict,
     reason: str,
     idempotency_key: str,
-    source_followup_task_utterance_id: str | None = None,
+    source_followup_task_answer_id: str | None = None,
     source_transcript_version_id: str | None = None,
 ) -> MemoirNarrativeDecision:
     decision, _created = await MemoirNarrativeDecisionRepository(db).create(
@@ -81,7 +81,7 @@ async def record_decision(
             action=action,
             actor_type=actor_type,
             actor_user_id=actor_user_id,
-            source_followup_task_utterance_id=source_followup_task_utterance_id,
+            source_followup_task_answer_id=source_followup_task_answer_id,
             source_transcript_version_id=source_transcript_version_id,
             before_state=before_state,
             after_state=after_state,

@@ -38,7 +38,7 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirFollowupTask,
     MemoirFollowupTaskClaim,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
     MemoirNarrativeGap,
     MemoirNarrativeGapClaim,
@@ -46,6 +46,7 @@ from app.models.memoir_narrative import (
     MemoirStoryClaim,
     MemoirStorySlot,
     MemoirStorySlotClaim,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.repositories.memoir_narrative import (
     MemoirClaimRepository,
@@ -123,15 +124,22 @@ async def _repair_fixture(client, test_db):
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="related_context",
-        is_assignment_snapshot=True,
         interpretation_status="pending",
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
 
     text_hash = sha256(answer_text.encode("utf-8")).hexdigest()
     source_card = MemoirSourceCard(
@@ -479,18 +487,25 @@ async def _historical_fact_repair_fixture(client, test_db):
                 context_role="known",
             )
         )
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=answer["utterance_id"],
         result_role="target_answer",
-        is_assignment_snapshot=True,
         interpretation_status="resolved",
         answer_kind="fact_resolution",
         fact_resolution_text=answer_text,
         interpretation_reason="旧链路只关闭了任务。",
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=answer["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
     resolution_plan = MemoirFactResolutionPlan.model_validate(
         {
@@ -570,7 +585,7 @@ async def test_historical_fact_answer_repair_applies_exact_auditable_operations(
             await test_db.scalars(
                 select(MemoirNarrativeDecision).where(
                     MemoirNarrativeDecision.project_id == spec.project_id,
-                    MemoirNarrativeDecision.source_followup_task_utterance_id
+                    MemoirNarrativeDecision.source_followup_task_answer_id
                     == relation.id,
                 )
             )

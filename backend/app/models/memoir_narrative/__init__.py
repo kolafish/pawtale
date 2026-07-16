@@ -20,8 +20,12 @@ from .gaps import (
 )
 from .followup_tasks import (
     MemoirFollowupTask,
+    MemoirFollowupTaskAnswer,
     MemoirFollowupTaskClaim,
-    MemoirFollowupTaskUtterance,
+)
+from .interview_policy import (
+    MemoirInterviewPolicyDecision,
+    MemoirUtteranceInterviewAssignment,
 )
 from .stories import (
     MemoirStory,
@@ -48,8 +52,10 @@ __all__ = [
     "MemoirNarrativeGapClaim",
     "MemoirNarrativeGapStory",
     "MemoirFollowupTask",
+    "MemoirFollowupTaskAnswer",
     "MemoirFollowupTaskClaim",
-    "MemoirFollowupTaskUtterance",
+    "MemoirInterviewPolicyDecision",
+    "MemoirUtteranceInterviewAssignment",
     "MemoirStory",
     "MemoirStoryClaim",
     "MemoirStoryRevision",

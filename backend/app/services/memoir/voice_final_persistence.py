@@ -229,6 +229,11 @@ class VoiceFinalPersistenceService:
             )
             self.db.add(utterance)
             await self.db.flush()
+            await followup_completion.link_utterance_to_session_task(
+                self.db,
+                voice_session=voice_session,
+                utterance=utterance,
+            )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
                 message_id=None,

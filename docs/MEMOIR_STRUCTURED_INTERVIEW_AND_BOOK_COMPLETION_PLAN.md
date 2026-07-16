@@ -69,7 +69,7 @@ NarrativeGap
 - Gap 是有稳定 ID、fingerprint、检测次数和处理状态的持久问题，不是一次 LLM 建议文本。
 - FollowupTask 是针对 Gap 的可执行访谈动作，不等于 Gap 本身。
 - FollowupTaskClaim 保存 known、do_not_repeat 和 expected_evidence 等任务语境。
-- FollowupTaskUtterance 在异步处理前保存任务分配快照，避免用户换题后回答归错任务。
+- MemoirUtteranceInterviewAssignment 在异步处理前保存创建时目标，FollowupTaskAnswer 单独记录事后回答关系，避免用户换题后回答归错任务。
 - 补全回答会区分直接讲述、编辑解释、事实修正和混合回答。
 - 只有直接讲述进入普通叙事提取；编辑解释和事实修正走各自的应用逻辑。
 - 新事实可以解决其他相关 Task/Gap，不要求用户严格只回答当前问题。
@@ -462,6 +462,7 @@ MemoirUtteranceInterviewAssignment
 - 无结构化访谈目标的自由讲述允许两个目标外键都为空；如果本轮由策略层产生系统回应，仍通过 `policy_decision_id` 关联当时上下文和 brief fingerprint。
 - `policy_decision_id` 非空时，assignment 的 target 必须与该决策记录一致，由创建 service 校验；不能关联到另一问题的策略记录。
 - assignment 的目标外键不可更新；纠错通过显式更正事件或重建下游关联完成，不能静默改写历史。
+- 阶段性交付中，C1 先落 `utterance_id + followup_task_id + policy_decision_id`；D0 创建 FrameworkItem 实体时再以同一次受约束迁移加入 `framework_item_id` 外键，不提前保留无外键占位列。
 
 ### 4.6 共享 InterviewBrief，而不是共享任务表
 
@@ -469,7 +470,7 @@ MemoirUtteranceInterviewAssignment
 
 ```text
 InterviewBrief
-  source_kind              # framework / book_completion
+  source_kind              # open_narration / framework / book_completion
   target_id
   purpose
   opening_question
@@ -493,10 +494,12 @@ InterviewBrief
 ```text
 InterviewBriefContextSnapshot
   schema_version
+  source_kind
   framework_item_id                # nullable，和 followup_task_id 最多一个非空
   followup_task_id                 # nullable
   template_version                 # book completion 可为空
   policy_version
+  completion_policy
   current_story_state              # 受控枚举/结构，不复制 Story 正文
   conversation_momentum
   user_preference_snapshot
@@ -879,7 +882,7 @@ complete
 ### 9.3 Utterance assignment 与策略日志迁移
 
 - 新增 MemoirUtteranceInterviewAssignment 和 InterviewPolicyDecision 表后，新 Utterance 只写新 assignment。
-- 现有 FollowupTaskUtterance 行迁移为显式 `followup_task_id` assignment；历史上下文无法还原时，`policy_decision_id` 保持空，不得伪造 InterviewPolicyDecision 或快照。
+- 现有 FollowupTaskUtterance 行无损迁移为 FollowupTaskAnswer；其中明确带 assignment snapshot 的行再回填显式 `followup_task_id` assignment，历史上下文无法还原时 `policy_decision_id` 保持空，不得伪造 InterviewPolicyDecision 或快照。
 - 校验任务归属数量和外键后，删除旧 FollowupTaskUtterance 写路径和表，不永久双写。
 - 历史会话不回填虚构的 InterviewPolicyDecision；决策日志只从新策略 Shadow Mode 开始记录。
 
@@ -1061,7 +1064,7 @@ complete
 - 定义 candidate action schema、风险分级和 candidate builder。
 - 扩展 InterviewBrief adapters，但语音层不读取领域表。
 - 新增 MemoirUtteranceInterviewAssignment 和 InterviewPolicyDecision。
-- 完成 FollowupTaskUtterance 迁移并删除旧写路径。
+- 将旧 FollowupTaskUtterance 拆成创建时 assignment 与事后 FollowupTaskAnswer，迁移历史引用并删除旧写路径和旧表。
 
 验收：每个策略选择、生成消息和后续用户结果可追溯；异步回答始终归属创建时的 Task/anchor。
 
