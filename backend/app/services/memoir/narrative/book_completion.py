@@ -13,13 +13,17 @@ from app.domain.memoir.types import MemoirEditingJobStatus
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionAction,
-    MemoirBookCompletionChapterResponse,
     MemoirBookCompletionOverviewResponse,
     MemoirBookCompletionResponse,
     MemoirBookCompletionState,
 )
 from app.services.memoir.book_plan_sources import included_book_chapters, load_plan_with_chapters
-from app.services.memoir.narrative import completion_items, followup_jobs, gap_audit
+from app.services.memoir.narrative import (
+    chapter_completion_summary,
+    completion_items,
+    followup_jobs,
+    gap_audit,
+)
 from app.services.memoir.narrative.gap_rules import ChapterAuditContext, load_chapter_audit_context
 
 
@@ -193,131 +197,6 @@ def _generation_problem(
     return None
 
 
-def _chapter_response_from_problem(
-    preparation: _ChapterPreparation,
-    problem: MemoirBookCompletionResponse,
-) -> MemoirBookCompletionChapterResponse:
-    return MemoirBookCompletionChapterResponse(
-        chapter_id=preparation.chapter.id,
-        title=preparation.chapter.title,
-        sort_order=preparation.chapter.sort_order,
-        state=problem.state,
-        headline=problem.headline,
-        detail=problem.detail,
-    )
-
-
-async def _chapter_completion_status(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter: MemoirBookPlanChapter,
-    preparation: _ChapterPreparation | None,
-    generation_job: MemoirEditingJob | None,
-) -> MemoirBookCompletionChapterResponse:
-    if preparation is None:
-        return MemoirBookCompletionChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="needs_review",
-            headline="先确认本章主要写什么",
-            detail="确认本章方向后，系统才能判断最值得补充的内容。",
-        )
-
-    items = await completion_items.chapter_completion_items(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-    )
-    interview_items = [
-        item for item in items if item.action == MemoirCompletionItemAction.INTERVIEW
-    ]
-    in_progress = next(
-        (
-            item
-            for item in interview_items
-            if item.status == MemoirCompletionItemStatus.IN_PROGRESS
-        ),
-        None,
-    )
-    if in_progress is not None:
-        return MemoirBookCompletionChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="in_progress",
-            headline="这一章有一个方向正在补充",
-            detail="可以回到刚才的语音访谈继续讲。",
-            focus_areas=[in_progress.question],
-            task_id=in_progress.task_id,
-            active_session_id=in_progress.active_session_id,
-        )
-
-    audit_problem = _audit_problem(project_id, preparation)
-    if audit_problem:
-        return _chapter_response_from_problem(preparation, audit_problem)
-    generation_problem = _generation_problem(project_id, preparation, generation_job)
-    if generation_problem:
-        return _chapter_response_from_problem(preparation, generation_problem)
-
-    if interview_items:
-        item = interview_items[0]
-        deferred = item.status == MemoirCompletionItemStatus.DEFERRED
-        return MemoirBookCompletionChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="ready",
-            headline=("有一个补充方向留到以后" if deferred else "还有一个重要方向值得补充"),
-            detail=(
-                "准备好后，可以从这里继续。"
-                if deferred
-                else _INTERVIEW_GUIDANCE
-            ),
-            focus_areas=[item.question],
-            task_id=item.task_id,
-        )
-
-    if any(item.requires_manual_review for item in items):
-        return MemoirBookCompletionChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="needs_review",
-            headline="有一处内容需要您确认",
-            detail="这不是靠继续录音能解决的问题，请到本章查看。",
-        )
-
-    editorial_item = next(
-        (
-            item
-            for item in items
-            if item.action == MemoirCompletionItemAction.EDIT
-        ),
-        None,
-    )
-    if editorial_item is not None:
-        return MemoirBookCompletionChapterResponse(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="needs_review",
-            headline="已有素材，可以直接重新整理",
-            detail="这处问题不需要继续采访，请到本章调整结构或正文。",
-            focus_areas=[editorial_item.title],
-        )
-
-    return MemoirBookCompletionChapterResponse(
-        chapter_id=chapter.id,
-        title=chapter.title,
-        sort_order=chapter.sort_order,
-        state="complete",
-        headline="目前不需要再补",
-        detail="以后新增素材或调整本章后，系统会重新整理。",
-    )
-
-
 async def get_book_completion_overview(
     db: AsyncSession,
     *,
@@ -335,27 +214,20 @@ async def get_book_completion_overview(
             chapters=[],
         )
 
-    preparations = await _chapter_preparations(
-        db,
-        project_id=project_id,
-        chapters=chapters,
-    )
-    preparation_by_chapter = {item.chapter.id: item for item in preparations}
-    generation_jobs = await _generation_jobs(
-        db,
-        project_id=project_id,
-        preparations=preparations,
-    )
-    chapter_items = [
-        await _chapter_completion_status(
+    chapter_items = []
+    for chapter in chapters:
+        context = await load_chapter_audit_context(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
+        completion = await chapter_completion_summary.get_chapter_completion_read_model(
             db,
             project_id=project_id,
             chapter=chapter,
-            preparation=preparation_by_chapter.get(chapter.id),
-            generation_job=generation_jobs.get(chapter.id),
+            context=context,
         )
-        for chapter in chapters
-    ]
+        chapter_items.append(completion.summary)
     completed = sum(item.state == "complete" for item in chapter_items)
     return MemoirBookCompletionOverviewResponse(
         project_id=project_id,

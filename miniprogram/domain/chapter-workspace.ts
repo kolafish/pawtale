@@ -1,3 +1,5 @@
+import type { MemoirChapterCompletionSummary } from "./chapter-completion";
+
 export type MemoirNarrativeGapStatus =
   | "open"
   | "resolved"
@@ -201,6 +203,7 @@ export interface MemoirChapterWorkspace {
   project_id: string;
   chapter_id: string;
   chapter_title: string;
+  completion_summary: MemoirChapterCompletionSummary;
   contract: MemoirChapterWorkspaceContract | null;
   stories: MemoirChapterWorkspaceStory[];
   available_stories: MemoirChapterWorkspaceAvailableStory[];

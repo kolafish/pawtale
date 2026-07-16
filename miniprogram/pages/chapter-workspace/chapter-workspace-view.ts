@@ -2,11 +2,9 @@ import type {
   MemoirChapterWorkspace,
   MemoirChapterWorkspaceStory,
 } from "../../domain/chapter-workspace";
+import type { MemoirChapterCompletionTask } from "../../domain/chapter-completion";
 import type { MemoirDraftBlock } from "../../domain/draft-blocks";
-import type { MemoirFollowupTask } from "../../domain/voice-chat";
 import { chapterNextAction, type ChapterNextAction } from "./chapter-next-action";
-
-const ACTIVE_FOLLOWUP_STATUSES = new Set(["pending", "deferred", "in_progress"]);
 
 export interface RecordedStoryView {
   id: string;
@@ -85,7 +83,6 @@ export interface ChapterWorkspaceViewPatch {
   confirmations: ConfirmationView[];
   reviewGaps: ReviewGapView[];
   editorialGaps: EditorialGapView[];
-  suggestionHints: ReviewGapView[];
   appliedAnswerUpdates: AnswerUpdateView[];
   outlineTitles: string[];
   canAssembleDraft: boolean;
@@ -105,13 +102,7 @@ function storyHasUsableEvidence(story: MemoirChapterWorkspaceStory): boolean {
   ));
 }
 
-function activeFollowupTasks(tasks: MemoirFollowupTask[]): MemoirFollowupTask[] {
-  return tasks
-    .filter((task) => ACTIVE_FOLLOWUP_STATUSES.has(task.status))
-    .sort((left, right) => right.priority - left.priority);
-}
-
-function directionView(task: MemoirFollowupTask): FollowupDirectionView {
+function directionView(task: MemoirChapterCompletionTask): FollowupDirectionView {
   const inProgress = task.status === "in_progress";
   return {
     id: task.id,
@@ -184,127 +175,49 @@ export function draftBlockViews(
 
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
-  followupTasks: MemoirFollowupTask[],
   draftBlocks: MemoirDraftBlock[],
 ): ChapterWorkspaceViewPatch {
+  const summary = workspace.completion_summary;
   const recordedStories = workspace.stories
     .filter(storyHasUsableEvidence)
     .map((story) => ({ id: story.id, title: story.title, summary: story.summary }));
   const confirmations = workspace.answer_updates.filter((item) => item.status === "needs_confirmation");
-  const confirmationTaskIds = new Set(confirmations.map((item) => item.task_id));
-  const tasksById = new Map(followupTasks.map((task) => [task.id, task]));
-  const confirmationGapIds = new Set(
-    confirmations
-      .map((item) => tasksById.get(item.task_id)?.gap_id)
-      .filter((gapId): gapId is string => Boolean(gapId)),
-  );
-  const allOpenGaps = Array.from(
-    new Map(
-      [...workspace.gaps.must_handle, ...workspace.gaps.suggested]
-        .map((gap) => [gap.id, gap] as const),
-    ).values(),
-  );
-  const gapById = new Map(allOpenGaps.map((gap) => [gap.id, gap]));
-  const reviewGaps = allOpenGaps.filter((gap) => (
-    gap.recommended_action === "manual_review"
-    && !confirmationGapIds.has(gap.id)
-  ));
-  const editorialGaps = allOpenGaps.filter(
-    (gap) => gap.recommended_action === "editorial",
-  );
-  const allActiveTasks = activeFollowupTasks(followupTasks);
-  const eligibleTasks = allActiveTasks.filter((task) => (
-    !confirmationTaskIds.has(task.id)
-    && gapById.get(task.gap_id)?.recommended_action === "interview"
-  ));
-  const directionGapIds = new Set<string>();
-  const directionTasks = eligibleTasks.filter((task) => {
-    if (directionGapIds.has(task.gap_id)) {
-      return false;
-    }
-    directionGapIds.add(task.gap_id);
-    return true;
-  });
-  const suggestionIds = new Set(
-    workspace.gaps.suggested
-      .filter((gap) => gap.recommended_action === "interview")
-      .map((gap) => gap.id),
-  );
-  directionTasks.forEach((task) => suggestionIds.add(task.gap_id));
   const currentDraftBlocks = draftBlocks;
-  const mustConfirmCount = confirmations.length + reviewGaps.length;
-  const editorialCount = editorialGaps.length;
-  const suggestionCount = suggestionIds.size;
-  const hasStaleDraft = currentDraftBlocks.some((block) => block.freshness_status === "stale");
   const canAssembleDraft = Boolean(currentDraftBlocks.length) && currentDraftBlocks.every((block) => (
     block.editorial_status === "confirmed"
     && block.freshness_status === "current"
   ));
 
-  let readinessTitle = "现有内容已经可以开始写正文";
-  let readinessDetail = "您也可以先选择下面任意一个方向继续补充。";
-  if (!workspace.contract) {
-    readinessTitle = "先确定这章主要写什么";
-    readinessDetail = "整理方向后，您会先看到整章还缺什么，再决定从哪里开始。";
-  } else if (mustConfirmCount) {
-    readinessTitle = `有 ${mustConfirmCount} 件事需要先确认`;
-    readinessDetail = "这些内容会影响人物、时间或事实是否准确，确认后再进入正文。";
-  } else if (editorialCount) {
-    readinessTitle = `有 ${editorialCount} 处可以直接重新整理`;
-    readinessDetail = "相关素材已经存在，不需要继续采访，调整结构或正文即可。";
-  } else if (workspace.latest_audit_job?.status === "pending" || workspace.latest_audit_job?.status === "running") {
-    readinessTitle = "正在整理本章的完整情况";
-    readinessDetail = "整理完成后会自动显示可选择的补充方向。";
-  } else if (hasStaleDraft) {
-    readinessTitle = "新回答已收到，正文需要重新整理";
-    readinessDetail = "重新整理只更新受影响的段落，您手动保护的内容不会被覆盖。";
-  } else if (currentDraftBlocks.length) {
-    readinessTitle = "现有内容可以形成章节正文";
-    readinessDetail = suggestionCount
-      ? "正文已经可读；下面的内容属于可选补充，不会阻止成书。"
-      : "目前没有必须补充的内容，可以直接通读本章正文。";
-  }
-
   return {
-    nextAction: chapterNextAction(workspace, followupTasks, currentDraftBlocks),
+    nextAction: chapterNextAction(summary),
     recordedCount: recordedStories.length,
-    mustConfirmCount,
-    editorialCount,
-    suggestionCount,
-    acceptedIncompleteCount: workspace.gaps.accepted_incomplete.length,
-    readinessTitle,
-    readinessDetail,
+    mustConfirmCount: confirmations.length + summary.review_gaps.length,
+    editorialCount: summary.editorial_gaps.length,
+    suggestionCount: summary.suggested_count,
+    acceptedIncompleteCount: summary.accepted_incomplete_count,
+    readinessTitle: summary.headline,
+    readinessDetail: summary.detail,
     recordedStories,
-    directions: directionTasks.slice(0, 3).map(directionView),
+    directions: summary.visible_tasks.map(directionView),
     confirmations: confirmations.map((item) => ({
       id: item.id,
       taskId: item.task_id,
       question: item.question,
       answerText: item.answer_text,
     })),
-    reviewGaps: reviewGaps.map((gap) => ({
-      id: gap.id,
-      title: gap.title,
-      description: gap.description,
-      taskId: allActiveTasks.find((task) => task.gap_id === gap.id)?.id || "",
-      resolutionText: "",
-    })),
-    editorialGaps: editorialGaps.slice(0, 3).map((gap) => ({
-      id: gap.id,
-      title: gap.title,
-      description: gap.description,
-      actionText: "查看并整理正文",
-    })),
-    suggestionHints: workspace.gaps.suggested
-      .filter((gap) => gap.recommended_action === "interview")
-      .slice(0, 3)
-      .map((gap) => ({
+    reviewGaps: summary.review_gaps.map((gap) => ({
       id: gap.id,
       title: gap.title,
       description: gap.description,
       taskId: "",
       resolutionText: "",
-      })),
+    })),
+    editorialGaps: summary.editorial_gaps.slice(0, 3).map((gap) => ({
+      id: gap.id,
+      title: gap.title,
+      description: gap.description,
+      actionText: "查看并整理正文",
+    })),
     appliedAnswerUpdates: workspace.answer_updates
       .filter((item) => item.status === "applied")
       .slice(0, 3)

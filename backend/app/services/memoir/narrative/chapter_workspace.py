@@ -6,19 +6,15 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
-    MemoirNarrativeGapStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStorySlotStatus,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
 from app.models.memoir_narrative import MemoirClaim, MemoirStory, MemoirStorySlotClaim
 from app.schemas.memoir_narrative import (
     MemoirChapterGapAuditJobResponse,
     MemoirChapterWorkspaceAvailableStoryResponse,
-    MemoirChapterWorkspaceGapGroups,
     MemoirChapterWorkspaceResponse,
     MemoirChapterWorkspaceStoryResponse,
     MemoirChapterWorkspaceStorySlotResponse,
@@ -26,13 +22,10 @@ from app.schemas.memoir_narrative import (
 )
 from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import (
-    chapter_answer_updates,
     chapter_contracts,
-    gap_audit,
-    gaps,
+    chapter_completion_summary,
 )
 from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
-from app.services.memoir.narrative.readiness_policy import gap_blocks_formalization
 
 
 async def get_chapter_workspace(
@@ -164,67 +157,17 @@ async def get_chapter_workspace(
         else set()
     )
 
-    chapter_gaps, _ = await gaps.list_gaps(
+    completion = await chapter_completion_summary.get_chapter_completion_read_model(
         db,
         project_id=project_id,
-        chapter_id=chapter_id,
-        limit=500,
+        chapter=context.chapter,
+        context=context,
     )
-    gap_responses = [await gaps.gap_response(db, gap=gap) for gap in chapter_gaps]
-    gap_groups = MemoirChapterWorkspaceGapGroups(
-        must_handle=[
-            gap
-            for gap in gap_responses
-            if gap.status == MemoirNarrativeGapStatus.OPEN
-            and gap_blocks_formalization(
-                gap_type=gap.gap_type.value,
-                severity=gap.severity.value,
-            )
-        ],
-        suggested=[
-            gap
-            for gap in gap_responses
-            if gap.status == MemoirNarrativeGapStatus.OPEN
-            and not gap_blocks_formalization(
-                gap_type=gap.gap_type.value,
-                severity=gap.severity.value,
-            )
-        ],
-        accepted_incomplete=[
-            gap
-            for gap in gap_responses
-            if gap.status
-            in {
-                MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE,
-                MemoirNarrativeGapStatus.NOT_APPLICABLE,
-                MemoirNarrativeGapStatus.DISMISSED,
-            }
-        ],
-    )
-    latest_job = await db.scalar(
-        select(MemoirEditingJob)
-        .where(
-            MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.chapter_id == chapter_id,
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
-        )
-        .order_by(MemoirEditingJob.updated_at.desc(), MemoirEditingJob.created_at.desc())
-    )
-    if latest_job:
-        payload = latest_job.payload_json if isinstance(latest_job.payload_json, dict) else {}
-        ai_model_value = payload.get("ai_model")
-        current_signature = gap_audit.chapter_gap_audit_signature(
-            context,
-            include_semantic_audit=bool(payload.get("include_semantic_audit")),
-            ai_model=(str(ai_model_value) if ai_model_value else None),
-        )
-        if payload.get("input_signature") != current_signature:
-            latest_job = None
     return MemoirChapterWorkspaceResponse(
         project_id=project_id,
         chapter_id=chapter_id,
         chapter_title=context.chapter.title,
+        completion_summary=completion.summary,
         contract=(
             await chapter_contracts.contract_response(db, contract=context.contract)
             if context.contract
@@ -244,15 +187,11 @@ async def get_chapter_workspace(
             )
             for story in available_stories
         ],
-        answer_updates=await chapter_answer_updates.chapter_answer_updates(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-        ),
-        gaps=gap_groups,
+        answer_updates=completion.answer_updates,
+        gaps=completion.gap_groups,
         latest_audit_job=(
-            MemoirChapterGapAuditJobResponse.model_validate(latest_job)
-            if latest_job
+            MemoirChapterGapAuditJobResponse.model_validate(completion.latest_audit_job)
+            if completion.latest_audit_job
             else None
         ),
     )

@@ -2,8 +2,8 @@ import type {
   MemoirChapterWorkspace,
   MemoirNarrativeGapAction,
 } from "../../domain/chapter-workspace";
+import type { MemoirChapterCompletionTask } from "../../domain/chapter-completion";
 import type { MemoirDraftBlockJob } from "../../domain/draft-blocks";
-import type { MemoirFollowupTask } from "../../domain/voice-chat";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   clearMemoirDraftJobCursor,
@@ -24,7 +24,6 @@ import {
   getMemoirChapterWorkspace,
   getMemoirDraftBlockJob,
   listMemoirDraftBlocks,
-  listMemoirFollowupTasks,
   manuallyReviseMemoirDraftBlock,
   resolveMemoirNarrativeGap,
   suggestMemoirChapterDirection,
@@ -99,8 +98,6 @@ interface ChapterWorkspacePageData extends ChapterWorkspaceViewPatch {
   projectId: string;
   chapterId: string;
   workspace: MemoirChapterWorkspace | null;
-  followupTasks: MemoirFollowupTask[];
-  followupError: string;
   draftBlocks: DraftBlockView[];
   draftError: string;
   auditBusy: boolean;
@@ -134,8 +131,6 @@ definePage<ChapterWorkspacePageData>()({
     projectId: "",
     chapterId: "",
     workspace: null,
-    followupTasks: [],
-    followupError: "",
     draftBlocks: [],
     draftError: "",
     nextAction: LOADING_NEXT_ACTION,
@@ -151,7 +146,6 @@ definePage<ChapterWorkspacePageData>()({
     confirmations: [],
     reviewGaps: [],
     editorialGaps: [],
-    suggestionHints: [],
     appliedAnswerUpdates: [],
     outlineTitles: [],
     canAssembleDraft: false,
@@ -195,20 +189,12 @@ definePage<ChapterWorkspacePageData>()({
     }
     try {
       const workspace = await getMemoirChapterWorkspace(this.data.projectId, this.data.chapterId);
-      const [taskResult, blockResult] = await Promise.all([
-        captureLoad(listMemoirFollowupTasks(
-          this.data.projectId,
-          { chapterId: this.data.chapterId, limit: 100 },
-        )),
-        captureLoad(listMemoirDraftBlocks(this.data.projectId, this.data.chapterId)),
-      ]);
-      if (taskResult.error && routeAuthError(taskResult.error, "me")) {
-        return;
-      }
+      const blockResult = await captureLoad(
+        listMemoirDraftBlocks(this.data.projectId, this.data.chapterId),
+      );
       if (blockResult.error && routeAuthError(blockResult.error, "me")) {
         return;
       }
-      const followupTasks = taskResult.value?.items || this.data.followupTasks;
       const draftBlocks = draftBlockViews(
         blockResult.value?.blocks || this.data.draftBlocks,
         workspace,
@@ -216,8 +202,8 @@ definePage<ChapterWorkspacePageData>()({
       );
       const auditBusy = workspace.latest_audit_job?.status === "pending"
         || workspace.latest_audit_job?.status === "running";
-      const viewPatch = chapterWorkspaceViewPatch(workspace, followupTasks, draftBlocks);
-      if (taskResult.error || blockResult.error) {
+      const viewPatch = chapterWorkspaceViewPatch(workspace, draftBlocks);
+      if (blockResult.error) {
         viewPatch.nextAction = {
           kind: "wait",
           eyebrow: "部分内容没有读取完成",
@@ -229,16 +215,12 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({
         workspace,
-        followupTasks,
         draftBlocks,
         auditBusy,
         auditError: workspace.latest_audit_job?.status === "failed"
           ? (workspace.latest_audit_job.error_message || "本章整理失败")
           : "",
         error: "",
-        followupError: taskResult.error
-          ? (taskResult.error instanceof Error ? taskResult.error.message : "补充方向加载失败")
-          : "",
         draftError: blockResult.error
           ? (blockResult.error instanceof Error ? blockResult.error.message : "本章正文加载失败")
           : "",
@@ -266,17 +248,17 @@ definePage<ChapterWorkspacePageData>()({
       await this.suggestCurrentDirection();
     } else if (action.kind === "confirm_direction") {
       await this.confirmCurrentDirection();
-    } else if (action.kind === "start_audit") {
+    } else if (action.kind === "refresh_audit") {
       await this.startAudit();
-    } else if (action.kind === "continue_fact_confirmation" || action.kind === "open_followups") {
+    } else if (action.kind === "continue_confirmation" || action.kind === "start_interview") {
       await this.beginFollowupInterview(action.taskId || this.data.directions[0]?.id || "");
-    } else if (action.kind === "open_checks") {
+    } else if (action.kind === "open_manual_review") {
       scrollToSection("#confirmations");
     } else if (action.kind === "open_editorial_fix") {
       scrollToSection("#editorial-fixes");
     } else if (action.kind === "generate_draft") {
       await this.generateDraftBlocks();
-    } else if (action.kind === "open_drafts") {
+    } else if (action.kind === "review_draft") {
       scrollToSection("#chapter-draft");
     }
   },
@@ -381,20 +363,25 @@ definePage<ChapterWorkspacePageData>()({
     if (!taskId || this.data.startingFollowupTaskId) {
       return;
     }
-    const task = this.data.followupTasks.find((item) => item.id === taskId);
-    if (task?.status === "in_progress" && task.assigned_session_id) {
-      this.openVoiceChat(task.assigned_session_id);
+    const summary = this.data.workspace?.completion_summary;
+    const tasks: MemoirChapterCompletionTask[] = [
+      ...(summary?.active_task ? [summary.active_task] : []),
+      ...(summary?.visible_tasks || []),
+    ];
+    const task = tasks.find((item) => item.id === taskId);
+    if (task?.status === "in_progress" && task.active_session_id) {
+      this.openVoiceChat(task.active_session_id);
       return;
     }
     if (!task || (task.status !== "pending" && task.status !== "deferred")) {
-      this.setData({ followupError: "这个补充方向已经处理，请下拉刷新" });
+      this.setData({ error: "这个补充方向已经处理，请下拉刷新" });
       return;
     }
     if (!readVoiceAuthorizationConsent()) {
       wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
       return;
     }
-    this.setData({ startingFollowupTaskId: taskId, followupError: "" });
+    this.setData({ startingFollowupTaskId: taskId, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
@@ -425,7 +412,7 @@ definePage<ChapterWorkspacePageData>()({
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ followupError: error instanceof Error ? error.message : "AI 访谈创建失败" });
+      this.setData({ error: error instanceof Error ? error.message : "AI 访谈创建失败" });
     } finally {
       this.setData({ startingFollowupTaskId: "" });
     }

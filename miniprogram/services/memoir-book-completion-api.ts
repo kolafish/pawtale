@@ -1,7 +1,5 @@
-import type {
-  MemoirBookCompletion,
-  MemoirBookCompletionOverview,
-} from "../domain/voice-chat";
+import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
+import type { MemoirBookCompletion } from "../domain/voice-chat";
 import { memoirNarrativeProjectPath, memoirRequest } from "./memoir-api-client";
 
 
