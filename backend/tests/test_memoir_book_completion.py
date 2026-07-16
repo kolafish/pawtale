@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.narrative_types import (
@@ -36,9 +37,16 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStorySlot,
 )
+from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import completion_items, gap_audit, story_slots
+from app.services.memoir.narrative import (
+    completion_items,
+    followup_jobs,
+    gap_audit,
+    gaps,
+    story_slots,
+)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -367,6 +375,77 @@ async def test_book_completion_exposes_at_most_three_interview_directions(
     assert "章节方向 4" not in {item.title for item in items}
 
 
+@pytest.mark.parametrize(
+    ("recommended_action", "gap_type", "expected_next_action", "expected_gap_key"),
+    (
+        (
+            "editorial",
+            MemoirNarrativeGapType.REPETITION,
+            "open_editorial_fix",
+            "editorial_gaps",
+        ),
+        (
+            "manual_review",
+            MemoirNarrativeGapType.CONTRADICTION,
+            "open_manual_review",
+            "review_gaps",
+        ),
+    ),
+)
+async def test_book_completion_summary_routes_editorial_and_manual_review_actions(
+    client,
+    test_db,
+    recommended_action,
+    gap_type,
+    expected_next_action,
+    expected_gap_key,
+):
+    register_memoir_editing_job_handlers()
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=True,
+    )
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
+    stored_gaps, created_count = await gaps.upsert_gaps(
+        test_db,
+        project_id=project_id,
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapter.id,
+                gap_type=gap_type,
+                severity=MemoirNarrativeGapSeverity.HIGH,
+                target_slot=f"summary-routing:{recommended_action}",
+                title="需要处理的章节问题",
+                description="验证章节补全摘要的确定性动作分流。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+            )
+        ],
+    )
+    assert created_count == 1
+    assert stored_gaps[0].recommended_action == recommended_action
+    await test_db.commit()
+
+    generation_job = await followup_jobs.schedule_followup_task_generation(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        source="test_chapter_completion_summary",
+    )
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, generation_job.id) is True
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert overview.status_code == 200, overview.text
+    summary = overview.json()["chapters"][0]
+    assert summary["next_action"]["kind"] == expected_next_action
+    assert summary["visible_tasks"] == []
+    assert len(summary[expected_gap_key]) == 1
+
+
 async def test_book_completion_overview_marks_audited_complete_chapter(
     client,
     test_db,
@@ -468,7 +547,10 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     await test_db.commit()
 
     stale = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
-    assert stale.json()["chapters"][0]["state"] == "needs_preparation"
+    stale_chapter = stale.json()["chapters"][0]
+    assert stale_chapter["state"] == "needs_preparation"
+    assert stale_chapter["next_action"]["kind"] == "refresh_audit"
+    assert stale_chapter["headline"] == stale_chapter["next_action"]["title"]
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )

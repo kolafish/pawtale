@@ -463,9 +463,9 @@ def _summary(
     elif not contract_is_confirmed:
         headline = "本章方向等待确认"
         detail = "确认写作重点后，系统才会继续判断补讲、编辑和事实确认。"
-    elif audit_job is not None and audit_job.status in _ACTIVE_JOB_STATUSES:
-        headline = "正在整理本章的完整情况"
-        detail = "整理完成后会自动显示可选择的补充方向。"
+    elif state in {"in_progress", "preparing", "needs_preparation", "failed"}:
+        headline = action.title
+        detail = action.detail
     elif confirmation_update is not None or review_gaps:
         count = len(
             {
