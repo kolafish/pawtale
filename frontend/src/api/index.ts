@@ -367,6 +367,7 @@ export const memoirBookEditorApi = {
       title: plan.title,
       chapters: plan.chapters.map(chapter => ({
         title: chapter.title,
+        include_in_book: chapter.include_in_book,
         source_refs: chapter.source_refs,
       })),
     },

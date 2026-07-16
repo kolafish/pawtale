@@ -1224,8 +1224,9 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
   BookData,
   "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "canGenerateBook" | "progressText"
 > {
-  const confirmedDraftCount = chapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
-  const totalChapterCount = chapters.length;
+  const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
+  const confirmedDraftCount = includedChapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
+  const totalChapterCount = includedChapters.length;
   const allChaptersConfirmed = totalChapterCount > 0 && confirmedDraftCount === totalChapterCount;
   return {
     confirmedDraftCount,
@@ -1266,24 +1267,28 @@ export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "s
 }
 
 function chapterSummaryMetaText(
-  chapter: Pick<BookChapterView, "sourceCount" | "draftCharCount" | "draft" | "draftStatusText">,
+  chapter: Pick<BookChapterView, "include_in_book" | "sourceCount" | "draftCharCount" | "draft" | "draftStatusText">,
 ): string {
   const sourceText = bookOralSourceCountText(chapter.sourceCount);
+  const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
   if (!chapter.draft?.latest_version) {
-    return `${sourceText} · 尚未生成正文`;
+    return `${inclusionText}${sourceText} · 尚未生成正文`;
   }
-  return `${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
+  return `${inclusionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
 }
 
 export function bookOutlineNarrationText(
   planTitle: string,
-  chapters: Pick<BookChapterView, "title" | "sourceCount">[],
+  chapters: Pick<BookChapterView, "include_in_book" | "title" | "sourceCount">[],
 ): string {
   const title = trimText(planTitle) || "回忆录章节规划";
   const lines = [`《${title}》现在有 ${chapters.length} 章。`];
   chapters.forEach((chapter, index) => {
     const chapterTitle = trimText(chapter.title) || "未命名章节";
     lines.push(`第 ${index + 1} 章，${chapterTitle}。本章收录 ${chapter.sourceCount} 条语音素材。`);
+    if (chapter.include_in_book === false) {
+      lines.push("本章目前保留整理，但不收入最终成书。");
+    }
   });
   lines.push("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。");
   return lines.join("\n");
@@ -1305,6 +1310,7 @@ export function buildChapterViews(
       const draftCharCount = trimText(content).length;
       const statusText = draftStatusText(draft);
       const viewBase = {
+        include_in_book: chapter.include_in_book !== false,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
         draft,
@@ -1347,12 +1353,13 @@ export function buildChapterViews(
 }
 
 export function bookProgressText(chapters: BookChapterView[]): string {
-  if (!chapters.length) {
+  const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
+  if (!includedChapters.length) {
     return "还没有章节";
   }
-  const confirmed = chapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
-  const generated = chapters.filter((chapter) => Boolean(chapter.draft?.latest_version)).length;
-  return `${confirmed}/${chapters.length} 章已确认，${generated} 章已有正文`;
+  const confirmed = includedChapters.filter((chapter) => chapter.draft?.status === "confirmed").length;
+  const generated = includedChapters.filter((chapter) => Boolean(chapter.draft?.latest_version)).length;
+  return `${confirmed}/${includedChapters.length} 章已确认，${generated} 章已有正文`;
 }
 
 export function planStage(plan: MemoirBookPlan | null): BookStage {
@@ -1457,6 +1464,7 @@ export function guestBookData(): Partial<BookHomeData> {
 export function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] {
   return chapters.map((chapter) => ({
     title: trimText(chapter.editingTitle),
+    include_in_book: chapter.include_in_book !== false,
     source_refs: chapter.source_refs,
   }));
 }
@@ -1465,6 +1473,7 @@ export function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanCh
   return chapters.map((chapter) => ({
     id: chapter.id,
     title: trimText(chapter.editingTitle || chapter.title),
+    include_in_book: chapter.include_in_book !== false,
     source_refs: chapter.source_refs,
   }));
 }

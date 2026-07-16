@@ -18,6 +18,8 @@ import {
   ArrowDown,
   ArrowUp,
   Check,
+  Eye,
+  EyeOff,
   GripVertical,
   Pencil,
   Trash2,
@@ -35,6 +37,7 @@ interface MemoirChapterListProps {
   onSelect: (chapterId: string) => void;
   onMove: (chapterId: string, targetIndex: number) => void;
   onRename: (chapterId: string, title: string) => void;
+  onToggleBookInclusion: (chapter: MemoirChapterSourceEditorChapter) => void;
   onDelete: (chapter: MemoirChapterSourceEditorChapter) => void;
 }
 
@@ -45,6 +48,7 @@ export function MemoirChapterList({
   onSelect,
   onMove,
   onRename,
+  onToggleBookInclusion,
   onDelete,
 }: MemoirChapterListProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -92,6 +96,7 @@ export function MemoirChapterList({
               onStartEditing={() => startEditing(chapter)}
               onFinishEditing={() => finishEditing(chapter)}
               onCancelEditing={() => setEditingId(null)}
+              onToggleBookInclusion={() => onToggleBookInclusion(chapter)}
               onDelete={() => onDelete(chapter)}
             />
           ))}
@@ -116,6 +121,7 @@ interface SortableChapterRowProps {
   onStartEditing: () => void;
   onFinishEditing: () => void;
   onCancelEditing: () => void;
+  onToggleBookInclusion: () => void;
   onDelete: () => void;
 }
 
@@ -134,6 +140,7 @@ function SortableChapterRow({
   onStartEditing,
   onFinishEditing,
   onCancelEditing,
+  onToggleBookInclusion,
   onDelete,
 }: SortableChapterRowProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -194,6 +201,7 @@ function SortableChapterRow({
               {chapter.title}
             </span>
             <span className="mt-1 block text-[11px] text-[#7a847f] tabular-nums">
+              {chapter.include_in_book === false ? '不收入本书 · ' : ''}
               {chapter.source_refs.length} 段素材
               {chapter.pending_source_count > 0 ? ` · ${chapter.pending_source_count} 段待补写` : ''}
             </span>
@@ -220,6 +228,13 @@ function SortableChapterRow({
               </IconButton>
               <IconButton label="修改标题" onClick={onStartEditing} disabled={disabled}>
                 <Pencil size={14} />
+              </IconButton>
+              <IconButton
+                label={chapter.include_in_book === false ? '恢复收入本书' : '不收入本书'}
+                onClick={onToggleBookInclusion}
+                disabled={disabled}
+              >
+                {chapter.include_in_book === false ? <Eye size={14} /> : <EyeOff size={14} />}
               </IconButton>
               <IconButton label="删除章节" onClick={onDelete} disabled={disabled || total <= 1} danger>
                 <Trash2 size={14} />

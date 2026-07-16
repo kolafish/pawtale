@@ -170,6 +170,16 @@ export function MemoirChapterWorkspace({ project }: MemoirChapterWorkspaceProps)
     structureMutation.mutate({ type: 'delete_chapter', chapter_id: chapter.id });
   };
 
+  const toggleChapterBookInclusion = (chapter: MemoirChapterSourceEditorChapter) => {
+    const nextIncludeInBook = chapter.include_in_book === false;
+    if (!nextIncludeInBook && !window.confirm(`保留“${chapter.title}”的全部内容，但不收入最终成书？`)) return;
+    structureMutation.mutate({
+      type: 'set_chapter_book_inclusion',
+      chapter_id: chapter.id,
+      include_in_book: nextIncludeInBook,
+    });
+  };
+
   const regeneratePlan = () => {
     if (!window.confirm('重新规划会替换当前章节目录。确定继续吗？')) return;
     generatePlanMutation.mutate();
@@ -294,6 +304,7 @@ export function MemoirChapterWorkspace({ project }: MemoirChapterWorkspaceProps)
             onSelect={setSelectedChapterId}
             onMove={moveChapter}
             onRename={(chapterId, title) => renameMutation.mutate({ chapterId, title })}
+            onToggleBookInclusion={toggleChapterBookInclusion}
             onDelete={deleteChapter}
           />
         </aside>

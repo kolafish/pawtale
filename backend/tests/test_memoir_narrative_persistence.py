@@ -201,6 +201,43 @@ async def test_narrative_migration_adds_structured_block_snapshot_column_once():
         await engine.dispose()
 
 
+async def test_narrative_migration_adds_book_chapter_inclusion_column_once():
+    register_models()
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_book_plan_chapters "
+                    "DROP COLUMN include_in_book"
+                )
+            )
+
+        first = await migrate_memoir_narrative_schema(engine)
+        second = await migrate_memoir_narrative_schema(engine)
+        await assert_memoir_narrative_schema(engine)
+
+        assert first["changed_columns"] == [
+            "memoir_book_plan_chapters.include_in_book"
+        ]
+        assert second["changed_columns"] == []
+        async with engine.begin() as conn:
+            column = next(
+                row
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_book_plan_chapters)")
+                    )
+                ).fetchall()
+                if row[1] == "include_in_book"
+            )
+        assert column[3] == 1
+        assert column[4] == "1"
+    finally:
+        await engine.dispose()
+
+
 async def test_narrative_migration_adds_followup_assignment_snapshot_column_once():
     register_models()
     engine = _sqlite_engine()

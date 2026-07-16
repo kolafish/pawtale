@@ -223,7 +223,13 @@ export function MemoirTranscriptEditor({
               <span className="inline-flex min-w-0 items-center gap-1">
                 <BookOpenText size={13} aria-hidden="true" />
                 <span className="max-w-56 truncate">
-                  {material.included_chapters.map((chapter) => chapter.title).join('、')}
+                  {material.included_chapters
+                    .map(chapter => (
+                      chapter.include_in_book === false
+                        ? `${chapter.title}（不收入本书）`
+                        : chapter.title
+                    ))
+                    .join('、')}
                 </span>
               </span>
             )}

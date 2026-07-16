@@ -18,7 +18,7 @@ from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionResponse,
     MemoirBookCompletionState,
 )
-from app.services.memoir.book_plan_sources import load_plan_with_chapters, sorted_chapters
+from app.services.memoir.book_plan_sources import included_book_chapters, load_plan_with_chapters
 from app.services.memoir.narrative import completion_items, followup_jobs, gap_audit
 from app.services.memoir.narrative.gap_rules import ChapterAuditContext, load_chapter_audit_context
 
@@ -305,7 +305,7 @@ async def get_book_completion_overview(
     project_id: str,
 ) -> MemoirBookCompletionOverviewResponse:
     plan = await load_plan_with_chapters(db, project_id)
-    chapters = sorted_chapters(plan) if plan else []
+    chapters = included_book_chapters(plan) if plan else []
     if not chapters:
         return MemoirBookCompletionOverviewResponse(
             project_id=project_id,
@@ -355,7 +355,7 @@ async def prepare_book_completion_chapter(
     chapter_id: str,
 ) -> MemoirBookCompletionResponse:
     plan = await load_plan_with_chapters(db, project_id)
-    chapters = sorted_chapters(plan) if plan else []
+    chapters = included_book_chapters(plan) if plan else []
     chapter = next((item for item in chapters if item.id == chapter_id), None)
     if chapter is None:
         raise ValueError("chapter does not belong to the project")

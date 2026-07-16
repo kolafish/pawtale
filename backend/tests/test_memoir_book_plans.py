@@ -409,6 +409,54 @@ async def test_mobile_memoir_book_plan_confirm_replaces_plan_with_user_chapters(
     assert legacy_response.status_code == 422
 
 
+async def test_mobile_memoir_book_plan_confirmation_preserves_hidden_chapters(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书，心里很紧张。")
+    project_id = first["session"]["project_id"]
+    monkeypatch.setattr(
+        "app.services.memoir.book_plan_ai.get_ai_service",
+        lambda model=None: FakeBookPlanAI(),
+    )
+    generated = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/generate",
+        json={},
+    )
+    assert generated.status_code == 200
+    generated_chapters = generated.json()["chapters"]
+
+    hidden = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": generated_chapters[1]["id"],
+            "include_in_book": False,
+        },
+    )
+    assert hidden.status_code == 200
+
+    confirmed = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "title": hidden.json()["title"],
+            "chapters": [
+                {
+                    "title": chapter["title"],
+                    "include_in_book": chapter["include_in_book"],
+                    "source_refs": chapter["source_refs"],
+                }
+                for chapter in hidden.json()["chapters"]
+            ],
+        },
+    )
+
+    assert confirmed.status_code == 200, confirmed.text
+    assert [chapter["include_in_book"] for chapter in confirmed.json()["chapters"]] == [True, False]
+
+
 async def test_mobile_memoir_book_source_coverage_detects_new_transcripts_after_plan(
     client,
     test_db,
@@ -823,6 +871,15 @@ async def test_mobile_memoir_book_plan_structure_command_merges_chapters_and_mar
         project_id=project_id,
         chapter_id=source_chapter["id"],
     )
+    hidden_target = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": target_chapter["id"],
+            "include_in_book": False,
+        },
+    )
+    assert hidden_target.status_code == 200, hidden_target.text
 
     response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
@@ -836,6 +893,7 @@ async def test_mobile_memoir_book_plan_structure_command_merges_chapters_and_mar
     assert response.status_code == 200, response.json()
     data = response.json()
     assert [chapter["id"] for chapter in data["chapters"]] == [target_chapter["id"]]
+    assert data["chapters"][0]["include_in_book"] is True
     assert [ref["utterance_id"] for ref in data["chapters"][0]["source_refs"]] == [
         first["utterance_id"],
         second["utterance_id"],
@@ -988,6 +1046,100 @@ async def test_mobile_memoir_book_plan_structure_command_creates_and_deletes_sou
     coverage = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-source-coverage")
     assert coverage.status_code == 200
     assert [item["utterance_id"] for item in coverage.json()["uncovered_sources"]] == [later["utterance_id"]]
+
+
+async def test_mobile_memoir_book_plan_can_hide_and_restore_structured_chapter(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db, "我小时候常在外婆家的院子里晒太阳。")
+    second = await create_test_voice_transcript(client, test_db, "后来我第一次离家去县城读书。")
+    project_id = first["session"]["project_id"]
+    confirmed = await client.put(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {"title": "外婆家的童年", "source_refs": [memoir_source_ref(first)]},
+                {"title": "离家求学", "source_refs": [memoir_source_ref(second)]},
+            ]
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    first_chapter, second_chapter = confirmed.json()["chapters"]
+    assert first_chapter["include_in_book"] is True
+    assert second_chapter["include_in_book"] is True
+
+    contract = MemoirChapterContract(
+        project_id=project_id,
+        chapter_id=second_chapter["id"],
+        version=1,
+        objective="讲清第一次离家的经过。",
+        reader_takeaway="理解这次经历带来的变化。",
+        status=MemoirChapterContractStatus.DRAFT.value,
+        created_by=MemoirNarrativeActorType.SYSTEM.value,
+    )
+    test_db.add(contract)
+    await test_db.commit()
+
+    hidden = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": second_chapter["id"],
+            "include_in_book": False,
+        },
+    )
+    assert hidden.status_code == 200, hidden.text
+    hidden_chapters = hidden.json()["chapters"]
+    assert len(hidden_chapters) == 2
+    assert hidden_chapters[1]["include_in_book"] is False
+    assert hidden_chapters[1]["source_refs"][0]["utterance_id"] == second["utterance_id"]
+    assert await test_db.get(MemoirChapterContract, contract.id) is not None
+
+    delete_last_included = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={"type": "delete_chapter", "chapter_id": first_chapter["id"]},
+    )
+    assert delete_last_included.status_code == 400
+    assert delete_last_included.json()["detail"] == "成书时至少需要保留一个章节"
+
+    replace_last_included = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan",
+        json={
+            "chapters": [
+                {
+                    "id": second_chapter["id"],
+                    "title": second_chapter["title"],
+                    "include_in_book": False,
+                    "source_refs": [memoir_source_ref(second)],
+                }
+            ]
+        },
+    )
+    assert replace_last_included.status_code == 400
+    assert replace_last_included.json()["detail"] == "成书时至少需要保留一个章节"
+
+    last_included = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": first_chapter["id"],
+            "include_in_book": False,
+        },
+    )
+    assert last_included.status_code == 400
+    assert last_included.json()["detail"] == "成书时至少需要保留一个章节"
+
+    restored = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": second_chapter["id"],
+            "include_in_book": True,
+        },
+    )
+    assert restored.status_code == 200, restored.text
+    assert all(item["include_in_book"] for item in restored.json()["chapters"])
 
 
 async def test_book_plan_destructive_changes_reject_chapters_with_narrative_contract(

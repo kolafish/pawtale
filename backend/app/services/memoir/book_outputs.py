@@ -61,6 +61,7 @@ from app.services.memoir.book_output_manuscript import (
     updated_manuscript_payload as _updated_manuscript_payload,
 )
 from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
     MemoirBookOutputExportLayout,
@@ -176,7 +177,7 @@ async def _load_plan(
 def _require_confirmed_chapters(plan: MemoirBookPlan) -> list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=400, detail="请先确认章节规划")
-    chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
+    chapters = included_book_chapters(plan)
     if not chapters:
         raise HTTPException(status_code=400, detail="章节规划不能为空")
 
@@ -248,7 +249,7 @@ def _current_book_snapshot(
 ) -> tuple[list[dict[str, object]], list[str]]:
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         return [], ["章节规划"]
-    chapters = sorted(plan.chapters, key=lambda item: item.sort_order)
+    chapters = included_book_chapters(plan)
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
     for index, chapter in enumerate(chapters, start=1):

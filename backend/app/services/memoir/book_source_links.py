@@ -400,6 +400,7 @@ async def included_chapters_by_utterance(
             chapter_id=chapter.id,
             title=chapter.title,
             sort_order=chapter.sort_order,
+            include_in_book=chapter.include_in_book,
         )
         for utterance_id in source_ref_utterance_ids(refs_by_chapter.get(chapter.id, [])):
             included.setdefault(utterance_id, []).append(chapter_item)

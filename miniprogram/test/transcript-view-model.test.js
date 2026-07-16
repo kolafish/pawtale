@@ -34,6 +34,19 @@ test("transcript view model derives book inclusion text", () => {
     }),
     "已放入第 1 章：童年院子等 2 章",
   );
+  assert.equal(
+    transcriptBookInclusionText({
+      included_chapters: [
+        {
+          chapter_id: "chapter-2",
+          title: "暂不成书的补记",
+          sort_order: 1,
+          include_in_book: false,
+        },
+      ],
+    }),
+    "已整理到第 2 章：暂不成书的补记（不收入本书）",
+  );
   assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "尚未入章");
 });
 

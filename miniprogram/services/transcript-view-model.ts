@@ -189,13 +189,20 @@ export function transcriptBookInclusionText(item: MemoirVoiceTranscriptItem): st
     .map((chapter) => ({
       title: chapter.title.trim() || "未命名章节",
       chapterNumber: chapter.sort_order + 1,
+      includeInBook: chapter.include_in_book !== false,
     }));
   if (!chapters.length) {
     return "尚未入章";
   }
+  const includedChapters = chapters.filter((chapter) => chapter.includeInBook);
+  if (includedChapters.length) {
+    const first = includedChapters[0];
+    const suffix = includedChapters.length > 1 ? `等 ${includedChapters.length} 章` : "";
+    return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
+  }
   const first = chapters[0];
   const suffix = chapters.length > 1 ? `等 ${chapters.length} 章` : "";
-  return `已放入第 ${first.chapterNumber} 章：${first.title}${suffix}`;
+  return `已整理到第 ${first.chapterNumber} 章：${first.title}${suffix}（不收入本书）`;
 }
 
 export function plainTranscriptSegments(text: string): TranscriptTextSegment[] {

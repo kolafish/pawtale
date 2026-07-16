@@ -442,9 +442,10 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert snapshot["chapter_progress_items"] == [
         {
             "chapter_id": chapter.id,
-            "title": "外婆家的童年",
-            "sort_order": 0,
-            "source_count": 1,
+                "title": "外婆家的童年",
+                "sort_order": 0,
+                "include_in_book": True,
+                "source_count": 1,
             "pending_source_count": 1,
             "removed_source_count": 1,
             "draft_status": "confirmed",

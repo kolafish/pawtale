@@ -86,6 +86,8 @@ async def load_book_consistency_context(
     chapter_contexts: list[ChapterAuditContext] = []
     if plan is not None:
         for chapter in sorted(plan.chapters, key=lambda item: (item.sort_order, item.id)):
+            if not chapter.include_in_book:
+                continue
             chapter_contexts.append(
                 await load_chapter_audit_context(
                     db,

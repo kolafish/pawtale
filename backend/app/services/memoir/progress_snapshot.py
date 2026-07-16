@@ -212,6 +212,7 @@ def _chapter_items(
                 chapter_id=chapter.id,
                 title=chapter.title,
                 sort_order=chapter.sort_order,
+                include_in_book=chapter.include_in_book,
                 source_count=len(source_ids),
                 pending_source_count=source_change_state.pending_source_count if source_change_state else 0,
                 removed_source_count=source_change_state.removed_source_count if source_change_state else 0,

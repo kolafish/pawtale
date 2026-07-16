@@ -134,6 +134,7 @@ async def run_book_quality_audit(
     chapter_items = [
         chapter_audit_item(item)
         for item in sorted(snapshot.chapter_progress_items, key=lambda value: value.sort_order)
+        if item.include_in_book
     ]
     audit_status = determine_overall_status(
         chapter_items=chapter_items,

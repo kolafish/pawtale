@@ -298,6 +298,16 @@ function planFromStructureCommand(status, command) {
         .map((chapter, index) => ({ ...chapter, sort_order: index })),
     };
   }
+  if (command.type === "set_chapter_book_inclusion") {
+    return {
+      ...base,
+      chapters: base.chapters.map((chapter) => (
+        chapter.id === command.chapter_id
+          ? { ...chapter, include_in_book: command.include_in_book }
+          : chapter
+      )),
+    };
+  }
   if (command.type === "move_chapter") {
     const chapters = [...base.chapters];
     const fromIndex = chapters.findIndex((chapter) => chapter.id === command.chapter_id);
@@ -640,14 +650,70 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
-    ["整理本章", "朗读"],
-    ["整理本章", "朗读"],
-    ["整理本章"],
+    ["整理本章", "朗读", "不收入本书"],
+    ["整理本章", "朗读", "不收入本书"],
+    ["整理本章", "不收入本书"],
   ]);
   assert.deepEqual(navigations, [
     "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter-1",
   ]);
   assert.deepEqual(audioCalls, ["chapter-1"]);
+  delete global.wx;
+});
+
+test("book page hides and restores a chapter without deleting its content", async () => {
+  const calls = [];
+  const actionSheets = [];
+  global.wx = {
+    navigateTo() {},
+    showActionSheet(options) {
+      actionSheets.push(options.itemList);
+      options.success({ tapIndex: options.itemList.length - 1 });
+    },
+    showToast() {},
+    switchTab() {},
+  };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      applyMemoirBookPlanStructureCommand: async (projectId, data) => {
+        calls.push({ projectId, data });
+        return planFromStructureCommand("confirmed", data);
+      },
+      getMemoirBookChapterDraft: async () => null,
+      getMemoirBookSourceCoverage: async () => sampleSourceCoverage(0),
+      getMemoirBookOutput: async () => null,
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+
+  page.openChapterMoreActions.call(context, {
+    currentTarget: { dataset: { id: "chapter-2" } },
+  });
+  await flushAsyncWork();
+
+  assert.deepEqual(actionSheets[0], ["整理本章", "不收入本书"]);
+  assert.deepEqual(calls[0], {
+    projectId: "project/1",
+    data: {
+      type: "set_chapter_book_inclusion",
+      chapter_id: "chapter-2",
+      include_in_book: false,
+    },
+  });
+  assert.equal(context.data.chapters[1].include_in_book, false);
+  assert.match(context.data.chapters[1].chapterSummaryMetaText, /^不收入本书/);
+  assert.equal(context.data.totalChapterCount, 1);
+
+  page.openChapterMoreActions.call(context, {
+    currentTarget: { dataset: { id: "chapter-2" } },
+  });
+  await flushAsyncWork();
+
+  assert.deepEqual(actionSheets[1], ["整理本章", "恢复收入本书"]);
+  assert.equal(calls[1].data.include_in_book, true);
+  assert.equal(context.data.chapters[1].include_in_book, true);
+  assert.equal(context.data.totalChapterCount, 2);
   delete global.wx;
 });
 
@@ -752,6 +818,25 @@ test("book page progress counts generated and confirmed chapters", () => {
   assert.equal(mod.bookProgressText(chapters), "1/2 章已确认，2 章已有正文");
   assert.equal(chapters[0].draftStatusText, "已确认");
   assert.equal(chapters[1].draftStatusText, "待确认");
+});
+
+test("book page excludes hidden chapters from full-book generation readiness", () => {
+  global.wx = { switchTab() {} };
+  const { page } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  plan.chapters[1].include_in_book = false;
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyPlan.call(context, plan, {
+    "chapter-1": sampleDraft(1, "confirmed"),
+    "chapter-2": sampleDraft(1, "draft"),
+  });
+
+  assert.equal(context.data.confirmedDraftCount, 1);
+  assert.equal(context.data.totalChapterCount, 1);
+  assert.equal(context.data.allChaptersConfirmed, true);
+  assert.equal(context.data.canGenerateBook, true);
+  assert.equal(context.data.progressText, "1/1 章已确认，1 章已有正文");
+  delete global.wx;
 });
 
 test("book page stores only the full-book summary needed by the home view", () => {
@@ -1461,6 +1546,7 @@ test("book page confirms chapters with trimmed user edits and original source re
   const plan = samplePlan("draft");
   const chapters = mod.buildChapterViews(plan);
   chapters[0].editingTitle = "  童年院子  ";
+  chapters[1].include_in_book = false;
   const context = pageContext(page, {
     projectId: "project/1",
     projectTitle: "外婆回忆录",
@@ -1475,6 +1561,8 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal(submissions[0].projectId, "project/1");
   assert.equal(submissions[0].data.title, "用户确认目录");
   assert.equal(submissions[0].data.chapters[0].title, "童年院子");
+  assert.equal(submissions[0].data.chapters[0].include_in_book, true);
+  assert.equal(submissions[0].data.chapters[1].include_in_book, false);
   assert.equal("summary" in submissions[0].data.chapters[0], false);
   assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(context.data.stage, "drafting");

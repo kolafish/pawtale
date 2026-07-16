@@ -765,10 +765,11 @@ definePage<BookPageData>()({
         run: () => this.playChapterAudioById(chapterId, { showPreparingToast: true }),
       });
     }
-    if (!actions.length) {
-      wx.showToast({ title: this.data.ttsBusyTarget ? "正在准备朗读，稍后再试" : "暂无可用操作", icon: "none" });
-      return;
-    }
+    const nextIncludeInBook = chapter.include_in_book === false;
+    actions.push({
+      label: nextIncludeInBook ? "恢复收入本书" : "不收入本书",
+      run: () => this.setChapterBookInclusion(chapterId, nextIncludeInBook),
+    });
     wx.showActionSheet({
       itemList: actions.map((item) => item.label),
       success: (result) => {
@@ -861,6 +862,20 @@ definePage<BookPageData>()({
     if (patch) {
       this.setData(patch);
     }
+  },
+
+  async setChapterBookInclusion(chapterId: string, includeInBook: boolean) {
+    if (!chapterId || this.data.updatingPlanStructure) {
+      return;
+    }
+    await this.applyPlanStructureCommand(
+      {
+        type: "set_chapter_book_inclusion",
+        chapter_id: chapterId,
+        include_in_book: includeInBook,
+      },
+      includeInBook ? "已恢复收入本书" : "已设为不收入本书，请重新生成全书",
+    );
   },
 
   async moveChapter(event: DatasetEvent) {
@@ -1055,7 +1070,7 @@ definePage<BookPageData>()({
       return;
     }
     if (!this.data.allChaptersConfirmed) {
-      this.setData({ error: "请先确认所有章节正文" });
+      this.setData({ error: "请先确认所有收入本书的章节正文" });
       return;
     }
     this.stopPlayback();

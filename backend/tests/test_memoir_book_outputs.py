@@ -879,6 +879,56 @@ async def test_mobile_memoir_book_output_detects_reordered_chapters(client, test
     assert stale_data["is_stale"] is True
     assert stale_data["stale_chapter_titles"] == ["第一次离家", "外婆家的童年"]
 
+
+async def test_mobile_memoir_book_output_excludes_hidden_chapter_and_invalidates_formal_output(
+    client,
+    test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(
+        test_db,
+        project_id=project_id,
+        confirmed_chapters=False,
+    )
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    output = await test_db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    assert output is not None
+    output.status = MemoirOutputStatus.ACCEPTED.value
+    await test_db.commit()
+
+    hidden = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/structure-commands",
+        json={
+            "type": "set_chapter_book_inclusion",
+            "chapter_id": chapters[1].id,
+            "include_in_book": False,
+        },
+    )
+    assert hidden.status_code == 200, hidden.text
+    await test_db.refresh(output)
+    assert output.status == MemoirOutputStatus.DRAFT.value
+
+    plan = await test_db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .options(
+            selectinload(MemoirBookPlan.chapters)
+            .selectinload(MemoirBookPlanChapter.draft)
+            .selectinload(MemoirBookChapterDraft.versions)
+        )
+        .execution_options(populate_existing=True)
+    )
+    assert plan is not None
+    included = book_outputs._require_confirmed_chapters(plan)
+    assert [chapter.id for chapter, _ in included] == [chapters[0].id]
+
+    stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert stale.status_code == 200
+    assert stale.json()["is_stale"] is True
+    assert stale.json()["stale_chapter_titles"] == ["章节结构"]
+
 async def test_mobile_memoir_book_output_marks_unconfirmed_plan_as_stale(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     plan, _ = await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -970,6 +1020,7 @@ async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
         utterance_id="utterance-3",
         quote="第二章素材二",
     )
+    chapters[1].include_in_book = False
     await test_db.commit()
     fake_tts = FakeBookTTS()
     monkeypatch.setattr("app.services.memoir.book_audio.get_tts_client", lambda: fake_tts)
@@ -991,6 +1042,7 @@ async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
     assert "《外婆回忆录章节规划》现在有 2 章。" in outline_text
     assert "第 1 章，外婆家的童年。本章收录 1 条语音素材。" in outline_text
     assert "第 2 章，第一次离家。本章收录 2 条语音素材。" in outline_text
+    assert "本章目前保留整理，但不收入最终成书。" in outline_text
     assert "你可以继续调整章节顺序、合并章节，或者说出想修改的地方。" in outline_text
     assert fake_tts.calls[0]["voice"] == "voice-outline"
     assert fake_tts.calls[0]["speed_ratio"] == 1.25

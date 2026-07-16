@@ -275,6 +275,7 @@ async def test_interview_editor_groups_multiple_answers_under_human_question(cli
         "chapter_id": chapter.id,
         "title": "家里人",
         "sort_order": 0,
+        "include_in_book": True,
     }
     assert detail["unassigned_answers"] == []
     assert [item["role"] for item in detail["raw_timeline"]] == ["interviewer", "user", "user"]

@@ -34,7 +34,11 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryVerificationStatus,
 )
 from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirEditingJobStatus
-from app.models.memoir import MemoirBookChapterDraft, MemoirBookChapterDraftVersion
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlanChapter,
+)
 from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
@@ -1158,10 +1162,24 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
     )
     assert draft is not None
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
+    hidden_chapter = MemoirBookPlanChapter(
+        plan_id=created["chapter"].plan_id,
+        project_id=created["project_id"],
+        title="保留但不收入本书的补记",
+        sort_order=1,
+        include_in_book=False,
+        source_refs_json=[],
+        metadata_json={},
+    )
+    test_db.add(hidden_chapter)
+    await test_db.flush()
     book = await draft_assembly.assemble_book_output(
         test_db,
         project_id=created["project_id"],
     )
+    assert [item["chapter_id"] for item in book.chapter_snapshot_json] == [
+        created["chapter"].id
+    ]
     assert book.chapter_snapshot_json[0]["draft_version_id"] == second_assembly.draft_version_id
     assert (
         book.chapter_snapshot_json[0]["block_snapshot"][0]["block_version_id"]

@@ -19,12 +19,13 @@ export function MemoirDraftChapterList({
   selectedChapterId,
   onSelect,
 }: MemoirDraftChapterListProps) {
+  const includedChapters = chapters.filter(chapter => chapter.include_in_book !== false);
   return (
     <aside className="flex h-full min-h-0 flex-col bg-white">
       <div className="border-b border-black/6 px-4 py-4">
         <h1 className="text-base font-semibold text-[#202824]">章节稿</h1>
         <p className="mt-1 text-xs text-[#7a847f] tabular-nums">
-          已确认 {chapters.filter(chapter => draftsByChapterId.get(chapter.id)?.status === 'confirmed').length}/{chapters.length} 章
+          已确认 {includedChapters.filter(chapter => draftsByChapterId.get(chapter.id)?.status === 'confirmed').length}/{includedChapters.length} 章
         </p>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto divide-y divide-black/5">
@@ -69,6 +70,7 @@ export function MemoirDraftChapterList({
                 </span>
                 <span className="mt-1 block text-[11px] text-[#7a847f]">
                   {status === 'confirmed' ? '已确认' : draft ? '编辑中' : '未生成'}
+                  {chapter.include_in_book === false ? ' · 不收入本书' : ''}
                   {pendingCount > 0 ? ` · ${pendingCount} 段素材待补写` : ''}
                 </span>
               </span>

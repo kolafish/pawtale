@@ -36,12 +36,14 @@ class MemoirBookSourceIncludedChapter(BaseModel):
     chapter_id: str
     title: str
     sort_order: int
+    include_in_book: bool = True
 
 
 class MemoirBookPlanChapterInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str
+    include_in_book: bool = True
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
 
     @field_validator("title")
@@ -122,6 +124,7 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
         "merge_chapters",
         "move_chapter",
         "rename_chapter",
+        "set_chapter_book_inclusion",
         "split_chapter",
     ]
     chapter_id: str | None = None
@@ -132,6 +135,7 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     relative_chapter_id: str | None = None
     relative_position: Literal["before", "after"] | None = None
     title: str | None = None
+    include_in_book: bool | None = None
     utterance_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
 
@@ -298,6 +302,7 @@ class MemoirBookPlanChapterResponse(BaseModel):
     project_id: str
     title: str
     sort_order: int
+    include_in_book: bool = True
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)
     pending_source_count: int = 0

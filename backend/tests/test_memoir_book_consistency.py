@@ -48,6 +48,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookOutput,
+    MemoirBookPlanChapter,
 )
 from app.models.memoir_narrative import (
     MemoirChapterContract,
@@ -167,16 +168,30 @@ async def _create_ready_structured_book(
     test_db,
     *,
     plan_status: MemoirBookPlanStatus = MemoirBookPlanStatus.CONFIRMED,
+    include_hidden_chapter: bool = False,
 ):
     project_id = await ensure_mobile_memoir_project(client)
     user_id = (await client.get("/api/auth/me")).json()["id"]
-    _, chapters = await create_test_book_plan_with_chapters(
+    plan, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
         chapter_titles=["第一次离家"],
         status=plan_status,
     )
     chapter = chapters[0]
+    if include_hidden_chapter:
+        test_db.add(
+            MemoirBookPlanChapter(
+                plan_id=plan.id,
+                project_id=project_id,
+                title="保留但不收入本书的补记",
+                sort_order=1,
+                include_in_book=False,
+                source_refs_json=[],
+                metadata_json={},
+            )
+        )
+        await test_db.flush()
     contract = MemoirChapterContract(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -387,7 +402,11 @@ async def test_current_full_audit_is_required_before_formalizing_and_edits_reope
     test_db,
     monkeypatch,
 ):
-    project_id, user_id, _ = await _create_ready_structured_book(client, test_db)
+    project_id, user_id, _ = await _create_ready_structured_book(
+        client,
+        test_db,
+        include_hidden_chapter=True,
+    )
     chapter_story = await test_db.scalar(
         select(MemoirStory).where(
             MemoirStory.project_id == project_id,

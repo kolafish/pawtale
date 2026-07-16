@@ -122,5 +122,7 @@ def build_book_outline_audio_text(
             else 0
         )
         lines.append(f"第 {index} 章，{chapter_title}。本章收录 {source_count} 条语音素材。")
+        if not chapter.include_in_book:
+            lines.append("本章目前保留整理，但不收入最终成书。")
     lines.append("你可以继续调整章节顺序、合并章节，或者说出想修改的地方。")
     return "\n".join(lines)
