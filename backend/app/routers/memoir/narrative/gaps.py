@@ -9,15 +9,15 @@ from app.database import get_db
 from app.domain.memoir.narrative_types import MemoirNarrativeGapStatus
 from app.models.users import User
 from app.schemas.memoir_narrative import (
-    MemoirChapterGapAuditJobResponse,
-    MemoirChapterGapAuditRequest,
+    MemoirChapterCompletionRefreshJobResponse,
+    MemoirChapterCompletionRefreshRequest,
     MemoirChapterWorkspaceResponse,
     MemoirNarrativeGapDismissRequest,
     MemoirNarrativeGapListResponse,
     MemoirNarrativeGapResolutionRequest,
     MemoirNarrativeGapResponse,
 )
-from app.services.memoir.narrative import chapter_workspace, gap_audit, gaps
+from app.services.memoir.narrative import chapter_workspace, completion_refresh, gaps
 
 from .common import authorize_project, decision_error
 
@@ -60,20 +60,20 @@ async def get_memoir_chapter_workspace(
 
 
 @router.post(
-    "/projects/{project_id}/chapters/{chapter_id}/workspace/audits",
-    response_model=MemoirChapterGapAuditJobResponse,
+    "/projects/{project_id}/chapters/{chapter_id}/completion-refresh-jobs",
+    response_model=MemoirChapterCompletionRefreshJobResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
-async def audit_memoir_chapter_workspace(
+async def refresh_memoir_chapter_completion(
     project_id: str,
     chapter_id: str,
-    req: MemoirChapterGapAuditRequest,
+    req: MemoirChapterCompletionRefreshRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
-        job = await gap_audit.enqueue_chapter_gap_audit(
+        job = await completion_refresh.enqueue_chapter_completion_refresh(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
@@ -82,7 +82,7 @@ async def audit_memoir_chapter_workspace(
         )
         await db.commit()
         await db.refresh(job)
-        return MemoirChapterGapAuditJobResponse.model_validate(job)
+        return MemoirChapterCompletionRefreshJobResponse.model_validate(job)
     except (ValueError, IntegrityError) as exc:
         await _raise_mutation_error(db, exc)
 

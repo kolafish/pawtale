@@ -10,7 +10,7 @@ export type MemoirChapterCompletionState =
 export type MemoirChapterCompletionNextActionKind =
   | "create_direction"
   | "confirm_direction"
-  | "refresh_audit"
+  | "refresh_completion"
   | "wait"
   | "continue_confirmation"
   | "start_interview"
@@ -53,8 +53,8 @@ export interface MemoirChapterCompletionSummary {
   title: string;
   sort_order: number;
   state: MemoirChapterCompletionState;
-  audit_status: "not_started" | "pending" | "running" | "succeeded" | "failed" | "skipped";
-  audit_is_current: boolean;
+  refresh_status: "not_started" | "pending" | "running" | "succeeded" | "failed" | "skipped";
+  refresh_is_current: boolean;
   next_action: MemoirChapterCompletionNextAction;
   must_handle_count: number;
   suggested_count: number;

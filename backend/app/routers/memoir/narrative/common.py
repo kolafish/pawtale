@@ -24,6 +24,7 @@ def decision_error(exc: ValueError) -> HTTPException:
     message = str(exc)
     status_code = 404 if "does not belong" in message else 409
     detail = {
+        "chapter does not belong to the project": "章节不存在",
         "confirm the chapter direction before assembling the chapter": "请先确认本章整理方向",
         "chapter has no structured draft blocks to assemble": "请先整理本章正文段落",
         "confirm every included draft block before assembling the chapter": "请先确认本章所有正文段落",

@@ -1,6 +1,5 @@
 from .book_completion import (
     MemoirBookCompletionOverviewResponse,
-    MemoirBookCompletionResponse,
     MemoirChapterCompletionGap,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
@@ -18,7 +17,6 @@ from .book_consistency import (
     MemoirBookSemanticGapCandidate,
 )
 from .claims import MemoirClaimCreate, MemoirClaimEvidenceCreate
-from .completion_items import MemoirCompletionItem
 from .chapter_structures import (
     MemoirChapterContractConstraints,
     MemoirChapterContractDraftRequest,
@@ -70,8 +68,8 @@ from .fact_resolution import (
     MemoirFactResolutionPlan,
 )
 from .gaps import (
-    MemoirChapterGapAuditJobResponse,
-    MemoirChapterGapAuditRequest,
+    MemoirChapterCompletionRefreshJobResponse,
+    MemoirChapterCompletionRefreshRequest,
     MemoirChapterWorkspaceAvailableStoryResponse,
     MemoirChapterWorkspaceAnswerUpdateResponse,
     MemoirChapterWorkspaceGapGroups,
@@ -90,8 +88,6 @@ from .followup_tasks import (
     MemoirFollowupTaskActionRequest,
     MemoirFollowupTaskClaimResponse,
     MemoirFollowupTaskDeferRequest,
-    MemoirFollowupTaskGenerateRequest,
-    MemoirFollowupTaskGenerationJobResponse,
     MemoirFollowupTaskListResponse,
     MemoirFollowupTaskOutcomeRequest,
     MemoirFollowupTaskResponse,
@@ -120,7 +116,6 @@ from .stories import (
 )
 
 __all__ = [
-    "MemoirBookCompletionResponse",
     "MemoirBookCompletionOverviewResponse",
     "MemoirChapterCompletionGap",
     "MemoirChapterCompletionNextAction",
@@ -137,7 +132,6 @@ __all__ = [
     "MemoirBookSemanticGapCandidate",
     "MemoirClaimCreate",
     "MemoirClaimEvidenceCreate",
-    "MemoirCompletionItem",
     "MemoirChapterContractConstraints",
     "MemoirChapterContractDraftRequest",
     "MemoirChapterContractResponse",
@@ -184,8 +178,8 @@ __all__ = [
     "MemoirEntityMergeResolution",
     "MemoirFactResolutionOperation",
     "MemoirFactResolutionPlan",
-    "MemoirChapterGapAuditJobResponse",
-    "MemoirChapterGapAuditRequest",
+    "MemoirChapterCompletionRefreshJobResponse",
+    "MemoirChapterCompletionRefreshRequest",
     "MemoirChapterWorkspaceAvailableStoryResponse",
     "MemoirChapterWorkspaceAnswerUpdateResponse",
     "MemoirChapterWorkspaceGapGroups",
@@ -202,8 +196,6 @@ __all__ = [
     "MemoirFollowupTaskActionRequest",
     "MemoirFollowupTaskClaimResponse",
     "MemoirFollowupTaskDeferRequest",
-    "MemoirFollowupTaskGenerateRequest",
-    "MemoirFollowupTaskGenerationJobResponse",
     "MemoirFollowupTaskListResponse",
     "MemoirFollowupTaskOutcomeRequest",
     "MemoirFollowupTaskResponse",

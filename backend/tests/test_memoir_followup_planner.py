@@ -1167,7 +1167,7 @@ async def test_story_narration_task_completes_after_one_valid_answer(client, tes
             MemoirEditingJob.project_id == fixture["project_id"],
             MemoirEditingJob.chapter_id == fixture["chapter"].id,
             MemoirEditingJob.job_type
-            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+            == MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
         )
     )
     assert audit_job is not None
@@ -1323,12 +1323,18 @@ async def test_concurrent_answer_does_not_rollback_new_narrative_evidence(
     assert gap.status == MemoirNarrativeGapStatus.RESOLVED.value
 
 
-async def test_followup_generation_runs_on_existing_background_worker(client, test_db):
+async def test_completion_refresh_plans_followups_on_existing_background_worker(
+    client,
+    test_db,
+):
     fixture = await _create_story_gap(client, test_db, generate=False)
     register_memoir_editing_job_handlers()
     response = await client.post(
-        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/generation-jobs",
-        json={"chapter_id": fixture["chapter"].id},
+        (
+            f"/api/memoir/projects/{fixture['project_id']}/chapters/"
+            f"{fixture['chapter'].id}/completion-refresh-jobs"
+        ),
+        json={"include_semantic_audit": False},
     )
     assert response.status_code == 202, response.text
     succeeded = await run_test_editing_job(test_db, response.json()["id"])

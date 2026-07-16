@@ -11,8 +11,8 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     getMemoirBookCompletionOverview: async () => {
       throw new Error("getMemoirBookCompletionOverview was not mocked");
     },
-    prepareMemoirBookCompletionChapter: async () => {
-      throw new Error("prepareMemoirBookCompletionChapter was not mocked");
+    enqueueMemoirChapterCompletionRefresh: async () => {
+      throw new Error("enqueueMemoirChapterCompletionRefresh was not mocked");
     },
     ...voiceApiExports,
   });
@@ -35,8 +35,8 @@ function readyOverview() {
         title: "学校里的比赛",
         sort_order: 0,
         state: "ready",
-        audit_status: "succeeded",
-        audit_is_current: true,
+        refresh_status: "succeeded",
+        refresh_is_current: true,
         next_action: {
           kind: "start_interview",
           eyebrow: "选择一个方向继续讲",
@@ -80,8 +80,8 @@ function readyOverview() {
         title: "参加工作",
         sort_order: 1,
         state: "complete",
-        audit_status: "succeeded",
-        audit_is_current: true,
+        refresh_status: "succeeded",
+        refresh_is_current: true,
         next_action: {
           kind: "complete",
           eyebrow: "本章已整理",

@@ -61,8 +61,7 @@ EDITING_JOB_RECOVERY_REASON = "editing_job_succeeded"
 
 _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
-    MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS: MemoirAutomationEventType.FOLLOWUP_TASKS_GENERATED,
+    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: MemoirAutomationEventType.AUDIT_COMPLETED,
     MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
@@ -72,8 +71,7 @@ _FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
 
 _FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE: "素材事实整理失败，原始转写未受影响，可稍后重试。",
-    MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT: "章节完整性检查失败，已有事实和正文未受影响，可稍后重试。",
-    MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS: "补访任务生成失败，已有事实和录音未受影响，可稍后重试。",
+    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION: "章节补全状态更新失败，已有事实、录音和正文未受影响，可稍后重试。",
     MemoirEditingJobType.GENERATE_DRAFT_BLOCKS: "正文块生成失败，已有正文和锁定内容未受影响，可稍后重试。",
     MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: "全书一致性检查失败，已有事实和正文未受影响，可稍后重试。",
     MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",

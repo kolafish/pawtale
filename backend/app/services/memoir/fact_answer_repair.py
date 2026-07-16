@@ -30,7 +30,7 @@ from app.schemas.memoir_narrative import (
     MemoirFactResolutionPlan,
 )
 from app.services.memoir import automation_event_resolution
-from app.services.memoir.narrative import fact_resolution, gap_audit
+from app.services.memoir.narrative import completion_refresh, fact_resolution
 
 
 class HistoricalFactAnswerRepairMismatch(ValueError):
@@ -371,7 +371,7 @@ async def apply_historical_fact_answer_repair(
     )
     audit_job = None
     if task.chapter_id:
-        audit_job = await gap_audit.enqueue_chapter_gap_audit(
+        audit_job = await completion_refresh.enqueue_chapter_completion_refresh(
             db,
             project_id=spec.project_id,
             chapter_id=task.chapter_id,

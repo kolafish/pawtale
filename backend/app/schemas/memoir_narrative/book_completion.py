@@ -17,15 +17,7 @@ MemoirBookCompletionState = Literal[
     "complete",
     "failed",
 ]
-MemoirBookCompletionAction = Literal[
-    "start_interview",
-    "wait",
-    "prepare",
-    "open_chapter",
-    "retry",
-    "none",
-]
-MemoirChapterCompletionAuditStatus = Literal["not_started"] | MemoirEditingJobStatus
+MemoirChapterCompletionRefreshStatus = Literal["not_started"] | MemoirEditingJobStatus
 MemoirChapterCompletionTaskStatus = Literal["pending", "in_progress", "deferred"]
 MemoirChapterCompletionDraftReadiness = Literal[
     "blocked",
@@ -36,7 +28,7 @@ MemoirChapterCompletionDraftReadiness = Literal[
 MemoirChapterCompletionNextActionKind = Literal[
     "create_direction",
     "confirm_direction",
-    "refresh_audit",
+    "refresh_completion",
     "wait",
     "continue_confirmation",
     "start_interview",
@@ -81,8 +73,8 @@ class MemoirChapterCompletionSummary(BaseModel):
     title: str
     sort_order: int
     state: MemoirBookCompletionState
-    audit_status: MemoirChapterCompletionAuditStatus
-    audit_is_current: bool
+    refresh_status: MemoirChapterCompletionRefreshStatus
+    refresh_is_current: bool
     next_action: MemoirChapterCompletionNextAction
     must_handle_count: int
     suggested_count: int
@@ -94,16 +86,6 @@ class MemoirChapterCompletionSummary(BaseModel):
     draft_readiness: MemoirChapterCompletionDraftReadiness
     headline: str
     detail: str
-
-
-class MemoirBookCompletionResponse(BaseModel):
-    project_id: str
-    state: MemoirBookCompletionState
-    action: MemoirBookCompletionAction
-    headline: str
-    detail: str
-    task_id: str | None = None
-    chapter_id: str | None = None
 
 
 class MemoirBookCompletionOverviewResponse(BaseModel):

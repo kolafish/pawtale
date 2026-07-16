@@ -13,7 +13,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
-    MemoirCompletionItemAction,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
@@ -41,10 +40,9 @@ from app.models.memoir_narrative import (
     MemoirStoryClaim,
 )
 from app.services.memoir.narrative import (
-    completion_items,
     completion_planner,
+    completion_refresh,
     followup_planner,
-    gap_audit,
     gap_semantic,
     gaps,
 )
@@ -325,7 +323,10 @@ async def test_project_rule_audit_resolves_obsolete_gap_and_reopens_it_if_condit
     ) == 2
 
 
-async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_db):
+async def test_completion_refresh_is_queued_on_existing_editing_job_worker(
+    client,
+    test_db,
+):
     created = await create_test_voice_transcript(client, test_db)
     project_id = created["session"]["project_id"]
     _, chapters = await create_test_book_plan_with_chapters(
@@ -335,7 +336,7 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
     )
 
     response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace/audits",
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/completion-refresh-jobs",
         json={"include_semantic_audit": False},
     )
 
@@ -359,7 +360,7 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
     ) == 1
 
     semantic_response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace/audits",
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/completion-refresh-jobs",
         json={"include_semantic_audit": True, "ai_model": "test-semantic-model"},
     )
     assert semantic_response.status_code == 202, semantic_response.text
@@ -367,7 +368,10 @@ async def test_gap_audit_is_queued_on_existing_editing_job_worker(client, test_d
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
     )
     assert workspace.status_code == 200
-    assert workspace.json()["latest_audit_job"]["id"] == semantic_response.json()["id"]
+    assert (
+        workspace.json()["latest_refresh_job"]["id"]
+        == semantic_response.json()["id"]
+    )
 
 
 async def test_semantic_reaudit_resolves_then_reopens_gap_and_task_if_it_recurs(
@@ -556,11 +560,6 @@ async def test_gap_reaudit_cancels_a_pending_task_that_no_longer_needs_interview
             )
         ],
     )
-    items = await completion_items.chapter_completion_items(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapters[0].id,
-    )
     await followup_planner.generate_followup_tasks(
         test_db,
         project_id=project_id,
@@ -572,11 +571,6 @@ async def test_gap_reaudit_cancels_a_pending_task_that_no_longer_needs_interview
         reaudited[0].recommended_action
         == MemoirNarrativeGapRecommendedAction.EDITORIAL.value
     )
-    assert [
-        (item.action, item.task_id)
-        for item in items
-        if item.gap_id == reaudited[0].id
-    ] == [(MemoirCompletionItemAction.EDIT, None)]
     assert task.status == MemoirFollowupTaskStatus.CANCELLED.value
 
 
@@ -749,9 +743,9 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
         context,
         draft_blocks=(replace(draft_block, content="先交代搬家原因，再写进入新学校。"),),
     )
-    assert gap_audit.chapter_gap_audit_content_signature(
+    assert completion_refresh.chapter_completion_content_signature(
         context
-    ) != gap_audit.chapter_gap_audit_content_signature(changed_context)
+    ) != completion_refresh.chapter_completion_content_signature(changed_context)
 
 
 async def test_semantic_gap_routes_truly_missing_background_to_interview():

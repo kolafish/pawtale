@@ -18,7 +18,7 @@ import {
   confirmMemoirChapterContract,
   createMemoirVoiceSession,
   decideMemoirDraftBlock,
-  enqueueMemoirChapterWorkspaceAudit,
+  enqueueMemoirChapterCompletionRefresh,
   enqueueMemoirDraftBlockGeneration,
   enqueueMemoirDraftBlockRevision,
   getMemoirChapterWorkspace,
@@ -55,7 +55,7 @@ import {
 
 export { chapterNextAction, chapterWorkspaceViewPatch };
 
-const AUDIT_POLL_INTERVAL_MS = 1500;
+const COMPLETION_REFRESH_POLL_INTERVAL_MS = 1500;
 const DRAFT_JOB_POLL_INTERVAL_MS = 1500;
 const GAP_ACTIONS = new Set(["resolve", "accept-incomplete", "not-applicable"]);
 type DraftJobMode = "generate" | "revise";
@@ -100,8 +100,8 @@ interface ChapterWorkspacePageData extends ChapterWorkspaceViewPatch {
   workspace: MemoirChapterWorkspace | null;
   draftBlocks: DraftBlockView[];
   draftError: string;
-  auditBusy: boolean;
-  auditError: string;
+  refreshBusy: boolean;
+  completionError: string;
   contractBusy: boolean;
   startingFollowupTaskId: string;
   actionBusyGapId: string;
@@ -119,8 +119,8 @@ interface ChapterWorkspacePageData extends ChapterWorkspaceViewPatch {
 }
 
 definePage<ChapterWorkspacePageData>()({
-  auditPollTimer: null as ReturnType<typeof setTimeout> | null,
-  auditPollToken: 0,
+  refreshPollTimer: null as ReturnType<typeof setTimeout> | null,
+  refreshPollToken: 0,
   draftPollTimer: null as ReturnType<typeof setTimeout> | null,
   draftPollToken: 0,
   loadedOnce: false,
@@ -149,8 +149,8 @@ definePage<ChapterWorkspacePageData>()({
     appliedAnswerUpdates: [],
     outlineTitles: [],
     canAssembleDraft: false,
-    auditBusy: false,
-    auditError: "",
+    refreshBusy: false,
+    completionError: "",
     contractBusy: false,
     startingFollowupTaskId: "",
     actionBusyGapId: "",
@@ -200,8 +200,8 @@ definePage<ChapterWorkspacePageData>()({
         workspace,
         this.data.draftBlocks,
       );
-      const auditBusy = workspace.latest_audit_job?.status === "pending"
-        || workspace.latest_audit_job?.status === "running";
+      const refreshBusy = workspace.latest_refresh_job?.status === "pending"
+        || workspace.latest_refresh_job?.status === "running";
       const viewPatch = chapterWorkspaceViewPatch(workspace, draftBlocks);
       if (blockResult.error) {
         viewPatch.nextAction = {
@@ -216,9 +216,9 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         workspace,
         draftBlocks,
-        auditBusy,
-        auditError: workspace.latest_audit_job?.status === "failed"
-          ? (workspace.latest_audit_job.error_message || "本章整理失败")
+        refreshBusy,
+        completionError: workspace.latest_refresh_job?.status === "failed"
+          ? (workspace.latest_refresh_job.error_message || "本章整理失败")
           : "",
         error: "",
         draftError: blockResult.error
@@ -226,7 +226,7 @@ definePage<ChapterWorkspacePageData>()({
           : "",
         ...viewPatch,
       });
-      this.startAuditPollingIfNeeded();
+      this.startRefreshPollingIfNeeded();
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
@@ -248,8 +248,8 @@ definePage<ChapterWorkspacePageData>()({
       await this.suggestCurrentDirection();
     } else if (action.kind === "confirm_direction") {
       await this.confirmCurrentDirection();
-    } else if (action.kind === "refresh_audit") {
-      await this.startAudit();
+    } else if (action.kind === "refresh_completion") {
+      await this.startCompletionRefresh();
     } else if (action.kind === "continue_confirmation" || action.kind === "start_interview") {
       await this.beginFollowupInterview(action.taskId || this.data.directions[0]?.id || "");
     } else if (action.kind === "open_manual_review") {
@@ -305,52 +305,52 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  stopAuditPolling() {
-    this.auditPollToken += 1;
-    if (this.auditPollTimer !== null) {
-      clearTimeout(this.auditPollTimer);
-      this.auditPollTimer = null;
+  stopRefreshPolling() {
+    this.refreshPollToken += 1;
+    if (this.refreshPollTimer !== null) {
+      clearTimeout(this.refreshPollTimer);
+      this.refreshPollTimer = null;
     }
   },
 
-  startAuditPollingIfNeeded() {
-    if (!this.data.auditBusy || this.auditPollTimer !== null) {
+  startRefreshPollingIfNeeded() {
+    if (!this.data.refreshBusy || this.refreshPollTimer !== null) {
       return;
     }
-    const token = this.auditPollToken;
-    this.auditPollTimer = setTimeout(() => {
-      this.auditPollTimer = null;
-      void this.pollAudit(token);
-    }, AUDIT_POLL_INTERVAL_MS);
+    const token = this.refreshPollToken;
+    this.refreshPollTimer = setTimeout(() => {
+      this.refreshPollTimer = null;
+      void this.pollCompletionRefresh(token);
+    }, COMPLETION_REFRESH_POLL_INTERVAL_MS);
   },
 
-  async pollAudit(token: number) {
-    if (token !== this.auditPollToken || !this.data.auditBusy) {
+  async pollCompletionRefresh(token: number) {
+    if (token !== this.refreshPollToken || !this.data.refreshBusy) {
       return;
     }
     await this.loadPageData(true);
-    if (token === this.auditPollToken && this.data.auditBusy) {
-      this.startAuditPollingIfNeeded();
+    if (token === this.refreshPollToken && this.data.refreshBusy) {
+      this.startRefreshPollingIfNeeded();
     }
   },
 
-  async startAudit() {
-    if (!this.data.projectId || !this.data.chapterId || this.data.auditBusy) {
+  async startCompletionRefresh() {
+    if (!this.data.projectId || !this.data.chapterId || this.data.refreshBusy) {
       return;
     }
-    this.stopAuditPolling();
-    this.setData({ auditBusy: true, auditError: "" });
+    this.stopRefreshPolling();
+    this.setData({ refreshBusy: true, completionError: "" });
     try {
-      await enqueueMemoirChapterWorkspaceAudit(this.data.projectId, this.data.chapterId);
+      await enqueueMemoirChapterCompletionRefresh(this.data.projectId, this.data.chapterId);
       await this.loadPageData(true);
-      this.startAuditPollingIfNeeded();
+      this.startRefreshPollingIfNeeded();
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({
-        auditBusy: false,
-        auditError: error instanceof Error ? error.message : "本章整理提交失败",
+        refreshBusy: false,
+        completionError: error instanceof Error ? error.message : "本章整理提交失败",
       });
     }
   },
@@ -439,10 +439,10 @@ definePage<ChapterWorkspacePageData>()({
     const gap = this.data.reviewGaps.find((item) => item.id === gapId);
     const note = gap?.resolutionText.trim() || "";
     if (action === "resolve" && !note) {
-      this.setData({ auditError: "请先写明正确说法，再保存确认结果" });
+      this.setData({ completionError: "请先写明正确说法，再保存确认结果" });
       return;
     }
-    this.setData({ actionBusyGapId: gapId, auditError: "" });
+    this.setData({ actionBusyGapId: gapId, completionError: "" });
     try {
       await resolveMemoirNarrativeGap(this.data.projectId, gapId, action, {
         idempotency_key: `workspace:${gapId}:${action}:${Date.now()}`,
@@ -454,7 +454,9 @@ definePage<ChapterWorkspacePageData>()({
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ auditError: error instanceof Error ? error.message : "确认结果保存失败" });
+      this.setData({
+        completionError: error instanceof Error ? error.message : "确认结果保存失败",
+      });
     } finally {
       this.setData({ actionBusyGapId: "" });
     }
@@ -922,7 +924,7 @@ definePage<ChapterWorkspacePageData>()({
     if (this.loadedOnce) {
       void this.loadPageData(true);
     }
-    this.startAuditPollingIfNeeded();
+    this.startRefreshPollingIfNeeded();
     if (this.data.draftGenerationBusy && this.data.draftGenerationJobId) {
       this.scheduleDraftJobPoll(this.data.draftGenerationJobId, "generate");
     } else if (this.data.revisionBlockId && this.data.revisionJobId && !this.data.revisionSuggestion) {
@@ -931,12 +933,12 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   onHide() {
-    this.stopAuditPolling();
+    this.stopRefreshPolling();
     this.stopDraftPolling();
   },
 
   onUnload() {
-    this.stopAuditPolling();
+    this.stopRefreshPolling();
     this.stopDraftPolling();
   },
 

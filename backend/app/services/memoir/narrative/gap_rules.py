@@ -98,135 +98,192 @@ SLOT_LABELS = {
 }
 
 
-async def load_chapter_audit_context(
+async def load_chapter_audit_contexts(
     db: AsyncSession,
     *,
     project_id: str,
-    chapter_id: str,
-) -> ChapterAuditContext:
-    chapter = await db.scalar(
-        select(MemoirBookPlanChapter).where(
-            MemoirBookPlanChapter.project_id == project_id,
-            MemoirBookPlanChapter.id == chapter_id,
-        )
-    )
-    if chapter is None:
+    chapters: list[MemoirBookPlanChapter],
+) -> dict[str, ChapterAuditContext]:
+    if any(chapter.project_id != project_id for chapter in chapters):
         raise ValueError("chapter does not belong to the project")
-    contract = await db.scalar(
-        select(MemoirChapterContract)
-        .where(
-            MemoirChapterContract.project_id == project_id,
-            MemoirChapterContract.chapter_id == chapter_id,
-            MemoirChapterContract.status.in_(
-                [
-                    MemoirChapterContractStatus.CONFIRMED.value,
-                    MemoirChapterContractStatus.DRAFT.value,
-                ]
-            ),
-        )
-        .order_by(
-            MemoirChapterContract.version.desc(),
-            (MemoirChapterContract.status == MemoirChapterContractStatus.CONFIRMED.value).desc(),
-        )
+    chapter_ids = [chapter.id for chapter in chapters]
+    if not chapter_ids:
+        return {}
+
+    contract_rows = list(
+        (
+            await db.scalars(
+                select(MemoirChapterContract)
+                .where(
+                    MemoirChapterContract.project_id == project_id,
+                    MemoirChapterContract.chapter_id.in_(chapter_ids),
+                    MemoirChapterContract.status.in_(
+                        [
+                            MemoirChapterContractStatus.CONFIRMED.value,
+                            MemoirChapterContractStatus.DRAFT.value,
+                        ]
+                    ),
+                )
+                .execution_options(populate_existing=True)
+                .order_by(
+                    MemoirChapterContract.chapter_id,
+                    MemoirChapterContract.version.desc(),
+                    (
+                        MemoirChapterContract.status
+                        == MemoirChapterContractStatus.CONFIRMED.value
+                    ).desc(),
+                )
+            )
+        ).all()
     )
-    nodes: list[MemoirChapterNode] = []
-    links: list[MemoirChapterNodeStory] = []
-    if contract is not None:
-        nodes = list(
+    contracts_by_chapter: dict[str, MemoirChapterContract] = {}
+    for contract in contract_rows:
+        contracts_by_chapter.setdefault(contract.chapter_id, contract)
+
+    contract_ids = [contract.id for contract in contracts_by_chapter.values()]
+    node_rows = (
+        list(
             (
                 await db.scalars(
                     select(MemoirChapterNode)
                     .where(
                         MemoirChapterNode.project_id == project_id,
-                        MemoirChapterNode.contract_id == contract.id,
+                        MemoirChapterNode.contract_id.in_(contract_ids),
                     )
-                    .order_by(MemoirChapterNode.sort_order, MemoirChapterNode.id)
+                    .execution_options(populate_existing=True)
+                    .order_by(
+                        MemoirChapterNode.contract_id,
+                        MemoirChapterNode.sort_order,
+                        MemoirChapterNode.id,
+                    )
                 )
             ).all()
         )
-        node_ids = [node.id for node in nodes]
-        if node_ids:
-            links = list(
-                (
-                    await db.scalars(
-                        select(MemoirChapterNodeStory)
-                        .where(
-                            MemoirChapterNodeStory.project_id == project_id,
-                            MemoirChapterNodeStory.node_id.in_(node_ids),
-                        )
-                        .order_by(
-                            MemoirChapterNodeStory.node_id,
-                            MemoirChapterNodeStory.sort_order,
-                            MemoirChapterNodeStory.id,
-                        )
+        if contract_ids
+        else []
+    )
+    nodes_by_contract: dict[str, list[MemoirChapterNode]] = defaultdict(list)
+    for node in node_rows:
+        nodes_by_contract[node.contract_id].append(node)
+
+    node_ids = [node.id for node in node_rows]
+    link_rows = (
+        list(
+            (
+                await db.scalars(
+                    select(MemoirChapterNodeStory)
+                    .where(
+                        MemoirChapterNodeStory.project_id == project_id,
+                        MemoirChapterNodeStory.node_id.in_(node_ids),
                     )
-                ).all()
-            )
-    story_ids = {link.story_id for link in links}
-    stories = {
-        story.id: story
-        for story in (
-            await db.scalars(
-                select(MemoirStory).where(
-                    MemoirStory.project_id == project_id,
-                    MemoirStory.id.in_(story_ids),
-                    MemoirStory.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value,
+                    .execution_options(populate_existing=True)
+                    .order_by(
+                        MemoirChapterNodeStory.node_id,
+                        MemoirChapterNodeStory.sort_order,
+                        MemoirChapterNodeStory.id,
+                    )
                 )
-            )
-        ).all()
-    } if story_ids else {}
-    story_claim_links = list(
-        (
-            await db.scalars(
-                select(MemoirStoryClaim)
-                .where(
-                    MemoirStoryClaim.project_id == project_id,
-                    MemoirStoryClaim.story_id.in_(story_ids),
+            ).all()
+        )
+        if node_ids
+        else []
+    )
+    links_by_node: dict[str, list[MemoirChapterNodeStory]] = defaultdict(list)
+    for link in link_rows:
+        links_by_node[link.node_id].append(link)
+
+    story_ids = {link.story_id for link in link_rows}
+    stories = (
+        {
+            story.id: story
+            for story in (
+                await db.scalars(
+                    select(MemoirStory).where(
+                        MemoirStory.project_id == project_id,
+                        MemoirStory.id.in_(story_ids),
+                        MemoirStory.lifecycle_status
+                        == MemoirStoryLifecycleStatus.ACTIVE.value,
+                    ).execution_options(populate_existing=True)
                 )
-                .order_by(MemoirStoryClaim.story_id, MemoirStoryClaim.sort_order)
-            )
-        ).all()
-    ) if story_ids else []
+            ).all()
+        }
+        if story_ids
+        else {}
+    )
+    story_claim_links = (
+        list(
+            (
+                await db.scalars(
+                    select(MemoirStoryClaim)
+                    .where(
+                        MemoirStoryClaim.project_id == project_id,
+                        MemoirStoryClaim.story_id.in_(story_ids),
+                    )
+                    .execution_options(populate_existing=True)
+                    .order_by(
+                        MemoirStoryClaim.story_id,
+                        MemoirStoryClaim.sort_order,
+                    )
+                )
+            ).all()
+        )
+        if story_ids
+        else []
+    )
     story_claims: dict[str, list[MemoirStoryClaim]] = defaultdict(list)
     for link in story_claim_links:
         story_claims[link.story_id].append(link)
+
     claim_ids = {link.claim_id for link in story_claim_links}
-    claims = {
-        claim.id: claim
-        for claim in (
-            await db.scalars(
-                select(MemoirClaim).where(
-                    MemoirClaim.project_id == project_id,
-                    MemoirClaim.id.in_(claim_ids),
+    claims = (
+        {
+            claim.id: claim
+            for claim in (
+                await db.scalars(
+                    select(MemoirClaim).where(
+                        MemoirClaim.project_id == project_id,
+                        MemoirClaim.id.in_(claim_ids),
+                    ).execution_options(populate_existing=True)
                 )
-            )
-        ).all()
-    } if claim_ids else {}
-    evidence_counts = {
-        claim_id: int(count)
-        for claim_id, count in (
-            await db.execute(
-                select(MemoirClaimEvidence.claim_id, func.count(MemoirClaimEvidence.id))
-                .where(
-                    MemoirClaimEvidence.project_id == project_id,
-                    MemoirClaimEvidence.claim_id.in_(claim_ids),
-                    MemoirClaimEvidence.evidence_role == MemoirClaimEvidenceRole.SUPPORTS.value,
+            ).all()
+        }
+        if claim_ids
+        else {}
+    )
+    evidence_counts = (
+        {
+            claim_id: int(count)
+            for claim_id, count in (
+                await db.execute(
+                    select(
+                        MemoirClaimEvidence.claim_id,
+                        func.count(MemoirClaimEvidence.id),
+                    )
+                    .where(
+                        MemoirClaimEvidence.project_id == project_id,
+                        MemoirClaimEvidence.claim_id.in_(claim_ids),
+                        MemoirClaimEvidence.evidence_role
+                        == MemoirClaimEvidenceRole.SUPPORTS.value,
+                    )
+                    .group_by(MemoirClaimEvidence.claim_id)
                 )
-                .group_by(MemoirClaimEvidence.claim_id)
-            )
-        ).all()
-    } if claim_ids else {}
-    story_slots: dict[str, dict[str, MemoirStorySlot]] = defaultdict(dict)
+            ).all()
+        }
+        if claim_ids
+        else {}
+    )
+    slots_by_story: dict[str, dict[str, MemoirStorySlot]] = defaultdict(dict)
     if story_ids:
         for slot in (
             await db.scalars(
                 select(MemoirStorySlot).where(
                     MemoirStorySlot.project_id == project_id,
                     MemoirStorySlot.story_id.in_(story_ids),
-                )
+                ).execution_options(populate_existing=True)
             )
         ).all():
-            story_slots[slot.story_id][slot.slot_key] = slot
+            slots_by_story[slot.story_id][slot.slot_key] = slot
+
     draft_rows = (
         await db.execute(
             select(MemoirDraftBlock, MemoirDraftBlockVersion)
@@ -241,38 +298,101 @@ async def load_chapter_audit_context(
             )
             .where(
                 MemoirDraftBlock.project_id == project_id,
-                MemoirDraftBlock.chapter_id == chapter_id,
+                MemoirDraftBlock.chapter_id.in_(chapter_ids),
             )
-            .order_by(MemoirDraftBlock.sort_order, MemoirDraftBlock.id)
+            .execution_options(populate_existing=True)
+            .order_by(
+                MemoirDraftBlock.chapter_id,
+                MemoirDraftBlock.sort_order,
+                MemoirDraftBlock.id,
+            )
         )
     ).all()
-    draft_blocks = tuple(
-        ChapterAuditDraftBlock(
-            id=block.id,
-            node_id=block.node_id,
-            block_role=block.block_role,
-            sort_order=block.sort_order,
-            editorial_status=block.editorial_status,
-            freshness_status=block.freshness_status,
-            current_version_id=version.id,
-            content=version.content,
-            claim_ids=tuple(relation.claim_id for relation in version.claims),
-            story_ids=tuple(relation.story_id for relation in version.stories),
+    draft_blocks_by_chapter: dict[str, list[ChapterAuditDraftBlock]] = defaultdict(list)
+    for block, version in draft_rows:
+        draft_blocks_by_chapter[block.chapter_id].append(
+            ChapterAuditDraftBlock(
+                id=block.id,
+                node_id=block.node_id,
+                block_role=block.block_role,
+                sort_order=block.sort_order,
+                editorial_status=block.editorial_status,
+                freshness_status=block.freshness_status,
+                current_version_id=version.id,
+                content=version.content,
+                claim_ids=tuple(relation.claim_id for relation in version.claims),
+                story_ids=tuple(relation.story_id for relation in version.stories),
+            )
         )
-        for block, version in draft_rows
+
+    contexts: dict[str, ChapterAuditContext] = {}
+    for chapter in chapters:
+        contract = contracts_by_chapter.get(chapter.id)
+        nodes = nodes_by_contract.get(contract.id, []) if contract else []
+        links = [
+            link
+            for node in nodes
+            for link in links_by_node.get(node.id, [])
+        ]
+        chapter_story_ids = {link.story_id for link in links}
+        contexts[chapter.id] = ChapterAuditContext(
+            chapter=chapter,
+            contract=contract,
+            nodes=list(nodes),
+            links=links,
+            stories={
+                story_id: stories[story_id]
+                for story_id in chapter_story_ids
+                if story_id in stories
+            },
+            story_claims={
+                story_id: story_claims.get(story_id, [])
+                for story_id in chapter_story_ids
+            },
+            claims={
+                link.claim_id: claims[link.claim_id]
+                for story_id in chapter_story_ids
+                for link in story_claims.get(story_id, [])
+                if link.claim_id in claims
+            },
+            evidence_counts={
+                link.claim_id: evidence_counts.get(link.claim_id, 0)
+                for story_id in chapter_story_ids
+                for link in story_claims.get(story_id, [])
+                if link.claim_id in claims
+            },
+            slots={
+                story_id: slots_by_story.get(story_id, {})
+                for story_id in chapter_story_ids
+            },
+            draft_blocks=tuple(draft_blocks_by_chapter.get(chapter.id, [])),
+        )
+    return contexts
+
+
+async def load_chapter_audit_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> ChapterAuditContext:
+    chapter = await db.scalar(
+        select(MemoirBookPlanChapter)
+        .where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.id == chapter_id,
+        )
+        .execution_options(populate_existing=True)
     )
-    return ChapterAuditContext(
-        chapter=chapter,
-        contract=contract,
-        nodes=nodes,
-        links=links,
-        stories=stories,
-        story_claims=dict(story_claims),
-        claims=claims,
-        evidence_counts=evidence_counts,
-        slots=dict(story_slots),
-        draft_blocks=draft_blocks,
-    )
+    if chapter is None:
+        raise ValueError("chapter does not belong to the project")
+    return (
+        await load_chapter_audit_contexts(
+            db,
+            project_id=project_id,
+            chapters=[chapter],
+        )
+    )[chapter.id]
 
 
 def _chapter_candidate(

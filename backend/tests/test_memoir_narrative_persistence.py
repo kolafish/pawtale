@@ -29,6 +29,7 @@ from app.migrations.memoir_narrative import (
     NARRATIVE_GAP_ACTION_COLUMNS,
     NARRATIVE_GAP_ACTION_CONSTRAINTS,
     _ensure_narrative_gap_action_columns,
+    _retire_legacy_completion_rows,
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
@@ -58,6 +59,58 @@ from app.schemas.memoir_narrative import (
 
 def _sqlite_engine():
     return create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+
+
+async def test_narrative_migration_retires_legacy_completion_jobs_and_events():
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_editing_jobs "
+                    "(id TEXT PRIMARY KEY, job_type TEXT NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_automation_events "
+                    "(id TEXT PRIMARY KEY, event_type TEXT NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_editing_jobs (id, job_type) VALUES "
+                    "('legacy', 'generate_followup_tasks'), "
+                    "('current', 'recompute_chapter_structure_audit')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_automation_events (id, event_type) VALUES "
+                    "('legacy', 'followup_tasks_generated'), "
+                    "('current', 'audit_completed')"
+                )
+            )
+            await _retire_legacy_completion_rows(conn)
+
+            jobs = (
+                await conn.execute(
+                    text("SELECT id, job_type FROM memoir_editing_jobs ORDER BY id")
+                )
+            ).all()
+            events = (
+                await conn.execute(
+                    text("SELECT id, event_type FROM memoir_automation_events ORDER BY id")
+                )
+            ).all()
+
+        assert jobs == [("current", "recompute_chapter_structure_audit")]
+        assert events == [
+            ("current", "audit_completed"),
+            ("legacy", "audit_completed"),
+        ]
+    finally:
+        await engine.dispose()
 
 
 async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():

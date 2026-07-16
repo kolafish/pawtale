@@ -12,7 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupTaskUtteranceRole,
     MemoirNarrativeActorType,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus
 
 
 class MemoirFollowupTaskClaimResponse(BaseModel):
@@ -88,25 +87,6 @@ class MemoirCompletionOutcomeResponse(BaseModel):
     reason: str = ""
     message: str
     review_event_id: str | None = None
-
-
-class MemoirFollowupTaskGenerateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    chapter_id: str | None = Field(default=None, max_length=36)
-
-
-class MemoirFollowupTaskGenerationJobResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    project_id: str
-    chapter_id: str | None
-    status: MemoirEditingJobStatus
-    result_json: dict
-    error_message: str
-    created_at: datetime
-    updated_at: datetime
 
 
 class MemoirFollowupTaskActionRequest(BaseModel):

@@ -1005,7 +1005,7 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
             MemoirEditingJob.project_id == case["project_id"],
             MemoirEditingJob.chapter_id == case["chapter"].id,
             MemoirEditingJob.job_type
-            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+            == MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
         )
     )
     assert chapter_audit_job is not None

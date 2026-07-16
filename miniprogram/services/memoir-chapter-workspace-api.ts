@@ -1,6 +1,4 @@
 import type {
-  MemoirChapterGapAuditJob,
-  MemoirChapterGapAuditRequest,
   MemoirChapterContractRevisionRequest,
   MemoirChapterWorkspace,
   MemoirChapterWorkspaceContract,
@@ -12,7 +10,6 @@ import type {
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
-  withSelectedAIModel,
 } from "./memoir-api-client";
 
 
@@ -42,23 +39,6 @@ export function getMemoirChapterWorkspace(
   chapterId: string,
 ): Promise<MemoirChapterWorkspace> {
   return memoirRequest<MemoirChapterWorkspace>(chapterWorkspacePath(projectId, chapterId));
-}
-
-export function enqueueMemoirChapterWorkspaceAudit(
-  projectId: string,
-  chapterId: string,
-  data: MemoirChapterGapAuditRequest = {},
-): Promise<MemoirChapterGapAuditJob> {
-  return memoirRequest<MemoirChapterGapAuditJob>(
-    chapterWorkspacePath(projectId, chapterId, "/audits"),
-    {
-      method: "POST",
-      data: withSelectedAIModel({
-        include_semantic_audit: data.include_semantic_audit ?? true,
-        ai_model: data.ai_model,
-      }),
-    },
-  );
 }
 
 export function createMemoirChapterContractRevision(
