@@ -34,6 +34,7 @@ from app.migrations.memoir_narrative import (
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
+from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirImageAsset,
     MemoirTranscriptVersion,
@@ -487,6 +488,15 @@ async def test_narrative_migration_splits_followup_answers_and_assignments_once(
                     )
                 )
                 await conn.execute(
+                    text("DROP INDEX ix_memoir_followup_task_answers_task")
+                )
+                await conn.execute(
+                    text(
+                        "CREATE INDEX ix_memoir_followup_task_utterances_task "
+                        "ON memoir_followup_task_utterances (project_id, task_id)"
+                    )
+                )
+                await conn.execute(
                     text(
                         "ALTER TABLE memoir_followup_task_utterances "
                         "ADD COLUMN is_assignment_snapshot BOOLEAN NOT NULL DEFAULT 0"
@@ -544,17 +554,17 @@ async def test_narrative_migration_splits_followup_answers_and_assignments_once(
             await conn.execute(text("PRAGMA foreign_keys=ON"))
             await conn.commit()
 
-        first = await migrate_memoir_narrative_schema(engine)
-        second = await migrate_memoir_narrative_schema(engine)
+        first = await migrate_runtime_schema(engine)
+        second = await migrate_runtime_schema(engine)
         await assert_memoir_narrative_schema(engine)
 
-        assert set(first["changed_tables"]) >= {
+        assert set(first["memoir_narrative"]["changed_tables"]) >= {
             "memoir_followup_task_answers",
             "memoir_utterance_interview_assignments",
             "memoir_interview_policy_decisions",
             "memoir_narrative_decisions",
         }
-        assert second["changed_tables"] == []
+        assert second["memoir_narrative"]["changed_tables"] == []
         async with session_factory() as db:
             answer = await db.get(MemoirFollowupTaskAnswer, answer_id)
             assignment = await db.scalar(
@@ -581,6 +591,38 @@ async def test_narrative_migration_splits_followup_answers_and_assignments_once(
                 )
             ).scalar_one_or_none()
             assert (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall() == []
+    finally:
+        await engine.dispose()
+
+
+async def test_narrative_migration_rejects_nonempty_current_answer_table():
+    engine = _sqlite_engine()
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_task_utterances "
+                    "(id TEXT PRIMARY KEY)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_task_answers "
+                    "(id TEXT PRIMARY KEY)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_task_answers (id) "
+                    "VALUES ('partial-current-row')"
+                )
+            )
+
+        with pytest.raises(
+            RuntimeError,
+            match="non-empty current tables.*memoir_followup_task_answers",
+        ):
+            await migrate_memoir_narrative_schema(engine)
     finally:
         await engine.dispose()
 
