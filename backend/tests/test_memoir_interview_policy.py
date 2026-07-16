@@ -24,6 +24,7 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirFollowupTask,
     MemoirInterviewPolicyDecision,
+    MemoirInterviewPolicyEvaluation,
     MemoirNarrativeGap,
     MemoirUtteranceInterviewAssignment,
 )
@@ -55,6 +56,15 @@ def test_open_narration_candidate_builder_respects_safety_constraints():
     )
     assert [candidate.action for candidate in paused.candidate_actions] == [
         MemoirInterviewAction.PAUSE_OR_END
+    ]
+
+    opening = interview_policy.open_narration_brief(
+        current_story_state=MemoirInterviewStoryState.OPENING,
+        conversation_momentum=MemoirConversationMomentum.LOW,
+    )
+    assert [candidate.action for candidate in opening.candidate_actions] == [
+        MemoirInterviewAction.CONTINUE_LISTENING,
+        MemoirInterviewAction.PAUSE_OR_END,
     ]
 
 
@@ -114,7 +124,7 @@ async def test_policy_decision_message_and_user_response_are_traceable(test_db):
         selected_action=MemoirInterviewAction.FOLLOW_CURRENT_STORY,
         reason_code="story_has_momentum",
         reason_summary="当前故事仍在自然展开。",
-        execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW,
+        execution_mode=MemoirInterviewPolicyExecutionMode.ACTIVE,
         model_provider="test",
         model_name="policy-model",
     )
@@ -219,7 +229,7 @@ async def test_policy_selection_and_assignment_target_are_immutable(test_db):
         selected_action=MemoirInterviewAction.CONTINUE_LISTENING,
         reason_code="opening_turn",
         reason_summary="先让讲述者自然开始。",
-        execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW,
+        execution_mode=MemoirInterviewPolicyExecutionMode.ACTIVE,
     )
     utterance = MemoirVoiceUtterance(
         voice_session_id=session.id,
@@ -347,7 +357,7 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
         selected_action=MemoirInterviewAction.FOLLOW_CURRENT_STORY,
         reason_code="followup_target",
         reason_summary="继续当前补访目标。",
-        execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW,
+        execution_mode=MemoirInterviewPolicyExecutionMode.ACTIVE,
     )
     utterance = MemoirVoiceUtterance(
         voice_session_id=session.id,
@@ -361,8 +371,16 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
         followup_task=task,
         policy_decision=decision,
     )
+    evaluation = await interview_policy.record_human_evaluation(
+        test_db,
+        decision=decision,
+        reviewer_user_id=None,
+        expected_action=MemoirInterviewAction.FOLLOW_CURRENT_STORY,
+        human_rating=1,
+    )
     await test_db.commit()
     decision_id = decision.id
+    evaluation_id = evaluation.id
     assignment_id = assignment.id
     project_id = project.id
 
@@ -371,4 +389,5 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
 
     assert await test_db.get(Project, project_id) is None
     assert await test_db.get(MemoirInterviewPolicyDecision, decision_id) is None
+    assert await test_db.get(MemoirInterviewPolicyEvaluation, evaluation_id) is None
     assert await test_db.get(MemoirUtteranceInterviewAssignment, assignment_id) is None

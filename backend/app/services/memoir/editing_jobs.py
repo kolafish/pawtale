@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Awaitable, Callable
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -356,6 +356,14 @@ async def claim_due_editing_jobs(
     candidate_ids = (
         await db.scalars(
             statement.order_by(
+                case(
+                    (
+                        MemoirEditingJob.job_type
+                        == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+                        1,
+                    ),
+                    else_=0,
+                ),
                 MemoirEditingJob.run_after,
                 MemoirEditingJob.created_at,
             ).limit(batch_size)

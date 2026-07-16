@@ -15,6 +15,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupTaskClaimRole,
     MemoirInterviewAction,
     MemoirInterviewBriefSourceKind,
+    MemoirInterviewPolicyFailureCode,
     MemoirInterviewPolicyExecutionMode,
     MemoirInterviewResponseOutcome,
     MemoirInterviewStoryState,
@@ -23,6 +24,7 @@ from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoice
 from app.models.memoir_narrative import (
     MemoirFollowupTask,
     MemoirInterviewPolicyDecision,
+    MemoirInterviewPolicyEvaluation,
     MemoirUtteranceInterviewAssignment,
 )
 
@@ -36,6 +38,8 @@ def open_narration_brief(
     conversation_momentum: MemoirConversationMomentum,
     existing_material_refs: tuple[str, ...] = (),
     unresolved_gap_ids: tuple[str, ...] = (),
+    known_claim_ids: tuple[str, ...] = (),
+    do_not_repeat_claim_ids: tuple[str, ...] = (),
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
     policy_version: str = DEFAULT_POLICY_VERSION,
@@ -52,8 +56,8 @@ def open_narration_brief(
         safety_constraints=safety_constraints,
         existing_material=existing_material_refs,
         unresolved_gaps=unresolved_gap_ids,
-        known_claims=(),
-        do_not_repeat_claims=(),
+        known_claims=known_claim_ids,
+        do_not_repeat_claims=do_not_repeat_claim_ids,
         expected_evidence_hint="",
         completion_policy="",
         template_version=None,
@@ -66,6 +70,7 @@ def followup_task_brief(
     task: MemoirFollowupTask,
     current_story_state: MemoirInterviewStoryState,
     conversation_momentum: MemoirConversationMomentum,
+    recent_material_refs: tuple[str, ...] = (),
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
     policy_version: str = DEFAULT_POLICY_VERSION,
@@ -86,7 +91,10 @@ def followup_task_brief(
         user_preferences=user_preferences or {},
         safety_constraints=safety_constraints,
         existing_material=tuple(
-            sorted(claims_by_role.get(MemoirFollowupTaskClaimRole.KNOWN.value, ()))
+            sorted(
+                set(claims_by_role.get(MemoirFollowupTaskClaimRole.KNOWN.value, ()))
+                | set(recent_material_refs)
+            )
         ),
         unresolved_gaps=(task.gap_id,),
         known_claims=tuple(
@@ -192,6 +200,12 @@ async def record_response_outcome(
     if human_rating is not None and human_rating not in {-1, 0, 1}:
         raise ValueError("人工评分必须是 -1、0 或 1")
     if (
+        human_rating is not None
+        and decision.human_rating is not None
+        and decision.human_rating != human_rating
+    ):
+        raise ValueError("策略人工评分已经记录，不能覆盖")
+    if (
         decision.user_response_outcome is not None
         and decision.user_response_outcome != outcome.value
     ):
@@ -216,6 +230,46 @@ async def record_response_outcome(
     await db.flush()
 
 
+async def record_human_evaluation(
+    db: AsyncSession,
+    *,
+    decision: MemoirInterviewPolicyDecision,
+    reviewer_user_id: str | None,
+    expected_action: MemoirInterviewAction | None = None,
+    failure_codes: tuple[MemoirInterviewPolicyFailureCode, ...] = (),
+    human_rating: int | None = None,
+) -> MemoirInterviewPolicyEvaluation:
+    if expected_action is None and not failure_codes and human_rating is None:
+        raise ValueError("人工评估至少需要动作标签、失败标签或评分")
+    if human_rating is not None and human_rating not in {-1, 0, 1}:
+        raise ValueError("人工评分必须是 -1、0 或 1")
+    candidate_actions = {
+        str(item.get("action"))
+        for item in decision.candidate_actions_json
+        if isinstance(item, dict) and item.get("action")
+    }
+    if expected_action is not None and expected_action.value not in candidate_actions:
+        raise ValueError("人工动作标签不属于本轮候选集合")
+    normalized_failure_codes = sorted(
+        {failure_code.value for failure_code in failure_codes}
+    )
+    evaluation = MemoirInterviewPolicyEvaluation(
+        decision_id=decision.id,
+        reviewer_user_id=reviewer_user_id,
+        expected_action=expected_action.value if expected_action else None,
+        failure_codes_json=normalized_failure_codes,
+    )
+    if human_rating is not None and decision.human_rating is None:
+        decision.human_rating = human_rating
+        decision.evaluated_at = decision.evaluated_at or datetime.now(UTC).replace(
+            tzinfo=None
+        )
+        db.add(decision)
+    db.add(evaluation)
+    await db.flush()
+    return evaluation
+
+
 async def _policy_decision_for_parent_message(
     db: AsyncSession,
     *,
@@ -231,6 +285,8 @@ async def _policy_decision_for_parent_message(
             MemoirInterviewPolicyDecision.session_id == utterance.voice_session_id,
             MemoirInterviewPolicyDecision.generated_message_id
             == message.parent_message_id,
+            MemoirInterviewPolicyDecision.execution_mode
+            == MemoirInterviewPolicyExecutionMode.ACTIVE.value,
         )
     )
 
@@ -255,6 +311,11 @@ async def assign_utterance(
     if policy_decision is not None:
         if policy_decision.session_id != session.id:
             raise ValueError("策略决策不属于讲述记录所在会话")
+        if (
+            policy_decision.execution_mode
+            != MemoirInterviewPolicyExecutionMode.ACTIVE.value
+        ):
+            raise ValueError("只有实际执行的策略决策才能归因用户回答")
         snapshot_task_id = (
             policy_decision.state_snapshot_json or {}
         ).get("followup_task_id")

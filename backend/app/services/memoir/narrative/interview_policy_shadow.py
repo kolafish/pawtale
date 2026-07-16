@@ -1,0 +1,625 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from typing import Mapping
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.config import get_settings
+from app.domain.memoir.interview_policy import InterviewBrief, brief_context_snapshot
+from app.domain.memoir.narrative_types import (
+    MemoirConversationMomentum,
+    MemoirFollowupTaskClaimRole,
+    MemoirInterviewAction,
+    MemoirInterviewPolicyExecutionMode,
+    MemoirInterviewStoryState,
+)
+from app.domain.memoir.types import (
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+    MemoirGuidanceMode,
+    MemoirSessionGoal,
+)
+from app.models.memoir import (
+    MemoirChatMessage,
+    MemoirEditingJob,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
+from app.models.memoir_narrative import (
+    MemoirClaim,
+    MemoirClaimEvidence,
+    MemoirFollowupTask,
+    MemoirInterviewPolicyDecision,
+    MemoirStoryClaim,
+)
+from app.services.ai_factory import get_ai_service
+from app.services.ai_types import AITextClient
+from app.services.json_utils import extract_json_payload
+from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
+from app.services.memoir.narrative import followup_tasks, interview_policy
+from app.services.memoir.narrative.claim_usage_policy import (
+    known_for_conversation_filters,
+)
+
+
+SHADOW_POLICY_VERSION = "interview-policy-shadow-1"
+SHADOW_PROMPT_VERSION = "memoir_interview_policy_shadow_v1"
+MAX_POLICY_CONTEXT_MESSAGES = 8
+
+_ACTION_GUIDANCE: Mapping[MemoirInterviewAction, str] = {
+    MemoirInterviewAction.CONTINUE_LISTENING: "少问或不问，让叙述者把正在说的内容继续说完",
+    MemoirInterviewAction.FOLLOW_CURRENT_STORY: "顺着当前故事只追一个最自然的方向",
+    MemoirInterviewAction.ASK_PERSON_RELATIONSHIP: "澄清当前故事中关键人物与叙述者或彼此的关系",
+    MemoirInterviewAction.ASK_CAUSE_OR_RESULT: "只在因果或结果确实影响理解时询问",
+    MemoirInterviewAction.SUMMARIZE_AND_CONFIRM: "用简短总结确认理解，不添加新事实",
+    MemoirInterviewAction.RETURN_TO_PRIOR_STORY: "当前话题已停滞时，征得同意后回到旧故事",
+    MemoirInterviewAction.OFFER_NEW_TOPIC: "提供一个可拒绝的新话题选择",
+    MemoirInterviewAction.PAUSE_OR_END: "尊重暂停、结束或不愿继续讨论",
+}
+_REASON_SUMMARIES: Mapping[MemoirInterviewAction, str] = {
+    MemoirInterviewAction.CONTINUE_LISTENING: "当前更适合给叙述者继续表达的空间。",
+    MemoirInterviewAction.FOLLOW_CURRENT_STORY: "当前故事仍有自然延续的势能。",
+    MemoirInterviewAction.ASK_PERSON_RELATIONSHIP: "人物关系是理解当前内容的关键缺口。",
+    MemoirInterviewAction.ASK_CAUSE_OR_RESULT: "原因或结果是理解当前内容的关键缺口。",
+    MemoirInterviewAction.SUMMARIZE_AND_CONFIRM: "当前更适合先确认理解再继续。",
+    MemoirInterviewAction.RETURN_TO_PRIOR_STORY: "当前话题势能较低，可考虑回到已有故事。",
+    MemoirInterviewAction.OFFER_NEW_TOPIC: "当前可以提供一个可拒绝的新方向。",
+    MemoirInterviewAction.PAUSE_OR_END: "当前应优先尊重暂停或结束信号。",
+}
+_PAUSE_PHRASES = (
+    "不想再说",
+    "不想说了",
+    "别再问",
+    "暂停一下",
+    "先到这里",
+    "到此为止",
+    "结束吧",
+    "不聊了",
+)
+_PRIVACY_PHRASES = (
+    "这是隐私",
+    "这个不想说",
+    "别写进书",
+    "不要写进书",
+    "不要记录",
+)
+
+
+class ShadowPolicySelectionError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class ShadowPolicyContext:
+    brief: InterviewBrief
+    messages: tuple[MemoirChatMessage, ...]
+    completion_context: str
+    trigger_message_id: str | None
+
+
+def _eligible_session(session: MemoirVoiceSession) -> bool:
+    return (
+        session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+        or session.guidance_mode == MemoirGuidanceMode.FREE_NARRATION.value
+    )
+
+
+def _ordered_messages_before(
+    session: MemoirVoiceSession,
+    generated_message: MemoirChatMessage,
+) -> list[MemoirChatMessage]:
+    return [
+        message
+        for message in sorted(
+            session.messages,
+            key=lambda item: (item.turn_index, item.created_at, item.id),
+        )
+        if message.id != generated_message.id
+        and message.turn_index < generated_message.turn_index
+        and message.content_status == MemoirChatContentStatus.FINAL.value
+        and message.content_text.strip()
+    ]
+
+
+def _latest_user_message(
+    messages: list[MemoirChatMessage],
+) -> MemoirChatMessage | None:
+    return next(
+        (
+            message
+            for message in reversed(messages)
+            if message.role == MemoirChatMessageRole.USER.value
+        ),
+        None,
+    )
+
+
+def _safety_constraints(latest_user_text: str) -> tuple[str, ...]:
+    normalized = "".join(latest_user_text.split())
+    constraints: list[str] = []
+    if any(phrase in normalized for phrase in _PRIVACY_PHRASES):
+        constraints.extend(("avoid_sensitive_topics", "privacy_restricted"))
+    if any(phrase in normalized for phrase in _PAUSE_PHRASES):
+        constraints.extend(("user_requested_pause", "pause_required"))
+    return tuple(dict.fromkeys(constraints))
+
+
+def _story_state(
+    latest_user_message: MemoirChatMessage | None,
+    *,
+    completion_session: bool,
+    safety_constraints: tuple[str, ...],
+) -> MemoirInterviewStoryState:
+    if latest_user_message is None:
+        return MemoirInterviewStoryState.OPENING
+    if "pause_required" in safety_constraints:
+        return MemoirInterviewStoryState.CLOSING
+    if completion_session:
+        return MemoirInterviewStoryState.NEEDS_CONFIRMATION
+    return MemoirInterviewStoryState.ACTIVE
+
+
+def _conversation_momentum(
+    latest_user_message: MemoirChatMessage | None,
+    *,
+    safety_constraints: tuple[str, ...],
+) -> MemoirConversationMomentum:
+    if latest_user_message is None or "pause_required" in safety_constraints:
+        return MemoirConversationMomentum.LOW
+    text_length = len("".join(latest_user_message.content_text.split()))
+    if text_length < 12:
+        return MemoirConversationMomentum.LOW
+    if text_length >= 80:
+        return MemoirConversationMomentum.HIGH
+    return MemoirConversationMomentum.STEADY
+
+
+def _user_preferences(session: MemoirVoiceSession) -> dict[str, object]:
+    metadata = session.metadata_json if isinstance(session.metadata_json, dict) else {}
+    nested = metadata.get("interview_preferences")
+    source = nested if isinstance(nested, dict) else metadata
+    return {
+        key: source[key]
+        for key in ("detail_level", "pace", "question_style", "topic_switching")
+        if key in source
+    }
+
+
+async def _recent_material_state(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_messages: list[MemoirChatMessage],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    message_ids = [message.id for message in user_messages[-MAX_POLICY_CONTEXT_MESSAGES:]]
+    if not message_ids:
+        return (), (), ()
+    utterance_ids = tuple(
+        sorted(
+            set(
+                (
+                    await db.scalars(
+                        select(MemoirVoiceUtterance.id).where(
+                            MemoirVoiceUtterance.chat_message_id.in_(message_ids)
+                        )
+                    )
+                ).all()
+            )
+        )
+    )
+    if not utterance_ids:
+        return (), (), ()
+    claim_ids = tuple(
+        sorted(
+            set(
+                (
+                    await db.scalars(
+                        select(MemoirClaim.id)
+                        .join(
+                            MemoirClaimEvidence,
+                            MemoirClaimEvidence.claim_id == MemoirClaim.id,
+                        )
+                        .where(
+                            MemoirClaim.project_id == project_id,
+                            MemoirClaimEvidence.utterance_id.in_(utterance_ids),
+                            *known_for_conversation_filters(MemoirClaim),
+                        )
+                    )
+                ).all()
+            )
+        )
+    )
+    story_ids: tuple[str, ...] = ()
+    if claim_ids:
+        story_ids = tuple(
+            sorted(
+                set(
+                    (
+                        await db.scalars(
+                            select(MemoirStoryClaim.story_id).where(
+                                MemoirStoryClaim.project_id == project_id,
+                                MemoirStoryClaim.claim_id.in_(claim_ids),
+                            )
+                        )
+                    ).all()
+                )
+            )
+        )
+    material_refs = tuple(sorted(set(utterance_ids) | set(story_ids)))
+    return material_refs, claim_ids, claim_ids
+
+
+async def _completion_context(
+    db: AsyncSession,
+    task: MemoirFollowupTask,
+) -> str:
+    claim_ids = [relation.claim_id for relation in task.claims]
+    claims = (
+        list(
+            (
+                await db.scalars(
+                    select(MemoirClaim).where(
+                        MemoirClaim.project_id == task.project_id,
+                        MemoirClaim.id.in_(claim_ids),
+                    )
+                )
+            ).all()
+        )
+        if claim_ids
+        else []
+    )
+    claims_by_id = {claim.id: claim for claim in claims}
+    known = [
+        claims_by_id[relation.claim_id].statement.strip()
+        for relation in task.claims
+        if relation.context_role == MemoirFollowupTaskClaimRole.KNOWN.value
+        and relation.claim_id in claims_by_id
+        and claims_by_id[relation.claim_id].statement.strip()
+    ]
+    do_not_repeat = [
+        claims_by_id[relation.claim_id].statement.strip()
+        for relation in task.claims
+        if relation.context_role == MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value
+        and relation.claim_id in claims_by_id
+        and claims_by_id[relation.claim_id].statement.strip()
+    ]
+    lines = [
+        f"补访目的：{task.purpose.strip()}",
+        f"当前唯一问题：{task.question.strip()}",
+    ]
+    if known:
+        lines.append(f"已知事实（不要重复索取）：{'；'.join(known[:6])}")
+    if do_not_repeat:
+        lines.append(f"明确不要重复追问：{'；'.join(do_not_repeat[:6])}")
+    return "\n".join(lines)
+
+
+async def _load_shadow_context(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    generated_message: MemoirChatMessage,
+    followup_task_id: str | None,
+) -> ShadowPolicyContext | None:
+    messages = _ordered_messages_before(session, generated_message)
+    latest_user = _latest_user_message(messages)
+    safety_constraints = _safety_constraints(
+        latest_user.content_text if latest_user else ""
+    )
+    user_messages = [
+        message
+        for message in messages
+        if message.role == MemoirChatMessageRole.USER.value
+    ]
+    material_refs, known_claim_ids, do_not_repeat_claim_ids = (
+        await _recent_material_state(
+            db,
+            project_id=session.project_id,
+            user_messages=user_messages,
+        )
+    )
+    completion_session = (
+        session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+    )
+    current_story_state = _story_state(
+        latest_user,
+        completion_session=completion_session,
+        safety_constraints=safety_constraints,
+    )
+    conversation_momentum = _conversation_momentum(
+        latest_user,
+        safety_constraints=safety_constraints,
+    )
+    completion_context = ""
+    if completion_session:
+        if not followup_task_id:
+            return None
+        task = await followup_tasks.get_task(
+            db,
+            project_id=session.project_id,
+            task_id=followup_task_id,
+        )
+        if task is None:
+            return None
+        brief = interview_policy.followup_task_brief(
+            task=task,
+            current_story_state=current_story_state,
+            conversation_momentum=conversation_momentum,
+            recent_material_refs=material_refs,
+            user_preferences=_user_preferences(session),
+            safety_constraints=safety_constraints,
+            policy_version=SHADOW_POLICY_VERSION,
+        )
+        completion_context = await _completion_context(db, task)
+    else:
+        brief = interview_policy.open_narration_brief(
+            current_story_state=current_story_state,
+            conversation_momentum=conversation_momentum,
+            existing_material_refs=material_refs,
+            known_claim_ids=known_claim_ids,
+            do_not_repeat_claim_ids=do_not_repeat_claim_ids,
+            user_preferences=_user_preferences(session),
+            safety_constraints=safety_constraints,
+            policy_version=SHADOW_POLICY_VERSION,
+        )
+    return ShadowPolicyContext(
+        brief=brief,
+        messages=tuple(messages[-MAX_POLICY_CONTEXT_MESSAGES:]),
+        completion_context=completion_context,
+        trigger_message_id=latest_user.id if latest_user else None,
+    )
+
+
+def _conversation_prompt(messages: tuple[MemoirChatMessage, ...]) -> str:
+    if not messages:
+        return "暂无对话，这是本次访谈开场。"
+    lines: list[str] = []
+    for message in messages:
+        role = (
+            "叙述者"
+            if message.role == MemoirChatMessageRole.USER.value
+            else "访谈助手"
+        )
+        lines.append(f"{role}：{message.content_text.strip()}")
+    return "\n".join(lines)
+
+
+def _selection_prompt(context: ShadowPolicyContext) -> str:
+    snapshot = brief_context_snapshot(context.brief)
+    candidates = [candidate.action for candidate in context.brief.candidate_actions]
+    candidate_lines = "\n".join(
+        f"- {action.value}: {_ACTION_GUIDANCE[action]}"
+        for action in candidates
+    )
+    completion_context = context.completion_context or "本轮不是成书补访。"
+    return f"""你只负责选择回忆录访谈的下一步策略动作，不生成回复正文。
+
+必须遵守：
+- 只能从 candidate_actions 选择一个动作。
+- 优先避免打断仍在自然讲述的用户。
+- 不要因为某件事被简略带过，就默认要求补齐事件的时间、地点、人物、起因和结果。
+- 同时考虑章节/故事的背景交代、人物关系、因果、衔接和总结确认，不要只追事件细节。
+- 用户表示暂停、不愿讨论或涉及隐私时，必须服从 safety_constraint_codes。
+- 不得判断事实真假、隐私能否入书或覆盖用户决定。
+- 只输出 JSON：{{"selected_action":"candidate action"}}。
+
+brief（只含受控状态和对象引用）：
+{json.dumps(snapshot, ensure_ascii=False, sort_keys=True)}
+
+candidate_actions：
+{candidate_lines}
+
+补访上下文：
+{completion_context}
+
+最近对话：
+{_conversation_prompt(context.messages)}
+"""
+
+
+async def select_shadow_action(
+    *,
+    context: ShadowPolicyContext,
+    ai_client: AITextClient,
+) -> MemoirInterviewAction:
+    content = await ai_client._call_llm(
+        (
+            "你是回忆录访谈策略分类器。"
+            "你只选择系统提供的受控动作，不生成问题，不修改事实或用户决定。"
+        ),
+        _selection_prompt(context),
+        temperature=0.0,
+        max_tokens=100,
+        timeout=15.0,
+    )
+    payload = extract_json_payload(str(content))
+    if not isinstance(payload, dict):
+        raise ShadowPolicySelectionError("shadow_policy_invalid_json")
+    raw_action = str(payload.get("selected_action") or "").strip()
+    try:
+        selected_action = MemoirInterviewAction(raw_action)
+    except ValueError as exc:
+        raise ShadowPolicySelectionError("shadow_policy_unknown_action") from exc
+    candidate_actions = {
+        candidate.action for candidate in context.brief.candidate_actions
+    }
+    if selected_action not in candidate_actions:
+        raise ShadowPolicySelectionError("shadow_policy_action_outside_candidates")
+    return selected_action
+
+
+async def schedule_shadow_policy_evaluation(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    generated_message: MemoirChatMessage,
+    followup_task_id: str | None,
+    requested_ai_model: str | None,
+    enabled: bool | None = None,
+) -> MemoirEditingJob | None:
+    settings = get_settings()
+    is_enabled = (
+        settings.memoir_interview_policy_shadow_enabled
+        if enabled is None
+        else enabled
+    )
+    if not is_enabled or not _eligible_session(session):
+        return None
+    trigger = await db.scalar(
+        select(MemoirChatMessage)
+        .where(
+            MemoirChatMessage.voice_session_id == session.id,
+            MemoirChatMessage.role == MemoirChatMessageRole.USER.value,
+            MemoirChatMessage.content_status == MemoirChatContentStatus.FINAL.value,
+            func.trim(MemoirChatMessage.content_text) != "",
+            MemoirChatMessage.turn_index < generated_message.turn_index,
+        )
+        .order_by(
+            MemoirChatMessage.turn_index.desc(),
+            MemoirChatMessage.created_at.desc(),
+            MemoirChatMessage.id.desc(),
+        )
+        .limit(1)
+    )
+    selected_model = (
+        settings.memoir_interview_policy_shadow_model.strip()
+        or (requested_ai_model or "").strip()
+    )
+    payload: dict[str, object] = {
+        "session_id": session.id,
+        "generated_message_id": generated_message.id,
+        "trigger_message_id": trigger.id if trigger else None,
+        "followup_task_id": followup_task_id,
+        "policy_version": SHADOW_POLICY_VERSION,
+        "prompt_version": SHADOW_PROMPT_VERSION,
+    }
+    if selected_model:
+        payload["ai_model"] = selected_model
+    return await enqueue_editing_job(
+        db,
+        project_id=session.project_id,
+        job_type=MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW,
+        payload_json=payload,
+        dedupe_key=(
+            f"interview_policy_shadow:{generated_message.id}:"
+            f"{SHADOW_POLICY_VERSION}"
+        ),
+        retry_failed=True,
+    )
+
+
+async def run_shadow_policy_evaluation_job(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+    *,
+    ai_client: AITextClient | None = None,
+) -> EditingJobResult:
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    session_id = str(payload.get("session_id") or "").strip()
+    generated_message_id = str(payload.get("generated_message_id") or "").strip()
+    followup_task_id = str(payload.get("followup_task_id") or "").strip() or None
+    if not session_id or not generated_message_id:
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            error_message="shadow_policy_source_unavailable",
+        )
+    existing = await db.scalar(
+        select(MemoirInterviewPolicyDecision).where(
+            MemoirInterviewPolicyDecision.generated_message_id
+            == generated_message_id,
+            MemoirInterviewPolicyDecision.execution_mode
+            == MemoirInterviewPolicyExecutionMode.SHADOW.value,
+            MemoirInterviewPolicyDecision.policy_version
+            == SHADOW_POLICY_VERSION,
+        )
+    )
+    if existing is not None:
+        return EditingJobResult(
+            result_json={
+                "decision_id": existing.id,
+                "selected_action": existing.selected_action,
+                "reused": True,
+            }
+        )
+    session = await db.scalar(
+        select(MemoirVoiceSession)
+        .where(
+            MemoirVoiceSession.id == session_id,
+            MemoirVoiceSession.project_id == job.project_id,
+        )
+        .options(
+            selectinload(MemoirVoiceSession.messages),
+            selectinload(MemoirVoiceSession.utterances),
+        )
+    )
+    generated_message = await db.get(MemoirChatMessage, generated_message_id)
+    if (
+        session is None
+        or generated_message is None
+        or generated_message.voice_session_id != session.id
+        or generated_message.role != MemoirChatMessageRole.ASSISTANT.value
+        or generated_message.content_status != MemoirChatContentStatus.FINAL.value
+        or not _eligible_session(session)
+    ):
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            error_message="shadow_policy_source_unavailable",
+        )
+    context = await _load_shadow_context(
+        db,
+        session=session,
+        generated_message=generated_message,
+        followup_task_id=followup_task_id,
+    )
+    if context is None:
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            error_message="shadow_policy_brief_unavailable",
+        )
+    expected_trigger_id = str(payload.get("trigger_message_id") or "").strip() or None
+    if context.trigger_message_id != expected_trigger_id:
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            error_message="shadow_policy_context_changed",
+        )
+    model = str(payload.get("ai_model") or "").strip() or None
+    client = ai_client or get_ai_service(model)
+    selected_action = await select_shadow_action(
+        context=context,
+        ai_client=client,
+    )
+    decision = await interview_policy.create_policy_decision(
+        db,
+        session_id=session.id,
+        trigger_message_id=context.trigger_message_id,
+        brief=context.brief,
+        selected_action=selected_action,
+        reason_code=f"shadow_{selected_action.value}",
+        reason_summary=_REASON_SUMMARIES[selected_action],
+        execution_mode=MemoirInterviewPolicyExecutionMode.SHADOW,
+        model_provider=client.provider_name,
+        model_name=client.model_name,
+    )
+    await interview_policy.attach_generated_message(
+        db,
+        decision=decision,
+        message_id=generated_message.id,
+    )
+    return EditingJobResult(
+        result_json={
+            "decision_id": decision.id,
+            "selected_action": selected_action.value,
+            "brief_fingerprint": decision.brief_fingerprint,
+            "generated_message_id": generated_message.id,
+            "provider": client.provider_name,
+            "model": client.model_name,
+            "policy_version": SHADOW_POLICY_VERSION,
+            "prompt_version": SHADOW_PROMPT_VERSION,
+        }
+    )

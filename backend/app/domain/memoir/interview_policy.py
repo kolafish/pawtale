@@ -86,7 +86,10 @@ def build_candidate_actions(
         selected: list[MemoirInterviewAction] = [
             MemoirInterviewAction.CONTINUE_LISTENING,
         ]
-        if brief.current_story_state != MemoirInterviewStoryState.NONE:
+        if brief.current_story_state in {
+            MemoirInterviewStoryState.ACTIVE,
+            MemoirInterviewStoryState.NEEDS_CONFIRMATION,
+        }:
             selected.extend(
                 (
                     MemoirInterviewAction.FOLLOW_CURRENT_STORY,
@@ -96,7 +99,10 @@ def build_candidate_actions(
             )
         if brief.existing_material:
             selected.append(MemoirInterviewAction.SUMMARIZE_AND_CONFIRM)
-        if brief.source_kind == MemoirInterviewBriefSourceKind.OPEN_NARRATION:
+        if (
+            brief.source_kind == MemoirInterviewBriefSourceKind.OPEN_NARRATION
+            and brief.existing_material
+        ):
             selected.append(MemoirInterviewAction.RETURN_TO_PRIOR_STORY)
         if brief.source_kind == MemoirInterviewBriefSourceKind.FRAMEWORK:
             selected.append(MemoirInterviewAction.OFFER_NEW_TOPIC)

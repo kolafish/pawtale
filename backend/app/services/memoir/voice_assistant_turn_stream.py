@@ -22,6 +22,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import followup_planner
+from app.services.memoir.narrative import interview_policy_shadow
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
@@ -365,6 +366,25 @@ class VoiceAssistantTurnStreamSession:
             voice_session_id=voice_session.id,
             message_id=message.id,
         )
+        try:
+            await interview_policy_shadow.schedule_shadow_policy_evaluation(
+                self.db,
+                session=voice_session,
+                generated_message=message,
+                followup_task_id=(
+                    followup_context.task_id if followup_context else None
+                ),
+                requested_ai_model=req.ai_model,
+            )
+            await self.db.commit()
+        except Exception:
+            await self.db.rollback()
+            logger.exception(
+                "Failed to schedule interview policy shadow evaluation "
+                "voice_session_id=%s message_id=%s",
+                voice_session.id,
+                message.id,
+            )
         await self.client.send_json(
             {
                 "type": "turn.completed",

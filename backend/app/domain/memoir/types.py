@@ -76,6 +76,7 @@ class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
     INGEST_NARRATIVE_STATE = "ingest_narrative_state"
+    EVALUATE_INTERVIEW_POLICY_SHADOW = "evaluate_interview_policy_shadow"
     REFRESH_CHAPTER_COMPLETION = "recompute_chapter_structure_audit"
     GENERATE_DRAFT_BLOCKS = "generate_draft_blocks"
     AUDIT_BOOK_CONSISTENCY = "audit_book_consistency"

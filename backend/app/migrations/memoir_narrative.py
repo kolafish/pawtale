@@ -31,6 +31,7 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_followup_task_claims",
     "memoir_followup_task_answers",
     "memoir_interview_policy_decisions",
+    "memoir_interview_policy_evaluations",
     "memoir_utterance_interview_assignments",
     "memoir_narrative_decisions",
     "memoir_draft_blocks",
@@ -47,6 +48,9 @@ MEMOIR_INTERVIEW_POLICY_TRIGGERS = (
     "memoir_interview_policy_decisions_immutable_selection",
     "memoir_interview_policy_decisions_candidate_membership",
     "memoir_interview_policy_decisions_append_only_evaluation",
+    "memoir_interview_policy_evaluations_failure_codes",
+    "memoir_interview_policy_evaluations_no_update",
+    "memoir_interview_policy_evaluations_no_delete",
 )
 MEMOIR_CHAPTER_STRUCTURE_TRIGGERS = (
     "memoir_chapter_contracts_immutable_update",
@@ -102,6 +106,14 @@ FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
 }
 LEGACY_FOLLOWUP_GENERATION_JOB_TYPE = "generate_followup_tasks"
 LEGACY_FOLLOWUP_GENERATION_EVENT_TYPE = "followup_tasks_generated"
+INTERVIEW_POLICY_SHADOW_JOB_TYPE = "evaluate_interview_policy_shadow"
+INTERVIEW_POLICY_FAILURE_CODES = (
+    "action_outside_candidates",
+    "interrupted_user",
+    "repeated_question",
+    "wrong_topic_switch",
+    "privacy_violation",
+)
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -389,6 +401,65 @@ async def _ensure_narrative_gap_action_constraints(engine: AsyncEngine) -> bool:
             if violations:
                 raise RuntimeError(
                     "Narrative gap action migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    return True
+
+
+async def _ensure_editing_job_type_constraint(engine: AsyncEngine) -> bool:
+    """Rebuild the SQLite job table when the policy shadow type is unavailable."""
+    register_models()
+    table_name = "memoir_editing_jobs"
+    legacy_table_name = f"{table_name}_before_policy_shadow"
+    async with engine.connect() as conn:
+        table_sql = await _table_sql(conn, table_name)
+        if not table_sql or f"'{INTERVIEW_POLICY_SHADOW_JOB_TYPE}'" in table_sql:
+            await conn.rollback()
+            return False
+
+        await conn.rollback()
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}")
+                )
+                for index_name in await _index_names(conn, legacy_table_name):
+                    if not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+
+                table = Base.metadata.tables[table_name]
+                await conn.run_sync(
+                    lambda sync_conn: table.create(sync_conn, checkfirst=False)
+                )
+                legacy_columns = {
+                    str(column["name"])
+                    for column in await _table_column_schema(conn, legacy_table_name)
+                }
+                copied_columns = [
+                    column.name for column in table.columns if column.name in legacy_columns
+                ]
+                column_names = ", ".join(f'"{name}"' for name in copied_columns)
+                await conn.execute(
+                    text(
+                        f"INSERT INTO {table_name} ({column_names}) "
+                        f"SELECT {column_names} FROM {legacy_table_name}"
+                    )
+                )
+                await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with conn.begin():
+            violations = (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Editing job type migration left foreign key violations: "
                     + ", ".join(str(tuple(row)) for row in violations)
                 )
     return True
@@ -889,6 +960,9 @@ async def _ensure_decision_triggers(conn) -> list[str]:
 
 async def _ensure_interview_policy_triggers(conn) -> list[str]:
     changed: list[str] = []
+    failure_code_values = ", ".join(
+        f"'{value}'" for value in INTERVIEW_POLICY_FAILURE_CODES
+    )
     statements = {
         "memoir_utterance_interview_assignments_immutable_update": """
             CREATE TRIGGER memoir_utterance_interview_assignments_immutable_update
@@ -964,6 +1038,55 @@ async def _ensure_interview_policy_triggers(conn) -> list[str]:
                 OLD.evaluated_at IS NOT NULL
                 AND NEW.evaluated_at IS NOT OLD.evaluated_at
               )
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'memoir interview policy evaluations are append-only'
+                );
+            END
+        """,
+        "memoir_interview_policy_evaluations_failure_codes": f"""
+            CREATE TRIGGER memoir_interview_policy_evaluations_failure_codes
+            BEFORE INSERT ON memoir_interview_policy_evaluations
+            WHEN json_type(NEW.failure_codes_json) IS NOT 'array'
+              OR EXISTS (
+                SELECT 1
+                FROM json_each(NEW.failure_codes_json)
+                WHERE value NOT IN ({failure_code_values})
+              )
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'unknown memoir interview policy failure code'
+                );
+            END
+        """,
+        "memoir_interview_policy_evaluations_no_update": """
+            CREATE TRIGGER memoir_interview_policy_evaluations_no_update
+            BEFORE UPDATE ON memoir_interview_policy_evaluations
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'memoir interview policy evaluations are append-only'
+                );
+            END
+        """,
+        "memoir_interview_policy_evaluations_no_delete": """
+            CREATE TRIGGER memoir_interview_policy_evaluations_no_delete
+            BEFORE DELETE ON memoir_interview_policy_evaluations
+            WHEN EXISTS (
+                SELECT 1
+                FROM memoir_interview_policy_decisions AS decision
+                JOIN memoir_voice_sessions AS session
+                  ON session.id = decision.session_id
+                JOIN projects AS project
+                  ON project.id = session.project_id
+                WHERE decision.id = OLD.decision_id
+                  AND COALESCE(
+                    json_extract(project.metadata_json, '$.__delete_in_progress'),
+                    0
+                  ) != 1
+            )
             BEGIN
                 SELECT RAISE(
                     ABORT,
@@ -1163,6 +1286,8 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
     changed_triggers: list[str] = []
+    if await _ensure_editing_job_type_constraint(engine):
+        changed_tables.append("memoir_editing_jobs")
     if await _ensure_followup_task_outcome_schema(engine):
         changed_tables.append("memoir_followup_tasks")
     changed_tables.extend(

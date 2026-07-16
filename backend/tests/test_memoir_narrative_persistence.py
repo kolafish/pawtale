@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from hashlib import sha256
 
 import pytest
@@ -29,6 +30,7 @@ from app.migrations.memoir_narrative import (
     NARRATIVE_GAP_ACTION_COLUMNS,
     NARRATIVE_GAP_ACTION_CONSTRAINTS,
     _ensure_decision_schema,
+    _ensure_editing_job_type_constraint,
     _ensure_narrative_gap_action_columns,
     _retire_legacy_completion_rows,
     assert_memoir_narrative_schema,
@@ -36,6 +38,7 @@ from app.migrations.memoir_narrative import (
 )
 from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
+    MemoirEditingJob,
     MemoirImageAsset,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
@@ -113,6 +116,76 @@ async def test_narrative_migration_retires_legacy_completion_jobs_and_events():
             ("current", "audit_completed"),
             ("legacy", "audit_completed"),
         ]
+    finally:
+        await engine.dispose()
+
+
+async def test_editing_job_type_migration_preserves_existing_jobs_and_adds_shadow():
+    engine = _sqlite_engine()
+    register_models()
+    session_maker = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            current_sql = str(
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT sql FROM sqlite_master "
+                            "WHERE type = 'table' AND name = 'memoir_editing_jobs'"
+                        )
+                    )
+                ).scalar_one()
+            )
+        legacy_sql = current_sql.replace(
+            ", 'evaluate_interview_policy_shadow'",
+            "",
+        )
+        assert legacy_sql != current_sql
+        async with engine.connect() as conn:
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.commit()
+            async with conn.begin():
+                await conn.execute(text("DROP TABLE memoir_editing_jobs"))
+                await conn.execute(text(legacy_sql))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with session_maker() as db:
+            project = Project(type="memoir", title="迁移编辑任务")
+            db.add(project)
+            await db.flush()
+            existing = MemoirEditingJob(
+                project_id=project.id,
+                job_type="route_sources",
+                status="pending",
+                run_after=datetime.now(UTC).replace(tzinfo=None),
+                payload_json={"source": "before_migration"},
+            )
+            db.add(existing)
+            await db.commit()
+            existing_id = existing.id
+            project_id = project.id
+
+        assert await _ensure_editing_job_type_constraint(engine) is True
+
+        async with session_maker() as db:
+            preserved = await db.get(MemoirEditingJob, existing_id)
+            assert preserved is not None
+            assert preserved.payload_json == {"source": "before_migration"}
+            shadow = MemoirEditingJob(
+                project_id=project_id,
+                job_type="evaluate_interview_policy_shadow",
+                status="pending",
+                run_after=datetime.now(UTC).replace(tzinfo=None),
+            )
+            db.add(shadow)
+            await db.commit()
+            assert shadow.id
     finally:
         await engine.dispose()
 
