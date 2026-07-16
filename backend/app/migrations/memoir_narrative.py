@@ -64,6 +64,10 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
 MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN = "include_in_book"
 FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
+FOLLOWUP_TASK_OUTCOME_STATUS_RENAMES = {
+    "cannot_recall": "unable_to_answer",
+    "excluded": "closed_without_answer",
+}
 FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS = {
     "interpretation_status": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
     "answer_kind": "VARCHAR(24)",
@@ -268,6 +272,79 @@ async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
     return [f"{table_name}.{FOLLOWUP_TASK_ANSWER_USE_COLUMN}"]
 
 
+async def _ensure_followup_task_outcome_schema(engine: AsyncEngine) -> bool:
+    """Rebuild the SQLite table so terminal task outcomes have local semantics."""
+    table_name = "memoir_followup_tasks"
+    legacy_table_name = f"{table_name}_before_outcome_split"
+    async with engine.connect() as conn:
+        table_sql = await _table_sql(conn, table_name)
+        if not table_sql or (
+            "'unable_to_answer'" in table_sql
+            and "'closed_without_answer'" in table_sql
+            and "'cannot_recall'" not in table_sql
+        ):
+            await conn.rollback()
+            return False
+        await conn.rollback()
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(f"ALTER TABLE {table_name} RENAME TO {legacy_table_name}")
+                )
+                for index_name in await _index_names(conn, legacy_table_name):
+                    if not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(text(f'DROP INDEX IF EXISTS "{index_name}"'))
+
+                table = Base.metadata.tables[table_name]
+                await conn.run_sync(
+                    lambda sync_conn: table.create(sync_conn, checkfirst=False)
+                )
+                legacy_columns = {
+                    str(column["name"])
+                    for column in await _table_column_schema(conn, legacy_table_name)
+                }
+                copied_columns = [
+                    column.name for column in table.columns if column.name in legacy_columns
+                ]
+                insert_columns = ", ".join(f'"{name}"' for name in copied_columns)
+                select_columns = ", ".join(
+                    (
+                        "CASE status "
+                        + " ".join(
+                            f"WHEN '{old}' THEN '{new}'"
+                            for old, new in FOLLOWUP_TASK_OUTCOME_STATUS_RENAMES.items()
+                        )
+                        + " ELSE status END AS status"
+                    )
+                    if name == "status"
+                    else f'"{name}"'
+                    for name in copied_columns
+                )
+                await conn.execute(
+                    text(
+                        f"INSERT INTO {table_name} ({insert_columns}) "
+                        f"SELECT {select_columns} FROM {legacy_table_name}"
+                    )
+                )
+                await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+        async with conn.begin():
+            violations = (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Follow-up task outcome migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    return True
+
+
 async def _backfill_semantic_followup_task_target_slots(conn) -> None:
     if not await _table_exists(conn, "memoir_followup_tasks") or not await _table_exists(
         conn,
@@ -336,6 +413,8 @@ async def _ensure_decision_schema(conn) -> bool:
     }
     if (
         "'include'" in table_sql
+        and "'unable_to_answer'" in table_sql
+        and "'stop_asking'" in table_sql
         and required_columns <= columns
         and all(name in table_sql for name in required_constraints)
     ):
@@ -622,6 +701,8 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
     changed_columns: list[str] = []
     changed_indexes: list[str] = []
     changed_triggers: list[str] = []
+    if await _ensure_followup_task_outcome_schema(engine):
+        changed_tables.append("memoir_followup_tasks")
     async with engine.begin() as conn:
         for table in _narrative_tables_from_metadata():
             if not await _table_exists(conn, table.name):

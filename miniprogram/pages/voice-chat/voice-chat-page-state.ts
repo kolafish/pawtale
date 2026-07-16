@@ -406,8 +406,8 @@ function completionTaskStatusText(state: VoiceChatData): string {
     in_progress: "正在补这一项",
     answered: "这项已经补上了",
     deferred: "已留到以后再补",
-    cannot_recall: "已按暂时想不起来处理",
-    excluded: "已设为不收录",
+    unable_to_answer: "这个问题暂时答不上来",
+    closed_without_answer: "以后不再问这个问题",
     cancelled: "这项已经取消",
   })[status];
 }
@@ -529,8 +529,8 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const showCompletionTaskActions = completionTaskStatus === "pending" || completionTaskStatus === "in_progress";
   const showCompletionTaskContinue = completionTaskStatus === "answered"
     || completionTaskStatus === "deferred"
-    || completionTaskStatus === "cannot_recall"
-    || completionTaskStatus === "excluded";
+    || completionTaskStatus === "unable_to_answer"
+    || completionTaskStatus === "closed_without_answer";
   const completionTaskControlsDisabled = Boolean(state.completionTaskAction) || state.recording;
   const completionTaskPanelClass = [
     "completion-task-panel",

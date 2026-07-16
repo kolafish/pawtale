@@ -1,14 +1,14 @@
 import type {
-  MemoirFollowupCannotRecallResolution,
+  MemoirFollowupUnableToAnswerResolution,
   MemoirFollowupTask,
   MemoirInterviewType,
   MemoirSessionGoal,
 } from "../../domain/voice-chat";
 import {
-  cannotRecallMemoirFollowupTask,
   deferMemoirFollowupTask,
-  excludeMemoirFollowupTask,
   getMemoirFollowupTask,
+  markMemoirFollowupTaskUnableToAnswer,
+  stopAskingMemoirFollowupTask,
   switchMemoirFollowupTask,
 } from "../../services/memoir-voice-api";
 
@@ -194,31 +194,35 @@ export class VoiceChatCompletionTaskRuntime {
     }
   }
 
-  async applyCannotRecall(resolution: MemoirFollowupCannotRecallResolution): Promise<void> {
+  async applyUnableToAnswer(
+    resolution: MemoirFollowupUnableToAnswerResolution,
+  ): Promise<void> {
     const state = this.options.readState();
     const { projectId, currentFollowupTaskId } = state;
     if (!projectId || !currentFollowupTaskId || state.completionTaskAction) {
       return;
     }
     this.stop();
-    this.options.cancelAssistant("followup_task_cannot_recall");
+    this.options.cancelAssistant("followup_task_unable_to_answer");
     this.options.applyPatch({
-      completionTaskAction: "cannot_recall",
+      completionTaskAction: "unable_to_answer",
       completionTaskError: "",
       completionTaskNotice: "正在保存您的选择",
     });
     try {
-      const task = await cannotRecallMemoirFollowupTask(projectId, currentFollowupTaskId, {
-        idempotency_key: this.idempotencyKey(`cannot-recall:${resolution}`),
-        note: resolution === "accept_incomplete"
-          ? "用户确认暂时想不起来，接受本项不完整"
-          : "用户暂时想不起来，准备询问家人后再补",
-        resolution,
-      });
+      const task = resolution === "unable_to_answer"
+        ? await markMemoirFollowupTaskUnableToAnswer(projectId, currentFollowupTaskId, {
+          idempotency_key: this.idempotencyKey("unable-to-answer"),
+          note: "用户暂时想不起来这个具体问题",
+        })
+        : await deferMemoirFollowupTask(projectId, currentFollowupTaskId, {
+          idempotency_key: this.idempotencyKey("ask-family-later"),
+          note: "用户暂时想不起来，准备询问家人后再补",
+        });
       this.options.applyPatch({
         completionTask: task,
-        completionTaskNotice: resolution === "accept_incomplete"
-          ? "已接受这项暂时不完整"
+        completionTaskNotice: resolution === "unable_to_answer"
+          ? "已记为暂时无法回答"
           : "已留到问过家人以后再补",
       });
     } catch (error) {
@@ -231,28 +235,31 @@ export class VoiceChatCompletionTaskRuntime {
     }
   }
 
-  async excludeTask(): Promise<void> {
+  async stopAsking(): Promise<void> {
     const state = this.options.readState();
     const { projectId, currentFollowupTaskId } = state;
     if (!projectId || !currentFollowupTaskId || state.completionTaskAction) {
       return;
     }
     this.stop();
-    this.options.cancelAssistant("followup_task_excluded");
+    this.options.cancelAssistant("followup_task_closed_without_answer");
     this.options.applyPatch({
-      completionTaskAction: "exclude",
+      completionTaskAction: "stop_asking",
       completionTaskError: "",
       completionTaskNotice: "正在保存您的选择",
     });
     try {
-      const task = await excludeMemoirFollowupTask(projectId, currentFollowupTaskId, {
-        idempotency_key: this.idempotencyKey("exclude"),
-        note: "用户明确选择不收录这个问题对应的内容",
+      const task = await stopAskingMemoirFollowupTask(projectId, currentFollowupTaskId, {
+        idempotency_key: this.idempotencyKey("stop-asking"),
+        note: "用户明确选择不再询问这个具体问题",
       });
-      this.options.applyPatch({ completionTask: task, completionTaskNotice: "已设为不收录" });
+      this.options.applyPatch({
+        completionTask: task,
+        completionTaskNotice: "以后不再问这个问题，已有内容不受影响",
+      });
     } catch (error) {
       this.options.applyPatch({
-        completionTaskError: error instanceof Error ? error.message : "不收录状态保存失败",
+        completionTaskError: error instanceof Error ? error.message : "停止询问状态保存失败",
         completionTaskNotice: "",
       });
     } finally {

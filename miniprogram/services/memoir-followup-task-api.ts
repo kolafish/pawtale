@@ -2,7 +2,6 @@ import type {
   MemoirCompletionOutcome,
   MemoirFollowupTask,
   MemoirFollowupTaskActionRequest,
-  MemoirFollowupTaskCannotRecallRequest,
   MemoirFollowupTaskDeferRequest,
   MemoirFollowupTaskListResponse,
   MemoirFollowupTaskStatus,
@@ -72,26 +71,32 @@ export function deferMemoirFollowupTask(
   });
 }
 
-export function cannotRecallMemoirFollowupTask(
-  projectId: string,
-  taskId: string,
-  data: MemoirFollowupTaskCannotRecallRequest,
-): Promise<MemoirFollowupTask> {
-  return memoirRequest<MemoirFollowupTask>(followupTaskPath(projectId, taskId, "/cannot-recall"), {
-    method: "POST",
-    data,
-  });
-}
-
-export function excludeMemoirFollowupTask(
+export function markMemoirFollowupTaskUnableToAnswer(
   projectId: string,
   taskId: string,
   data: MemoirFollowupTaskActionRequest,
 ): Promise<MemoirFollowupTask> {
-  return memoirRequest<MemoirFollowupTask>(followupTaskPath(projectId, taskId, "/exclude"), {
-    method: "POST",
-    data,
-  });
+  return memoirRequest<MemoirFollowupTask>(
+    followupTaskPath(projectId, taskId, "/unable-to-answer"),
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export function stopAskingMemoirFollowupTask(
+  projectId: string,
+  taskId: string,
+  data: MemoirFollowupTaskActionRequest,
+): Promise<MemoirFollowupTask> {
+  return memoirRequest<MemoirFollowupTask>(
+    followupTaskPath(projectId, taskId, "/stop-asking"),
+    {
+      method: "POST",
+      data,
+    },
+  );
 }
 
 export function switchMemoirFollowupTask(

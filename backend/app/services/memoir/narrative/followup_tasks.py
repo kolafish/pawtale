@@ -24,8 +24,8 @@ ACTIVE_TASK_STATUSES = {
 }
 TERMINAL_TASK_STATUSES = {
     MemoirFollowupTaskStatus.ANSWERED,
-    MemoirFollowupTaskStatus.CANNOT_RECALL,
-    MemoirFollowupTaskStatus.EXCLUDED,
+    MemoirFollowupTaskStatus.UNABLE_TO_ANSWER,
+    MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER,
     MemoirFollowupTaskStatus.CANCELLED,
 }
 ALLOWED_TASK_TRANSITIONS = {
@@ -37,8 +37,8 @@ ALLOWED_TASK_TRANSITIONS = {
     MemoirFollowupTaskStatus.IN_PROGRESS: {
         MemoirFollowupTaskStatus.ANSWERED,
         MemoirFollowupTaskStatus.DEFERRED,
-        MemoirFollowupTaskStatus.CANNOT_RECALL,
-        MemoirFollowupTaskStatus.EXCLUDED,
+        MemoirFollowupTaskStatus.UNABLE_TO_ANSWER,
+        MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER,
         MemoirFollowupTaskStatus.CANCELLED,
     },
     MemoirFollowupTaskStatus.DEFERRED: {
@@ -141,10 +141,10 @@ def task_state(task: MemoirFollowupTask) -> dict[str, object]:
 
 
 def _decision_action(status: MemoirFollowupTaskStatus) -> MemoirNarrativeDecisionAction:
-    if status == MemoirFollowupTaskStatus.CANNOT_RECALL:
-        return MemoirNarrativeDecisionAction.ACCEPT_INCOMPLETE
-    if status == MemoirFollowupTaskStatus.EXCLUDED:
-        return MemoirNarrativeDecisionAction.EXCLUDE
+    if status == MemoirFollowupTaskStatus.UNABLE_TO_ANSWER:
+        return MemoirNarrativeDecisionAction.UNABLE_TO_ANSWER
+    if status == MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER:
+        return MemoirNarrativeDecisionAction.STOP_ASKING
     return MemoirNarrativeDecisionAction.RESOLVE
 
 

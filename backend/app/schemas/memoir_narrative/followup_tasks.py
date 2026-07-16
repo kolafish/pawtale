@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.narrative_types import (
@@ -133,13 +131,11 @@ class MemoirFollowupTaskDeferRequest(MemoirFollowupTaskActionRequest):
         return self
 
 
-class MemoirFollowupTaskCannotRecallRequest(MemoirFollowupTaskActionRequest):
-    resolution: Literal["accept_incomplete", "ask_family_later"]
-
+class MemoirFollowupTaskOutcomeRequest(MemoirFollowupTaskActionRequest):
     @model_validator(mode="after")
     def require_note(self):
         if not self.note:
-            raise ValueError("cannot-recall handling requires a note")
+            raise ValueError("follow-up task outcome requires a note")
         return self
 
 

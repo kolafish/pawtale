@@ -6,21 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
-    MemoirClaimPublicationStatus,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
-    MemoirNarrativeGapStatus,
-    MemoirStoryLifecycleStatus,
-    MemoirStoryPublicationStatus,
 )
 from app.models.memoir import MemoirVoiceSession
-from app.models.memoir_narrative import MemoirClaim, MemoirStory
 from app.services.memoir.narrative import (
-    decisions,
     followup_planner,
     followup_tasks,
-    gaps,
-    story_decisions,
 )
 
 
@@ -68,7 +60,7 @@ async def resume_task(
     )
 
 
-async def cannot_recall_task(
+async def mark_task_unable_to_answer(
     db: AsyncSession,
     *,
     project_id: str,
@@ -76,44 +68,23 @@ async def cannot_recall_task(
     actor_user_id: str,
     idempotency_key: str,
     reason: str,
-    resolution: str,
 ):
     task = await followup_tasks.get_task(db, project_id=project_id, task_id=task_id)
     if task is None:
         raise ValueError("follow-up task does not belong to the project")
-    if resolution == "ask_family_later":
-        return await defer_task(
-            db,
-            project_id=project_id,
-            task_id=task_id,
-            actor_user_id=actor_user_id,
-            idempotency_key=idempotency_key,
-            reason=reason,
-            defer_until=None,
-        )
-    task = await followup_tasks.transition_task(
+    return await followup_tasks.transition_task(
         db,
         project_id=project_id,
         task_id=task_id,
-        status=MemoirFollowupTaskStatus.CANNOT_RECALL,
+        status=MemoirFollowupTaskStatus.UNABLE_TO_ANSWER,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
         idempotency_key=idempotency_key,
         reason=reason,
     )
-    await gaps.resolve_gap(
-        db,
-        project_id=project_id,
-        gap_id=task.gap_id,
-        status=MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE,
-        actor_user_id=actor_user_id,
-        idempotency_key=f"{idempotency_key}:gap",
-        note=reason,
-    )
-    return task
 
 
-async def exclude_task(
+async def stop_asking_task(
     db: AsyncSession,
     *,
     project_id: str,
@@ -123,76 +94,20 @@ async def exclude_task(
     reason: str,
 ):
     if not reason.strip():
-        raise ValueError("excluding a follow-up task requires a reason")
+        raise ValueError("stopping a follow-up task requires a reason")
     task = await followup_tasks.get_task(db, project_id=project_id, task_id=task_id)
     if task is None:
         raise ValueError("follow-up task does not belong to the project")
-    task = await followup_tasks.transition_task(
+    return await followup_tasks.transition_task(
         db,
         project_id=project_id,
         task_id=task_id,
-        status=MemoirFollowupTaskStatus.EXCLUDED,
+        status=MemoirFollowupTaskStatus.CLOSED_WITHOUT_ANSWER,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
         idempotency_key=idempotency_key,
         reason=reason,
     )
-    if task.story_id:
-        story = await db.scalar(
-            select(MemoirStory).where(
-                MemoirStory.project_id == project_id,
-                MemoirStory.id == task.story_id,
-            )
-        )
-        if (
-            story is not None
-            and story.lifecycle_status == MemoirStoryLifecycleStatus.ACTIVE.value
-            and story.publication_status != MemoirStoryPublicationStatus.EXCLUDED.value
-        ):
-            await story_decisions.decide_story_publication(
-                db,
-                project_id=project_id,
-                story_id=story.id,
-                publication_status=MemoirStoryPublicationStatus.EXCLUDED,
-                actor_user_id=actor_user_id,
-                idempotency_key=f"{idempotency_key}:story:{story.id}",
-                reason=reason,
-            )
-    claim_ids = [relation.claim_id for relation in task.claims]
-    if claim_ids:
-        claims = list(
-            (
-                await db.scalars(
-                    select(MemoirClaim).where(
-                        MemoirClaim.project_id == project_id,
-                        MemoirClaim.id.in_(claim_ids),
-                        MemoirClaim.superseded_by_claim_id.is_(None),
-                    )
-                )
-            ).all()
-        )
-        for claim in claims:
-            if claim.publication_status == MemoirClaimPublicationStatus.EXCLUDED.value:
-                continue
-            await decisions.decide_claim_publication(
-                db,
-                project_id=project_id,
-                claim_id=claim.id,
-                publication_status=MemoirClaimPublicationStatus.EXCLUDED,
-                actor_user_id=actor_user_id,
-                idempotency_key=f"{idempotency_key}:claim:{claim.id}",
-                reason=reason,
-            )
-    await gaps.resolve_gap(
-        db,
-        project_id=project_id,
-        gap_id=task.gap_id,
-        status=MemoirNarrativeGapStatus.NOT_APPLICABLE,
-        actor_user_id=actor_user_id,
-        idempotency_key=f"{idempotency_key}:gap",
-        note=reason,
-    )
-    return task
 
 
 async def cancel_task(

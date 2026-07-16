@@ -86,9 +86,9 @@
     <text wx:if="{{completionTaskActionText}}" class="completion-task-action-state">{{completionTaskActionText}}</text>
     <view wx:if="{{showCompletionTaskActions}}" class="completion-task-actions">
       <button disabled="{{completionTaskControlsDisabled}}" bindtap="switchCompletionTask">换一个</button>
-      <button disabled="{{completionTaskControlsDisabled}}" bindtap="chooseCannotRecallResolution">想不起来</button>
+      <button disabled="{{completionTaskControlsDisabled}}" bindtap="chooseUnableToAnswerResolution">想不起来</button>
       <button disabled="{{completionTaskControlsDisabled}}" bindtap="deferCompletionTask">以后再说</button>
-      <button class="danger" disabled="{{completionTaskControlsDisabled}}" bindtap="confirmExcludeCompletionTask">不想收录</button>
+      <button class="danger" disabled="{{completionTaskControlsDisabled}}" bindtap="confirmStopAskingCompletionTask">不再问这个问题</button>
     </view>
     <button
       wx:if="{{showCompletionTaskContinue}}"
