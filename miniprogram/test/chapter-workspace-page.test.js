@@ -64,13 +64,8 @@ function sampleWorkspace(overrides = {}) {
     stories: [{
       id: "story-1",
       title: "十八岁离开家乡",
-      story_type: "event",
       summary: "第一次独自去外地。",
-      completion_status: "sufficient",
-      verification_status: "confirmed",
       publication_status: "eligible",
-      story_version: 1,
-      slots: [],
       claims: [{
         id: "claim-1",
         statement: "十八岁时离开家乡。",
@@ -87,7 +82,6 @@ function sampleWorkspace(overrides = {}) {
         }],
       }],
     }],
-    available_stories: [],
     answer_updates: [{
       id: "update-1",
       task_id: "task-confirm",
@@ -97,26 +91,6 @@ function sampleWorkspace(overrides = {}) {
       summaries: [],
       created_at: "2026-07-15T10:00:00",
     }],
-    gaps: {
-      must_handle: [sampleGap()],
-      suggested: [
-        sampleGap({
-          id: "gap-2",
-          severity: "medium",
-          title: "可以再讲讲到达后的感受",
-          recommended_action: "interview",
-          action_reason_code: "missing_new_evidence",
-        }),
-        sampleGap({
-          id: "gap-3",
-          severity: "low",
-          title: "还可以讲讲这次离家的影响",
-          recommended_action: "interview",
-          action_reason_code: "missing_new_evidence",
-        }),
-      ],
-      accepted_incomplete: [],
-    },
     latest_refresh_job: {
       id: "audit-1",
       status: "succeeded",

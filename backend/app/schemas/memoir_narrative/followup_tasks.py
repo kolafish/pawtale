@@ -63,11 +63,6 @@ class MemoirFollowupTaskResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirFollowupTaskListResponse(BaseModel):
-    items: list[MemoirFollowupTaskResponse] = Field(default_factory=list)
-    total: int = 0
-
-
 class MemoirCompletionOutcomeResponse(BaseModel):
     status: Literal[
         "processing",

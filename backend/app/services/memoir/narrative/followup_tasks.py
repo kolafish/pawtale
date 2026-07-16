@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -138,41 +138,6 @@ async def task_responses(
             )
         )
     return responses
-
-
-async def list_tasks(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    statuses: set[MemoirFollowupTaskStatus] | None = None,
-    chapter_id: str | None = None,
-    limit: int = 100,
-    offset: int = 0,
-) -> tuple[list[MemoirFollowupTask], int]:
-    filters = [MemoirFollowupTask.project_id == project_id]
-    if statuses:
-        filters.append(MemoirFollowupTask.status.in_([status.value for status in statuses]))
-    if chapter_id:
-        filters.append(MemoirFollowupTask.chapter_id == chapter_id)
-    total = await db.scalar(select(func.count(MemoirFollowupTask.id)).where(*filters)) or 0
-    items = list(
-        (
-            await db.scalars(
-                select(MemoirFollowupTask)
-                .options(*task_load_options())
-                .execution_options(populate_existing=True)
-                .where(*filters)
-                .order_by(
-                    MemoirFollowupTask.priority.desc(),
-                    MemoirFollowupTask.created_at,
-                    MemoirFollowupTask.id,
-                )
-                .offset(offset)
-                .limit(limit)
-            )
-        ).unique().all()
-    )
-    return items, int(total)
 
 
 def task_state(task: MemoirFollowupTask) -> dict[str, object]:

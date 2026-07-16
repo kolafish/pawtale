@@ -3,41 +3,17 @@ import type {
   MemoirFollowupTask,
   MemoirFollowupTaskActionRequest,
   MemoirFollowupTaskDeferRequest,
-  MemoirFollowupTaskListResponse,
-  MemoirFollowupTaskStatus,
   MemoirFollowupTaskSwitchRequest,
 } from "../domain/voice-chat";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
-  queryString,
 } from "./memoir-api-client";
-
-interface FollowupTaskListOptions {
-  status?: MemoirFollowupTaskStatus;
-  chapterId?: string;
-  limit?: number;
-  offset?: number;
-}
 
 function followupTaskPath(projectId: string, taskId: string, suffix = ""): string {
   return memoirNarrativeProjectPath(
     projectId,
     `/followup-tasks/${encodeURIComponent(taskId)}${suffix}`,
-  );
-}
-
-export function listMemoirFollowupTasks(
-  projectId: string,
-  options: FollowupTaskListOptions = {},
-): Promise<MemoirFollowupTaskListResponse> {
-  return memoirRequest<MemoirFollowupTaskListResponse>(
-    `${memoirNarrativeProjectPath(projectId, "/followup-tasks")}${queryString({
-      status: options.status,
-      chapter_id: options.chapterId,
-      limit: options.limit,
-      offset: options.offset,
-    })}`,
   );
 }
 

@@ -90,11 +90,6 @@ export interface MemoirFollowupTask {
   updated_at: string;
 }
 
-export interface MemoirFollowupTaskListResponse {
-  items: MemoirFollowupTask[];
-  total: number;
-}
-
 export interface MemoirFollowupTaskActionRequest {
   idempotency_key: string;
   note?: string;

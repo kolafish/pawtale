@@ -102,11 +102,6 @@ class MemoirNarrativeGapResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirNarrativeGapListResponse(BaseModel):
-    items: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
-    total: int = 0
-
-
 class MemoirNarrativeGapResolutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -153,37 +148,12 @@ class MemoirChapterCompletionRefreshJobResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirChapterWorkspaceStorySlotResponse(BaseModel):
-    id: str | None = None
-    slot_key: str
-    required: bool
-    status: str
-    assessment_summary: str = ""
-    claim_ids: list[str] = Field(default_factory=list)
-
-
 class MemoirChapterWorkspaceStoryResponse(BaseModel):
     id: str
     title: str
-    story_type: str
     summary: str
-    completion_status: str
-    verification_status: str
     publication_status: str
-    story_version: int
-    slots: list[MemoirChapterWorkspaceStorySlotResponse] = Field(default_factory=list)
     claims: list[MemoirClaimResponse] = Field(default_factory=list)
-
-
-class MemoirChapterWorkspaceAvailableStoryResponse(BaseModel):
-    id: str
-    title: str
-    story_type: str
-    summary: str
-    completion_status: str
-    verification_status: str
-    story_version: int
-    excluded_from_chapter: bool = False
 
 
 class MemoirChapterWorkspaceGapGroups(BaseModel):
@@ -209,13 +179,9 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     completion_summary: MemoirChapterCompletionSummary
     contract: MemoirChapterContractResponse | None = None
     stories: list[MemoirChapterWorkspaceStoryResponse] = Field(default_factory=list)
-    available_stories: list[MemoirChapterWorkspaceAvailableStoryResponse] = Field(
-        default_factory=list
-    )
     answer_updates: list[MemoirChapterWorkspaceAnswerUpdateResponse] = Field(
         default_factory=list
     )
-    gaps: MemoirChapterWorkspaceGapGroups
     latest_refresh_job: MemoirChapterCompletionRefreshJobResponse | None = None
 
 
