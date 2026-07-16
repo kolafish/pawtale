@@ -15,7 +15,6 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_narrative_entities",
     "memoir_claims",
     "memoir_claim_evidence",
-    "memoir_narrative_decisions",
     "memoir_stories",
     "memoir_story_revisions",
     "memoir_story_claims",
@@ -30,7 +29,10 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_narrative_gap_chapters",
     "memoir_followup_tasks",
     "memoir_followup_task_claims",
-    "memoir_followup_task_utterances",
+    "memoir_followup_task_answers",
+    "memoir_interview_policy_decisions",
+    "memoir_utterance_interview_assignments",
+    "memoir_narrative_decisions",
     "memoir_draft_blocks",
     "memoir_draft_block_versions",
     "memoir_draft_block_claims",
@@ -39,6 +41,12 @@ MEMOIR_NARRATIVE_TABLES = (
 MEMOIR_NARRATIVE_DECISION_TRIGGERS = (
     "memoir_narrative_decisions_no_update",
     "memoir_narrative_decisions_no_delete",
+)
+MEMOIR_INTERVIEW_POLICY_TRIGGERS = (
+    "memoir_utterance_interview_assignments_immutable_update",
+    "memoir_interview_policy_decisions_immutable_selection",
+    "memoir_interview_policy_decisions_candidate_membership",
+    "memoir_interview_policy_decisions_append_only_evaluation",
 )
 MEMOIR_CHAPTER_STRUCTURE_TRIGGERS = (
     "memoir_chapter_contracts_immutable_update",
@@ -52,6 +60,7 @@ MEMOIR_CHAPTER_STRUCTURE_TRIGGERS = (
 )
 MEMOIR_NARRATIVE_TRIGGERS = (
     *MEMOIR_NARRATIVE_DECISION_TRIGGERS,
+    *MEMOIR_INTERVIEW_POLICY_TRIGGERS,
     *MEMOIR_CHAPTER_STRUCTURE_TRIGGERS,
     *MEMOIR_DRAFT_BLOCK_TRIGGERS,
 )
@@ -62,7 +71,6 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
     "formalized_at": "DATETIME",
 }
 MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN = "include_in_book"
-FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
 NARRATIVE_GAP_ACTION_COLUMNS = {
     "recommended_action": "VARCHAR(24) NOT NULL DEFAULT 'manual_review'",
@@ -81,15 +89,6 @@ NARRATIVE_GAP_ACTION_CONSTRAINTS = {
 FOLLOWUP_TASK_OUTCOME_STATUS_RENAMES = {
     "cannot_recall": "unable_to_answer",
     "excluded": "closed_without_answer",
-}
-FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS = {
-    "interpretation_status": "VARCHAR(24) NOT NULL DEFAULT 'pending'",
-    "answer_kind": "VARCHAR(24)",
-    "direct_narrative_text": "TEXT NOT NULL DEFAULT ''",
-    "clarification_text": "TEXT NOT NULL DEFAULT ''",
-    "fact_resolution_text": "TEXT NOT NULL DEFAULT ''",
-    "confirmation_question": "TEXT NOT NULL DEFAULT ''",
-    "interpretation_reason": "TEXT NOT NULL DEFAULT ''",
 }
 FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
     "missing_slot": "direct_narrative",
@@ -220,45 +219,6 @@ async def _ensure_book_plan_chapter_include_column(conn) -> list[str]:
         )
     )
     return [f"{table_name}.{MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN}"]
-
-
-async def _ensure_followup_task_utterance_assignment_column(conn) -> list[str]:
-    table_name = "memoir_followup_task_utterances"
-    if not await _table_exists(conn, table_name):
-        return []
-    columns = {
-        str(column["name"])
-        for column in await _table_column_schema(conn, table_name)
-    }
-    if FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN in columns:
-        return []
-    await conn.execute(
-        text(
-            f"ALTER TABLE {table_name} "
-            f"ADD COLUMN {FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN} "
-            "BOOLEAN NOT NULL DEFAULT 0"
-        )
-    )
-    return [f"{table_name}.{FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN}"]
-
-
-async def _ensure_followup_task_utterance_interpretation_columns(conn) -> list[str]:
-    table_name = "memoir_followup_task_utterances"
-    if not await _table_exists(conn, table_name):
-        return []
-    columns = {
-        str(column["name"])
-        for column in await _table_column_schema(conn, table_name)
-    }
-    changed: list[str] = []
-    for column_name, column_type in FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS.items():
-        if column_name in columns:
-            continue
-        await conn.execute(
-            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
-        )
-        changed.append(f"{table_name}.{column_name}")
-    return changed
 
 
 async def _ensure_followup_task_answer_use_column(conn) -> list[str]:
@@ -507,6 +467,204 @@ async def _ensure_followup_task_outcome_schema(engine: AsyncEngine) -> bool:
     return True
 
 
+async def _migrate_followup_answer_assignment_schema(
+    engine: AsyncEngine,
+) -> list[str]:
+    """Split the legacy task/utterance table without losing answer or decision IDs."""
+    register_models()
+    legacy_answer_table = "memoir_followup_task_utterances"
+    answer_table = "memoir_followup_task_answers"
+    assignment_table = "memoir_utterance_interview_assignments"
+    policy_table = "memoir_interview_policy_decisions"
+    decision_table = "memoir_narrative_decisions"
+    legacy_decision_table = f"{decision_table}_before_answer_assignment_split"
+
+    async with engine.connect() as conn:
+        if not await _table_exists(conn, legacy_answer_table):
+            await conn.rollback()
+            return []
+        if await _table_exists(conn, answer_table):
+            raise RuntimeError(
+                "Both legacy and current follow-up answer tables exist; "
+                "manual migration recovery is required"
+            )
+
+        await conn.rollback()
+        await conn.execute(text("PRAGMA foreign_keys=OFF"))
+        await conn.commit()
+        try:
+            async with conn.begin():
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                for trigger_name in MEMOIR_NARRATIVE_DECISION_TRIGGERS:
+                    await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+
+                has_decision_table = await _table_exists(conn, decision_table)
+                if has_decision_table:
+                    await conn.execute(
+                        text(
+                            f"ALTER TABLE {decision_table} "
+                            f"RENAME TO {legacy_decision_table}"
+                        )
+                    )
+                    for index_name in await _index_names(conn, legacy_decision_table):
+                        if not index_name.startswith("sqlite_autoindex"):
+                            await conn.execute(
+                                text(f'DROP INDEX IF EXISTS "{index_name}"')
+                            )
+
+                for index_name in await _index_names(conn, legacy_answer_table):
+                    if not index_name.startswith("sqlite_autoindex"):
+                        await conn.execute(
+                            text(f'DROP INDEX IF EXISTS "{index_name}"')
+                        )
+
+                for table_name in (answer_table, policy_table, assignment_table):
+                    table = Base.metadata.tables[table_name]
+                    await conn.run_sync(
+                        lambda sync_conn, table=table: table.create(
+                            sync_conn,
+                            checkfirst=False,
+                        )
+                    )
+
+                legacy_columns = {
+                    str(column["name"])
+                    for column in await _table_column_schema(
+                        conn,
+                        legacy_answer_table,
+                    )
+                }
+                answer_columns = [
+                    column.name
+                    for column in Base.metadata.tables[answer_table].columns
+                ]
+                defaults = {
+                    "interpretation_status": "'pending'",
+                    "answer_kind": "NULL",
+                    "direct_narrative_text": "''",
+                    "clarification_text": "''",
+                    "fact_resolution_text": "''",
+                    "confirmation_question": "''",
+                    "interpretation_reason": "''",
+                }
+                answer_select = [
+                    f'"{name}"'
+                    if name in legacy_columns
+                    else defaults[name]
+                    for name in answer_columns
+                ]
+                insert_columns = ", ".join(f'"{name}"' for name in answer_columns)
+                await conn.execute(
+                    text(
+                        f"INSERT INTO {answer_table} ({insert_columns}) "
+                        f"SELECT {', '.join(answer_select)} "
+                        f"FROM {legacy_answer_table}"
+                    )
+                )
+
+                if "is_assignment_snapshot" in legacy_columns:
+                    await conn.execute(
+                        text(
+                            f"INSERT INTO {assignment_table} "
+                            "(id, utterance_id, followup_task_id, "
+                            "policy_decision_id, created_at) "
+                            "SELECT id, utterance_id, task_id, NULL, created_at "
+                            "FROM ("
+                            "SELECT id, utterance_id, task_id, created_at, "
+                            "ROW_NUMBER() OVER ("
+                            "PARTITION BY utterance_id "
+                            "ORDER BY created_at, id"
+                            ") AS assignment_rank "
+                            f"FROM {legacy_answer_table} "
+                            "WHERE is_assignment_snapshot = 1"
+                            ") AS ranked "
+                            "WHERE assignment_rank = 1"
+                        )
+                    )
+
+                if has_decision_table:
+                    decision = Base.metadata.tables[decision_table]
+                    await conn.run_sync(
+                        lambda sync_conn: decision.create(
+                            sync_conn,
+                            checkfirst=False,
+                        )
+                    )
+                    legacy_decision_columns = {
+                        str(column["name"])
+                        for column in await _table_column_schema(
+                            conn,
+                            legacy_decision_table,
+                        )
+                    }
+                    target_columns: list[str] = []
+                    source_expressions: list[str] = []
+                    legacy_answer_source = next(
+                        (
+                            column_name
+                            for column_name in (
+                                "source_followup_task_answer_id",
+                                "source_followup_task_utterance_id",
+                            )
+                            if column_name in legacy_decision_columns
+                        ),
+                        None,
+                    )
+                    for column in decision.columns:
+                        target_columns.append(column.name)
+                        if column.name == "source_followup_task_answer_id":
+                            source_expressions.append(
+                                f'"{legacy_answer_source}"'
+                                if legacy_answer_source
+                                else "NULL"
+                            )
+                        elif column.name == "source_transcript_version_id":
+                            source_expressions.append(
+                                '"source_transcript_version_id"'
+                                if legacy_answer_source
+                                and "source_transcript_version_id"
+                                in legacy_decision_columns
+                                else "NULL"
+                            )
+                        elif column.name in legacy_decision_columns:
+                            source_expressions.append(f'"{column.name}"')
+                        else:
+                            raise RuntimeError(
+                                "Cannot migrate narrative decisions; missing column "
+                                f"{column.name}"
+                            )
+                    await conn.execute(
+                        text(
+                            f"INSERT INTO {decision_table} "
+                            f"({', '.join(f'\"{name}\"' for name in target_columns)}) "
+                            f"SELECT {', '.join(source_expressions)} "
+                            f"FROM {legacy_decision_table}"
+                        )
+                    )
+                    await conn.execute(text(f"DROP TABLE {legacy_decision_table}"))
+
+                await conn.execute(text(f"DROP TABLE {legacy_answer_table}"))
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+        finally:
+            await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
+
+        async with conn.begin():
+            violations = (
+                await conn.execute(text("PRAGMA foreign_key_check"))
+            ).fetchall()
+            if violations:
+                raise RuntimeError(
+                    "Follow-up answer assignment migration left foreign key violations: "
+                    + ", ".join(str(tuple(row)) for row in violations)
+                )
+    changed = [answer_table, assignment_table, policy_table]
+    if has_decision_table:
+        changed.append(decision_table)
+    return changed
+
+
 async def _backfill_semantic_followup_task_target_slots(conn) -> None:
     if not await _table_exists(conn, "memoir_followup_tasks") or not await _table_exists(
         conn,
@@ -565,7 +723,7 @@ async def _ensure_decision_schema(conn) -> bool:
         for column in await _table_column_schema(conn, table_name)
     }
     required_columns = {
-        "source_followup_task_utterance_id",
+        "source_followup_task_answer_id",
         "source_transcript_version_id",
     }
     required_constraints = {
@@ -598,14 +756,41 @@ async def _ensure_decision_schema(conn) -> bool:
         str(column["name"])
         for column in await _table_column_schema(conn, legacy_table_name)
     }
-    copied_columns = [
-        column.name for column in table.columns if column.name in legacy_columns
-    ]
+    legacy_answer_source = next(
+        (
+            column_name
+            for column_name in (
+                "source_followup_task_answer_id",
+                "source_followup_task_utterance_id",
+            )
+            if column_name in legacy_columns
+        ),
+        None,
+    )
+    copied_columns: list[str] = []
+    source_expressions: list[str] = []
+    for column in table.columns:
+        if column.name == "source_followup_task_answer_id":
+            copied_columns.append(column.name)
+            source_expressions.append(
+                f'"{legacy_answer_source}"' if legacy_answer_source else "NULL"
+            )
+        elif column.name == "source_transcript_version_id":
+            copied_columns.append(column.name)
+            source_expressions.append(
+                '"source_transcript_version_id"'
+                if legacy_answer_source
+                and "source_transcript_version_id" in legacy_columns
+                else "NULL"
+            )
+        elif column.name in legacy_columns:
+            copied_columns.append(column.name)
+            source_expressions.append(f'"{column.name}"')
     column_names = ", ".join(f'"{name}"' for name in copied_columns)
     await conn.execute(
         text(
             f"INSERT INTO {table_name} ({column_names}) "
-            f"SELECT {column_names} FROM {legacy_table_name}"
+            f"SELECT {', '.join(source_expressions)} FROM {legacy_table_name}"
         )
     )
     await conn.execute(text(f"DROP TABLE {legacy_table_name}"))
@@ -673,6 +858,99 @@ async def _ensure_decision_triggers(conn) -> list[str]:
     for trigger_name, statement in statements.items():
         if trigger_name == "memoir_narrative_decisions_no_delete":
             await _replace_unguarded_delete_trigger(conn, trigger_name)
+        if await _trigger_exists(conn, trigger_name):
+            continue
+        await conn.execute(text(statement))
+        changed.append(trigger_name)
+    return changed
+
+
+async def _ensure_interview_policy_triggers(conn) -> list[str]:
+    changed: list[str] = []
+    statements = {
+        "memoir_utterance_interview_assignments_immutable_update": """
+            CREATE TRIGGER memoir_utterance_interview_assignments_immutable_update
+            BEFORE UPDATE ON memoir_utterance_interview_assignments
+            WHEN NEW.utterance_id IS NOT OLD.utterance_id
+              OR NEW.followup_task_id IS NOT OLD.followup_task_id
+              OR NEW.policy_decision_id IS NOT OLD.policy_decision_id
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'memoir utterance interview assignment targets are immutable'
+                );
+            END
+        """,
+        "memoir_interview_policy_decisions_immutable_selection": """
+            CREATE TRIGGER memoir_interview_policy_decisions_immutable_selection
+            BEFORE UPDATE ON memoir_interview_policy_decisions
+            WHEN NEW.session_id IS NOT OLD.session_id
+              OR (
+                NEW.trigger_message_id IS NOT OLD.trigger_message_id
+                AND NEW.trigger_message_id IS NOT NULL
+              )
+              OR NEW.brief_fingerprint IS NOT OLD.brief_fingerprint
+              OR NEW.state_snapshot_json IS NOT OLD.state_snapshot_json
+              OR NEW.candidate_actions_json IS NOT OLD.candidate_actions_json
+              OR NEW.selected_action IS NOT OLD.selected_action
+              OR NEW.reason_code IS NOT OLD.reason_code
+              OR NEW.reason_summary IS NOT OLD.reason_summary
+              OR NEW.policy_version IS NOT OLD.policy_version
+              OR NEW.model_provider IS NOT OLD.model_provider
+              OR NEW.model_name IS NOT OLD.model_name
+              OR NEW.execution_mode IS NOT OLD.execution_mode
+              OR (
+                OLD.generated_message_id IS NOT NULL
+                AND NEW.generated_message_id IS NOT OLD.generated_message_id
+                AND NEW.generated_message_id IS NOT NULL
+              )
+              OR NEW.created_at IS NOT OLD.created_at
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'memoir interview policy selections are immutable'
+                );
+            END
+        """,
+        "memoir_interview_policy_decisions_candidate_membership": """
+            CREATE TRIGGER memoir_interview_policy_decisions_candidate_membership
+            BEFORE INSERT ON memoir_interview_policy_decisions
+            WHEN NOT EXISTS (
+                SELECT 1
+                FROM json_each(NEW.candidate_actions_json)
+                WHERE json_extract(value, '$.action') = NEW.selected_action
+            )
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'selected interview action must belong to candidate actions'
+                );
+            END
+        """,
+        "memoir_interview_policy_decisions_append_only_evaluation": """
+            CREATE TRIGGER memoir_interview_policy_decisions_append_only_evaluation
+            BEFORE UPDATE ON memoir_interview_policy_decisions
+            WHEN (
+                OLD.user_response_outcome IS NOT NULL
+                AND NEW.user_response_outcome IS NOT OLD.user_response_outcome
+              )
+              OR (
+                OLD.human_rating IS NOT NULL
+                AND NEW.human_rating IS NOT OLD.human_rating
+              )
+              OR (
+                OLD.evaluated_at IS NOT NULL
+                AND NEW.evaluated_at IS NOT OLD.evaluated_at
+              )
+            BEGIN
+                SELECT RAISE(
+                    ABORT,
+                    'memoir interview policy evaluations are append-only'
+                );
+            END
+        """,
+    }
+    for trigger_name, statement in statements.items():
         if await _trigger_exists(conn, trigger_name):
             continue
         await conn.execute(text(statement))
@@ -865,6 +1143,9 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
     changed_triggers: list[str] = []
     if await _ensure_followup_task_outcome_schema(engine):
         changed_tables.append("memoir_followup_tasks")
+    changed_tables.extend(
+        await _migrate_followup_answer_assignment_schema(engine)
+    )
     async with engine.begin() as conn:
         await _retire_legacy_completion_rows(conn)
         for table in _narrative_tables_from_metadata():
@@ -884,16 +1165,11 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
         changed_columns.extend(await _ensure_book_plan_chapter_include_column(conn))
-        changed_columns.extend(
-            await _ensure_followup_task_utterance_assignment_column(conn)
-        )
-        changed_columns.extend(
-            await _ensure_followup_task_utterance_interpretation_columns(conn)
-        )
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
         await _backfill_semantic_followup_task_target_slots(conn)
         await _remove_derived_empty_story_slots(conn)
         changed_triggers.extend(await _ensure_decision_triggers(conn))
+        changed_triggers.extend(await _ensure_interview_policy_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))
         changed_triggers.extend(await ensure_draft_block_triggers(conn))
     if await _ensure_narrative_gap_action_constraints(engine):

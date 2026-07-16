@@ -344,6 +344,57 @@ class MemoirFollowupTaskClaimRole(str, Enum):
     EXPECTED_EVIDENCE = "expected_evidence"
 
 
-class MemoirFollowupTaskUtteranceRole(str, Enum):
+class MemoirFollowupTaskAnswerRole(str, Enum):
     TARGET_ANSWER = "target_answer"
     RELATED_CONTEXT = "related_context"
+
+
+class MemoirInterviewBriefSourceKind(str, Enum):
+    OPEN_NARRATION = "open_narration"
+    FRAMEWORK = "framework"
+    BOOK_COMPLETION = "book_completion"
+
+
+class MemoirInterviewAction(str, Enum):
+    CONTINUE_LISTENING = "continue_listening"
+    FOLLOW_CURRENT_STORY = "follow_current_story"
+    ASK_PERSON_RELATIONSHIP = "ask_person_relationship"
+    ASK_CAUSE_OR_RESULT = "ask_cause_or_result"
+    SUMMARIZE_AND_CONFIRM = "summarize_and_confirm"
+    RETURN_TO_PRIOR_STORY = "return_to_prior_story"
+    OFFER_NEW_TOPIC = "offer_new_topic"
+    PAUSE_OR_END = "pause_or_end"
+
+
+class MemoirInterviewActionRisk(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    TERMINAL = "terminal"
+
+
+class MemoirInterviewStoryState(str, Enum):
+    NONE = "none"
+    OPENING = "opening"
+    ACTIVE = "active"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+    CLOSING = "closing"
+
+
+class MemoirConversationMomentum(str, Enum):
+    LOW = "low"
+    STEADY = "steady"
+    HIGH = "high"
+
+
+class MemoirInterviewPolicyExecutionMode(str, Enum):
+    SHADOW = "shadow"
+    SUGGEST = "suggest"
+    ACTIVE = "active"
+
+
+class MemoirInterviewResponseOutcome(str, Enum):
+    CONTINUED_STORY = "continued_story"
+    ANSWERED_QUESTION = "answered_question"
+    CHANGED_TOPIC = "changed_topic"
+    CONFUSED = "confused"
+    STOPPED = "stopped"

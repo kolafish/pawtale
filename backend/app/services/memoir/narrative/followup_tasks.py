@@ -63,7 +63,7 @@ def _utcnow() -> datetime:
 def task_load_options():
     return (
         selectinload(MemoirFollowupTask.claims),
-        selectinload(MemoirFollowupTask.utterances),
+        selectinload(MemoirFollowupTask.answers),
     )
 
 
@@ -89,7 +89,7 @@ async def task_response(
     *,
     task: MemoirFollowupTask,
 ) -> MemoirFollowupTaskResponse:
-    if "claims" not in task.__dict__ or "utterances" not in task.__dict__:
+    if "claims" not in task.__dict__ or "answers" not in task.__dict__:
         loaded = await get_task(db, project_id=task.project_id, task_id=task.id)
         if loaded is None:
             raise ValueError("follow-up task does not belong to the project")

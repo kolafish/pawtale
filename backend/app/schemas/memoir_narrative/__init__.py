@@ -92,7 +92,7 @@ from .followup_tasks import (
     MemoirFollowupTaskOutcomeRequest,
     MemoirFollowupTaskResponse,
     MemoirFollowupTaskSwitchRequest,
-    MemoirFollowupTaskUtteranceResponse,
+    MemoirFollowupTaskAnswerResponse,
 )
 from .responses import (
     MemoirClaimResponse,
@@ -200,7 +200,7 @@ __all__ = [
     "MemoirFollowupTaskOutcomeRequest",
     "MemoirFollowupTaskResponse",
     "MemoirFollowupTaskSwitchRequest",
-    "MemoirFollowupTaskUtteranceResponse",
+    "MemoirFollowupTaskAnswerResponse",
     "MemoirStoryClaimInput",
     "MemoirStoryClaimLinkResponse",
     "MemoirStoryClaimsAttachRequest",

@@ -14,8 +14,9 @@ from app.domain.memoir.narrative_types import (
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.schemas.memoir_narrative import MemoirChapterWorkspaceAnswerUpdateResponse
 
@@ -80,22 +81,28 @@ async def chapter_answer_updates_by_chapter(
 
     pending_rows = (
         await db.execute(
-            select(MemoirFollowupTaskUtterance, MemoirFollowupTask)
+            select(MemoirFollowupTaskAnswer, MemoirFollowupTask)
             .join(
                 MemoirFollowupTask,
                 and_(
                     MemoirFollowupTask.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
+                    == MemoirFollowupTaskAnswer.project_id,
                     MemoirFollowupTask.id
-                    == MemoirFollowupTaskUtterance.task_id,
+                    == MemoirFollowupTaskAnswer.task_id,
                 ),
             )
+            .join(
+                MemoirUtteranceInterviewAssignment,
+                MemoirUtteranceInterviewAssignment.utterance_id
+                == MemoirFollowupTaskAnswer.utterance_id,
+            )
             .where(
-                MemoirFollowupTaskUtterance.project_id == project_id,
-                MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
-                MemoirFollowupTaskUtterance.interpretation_status
+                MemoirFollowupTaskAnswer.project_id == project_id,
+                MemoirUtteranceInterviewAssignment.followup_task_id
+                == MemoirFollowupTaskAnswer.task_id,
+                MemoirFollowupTaskAnswer.interpretation_status
                 == MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value,
-                MemoirFollowupTaskUtterance.confirmation_question != "",
+                MemoirFollowupTaskAnswer.confirmation_question != "",
                 MemoirFollowupTask.chapter_id.in_(chapter_ids),
                 MemoirFollowupTask.answer_use
                 == MemoirFollowupAnswerUse.FACT_RESOLUTION.value,
@@ -103,8 +110,8 @@ async def chapter_answer_updates_by_chapter(
             )
             .order_by(
                 MemoirFollowupTask.chapter_id,
-                MemoirFollowupTaskUtterance.created_at.desc(),
-                MemoirFollowupTaskUtterance.id.desc(),
+                MemoirFollowupTaskAnswer.created_at.desc(),
+                MemoirFollowupTaskAnswer.id.desc(),
             )
         )
     ).all()
@@ -126,7 +133,7 @@ async def chapter_answer_updates_by_chapter(
         )
 
     source_relation_id = (
-        MemoirNarrativeDecision.source_followup_task_utterance_id
+        MemoirNarrativeDecision.source_followup_task_answer_id
     )
     ranked_relation_ids = (
         select(
@@ -142,20 +149,20 @@ async def chapter_answer_updates_by_chapter(
             .label("chapter_rank"),
         )
         .join(
-            MemoirFollowupTaskUtterance,
+            MemoirFollowupTaskAnswer,
             and_(
                 MemoirNarrativeDecision.project_id
-                == MemoirFollowupTaskUtterance.project_id,
-                source_relation_id == MemoirFollowupTaskUtterance.id,
+                == MemoirFollowupTaskAnswer.project_id,
+                source_relation_id == MemoirFollowupTaskAnswer.id,
             ),
         )
         .join(
             MemoirFollowupTask,
             and_(
                 MemoirFollowupTask.project_id
-                == MemoirFollowupTaskUtterance.project_id,
+                == MemoirFollowupTaskAnswer.project_id,
                 MemoirFollowupTask.id
-                == MemoirFollowupTaskUtterance.task_id,
+                == MemoirFollowupTaskAnswer.task_id,
             ),
         )
         .where(
@@ -174,25 +181,25 @@ async def chapter_answer_updates_by_chapter(
         await db.execute(
             select(
                 MemoirNarrativeDecision,
-                MemoirFollowupTaskUtterance,
+                MemoirFollowupTaskAnswer,
                 MemoirFollowupTask,
             )
             .join(
-                MemoirFollowupTaskUtterance,
+                MemoirFollowupTaskAnswer,
                 and_(
                     MemoirNarrativeDecision.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
-                    MemoirNarrativeDecision.source_followup_task_utterance_id
-                    == MemoirFollowupTaskUtterance.id,
+                    == MemoirFollowupTaskAnswer.project_id,
+                    MemoirNarrativeDecision.source_followup_task_answer_id
+                    == MemoirFollowupTaskAnswer.id,
                 ),
             )
             .join(
                 MemoirFollowupTask,
                 and_(
                     MemoirFollowupTask.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
+                    == MemoirFollowupTaskAnswer.project_id,
                     MemoirFollowupTask.id
-                    == MemoirFollowupTaskUtterance.task_id,
+                    == MemoirFollowupTaskAnswer.task_id,
                 ),
             )
             .where(
@@ -213,7 +220,7 @@ async def chapter_answer_updates_by_chapter(
         list[
             tuple[
                 MemoirNarrativeDecision,
-                MemoirFollowupTaskUtterance,
+                MemoirFollowupTaskAnswer,
                 MemoirFollowupTask,
             ]
         ],

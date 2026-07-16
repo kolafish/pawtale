@@ -11,7 +11,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerKind,
     MemoirFollowupAnswerUse,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import (
@@ -37,7 +37,7 @@ from app.models.memoir_narrative import (
     MemoirDraftBlockStory,
     MemoirFollowupTask,
     MemoirFollowupTaskClaim,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeGap,
     MemoirNarrativeGapClaim,
     MemoirNarrativeGapStory,
@@ -54,7 +54,7 @@ from app.services.memoir.book_plan_sources import (
     removed_source_ids,
     set_source_change_metadata,
 )
-from app.services.memoir.narrative import draft_blocks
+from app.services.memoir.narrative import draft_blocks, interview_policy
 from app.services.memoir.narrative.followup_completion import (
     complete_task_from_semantic_interpretation,
 )
@@ -329,14 +329,21 @@ async def inspect_context_only_followup_answer_repair(
     _require(bool(spec.expected_source_text.strip()), "必须提供完整的预期原文")
 
     relation = await db.scalar(
-        select(MemoirFollowupTaskUtterance).where(
-            MemoirFollowupTaskUtterance.project_id == spec.project_id,
-            MemoirFollowupTaskUtterance.task_id == spec.task_id,
-            MemoirFollowupTaskUtterance.utterance_id == spec.utterance_id,
+        select(MemoirFollowupTaskAnswer).where(
+            MemoirFollowupTaskAnswer.project_id == spec.project_id,
+            MemoirFollowupTaskAnswer.task_id == spec.task_id,
+            MemoirFollowupTaskAnswer.utterance_id == spec.utterance_id,
         )
     )
     _require(relation is not None, "补全回答关系不存在")
-    _require(relation.is_assignment_snapshot, "补全回答缺少采集任务快照")
+    _require(
+        await interview_policy.answer_belongs_to_creation_assignment(
+            db,
+            utterance_id=spec.utterance_id,
+            followup_task_id=spec.task_id,
+        ),
+        "补全回答缺少采集任务归属",
+    )
     _require(
         relation.interpretation_status == spec.expected_interpretation_status,
         "补全回答当前解释状态与预期不一致",
@@ -477,17 +484,17 @@ async def apply_context_only_followup_answer_repair(
 
     relation = _required(
         await db.scalar(
-            select(MemoirFollowupTaskUtterance).where(
-                MemoirFollowupTaskUtterance.project_id == spec.project_id,
-                MemoirFollowupTaskUtterance.task_id == spec.task_id,
-                MemoirFollowupTaskUtterance.utterance_id == spec.utterance_id,
+            select(MemoirFollowupTaskAnswer).where(
+                MemoirFollowupTaskAnswer.project_id == spec.project_id,
+                MemoirFollowupTaskAnswer.task_id == spec.task_id,
+                MemoirFollowupTaskAnswer.utterance_id == spec.utterance_id,
             )
         ),
         "补全回答关系不存在",
     )
     relation.interpretation_status = MemoirFollowupAnswerInterpretationStatus.RESOLVED.value
     relation.answer_kind = spec.answer_kind.value
-    relation.result_role = MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value
+    relation.result_role = MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value
     relation.direct_narrative_text = ""
     relation.clarification_text = (
         plan.source_text if spec.answer_kind == MemoirFollowupAnswerKind.CLARIFICATION else ""

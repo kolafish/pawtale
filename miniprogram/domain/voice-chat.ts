@@ -32,7 +32,7 @@ export type MemoirFollowupTaskStatus =
   | "closed_without_answer"
   | "cancelled";
 export type MemoirFollowupTaskClaimRole = "known" | "do_not_repeat" | "expected_evidence";
-export type MemoirFollowupTaskUtteranceRole = "target_answer" | "related_context";
+export type MemoirFollowupTaskAnswerRole = "target_answer" | "related_context";
 export type MemoirFollowupUnableToAnswerResolution = "unable_to_answer" | "ask_family_later";
 export type MemoirNarrativeActorType = "ai" | "user" | "system";
 
@@ -60,9 +60,9 @@ export interface MemoirFollowupTaskClaim {
   context_role: MemoirFollowupTaskClaimRole;
 }
 
-export interface MemoirFollowupTaskUtterance {
+export interface MemoirFollowupTaskAnswer {
   utterance_id: string;
-  result_role: MemoirFollowupTaskUtteranceRole;
+  result_role: MemoirFollowupTaskAnswerRole;
   created_at: string;
 }
 
@@ -85,7 +85,7 @@ export interface MemoirFollowupTask {
   started_at?: string | null;
   completed_at?: string | null;
   claims: MemoirFollowupTaskClaim[];
-  utterances: MemoirFollowupTaskUtterance[];
+  answers: MemoirFollowupTaskAnswer[];
   created_at: string;
   updated_at: string;
 }

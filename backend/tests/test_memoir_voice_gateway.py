@@ -22,6 +22,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.models.memoir_narrative import MemoirUtteranceInterviewAssignment
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
@@ -31,6 +32,7 @@ from app.services.memoir.voice_gateway import (
     MAX_AUDIO_FRAME_BYTES,
     VoiceGatewayClientError,
     VoiceGatewaySession,
+    VoiceGatewayTurnContext,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
@@ -1371,6 +1373,12 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert persisted is not None
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
     utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
+    assignment = await test_db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == persisted["utterance_id"]
+        )
+    )
 
     assert audio_file is not None
     assert audio_file.size_bytes == len(b"partial-pcm")
@@ -1378,8 +1386,61 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert utterance is not None
     assert utterance.transcript_raw == ""
     assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
+    assert assignment is not None
+    assert assignment.followup_task_id is None
     assert not pending_path.exists()
     assert persistence.pending_audio_path is None
+
+
+async def test_voice_gateway_persistence_keeps_unfinalized_interviewer_as_context(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.memoir.audio_files.MEMOIR_AUDIO_DIR",
+        tmp_path / "audio",
+    )
+    user_response = await client.get("/api/auth/me")
+    create_response = await post_mobile_memoir_voice_session(
+        client,
+        json={
+            "guidance_mode": "free_narration",
+            "interview_type": "human_interview",
+        },
+    )
+    persistence = VoiceGatewayPersistence(
+        db=test_db,
+        voice_session_id=create_response.json()["session"]["id"],
+        user_id=user_response.json()["id"],
+    )
+    await persistence.set_turn_context(
+        VoiceGatewayTurnContext(speaker_role="interviewer")
+    )
+    await persistence.record_audio_frame(b"interviewer-partial-pcm")
+
+    persisted = await persistence.flush_unfinalized_audio()
+
+    assert persisted is not None
+    utterance = await test_db.get(
+        MemoirVoiceUtterance,
+        persisted["utterance_id"],
+    )
+    assignment = await test_db.scalar(
+        select(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id
+            == persisted["utterance_id"]
+        )
+    )
+    assert utterance is not None
+    assert utterance.provider_payload_json == {
+        "source": "unfinalized_audio",
+        "speaker_role": "interviewer",
+    }
+    assert utterance.source_material_type == "interviewer_prompt"
+    assert utterance.source_route_action == "ignore"
+    assert assignment is None
 
 
 async def test_voice_gateway_persistence_keeps_pending_audio_when_final_persist_fails(

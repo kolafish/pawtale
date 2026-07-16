@@ -32,10 +32,11 @@ from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
     MemoirNarrativeGap,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
 from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarrativeEntityRepository
@@ -426,14 +427,21 @@ async def test_delete_transcript_rejects_followup_answer_lineage(client, test_db
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=utterance.id,
         result_role="target_answer",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=utterance.id,
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
 
     response = await client.delete(
@@ -442,7 +450,7 @@ async def test_delete_transcript_rejects_followup_answer_lineage(client, test_db
 
     assert response.status_code == 409, response.text
     assert await test_db.get(MemoirVoiceUtterance, utterance.id) is not None
-    assert await test_db.get(MemoirFollowupTaskUtterance, relation.id) is not None
+    assert await test_db.get(MemoirFollowupTaskAnswer, relation.id) is not None
 
 
 async def test_control_only_utterance_creates_no_claim_or_story(client, test_db):
@@ -1268,14 +1276,21 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=project_id,
         task_id=task.id,
         utterance_id=utterance.id,
         result_role="target_answer",
-        is_assignment_snapshot=True,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=utterance.id,
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.flush()
 
     mismatched_transcript = MemoirTranscriptVersion(
@@ -1298,7 +1313,7 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
             retained_entity_id=retained.id,
             actor_user_id=user_id,
             idempotency_key=f"followup-entity-merge-invalid:{relation.id}",
-            source_followup_task_utterance_id=relation.id,
+            source_followup_task_answer_id=relation.id,
             source_transcript_version_id=mismatched_transcript.id,
         )
     assert duplicate.merged_into_entity_id is None
@@ -1312,7 +1327,7 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
         actor_user_id=user_id,
         idempotency_key=f"followup-entity-merge:{relation.id}",
         reason="用户明确确认两处人物称呼指向同一人。",
-        source_followup_task_utterance_id=relation.id,
+        source_followup_task_answer_id=relation.id,
         source_transcript_version_id=transcript_version.id,
     )
     repeated = await decisions.merge_entities(
@@ -1323,7 +1338,7 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
         actor_user_id=user_id,
         idempotency_key=f"followup-entity-merge:{relation.id}",
         reason="用户明确确认两处人物称呼指向同一人。",
-        source_followup_task_utterance_id=relation.id,
+        source_followup_task_answer_id=relation.id,
         source_transcript_version_id=transcript_version.id,
     )
 
@@ -1339,7 +1354,7 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
         relationship_claim.verification_status
         == MemoirClaimVerificationStatus.NEEDS_VERIFICATION.value
     )
-    assert decision.source_followup_task_utterance_id == relation.id
+    assert decision.source_followup_task_answer_id == relation.id
     assert decision.source_transcript_version_id == transcript_version.id
     assert repeated.id == decision.id
     review_decision = await test_db.scalar(
@@ -1349,7 +1364,7 @@ async def test_entity_merge_rewires_claims_and_records_followup_provenance(
         )
     )
     assert review_decision is not None
-    assert review_decision.source_followup_task_utterance_id == relation.id
+    assert review_decision.source_followup_task_answer_id == relation.id
     assert review_decision.source_transcript_version_id == transcript_version.id
     assert decision.before_state_json["references"]["claims"][claim.id][
         "subject_entity_id"

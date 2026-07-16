@@ -21,7 +21,11 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
-from app.models.memoir_narrative import MemoirFollowupTask, MemoirFollowupTaskUtterance
+from app.models.memoir_narrative import (
+    MemoirFollowupTask,
+    MemoirFollowupTaskAnswer,
+    MemoirUtteranceInterviewAssignment,
+)
 from app.schemas.memoir_narrative import MemoirCompletionOutcomeResponse
 
 
@@ -71,7 +75,7 @@ def _response(
     task: MemoirFollowupTask | None,
     chapter_title: str,
     utterance: MemoirVoiceUtterance | None,
-    relation: MemoirFollowupTaskUtterance | None,
+    relation: MemoirFollowupTaskAnswer | None,
     message: str,
     review_event_id: str | None = None,
 ) -> MemoirCompletionOutcomeResponse:
@@ -116,26 +120,32 @@ async def completion_outcome(
     row = (
         await db.execute(
             select(
-                MemoirFollowupTaskUtterance,
+                MemoirFollowupTaskAnswer,
                 MemoirVoiceUtterance,
                 MemoirFollowupTask,
             )
             .join(
                 MemoirVoiceUtterance,
-                MemoirVoiceUtterance.id == MemoirFollowupTaskUtterance.utterance_id,
+                MemoirVoiceUtterance.id == MemoirFollowupTaskAnswer.utterance_id,
+            )
+            .join(
+                MemoirUtteranceInterviewAssignment,
+                MemoirUtteranceInterviewAssignment.utterance_id
+                == MemoirFollowupTaskAnswer.utterance_id,
             )
             .join(
                 MemoirFollowupTask,
                 and_(
                     MemoirFollowupTask.project_id
-                    == MemoirFollowupTaskUtterance.project_id,
-                    MemoirFollowupTask.id == MemoirFollowupTaskUtterance.task_id,
+                    == MemoirFollowupTaskAnswer.project_id,
+                    MemoirFollowupTask.id == MemoirFollowupTaskAnswer.task_id,
                 ),
             )
             .where(
-                MemoirFollowupTaskUtterance.project_id == project_id,
+                MemoirFollowupTaskAnswer.project_id == project_id,
                 MemoirVoiceUtterance.voice_session_id == voice_session_id,
-                MemoirFollowupTaskUtterance.is_assignment_snapshot.is_(True),
+                MemoirUtteranceInterviewAssignment.followup_task_id
+                == MemoirFollowupTaskAnswer.task_id,
             )
             .order_by(
                 MemoirVoiceUtterance.created_at.desc(),

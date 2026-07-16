@@ -28,6 +28,7 @@ from app.migrations.memoir_narrative import (
     MEMOIR_NARRATIVE_TRIGGERS,
     NARRATIVE_GAP_ACTION_COLUMNS,
     NARRATIVE_GAP_ACTION_CONSTRAINTS,
+    _ensure_decision_schema,
     _ensure_narrative_gap_action_columns,
     _retire_legacy_completion_rows,
     assert_memoir_narrative_schema,
@@ -42,10 +43,12 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
+    MemoirNarrativeDecision,
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStorySlot,
+    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
 from app.models.users import User
@@ -109,6 +112,70 @@ async def test_narrative_migration_retires_legacy_completion_jobs_and_events():
             ("current", "audit_completed"),
             ("legacy", "audit_completed"),
         ]
+    finally:
+        await engine.dispose()
+
+
+async def test_decision_schema_upgrade_preserves_legacy_answer_source_column():
+    engine = _sqlite_engine()
+    register_models()
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        async with engine.connect() as conn:
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.commit()
+            async with conn.begin():
+                current_sql = str(
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT sql FROM sqlite_master "
+                                "WHERE type = 'table' "
+                                "AND name = 'memoir_narrative_decisions'"
+                            )
+                        )
+                    ).scalar_one()
+                )
+                legacy_sql = current_sql.replace(
+                    "source_followup_task_answer_id",
+                    "source_followup_task_utterance_id",
+                ).replace(
+                    "memoir_followup_task_answers",
+                    "memoir_followup_task_utterances",
+                )
+                await conn.execute(text("DROP TABLE memoir_narrative_decisions"))
+                await conn.execute(text(legacy_sql))
+                await conn.execute(
+                    text(
+                        "INSERT INTO memoir_narrative_decisions "
+                        "(id, project_id, target_type, target_id, action, actor_type, "
+                        "actor_user_id, source_followup_task_utterance_id, "
+                        "source_transcript_version_id, before_state_json, "
+                        "after_state_json, reason, idempotency_key, created_at) "
+                        "VALUES "
+                        "('decision-1', 'project-1', 'gap', 'gap-1', 'confirm', "
+                        "'system', NULL, 'answer-1', 'transcript-1', '{}', '{}', "
+                        "'preserve legacy source', 'decision-upgrade-1', "
+                        "'2026-07-16 00:00:00')"
+                    )
+                )
+
+                assert await _ensure_decision_schema(conn)
+                row = (
+                    await conn.execute(
+                        text(
+                            "SELECT source_followup_task_answer_id, "
+                            "source_transcript_version_id "
+                            "FROM memoir_narrative_decisions "
+                            "WHERE id = 'decision-1'"
+                        )
+                    )
+                ).one()
+                assert tuple(row) == ("answer-1", "transcript-1")
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
     finally:
         await engine.dispose()
 
@@ -307,27 +374,213 @@ async def test_narrative_migration_adds_book_chapter_inclusion_column_once():
         await engine.dispose()
 
 
-async def test_narrative_migration_adds_followup_assignment_snapshot_column_once():
+async def test_narrative_migration_splits_followup_answers_and_assignments_once():
     register_models()
     engine = _sqlite_engine()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                text(
-                    "ALTER TABLE memoir_followup_task_utterances "
-                    "DROP COLUMN is_assignment_snapshot"
+        async with session_factory() as db:
+            project = Project(type="memoir", title="补访关系拆分")
+            db.add(project)
+            await db.flush()
+            gap = MemoirNarrativeGap(
+                project_id=project.id,
+                scope_type="book",
+                gap_type="relationship",
+                severity="medium",
+                title="人物关系",
+                fingerprint=sha256(b"answer-assignment-split").hexdigest(),
+                status="open",
+                detected_by="rules",
+            )
+            db.add(gap)
+            await db.flush()
+            session = MemoirVoiceSession(
+                project_id=project.id,
+                guidance_mode="guided_interview",
+                session_goal="book_completion",
+            )
+            db.add(session)
+            await db.flush()
+            task = MemoirFollowupTask(
+                project_id=project.id,
+                gap_id=gap.id,
+                question="当时是什么关系？",
+                purpose="补充人物关系",
+                priority=1,
+                status="in_progress",
+                assigned_session_id=session.id,
+                started_at=session.created_at,
+                created_by="system",
+            )
+            db.add(task)
+            await db.flush()
+            utterance = MemoirVoiceUtterance(
+                voice_session_id=session.id,
+                transcript_raw="她是我的小学老师。",
+            )
+            db.add(utterance)
+            await db.flush()
+            transcript = MemoirTranscriptVersion(
+                voice_session_id=session.id,
+                source_artifact_id=utterance.id,
+                version_type=MemoirTranscriptVersionType.ASR_RAW.value,
+                content=utterance.transcript_raw,
+                created_by=MemoirCreatedBy.SYSTEM.value,
+            )
+            db.add(transcript)
+            await db.flush()
+            answer = MemoirFollowupTaskAnswer(
+                project_id=project.id,
+                task_id=task.id,
+                utterance_id=utterance.id,
+                result_role="target_answer",
+                interpretation_status="resolved",
+                answer_kind="clarification",
+                clarification_text="她是我的小学老师。",
+            )
+            db.add(answer)
+            await db.flush()
+            db.add(
+                MemoirUtteranceInterviewAssignment(
+                    utterance_id=utterance.id,
+                    followup_task_id=task.id,
                 )
             )
+            decision = MemoirNarrativeDecision(
+                project_id=project.id,
+                target_type="gap",
+                target_id=gap.id,
+                action="confirm",
+                actor_type="system",
+                source_followup_task_answer_id=answer.id,
+                source_transcript_version_id=transcript.id,
+                before_state_json={},
+                after_state_json={"status": "resolved"},
+                reason="保留来源引用",
+                idempotency_key="split-source-decision",
+            )
+            db.add(decision)
+            await db.commit()
+            answer_id = answer.id
+            utterance_id = utterance.id
+            task_id = task.id
+            decision_id = decision.id
+
+        async with engine.connect() as conn:
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.commit()
+            async with conn.begin():
+                for trigger_name in MEMOIR_NARRATIVE_TRIGGERS:
+                    await conn.execute(text(f"DROP TRIGGER IF EXISTS {trigger_name}"))
+                await conn.execute(
+                    text("DROP TABLE memoir_utterance_interview_assignments")
+                )
+                await conn.execute(text("DROP TABLE memoir_interview_policy_decisions"))
+                await conn.execute(text("PRAGMA legacy_alter_table=ON"))
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_followup_task_answers "
+                        "RENAME TO memoir_followup_task_utterances"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_followup_task_utterances "
+                        "ADD COLUMN is_assignment_snapshot BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
+                await conn.execute(
+                    text(
+                        "UPDATE memoir_followup_task_utterances "
+                        "SET is_assignment_snapshot = 1"
+                    )
+                )
+                decision_sql = str(
+                    (
+                        await conn.execute(
+                            text(
+                                "SELECT sql FROM sqlite_master "
+                                "WHERE type = 'table' "
+                                "AND name = 'memoir_narrative_decisions'"
+                            )
+                        )
+                    ).scalar_one()
+                )
+                legacy_decision_sql = decision_sql.replace(
+                    "source_followup_task_answer_id",
+                    "source_followup_task_utterance_id",
+                ).replace(
+                    "memoir_followup_task_answers",
+                    "memoir_followup_task_utterances",
+                )
+                await conn.execute(
+                    text(
+                        "ALTER TABLE memoir_narrative_decisions "
+                        "RENAME TO memoir_narrative_decisions_current"
+                    )
+                )
+                await conn.execute(text(legacy_decision_sql))
+                await conn.execute(
+                    text(
+                        "INSERT INTO memoir_narrative_decisions "
+                        "(id, project_id, target_type, target_id, action, actor_type, "
+                        "actor_user_id, source_followup_task_utterance_id, "
+                        "source_transcript_version_id, before_state_json, "
+                        "after_state_json, reason, idempotency_key, created_at) "
+                        "SELECT id, project_id, target_type, target_id, action, "
+                        "actor_type, actor_user_id, source_followup_task_answer_id, "
+                        "source_transcript_version_id, before_state_json, "
+                        "after_state_json, reason, idempotency_key, created_at "
+                        "FROM memoir_narrative_decisions_current"
+                    )
+                )
+                await conn.execute(
+                    text("DROP TABLE memoir_narrative_decisions_current")
+                )
+                await conn.execute(text("PRAGMA legacy_alter_table=OFF"))
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+            await conn.commit()
 
         first = await migrate_memoir_narrative_schema(engine)
         second = await migrate_memoir_narrative_schema(engine)
         await assert_memoir_narrative_schema(engine)
 
-        assert first["changed_columns"] == [
-            "memoir_followup_task_utterances.is_assignment_snapshot"
-        ]
-        assert second["changed_columns"] == []
+        assert set(first["changed_tables"]) >= {
+            "memoir_followup_task_answers",
+            "memoir_utterance_interview_assignments",
+            "memoir_interview_policy_decisions",
+            "memoir_narrative_decisions",
+        }
+        assert second["changed_tables"] == []
+        async with session_factory() as db:
+            answer = await db.get(MemoirFollowupTaskAnswer, answer_id)
+            assignment = await db.scalar(
+                select(MemoirUtteranceInterviewAssignment).where(
+                    MemoirUtteranceInterviewAssignment.utterance_id
+                    == utterance_id,
+                )
+            )
+            decision = await db.get(MemoirNarrativeDecision, decision_id)
+            assert answer is not None
+            assert answer.task_id == task_id
+            assert assignment is not None
+            assert assignment.id == answer_id
+            assert assignment.followup_task_id == task_id
+            assert decision is not None
+            assert decision.source_followup_task_answer_id == answer_id
+        async with engine.begin() as conn:
+            assert not (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+                        "AND name = 'memoir_followup_task_utterances'"
+                    )
+                )
+            ).scalar_one_or_none()
+            assert (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall() == []
     finally:
         await engine.dispose()
 
@@ -621,14 +874,21 @@ async def test_narrative_migration_renames_followup_outcomes_without_losing_rela
             )
             db.add(utterance)
             await db.flush()
-            relation = MemoirFollowupTaskUtterance(
+            relation = MemoirFollowupTaskAnswer(
                 project_id=project.id,
                 task_id=task.id,
                 utterance_id=utterance.id,
                 result_role="target_answer",
-                is_assignment_snapshot=True,
             )
-            db.add(relation)
+            db.add_all(
+                [
+                    relation,
+                    MemoirUtteranceInterviewAssignment(
+                        utterance_id=utterance.id,
+                        followup_task_id=task.id,
+                    ),
+                ]
+            )
             await db.commit()
             task_id = task.id
             relation_id = relation.id
@@ -695,7 +955,7 @@ async def test_narrative_migration_renames_followup_outcomes_without_losing_rela
         assert second["changed_tables"] == []
         async with session_factory() as db:
             migrated = await db.get(MemoirFollowupTask, task_id)
-            relation = await db.get(MemoirFollowupTaskUtterance, relation_id)
+            relation = await db.get(MemoirFollowupTaskAnswer, relation_id)
             session = await db.get(MemoirVoiceSession, session_id)
             assert migrated is not None
             assert migrated.status == MemoirFollowupTaskStatus.UNABLE_TO_ANSWER.value
@@ -705,56 +965,6 @@ async def test_narrative_migration_renames_followup_outcomes_without_losing_rela
             assert session.current_followup_task_id == task_id
         async with engine.begin() as conn:
             assert (await conn.execute(text("PRAGMA foreign_key_check"))).fetchall() == []
-    finally:
-        await engine.dispose()
-
-
-async def test_narrative_migration_adds_followup_answer_interpretation_columns_once():
-    register_models()
-    engine = _sqlite_engine()
-    columns = [
-        "interpretation_status",
-        "answer_kind",
-        "direct_narrative_text",
-        "clarification_text",
-        "fact_resolution_text",
-        "confirmation_question",
-        "interpretation_reason",
-    ]
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP TABLE memoir_followup_task_utterances"))
-            await conn.execute(
-                text(
-                    "CREATE TABLE memoir_followup_task_utterances ("
-                    "id VARCHAR(36) PRIMARY KEY NOT NULL, "
-                    "project_id VARCHAR(36) NOT NULL, "
-                    "task_id VARCHAR(36) NOT NULL, "
-                    "utterance_id VARCHAR(36) NOT NULL, "
-                    "result_role VARCHAR(24) NOT NULL, "
-                    "is_assignment_snapshot BOOLEAN NOT NULL DEFAULT 0, "
-                    "created_at DATETIME NOT NULL)"
-                )
-            )
-
-        first = await migrate_memoir_narrative_schema(engine)
-        second = await migrate_memoir_narrative_schema(engine)
-
-        assert first["changed_columns"] == [
-            f"memoir_followup_task_utterances.{column}" for column in columns
-        ]
-        assert second["changed_columns"] == []
-        async with engine.begin() as conn:
-            actual_columns = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text("PRAGMA table_info(memoir_followup_task_utterances)")
-                    )
-                ).fetchall()
-            }
-        assert set(columns) <= actual_columns
     finally:
         await engine.dispose()
 
@@ -972,7 +1182,7 @@ async def test_narrative_migration_rebuilds_legacy_decisions_and_preserves_rows(
             preserved = (
                 await conn.execute(
                     text(
-                        "SELECT action, reason, source_followup_task_utterance_id, "
+                        "SELECT action, reason, source_followup_task_answer_id, "
                         "source_transcript_version_id FROM memoir_narrative_decisions "
                         "WHERE id = 'legacy-decision'"
                     )

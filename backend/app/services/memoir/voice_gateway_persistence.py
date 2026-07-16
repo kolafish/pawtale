@@ -126,7 +126,10 @@ class VoiceGatewayPersistence:
 
     async def flush_unfinalized_audio(self) -> dict[str, Any] | None:
         staged_audio = await self._pending_audio.stage(self.db)
-        result = await self._service.persist_unfinalized_audio(staged_audio=staged_audio)
+        result = await self._service.persist_unfinalized_audio(
+            staged_audio=staged_audio,
+            speaker_role=self._turn_context.speaker_role,
+        )
         if result is None:
             return None
         await self._pending_audio.mark_committed()

@@ -22,7 +22,11 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_common import AudioFile
-from app.models.memoir_narrative import MemoirDraftBlock
+from app.models.memoir_narrative import (
+    MemoirDraftBlock,
+    MemoirInterviewPolicyDecision,
+    MemoirUtteranceInterviewAssignment,
+)
 from app.models.projects import Project
 import app.services.project_documents as project_documents
 from app.services.memoir import audio_files
@@ -147,6 +151,24 @@ async def _remaining_media_paths(db: AsyncSession) -> set[str]:
 
 async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
     register_models()
+    project_session_ids = select(MemoirVoiceSession.id).where(
+        MemoirVoiceSession.project_id == project_id
+    )
+    project_utterance_ids = select(MemoirVoiceUtterance.id).where(
+        MemoirVoiceUtterance.voice_session_id.in_(project_session_ids)
+    )
+    await db.execute(
+        delete(MemoirUtteranceInterviewAssignment).where(
+            MemoirUtteranceInterviewAssignment.utterance_id.in_(
+                project_utterance_ids
+            )
+        )
+    )
+    await db.execute(
+        delete(MemoirInterviewPolicyDecision).where(
+            MemoirInterviewPolicyDecision.session_id.in_(project_session_ids)
+        )
+    )
     await db.execute(
         update(MemoirBookOutput)
         .where(MemoirBookOutput.project_id == project_id)

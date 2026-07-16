@@ -23,7 +23,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerKind,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeActorType,
     MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
@@ -48,7 +48,8 @@ from app.models.memoir_narrative import (
     MemoirDraftBlock,
     MemoirDraftBlockVersion,
     MemoirFollowupTask,
-    MemoirFollowupTaskUtterance,
+    MemoirFollowupTaskAnswer,
+    MemoirUtteranceInterviewAssignment,
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
@@ -416,23 +417,30 @@ async def _create_editorial_answer(
     )
     test_db.add(task)
     await test_db.flush()
-    relation = MemoirFollowupTaskUtterance(
+    relation = MemoirFollowupTaskAnswer(
         project_id=created["project_id"],
         task_id=task.id,
         utterance_id=transcript["utterance_id"],
         result_role=(
-            MemoirFollowupTaskUtteranceRole.TARGET_ANSWER.value
+            MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value
             if answered
-            else MemoirFollowupTaskUtteranceRole.RELATED_CONTEXT.value
+            else MemoirFollowupTaskAnswerRole.RELATED_CONTEXT.value
         ),
-        is_assignment_snapshot=True,
         interpretation_status=MemoirFollowupAnswerInterpretationStatus.RESOLVED.value,
         answer_kind=answer_kind.value,
         direct_narrative_text=direct_narrative_text,
         clarification_text=clarification_text,
         fact_resolution_text=fact_resolution_text,
     )
-    test_db.add(relation)
+    test_db.add_all(
+        [
+            relation,
+            MemoirUtteranceInterviewAssignment(
+                utterance_id=transcript["utterance_id"],
+                followup_task_id=task.id,
+            ),
+        ]
+    )
     await test_db.commit()
     return transcript, gap, task, relation
 

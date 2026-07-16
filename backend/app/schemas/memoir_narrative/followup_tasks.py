@@ -9,7 +9,7 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
     MemoirFollowupTaskStatus,
-    MemoirFollowupTaskUtteranceRole,
+    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeActorType,
 )
 
@@ -21,11 +21,11 @@ class MemoirFollowupTaskClaimResponse(BaseModel):
     context_role: MemoirFollowupTaskClaimRole
 
 
-class MemoirFollowupTaskUtteranceResponse(BaseModel):
+class MemoirFollowupTaskAnswerResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     utterance_id: str
-    result_role: MemoirFollowupTaskUtteranceRole
+    result_role: MemoirFollowupTaskAnswerRole
     interpretation_status: MemoirFollowupAnswerInterpretationStatus
     answer_kind: MemoirFollowupAnswerKind | None
     direct_narrative_text: str
@@ -58,7 +58,7 @@ class MemoirFollowupTaskResponse(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     claims: list[MemoirFollowupTaskClaimResponse] = Field(default_factory=list)
-    utterances: list[MemoirFollowupTaskUtteranceResponse] = Field(default_factory=list)
+    answers: list[MemoirFollowupTaskAnswerResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
