@@ -129,6 +129,10 @@ function loadVoiceChatPage({
     formatDuration: () => "00:00",
     gatewayStateText: () => "识别未同步",
     latestAssistantMessageId: () => "",
+    latestPersistedAssistantMessageId: (lines) => {
+      const latest = lines[lines.length - 1];
+      return latest?.role === "assistant" ? latest.message_id || "" : "";
+    },
     latestTranscriptText: () => "",
     modeLabel: (mode) => (mode === "guided_interview" ? "小余陪着问" : "慢慢讲"),
     statusText: (status) => status,
@@ -1518,6 +1522,12 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
       voiceSessionId: "voice-1",
       voiceAuthorizationAgreed: true,
       status: "ready",
+      transcriptLines: [{
+        id: "assistant-line-1",
+        role: "assistant",
+        text: "后来还发生了什么？",
+        message_id: "assistant-message-1",
+      }],
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -1530,8 +1540,14 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
   await page.startRecordingAfterPrivacy.call(context, false);
 
   assert.equal(startOptions.length, 2);
-  assert.equal(startOptions[0].noVoiceActivityTimeoutMs, 15000);
-  assert.equal(startOptions[1].noVoiceActivityTimeoutMs, 0);
+  assert.deepEqual(startOptions[0], {
+    noVoiceActivityTimeoutMs: 15000,
+    parentMessageId: "assistant-message-1",
+  });
+  assert.deepEqual(startOptions[1], {
+    noVoiceActivityTimeoutMs: 0,
+    parentMessageId: "assistant-message-1",
+  });
   assert.equal(context.data.primaryActionText, "暂停收音");
 });
 

@@ -14,6 +14,7 @@ const {
   coveredFollowUpSourceMessageId,
   followUpSourceMessageId,
   latestAssistantMessageId,
+  latestPersistedAssistantMessageId,
   latestTranscriptText,
   totalTranscriptChars,
   ttsAlignmentFromMetadata,
@@ -64,6 +65,7 @@ test("derives assistant panel state from transcript lines", () => {
   assert.equal(followUpSourceMessageId(lines), "message-user");
   assert.equal(coveredFollowUpSourceMessageId(lines), "message-user");
   assert.equal(latestAssistantMessageId(lines), "message-assistant");
+  assert.equal(latestPersistedAssistantMessageId(lines), "message-assistant");
   assert.equal(visibleAssistantLine(lines, ""), assistantLine);
   assert.equal(visibleAssistantLine(lines, "message-assistant"), undefined);
   assert.equal(assistantPrimaryIntent(assistantLine), "follow_up");
@@ -74,6 +76,19 @@ test("derives assistant panel state from transcript lines", () => {
     assistantLoadingText: "小余正在想一想",
     assistantEmptyText: "可以让小余根据刚才的内容接着问。",
   });
+});
+
+test("only exposes persisted assistant messages as recording parents", () => {
+  const streamingLine = {
+    id: "assistant-stream-1",
+    role: "assistant",
+    text: "正在生成的问题",
+    message_id: "",
+  };
+
+  assert.equal(latestPersistedAssistantMessageId([userLine, streamingLine]), "");
+  assert.equal(latestPersistedAssistantMessageId([userLine, assistantLine]), "message-assistant");
+  assert.equal(latestPersistedAssistantMessageId([assistantLine, userLine]), "");
 });
 
 test("does not mark a source covered by a non-answer acknowledgement", () => {

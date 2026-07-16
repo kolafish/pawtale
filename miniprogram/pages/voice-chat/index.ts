@@ -63,6 +63,7 @@ import {
   canRequestFollowUp,
   followUpSourceMessageId,
   latestAssistantMessageId,
+  latestPersistedAssistantMessageId,
   statusText,
   ttsAlignmentFromMetadata,
   upsertTranscriptLine,
@@ -1634,6 +1635,9 @@ definePage<VoiceChatData>()({
   ) {
     const requestGeneration = requestedGeneration ?? ++this.recordingStartGeneration;
     const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
+    const parentMessageId = this.data.interviewType === "human_interview"
+      ? ""
+      : latestPersistedAssistantMessageId(this.data.transcriptLines);
     if (!autoTriggered) {
       this.consecutiveNoAnswerPrompts = 0;
       this.cancelPendingNoAnswerPrompt(!interruptingAssistant);
@@ -1696,11 +1700,14 @@ definePage<VoiceChatData>()({
     const recordingOptions: {
       noVoiceActivityTimeoutMs: number;
       speakerRole?: MemoirSpeakerRole;
+      parentMessageId?: string;
     } = {
       noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
     };
     if (this.data.interviewType === "human_interview") {
       recordingOptions.speakerRole = speakerRole || this.data.speakerRole;
+    } else if (parentMessageId) {
+      recordingOptions.parentMessageId = parentMessageId;
     }
     const started = this.voiceStreaming.startRecording(recordingOptions);
     if (!started) {
