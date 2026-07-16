@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, RefreshCw, Trash2, X } from 'lucide-react';
 import { isProjectDeletionConfirmationValid } from '../domain/projectDeletion';
 import type { ProjectListItem } from '../types';
@@ -19,16 +19,55 @@ export function ProjectDeleteDialog({
   onConfirm,
 }: ProjectDeleteDialogProps) {
   const [confirmation, setConfirmation] = useState('');
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const confirmationInputRef = useRef<HTMLInputElement | null>(null);
+  const onCancelRef = useRef(onCancel);
   const ownerLabel = project.owner_display_name || project.owner_email || '未记录所有者';
   const isConfirmed = isProjectDeletionConfirmationValid(project.title, confirmation);
 
   useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    confirmationInputRef.current?.focus();
+    return () => previouslyFocused?.focus();
+  }, []);
+
+  useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !isDeleting) onCancel();
+      if (event.key === 'Escape' && !isDeleting) {
+        onCancelRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusableElements = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+      } else if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isDeleting, onCancel]);
+  }, [isDeleting]);
 
   return (
     <div
@@ -39,8 +78,10 @@ export function ProjectDeleteDialog({
       }}
     >
       <section
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        aria-busy={isDeleting}
         aria-labelledby="project-delete-title"
         aria-describedby="project-delete-description"
         className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-[0_0_0_1px_rgba(0,0,0,0.06),0_12px_32px_-12px_rgba(17,24,39,0.28),0_24px_64px_-24px_rgba(17,24,39,0.22)]"
@@ -94,10 +135,10 @@ export function ProjectDeleteDialog({
             输入项目名称 <span className="font-semibold text-red-600">{project.title}</span> 以确认
           </label>
           <input
+            ref={confirmationInputRef}
             id="project-delete-confirmation"
             value={confirmation}
             onChange={(event) => setConfirmation(event.target.value)}
-            autoFocus
             autoComplete="off"
             disabled={isDeleting}
             className="mt-2 min-h-10 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition-[border-color,box-shadow] duration-150 focus:border-red-400 focus:ring-2 focus:ring-red-100 disabled:cursor-not-allowed disabled:bg-gray-50"
