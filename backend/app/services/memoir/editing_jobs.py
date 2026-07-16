@@ -358,8 +358,12 @@ async def claim_due_editing_jobs(
             statement.order_by(
                 case(
                     (
-                        MemoirEditingJob.job_type
-                        == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+                        MemoirEditingJob.job_type.in_(
+                            (
+                                MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+                                MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
+                            )
+                        ),
                         1,
                     ),
                     else_=0,

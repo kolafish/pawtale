@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 from typing import Mapping
 
@@ -50,7 +51,15 @@ from app.services.memoir.narrative.claim_usage_policy import (
 
 SHADOW_POLICY_VERSION = "interview-policy-shadow-1"
 SHADOW_PROMPT_VERSION = "memoir_interview_policy_shadow_v1"
+ACTIVE_POLICY_VERSION = "interview-policy-active-1"
 MAX_POLICY_CONTEXT_MESSAGES = 8
+LOW_RISK_ACTIVE_ACTIONS = frozenset(
+    {
+        MemoirInterviewAction.CONTINUE_LISTENING,
+        MemoirInterviewAction.FOLLOW_CURRENT_STORY,
+        MemoirInterviewAction.SUMMARIZE_AND_CONFIRM,
+    }
+)
 
 _ACTION_GUIDANCE: Mapping[MemoirInterviewAction, str] = {
     MemoirInterviewAction.CONTINUE_LISTENING: "少问或不问，让叙述者把正在说的内容继续说完",
@@ -91,16 +100,29 @@ _PRIVACY_PHRASES = (
 )
 
 
-class ShadowPolicySelectionError(ValueError):
+class InterviewPolicySelectionError(ValueError):
     pass
 
 
 @dataclass(frozen=True)
-class ShadowPolicyContext:
+class InterviewPolicyContext:
     brief: InterviewBrief
     messages: tuple[MemoirChatMessage, ...]
     completion_context: str
     trigger_message_id: str | None
+
+
+@dataclass(frozen=True)
+class ActivePolicyTurn:
+    context: InterviewPolicyContext
+    selected_action: MemoirInterviewAction
+    execution_mode: MemoirInterviewPolicyExecutionMode
+    model_provider: str
+    model_name: str
+
+    @property
+    def applies_to_reply(self) -> bool:
+        return self.execution_mode == MemoirInterviewPolicyExecutionMode.ACTIVE
 
 
 def _eligible_session(session: MemoirVoiceSession) -> bool:
@@ -306,8 +328,25 @@ async def _load_shadow_context(
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
     followup_task_id: str | None,
-) -> ShadowPolicyContext | None:
+) -> InterviewPolicyContext | None:
     messages = _ordered_messages_before(session, generated_message)
+    return await _build_policy_context(
+        db,
+        session=session,
+        messages=messages,
+        followup_task_id=followup_task_id,
+        policy_version=SHADOW_POLICY_VERSION,
+    )
+
+
+async def _build_policy_context(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    messages: list[MemoirChatMessage],
+    followup_task_id: str | None,
+    policy_version: str,
+) -> InterviewPolicyContext | None:
     latest_user = _latest_user_message(messages)
     safety_constraints = _safety_constraints(
         latest_user.content_text if latest_user else ""
@@ -354,7 +393,7 @@ async def _load_shadow_context(
             recent_material_refs=material_refs,
             user_preferences=_user_preferences(session),
             safety_constraints=safety_constraints,
-            policy_version=SHADOW_POLICY_VERSION,
+            policy_version=policy_version,
         )
         completion_context = await _completion_context(db, task)
     else:
@@ -366,13 +405,38 @@ async def _load_shadow_context(
             do_not_repeat_claim_ids=do_not_repeat_claim_ids,
             user_preferences=_user_preferences(session),
             safety_constraints=safety_constraints,
-            policy_version=SHADOW_POLICY_VERSION,
+            policy_version=policy_version,
         )
-    return ShadowPolicyContext(
+    return InterviewPolicyContext(
         brief=brief,
         messages=tuple(messages[-MAX_POLICY_CONTEXT_MESSAGES:]),
         completion_context=completion_context,
         trigger_message_id=latest_user.id if latest_user else None,
+    )
+
+
+async def build_current_policy_context(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    followup_task_id: str | None,
+    policy_version: str,
+) -> InterviewPolicyContext | None:
+    messages = [
+        message
+        for message in sorted(
+            session.messages,
+            key=lambda item: (item.turn_index, item.created_at, item.id),
+        )
+        if message.content_status == MemoirChatContentStatus.FINAL.value
+        and message.content_text.strip()
+    ]
+    return await _build_policy_context(
+        db,
+        session=session,
+        messages=messages,
+        followup_task_id=followup_task_id,
+        policy_version=policy_version,
     )
 
 
@@ -390,7 +454,7 @@ def _conversation_prompt(messages: tuple[MemoirChatMessage, ...]) -> str:
     return "\n".join(lines)
 
 
-def _selection_prompt(context: ShadowPolicyContext) -> str:
+def _selection_prompt(context: InterviewPolicyContext) -> str:
     snapshot = brief_context_snapshot(context.brief)
     candidates = [candidate.action for candidate in context.brief.candidate_actions]
     candidate_lines = "\n".join(
@@ -423,9 +487,9 @@ candidate_actions：
 """
 
 
-async def select_shadow_action(
+async def select_policy_action(
     *,
-    context: ShadowPolicyContext,
+    context: InterviewPolicyContext,
     ai_client: AITextClient,
 ) -> MemoirInterviewAction:
     content = await ai_client._call_llm(
@@ -440,18 +504,164 @@ async def select_shadow_action(
     )
     payload = extract_json_payload(str(content))
     if not isinstance(payload, dict):
-        raise ShadowPolicySelectionError("shadow_policy_invalid_json")
+        raise InterviewPolicySelectionError("interview_policy_invalid_json")
     raw_action = str(payload.get("selected_action") or "").strip()
     try:
         selected_action = MemoirInterviewAction(raw_action)
     except ValueError as exc:
-        raise ShadowPolicySelectionError("shadow_policy_unknown_action") from exc
+        raise InterviewPolicySelectionError("interview_policy_unknown_action") from exc
     candidate_actions = {
         candidate.action for candidate in context.brief.candidate_actions
     }
     if selected_action not in candidate_actions:
-        raise ShadowPolicySelectionError("shadow_policy_action_outside_candidates")
+        raise InterviewPolicySelectionError(
+            "interview_policy_action_outside_candidates"
+        )
     return selected_action
+
+
+def _active_rollout_selected(
+    *,
+    session_id: str,
+    rollout_percent: int,
+    policy_version: str = ACTIVE_POLICY_VERSION,
+) -> bool:
+    normalized_percent = max(0, min(100, rollout_percent))
+    if normalized_percent <= 0:
+        return False
+    if normalized_percent >= 100:
+        return True
+    digest = hashlib.sha256(
+        f"{policy_version}:{session_id}".encode("utf-8")
+    ).digest()
+    bucket = int.from_bytes(digest[:8], "big") % 100
+    return bucket < normalized_percent
+
+
+def _execution_mode_for_selection(
+    context: InterviewPolicyContext,
+    selected_action: MemoirInterviewAction,
+) -> MemoirInterviewPolicyExecutionMode:
+    if selected_action in LOW_RISK_ACTIVE_ACTIONS:
+        return MemoirInterviewPolicyExecutionMode.ACTIVE
+    if (
+        selected_action == MemoirInterviewAction.PAUSE_OR_END
+        and len(context.brief.candidate_actions) == 1
+        and context.brief.candidate_actions[0].action
+        == MemoirInterviewAction.PAUSE_OR_END
+    ):
+        return MemoirInterviewPolicyExecutionMode.ACTIVE
+    return MemoirInterviewPolicyExecutionMode.SUGGEST
+
+
+async def prepare_active_policy_turn(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    followup_task_id: str | None,
+    requested_ai_model: str | None,
+    ai_client_factory=get_ai_service,
+    enabled: bool | None = None,
+    rollout_percent: int | None = None,
+) -> ActivePolicyTurn | None:
+    settings = get_settings()
+    is_enabled = (
+        settings.memoir_interview_policy_active_enabled
+        if enabled is None
+        else enabled
+    )
+    selected_percent = (
+        settings.memoir_interview_policy_active_rollout_percent
+        if rollout_percent is None
+        else rollout_percent
+    )
+    if (
+        not is_enabled
+        or not _eligible_session(session)
+        or not _active_rollout_selected(
+            session_id=session.id,
+            rollout_percent=selected_percent,
+        )
+    ):
+        return None
+    context = await build_current_policy_context(
+        db,
+        session=session,
+        followup_task_id=followup_task_id,
+        policy_version=ACTIVE_POLICY_VERSION,
+    )
+    if context is None:
+        return None
+    selected_model = (
+        settings.memoir_interview_policy_active_model.strip()
+        or (requested_ai_model or "").strip()
+    )
+    client = ai_client_factory(selected_model or None)
+    selected_action = await select_policy_action(
+        context=context,
+        ai_client=client,
+    )
+    return ActivePolicyTurn(
+        context=context,
+        selected_action=selected_action,
+        execution_mode=_execution_mode_for_selection(context, selected_action),
+        model_provider=client.provider_name,
+        model_name=client.model_name,
+    )
+
+
+def active_reply_instruction(policy_turn: ActivePolicyTurn | None) -> str:
+    if policy_turn is None or not policy_turn.applies_to_reply:
+        return ""
+    instructions = {
+        MemoirInterviewAction.CONTINUE_LISTENING: (
+            "本轮策略是“继续倾听”：以简短承接和鼓励为主，不提出新的具体问题，"
+            "不要换话题；可以用一句很轻的邀请让叙述者继续。"
+        ),
+        MemoirInterviewAction.FOLLOW_CURRENT_STORY: (
+            "本轮策略是“顺着当前故事追问”：只能沿叙述者最新内容推进，"
+            "一次只问一个自然问题，不切换到旧故事或新主题。"
+        ),
+        MemoirInterviewAction.SUMMARIZE_AND_CONFIRM: (
+            "本轮策略是“总结确认”：只做简短、忠实的总结并请叙述者确认，"
+            "不得添加新事实，不继续索取事件细节。"
+        ),
+        MemoirInterviewAction.PAUSE_OR_END: (
+            "叙述者已明确要求暂停、结束或不愿讨论；本轮只尊重这一决定并自然收尾，"
+            "不得继续提问或换一个话题追问。"
+        ),
+    }
+    return instructions.get(policy_turn.selected_action, "")
+
+
+async def persist_policy_turn_decision(
+    db: AsyncSession,
+    *,
+    session: MemoirVoiceSession,
+    generated_message: MemoirChatMessage,
+    policy_turn: ActivePolicyTurn,
+) -> MemoirInterviewPolicyDecision:
+    decision = await interview_policy.create_policy_decision(
+        db,
+        session_id=session.id,
+        trigger_message_id=policy_turn.context.trigger_message_id,
+        brief=policy_turn.context.brief,
+        selected_action=policy_turn.selected_action,
+        reason_code=(
+            f"{policy_turn.execution_mode.value}_"
+            f"{policy_turn.selected_action.value}"
+        ),
+        reason_summary=_REASON_SUMMARIES[policy_turn.selected_action],
+        execution_mode=policy_turn.execution_mode,
+        model_provider=policy_turn.model_provider,
+        model_name=policy_turn.model_name,
+    )
+    await interview_policy.attach_generated_message(
+        db,
+        decision=decision,
+        message_id=generated_message.id,
+    )
+    return decision
 
 
 async def schedule_shadow_policy_evaluation(
@@ -590,7 +800,7 @@ async def run_shadow_policy_evaluation_job(
         )
     model = str(payload.get("ai_model") or "").strip() or None
     client = ai_client or get_ai_service(model)
-    selected_action = await select_shadow_action(
+    selected_action = await select_policy_action(
         context=context,
         ai_client=client,
     )

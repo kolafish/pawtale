@@ -22,7 +22,7 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import followup_planner
-from app.services.memoir.narrative import interview_policy_shadow
+from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
@@ -171,6 +171,7 @@ class VoiceAssistantTurnStreamSession:
         voice_session_id: str,
         user_id: str,
         ai_client_factory=get_ai_service,
+        policy_ai_client_factory=get_ai_service,
         tts_client_factory=get_tts_client,
     ) -> None:
         self.db = db
@@ -178,6 +179,7 @@ class VoiceAssistantTurnStreamSession:
         self.voice_session_id = voice_session_id
         self.user_id = user_id
         self.ai_client_factory = ai_client_factory
+        self.policy_ai_client_factory = policy_ai_client_factory
         self.tts_client_factory = tts_client_factory
 
     async def run(self) -> None:
@@ -301,14 +303,6 @@ class VoiceAssistantTurnStreamSession:
         )
         tts_client = self.tts_client_factory()
         persona = interviewer_persona_for_voice(req.voice or tts_client.default_voice)
-        prompt = _build_stream_turn_prompt(
-            voice_session,
-            previous_messages=previous_messages,
-            regenerate=req.regenerate,
-            progress_context=project_progress_context,
-            persona=persona,
-            followup_context=followup_context,
-        )
         ai_client = self.ai_client_factory(req.ai_model)
         artifacts = AssistantTurnArtifacts()
 
@@ -329,6 +323,40 @@ class VoiceAssistantTurnStreamSession:
                     followup_context.task_id if followup_context else None
                 ),
             }
+        )
+
+        policy_turn: interview_policy_runtime.ActivePolicyTurn | None = None
+        try:
+            async with self.db.begin_nested():
+                policy_turn = (
+                    await interview_policy_runtime.prepare_active_policy_turn(
+                        self.db,
+                        session=voice_session,
+                        followup_task_id=(
+                            followup_context.task_id if followup_context else None
+                        ),
+                        requested_ai_model=req.ai_model,
+                        ai_client_factory=self.policy_ai_client_factory,
+                    )
+                )
+        except Exception:
+            logger.exception(
+                "Active interview policy selection failed; continuing with "
+                "the existing reply flow voice_session_id=%s turn_id=%s",
+                voice_session.id,
+                turn_id,
+            )
+
+        prompt = _build_stream_turn_prompt(
+            voice_session,
+            previous_messages=previous_messages,
+            regenerate=req.regenerate,
+            progress_context=project_progress_context,
+            persona=persona,
+            followup_context=followup_context,
+            policy_instruction=interview_policy_runtime.active_reply_instruction(
+                policy_turn
+            ),
         )
 
         await self._stream_text_and_audio(
@@ -366,25 +394,67 @@ class VoiceAssistantTurnStreamSession:
             voice_session_id=voice_session.id,
             message_id=message.id,
         )
+        persisted_message_id = message.id
         try:
-            await interview_policy_shadow.schedule_shadow_policy_evaluation(
-                self.db,
-                session=voice_session,
-                generated_message=message,
-                followup_task_id=(
-                    followup_context.task_id if followup_context else None
-                ),
-                requested_ai_model=req.ai_model,
-            )
+            if policy_turn is not None:
+                await interview_policy_runtime.persist_policy_turn_decision(
+                    self.db,
+                    session=voice_session,
+                    generated_message=message,
+                    policy_turn=policy_turn,
+                )
+            else:
+                await interview_policy_runtime.schedule_shadow_policy_evaluation(
+                    self.db,
+                    session=voice_session,
+                    generated_message=message,
+                    followup_task_id=(
+                        followup_context.task_id if followup_context else None
+                    ),
+                    requested_ai_model=req.ai_model,
+                )
             await self.db.commit()
         except Exception:
             await self.db.rollback()
             logger.exception(
-                "Failed to schedule interview policy shadow evaluation "
+                "Failed to persist interview policy result "
                 "voice_session_id=%s message_id=%s",
-                voice_session.id,
-                message.id,
+                self.voice_session_id,
+                persisted_message_id,
             )
+            if policy_turn is not None:
+                try:
+                    fallback_session = await load_voice_session(
+                        self.db,
+                        self.voice_session_id,
+                        self.user_id,
+                    )
+                    fallback_message = await self.db.get(
+                        MemoirChatMessage,
+                        persisted_message_id,
+                    )
+                    if fallback_message is None:
+                        raise RuntimeError(
+                            "Persisted assistant message unavailable for shadow fallback"
+                        )
+                    await interview_policy_runtime.schedule_shadow_policy_evaluation(
+                        self.db,
+                        session=fallback_session,
+                        generated_message=fallback_message,
+                        followup_task_id=(
+                            followup_context.task_id if followup_context else None
+                        ),
+                        requested_ai_model=req.ai_model,
+                    )
+                    await self.db.commit()
+                except Exception:
+                    await self.db.rollback()
+                    logger.exception(
+                        "Failed to schedule interview policy shadow fallback "
+                        "voice_session_id=%s message_id=%s",
+                        self.voice_session_id,
+                        persisted_message_id,
+                    )
         await self.client.send_json(
             {
                 "type": "turn.completed",
@@ -663,6 +733,7 @@ def _build_stream_turn_prompt(
     progress_context: ProgressPromptContext,
     persona: InterviewerPersona,
     followup_context: followup_planner.FollowupPromptContext | None,
+    policy_instruction: str = "",
 ) -> str:
     messages = list(voice_session.messages)
     has_user_message = _has_user_message(messages)
@@ -673,6 +744,11 @@ def _build_stream_turn_prompt(
     topic_hint = _requested_topic_hint(messages)
     host_name = persona.host_name
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
+    policy_section = (
+        f"\n当前受控访谈策略：\n{policy_instruction}\n"
+        if policy_instruction
+        else ""
+    )
     if (
         voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
         and followup_context is not None
@@ -744,6 +820,7 @@ def _build_stream_turn_prompt(
 {progress_context.prompt_text}
 
 {mode_instruction}
+{policy_section}
 
 当前补访任务：
 {followup_context.prompt_text if followup_context else "本轮没有已领取的补访任务，按当前引导模式继续。"}

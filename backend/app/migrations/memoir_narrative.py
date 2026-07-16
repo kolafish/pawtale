@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
 
 from app.database import Base, register_models
+from app.domain.memoir.types import MemoirEditingJobType
 from app.migrations.memoir_draft_blocks import (
     MEMOIR_DRAFT_BLOCK_TRIGGERS,
     ensure_draft_block_triggers,
@@ -106,7 +107,6 @@ FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
 }
 LEGACY_FOLLOWUP_GENERATION_JOB_TYPE = "generate_followup_tasks"
 LEGACY_FOLLOWUP_GENERATION_EVENT_TYPE = "followup_tasks_generated"
-INTERVIEW_POLICY_SHADOW_JOB_TYPE = "evaluate_interview_policy_shadow"
 INTERVIEW_POLICY_FAILURE_CODES = (
     "action_outside_candidates",
     "interrupted_user",
@@ -407,13 +407,16 @@ async def _ensure_narrative_gap_action_constraints(engine: AsyncEngine) -> bool:
 
 
 async def _ensure_editing_job_type_constraint(engine: AsyncEngine) -> bool:
-    """Rebuild the SQLite job table when the policy shadow type is unavailable."""
+    """Rebuild the SQLite job table when its enum CHECK is stale."""
     register_models()
     table_name = "memoir_editing_jobs"
-    legacy_table_name = f"{table_name}_before_policy_shadow"
+    legacy_table_name = f"{table_name}_before_type_constraint"
     async with engine.connect() as conn:
         table_sql = await _table_sql(conn, table_name)
-        if not table_sql or f"'{INTERVIEW_POLICY_SHADOW_JOB_TYPE}'" in table_sql:
+        expected_types = tuple(job_type.value for job_type in MemoirEditingJobType)
+        if not table_sql or all(
+            f"'{job_type}'" in table_sql for job_type in expected_types
+        ):
             await conn.rollback()
             return False
 
