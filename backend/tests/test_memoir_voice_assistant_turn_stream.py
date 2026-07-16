@@ -21,6 +21,7 @@ from app.models.memoir import (
     MemoirChatMessage,
     MemoirEditingJob,
 )
+from app.models.memoir_narrative import MemoirInterviewPolicyDecision
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
@@ -155,7 +156,7 @@ async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing
 ):
     current_settings = get_settings()
     monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_shadow.get_settings",
+        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
         lambda: current_settings.model_copy(
             update={"memoir_interview_policy_shadow_enabled": True}
         ),
@@ -191,6 +192,208 @@ async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing
     assert shadow_job is not None
     assert shadow_job.status == MemoirEditingJobStatus.PENDING.value
     assert "河边" not in str(shadow_job.payload_json)
+
+
+async def test_voice_assistant_turn_applies_and_records_low_risk_active_policy(
+    client,
+    test_db,
+    monkeypatch,
+):
+    current_settings = get_settings()
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
+        lambda: current_settings.model_copy(
+            update={
+                "memoir_interview_policy_shadow_enabled": True,
+                "memoir_interview_policy_active_enabled": True,
+                "memoir_interview_policy_active_rollout_percent": 100,
+            }
+        ),
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我还想接着讲小时候在河边玩的事。",
+        guidance_mode="free_narration",
+    )
+    policy_ai = FakePolicyAI("follow_current_story")
+
+    _, reply_ai, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["河边那次，后来还发生了什么？"],
+        policy_ai_client=policy_ai,
+    )
+
+    decision = await test_db.scalar(
+        select(MemoirInterviewPolicyDecision).where(
+            MemoirInterviewPolicyDecision.generated_message_id
+            == completed["message_id"]
+        )
+    )
+    shadow_job_count = await test_db.scalar(
+        select(func.count(MemoirEditingJob.id)).where(
+            MemoirEditingJob.project_id == created["session"]["project_id"],
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+        )
+    )
+
+    assert "当前受控访谈策略" in reply_ai.calls[0]["user_prompt"]
+    assert "顺着当前故事追问" in reply_ai.calls[0]["user_prompt"]
+    assert policy_ai.calls
+    assert decision is not None
+    assert decision.execution_mode == "active"
+    assert decision.selected_action == "follow_current_story"
+    assert decision.generated_message_id == completed["message_id"]
+    assert "河边" not in str(decision.state_snapshot_json)
+    assert shadow_job_count == 0
+
+
+async def test_voice_assistant_turn_records_medium_policy_as_suggestion_only(
+    client,
+    test_db,
+    monkeypatch,
+):
+    current_settings = get_settings()
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
+        lambda: current_settings.model_copy(
+            update={
+                "memoir_interview_policy_shadow_enabled": True,
+                "memoir_interview_policy_active_enabled": True,
+                "memoir_interview_policy_active_rollout_percent": 100,
+            }
+        ),
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我还想接着讲小时候在河边玩的事。",
+        guidance_mode="free_narration",
+    )
+
+    _, reply_ai, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["您慢慢讲，我在听。"],
+        policy_ai_client=FakePolicyAI("return_to_prior_story"),
+    )
+
+    decision = await test_db.scalar(
+        select(MemoirInterviewPolicyDecision).where(
+            MemoirInterviewPolicyDecision.generated_message_id
+            == completed["message_id"]
+        )
+    )
+    assert "当前受控访谈策略" not in reply_ai.calls[0]["user_prompt"]
+    assert decision is not None
+    assert decision.execution_mode == "suggest"
+    assert decision.selected_action == "return_to_prior_story"
+
+
+async def test_voice_assistant_turn_policy_failure_falls_back_to_existing_reply_and_shadow(
+    client,
+    test_db,
+    monkeypatch,
+):
+    current_settings = get_settings()
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
+        lambda: current_settings.model_copy(
+            update={
+                "memoir_interview_policy_shadow_enabled": True,
+                "memoir_interview_policy_active_enabled": True,
+                "memoir_interview_policy_active_rollout_percent": 100,
+            }
+        ),
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我还想接着讲小时候在河边玩的事。",
+        guidance_mode="free_narration",
+    )
+
+    _, reply_ai, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["您慢慢讲，我在听。"],
+        policy_ai_client=FailingPolicyAI(),
+    )
+
+    shadow_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == created["session"]["project_id"],
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+        )
+    )
+    decision = await test_db.scalar(select(MemoirInterviewPolicyDecision))
+
+    assert completed["text"].endswith("您慢慢讲，我在听。")
+    assert "当前受控访谈策略" not in reply_ai.calls[0]["user_prompt"]
+    assert decision is None
+    assert shadow_job is not None
+
+
+async def test_voice_assistant_turn_policy_persistence_failure_falls_back_to_shadow(
+    client,
+    test_db,
+    monkeypatch,
+):
+    current_settings = get_settings()
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_runtime.get_settings",
+        lambda: current_settings.model_copy(
+            update={
+                "memoir_interview_policy_shadow_enabled": True,
+                "memoir_interview_policy_active_enabled": True,
+                "memoir_interview_policy_active_rollout_percent": 100,
+            }
+        ),
+    )
+
+    async def fail_policy_persistence(*args, **kwargs):
+        raise RuntimeError("policy persistence unavailable")
+
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_runtime."
+        "persist_policy_turn_decision",
+        fail_policy_persistence,
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我还想接着讲小时候在河边玩的事。",
+        guidance_mode="free_narration",
+    )
+
+    _, _, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["河边那次，后来还发生了什么？"],
+        policy_ai_client=FakePolicyAI("follow_current_story"),
+    )
+
+    shadow_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == created["session"]["project_id"],
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+        )
+    )
+    assistant_message = await test_db.get(
+        MemoirChatMessage,
+        completed["message_id"],
+    )
+    assert assistant_message is not None
+    assert assistant_message.content_text == completed["text"]
+    assert shadow_job is not None
 
 
 async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
@@ -986,6 +1189,7 @@ async def _run_stream_turn(
     chunks: list[str],
     regenerate: bool = False,
     voice: str | None = None,
+    policy_ai_client=None,
 ) -> tuple["FakeTurnClient", "FakeStreamingAI", "FakeStreamingTTS", dict[str, Any]]:
     stream_client = FakeTurnClient()
     ai_client = FakeStreamingAI(chunks)
@@ -996,6 +1200,11 @@ async def _run_stream_turn(
         voice_session_id=voice_session_id,
         user_id=user_id,
         ai_client_factory=lambda model=None: ai_client,
+        policy_ai_client_factory=(
+            (lambda model=None: policy_ai_client)
+            if policy_ai_client is not None
+            else (lambda model=None: ai_client)
+        ),
         tts_client_factory=lambda: tts_client,
     )
     run_task = asyncio.create_task(session.run())
@@ -1055,6 +1264,33 @@ class FakeStreamingAI:
         for chunk in self.chunks:
             yield AITextStreamChunk(text_delta=chunk)
         yield AITextStreamChunk(finish_reason="stop", usage={"total_tokens": 42})
+
+
+class FakePolicyAI:
+    provider_name = "fake-policy"
+    model_name = "fake-policy-model"
+
+    def __init__(self, selected_action: str) -> None:
+        self.selected_action = selected_action
+        self.calls: list[dict[str, Any]] = []
+
+    async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+        self.calls.append(
+            {
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "kwargs": kwargs,
+            }
+        )
+        return f'{{"selected_action":"{self.selected_action}"}}'
+
+
+class FailingPolicyAI(FakePolicyAI):
+    def __init__(self) -> None:
+        super().__init__("continue_listening")
+
+    async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+        raise RuntimeError("policy unavailable")
 
 
 class SlowStreamingAI(FakeStreamingAI):

@@ -47,6 +47,7 @@ from app.services.memoir.narrative import (
     completion_refresh,
     gaps,
     interview_policy,
+    interview_policy_outcomes,
 )
 
 
@@ -203,10 +204,15 @@ async def link_utterance_to_session_task(
             and candidate.assigned_session_id == voice_session.id
         ):
             task = candidate
-    await interview_policy.assign_utterance(
+    assignment = await interview_policy.assign_utterance(
         db,
         utterance=utterance,
         followup_task=task,
+    )
+    await interview_policy_outcomes.schedule_policy_outcome_evaluation(
+        db,
+        project_id=voice_session.project_id,
+        assignment=assignment,
     )
     if task is None:
         return None

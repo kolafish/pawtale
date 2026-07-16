@@ -117,6 +117,10 @@ export function latestAssistantMessageId(lines: VoiceChatTranscriptLine[]): stri
   return latest ? latest.message_id || latest.id : "";
 }
 
+export function latestPersistedAssistantMessageId(lines: VoiceChatTranscriptLine[]): string {
+  return latestAssistantLine(lines)?.message_id || "";
+}
+
 export function visibleAssistantLine(
   lines: VoiceChatTranscriptLine[],
   dismissedMessageId: string,

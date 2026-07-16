@@ -210,12 +210,6 @@ async def record_response_outcome(
         and decision.user_response_outcome != outcome.value
     ):
         raise ValueError("策略响应结果已经记录，不能覆盖")
-    if (
-        human_rating is not None
-        and decision.human_rating is not None
-        and decision.human_rating != human_rating
-    ):
-        raise ValueError("策略人工评分已经记录，不能覆盖")
     changed = False
     if decision.user_response_outcome is None:
         decision.user_response_outcome = outcome.value

@@ -120,7 +120,7 @@ async def test_narrative_migration_retires_legacy_completion_jobs_and_events():
         await engine.dispose()
 
 
-async def test_editing_job_type_migration_preserves_existing_jobs_and_adds_shadow():
+async def test_editing_job_type_migration_preserves_jobs_and_adds_outcome_type():
     engine = _sqlite_engine()
     register_models()
     session_maker = async_sessionmaker(
@@ -142,7 +142,7 @@ async def test_editing_job_type_migration_preserves_existing_jobs_and_adds_shado
                 ).scalar_one()
             )
         legacy_sql = current_sql.replace(
-            ", 'evaluate_interview_policy_shadow'",
+            ", 'evaluate_interview_policy_outcome'",
             "",
         )
         assert legacy_sql != current_sql
@@ -177,15 +177,15 @@ async def test_editing_job_type_migration_preserves_existing_jobs_and_adds_shado
             preserved = await db.get(MemoirEditingJob, existing_id)
             assert preserved is not None
             assert preserved.payload_json == {"source": "before_migration"}
-            shadow = MemoirEditingJob(
+            outcome = MemoirEditingJob(
                 project_id=project_id,
-                job_type="evaluate_interview_policy_shadow",
+                job_type="evaluate_interview_policy_outcome",
                 status="pending",
                 run_after=datetime.now(UTC).replace(tzinfo=None),
             )
-            db.add(shadow)
+            db.add(outcome)
             await db.commit()
-            assert shadow.id
+            assert outcome.id
     finally:
         await engine.dispose()
 
