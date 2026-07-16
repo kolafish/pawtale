@@ -71,21 +71,6 @@ class FakeAIClient:
         return self.content
 
 
-def _contract_request(key: str, objective: str) -> dict:
-    return {
-        "idempotency_key": key,
-        "objective": objective,
-        "reader_takeaway": "读者理解这段经历对叙述者的影响。",
-        "core_questions": [{"key": "meaning", "question": "这段经历为什么重要？"}],
-        "constraints": {
-            "include_story_ids": [],
-            "exclude_story_ids": [],
-            "include_topics": [],
-            "exclude_topics": [],
-        },
-    }
-
-
 async def test_chapter_audit_uses_latest_draft_contract_over_older_confirmed_version(
     client,
     test_db,
@@ -99,29 +84,17 @@ async def test_chapter_audit_uses_latest_draft_contract_over_older_confirmed_ver
     )
     chapter_id = chapters[0].id
     first = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/contract/revisions",
-        json=_contract_request("contract-v1", "记录离家求学的经过。"),
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/contract/suggest",
+        json={"idempotency_key": "contract-v1"},
     )
     assert first.status_code == 200, first.text
-    node = await client.post(
-        f"/api/memoir/projects/{project_id}/chapter-contracts/{first.json()['id']}/nodes",
-        json={
-            "idempotency_key": "opening-v1",
-            "node_type": "opening",
-            "title": "开场",
-            "purpose": "交代离家前的处境。",
-            "required": True,
-            "status": "ready",
-        },
-    )
-    assert node.status_code == 200, node.text
     confirmed = await client.post(
         f"/api/memoir/projects/{project_id}/chapter-contracts/{first.json()['id']}/confirm"
     )
     assert confirmed.status_code == 200, confirmed.text
     draft = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/contract/revisions",
-        json=_contract_request("contract-v2", "重点记录离家决定对家庭关系的影响。"),
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/contract/suggest",
+        json={"idempotency_key": "contract-v2"},
     )
     assert draft.status_code == 200, draft.text
 
