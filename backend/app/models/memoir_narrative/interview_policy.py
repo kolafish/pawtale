@@ -146,6 +146,14 @@ class MemoirUtteranceInterviewAssignment(Base):
             "utterance_id",
             name="uq_memoir_utterance_interview_assignments_utterance",
         ),
+        CheckConstraint(
+            "framework_item_id IS NULL OR followup_task_id IS NULL",
+            name="ck_memoir_utterance_interview_assignments_one_target",
+        ),
+        Index(
+            "ix_memoir_utterance_interview_assignments_framework",
+            "framework_item_id",
+        ),
         Index(
             "ix_memoir_utterance_interview_assignments_followup",
             "followup_task_id",
@@ -163,6 +171,11 @@ class MemoirUtteranceInterviewAssignment(Base):
         String(36),
         ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
         nullable=False,
+    )
+    framework_item_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_framework_items.id"),
+        nullable=True,
     )
     followup_task_id: Mapped[str | None] = mapped_column(
         String(36),

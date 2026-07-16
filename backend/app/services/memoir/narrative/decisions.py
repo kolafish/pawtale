@@ -25,6 +25,7 @@ from app.models.memoir_narrative import (
 from app.services.memoir.narrative import (
     decision_log,
     draft_blocks,
+    frameworks,
     story_revisions,
     stories as story_service,
 )
@@ -402,6 +403,11 @@ async def decide_claim_verification(
         db,
         claim=claim,
         reason=f"claim verification changed by user decision {decision.id}",
+    )
+    await frameworks.recompute_framework_items_for_claim(
+        db,
+        claim_id=claim.id,
+        assessment_version="claim-policy-1",
     )
     return decision
 

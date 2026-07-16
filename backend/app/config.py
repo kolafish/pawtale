@@ -77,6 +77,8 @@ class Settings(BaseSettings):
     memoir_interview_policy_active_rollout_percent: int = 0
     memoir_interview_policy_active_model: str = ""
     memoir_interview_policy_outcome_model: str = ""
+    memoir_topic_map_shadow_enabled: bool = False
+    memoir_topic_map_shadow_model: str = ""
     memoir_share_video_worker_enabled: bool = True
     memoir_share_video_poll_seconds: int = 2
     memoir_share_video_batch_size: int = 1

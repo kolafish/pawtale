@@ -78,6 +78,7 @@ class MemoirEditingJobType(str, Enum):
     INGEST_NARRATIVE_STATE = "ingest_narrative_state"
     EVALUATE_INTERVIEW_POLICY_SHADOW = "evaluate_interview_policy_shadow"
     EVALUATE_INTERVIEW_POLICY_OUTCOME = "evaluate_interview_policy_outcome"
+    EVALUATE_TOPIC_MAP_CLAIMS = "evaluate_topic_map_claims"
     REFRESH_CHAPTER_COMPLETION = "recompute_chapter_structure_audit"
     GENERATE_DRAFT_BLOCKS = "generate_draft_blocks"
     AUDIT_BOOK_CONSISTENCY = "audit_book_consistency"

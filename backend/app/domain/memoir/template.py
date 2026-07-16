@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.projects import Document, DocumentGroup, Project
 import app.services.project_documents as project_docs
+from app.services.memoir.narrative import frameworks
 
 
 async def initialize_memoir_project(db: AsyncSession, project: Project) -> None:
@@ -13,4 +14,5 @@ async def initialize_memoir_project(db: AsyncSession, project: Project) -> None:
     db.add(doc)
     await db.flush()
 
+    await frameworks.initialize_project_framework(db, project_id=project.id)
     await project_docs.commit_created_document(db, project.id, doc)
