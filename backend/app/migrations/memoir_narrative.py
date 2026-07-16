@@ -478,15 +478,33 @@ async def _migrate_followup_answer_assignment_schema(
     policy_table = "memoir_interview_policy_decisions"
     decision_table = "memoir_narrative_decisions"
     legacy_decision_table = f"{decision_table}_before_answer_assignment_split"
+    current_tables = (answer_table, policy_table, assignment_table)
 
     async with engine.connect() as conn:
         if not await _table_exists(conn, legacy_answer_table):
             await conn.rollback()
             return []
-        if await _table_exists(conn, answer_table):
+        empty_current_tables: set[str] = set()
+        nonempty_current_tables: list[str] = []
+        for table_name in current_tables:
+            if not await _table_exists(conn, table_name):
+                continue
+            row_count = int(
+                (
+                    await conn.execute(
+                        text(f'SELECT COUNT(*) FROM "{table_name}"')
+                    )
+                ).scalar_one()
+            )
+            if row_count:
+                nonempty_current_tables.append(table_name)
+            else:
+                empty_current_tables.add(table_name)
+        if nonempty_current_tables:
             raise RuntimeError(
-                "Both legacy and current follow-up answer tables exist; "
-                "manual migration recovery is required"
+                "Legacy follow-up answer table exists alongside non-empty current "
+                "tables; manual migration recovery is required: "
+                + ", ".join(sorted(nonempty_current_tables))
             )
 
         await conn.rollback()
@@ -518,7 +536,11 @@ async def _migrate_followup_answer_assignment_schema(
                             text(f'DROP INDEX IF EXISTS "{index_name}"')
                         )
 
-                for table_name in (answer_table, policy_table, assignment_table):
+                for table_name in (assignment_table, policy_table, answer_table):
+                    if table_name in empty_current_tables:
+                        await conn.execute(text(f'DROP TABLE "{table_name}"'))
+
+                for table_name in current_tables:
                     table = Base.metadata.tables[table_name]
                     await conn.run_sync(
                         lambda sync_conn, table=table: table.create(
