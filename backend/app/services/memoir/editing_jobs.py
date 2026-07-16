@@ -33,7 +33,6 @@ from app.services.memoir.automation_event_metadata import (
     VOICE_SELECTED_AT_KEY,
     VOICE_SELECTED_MESSAGE_ID_KEY,
     VOICE_SELECTED_SESSION_ID_KEY,
-    _event_signature,
 )
 from app.services.memoir.job_leases import (
     JobLease,
@@ -132,6 +131,7 @@ async def _record_job_failure_event(
         status=MemoirAutomationEventStatus.FAILED,
         chapter_id=job.chapter_id,
         utterance_ids=_payload_utterance_ids(payload),
+        editing_job_id=job.id,
         summary_text=_FAILURE_SUMMARIES[job_type],
         event_signature=f"editing_job_failed:{job.id}",
         metadata_json=metadata,
@@ -161,18 +161,16 @@ async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) ->
     event_type = _FAILURE_EVENT_TYPES.get(job_type)
     if event_type is None:
         return
-    signature = f"editing_job_failed:{job.id}"
     events = (
         await db.scalars(
             select(MemoirAutomationEvent).where(
                 MemoirAutomationEvent.project_id == job.project_id,
                 MemoirAutomationEvent.event_type == event_type.value,
+                MemoirAutomationEvent.editing_job_id == job.id,
             )
         )
     ).all()
     for event in events:
-        if _event_signature(event.metadata_json or {}) != signature:
-            continue
         event.metadata_json = {
             **(event.metadata_json or {}),
             RESOLUTION_KEY: "confirmed",

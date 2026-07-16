@@ -1,7 +1,9 @@
 import json
 from hashlib import sha256
 
+import pytest
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
@@ -578,6 +580,7 @@ async def test_source_routing_job_assigns_high_confidence_source(client, test_db
     assert event is not None
     assert event.chapter_id == chapter.id
     assert event.utterance_ids_json == [uncovered["utterance_id"]]
+    assert event.editing_job_id == job.id
     assert event.summary_text == "1 条讲述已自动整理进「院子里的童年」。"
     assert event.metadata_json["event_signature"] == f"source_assigned:{chapter.id}:{uncovered['utterance_id']}"
     route_metadata = event.metadata_json["routes"][0]
@@ -912,9 +915,11 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
     )
     stale_review_event = MemoirAutomationEvent(
         project_id=case["project_id"],
+        review_utterance_id=case["first"]["utterance_id"],
+        followup_task_id=case["task"].id,
         event_type=MemoirAutomationEventType.SOURCE_HELD.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[case["first"]["utterance_id"]],
+        utterance_ids_json=[],
         summary_text="请继续确认这两个称呼是否指向同一个人。",
         metadata_json={
             "route": {
@@ -1203,9 +1208,11 @@ async def test_semantic_completion_clarification_closes_task_and_review_event(
     review_event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=chapter.id,
+        review_utterance_id=answer["utterance_id"],
+        followup_task_id=task.id,
         event_type=MemoirAutomationEventType.SOURCE_HELD.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[answer["utterance_id"]],
+        utterance_ids_json=[],
         summary_text="这是一件亲身经历，还是章节写法说明？",
         metadata_json={
             "route": {
@@ -1410,7 +1417,7 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     assert relation.clarification_text == answer_text
 
 
-async def test_source_review_does_not_expose_utterance_text_from_another_project(
+async def test_source_review_rejects_utterance_from_another_project(
     client,
     test_db,
 ):
@@ -1428,9 +1435,10 @@ async def test_source_review_does_not_expose_utterance_text_from_another_project
     )
     event = MemoirAutomationEvent(
         project_id=project_source["session"]["project_id"],
+        review_utterance_id=other_source["utterance_id"],
         event_type=MemoirAutomationEventType.SOURCE_HELD.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[other_source["utterance_id"]],
+        utterance_ids_json=[],
         summary_text="需要确认讲述用途。",
         metadata_json={
             "route_action": "hold_for_review",
@@ -1439,16 +1447,12 @@ async def test_source_review_does_not_expose_utterance_text_from_another_project
         },
     )
     test_db.add(event)
-    await test_db.commit()
-
-    response = await client.get(
-        f"/api/mobile/memoir/projects/{project_source['session']['project_id']}"
-        "/book-source-review-items"
-    )
-
-    assert response.status_code == 200
-    assert response.json()["items"][0]["id"] == event.id
-    assert response.json()["items"][0]["source_text"] == ""
+    with pytest.raises(
+        IntegrityError,
+        match="invalid memoir automation event direct links",
+    ):
+        await test_db.commit()
+    await test_db.rollback()
 
 
 async def test_source_routing_job_holds_new_topic_for_review(client, test_db, monkeypatch):
@@ -1493,7 +1497,9 @@ async def test_source_routing_job_holds_new_topic_for_review(client, test_db, mo
     )
     assert event is not None
     assert event.status == "needs_review"
-    assert event.utterance_ids_json == [uncovered["utterance_id"]]
+    assert event.review_utterance_id == uncovered["utterance_id"]
+    assert event.editing_job_id == job.id
+    assert event.utterance_ids_json == []
     assert event.metadata_json["route"]["material_type"] == "memoir_content"
     assert event.metadata_json["route"]["action"] == "suggest_new_chapter"
     assert event.metadata_json["route"]["editing_job_id"] == job.id

@@ -634,7 +634,10 @@ def test_explicit_story_time_reversal_is_a_high_book_gap():
     chronology = [item for item in candidates if item.gap_type.value == "chronology"]
     assert len(chronology) == 1
     assert chronology[0].severity.value == "high"
-    assert set(chronology[0].chapter_roles) == {"chapter-0", "chapter-1"}
+    assert chronology[0].involved_chapter_ids == {
+        "chapter-0",
+        "chapter-1",
+    }
 
 
 async def test_semantic_book_audit_rejects_ids_outside_its_evidence_context():
@@ -696,8 +699,8 @@ async def test_semantic_book_audit_accepts_story_chapter_relation_without_claims
     )
 
     assert len(candidates) == 1
-    assert set(candidates[0].story_roles) == {"story-1"}
-    assert set(candidates[0].chapter_roles) == {"chapter-0"}
+    assert candidates[0].involved_story_ids == {"story-1"}
+    assert candidates[0].involved_chapter_ids == {"chapter-0"}
 
 
 async def test_semantic_book_audit_rejects_evidence_not_sent_in_current_window():

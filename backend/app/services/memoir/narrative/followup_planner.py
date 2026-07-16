@@ -148,15 +148,13 @@ async def _semantic_task_leaders(
 def _gap_story_id(gap: MemoirNarrativeGap) -> str | None:
     if gap.primary_story_id:
         return gap.primary_story_id
-    primary = next((relation.story_id for relation in gap.stories if relation.role == "primary"), None)
-    return primary or next((relation.story_id for relation in gap.stories), None)
+    return next((relation.story_id for relation in gap.stories), None)
 
 
 def _gap_chapter_id(gap: MemoirNarrativeGap) -> str | None:
     if gap.primary_chapter_id:
         return gap.primary_chapter_id
-    primary = next((relation.chapter_id for relation in gap.chapters if relation.role == "primary"), None)
-    return primary or next((relation.chapter_id for relation in gap.chapters), None)
+    return next((relation.chapter_id for relation in gap.chapters), None)
 
 
 def _gap_chapter_ids(gap: MemoirNarrativeGap) -> set[str]:

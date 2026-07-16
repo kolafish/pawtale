@@ -4,15 +4,16 @@
 
 本文档是 Pawtale 回忆录“事实整理、故事构建、章节结构、补访规划、正文生成和全书审校”的主设计文档。
 
-- 状态：叙事数据基线已落地；2026-07 起按本文“完整度与成稿语义修订”继续演进。
+- 状态：叙事数据基线与 2026-07 完整度/成稿语义修订均已落地；后续演进继续受本文不变量约束。
 - 适用范围：新版回忆录项目的叙事领域层、成书链路和成书驱动访谈。
 - 不取代：实时录音、Streaming ASR、LLM/TTS 对话状态机等语音基础能力。
 - 上游文档：`docs/MEMOIR_VOICE_CHAT_REDESIGN.md`。
 - 下游规划：`docs/MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`，负责项目级结构化访谈框架与成书补全收敛；本文继续约束共同事实底座和成书质量不变量。
+- 下游规划实现状态：第一轮阶段 0/A/B/C/D/E 已完成；偏好学习或强化学习尚未开始。
 - 历史基础：`docs/MEMOIR_SEMANTIC_AUDIT_REFACTOR_PLAN.md` 已完成的素材卡、章节卡、SourceLink 和审计快照重构。
 - 执行原则：如果实现发现本设计不成立，必须先在对应 PR 中修改本文档、说明证据和影响，再调整实现；不能通过临时字段、兼容分支或提示词补丁绕开设计问题。
 
-原 6 阶段、12 PR 计划保留为历史实施记录，不再是当前切流依据。当前实现和 code review 以第十八章的 4 PR 修订计划及本文业务不变量为验收依据。
+原 6 阶段、12 PR 计划保留为历史实施记录，不再是当前切流依据。第十八章的 4 PR 修订和下游规划第一轮阶段 0/A/B/C/D/E 均已完成；当前实现和 code review 以本文业务不变量及下游规划的当前结构为验收依据。
 
 ## 一、问题定义
 
@@ -105,6 +106,7 @@ MemoirAutomationEvent             # 用户可见的后台处理事件
 - 缓存必须可以通过输入签名、转写版本或 engine version 判断过期。
 - 缓存失败不得破坏原始素材，但失败必须可观察，不能写入未经验证的业务真相。
 - `MemoirAutomationEvent` 只表达处理进度和用户动作提醒，不承载长期缺口、确认状态或故事状态。
+- 待确认来源事件通过 `review_utterance_id` 和可选 `followup_task_id` 直接关联业务对象，编辑任务事件通过 `editing_job_id` 关联 Job；metadata 中的 ID 只保留为历史快照，不再承担查询真相。
 
 ### 3.3 逐步降级或删除的旧职责
 
@@ -533,16 +535,15 @@ claim_role              # supporting / conflicting / unsupported_candidate
 MemoirNarrativeGapStory
 gap_id
 story_id
-scope_role              # primary / involved
 
 MemoirNarrativeGapChapter
 gap_id
 chapter_id
-scope_role              # primary / involved
 ```
 
 规则：
 
+- `primary_story_id/primary_chapter_id` 是 Gap scope 的唯一权威；GapStory/GapChapter 只保存额外 involved 对象，不保存 role，也不重复 primary。
 - 新审计命中同一 fingerprint 时更新证据和最后检测时间，不创建无限重复记录。
 - fingerprint 由 scope、gap type、target slot 和涉及的稳定对象 ID 组成，不能使用易变化的 AI 文案计算。
 - 审计不再通过“下一次快照没有返回”自动关闭旧 gap。

@@ -140,6 +140,7 @@ async def run_book_consistency_audit_job(
         status=MemoirAutomationEventStatus.COMPLETED,
         chapter_id=None,
         utterance_ids=[],
+        editing_job_id=job.id,
         summary_text="全书人物、时间和事实来源检查已更新。",
         event_signature=f"book_consistency_audit:{job.id}",
         metadata_json={

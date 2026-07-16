@@ -279,10 +279,24 @@ async def _gap_groups(
         elif gap.scope_type == MemoirNarrativeGapScopeType.STORY.value:
             relevant = gap.primary_story_id in current_story_ids
         else:
-            has_relations = bool(gap.chapters or gap.stories or gap.claims)
+            has_relations = bool(
+                gap.primary_chapter_id
+                or gap.primary_story_id
+                or gap.chapters
+                or gap.stories
+                or gap.claims
+            )
             relevant = not has_relations or bool(
-                {item.chapter_id for item in gap.chapters} & current_chapter_ids
-                or {item.story_id for item in gap.stories} & current_story_ids
+                (
+                    {item.chapter_id for item in gap.chapters}
+                    | ({gap.primary_chapter_id} if gap.primary_chapter_id else set())
+                )
+                & current_chapter_ids
+                or (
+                    {item.story_id for item in gap.stories}
+                    | ({gap.primary_story_id} if gap.primary_story_id else set())
+                )
+                & current_story_ids
                 or {item.claim_id for item in gap.claims} & current_claim_ids
             )
         if not relevant:
@@ -291,8 +305,10 @@ async def _gap_groups(
             f"gap:{gap.id}",
             gap.title,
             gap.description,
-            chapter_id=gap.chapters[0].chapter_id if gap.chapters else None,
-            story_id=gap.stories[0].story_id if gap.stories else None,
+            chapter_id=gap.primary_chapter_id
+            or (gap.chapters[0].chapter_id if gap.chapters else None),
+            story_id=gap.primary_story_id
+            or (gap.stories[0].story_id if gap.stories else None),
             claim_id=gap.claims[0].claim_id if gap.claims else None,
             gap_id=gap.id,
         )

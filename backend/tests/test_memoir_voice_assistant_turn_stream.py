@@ -963,6 +963,7 @@ async def test_automation_events_hide_historical_failure_after_job_recovered(cli
         project_id=project_id,
         event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
         status=MemoirAutomationEventStatus.FAILED,
+        editing_job_id=job.id,
         summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
         metadata_json={
             "source": "editing_job_failure",
@@ -1010,6 +1011,7 @@ async def test_internal_editing_failure_is_not_announced_during_interview(client
         project_id=project_id,
         event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
         status=MemoirAutomationEventStatus.FAILED,
+        editing_job_id=job.id,
         summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
         metadata_json={
             "source": "editing_job_failure",

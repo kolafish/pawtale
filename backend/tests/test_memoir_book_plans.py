@@ -115,9 +115,10 @@ async def _chapter_source_links(test_db, *, project_id: str) -> list[MemoirChapt
 async def _create_source_held_event(test_db, *, project_id: str, utterance_id: str) -> MemoirAutomationEvent:
     event = MemoirAutomationEvent(
         project_id=project_id,
+        review_utterance_id=utterance_id,
         event_type=MemoirAutomationEventType.SOURCE_HELD.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[utterance_id],
+        utterance_ids_json=[],
         summary_text="1 条讲述暂未自动收入章节，需要确认归属。",
         metadata_json={
             "route": {

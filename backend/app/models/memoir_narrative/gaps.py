@@ -25,7 +25,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRecommendedAction,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
@@ -209,6 +208,14 @@ class MemoirNarrativeGap(Base):
         "MemoirNarrativeGapChapter", cascade="all, delete-orphan"
     )
 
+    @property
+    def involved_story_ids(self) -> list[str]:
+        return sorted(relation.story_id for relation in self.stories)
+
+    @property
+    def involved_chapter_ids(self) -> list[str]:
+        return sorted(relation.chapter_id for relation in self.chapters)
+
 
 class MemoirNarrativeGapClaim(Base):
     __tablename__ = "memoir_narrative_gap_claims"
@@ -261,18 +268,19 @@ class MemoirNarrativeGapStory(Base):
             ["memoir_stories.project_id", "memoir_stories.id"],
             name="fk_memoir_narrative_gap_stories_story_project",
         ),
-        CheckConstraint(
-            f"role IN ({_enum_values(MemoirNarrativeGapRelationRole)})",
-            name="ck_memoir_narrative_gap_stories_role",
-        ),
         Index("ix_memoir_narrative_gap_stories_gap", "project_id", "gap_id"),
+        Index(
+            "ix_memoir_narrative_gap_stories_story",
+            "project_id",
+            "story_id",
+            "gap_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String(36), nullable=False)
     gap_id: Mapped[str] = mapped_column(String(36), nullable=False)
     story_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    role: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -292,11 +300,13 @@ class MemoirNarrativeGapChapter(Base):
             ondelete="CASCADE",
             name="fk_memoir_narrative_gap_chapters_gap_project",
         ),
-        CheckConstraint(
-            f"role IN ({_enum_values(MemoirNarrativeGapRelationRole)})",
-            name="ck_memoir_narrative_gap_chapters_role",
-        ),
         Index("ix_memoir_narrative_gap_chapters_gap", "project_id", "gap_id"),
+        Index(
+            "ix_memoir_narrative_gap_chapters_chapter",
+            "project_id",
+            "chapter_id",
+            "gap_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -305,5 +315,4 @@ class MemoirNarrativeGapChapter(Base):
     chapter_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("memoir_book_plan_chapters.id"), nullable=False
     )
-    role: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

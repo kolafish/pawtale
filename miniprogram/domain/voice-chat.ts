@@ -219,6 +219,9 @@ export interface MemoirAutomationEvent {
   event_type: MemoirAutomationEventType;
   status: MemoirAutomationEventStatus;
   chapter_id?: string | null;
+  review_utterance_id?: string | null;
+  followup_task_id?: string | null;
+  editing_job_id?: string | null;
   utterance_ids: string[];
   summary_text: string;
   confidence?: number | null;

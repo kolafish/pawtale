@@ -5,9 +5,12 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.database import Base, register_models
 from app.migrations.memoir_voice import (
+    AUTOMATION_EVENT_LINK_TRIGGERS,
+    AUXILIARY_QUERY_INDEXES,
     TRANSCRIPT_FTS_TABLE,
     TRANSCRIPT_FTS_TRIGGERS,
     VOICE_SESSION_ANCHOR_TRIGGERS,
+    _ensure_automation_event_link_schema,
     assert_memoir_voice_schema,
     describe_memoir_voice_schema,
     expected_memoir_voice_schema,
@@ -29,13 +32,174 @@ async def test_memoir_voice_migration_installs_runtime_managed_objects():
         assert first["changed_tables"] == [TRANSCRIPT_FTS_TABLE]
         assert first["changed_triggers"] == [
             *VOICE_SESSION_ANCHOR_TRIGGERS,
+            *AUTOMATION_EVENT_LINK_TRIGGERS,
             *TRANSCRIPT_FTS_TRIGGERS,
         ]
         assert first["changed_columns"] == []
-        assert first["changed_rows"] == []
+        assert first["changed_rows"] == 0
+        assert first["changed_indexes"] == []
         assert second["changed_tables"] == []
         assert second["changed_triggers"] == []
+        assert second["changed_columns"] == []
+        assert second["changed_indexes"] == []
+        assert second["changed_rows"] == 0
         await assert_memoir_voice_schema(engine)
+    finally:
+        await engine.dispose()
+
+
+async def test_automation_event_link_migration_backfills_direct_truth_once():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_voice_sessions ("
+                    "id VARCHAR(36) PRIMARY KEY, project_id VARCHAR(36) NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_voice_utterances ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "voice_session_id VARCHAR(36) NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_followup_tasks ("
+                    "id VARCHAR(36) PRIMARY KEY, project_id VARCHAR(36) NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_editing_jobs ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "chapter_id VARCHAR(36), "
+                    "job_type VARCHAR(80) NOT NULL, "
+                    "status VARCHAR(20) NOT NULL, "
+                    "run_after DATETIME, lease_expires_at DATETIME, "
+                    "updated_at DATETIME NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_automation_events ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "chapter_id VARCHAR(36), "
+                    "event_type VARCHAR(40) NOT NULL, "
+                    "status VARCHAR(24) NOT NULL, "
+                    "utterance_ids_json JSON NOT NULL, "
+                    "summary_text TEXT NOT NULL, "
+                    "confidence FLOAT, "
+                    "metadata_json JSON NOT NULL, "
+                    "created_at DATETIME NOT NULL, "
+                    "updated_at DATETIME NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_voice_sessions VALUES "
+                    "('session-1', 'project-1'), "
+                    "('session-2', 'project-2')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_voice_utterances VALUES "
+                    "('utterance-1', 'session-1'), "
+                    "('utterance-2', 'session-2')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_followup_tasks VALUES "
+                    "('task-1', 'project-1')"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_editing_jobs VALUES "
+                    "('job-1', 'project-1', 'chapter-1', "
+                    "'quality_audit', 'pending', NULL, NULL, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_automation_events VALUES ("
+                    "'event-1', 'project-1', 'chapter-1', "
+                        "'source_held', 'needs_review', '[\"utterance-1\"]', "
+                        "'需要确认', NULL, "
+                        "'{\"route\":{\"followup_answer\":{\"task_id\":\"task-1\"},"
+                        "\"editing_job_id\":\"job-1\"}}', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+
+            first = await _ensure_automation_event_link_schema(conn)
+            second = await _ensure_automation_event_link_schema(conn)
+
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT review_utterance_id, followup_task_id, "
+                        "editing_job_id, utterance_ids_json "
+                        "FROM memoir_automation_events WHERE id = 'event-1'"
+                    )
+                )
+            ).one()
+            indexes = {
+                str(item[1])
+                for table_name in (
+                    "memoir_automation_events",
+                    "memoir_editing_jobs",
+                )
+                for item in (
+                    await conn.execute(
+                        text(f'PRAGMA index_list("{table_name}")')
+                    )
+                ).fetchall()
+            }
+
+        assert first["changed_columns"] == [
+            "memoir_automation_events.review_utterance_id",
+            "memoir_automation_events.followup_task_id",
+            "memoir_automation_events.editing_job_id",
+        ]
+        assert set(first["changed_indexes"]) == set(AUXILIARY_QUERY_INDEXES)
+        assert first["changed_triggers"] == list(
+            AUTOMATION_EVENT_LINK_TRIGGERS
+        )
+        assert first["changed_rows"] == 1
+        assert second == {
+            "changed_columns": [],
+            "changed_indexes": [],
+            "changed_triggers": [],
+            "changed_rows": 0,
+        }
+        assert row == ("utterance-1", "task-1", "job-1", "[]")
+        assert set(AUXILIARY_QUERY_INDEXES).issubset(indexes)
+
+        async with engine.begin() as conn:
+            with pytest.raises(
+                IntegrityError,
+                match="invalid memoir automation event direct links",
+            ):
+                await conn.execute(
+                    text(
+                        "INSERT INTO memoir_automation_events ("
+                        "id, project_id, event_type, status, "
+                        "utterance_ids_json, summary_text, metadata_json, "
+                        "created_at, updated_at, review_utterance_id"
+                        ") VALUES ("
+                        "'event-invalid', 'project-1', 'source_held', "
+                        "'needs_review', '[]', '跨项目', '{}', "
+                        "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 'utterance-2')"
+                    )
+                )
     finally:
         await engine.dispose()
 

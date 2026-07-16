@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from hashlib import sha256
 import json
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -18,7 +18,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapStatus,
@@ -63,8 +62,14 @@ def gap_fingerprint(candidate: MemoirNarrativeGapCandidate) -> str:
         "primary_chapter_id": candidate.primary_chapter_id or "",
         "gap_type": candidate.gap_type.value,
         "target_slot": candidate.target_slot,
-        "story_ids": sorted(candidate.story_roles),
-        "chapter_ids": sorted(candidate.chapter_roles),
+        # Story-scoped rule findings historically included their primary Story
+        # in the relation identity. Preserve that stable fingerprint while
+        # keeping primary ownership only on the Gap row.
+        "story_ids": sorted(
+            candidate.involved_story_ids
+            | ({candidate.primary_story_id} if candidate.primary_story_id else set())
+        ),
+        "chapter_ids": sorted(candidate.involved_chapter_ids),
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return sha256(encoded.encode("utf-8")).hexdigest()
@@ -154,11 +159,11 @@ async def _validate_candidate_relations(
     project_id: str,
     candidate: MemoirNarrativeGapCandidate,
 ) -> None:
-    story_ids = set(candidate.story_roles)
+    story_ids = set(candidate.involved_story_ids)
     if candidate.primary_story_id:
         story_ids.add(candidate.primary_story_id)
     claim_ids = set(candidate.claim_roles)
-    chapter_ids = set(candidate.chapter_roles)
+    chapter_ids = set(candidate.involved_chapter_ids)
     if candidate.primary_chapter_id:
         chapter_ids.add(candidate.primary_chapter_id)
 
@@ -198,13 +203,6 @@ async def _sync_relations(
     candidate: MemoirNarrativeGapCandidate,
 ) -> None:
     claim_roles = dict(candidate.claim_roles)
-    story_roles = dict(candidate.story_roles)
-    chapter_roles = dict(candidate.chapter_roles)
-    if candidate.primary_story_id:
-        story_roles[candidate.primary_story_id] = MemoirNarrativeGapRelationRole.PRIMARY
-    if candidate.primary_chapter_id:
-        chapter_roles[candidate.primary_chapter_id] = MemoirNarrativeGapRelationRole.PRIMARY
-
     await db.execute(
         delete(MemoirNarrativeGapClaim).where(
             MemoirNarrativeGapClaim.project_id == gap.project_id,
@@ -238,18 +236,16 @@ async def _sync_relations(
                 project_id=gap.project_id,
                 gap_id=gap.id,
                 story_id=story_id,
-                role=role.value,
             )
-            for story_id, role in sorted(story_roles.items())
+            for story_id in sorted(candidate.involved_story_ids)
         ]
         + [
             MemoirNarrativeGapChapter(
                 project_id=gap.project_id,
                 gap_id=gap.id,
                 chapter_id=chapter_id,
-                role=role.value,
             )
-            for chapter_id, role in sorted(chapter_roles.items())
+            for chapter_id in sorted(candidate.involved_chapter_ids)
         ]
     )
 
@@ -555,10 +551,13 @@ async def list_gaps(
     filters = [MemoirNarrativeGap.project_id == project_id]
     if chapter_id:
         filters.append(
-            MemoirNarrativeGap.id.in_(
-                select(MemoirNarrativeGapChapter.gap_id).where(
-                    MemoirNarrativeGapChapter.project_id == project_id,
-                    MemoirNarrativeGapChapter.chapter_id == chapter_id,
+            or_(
+                MemoirNarrativeGap.primary_chapter_id == chapter_id,
+                MemoirNarrativeGap.id.in_(
+                    select(MemoirNarrativeGapChapter.gap_id).where(
+                        MemoirNarrativeGapChapter.project_id == project_id,
+                        MemoirNarrativeGapChapter.chapter_id == chapter_id,
+                    )
                 )
             )
         )

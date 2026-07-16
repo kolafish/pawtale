@@ -988,6 +988,11 @@ async def test_book_completion_openapi_exposes_only_the_unified_refresh_api(clie
         "/api/memoir/projects/{project_id}/chapters/{chapter_id}/workspace/audits"
         not in paths
     )
+    assert not any(
+        path.endswith("/followup-tasks/{task_id}/resume")
+        or path.endswith("/followup-tasks/{task_id}/cancel")
+        for path in paths
+    )
     assert (
         "/api/memoir/projects/{project_id}/followup-tasks/generation-jobs"
         not in paths

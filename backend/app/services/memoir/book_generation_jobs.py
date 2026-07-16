@@ -132,6 +132,7 @@ async def _ensure_generation_event(
         event.event_type = event_type.value
         event.status = MemoirAutomationEventStatus.PENDING.value
         event.chapter_id = chapter_id
+        event.editing_job_id = job.id
         event.summary_text = summary_text
         event.metadata_json = {
             **(event.metadata_json or {}),
@@ -146,6 +147,7 @@ async def _ensure_generation_event(
             event_type=event_type,
             status=MemoirAutomationEventStatus.PENDING,
             chapter_id=chapter_id,
+            editing_job_id=job.id,
             summary_text=summary_text,
             metadata_json=metadata,
         )
@@ -179,6 +181,7 @@ async def _update_generation_event(
         event.event_type = event_type.value
         event.status = status.value
         event.chapter_id = chapter_id
+        event.editing_job_id = job.id
         event.summary_text = summary_text
         event.metadata_json = {
             **(event.metadata_json or {}),
@@ -194,6 +197,7 @@ async def _update_generation_event(
         event_type=event_type,
         status=status,
         chapter_id=chapter_id,
+        editing_job_id=job.id,
         summary_text=summary_text,
         metadata_json=metadata,
     )

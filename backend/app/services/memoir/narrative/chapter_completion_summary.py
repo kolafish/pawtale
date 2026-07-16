@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -508,7 +508,10 @@ async def get_chapter_completion_read_models(
                 )
                 .where(
                     MemoirNarrativeGap.project_id == project_id,
-                    MemoirNarrativeGap.id.in_(chapter_gap_ids),
+                    or_(
+                        MemoirNarrativeGap.primary_chapter_id.in_(chapter_ids),
+                        MemoirNarrativeGap.id.in_(chapter_gap_ids),
+                    ),
                 )
                 .order_by(
                     MemoirNarrativeGap.status,
@@ -523,9 +526,14 @@ async def get_chapter_completion_read_models(
     }
     for gap in chapter_gaps:
         response = MemoirNarrativeGapResponse.model_validate(gap)
-        for relation in gap.chapters:
-            if relation.chapter_id in gap_responses_by_chapter:
-                gap_responses_by_chapter[relation.chapter_id].append(response)
+        related_chapter_ids = {
+            relation.chapter_id for relation in gap.chapters
+        }
+        if gap.primary_chapter_id:
+            related_chapter_ids.add(gap.primary_chapter_id)
+        for related_chapter_id in related_chapter_ids:
+            if related_chapter_id in gap_responses_by_chapter:
+                gap_responses_by_chapter[related_chapter_id].append(response)
 
     active_tasks = list(
         (

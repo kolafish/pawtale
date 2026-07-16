@@ -10,7 +10,6 @@ from app.domain.memoir.narrative_types import MemoirFollowupTaskStatus
 from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirCompletionOutcomeResponse,
-    MemoirFollowupTaskActionRequest,
     MemoirFollowupTaskDeferRequest,
     MemoirFollowupTaskListResponse,
     MemoirFollowupTaskOutcomeRequest,
@@ -151,32 +150,6 @@ async def defer_memoir_followup_task(
 
 
 @router.post(
-    "/projects/{project_id}/followup-tasks/{task_id}/resume",
-    response_model=MemoirFollowupTaskResponse,
-)
-async def resume_memoir_followup_task(
-    project_id: str,
-    task_id: str,
-    req: MemoirFollowupTaskActionRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    try:
-        task = await followup_actions.resume_task(
-            db,
-            project_id=project_id,
-            task_id=task_id,
-            actor_user_id=current_user.id,
-            idempotency_key=req.idempotency_key,
-            reason=req.note,
-        )
-        return await _commit_task(db, task)
-    except (ValueError, IntegrityError) as exc:
-        await _raise_mutation_error(db, exc)
-
-
-@router.post(
     "/projects/{project_id}/followup-tasks/{task_id}/unable-to-answer",
     response_model=MemoirFollowupTaskResponse,
 )
@@ -216,32 +189,6 @@ async def stop_asking_memoir_followup_task(
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
         task = await followup_actions.stop_asking_task(
-            db,
-            project_id=project_id,
-            task_id=task_id,
-            actor_user_id=current_user.id,
-            idempotency_key=req.idempotency_key,
-            reason=req.note,
-        )
-        return await _commit_task(db, task)
-    except (ValueError, IntegrityError) as exc:
-        await _raise_mutation_error(db, exc)
-
-
-@router.post(
-    "/projects/{project_id}/followup-tasks/{task_id}/cancel",
-    response_model=MemoirFollowupTaskResponse,
-)
-async def cancel_memoir_followup_task(
-    project_id: str,
-    task_id: str,
-    req: MemoirFollowupTaskActionRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    try:
-        task = await followup_actions.cancel_task(
             db,
             project_id=project_id,
             task_id=task_id,

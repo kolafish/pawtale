@@ -166,8 +166,8 @@ export interface MemoirNarrativeGap {
   first_detected_at: string;
   last_detected_at: string;
   claims: Array<{ claim_id: string; role: string }>;
-  stories: Array<{ story_id: string; role: string }>;
-  chapters: Array<{ chapter_id: string; role: string }>;
+  involved_story_ids: string[];
+  involved_chapter_ids: string[];
   created_at: string;
   updated_at: string;
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
@@ -29,13 +29,6 @@ from app.models.memoir_narrative import (
 from app.schemas.memoir_narrative import MemoirCompletionOutcomeResponse
 
 
-def _event_task_id(event: MemoirAutomationEvent) -> str:
-    metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
-    route = metadata.get("route") if isinstance(metadata.get("route"), dict) else metadata
-    followup = route.get("followup_answer") if isinstance(route.get("followup_answer"), dict) else {}
-    return str(followup.get("task_id") or "").strip()
-
-
 async def _review_event_id(
     db: AsyncSession,
     *,
@@ -43,29 +36,25 @@ async def _review_event_id(
     task_id: str,
     utterance_id: str,
 ) -> str | None:
-    events = list(
-        (
-            await db.scalars(
-                select(MemoirAutomationEvent)
-                .where(
-                    MemoirAutomationEvent.project_id == project_id,
-                    MemoirAutomationEvent.event_type
-                    == MemoirAutomationEventType.SOURCE_HELD.value,
-                    MemoirAutomationEvent.status
-                    == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-                )
-                .order_by(
-                    MemoirAutomationEvent.created_at.desc(),
-                    MemoirAutomationEvent.id.desc(),
-                )
+    return await db.scalar(
+        select(MemoirAutomationEvent.id)
+        .where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type
+            == MemoirAutomationEventType.SOURCE_HELD.value,
+            MemoirAutomationEvent.status
+            == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+            or_(
+                MemoirAutomationEvent.followup_task_id == task_id,
+                MemoirAutomationEvent.review_utterance_id == utterance_id,
             )
-        ).all()
+        )
+        .order_by(
+            MemoirAutomationEvent.created_at.desc(),
+            MemoirAutomationEvent.id.desc(),
+        )
+        .limit(1)
     )
-    for event in events:
-        utterance_ids = event.utterance_ids_json if isinstance(event.utterance_ids_json, list) else []
-        if utterance_id in utterance_ids or _event_task_id(event) == task_id:
-            return event.id
-    return None
 
 
 def _response(

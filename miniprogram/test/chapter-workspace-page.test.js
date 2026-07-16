@@ -22,8 +22,8 @@ function sampleGap(overrides = {}) {
     action_decision_source: "deterministic_policy",
     action_policy_version: "1",
     claims: [],
-    stories: [],
-    chapters: [],
+    involved_story_ids: [],
+    involved_chapter_ids: [],
     ...overrides,
   };
 }

@@ -145,6 +145,18 @@ def _route_metadata(
     return metadata
 
 
+def _route_editing_job_id(
+    route: MemoirBookSourceRouteResponse,
+    *,
+    source_lineage_by_utterance: dict[str, dict[str, object]] | None,
+) -> str | None:
+    lineage = (source_lineage_by_utterance or {}).get(route.utterance_id)
+    if not isinstance(lineage, dict):
+        return None
+    value = lineage.get("editing_job_id")
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _group_assignment_inputs(
     routes: list[MemoirBookSourceRouteResponse],
     *,
@@ -248,6 +260,17 @@ async def _record_assignment_events(
     responses: list[MemoirAutomationEventResponse] = []
     for chapter_id, chapter_routes in routes_by_chapter.items():
         utterance_ids = [route.utterance_id for route in chapter_routes]
+        editing_job_ids = {
+            job_id
+            for route in chapter_routes
+            for job_id in [
+                _route_editing_job_id(
+                    route,
+                    source_lineage_by_utterance=source_lineage_by_utterance,
+                )
+            ]
+            if job_id
+        }
         confidence_values = [route.confidence or 0 for route in chapter_routes]
         confidence = round(sum(confidence_values) / len(confidence_values), 3)
         title = titles.get(chapter_id) or chapter_routes[0].target_chapter_title or "未命名章节"
@@ -258,6 +281,11 @@ async def _record_assignment_events(
             status=MemoirAutomationEventStatus.COMPLETED,
             chapter_id=chapter_id,
             utterance_ids=utterance_ids,
+            editing_job_id=(
+                next(iter(editing_job_ids))
+                if len(editing_job_ids) == 1
+                else None
+            ),
             summary_text=f"{len(utterance_ids)} 条讲述已自动整理进「{title}」。",
             event_signature=f"source_assigned:{chapter_id}:{','.join(sorted(utterance_ids))}",
             confidence=confidence,
@@ -315,9 +343,8 @@ async def _pending_held_events_by_utterance(
     )
     events_by_utterance: dict[str, MemoirAutomationEvent] = {}
     for event in result.scalars().all():
-        for utterance_id in event.utterance_ids_json or []:
-            if isinstance(utterance_id, str) and utterance_id.strip():
-                events_by_utterance.setdefault(utterance_id.strip(), event)
+        if event.review_utterance_id:
+            events_by_utterance.setdefault(event.review_utterance_id, event)
     return events_by_utterance
 
 
@@ -343,8 +370,21 @@ async def _record_held_events(
             source_lineage_by_utterance=source_lineage_by_utterance,
         )
         event = pending_events.get(route.utterance_id)
+        followup_task_id = (
+            route.followup_answer.task_id
+            if route.followup_answer is not None
+            else None
+        )
+        editing_job_id = _route_editing_job_id(
+            route,
+            source_lineage_by_utterance=source_lineage_by_utterance,
+        )
         if event:
             event.chapter_id = route.target_chapter_id
+            event.review_utterance_id = route.utterance_id
+            event.followup_task_id = followup_task_id
+            event.editing_job_id = editing_job_id
+            event.utterance_ids_json = []
             event.summary_text = summary
             event.confidence = route.confidence
             event.metadata_json = metadata
@@ -357,7 +397,9 @@ async def _record_held_events(
                 event_type=MemoirAutomationEventType.SOURCE_HELD,
                 status=MemoirAutomationEventStatus.NEEDS_REVIEW,
                 chapter_id=route.target_chapter_id,
-                utterance_ids=[route.utterance_id],
+                review_utterance_id=route.utterance_id,
+                followup_task_id=followup_task_id,
+                editing_job_id=editing_job_id,
                 summary_text=summary,
                 confidence=route.confidence,
                 metadata_json=metadata,

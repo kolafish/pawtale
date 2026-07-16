@@ -31,6 +31,7 @@ from app.migrations.memoir_narrative import (
     NARRATIVE_GAP_ACTION_CONSTRAINTS,
     _ensure_decision_schema,
     _ensure_editing_job_type_constraint,
+    _ensure_gap_involved_relation_schema,
     _ensure_narrative_gap_action_columns,
     _retire_legacy_completion_rows,
     assert_memoir_narrative_schema,
@@ -38,6 +39,8 @@ from app.migrations.memoir_narrative import (
 )
 from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
     MemoirEditingJob,
     MemoirImageAsset,
     MemoirTranscriptVersion,
@@ -279,6 +282,258 @@ async def test_narrative_migration_is_idempotent_and_runtime_asserts_schema():
             "changed_indexes": [],
             "changed_triggers": [],
         }
+    finally:
+        await engine.dispose()
+
+
+async def test_gap_relation_migration_keeps_only_involved_rows_once():
+    register_models()
+    engine = _sqlite_engine()
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as db:
+            project = Project(type="memoir", title="Gap 关系迁移")
+            db.add(project)
+            await db.flush()
+            primary_story = MemoirStory(
+                project_id=project.id,
+                title="主故事",
+                title_normalized="主故事",
+                story_type="event",
+                summary="",
+                time_precision="unknown",
+                lifecycle_status="active",
+                completion_status="incomplete",
+                verification_status="unreviewed",
+                publication_status="eligible",
+                slot_schema_version="1",
+                created_by="system",
+                updated_by="system",
+            )
+            involved_story = MemoirStory(
+                project_id=project.id,
+                title="相关故事",
+                title_normalized="相关故事",
+                story_type="event",
+                summary="",
+                time_precision="unknown",
+                lifecycle_status="active",
+                completion_status="incomplete",
+                verification_status="unreviewed",
+                publication_status="eligible",
+                slot_schema_version="1",
+                created_by="system",
+                updated_by="system",
+            )
+            plan = MemoirBookPlan(project_id=project.id, title="迁移书稿")
+            db.add_all([primary_story, involved_story, plan])
+            await db.flush()
+            primary_chapter = MemoirBookPlanChapter(
+                plan_id=plan.id,
+                project_id=project.id,
+                title="主章节",
+                sort_order=0,
+            )
+            involved_chapter = MemoirBookPlanChapter(
+                plan_id=plan.id,
+                project_id=project.id,
+                title="相关章节",
+                sort_order=1,
+            )
+            db.add_all([primary_chapter, involved_chapter])
+            await db.flush()
+            story_gap = MemoirNarrativeGap(
+                project_id=project.id,
+                scope_type="story",
+                primary_story_id=primary_story.id,
+                gap_type="causality",
+                severity="medium",
+                title="故事因果",
+                fingerprint=sha256(b"story-gap-migration").hexdigest(),
+                status="open",
+                detected_by="rules",
+            )
+            chapter_gap = MemoirNarrativeGap(
+                project_id=project.id,
+                scope_type="chapter",
+                primary_chapter_id=primary_chapter.id,
+                gap_type="relationship",
+                severity="medium",
+                title="章节关系",
+                fingerprint=sha256(b"chapter-gap-migration").hexdigest(),
+                status="open",
+                detected_by="rules",
+            )
+            db.add_all([story_gap, chapter_gap])
+            await db.commit()
+
+        async with engine.begin() as conn:
+            await conn.execute(text("PRAGMA foreign_keys=OFF"))
+            await conn.execute(
+                text("DROP TABLE memoir_narrative_gap_stories")
+            )
+            await conn.execute(
+                text("DROP TABLE memoir_narrative_gap_chapters")
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_narrative_gap_stories ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "gap_id VARCHAR(36) NOT NULL, "
+                    "story_id VARCHAR(36) NOT NULL, "
+                    "role VARCHAR(16) NOT NULL, "
+                    "created_at DATETIME NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_narrative_gap_chapters ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "project_id VARCHAR(36) NOT NULL, "
+                    "gap_id VARCHAR(36) NOT NULL, "
+                    "chapter_id VARCHAR(36) NOT NULL, "
+                    "role VARCHAR(16) NOT NULL, "
+                    "created_at DATETIME NOT NULL)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gap_stories VALUES "
+                    "('story-primary', :project_id, :gap_id, :primary_id, "
+                    "'primary', CURRENT_TIMESTAMP), "
+                    "('story-involved', :project_id, :gap_id, :involved_id, "
+                    "'involved', CURRENT_TIMESTAMP)"
+                ),
+                {
+                    "project_id": project.id,
+                    "gap_id": story_gap.id,
+                    "primary_id": primary_story.id,
+                    "involved_id": involved_story.id,
+                },
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_narrative_gap_chapters VALUES "
+                    "('chapter-primary', :project_id, :gap_id, :primary_id, "
+                    "'primary', CURRENT_TIMESTAMP), "
+                    "('chapter-involved', :project_id, :gap_id, :involved_id, "
+                    "'involved', CURRENT_TIMESTAMP)"
+                ),
+                {
+                    "project_id": project.id,
+                    "gap_id": chapter_gap.id,
+                    "primary_id": primary_chapter.id,
+                    "involved_id": involved_chapter.id,
+                },
+            )
+            await conn.execute(text("PRAGMA foreign_keys=ON"))
+
+        first = await _ensure_gap_involved_relation_schema(engine)
+        second = await _ensure_gap_involved_relation_schema(engine)
+
+        async with engine.begin() as conn:
+            story_columns = {
+                str(row[1])
+                for row in (
+                    await conn.execute(
+                        text(
+                            "PRAGMA table_info("
+                            "memoir_narrative_gap_stories)"
+                        )
+                    )
+                ).fetchall()
+            }
+            chapter_columns = {
+                str(row[1])
+                for row in (
+                    await conn.execute(
+                        text(
+                            "PRAGMA table_info("
+                            "memoir_narrative_gap_chapters)"
+                        )
+                    )
+                ).fetchall()
+            }
+            story_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT gap_id, story_id "
+                        "FROM memoir_narrative_gap_stories"
+                    )
+                )
+            ).all()
+            chapter_rows = (
+                await conn.execute(
+                    text(
+                        "SELECT gap_id, chapter_id "
+                        "FROM memoir_narrative_gap_chapters"
+                    )
+                )
+            ).all()
+            primary_values = (
+                await conn.execute(
+                    text(
+                        "SELECT id, primary_story_id, primary_chapter_id "
+                        "FROM memoir_narrative_gaps "
+                        "WHERE id IN (:story_gap_id, :chapter_gap_id) "
+                        "ORDER BY id"
+                    ),
+                    {
+                        "story_gap_id": story_gap.id,
+                        "chapter_gap_id": chapter_gap.id,
+                    },
+                )
+            ).all()
+            story_indexes = {
+                str(row[1])
+                for row in (
+                    await conn.execute(
+                        text(
+                            "PRAGMA index_list("
+                            "memoir_narrative_gap_stories)"
+                        )
+                    )
+                ).fetchall()
+            }
+            chapter_indexes = {
+                str(row[1])
+                for row in (
+                    await conn.execute(
+                        text(
+                            "PRAGMA index_list("
+                            "memoir_narrative_gap_chapters)"
+                        )
+                    )
+                ).fetchall()
+            }
+            violations = (
+                await conn.execute(text("PRAGMA foreign_key_check"))
+            ).all()
+
+        assert first == [
+            "memoir_narrative_gap_stories",
+            "memoir_narrative_gap_chapters",
+        ]
+        assert second == []
+        assert "role" not in story_columns
+        assert "role" not in chapter_columns
+        assert story_rows == [(story_gap.id, involved_story.id)]
+        assert chapter_rows == [(chapter_gap.id, involved_chapter.id)]
+        assert {
+            row[0]: (row[1], row[2]) for row in primary_values
+        } == {
+            story_gap.id: (primary_story.id, None),
+            chapter_gap.id: (None, primary_chapter.id),
+        }
+        assert "ix_memoir_narrative_gap_stories_story" in story_indexes
+        assert (
+            "ix_memoir_narrative_gap_chapters_chapter"
+            in chapter_indexes
+        )
+        assert violations == []
     finally:
         await engine.dispose()
 

@@ -28,7 +28,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirNarrativeDecisionAction,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
@@ -251,8 +250,7 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
                 title="比赛结果还不完整",
                 description="需要补充比赛最后的结果，以及这件事后来有什么影响。",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                story_roles={story.id: MemoirNarrativeGapRelationRole.PRIMARY},
-                chapter_roles={chapter.id: MemoirNarrativeGapRelationRole.INVOLVED},
+                involved_chapter_ids={chapter.id},
             )
         ],
     )
@@ -471,10 +469,7 @@ async def _add_story_chapter_gap(
                 title=f"“{fixture['story'].title}”还缺少内容",
                 description="需要继续补充。",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                story_roles={
-                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
-                },
-                chapter_roles={chapter.id: MemoirNarrativeGapRelationRole.INVOLVED},
+                involved_chapter_ids={chapter.id},
             )
         ],
     )
@@ -519,12 +514,7 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
                 title="比赛起因还不完整",
                 description="还不知道为什么参加比赛。",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                story_roles={
-                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
-                },
-                chapter_roles={
-                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.INVOLVED,
-                },
+                involved_chapter_ids={fixture["chapter"].id},
             ),
             MemoirNarrativeGapCandidate(
                 scope_type=MemoirNarrativeGapScopeType.STORY,
@@ -535,10 +525,7 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
                 title="天气背景还不完整",
                 description="还可以继续补充当天天气。",
                 detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                story_roles={other_story.id: MemoirNarrativeGapRelationRole.PRIMARY},
-                chapter_roles={
-                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.INVOLVED,
-                },
+                involved_chapter_ids={fixture["chapter"].id},
             ),
         ],
     )
@@ -620,12 +607,7 @@ async def test_semantic_followup_task_preserves_gap_target_slot(client, test_db)
                 title="章节开头还可以更清楚",
                 description="需要补充一个能自然带入本章的开场。",
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
-                story_roles={
-                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
-                },
-                chapter_roles={
-                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.INVOLVED,
-                },
+                involved_chapter_ids={fixture["chapter"].id},
             )
         ],
     )
@@ -673,9 +655,7 @@ async def test_semantic_followup_target_is_only_asked_in_one_chapter(client, tes
                 title="比赛前的背景还不清楚",
                 description="需要交代这场比赛为何重要。",
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
-                story_roles={
-                    fixture["story"].id: MemoirNarrativeGapRelationRole.INVOLVED,
-                },
+                involved_story_ids={fixture["story"].id},
             )
             for chapter in (fixture["chapter"], second_chapter)
         ],
@@ -842,12 +822,7 @@ async def test_followup_generation_marks_chapter_causality_as_clarification(
                 title="比赛与本章主题的关系不清楚",
                 description="需要确认比赛为什么会出现在这一章。",
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
-                story_roles={
-                    fixture["story"].id: MemoirNarrativeGapRelationRole.PRIMARY,
-                },
-                chapter_roles={
-                    fixture["chapter"].id: MemoirNarrativeGapRelationRole.PRIMARY,
-                },
+                involved_story_ids={fixture["story"].id},
             )
         ],
     )
@@ -1406,7 +1381,10 @@ async def test_unable_to_answer_is_local_to_task_and_prevents_reselection(client
     assert session["current_followup_task_id"] == fixture["task"].id
 
 
-async def test_ask_family_later_keeps_gap_open_and_task_resumable(client, test_db):
+async def test_ask_family_later_resumes_when_user_starts_the_direction_again(
+    client,
+    test_db,
+):
     fixture = await _create_story_gap(client, test_db)
     started = await post_mobile_memoir_voice_session(
         client,
@@ -1431,12 +1409,21 @@ async def test_ask_family_later_keeps_gap_open_and_task_resumable(client, test_d
     assert gap is not None
     assert gap.status == MemoirNarrativeGapStatus.OPEN.value
 
-    resumed = await client.post(
-        f"/api/memoir/projects/{fixture['project_id']}/followup-tasks/{fixture['task'].id}/resume",
-        json={"idempotency_key": "resume-after-family", "note": "已经问过家人了。"},
+    resumed = await post_mobile_memoir_voice_session(
+        client,
+        project_id=fixture["project_id"],
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_followup_task_id": fixture["task"].id,
+        },
     )
-    assert resumed.status_code == 200, resumed.text
-    assert resumed.json()["status"] == MemoirFollowupTaskStatus.PENDING.value
+    assert resumed.status_code == 201, resumed.text
+    await test_db.refresh(fixture["task"])
+    assert (
+        fixture["task"].status
+        == MemoirFollowupTaskStatus.IN_PROGRESS.value
+    )
 
 
 async def test_stop_asking_closes_only_task_and_keeps_content_and_gap(client, test_db):

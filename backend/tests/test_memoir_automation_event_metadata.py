@@ -7,10 +7,12 @@ from app.services.memoir import automation_event_metadata as metadata
 
 def _event(
     *,
+    review_utterance_id: str | None = None,
     utterance_ids_json: list[str] | None = None,
     metadata_json: dict | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
+        review_utterance_id=review_utterance_id,
         utterance_ids_json=utterance_ids_json or [],
         metadata_json=metadata_json or {},
     )
@@ -18,6 +20,7 @@ def _event(
 
 def test_event_utterance_ids_collects_metadata_routes_and_deduplicates():
     event = _event(
+        review_utterance_id="u0",
         utterance_ids_json=[" u1 ", "u2", "u1"],
         metadata_json={
             metadata.UTTERANCE_ID_KEY: "u3",
@@ -31,7 +34,14 @@ def test_event_utterance_ids_collects_metadata_routes_and_deduplicates():
         },
     )
 
-    assert metadata._event_utterance_ids(event) == ["u1", "u2", "u3", "u4", "u5"]
+    assert metadata._event_utterance_ids(event) == [
+        "u0",
+        "u1",
+        "u2",
+        "u3",
+        "u4",
+        "u5",
+    ]
 
 
 def test_metadata_without_deleted_utterances_cleans_all_reference_shapes():

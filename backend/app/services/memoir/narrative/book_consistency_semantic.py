@@ -8,7 +8,6 @@ from pydantic import ValidationError
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRelationRole,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapType,
@@ -262,14 +261,8 @@ def _validated_book_candidates(
                 description=item.description,
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
                 claim_roles={claim_id: claim_role for claim_id in sorted(claim_ids)},
-                story_roles={
-                    story_id: MemoirNarrativeGapRelationRole.INVOLVED
-                    for story_id in sorted(story_ids)
-                },
-                chapter_roles={
-                    chapter_id: MemoirNarrativeGapRelationRole.INVOLVED
-                    for chapter_id in sorted(chapter_ids)
-                },
+                involved_story_ids=set(story_ids),
+                involved_chapter_ids=set(chapter_ids),
             )
         )
     return candidates

@@ -49,12 +49,7 @@ def _utcnow_iso() -> str:
 
 
 def _event_utterance_id(event: MemoirAutomationEvent) -> str:
-    for item in event.utterance_ids_json or []:
-        if isinstance(item, str) and item.strip():
-            return item.strip()
-    metadata = event.metadata_json or {}
-    value = metadata.get("utterance_id")
-    return value.strip() if isinstance(value, str) else ""
+    return (event.review_utterance_id or "").strip()
 
 
 def _route_action(metadata: dict[str, object]) -> str:
@@ -202,18 +197,21 @@ async def _load_pending_review_for_utterance(
     project_id: str,
     utterance_id: str,
 ) -> MemoirAutomationEvent | None:
-    events = (
-        await db.execute(
-            select(MemoirAutomationEvent)
-            .where(
-                MemoirAutomationEvent.project_id == project_id,
-                MemoirAutomationEvent.event_type == SOURCE_REVIEW_EVENT_TYPE.value,
-                MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-            )
-            .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
+    return await db.scalar(
+        select(MemoirAutomationEvent)
+        .where(
+            MemoirAutomationEvent.project_id == project_id,
+            MemoirAutomationEvent.event_type
+            == SOURCE_REVIEW_EVENT_TYPE.value,
+            MemoirAutomationEvent.status
+            == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
+            MemoirAutomationEvent.review_utterance_id == utterance_id,
         )
-    ).scalars().all()
-    return next((event for event in events if _event_utterance_id(event) == utterance_id), None)
+        .order_by(
+            MemoirAutomationEvent.created_at.desc(),
+            MemoirAutomationEvent.id.desc(),
+        )
+    )
 
 
 async def create_source_review_item(
@@ -234,6 +232,11 @@ async def create_source_review_item(
     existing = await _load_pending_review_for_utterance(db, project_id=project_id, utterance_id=utterance_id)
     if existing:
         existing.chapter_id = route.target_chapter_id
+        existing.followup_task_id = (
+            route.followup_answer.task_id
+            if route.followup_answer is not None
+            else None
+        )
         existing.summary_text = _route_summary(route)
         existing.confidence = route.confidence
         existing.metadata_json = {
@@ -254,9 +257,15 @@ async def create_source_review_item(
     event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=route.target_chapter_id,
+        review_utterance_id=utterance_id,
+        followup_task_id=(
+            route.followup_answer.task_id
+            if route.followup_answer is not None
+            else None
+        ),
         event_type=SOURCE_REVIEW_EVENT_TYPE.value,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[utterance_id],
+        utterance_ids_json=[],
         summary_text=_route_summary(route),
         confidence=route.confidence,
         metadata_json=_route_metadata(route),
@@ -403,6 +412,7 @@ async def confirm_source_review_item(
             else:
                 metadata.update(route_metadata)
             event.summary_text = relation.confirmation_question
+            event.followup_task_id = relation.task_id
             event.metadata_json = metadata
             db.add(event)
             plan = await book_plans.get_book_plan(
