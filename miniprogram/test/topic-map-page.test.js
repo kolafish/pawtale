@@ -48,7 +48,11 @@ function topicMapFixture() {
   };
 }
 
-function loadTopicMapPage({ apiExports = {} } = {}) {
+function loadTopicMapPage({
+  apiExports = {},
+  voiceApiExports = {},
+  authorizationExports = {},
+} = {}) {
   mockModule("../services/memoir-topic-map-api.ts", {
     getMemoirTopicMap: async () => topicMapFixture(),
     updateMemoirTopicMapResolution: async () => {
@@ -58,6 +62,18 @@ function loadTopicMapPage({ apiExports = {} } = {}) {
   });
   mockModule("../services/accessibility-settings.ts", {
     readLargeTextEnabled: () => false,
+  });
+  mockModule("../services/memoir-voice-session-api.ts", {
+    createMemoirVoiceSession: async () => {
+      throw new Error("createMemoirVoiceSession was not mocked");
+    },
+    ...voiceApiExports,
+  });
+  mockModule("../services/voice-authorization.ts", {
+    readVoiceAuthorizationConsent: () => true,
+    syncVoiceAuthorizationConsent: async () => ({}),
+    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+    ...authorizationExports,
   });
   mockModule("../services/navigation.ts", {
     routeAuthError: () => false,
@@ -81,8 +97,10 @@ test("topic map view keeps evidence and user decisions as separate states", () =
 
   assert.equal(patch.modules[0].items[0].state_text, "已经聊过");
   assert.equal(patch.modules[0].items[0].actionText, "调整这个话题");
+  assert.equal(patch.modules[0].items[0].startDisabled, false);
   assert.equal(patch.modules[0].items[1].state_text, "不想聊这个");
   assert.equal(patch.modules[0].items[1].actionText, "修改我的选择");
+  assert.equal(patch.modules[0].items[1].startDisabled, true);
   assert.equal(
     topicMapResolutionChoices("do_not_discuss")[0].value,
     "none",
@@ -91,6 +109,91 @@ test("topic map view keeps evidence and user decisions as separate states", () =
     JSON.stringify(patch),
     /coverage|sufficient|FrameworkItem|Claim|Gap|Task/,
   );
+});
+
+test("starting from a topic creates an explicitly anchored guided session", async () => {
+  const created = [];
+  const { page, mod } = loadTopicMapPage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async (input, options) => {
+        created.push({ input, options });
+        return {
+          session: { id: "voice-1" },
+          messages: [],
+          utterances: [],
+        };
+      },
+    },
+  });
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project-1",
+      modules: mod.topicMapViewPatch(topicMapFixture()).modules,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startFromTopic.call(context, {
+    currentTarget: { dataset: { itemId: "item-1" } },
+  });
+
+  assert.equal(created.length, 1);
+  assert.equal(created[0].input.guidance_mode, "guided_interview");
+  assert.equal(created[0].input.session_goal, "open_narration");
+  assert.equal(created[0].input.anchor_framework_item_id, "item-1");
+  assert.equal(created[0].options.projectId, "project-1");
+  assert.match(navigations[0], /voiceSessionId=voice-1/);
+  assert.match(navigations[0], /mode=guided_interview/);
+  delete global.wx;
+});
+
+test("starting from a topic waits for voice authorization", async () => {
+  let created = false;
+  const { page, mod } = loadTopicMapPage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async () => {
+        created = true;
+      },
+    },
+    authorizationExports: {
+      readVoiceAuthorizationConsent: () => false,
+    },
+  });
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      projectId: "project-1",
+      modules: mod.topicMapViewPatch(topicMapFixture()).modules,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startFromTopic.call(context, {
+    currentTarget: { dataset: { itemId: "item-1" } },
+  });
+
+  assert.equal(created, false);
+  assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
+  delete global.wx;
 });
 
 test("saving a resolution updates only the selected topic", async () => {

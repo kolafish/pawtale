@@ -29,6 +29,7 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
+    MemoirFrameworkItem,
     MemoirFollowupTask,
     MemoirFollowupTaskAnswer,
     MemoirStory,
@@ -181,16 +182,23 @@ async def _add_task_answer_relation(
     return relation
 
 
-async def link_utterance_to_session_task(
+async def link_utterance_to_interview_target(
     db: AsyncSession,
     *,
     voice_session: MemoirVoiceSession,
     utterance: MemoirVoiceUtterance,
 ) -> str | None:
-    """Persist the creation-time interview target before async processing starts."""
+    """Freeze the creation-time Task/Framework target before async processing."""
     task: MemoirFollowupTask | None = None
+    framework_item: MemoirFrameworkItem | None = None
+    policy_decision = await interview_policy.policy_decision_for_utterance(
+        db,
+        utterance=utterance,
+    )
     if (
-        voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+        policy_decision is None
+        and voice_session.session_goal
+        == MemoirSessionGoal.BOOK_COMPLETION.value
         and voice_session.current_followup_task_id
     ):
         candidate = await followup_tasks.get_task(
@@ -204,26 +212,54 @@ async def link_utterance_to_session_task(
             and candidate.assigned_session_id == voice_session.id
         ):
             task = candidate
+    elif (
+        policy_decision is None
+        and voice_session.session_goal
+        == MemoirSessionGoal.OPEN_NARRATION.value
+        and voice_session.anchor_framework_item_id
+    ):
+        framework_item = await db.get(
+            MemoirFrameworkItem,
+            voice_session.anchor_framework_item_id,
+        )
     assignment = await interview_policy.assign_utterance(
         db,
         utterance=utterance,
         followup_task=task,
+        framework_item=framework_item,
+        policy_decision=policy_decision,
     )
+    if (
+        assignment.framework_item_id
+        and voice_session.anchor_framework_item_id
+        != assignment.framework_item_id
+    ):
+        voice_session.anchor_framework_item_id = assignment.framework_item_id
+        db.add(voice_session)
+        await db.flush()
     await interview_policy_outcomes.schedule_policy_outcome_evaluation(
         db,
         project_id=voice_session.project_id,
         assignment=assignment,
     )
-    if task is None:
+    if not assignment.followup_task_id:
         return None
+    if task is None or task.id != assignment.followup_task_id:
+        task = await followup_tasks.get_task(
+            db,
+            project_id=voice_session.project_id,
+            task_id=assignment.followup_task_id,
+        )
+    if task is None:
+        raise ValueError("讲述记录归属的补访任务不存在")
     await _add_task_answer_relation(
         db,
         project_id=voice_session.project_id,
-        task_id=task.id,
+        task_id=assignment.followup_task_id,
         utterance_id=utterance.id,
         role=MemoirFollowupTaskAnswerRole.RELATED_CONTEXT,
     )
-    return task.id
+    return assignment.followup_task_id
 
 
 async def ingestion_context_for_utterance(

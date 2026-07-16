@@ -116,6 +116,7 @@ export interface MemoirVoiceSession {
   interview_type: MemoirInterviewType;
   session_goal: MemoirSessionGoal;
   current_followup_task_id?: string | null;
+  anchor_framework_item_id?: string | null;
   current_guidance_module?: string | null;
   provider?: string | null;
   input_format?: string | null;
@@ -172,6 +173,7 @@ export interface MemoirVoiceSessionSummary {
   interview_type: MemoirInterviewType;
   session_goal: MemoirSessionGoal;
   current_followup_task_id?: string | null;
+  anchor_framework_item_id?: string | null;
   current_guidance_module?: string | null;
   started_at?: string | null;
   stopped_at?: string | null;
@@ -364,6 +366,7 @@ export interface MemoirVoiceSessionCreate {
   interview_type?: MemoirInterviewType;
   session_goal?: MemoirSessionGoal;
   current_followup_task_id?: string;
+  anchor_framework_item_id?: string;
   current_guidance_module?: string;
   provider?: string;
   input_format?: string;

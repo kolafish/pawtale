@@ -6,6 +6,9 @@ from typing import Mapping
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.memoir.framework_templates import (
+    FrameworkTemplateItemDefinition,
+)
 from app.domain.memoir.interview_policy import (
     InterviewBrief,
     brief_context_snapshot,
@@ -42,6 +45,7 @@ def open_narration_brief(
     unresolved_gap_ids: tuple[str, ...] = (),
     known_claim_ids: tuple[str, ...] = (),
     do_not_repeat_claim_ids: tuple[str, ...] = (),
+    candidate_topic_ids: tuple[str, ...] = (),
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
     policy_version: str = DEFAULT_POLICY_VERSION,
@@ -60,6 +64,7 @@ def open_narration_brief(
         unresolved_gaps=unresolved_gap_ids,
         known_claims=known_claim_ids,
         do_not_repeat_claims=do_not_repeat_claim_ids,
+        candidate_topic_ids=candidate_topic_ids,
         expected_evidence_hint="",
         completion_policy="",
         template_version=None,
@@ -110,9 +115,52 @@ def followup_task_brief(
                 )
             )
         ),
+        candidate_topic_ids=(),
         expected_evidence_hint=task.target_slot,
         completion_policy=task.answer_use,
         template_version=None,
+        policy_version=policy_version,
+    ).with_candidates()
+
+
+def framework_item_brief(
+    *,
+    item: MemoirFrameworkItem,
+    definition: FrameworkTemplateItemDefinition,
+    template_version: str,
+    current_story_state: MemoirInterviewStoryState,
+    conversation_momentum: MemoirConversationMomentum,
+    existing_material_refs: tuple[str, ...] = (),
+    known_claim_ids: tuple[str, ...] = (),
+    do_not_repeat_claim_ids: tuple[str, ...] = (),
+    user_preferences: Mapping[str, object] | None = None,
+    safety_constraints: tuple[str, ...] = (),
+    policy_version: str = DEFAULT_POLICY_VERSION,
+) -> InterviewBrief:
+    return InterviewBrief(
+        source_kind=MemoirInterviewBriefSourceKind.FRAMEWORK,
+        target_id=item.id,
+        purpose=definition.intent,
+        opening_question=(
+            f"如果从“{definition.title}”聊起，您最先想到的是哪一段？"
+        ),
+        candidate_actions=(),
+        current_story_state=current_story_state,
+        conversation_momentum=conversation_momentum,
+        user_preferences=user_preferences or {},
+        safety_constraints=safety_constraints,
+        existing_material=tuple(
+            sorted(set(existing_material_refs) | set(known_claim_ids))
+        ),
+        unresolved_gaps=(),
+        known_claims=tuple(sorted(set(known_claim_ids))),
+        do_not_repeat_claims=tuple(
+            sorted(set(do_not_repeat_claim_ids))
+        ),
+        candidate_topic_ids=(),
+        expected_evidence_hint="",
+        completion_policy="",
+        template_version=template_version,
         policy_version=policy_version,
     ).with_candidates()
 
@@ -266,7 +314,7 @@ async def record_human_evaluation(
     return evaluation
 
 
-async def _policy_decision_for_parent_message(
+async def policy_decision_for_utterance(
     db: AsyncSession,
     *,
     utterance: MemoirVoiceUtterance,
@@ -315,7 +363,7 @@ async def assign_utterance(
         if framework_project_id != session.project_id:
             raise ValueError("话题地图方向不属于讲述记录所在项目")
     if policy_decision is None:
-        policy_decision = await _policy_decision_for_parent_message(
+        policy_decision = await policy_decision_for_utterance(
             db,
             utterance=utterance,
         )
@@ -333,6 +381,23 @@ async def assign_utterance(
         snapshot_framework_item_id = (
             policy_decision.state_snapshot_json or {}
         ).get("framework_item_id")
+        if snapshot_task_id and snapshot_framework_item_id:
+            raise ValueError("策略决策同时包含多个访谈目标")
+        if followup_task is None and framework_item is None:
+            if snapshot_task_id:
+                followup_task = await db.get(
+                    MemoirFollowupTask,
+                    snapshot_task_id,
+                )
+                if followup_task is None:
+                    raise ValueError("策略决策引用的补访任务不存在")
+            elif snapshot_framework_item_id:
+                framework_item = await db.get(
+                    MemoirFrameworkItem,
+                    snapshot_framework_item_id,
+                )
+                if framework_item is None:
+                    raise ValueError("策略决策引用的话题方向不存在")
         expected_task_id = followup_task.id if followup_task else None
         expected_framework_item_id = framework_item.id if framework_item else None
         if (

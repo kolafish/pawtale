@@ -22,15 +22,27 @@ class MemoirVoiceSessionCreate(BaseModel):
     interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
     session_goal: MemoirSessionGoal = MemoirSessionGoal.OPEN_NARRATION
     current_followup_task_id: str | None = Field(default=None, max_length=36)
+    anchor_framework_item_id: str | None = Field(default=None, max_length=36)
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def validate_followup_goal(self):
+    def validate_interview_target(self):
         if self.current_followup_task_id and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION:
             raise ValueError("current_followup_task_id requires book_completion session_goal")
+        if self.anchor_framework_item_id and (
+            self.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW
+            or self.session_goal != MemoirSessionGoal.OPEN_NARRATION
+        ):
+            raise ValueError(
+                "anchor_framework_item_id requires guided_interview open_narration"
+            )
+        if self.current_followup_task_id and self.anchor_framework_item_id:
+            raise ValueError(
+                "voice session cannot target a followup task and framework item together"
+            )
         return self
 
 class MemoirVoiceSessionStopRequest(BaseModel):
@@ -97,6 +109,7 @@ class MemoirVoiceSessionResponse(BaseModel):
     interview_type: MemoirInterviewType
     session_goal: MemoirSessionGoal
     current_followup_task_id: str | None = None
+    anchor_framework_item_id: str | None = None
     current_guidance_module: str | None = None
     provider: str | None = None
     input_format: str | None = None
@@ -160,6 +173,7 @@ class MemoirVoiceSessionSummaryResponse(BaseModel):
     interview_type: MemoirInterviewType
     session_goal: MemoirSessionGoal
     current_followup_task_id: str | None = None
+    anchor_framework_item_id: str | None = None
     current_guidance_module: str | None = None
     started_at: datetime | None = None
     stopped_at: datetime | None = None

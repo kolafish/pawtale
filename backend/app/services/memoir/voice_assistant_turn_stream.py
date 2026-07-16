@@ -26,7 +26,6 @@ from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
-    GUIDED_TOPIC_LIBRARY,
     GUIDED_TOPIC_MENU,
     PROGRESS_PROMPT_VERSION,
     InterviewerPersona,
@@ -326,6 +325,7 @@ class VoiceAssistantTurnStreamSession:
         )
 
         policy_turn: interview_policy_runtime.ActivePolicyTurn | None = None
+        anchor_instruction = ""
         try:
             async with self.db.begin_nested():
                 policy_turn = (
@@ -346,6 +346,21 @@ class VoiceAssistantTurnStreamSession:
                 voice_session.id,
                 turn_id,
             )
+        if policy_turn is None:
+            try:
+                anchor_instruction = (
+                    await interview_policy_runtime.anchored_opening_reply_instruction(
+                        self.db,
+                        session=voice_session,
+                    )
+                )
+            except Exception:
+                logger.exception(
+                    "Topic anchor opening preparation failed; continuing with "
+                    "the existing reply flow voice_session_id=%s turn_id=%s",
+                    voice_session.id,
+                    turn_id,
+                )
 
         prompt = _build_stream_turn_prompt(
             voice_session,
@@ -356,7 +371,7 @@ class VoiceAssistantTurnStreamSession:
             followup_context=followup_context,
             policy_instruction=interview_policy_runtime.active_reply_instruction(
                 policy_turn
-            ),
+            ) or anchor_instruction,
         )
 
         await self._stream_text_and_audio(
@@ -768,10 +783,9 @@ def _build_stream_turn_prompt(
         if has_user_message:
             mode_instruction = f"""当前是主题讲述，当前主题线索是“{module_label}”；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。
 - 如果叙述者明确说想换主题，下一句必须围绕新主题展开，不要继续旧话题
-- 先从宏观问题开始，不要立刻追细节
-- 帮叙述者把当前主题讲完整：时间、地点、人物、发生了什么、当时感受、后来影响
-- 不要连续追同一个细节超过两轮
-{GUIDED_TOPIC_LIBRARY}"""
+- 优先顺着当前故事的势能继续听或只追一个自然方向，不要为了“完整”机械补齐时间、地点、人物、起因和结果
+- 只有确实影响理解时，才询问背景、人物关系、原因、结果、转场或感受
+- 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
         elif has_previous_user_message:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
 - 最多两句：第一句轻轻回访并宽泛概括上次聊到的大方向；第二句只问“今天想先讲哪一段？”

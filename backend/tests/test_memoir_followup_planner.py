@@ -1071,7 +1071,7 @@ async def test_saved_answer_completes_task_after_session_stops_before_ingestion(
         fixture,
         voice_session_id=session.id,
     )
-    linked_task_id = await followup_completion.link_utterance_to_session_task(
+    linked_task_id = await followup_completion.link_utterance_to_interview_target(
         test_db,
         voice_session=session,
         utterance=utterance,
@@ -1245,7 +1245,7 @@ async def test_interviewer_evidence_cannot_complete_narrator_followup(client, te
     )
     voice_session = await test_db.get(MemoirVoiceSession, session["id"])
     assert voice_session is not None
-    await followup_completion.link_utterance_to_session_task(
+    await followup_completion.link_utterance_to_interview_target(
         test_db,
         voice_session=voice_session,
         utterance=utterance,

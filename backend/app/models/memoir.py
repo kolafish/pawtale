@@ -57,6 +57,17 @@ class MemoirVoiceSession(Base):
             "current_followup_task_id IS NULL OR session_goal = 'book_completion'",
             name="ck_memoir_voice_sessions_followup_goal",
         ),
+        CheckConstraint(
+            "anchor_framework_item_id IS NULL OR "
+            "(guidance_mode = 'guided_interview' "
+            "AND session_goal = 'open_narration')",
+            name="ck_memoir_voice_sessions_anchor_mode",
+        ),
+        CheckConstraint(
+            "anchor_framework_item_id IS NULL "
+            "OR current_followup_task_id IS NULL",
+            name="ck_memoir_voice_sessions_single_target",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -84,6 +95,12 @@ class MemoirVoiceSession(Base):
     )
     current_followup_task_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, index=True
+    )
+    anchor_framework_item_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_framework_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     current_guidance_module: Mapped[str | None] = mapped_column(String(80), nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)

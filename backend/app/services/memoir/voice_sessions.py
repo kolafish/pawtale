@@ -7,12 +7,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.domain.memoir.narrative_types import MemoirFrameworkUserResolution
 from app.domain.memoir.types import (
     MemoirChatMessageRole,
+    MemoirGuidanceMode,
     MemoirSessionGoal,
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_narrative import MemoirFrameworkItem, MemoirProjectFramework
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirVoiceProgressResponse,
@@ -78,6 +81,44 @@ async def create_voice_session(
         if task is None:
             raise HTTPException(status_code=404, detail="补访任务不存在")
 
+    anchor_item = None
+    if req.anchor_framework_item_id:
+        anchor_item = await db.scalar(
+            select(MemoirFrameworkItem)
+            .join(
+                MemoirProjectFramework,
+                MemoirProjectFramework.id
+                == MemoirFrameworkItem.project_framework_id,
+            )
+            .where(
+                MemoirProjectFramework.project_id == project.id,
+                MemoirFrameworkItem.id == req.anchor_framework_item_id,
+            )
+        )
+        if anchor_item is None:
+            raise HTTPException(status_code=404, detail="话题方向不存在")
+        if (
+            anchor_item.user_resolution
+            != MemoirFrameworkUserResolution.NONE.value
+            or (
+                anchor_item.deferred_until is not None
+                and anchor_item.deferred_until
+                > datetime.now(UTC).replace(tzinfo=None)
+            )
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="这个话题方向当前已被收起，请先修改您的选择",
+            )
+        if (
+            req.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW
+            or req.session_goal != MemoirSessionGoal.OPEN_NARRATION
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="话题方向只能用于按照主题来问的自由访谈",
+            )
+
     now = datetime.now(UTC).replace(tzinfo=None)
     voice_session = MemoirVoiceSession(
         project_id=project.id,
@@ -85,6 +126,9 @@ async def create_voice_session(
         guidance_mode=req.guidance_mode.value,
         interview_type=req.interview_type.value,
         session_goal=req.session_goal.value,
+        anchor_framework_item_id=(
+            anchor_item.id if anchor_item is not None else None
+        ),
         current_guidance_module=req.current_guidance_module,
         provider=req.provider,
         input_format=req.input_format,
@@ -185,6 +229,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         interview_type=voice_session.interview_type,
         session_goal=voice_session.session_goal,
         current_followup_task_id=voice_session.current_followup_task_id,
+        anchor_framework_item_id=voice_session.anchor_framework_item_id,
         current_guidance_module=voice_session.current_guidance_module,
         started_at=voice_session.started_at,
         stopped_at=voice_session.stopped_at,

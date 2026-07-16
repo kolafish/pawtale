@@ -67,6 +67,18 @@ def test_open_narration_candidate_builder_respects_safety_constraints():
         MemoirInterviewAction.PAUSE_OR_END,
     ]
 
+    guided_opening = interview_policy.open_narration_brief(
+        current_story_state=MemoirInterviewStoryState.OPENING,
+        conversation_momentum=MemoirConversationMomentum.LOW,
+        candidate_topic_ids=("framework-item-2", "framework-item-1"),
+    )
+    assert [
+        candidate.action for candidate in guided_opening.candidate_actions
+    ] == [MemoirInterviewAction.OFFER_NEW_TOPIC]
+    assert brief_context_snapshot(guided_opening)[
+        "candidate_framework_item_ids"
+    ] == ["framework-item-1", "framework-item-2"]
+
 
 def test_interview_brief_fingerprint_is_stable_and_contains_only_references():
     brief = interview_policy.open_narration_brief(
