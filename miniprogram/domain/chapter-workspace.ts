@@ -178,7 +178,7 @@ export interface MemoirChapterWorkspaceGapGroups {
   accepted_incomplete: MemoirNarrativeGap[];
 }
 
-export interface MemoirChapterGapAuditJob {
+export interface MemoirChapterCompletionRefreshJob {
   id: string;
   project_id: string;
   chapter_id: string | null;
@@ -209,10 +209,10 @@ export interface MemoirChapterWorkspace {
   available_stories: MemoirChapterWorkspaceAvailableStory[];
   answer_updates: MemoirChapterWorkspaceAnswerUpdate[];
   gaps: MemoirChapterWorkspaceGapGroups;
-  latest_audit_job: MemoirChapterGapAuditJob | null;
+  latest_refresh_job: MemoirChapterCompletionRefreshJob | null;
 }
 
-export interface MemoirChapterGapAuditRequest {
+export interface MemoirChapterCompletionRefreshRequest {
   include_semantic_audit?: boolean;
   ai_model?: string | null;
 }

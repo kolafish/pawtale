@@ -5,7 +5,7 @@ import type {
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirBookCompletionOverview,
-  prepareMemoirBookCompletionChapter,
+  enqueueMemoirChapterCompletionRefresh,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -174,7 +174,7 @@ definePage<BookCompletionData>()({
       this.openVoiceChat(chapter.active_task.active_session_id, chapter.title);
       return;
     }
-    if (chapter.next_action.kind === "refresh_audit") {
+    if (chapter.next_action.kind === "refresh_completion") {
       await this.prepareChapter(chapter.chapter_id);
       return;
     }
@@ -193,7 +193,7 @@ definePage<BookCompletionData>()({
       chapters: this.data.chapters.map((item) => chapterView(item, chapterId)),
     });
     try {
-      await prepareMemoirBookCompletionChapter(this.data.projectId, chapterId);
+      await enqueueMemoirChapterCompletionRefresh(this.data.projectId, chapterId);
       await this.loadOverview(true);
     } catch (error) {
       if (routeAuthError(error)) {

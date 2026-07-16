@@ -53,11 +53,11 @@
       <button
         wx:if="{{nextAction.actionText}}"
         class="primary-action"
-        loading="{{contractBusy || auditBusy || draftGenerationBusy}}"
-        disabled="{{nextAction.disabled || contractBusy || auditBusy || draftGenerationBusy}}"
+        loading="{{contractBusy || refreshBusy || draftGenerationBusy}}"
+        disabled="{{nextAction.disabled || contractBusy || refreshBusy || draftGenerationBusy}}"
         bindtap="runNextAction"
       >{{nextAction.actionText}}</button>
-      <view wx:if="{{auditError}}" class="message error-message">{{auditError}}</view>
+      <view wx:if="{{completionError}}" class="message error-message">{{completionError}}</view>
     </view>
 
     <view wx:if="{{editorialGaps.length}}" class="content-section" id="editorial-fixes">

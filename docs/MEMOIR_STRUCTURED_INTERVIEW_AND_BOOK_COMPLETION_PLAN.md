@@ -594,8 +594,8 @@ RefreshChapterCompletion Job
 ChapterCompletionSummary
   chapter_id
   state
-  audit_status
-  audit_is_current
+  refresh_status
+  refresh_is_current
   next_action
   must_handle_count
   suggested_count
@@ -616,7 +616,7 @@ ChapterCompletionSummary
 ```text
 create_direction
 confirm_direction
-refresh_audit
+refresh_completion
 wait
 continue_confirmation
 start_interview

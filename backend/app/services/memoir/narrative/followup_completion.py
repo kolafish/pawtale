@@ -43,7 +43,7 @@ from app.services.memoir.narrative import (
     draft_blocks,
     fact_resolution,
     followup_tasks,
-    gap_audit,
+    completion_refresh,
     gaps,
 )
 
@@ -474,7 +474,7 @@ async def complete_task_from_semantic_interpretation(
                 chapter_id=task.chapter_id,
                 story_id=task.story_id,
             )
-        await gap_audit.enqueue_chapter_gap_audit(
+        await completion_refresh.enqueue_chapter_completion_refresh(
             db,
             project_id=project_id,
             chapter_id=task.chapter_id,
@@ -667,7 +667,7 @@ async def evaluate_after_narrative_ingestion(
             chapters_to_semantic_reaudit.add(task.chapter_id)
 
     for chapter_id in sorted(chapters_to_reaudit | chapters_to_semantic_reaudit):
-        await gap_audit.enqueue_chapter_gap_audit(
+        await completion_refresh.enqueue_chapter_completion_refresh(
             db,
             project_id=project_id,
             chapter_id=chapter_id,

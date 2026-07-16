@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, func, select, update
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
@@ -11,7 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStoryRole,
     MemoirChapterNodeType,
     MemoirClaimTimePrecision,
-    MemoirCompletionItemAction,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskStatus,
     MemoirNarrativeActorType,
@@ -41,9 +41,8 @@ from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import register_editing_job_handler
 from app.services.memoir.narrative import (
-    completion_items,
-    followup_jobs,
-    gap_audit,
+    book_completion,
+    completion_refresh,
     gaps,
     story_slots,
 )
@@ -171,18 +170,19 @@ async def _latest_job(test_db, project_id: str, job_type: MemoirEditingJobType):
 async def _run_completion_preparation(client, test_db, project_id: str, chapter_id: str):
     register_memoir_editing_job_handlers()
     started = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/prepare"
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/completion-refresh-jobs",
+        json={},
     )
-    assert started.status_code == 200, started.text
-    assert started.json()["state"] == "preparing"
+    assert started.status_code == 202, started.text
 
-    audit_job = await _latest_job(
+    refresh_job = await _latest_job(
         test_db,
         project_id,
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
     )
-    assert audit_job is not None
-    assert audit_job.payload_json["include_semantic_audit"] is True
+    assert refresh_job is not None
+    assert refresh_job.id == started.json()["id"]
+    assert refresh_job.payload_json["include_semantic_audit"] is True
 
     class EmptySemanticClient:
         provider_name = "test"
@@ -191,26 +191,24 @@ async def _run_completion_preparation(client, test_db, project_id: str, chapter_
         async def _call_llm(self, *_args, **_kwargs):
             return '{"schema_version":"2","gaps":[]}'
 
-    async def semantic_audit_handler(db, job):
-        return await gap_audit.run_chapter_gap_audit_job(
+    async def completion_refresh_handler(db, job):
+        return await completion_refresh.run_chapter_completion_refresh_job(
             db,
             job,
             semantic_ai_client=EmptySemanticClient(),
         )
 
     register_editing_job_handler(
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
-        semantic_audit_handler,
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
+        completion_refresh_handler,
     )
-    assert await run_test_editing_job(test_db, audit_job.id) is True
-
-    generation_job = await _latest_job(
-        test_db,
-        project_id,
-        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
+    succeeded = await run_test_editing_job(test_db, refresh_job.id)
+    await test_db.refresh(refresh_job)
+    assert succeeded is True, (
+        refresh_job.status,
+        refresh_job.error_message,
+        refresh_job.result_json,
     )
-    assert generation_job is not None
-    assert await run_test_editing_job(test_db, generation_job.id) is True
 
 
 async def test_book_completion_overview_prepares_and_resumes_one_chapter(
@@ -303,14 +301,15 @@ async def test_book_completion_voice_session_rejects_an_empty_task_boundary(clie
     assert "问题尚未准备好" in response.json()["detail"]
 
 
-async def test_book_completion_prepare_rejects_a_chapter_outside_the_project(
+async def test_book_completion_refresh_rejects_a_chapter_outside_the_project(
     client,
     test_db,
 ):
     project_id, _, _ = await _create_structured_chapter(client, test_db, complete=False)
 
     response = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/missing/prepare"
+        f"/api/memoir/projects/{project_id}/chapters/missing/completion-refresh-jobs",
+        json={},
     )
 
     assert response.status_code == 404
@@ -326,24 +325,26 @@ async def test_book_completion_exposes_at_most_three_interview_directions(
         test_db,
         complete=True,
     )
+    await _run_completion_preparation(client, test_db, project_id, chapter.id)
     for index in range(4):
-        gap = MemoirNarrativeGap(
+        stored, created_count = await gaps.upsert_gaps(
+            test_db,
             project_id=project_id,
-            scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
-            primary_chapter_id=chapter.id,
-            gap_type=MemoirNarrativeGapType.CAUSALITY.value,
-            severity=MemoirNarrativeGapSeverity.MEDIUM.value,
-            target_slot=f"semantic:opening:{index}",
-            title=f"章节方向 {index + 1}",
-                description="需要补充一段章节层面的说明。",
-                fingerprint=f"{index + 1:064d}",
-                recommended_action="interview",
-                action_reason_code="missing_new_evidence",
-                action_decision_source="deterministic_policy",
-                action_policy_version="1",
-                detected_by=MemoirNarrativeGapDetectedBy.AI.value,
-            )
-        test_db.add(gap)
+            candidates=[
+                MemoirNarrativeGapCandidate(
+                    scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                    primary_chapter_id=chapter.id,
+                    gap_type=MemoirNarrativeGapType.CAUSALITY,
+                    severity=MemoirNarrativeGapSeverity.MEDIUM,
+                    target_slot=f"semantic:opening:{index}",
+                    title=f"章节方向 {index + 1}",
+                    description="需要补充一段章节层面的说明。",
+                    detected_by=MemoirNarrativeGapDetectedBy.AI,
+                )
+            ],
+        )
+        assert created_count == 1
+        gap = stored[0]
         await test_db.flush()
         test_db.add(
             MemoirFollowupTask(
@@ -361,18 +362,13 @@ async def test_book_completion_exposes_at_most_three_interview_directions(
         )
     await test_db.commit()
 
-    items = await completion_items.chapter_completion_items(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
     )
-    interview_items = [
-        item for item in items if item.action == MemoirCompletionItemAction.INTERVIEW
-    ]
-
-    assert len(interview_items) == 3
-    assert [item.priority for item in interview_items] == [4000, 3999, 3998]
-    assert "章节方向 4" not in {item.title for item in items}
+    visible_tasks = overview.json()["chapters"][0]["visible_tasks"]
+    assert len(visible_tasks) == 3
+    assert [item["priority"] for item in visible_tasks] == [4000, 3999, 3998]
+    assert "章节方向 4" not in {item["question"] for item in visible_tasks}
 
 
 @pytest.mark.parametrize(
@@ -426,15 +422,6 @@ async def test_book_completion_summary_routes_editorial_and_manual_review_action
     assert created_count == 1
     assert stored_gaps[0].recommended_action == recommended_action
     await test_db.commit()
-
-    generation_job = await followup_jobs.schedule_followup_task_generation(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        source="test_chapter_completion_summary",
-    )
-    await test_db.commit()
-    assert await run_test_editing_job(test_db, generation_job.id) is True
 
     overview = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
@@ -549,13 +536,13 @@ async def test_book_completion_reaudits_changed_content_before_reusing_an_old_qu
     stale = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     stale_chapter = stale.json()["chapters"][0]
     assert stale_chapter["state"] == "needs_preparation"
-    assert stale_chapter["next_action"]["kind"] == "refresh_audit"
+    assert stale_chapter["next_action"]["kind"] == "refresh_completion"
     assert stale_chapter["headline"] == stale_chapter["next_action"]["title"]
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )
     assert workspace.status_code == 200
-    assert workspace.json()["latest_audit_job"] is None
+    assert workspace.json()["latest_refresh_job"] is None
 
     await _run_completion_preparation(client, test_db, project_id, chapter.id)
 
@@ -601,19 +588,22 @@ async def test_book_completion_uses_a_ready_question_without_waiting_for_other_c
             MemoirEditingJob.project_id == project_id,
             MemoirEditingJob.chapter_id == second_chapter.id,
             MemoirEditingJob.job_type
-            == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+            == MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
         )
     )
     assert second_audit is None
 
 
-async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, test_db):
+async def test_book_completion_reuses_a_current_semantic_completion_refresh(
+    client,
+    test_db,
+):
     project_id, chapter, _ = await _create_structured_chapter(
         client,
         test_db,
         complete=False,
     )
-    semantic_job = await gap_audit.enqueue_chapter_gap_audit(
+    semantic_job = await completion_refresh.enqueue_chapter_completion_refresh(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
@@ -631,7 +621,7 @@ async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, t
             return '{"schema_version":"2","gaps":[]}'
 
     async def semantic_handler(db, job):
-        return await gap_audit.run_chapter_gap_audit_job(
+        return await completion_refresh.run_chapter_completion_refresh_job(
             db,
             job,
             semantic_ai_client=EmptySemanticClient(),
@@ -639,20 +629,12 @@ async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, t
 
     register_memoir_editing_job_handlers()
     register_editing_job_handler(
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
         semantic_handler,
     )
     assert await run_test_editing_job(test_db, semantic_job.id) is True
-    generation_job = await _latest_job(
-        test_db,
-        project_id,
-        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
-    )
-    assert generation_job is not None
-    assert await run_test_editing_job(test_db, generation_job.id) is True
-
-    status = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare"
+    status = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
     )
     audit_jobs = (
         await test_db.scalars(
@@ -660,11 +642,359 @@ async def test_book_completion_reuses_a_current_semantic_chapter_audit(client, t
                 MemoirEditingJob.project_id == project_id,
                 MemoirEditingJob.chapter_id == chapter.id,
                 MemoirEditingJob.job_type
-                == MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT.value,
+                == MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
             )
         )
     ).all()
 
     assert status.status_code == 200
-    assert status.json()["state"] == "ready"
+    assert status.json()["chapters"][0]["state"] == "ready"
     assert [job.id for job in audit_jobs] == [semantic_job.id]
+
+
+async def test_book_completion_uses_the_latest_current_refresh_regardless_of_mode(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    deterministic_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=False,
+        ai_model=None,
+        source="book_completion_answer",
+    )
+    await test_db.commit()
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, deterministic_job.id) is True
+
+    ready = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert ready.status_code == 200
+    assert ready.json()["chapters"][0]["state"] == "ready"
+    assert ready.json()["chapters"][0]["refresh_status"] == "succeeded"
+
+    semantic_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="custom-refresh-model",
+        source="chapter_workspace",
+    )
+    await test_db.commit()
+
+    preparing = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
+    )
+    assert preparing.status_code == 200
+    assert preparing.json()["chapters"][0]["state"] == "preparing"
+    assert preparing.json()["chapters"][0]["refresh_status"] == "pending"
+    assert workspace.status_code == 200
+    assert workspace.json()["latest_refresh_job"]["id"] == semantic_job.id
+
+
+async def test_completion_refresh_does_not_publish_partial_gaps_on_semantic_failure(
+    client,
+    test_db,
+):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="failing-semantic-model",
+        source="test_atomic_semantic_failure",
+    )
+    await test_db.commit()
+
+    class FailingSemanticClient:
+        provider_name = "test"
+        model_name = "failing-semantic-model"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            raise RuntimeError("semantic provider failed")
+
+    async def handler(db, job):
+        return await completion_refresh.run_chapter_completion_refresh_job(
+            db,
+            job,
+            semantic_ai_client=FailingSemanticClient(),
+        )
+
+    register_memoir_editing_job_handlers()
+    register_editing_job_handler(
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
+        handler,
+    )
+    assert await run_test_editing_job(test_db, refresh_job.id) is False
+    await test_db.refresh(refresh_job)
+
+    assert refresh_job.status == "failed"
+    assert refresh_job.result_json["published"] is False
+    assert refresh_job.result_json["failed_stage"] == "semantic_analysis"
+    assert await test_db.scalar(
+        select(func.count(MemoirNarrativeGap.id)).where(
+            MemoirNarrativeGap.project_id == project_id
+        )
+    ) == 0
+    assert await test_db.scalar(
+        select(func.count(MemoirFollowupTask.id)).where(
+            MemoirFollowupTask.project_id == project_id
+        )
+    ) == 0
+
+
+async def test_completion_refresh_requeues_when_content_changed_before_analysis(
+    client,
+    test_db,
+):
+    project_id, chapter, story = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=False,
+        ai_model=None,
+        source="test_stale_before_analysis",
+    )
+    await test_db.commit()
+    story.version += 1
+    await test_db.commit()
+
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, refresh_job.id) is False
+    await test_db.refresh(refresh_job)
+    replacement_job = await test_db.get(
+        MemoirEditingJob,
+        refresh_job.result_json["replacement_job_id"],
+    )
+
+    assert refresh_job.status == "skipped"
+    assert (
+        refresh_job.result_json["skip_reason"]
+        == "chapter_content_changed_before_analysis"
+    )
+    assert replacement_job is not None
+    assert replacement_job.id != refresh_job.id
+    assert replacement_job.status == "pending"
+    assert await test_db.scalar(
+        select(func.count(MemoirNarrativeGap.id)).where(
+            MemoirNarrativeGap.project_id == project_id
+        )
+    ) == 0
+
+
+async def test_completion_refresh_requeues_when_content_changes_during_analysis(
+    client,
+    test_db,
+):
+    project_id, chapter, story = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="changing-semantic-model",
+        source="test_stale_during_analysis",
+    )
+    await test_db.commit()
+    session_maker = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
+    class ChangingSemanticClient:
+        provider_name = "test"
+        model_name = "changing-semantic-model"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            async with session_maker() as other_db:
+                await other_db.execute(
+                    update(MemoirStory)
+                    .where(MemoirStory.id == story.id)
+                    .values(
+                        version=MemoirStory.version + 1,
+                        updated_at=datetime.now(UTC).replace(tzinfo=None),
+                    )
+                )
+                await other_db.commit()
+            return '{"schema_version":"2","gaps":[]}'
+
+    async def handler(db, job):
+        return await completion_refresh.run_chapter_completion_refresh_job(
+            db,
+            job,
+            semantic_ai_client=ChangingSemanticClient(),
+        )
+
+    register_memoir_editing_job_handlers()
+    register_editing_job_handler(
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
+        handler,
+    )
+    assert await run_test_editing_job(test_db, refresh_job.id) is False
+    await test_db.refresh(refresh_job)
+    replacement_job = await test_db.get(
+        MemoirEditingJob,
+        refresh_job.result_json["replacement_job_id"],
+    )
+
+    assert refresh_job.status == "skipped"
+    assert (
+        refresh_job.result_json["skip_reason"]
+        == "chapter_content_changed_during_analysis"
+    )
+    assert replacement_job is not None
+    assert replacement_job.id != refresh_job.id
+    assert replacement_job.status == "pending"
+    assert await test_db.scalar(
+        select(func.count(MemoirNarrativeGap.id)).where(
+            MemoirNarrativeGap.project_id == project_id
+        )
+    ) == 0
+
+
+async def test_completion_refresh_rolls_back_gap_publication_when_planner_fails(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=False,
+        ai_model=None,
+        source="test_atomic_planner_failure",
+    )
+    await test_db.commit()
+
+    async def fail_planner(*_args, **_kwargs):
+        raise RuntimeError("planner failed")
+
+    monkeypatch.setattr(
+        completion_refresh.followup_planner,
+        "generate_followup_tasks",
+        fail_planner,
+    )
+    register_memoir_editing_job_handlers()
+    assert await run_test_editing_job(test_db, refresh_job.id) is False
+    await test_db.refresh(refresh_job)
+
+    assert refresh_job.status == "failed"
+    assert "planner failed" in refresh_job.error_message
+    assert await test_db.scalar(
+        select(func.count(MemoirNarrativeGap.id)).where(
+            MemoirNarrativeGap.project_id == project_id
+        )
+    ) == 0
+    assert await test_db.scalar(
+        select(func.count(MemoirFollowupTask.id)).where(
+            MemoirFollowupTask.project_id == project_id
+        )
+    ) == 0
+
+
+async def test_book_completion_overview_query_count_does_not_grow_per_chapter(
+    client,
+    test_db,
+):
+    project_id, first_chapter, _ = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=True,
+    )
+    engine = test_db.bind
+    assert engine is not None
+
+    statement_counts: list[int] = []
+
+    async def count_overview_queries() -> None:
+        count = 0
+
+        def before_cursor_execute(*_args):
+            nonlocal count
+            count += 1
+
+        event.listen(engine.sync_engine, "before_cursor_execute", before_cursor_execute)
+        try:
+            await book_completion.get_book_completion_overview(
+                test_db,
+                project_id=project_id,
+            )
+        finally:
+            event.remove(
+                engine.sync_engine,
+                "before_cursor_execute",
+                before_cursor_execute,
+            )
+        statement_counts.append(count)
+
+    await count_overview_queries()
+    test_db.add_all(
+        MemoirBookPlanChapter(
+            plan_id=first_chapter.plan_id,
+            project_id=project_id,
+            title=f"补充章节 {index}",
+            sort_order=index,
+            source_refs_json=[],
+            metadata_json={},
+        )
+        for index in range(1, 6)
+    )
+    await test_db.commit()
+    await count_overview_queries()
+
+    assert statement_counts[1] <= statement_counts[0] + 1
+
+
+async def test_book_completion_openapi_exposes_only_the_unified_refresh_api(client):
+    response = await client.get("/openapi.json")
+    assert response.status_code == 200
+    document = response.json()
+    paths = document["paths"]
+    schemas = document["components"]["schemas"]
+
+    assert (
+        "/api/memoir/projects/{project_id}/chapters/{chapter_id}/completion-refresh-jobs"
+        in paths
+    )
+    assert (
+        "/api/memoir/projects/{project_id}/chapters/{chapter_id}/workspace/audits"
+        not in paths
+    )
+    assert (
+        "/api/memoir/projects/{project_id}/followup-tasks/generation-jobs"
+        not in paths
+    )
+    assert (
+        "/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/prepare"
+        not in paths
+    )
+    assert not any("CompletionItem" in name for name in schemas)
+    assert not any("FollowupTaskGenerationJob" in name for name in schemas)

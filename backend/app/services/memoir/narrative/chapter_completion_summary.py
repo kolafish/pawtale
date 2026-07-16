@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
@@ -13,9 +15,14 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapStatus,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus
+from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
-from app.models.memoir_narrative import MemoirDraftBlock, MemoirFollowupTask
+from app.models.memoir_narrative import (
+    MemoirDraftBlock,
+    MemoirFollowupTask,
+    MemoirNarrativeGap,
+    MemoirNarrativeGapChapter,
+)
 from app.schemas.memoir_narrative import (
     MemoirChapterCompletionGap,
     MemoirChapterCompletionNextAction,
@@ -23,14 +30,16 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionTask,
     MemoirChapterWorkspaceAnswerUpdateResponse,
     MemoirChapterWorkspaceGapGroups,
+    MemoirNarrativeGapResponse,
 )
 from app.services.memoir.narrative import (
     chapter_answer_updates,
-    followup_jobs,
-    gap_audit,
-    gaps,
+    completion_refresh,
 )
-from app.services.memoir.narrative.gap_rules import ChapterAuditContext
+from app.services.memoir.narrative.gap_rules import (
+    ChapterAuditContext,
+    ChapterAuditDraftBlock,
+)
 from app.services.memoir.narrative.readiness_policy import gap_blocks_formalization
 
 
@@ -56,9 +65,7 @@ class ChapterCompletionReadModel:
     summary: MemoirChapterCompletionSummary
     gap_groups: MemoirChapterWorkspaceGapGroups
     answer_updates: list[MemoirChapterWorkspaceAnswerUpdateResponse]
-    audit_job: MemoirEditingJob | None
-    latest_audit_job: MemoirEditingJob | None
-    generation_job: MemoirEditingJob | None
+    refresh_job: MemoirEditingJob | None
 
 
 def _task_response(task: MemoirFollowupTask) -> MemoirChapterCompletionTask:
@@ -104,97 +111,16 @@ def _next_action(
     )
 
 
-async def _current_generation_job(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> MemoirEditingJob | None:
-    signature = await followup_jobs.followup_generation_signature(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    dedupe_key = followup_jobs.followup_generation_dedupe_key(
-        project_id=project_id,
-        chapter_id=chapter_id,
-        signature=signature,
-    )
-    return await db.scalar(
-        select(MemoirEditingJob)
-        .where(MemoirEditingJob.dedupe_key == dedupe_key)
-        .execution_options(populate_existing=True)
-    )
-
-
-async def _active_tasks(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> list[MemoirFollowupTask]:
-    return list(
-        (
-            await db.scalars(
-                select(MemoirFollowupTask)
-                .where(
-                    MemoirFollowupTask.project_id == project_id,
-                    MemoirFollowupTask.chapter_id == chapter_id,
-                    MemoirFollowupTask.status.in_(_ACTIVE_TASK_STATUSES),
-                )
-                .order_by(
-                    (
-                        MemoirFollowupTask.status
-                        == MemoirFollowupTaskStatus.IN_PROGRESS.value
-                    ).desc(),
-                    (
-                        MemoirFollowupTask.status
-                        == MemoirFollowupTaskStatus.PENDING.value
-                    ).desc(),
-                    MemoirFollowupTask.priority.desc(),
-                    MemoirFollowupTask.created_at,
-                    MemoirFollowupTask.id,
-                )
-            )
-        ).all()
-    )
-
-
-async def _draft_blocks(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> list[MemoirDraftBlock]:
-    return list(
-        (
-            await db.scalars(
-                select(MemoirDraftBlock)
-                .where(
-                    MemoirDraftBlock.project_id == project_id,
-                    MemoirDraftBlock.chapter_id == chapter_id,
-                    MemoirDraftBlock.editorial_status
-                    != MemoirDraftBlockEditorialStatus.EXCLUDED.value,
-                )
-                .order_by(MemoirDraftBlock.sort_order, MemoirDraftBlock.id)
-            )
-        ).all()
-    )
-
-
 def _draft_readiness(
     *,
     contract_is_confirmed: bool,
-    audit_job: MemoirEditingJob | None,
-    generation_job: MemoirEditingJob | None,
-    draft_blocks: list[MemoirDraftBlock],
+    refresh_job: MemoirEditingJob | None,
+    draft_blocks: Sequence[MemoirDraftBlock | ChapterAuditDraftBlock],
 ) -> str:
     if (
         not contract_is_confirmed
-        or audit_job is None
-        or audit_job.status != MemoirEditingJobStatus.SUCCEEDED.value
-        or generation_job is None
-        or generation_job.status != MemoirEditingJobStatus.SUCCEEDED.value
+        or refresh_job is None
+        or refresh_job.status != MemoirEditingJobStatus.SUCCEEDED.value
     ):
         return "blocked"
     if not draft_blocks:
@@ -215,9 +141,8 @@ def _summary(
     gap_groups: MemoirChapterWorkspaceGapGroups,
     answer_updates: list[MemoirChapterWorkspaceAnswerUpdateResponse],
     active_tasks: list[MemoirFollowupTask],
-    draft_blocks: list[MemoirDraftBlock],
-    audit_job: MemoirEditingJob | None,
-    generation_job: MemoirEditingJob | None,
+    draft_blocks: Sequence[MemoirDraftBlock | ChapterAuditDraftBlock],
+    refresh_job: MemoirEditingJob | None,
 ) -> MemoirChapterCompletionSummary:
     contract = context.contract
     contract_is_confirmed = (
@@ -293,8 +218,7 @@ def _summary(
     ]
     draft_readiness = _draft_readiness(
         contract_is_confirmed=contract_is_confirmed,
-        audit_job=audit_job,
-        generation_job=generation_job,
+        refresh_job=refresh_job,
         draft_blocks=draft_blocks,
     )
 
@@ -339,16 +263,16 @@ def _summary(
             task_id=in_progress_task.id,
         )
         state = "in_progress"
-    elif audit_job is None:
+    elif refresh_job is None:
         action = _next_action(
-            "refresh_audit",
+            "refresh_completion",
             "看看还缺什么",
             "整理这章还缺什么",
             "系统会查看现有内容，然后只给出一个最值得处理的下一步。",
             action_text="开始整理",
         )
         state = "needs_preparation"
-    elif audit_job.status in _ACTIVE_JOB_STATUSES:
+    elif refresh_job.status in _ACTIVE_JOB_STATUSES:
         action = _next_action(
             "wait",
             "正在整理",
@@ -357,39 +281,12 @@ def _summary(
             disabled=True,
         )
         state = "preparing"
-    elif audit_job.status in _FAILED_JOB_STATUSES:
+    elif refresh_job.status in _FAILED_JOB_STATUSES:
         action = _next_action(
-            "refresh_audit",
+            "refresh_completion",
             "需要重试",
             "上次没有整理完成",
-            audit_job.error_message or "已有正文不会受影响，可以重新整理。",
-            action_text="重新整理",
-        )
-        state = "failed"
-    elif generation_job is None:
-        action = _next_action(
-            "refresh_audit",
-            "准备补充方向",
-            "还差一步就能看到本章下一步",
-            "系统会把审计结果整理成可执行的补讲、编辑或确认方向。",
-            action_text="继续整理",
-        )
-        state = "needs_preparation"
-    elif generation_job.status in _ACTIVE_JOB_STATUSES:
-        action = _next_action(
-            "wait",
-            "正在整理",
-            "正在准备本章下一步",
-            "整理完成后，这里会自动更新。",
-            disabled=True,
-        )
-        state = "preparing"
-    elif generation_job.status in _FAILED_JOB_STATUSES:
-        action = _next_action(
-            "refresh_audit",
-            "需要重试",
-            "本章下一步没有整理出来",
-            generation_job.error_message or "已有录音和正文不会受影响，可以重新整理。",
+            refresh_job.error_message or "已有录音和正文不会受影响，可以重新整理。",
             action_text="重新整理",
         )
         state = "failed"
@@ -503,8 +400,8 @@ def _summary(
         title=chapter.title,
         sort_order=chapter.sort_order,
         state=state,
-        audit_status=(audit_job.status if audit_job is not None else "not_started"),
-        audit_is_current=audit_job is not None,
+        refresh_status=(refresh_job.status if refresh_job is not None else "not_started"),
+        refresh_is_current=refresh_job is not None,
         next_action=action,
         must_handle_count=len(gap_groups.must_handle),
         suggested_count=len(gap_groups.suggested),
@@ -522,48 +419,10 @@ def _summary(
     )
 
 
-async def get_chapter_completion_read_model(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter: MemoirBookPlanChapter,
-    context: ChapterAuditContext,
-) -> ChapterCompletionReadModel:
-    content_signature = gap_audit.chapter_gap_audit_content_signature(context)
-    latest_audit_job = await gap_audit.latest_current_chapter_gap_audit_job(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        content_signature=content_signature,
-    )
-    audit_job = None
-    generation_job = None
-    if context.contract is not None:
-        audit_job = await gap_audit.current_chapter_gap_audit_job(
-            db,
-            project_id=project_id,
-            chapter_id=chapter.id,
-            content_signature=content_signature,
-            include_semantic_audit=True,
-        )
-        if (
-            audit_job is not None
-            and audit_job.status == MemoirEditingJobStatus.SUCCEEDED.value
-        ):
-            generation_job = await _current_generation_job(
-                db,
-                project_id=project_id,
-                chapter_id=chapter.id,
-            )
-
-    chapter_gaps, _ = await gaps.list_gaps(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        limit=500,
-    )
-    gap_responses = [await gaps.gap_response(db, gap=gap) for gap in chapter_gaps]
-    gap_groups = MemoirChapterWorkspaceGapGroups(
+def _gap_groups(
+    gap_responses: list[MemoirNarrativeGapResponse],
+) -> MemoirChapterWorkspaceGapGroups:
+    return MemoirChapterWorkspaceGapGroups(
         must_handle=[
             gap
             for gap in gap_responses
@@ -593,35 +452,175 @@ async def get_chapter_completion_read_model(
             }
         ],
     )
-    answer_updates = await chapter_answer_updates.chapter_answer_updates(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+
+
+async def get_chapter_completion_read_models(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapters: list[MemoirBookPlanChapter],
+    contexts: dict[str, ChapterAuditContext],
+) -> dict[str, ChapterCompletionReadModel]:
+    chapter_ids = [chapter.id for chapter in chapters]
+    if not chapter_ids:
+        return {}
+    if set(chapter_ids) != set(contexts):
+        raise ValueError("completion contexts do not match chapters")
+
+    jobs = list(
+        (
+            await db.scalars(
+                select(MemoirEditingJob)
+                .where(
+                    MemoirEditingJob.project_id == project_id,
+                    MemoirEditingJob.chapter_id.in_(chapter_ids),
+                    MemoirEditingJob.job_type
+                    == MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
+                )
+                .order_by(
+                    MemoirEditingJob.chapter_id,
+                    MemoirEditingJob.updated_at.desc(),
+                    MemoirEditingJob.created_at.desc(),
+                )
+                .execution_options(populate_existing=True)
+            )
+        ).all()
     )
-    active_tasks = await _active_tasks(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    jobs_by_chapter: dict[str, list[MemoirEditingJob]] = {
+        chapter_id: [] for chapter_id in chapter_ids
+    }
+    for job in jobs:
+        if job.chapter_id is not None:
+            jobs_by_chapter[job.chapter_id].append(job)
+
+    chapter_gap_ids = select(MemoirNarrativeGapChapter.gap_id).where(
+        MemoirNarrativeGapChapter.project_id == project_id,
+        MemoirNarrativeGapChapter.chapter_id.in_(chapter_ids),
     )
-    draft_blocks = await _draft_blocks(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    chapter_gaps = list(
+        (
+            await db.scalars(
+                select(MemoirNarrativeGap)
+                .options(
+                    selectinload(MemoirNarrativeGap.claims),
+                    selectinload(MemoirNarrativeGap.stories),
+                    selectinload(MemoirNarrativeGap.chapters),
+                )
+                .where(
+                    MemoirNarrativeGap.project_id == project_id,
+                    MemoirNarrativeGap.id.in_(chapter_gap_ids),
+                )
+                .order_by(
+                    MemoirNarrativeGap.status,
+                    MemoirNarrativeGap.severity,
+                    MemoirNarrativeGap.last_detected_at.desc(),
+                )
+            )
+        ).unique().all()
     )
-    return ChapterCompletionReadModel(
-        summary=_summary(
-            chapter=chapter,
-            context=context,
+    gap_responses_by_chapter: dict[str, list[MemoirNarrativeGapResponse]] = {
+        chapter_id: [] for chapter_id in chapter_ids
+    }
+    for gap in chapter_gaps:
+        response = MemoirNarrativeGapResponse.model_validate(gap)
+        for relation in gap.chapters:
+            if relation.chapter_id in gap_responses_by_chapter:
+                gap_responses_by_chapter[relation.chapter_id].append(response)
+
+    active_tasks = list(
+        (
+            await db.scalars(
+                select(MemoirFollowupTask)
+                .where(
+                    MemoirFollowupTask.project_id == project_id,
+                    MemoirFollowupTask.chapter_id.in_(chapter_ids),
+                    MemoirFollowupTask.status.in_(_ACTIVE_TASK_STATUSES),
+                )
+                .order_by(
+                    MemoirFollowupTask.chapter_id,
+                    (
+                        MemoirFollowupTask.status
+                        == MemoirFollowupTaskStatus.IN_PROGRESS.value
+                    ).desc(),
+                    (
+                        MemoirFollowupTask.status
+                        == MemoirFollowupTaskStatus.PENDING.value
+                    ).desc(),
+                    MemoirFollowupTask.priority.desc(),
+                    MemoirFollowupTask.created_at,
+                    MemoirFollowupTask.id,
+                )
+            )
+        ).all()
+    )
+    tasks_by_chapter: dict[str, list[MemoirFollowupTask]] = {
+        chapter_id: [] for chapter_id in chapter_ids
+    }
+    for task in active_tasks:
+        if task.chapter_id is not None:
+            tasks_by_chapter[task.chapter_id].append(task)
+
+    answer_updates_by_chapter = (
+        await chapter_answer_updates.chapter_answer_updates_by_chapter(
+            db,
+            project_id=project_id,
+            chapter_ids=chapter_ids,
+        )
+    )
+    read_models: dict[str, ChapterCompletionReadModel] = {}
+    for chapter in chapters:
+        context = contexts[chapter.id]
+        content_signature = (
+            completion_refresh.chapter_completion_content_signature(context)
+        )
+        chapter_jobs = jobs_by_chapter[chapter.id]
+        refresh_job = next(
+            (
+                job
+                for job in chapter_jobs
+                if isinstance(job.payload_json, dict)
+                and job.payload_json.get("content_signature")
+                == content_signature
+            ),
+            None,
+        )
+        gap_groups = _gap_groups(gap_responses_by_chapter[chapter.id])
+        answer_updates = answer_updates_by_chapter[chapter.id]
+        draft_blocks = [
+            block
+            for block in context.draft_blocks
+            if block.editorial_status
+            != MemoirDraftBlockEditorialStatus.EXCLUDED.value
+        ]
+        read_models[chapter.id] = ChapterCompletionReadModel(
+            summary=_summary(
+                chapter=chapter,
+                context=context,
+                gap_groups=gap_groups,
+                answer_updates=answer_updates,
+                active_tasks=tasks_by_chapter[chapter.id],
+                draft_blocks=draft_blocks,
+                refresh_job=refresh_job,
+            ),
             gap_groups=gap_groups,
             answer_updates=answer_updates,
-            active_tasks=active_tasks,
-            draft_blocks=draft_blocks,
-            audit_job=audit_job,
-            generation_job=generation_job,
-        ),
-        gap_groups=gap_groups,
-        answer_updates=answer_updates,
-        audit_job=audit_job,
-        latest_audit_job=latest_audit_job,
-        generation_job=generation_job,
-    )
+            refresh_job=refresh_job,
+        )
+    return read_models
+
+
+async def get_chapter_completion_read_model(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter: MemoirBookPlanChapter,
+    context: ChapterAuditContext,
+) -> ChapterCompletionReadModel:
+    return (
+        await get_chapter_completion_read_models(
+            db,
+            project_id=project_id,
+            chapters=[chapter],
+            contexts={chapter.id: context},
+        )
+    )[chapter.id]

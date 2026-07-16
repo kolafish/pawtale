@@ -101,6 +101,8 @@ FOLLOWUP_ANSWER_USE_BY_GAP_TYPE = {
     "repetition": "fact_resolution",
     "unsupported_fact": "fact_resolution",
 }
+LEGACY_FOLLOWUP_GENERATION_JOB_TYPE = "generate_followup_tasks"
+LEGACY_FOLLOWUP_GENERATION_EVENT_TYPE = "followup_tasks_generated"
 
 
 def _narrative_tables_from_metadata() -> tuple[Table, ...]:
@@ -129,6 +131,26 @@ async def _table_exists(conn, table_name: str) -> bool:
         {"table_name": table_name},
     )
     return result.scalar_one_or_none() is not None
+
+
+async def _retire_legacy_completion_rows(conn) -> None:
+    if await _table_exists(conn, "memoir_editing_jobs"):
+        await conn.execute(
+            text(
+                "DELETE FROM memoir_editing_jobs "
+                "WHERE job_type = :legacy_job_type"
+            ),
+            {"legacy_job_type": LEGACY_FOLLOWUP_GENERATION_JOB_TYPE},
+        )
+    if await _table_exists(conn, "memoir_automation_events"):
+        await conn.execute(
+            text(
+                "UPDATE memoir_automation_events "
+                "SET event_type = 'audit_completed' "
+                "WHERE event_type = :legacy_event_type"
+            ),
+            {"legacy_event_type": LEGACY_FOLLOWUP_GENERATION_EVENT_TYPE},
+        )
 
 
 async def _table_column_schema(conn, table_name: str) -> list[dict[str, object]]:
@@ -844,6 +866,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
     if await _ensure_followup_task_outcome_schema(engine):
         changed_tables.append("memoir_followup_tasks")
     async with engine.begin() as conn:
+        await _retire_legacy_completion_rows(conn)
         for table in _narrative_tables_from_metadata():
             if not await _table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))

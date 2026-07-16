@@ -12,8 +12,6 @@ from app.schemas.memoir_narrative import (
     MemoirCompletionOutcomeResponse,
     MemoirFollowupTaskActionRequest,
     MemoirFollowupTaskDeferRequest,
-    MemoirFollowupTaskGenerateRequest,
-    MemoirFollowupTaskGenerationJobResponse,
     MemoirFollowupTaskListResponse,
     MemoirFollowupTaskOutcomeRequest,
     MemoirFollowupTaskResponse,
@@ -22,7 +20,6 @@ from app.schemas.memoir_narrative import (
 from app.services.memoir.narrative import (
     completion_outcomes,
     followup_actions,
-    followup_jobs,
     followup_tasks as task_service,
 )
 
@@ -124,32 +121,6 @@ async def get_memoir_followup_task(
     if task is None:
         raise HTTPException(status_code=404, detail="补访任务不存在")
     return await task_service.task_response(db, task=task)
-
-
-@router.post(
-    "/projects/{project_id}/followup-tasks/generation-jobs",
-    response_model=MemoirFollowupTaskGenerationJobResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def generate_memoir_followup_tasks(
-    project_id: str,
-    req: MemoirFollowupTaskGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    try:
-        job = await followup_jobs.schedule_followup_task_generation(
-            db,
-            project_id=project_id,
-            chapter_id=req.chapter_id,
-            source="followup_task_api",
-        )
-        await db.commit()
-        await db.refresh(job)
-        return MemoirFollowupTaskGenerationJobResponse.model_validate(job)
-    except (ValueError, IntegrityError) as exc:
-        await _raise_mutation_error(db, exc)
 
 
 @router.post(

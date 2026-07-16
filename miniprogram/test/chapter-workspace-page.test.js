@@ -117,7 +117,7 @@ function sampleWorkspace(overrides = {}) {
       ],
       accepted_incomplete: [],
     },
-    latest_audit_job: {
+    latest_refresh_job: {
       id: "audit-1",
       status: "succeeded",
       error_message: "",
@@ -184,8 +184,8 @@ function sampleCompletionSummary(overrides = {}) {
     title: "第一次离家",
     sort_order: 0,
     state: "needs_review",
-    audit_status: "succeeded",
-    audit_is_current: true,
+    refresh_status: "succeeded",
+    refresh_is_current: true,
     next_action: {
       kind: "continue_confirmation",
       eyebrow: "还需要您说明一句",
@@ -247,8 +247,8 @@ function loadWorkspacePage({
     confirmMemoirChapterContract: async () => {
       throw new Error("confirmMemoirChapterContract was not mocked");
     },
-    enqueueMemoirChapterWorkspaceAudit: async () => {
-      throw new Error("enqueueMemoirChapterWorkspaceAudit was not mocked");
+    enqueueMemoirChapterCompletionRefresh: async () => {
+      throw new Error("enqueueMemoirChapterCompletionRefresh was not mocked");
     },
     resolveMemoirNarrativeGap: async () => {
       throw new Error("resolveMemoirNarrativeGap was not mocked");
@@ -464,7 +464,7 @@ test("a required fact check cannot be resolved without recording the correct sta
   const event = { currentTarget: { dataset: { gapId: "gap-1", action: "resolve" } } };
   await page.applyGapAction.call(context, event);
   assert.equal(resolutions.length, 0);
-  assert.match(context.data.auditError, /正确说法/);
+  assert.match(context.data.completionError, /正确说法/);
 
   page.changeGapResolution.call(context, {
     currentTarget: { dataset: { gapId: "gap-1" } },

@@ -138,7 +138,7 @@ class MemoirNarrativeGapDismissRequest(MemoirNarrativeGapResolutionRequest):
         return self
 
 
-class MemoirChapterGapAuditRequest(BaseModel):
+class MemoirChapterCompletionRefreshRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     include_semantic_audit: bool = True
@@ -151,7 +151,7 @@ class MemoirChapterGapAuditRequest(BaseModel):
         return value or None
 
 
-class MemoirChapterGapAuditJobResponse(BaseModel):
+class MemoirChapterCompletionRefreshJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
@@ -227,7 +227,7 @@ class MemoirChapterWorkspaceResponse(BaseModel):
         default_factory=list
     )
     gaps: MemoirChapterWorkspaceGapGroups
-    latest_audit_job: MemoirChapterGapAuditJobResponse | None = None
+    latest_refresh_job: MemoirChapterCompletionRefreshJobResponse | None = None
 
 
 class MemoirSemanticGapCandidate(BaseModel):

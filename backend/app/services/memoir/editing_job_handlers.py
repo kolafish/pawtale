@@ -9,9 +9,8 @@ from app.services.memoir import source_auto_assignment
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.editing_jobs import register_editing_job_handler
 from app.services.memoir.narrative import book_consistency_audit
+from app.services.memoir.narrative import completion_refresh
 from app.services.memoir.narrative import draft_generation_jobs
-from app.services.memoir.narrative import followup_jobs
-from app.services.memoir.narrative import gap_audit
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 
 
@@ -29,12 +28,8 @@ def register_memoir_editing_job_handlers() -> None:
         narrative_ingestion.run_narrative_ingestion_job,
     )
     register_editing_job_handler(
-        MemoirEditingJobType.RECOMPUTE_CHAPTER_STRUCTURE_AUDIT,
-        gap_audit.run_chapter_gap_audit_job,
-    )
-    register_editing_job_handler(
-        MemoirEditingJobType.GENERATE_FOLLOWUP_TASKS,
-        followup_jobs.run_followup_task_generation_job,
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
+        completion_refresh.run_chapter_completion_refresh_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,

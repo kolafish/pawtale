@@ -10,6 +10,7 @@ function resetModules() {
     "../services/request.ts",
     "../services/ai-model-settings.ts",
     "../services/memoir-api-client.ts",
+    "../services/memoir-book-completion-api.ts",
     "../services/memoir-chapter-workspace-api.ts",
   ]) {
     delete require.cache[require.resolve(modulePath)];
@@ -54,12 +55,14 @@ test("chapter workspace API uses narrative resource routes and explicit action p
   resetModules();
   const {
     createMemoirChapterContractRevision,
-    enqueueMemoirChapterWorkspaceAudit,
     getMemoirChapterWorkspace,
     includeMemoirStoryInChapter,
     resolveMemoirNarrativeGap,
     suggestMemoirChapterDirection,
   } = require("../services/memoir-chapter-workspace-api.ts");
+  const {
+    enqueueMemoirChapterCompletionRefresh,
+  } = require("../services/memoir-book-completion-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
   await createMemoirChapterContractRevision("project/1", "chapter/1", {
@@ -84,7 +87,7 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     idempotency_key: "include-1",
     reason: "属于本章",
   });
-  await enqueueMemoirChapterWorkspaceAudit("project/1", "chapter/1");
+  await enqueueMemoirChapterCompletionRefresh("project/1", "chapter/1");
   await resolveMemoirNarrativeGap("project/1", "gap/1", "not-applicable", {
     idempotency_key: "decision-1",
     note: "该项不适用于本章",
@@ -103,7 +106,7 @@ test("chapter workspace API uses narrative resource routes and explicit action p
     idempotency_key: "include-1",
     reason: "属于本章",
   });
-  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace/audits");
+  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/completion-refresh-jobs");
   assert.deepEqual(apiRequests[4].data, {
     include_semantic_audit: true,
     ai_model: "deepseek-v4-flash",

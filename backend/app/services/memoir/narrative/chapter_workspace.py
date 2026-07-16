@@ -13,7 +13,7 @@ from app.domain.memoir.narrative_types import (
 )
 from app.models.memoir_narrative import MemoirClaim, MemoirStory, MemoirStorySlotClaim
 from app.schemas.memoir_narrative import (
-    MemoirChapterGapAuditJobResponse,
+    MemoirChapterCompletionRefreshJobResponse,
     MemoirChapterWorkspaceAvailableStoryResponse,
     MemoirChapterWorkspaceResponse,
     MemoirChapterWorkspaceStoryResponse,
@@ -189,9 +189,11 @@ async def get_chapter_workspace(
         ],
         answer_updates=completion.answer_updates,
         gaps=completion.gap_groups,
-        latest_audit_job=(
-            MemoirChapterGapAuditJobResponse.model_validate(completion.latest_audit_job)
-            if completion.latest_audit_job
+        latest_refresh_job=(
+            MemoirChapterCompletionRefreshJobResponse.model_validate(
+                completion.refresh_job
+            )
+            if completion.refresh_job
             else None
         ),
     )
