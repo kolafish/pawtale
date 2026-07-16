@@ -12,6 +12,7 @@ from app.services.memoir.narrative import book_consistency_audit
 from app.services.memoir.narrative import completion_refresh
 from app.services.memoir.narrative import draft_generation_jobs
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
+from app.services.memoir.narrative import interview_policy_shadow
 
 
 def register_memoir_editing_job_handlers() -> None:
@@ -26,6 +27,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.INGEST_NARRATIVE_STATE,
         narrative_ingestion.run_narrative_ingestion_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW,
+        interview_policy_shadow.run_shadow_policy_evaluation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,

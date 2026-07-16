@@ -398,3 +398,11 @@ class MemoirInterviewResponseOutcome(str, Enum):
     CHANGED_TOPIC = "changed_topic"
     CONFUSED = "confused"
     STOPPED = "stopped"
+
+
+class MemoirInterviewPolicyFailureCode(str, Enum):
+    ACTION_OUTSIDE_CANDIDATES = "action_outside_candidates"
+    INTERRUPTED_USER = "interrupted_user"
+    REPEATED_QUESTION = "repeated_question"
+    WRONG_TOPIC_SWITCH = "wrong_topic_switch"
+    PRIVACY_VIOLATION = "privacy_violation"

@@ -25,6 +25,7 @@ from app.models.memoir_common import AudioFile
 from app.models.memoir_narrative import (
     MemoirDraftBlock,
     MemoirInterviewPolicyDecision,
+    MemoirInterviewPolicyEvaluation,
     MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
@@ -161,6 +162,16 @@ async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
         delete(MemoirUtteranceInterviewAssignment).where(
             MemoirUtteranceInterviewAssignment.utterance_id.in_(
                 project_utterance_ids
+            )
+        )
+    )
+    project_policy_decision_ids = select(MemoirInterviewPolicyDecision.id).where(
+        MemoirInterviewPolicyDecision.session_id.in_(project_session_ids)
+    )
+    await db.execute(
+        delete(MemoirInterviewPolicyEvaluation).where(
+            MemoirInterviewPolicyEvaluation.decision_id.in_(
+                project_policy_decision_ids
             )
         )
     )

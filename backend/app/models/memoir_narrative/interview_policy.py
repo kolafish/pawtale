@@ -106,6 +106,39 @@ class MemoirInterviewPolicyDecision(Base):
     evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class MemoirInterviewPolicyEvaluation(Base):
+    __tablename__ = "memoir_interview_policy_evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "expected_action IS NULL OR "
+            f"expected_action IN ({_enum_values(MemoirInterviewAction)})",
+            name="ck_memoir_interview_policy_evaluations_action",
+        ),
+        Index(
+            "ix_memoir_interview_policy_evaluations_decision_created",
+            "decision_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    decision_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_interview_policy_decisions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    reviewer_user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    expected_action: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    failure_codes_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class MemoirUtteranceInterviewAssignment(Base):
     __tablename__ = "memoir_utterance_interview_assignments"
     __table_args__ = (

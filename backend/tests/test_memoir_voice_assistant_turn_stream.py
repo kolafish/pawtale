@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -145,6 +146,51 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
+
+
+async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing_reply(
+    client,
+    test_db,
+    monkeypatch,
+):
+    current_settings = get_settings()
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_shadow.get_settings",
+        lambda: current_settings.model_copy(
+            update={"memoir_interview_policy_shadow_enabled": True}
+        ),
+    )
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我还想接着讲小时候在河边玩的事。",
+        guidance_mode="free_narration",
+    )
+
+    _, _, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["您慢慢讲，我在听。"],
+    )
+
+    shadow_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == created["session"]["project_id"],
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+        )
+    )
+    assistant_message = await test_db.get(
+        MemoirChatMessage,
+        completed["message_id"],
+    )
+    assert completed["text"].endswith("您慢慢讲，我在听。")
+    assert assistant_message is not None
+    assert assistant_message.content_text == completed["text"]
+    assert shadow_job is not None
+    assert shadow_job.status == MemoirEditingJobStatus.PENDING.value
+    assert "河边" not in str(shadow_job.payload_json)
 
 
 async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(

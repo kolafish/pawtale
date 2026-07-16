@@ -25,6 +25,7 @@ from .followup_tasks import (
 )
 from .interview_policy import (
     MemoirInterviewPolicyDecision,
+    MemoirInterviewPolicyEvaluation,
     MemoirUtteranceInterviewAssignment,
 )
 from .stories import (
@@ -55,6 +56,7 @@ __all__ = [
     "MemoirFollowupTaskAnswer",
     "MemoirFollowupTaskClaim",
     "MemoirInterviewPolicyDecision",
+    "MemoirInterviewPolicyEvaluation",
     "MemoirUtteranceInterviewAssignment",
     "MemoirStory",
     "MemoirStoryClaim",
