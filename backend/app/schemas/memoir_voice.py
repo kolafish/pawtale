@@ -232,6 +232,7 @@ class MemoirProjectProgressChapterResponse(BaseModel):
     chapter_id: str
     title: str
     sort_order: int
+    include_in_book: bool = True
     source_count: int
     pending_source_count: int
     removed_source_count: int

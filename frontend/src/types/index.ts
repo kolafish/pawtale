@@ -389,6 +389,7 @@ export interface MemoirBookSourceIncludedChapter {
   chapter_id: string;
   title: string;
   sort_order: number;
+  include_in_book?: boolean;
 }
 
 export interface MemoirBookChapterSourceRef {
@@ -409,6 +410,7 @@ export interface MemoirChapterSourceEditorChapter {
   project_id: string;
   title: string;
   sort_order: number;
+  include_in_book: boolean;
   source_refs: MemoirBookChapterSourceRef[];
   metadata_json: Record<string, unknown>;
   pending_source_count: number;
@@ -474,6 +476,7 @@ export interface MemoirBookPlanStructureCommand {
     | 'merge_chapters'
     | 'move_chapter'
     | 'rename_chapter'
+    | 'set_chapter_book_inclusion'
     | 'split_chapter';
   chapter_id?: string;
   target_chapter_id?: string;
@@ -483,6 +486,7 @@ export interface MemoirBookPlanStructureCommand {
   relative_chapter_id?: string;
   relative_position?: 'before' | 'after';
   title?: string;
+  include_in_book?: boolean;
   utterance_id?: string;
   utterance_ids?: string[];
 }
@@ -781,6 +785,7 @@ export interface MemoirMaterialIncludedChapter {
   chapter_id: string;
   title: string;
   sort_order: number;
+  include_in_book?: boolean;
 }
 
 export interface MemoirMaterialItem {

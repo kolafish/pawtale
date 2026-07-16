@@ -361,12 +361,26 @@ async def test_book_completion_overview_marks_audited_complete_chapter(
     test_db,
 ):
     project_id, chapter, _ = await _create_structured_chapter(client, test_db, complete=True)
+    test_db.add(
+        MemoirBookPlanChapter(
+            plan_id=chapter.plan_id,
+            project_id=project_id,
+            title="保留但不收入本书的补记",
+            sort_order=1,
+            include_in_book=False,
+            source_refs_json=[],
+            metadata_json={},
+        )
+    )
+    await test_db.commit()
 
     await _run_completion_preparation(client, test_db, project_id, chapter.id)
 
     status = await client.get(f"/api/memoir/projects/{project_id}/book-completion/overview")
     assert status.status_code == 200
+    assert status.json()["total_chapters"] == 1
     assert status.json()["completed_chapters"] == 1
+    assert [item["chapter_id"] for item in status.json()["chapters"]] == [chapter.id]
     assert status.json()["chapters"][0]["state"] == "complete"
 
 

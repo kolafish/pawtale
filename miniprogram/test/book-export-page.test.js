@@ -132,6 +132,17 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.bookConsistencyStatusText, "1 条必须处理");
 });
 
+test("book export page counts only chapters included in the final book", () => {
+  const { page } = loadBookExportPage();
+  const context = pageContext(page);
+  const plan = baseSamplePlan("confirmed", { chapterCount: 2 });
+  plan.chapters[1].include_in_book = false;
+
+  page.applyBookExportData.call(context, plan, sampleBookOutput());
+
+  assert.equal(context.data.totalChapterCount, 1);
+});
+
 test("book export page runs consistency audit in background and then enables formalization", async () => {
   const calls = [];
   const toasts = [];

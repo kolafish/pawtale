@@ -106,6 +106,10 @@ def sorted_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
     return sorted(plan.chapters, key=lambda chapter: chapter.sort_order)
 
 
+def included_book_chapters(plan: MemoirBookPlan) -> list[MemoirBookPlanChapter]:
+    return [chapter for chapter in sorted_chapters(plan) if chapter.include_in_book]
+
+
 def find_chapter_by_id(
     chapters: list[MemoirBookPlanChapter],
     chapter_id: str | None,
@@ -286,6 +290,7 @@ def chapter_response(
         project_id=chapter.project_id,
         title=chapter.title,
         sort_order=chapter.sort_order,
+        include_in_book=chapter.include_in_book,
         source_refs=[
             source_ref_response(ref, source_created_at)
             for ref in refs

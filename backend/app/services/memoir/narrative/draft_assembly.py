@@ -48,8 +48,8 @@ from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_plan_sources import (
     DRAFT_STATUS_REASON_KEY,
     REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    included_book_chapters,
     metadata_without_keys,
-    sorted_chapters,
     source_change_metadata_keys,
 )
 from app.services.memoir.book_source_links import (
@@ -393,7 +393,7 @@ async def assemble_book_output(
         raise ValueError("book plan does not belong to the project")
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise ValueError("confirm the book plan before assembling the book output")
-    chapters = sorted_chapters(plan)
+    chapters = included_book_chapters(plan)
     if not chapters:
         raise ValueError("book plan has no chapters")
     chapter_versions: list[

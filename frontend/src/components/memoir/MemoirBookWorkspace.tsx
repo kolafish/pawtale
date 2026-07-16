@@ -69,13 +69,14 @@ export function MemoirBookWorkspace({
     [data?.chapter_drafts],
   );
   const chapters = data?.plan?.chapters ?? [];
-  const unconfirmedChapters = chapters.filter(chapter => {
+  const includedChapters = chapters.filter(chapter => chapter.include_in_book !== false);
+  const unconfirmedChapters = includedChapters.filter(chapter => {
     const draft = draftsByChapterId.get(chapter.id);
     return draft?.status !== 'confirmed' || !draft.latest_version;
   });
   const readyToGenerate = Boolean(
     data?.plan?.status === 'confirmed'
-    && chapters.length > 0
+    && includedChapters.length > 0
     && unconfirmedChapters.length === 0,
   );
 
@@ -196,7 +197,7 @@ export function MemoirBookWorkspace({
             {readyToGenerate ? '章节已准备好，可以生成全书' : '确认所有章节后生成全书'}
           </h1>
           <p className="mt-2 text-sm leading-6 text-[#69736e] tabular-nums">
-            已确认 {chapters.length - unconfirmedChapters.length}/{chapters.length} 章
+            已确认 {includedChapters.length - unconfirmedChapters.length}/{includedChapters.length} 章
           </p>
           {unconfirmedChapters.length > 0 && (
             <div className="mx-auto mt-5 max-w-sm divide-y divide-black/5 rounded-md bg-white text-left shadow-[0_1px_6px_rgba(23,43,35,0.08)]">

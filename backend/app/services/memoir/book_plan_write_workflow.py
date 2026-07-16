@@ -19,6 +19,7 @@ from app.models.memoir import (
     MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookImagePlacement,
+    MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChapterCard,
@@ -85,12 +86,14 @@ from app.services.memoir.chapter_source_links import (
     sync_plan_chapter_source_links as _sync_plan_chapter_source_links,
 )
 from app.services.memoir.narrative import draft_blocks
+from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
 
 
 @dataclass(frozen=True)
 class ValidatedChapterUpdate:
     id: str | None
     title: str
+    include_in_book: bool
     source_refs: list[MemoirBookChapterSourceRef]
 
 
@@ -303,6 +306,7 @@ async def _replace_plan(
             project_id=project_id,
             title=chapter.title.strip()[:200],
             sort_order=index,
+            include_in_book=chapter.include_in_book,
         )
         db.add(plan_chapter)
         pending_source_refs.append((plan_chapter, [_as_dict(ref) for ref in chapter.source_refs]))
@@ -387,11 +391,14 @@ def _validated_chapters(
         chapters.append(
             MemoirBookPlanChapterInput(
                 title=chapter.title,
+                include_in_book=chapter.include_in_book,
                 source_refs=refs,
             )
         )
     if not chapters:
         raise HTTPException(status_code=400, detail="章节规划不能为空")
+    if not any(chapter.include_in_book for chapter in chapters):
+        raise HTTPException(status_code=400, detail="成书时至少需要保留一个章节")
     return chapters
 
 
@@ -422,6 +429,7 @@ def _validated_chapter_updates(
             ValidatedChapterUpdate(
                 id=chapter.id,
                 title=chapter.title,
+                include_in_book=chapter.include_in_book,
                 source_refs=refs,
             )
         )
@@ -440,6 +448,45 @@ def _touch_plan_structure(plan: MemoirBookPlan, *, operation: str, now: str) -> 
             "structure_operation": operation,
         },
     )
+
+
+async def _set_chapter_book_inclusion(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    plan: MemoirBookPlan,
+    req: MemoirBookPlanStructureCommandRequest,
+) -> MemoirBookPlanResponse:
+    if req.include_in_book is None:
+        raise HTTPException(status_code=400, detail="缺少章节成书收录状态")
+    chapter = _chapter_by_id(plan, _require_command_chapter_id(req))
+    if chapter.include_in_book == req.include_in_book:
+        return await _plan_response(db, plan)
+    if not req.include_in_book:
+        included_count = sum(item.include_in_book for item in plan.chapters)
+        if included_count <= 1:
+            raise HTTPException(status_code=400, detail="成书时至少需要保留一个章节")
+
+    chapter.include_in_book = req.include_in_book
+    now = datetime.now(UTC).isoformat()
+    _touch_plan_structure(
+        plan,
+        operation="set_chapter_book_inclusion",
+        now=now,
+    )
+    output = await db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    if output is not None:
+        invalidate_formal_book_output(output)
+        db.add(output)
+    db.add(chapter)
+    db.add(plan)
+    await db.commit()
+    refreshed = await _load_plan(db, project_id)
+    if not refreshed:
+        raise HTTPException(status_code=500, detail="章节收录状态保存失败")
+    return await _plan_response(db, refreshed)
 
 
 def _chapter_title_source_digests(
@@ -584,6 +631,11 @@ async def update_book_plan(
     unknown_ids = retained_ids - set(existing_by_id)
     if unknown_ids:
         raise HTTPException(status_code=404, detail="章节不存在")
+    if not any(
+        chapter.include_in_book if chapter.id is None else existing_by_id[chapter.id].include_in_book
+        for chapter in chapter_updates
+    ):
+        raise HTTPException(status_code=400, detail="成书时至少需要保留一个章节")
     removed_chapters = [
         chapter
         for chapter_id, chapter in existing_by_id.items()
@@ -627,6 +679,7 @@ async def update_book_plan(
                 project_id=project_id,
                 title=chapter_update.title.strip()[:200],
                 sort_order=index,
+                include_in_book=chapter_update.include_in_book,
                 metadata_json={"created_from_plan_update_at": now},
             )
             db.add(chapter)
@@ -702,6 +755,14 @@ async def apply_book_plan_structure_command(
             title=req.title,
             updated_by=MemoirCreatedBy.USER,
             structure_operation=req.type,
+        )
+
+    if req.type == "set_chapter_book_inclusion":
+        return await _set_chapter_book_inclusion(
+            db,
+            project_id=project_id,
+            plan=plan,
+            req=req,
         )
 
     if req.type in {"delete_chapter", "merge_chapters"}:

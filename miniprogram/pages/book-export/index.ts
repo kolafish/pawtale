@@ -472,6 +472,7 @@ definePage<BookExportData>()({
 
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
     const chapters = plan ? buildChapterViews(plan, {}, null, {}) : [];
+    const includedChapterCount = chapters.filter((chapter) => chapter.include_in_book !== false).length;
     const stage = planStage(plan);
     const outputData = bookOutputData(output);
     if (!output && !outputData.bookTitleInput) {
@@ -483,7 +484,7 @@ definePage<BookExportData>()({
       stage,
       stageText: stageText(stage),
       chapters,
-      totalChapterCount: chapters.length,
+      totalChapterCount: includedChapterCount,
       allChaptersConfirmed: Boolean(output?.latest_version),
       ...outputData,
       bookPreviewChaptersExpanded: true,

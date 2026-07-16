@@ -61,6 +61,7 @@ MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS = {
     "formalized_by_user_id": "VARCHAR(36)",
     "formalized_at": "DATETIME",
 }
+MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN = "include_in_book"
 FOLLOWUP_TASK_UTTERANCE_ASSIGNMENT_COLUMN = "is_assignment_snapshot"
 FOLLOWUP_TASK_ANSWER_USE_COLUMN = "answer_use"
 FOLLOWUP_TASK_UTTERANCE_INTERPRETATION_COLUMNS = {
@@ -159,6 +160,26 @@ async def _ensure_book_output_formal_columns(conn) -> list[str]:
         )
         changed.append(f"{table_name}.{column_name}")
     return changed
+
+
+async def _ensure_book_plan_chapter_include_column(conn) -> list[str]:
+    table_name = "memoir_book_plan_chapters"
+    if not await _table_exists(conn, table_name):
+        return []
+    columns = {
+        str(column["name"])
+        for column in await _table_column_schema(conn, table_name)
+    }
+    if MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN in columns:
+        return []
+    await conn.execute(
+        text(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN} "
+            "BOOLEAN NOT NULL DEFAULT 1"
+        )
+    )
+    return [f"{table_name}.{MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN}"]
 
 
 async def _ensure_followup_task_utterance_assignment_column(conn) -> list[str]:
@@ -617,6 +638,7 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
                 changed_indexes.append(index.name)
         changed_columns.extend(await _ensure_structured_draft_snapshot_column(conn))
         changed_columns.extend(await _ensure_book_output_formal_columns(conn))
+        changed_columns.extend(await _ensure_book_plan_chapter_include_column(conn))
         changed_columns.extend(
             await _ensure_followup_task_utterance_assignment_column(conn)
         )
@@ -662,6 +684,16 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
                     set(MEMOIR_BOOK_OUTPUT_FORMAL_COLUMNS) - output_columns
                 )
             )
+        if await _table_exists(conn, "memoir_book_plan_chapters"):
+            chapter_columns = {
+                str(column["name"])
+                for column in await _table_column_schema(conn, "memoir_book_plan_chapters")
+            }
+            if MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN not in chapter_columns:
+                missing_columns.append(
+                    "memoir_book_plan_chapters."
+                    f"{MEMOIR_BOOK_PLAN_CHAPTER_INCLUDE_COLUMN}"
+                )
         for table_name, expected in expected_columns.items():
             if not await _table_exists(conn, table_name):
                 missing_tables.append(table_name)

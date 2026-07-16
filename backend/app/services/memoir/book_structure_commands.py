@@ -175,6 +175,8 @@ def _delete_chapter(
     if len(chapters) <= 1:
         raise HTTPException(status_code=400, detail="至少需要保留一个章节")
     chapter = chapter_by_id(plan, chapter_id)
+    if chapter.include_in_book and sum(item.include_in_book for item in chapters) <= 1:
+        raise HTTPException(status_code=400, detail="成书时至少需要保留一个章节")
     next_refs_by_chapter = dict(source_refs_by_chapter)
     next_refs_by_chapter.pop(chapter.id, None)
     return BookStructureCommandMutation(
@@ -197,6 +199,9 @@ def _merge_chapters(
         raise HTTPException(status_code=400, detail="不能合并到同一章节")
     source_chapter = chapter_by_id(plan, source_chapter_id)
     target_chapter = chapter_by_id(plan, target_chapter_id_value)
+    target_chapter.include_in_book = (
+        target_chapter.include_in_book or source_chapter.include_in_book
+    )
     source_refs = source_refs_by_chapter.get(source_chapter.id, [])
     target_refs = source_refs_by_chapter.get(target_chapter.id, [])
     old_target_ids = set(source_ref_utterance_ids(target_refs))
@@ -274,6 +279,7 @@ def _split_chapter(
         project_id=project_id,
         title=(req.title or f"{chapter.title}（拆出）").strip()[:200],
         sort_order=10000 + len(chapters),
+        include_in_book=chapter.include_in_book,
         metadata_json={"created_from_split_at": now, "split_from_chapter_id": chapter.id},
     )
     next_refs_by_chapter = dict(source_refs_by_chapter)
