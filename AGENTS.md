@@ -78,6 +78,7 @@
 ## Memoir Voice Chat Redesign Context
 
 - 回忆录小程序新版主线文档是 `docs/MEMOIR_VOICE_CHAT_REDESIGN.md`，后续回忆录小程序改造默认以它为准。
+- 项目级结构化访谈框架与成书补全重构的规划基线是 `docs/MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`；相关数据模型、状态边界、开发拆分和验收必须以它为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
 - 旧版固定问题、整段录音上传、离线 ASR、整理稿确认链路只通过 commit `bd3599ad3dddf382b242c47071c856d382543cac` 追溯，不在文档里维护旧代码路径清单。
 - 旧版回忆录文档已删除；需要查看 legacy 背景时通过上述 baseline commit 做 Git 追溯。
 - 新版产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心，不再继续强化固定问答模型。
