@@ -1,135 +1,27 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import json
 
-from sqlalchemy import event, func, select
+from sqlalchemy import select
 
-from app.domain.memoir.narrative_types import (
-    MemoirChapterContractStatus,
-    MemoirChapterNodeStatus,
-    MemoirChapterNodeStoryRole,
-    MemoirChapterNodeType,
-    MemoirClaimTimePrecision,
-    MemoirDraftBlockEditorialStatus,
-    MemoirDraftBlockFreshnessStatus,
-    MemoirDraftBlockRole,
-    MemoirNarrativeActorType,
-    MemoirStoryLifecycleStatus,
-    MemoirStoryPublicationStatus,
-    MemoirStoryType,
-    MemoirStoryVerificationStatus,
-)
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
-from app.models.memoir_narrative import (
-    MemoirChapterContract,
-    MemoirChapterNode,
-    MemoirChapterNodeStory,
-    MemoirDraftBlock,
-    MemoirDraftBlockVersion,
-    MemoirStory,
+from app.models.memoir import MemoirEditingJob
+from app.models.memoir_narrative import MemoirCompletionItem
+from app.services.memoir.editing_job_handlers import (
+    register_memoir_editing_job_handlers,
 )
-from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
-from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import (
-    book_completion,
-    completion_refresh,
-)
+from app.services.memoir.narrative import completion_refresh, draft_generation_jobs
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
+    create_test_source_backed_story,
     create_test_voice_transcript,
-    post_mobile_memoir_voice_session,
+    memoir_source_ref,
     run_test_editing_job,
 )
 
 
-async def _create_structured_chapter(
-    client,
-    test_db,
-    *,
-    complete: bool,
-    confirm_contract: bool = True,
-):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="那年我参加了学校比赛。",
-    )
-    project_id = created["session"]["project_id"]
-    user_id = created["user_id"]
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db,
-        project_id=project_id,
-        chapter_titles=["学校里的比赛"],
-    )
-    chapter = chapters[0]
-    story = MemoirStory(
-        project_id=project_id,
-        title="学校里的比赛",
-        title_normalized="学校里的比赛",
-        story_type=MemoirStoryType.EVENT.value,
-        summary="讲述者参加了学校比赛。",
-        time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
-        lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
-        publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=user_id,
-    )
-    contract = MemoirChapterContract(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        version=1,
-        objective="讲清楚这次比赛的经过和影响。",
-        reader_takeaway="读者能理解这次比赛为什么重要。",
-        status=MemoirChapterContractStatus.DRAFT.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-    )
-    test_db.add_all([story, contract])
-    await test_db.flush()
-    node = MemoirChapterNode(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        contract_id=contract.id,
-        node_type=MemoirChapterNodeType.STORY.value,
-        title="比赛经过",
-        purpose="写清楚比赛如何发生以及最后结果。",
-        sort_order=0,
-        required=True,
-        status=MemoirChapterNodeStatus.READY.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=user_id,
-    )
-    test_db.add(node)
-    await test_db.flush()
-    test_db.add(
-        MemoirChapterNodeStory(
-            project_id=project_id,
-            node_id=node.id,
-            story_id=story.id,
-            story_role=MemoirChapterNodeStoryRole.PRIMARY.value,
-            sort_order=0,
-            required=True,
-            created_by=MemoirNarrativeActorType.USER.value,
-            created_by_user_id=user_id,
-        )
-    )
-    await test_db.flush()
-    if confirm_contract:
-        contract.status = MemoirChapterContractStatus.CONFIRMED.value
-        contract.confirmed_by_user_id = user_id
-        contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
-    await test_db.commit()
-    return project_id, chapter, story, user_id
-
-
-class EmptySemanticClient:
+class EmptyChapterAuditAI:
     provider_name = "test"
     model_name = "test-chapter-audit"
 
@@ -137,35 +29,30 @@ class EmptySemanticClient:
         return '{"schema_version":"2","gaps":[]}'
 
 
-class MissingContextSemanticClient:
+class WholeChapterDraftAI:
     provider_name = "test"
-    model_name = "test-chapter-audit"
+    model_name = "test-whole-chapter"
 
-    def __init__(self, story_id: str):
-        self.story_id = story_id
+    def __init__(self, claim_id: str):
+        self.claim_id = claim_id
 
     async def _call_llm(self, *_args, **_kwargs):
-        return f"""{{
-          "schema_version": "2",
-          "gaps": [{{
-            "gap_type": "causality",
-            "severity": "medium",
-            "dimension": "chapter_context",
-            "reason_signal": "missing_new_evidence",
-            "title": "比赛背景还不清楚",
-            "description": "现有素材没有说明为什么参加这次比赛。",
-            "story_ids": ["{self.story_id}"],
-            "claim_ids": []
-          }}]
-        }}"""
+        return json.dumps(
+            {
+                "content": "那年，我参加了学校比赛。这段经历让我一直记得。",
+                "used_claim_ids": [self.claim_id],
+                "unsupported_fact_candidates": [],
+            },
+            ensure_ascii=False,
+        )
 
 
-async def _run_refresh_job(test_db, job: MemoirEditingJob, *, client=None):
+async def _run_refresh(test_db, job: MemoirEditingJob):
     async def handler(db, queued_job):
         return await completion_refresh.run_chapter_completion_refresh_job(
             db,
             queued_job,
-            semantic_ai_client=client or EmptySemanticClient(),
+            semantic_ai_client=EmptyChapterAuditAI(),
         )
 
     register_memoir_editing_job_handlers()
@@ -173,42 +60,52 @@ async def _run_refresh_job(test_db, job: MemoirEditingJob, *, client=None):
         MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
         handler,
     )
-    succeeded = await run_test_editing_job(test_db, job.id)
+    assert await run_test_editing_job(test_db, job.id) is True
     await test_db.refresh(job)
-    return succeeded
 
 
-async def _prepare_chapter(
-    client,
+async def _run_generation(
     test_db,
-    project_id: str,
-    chapter_id: str,
+    job: MemoirEditingJob,
     *,
-    semantic_client=None,
+    claim_id: str,
 ):
-    response = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter_id}/prepare"
-        ),
-        json={},
+    async def handler(db, queued_job):
+        return await draft_generation_jobs.run_chapter_draft_generation_job(
+            db,
+            queued_job,
+            ai_client=WholeChapterDraftAI(claim_id),
+        )
+
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
+        handler,
     )
-    assert response.status_code == 202, response.text
-    job = await test_db.get(MemoirEditingJob, response.json()["id"])
-    assert job is not None
-    assert job.payload_json["include_semantic_audit"] is True
-    assert await _run_refresh_job(test_db, job, client=semantic_client) is True
-    return job
+    assert await run_test_editing_job(test_db, job.id) is True
+    await test_db.refresh(job)
 
 
-async def test_book_completion_prepares_one_chapter_and_exposes_one_followup(
+async def test_chapter_completion_runs_from_source_material_to_one_confirmed_draft(
     client,
     test_db,
 ):
-    project_id, chapter, story, _ = await _create_structured_chapter(
-        client,
+    source_text = "那年，我参加了学校比赛。"
+    source = await create_test_voice_transcript(client, test_db, source_text)
+    project_id = source["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
         test_db,
-        complete=False,
+        project_id=project_id,
+        chapter_titles=["学校里的比赛"],
+        source_refs_by_chapter=[[memoir_source_ref(source)]],
+    )
+    chapter = chapters[0]
+    _, claim = await create_test_source_backed_story(
+        test_db,
+        project_id=project_id,
+        user_id=source["user_id"],
+        source=source,
+        title="学校里的比赛",
+        statement=source_text,
     )
 
     initial = await client.get(
@@ -216,329 +113,124 @@ async def test_book_completion_prepares_one_chapter_and_exposes_one_followup(
     )
     assert initial.status_code == 200
     assert initial.json()["chapters"][0]["state"] == "not_started"
-    assert initial.json()["chapters"][0]["next_action"]["kind"] == "prepare"
 
-    await _prepare_chapter(
-        client,
-        test_db,
-        project_id,
-        chapter.id,
-        semantic_client=MissingContextSemanticClient(story.id),
+    prepared = await client.post(
+        (
+            f"/api/memoir/projects/{project_id}/book-completion/"
+            f"chapters/{chapter.id}/prepare"
+        ),
+        json={},
     )
+    assert prepared.status_code == 202, prepared.text
+    refresh_job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
+    assert refresh_job is not None
+    await _run_refresh(test_db, refresh_job)
 
-    overview = await client.get(
-        f"/api/memoir/projects/{project_id}/book-completion/overview"
-    )
-    summary = overview.json()["chapters"][0]
-    assert summary["state"] == "needs_input"
-    assert summary["next_action"]["kind"] == "start_interview"
-    assert summary["active_item"]["id"]
-    assert not any(
-        key in summary
-        for key in (
-            "visible_tasks",
-            "editorial_gaps",
-            "review_gaps",
-            "draft_readiness",
-            "refresh_status",
+    draft_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.chapter_id == chapter.id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
         )
     )
+    assert draft_job is not None
+    await _run_generation(test_db, draft_job, claim_id=claim.id)
+
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )
-    assert workspace.status_code == 200
-    assert workspace.json() == {
-        "project_id": project_id,
-        "chapter_id": chapter.id,
-        "chapter_title": chapter.title,
-        "completion_summary": summary,
-    }
+    assert workspace.status_code == 200, workspace.text
+    workspace_body = workspace.json()
+    assert workspace_body["completion_summary"]["state"] == "draft_ready"
+    assert workspace_body["draft_content"].startswith("那年，我参加了学校比赛")
+    original_version_id = workspace_body["draft_version_id"]
 
-    voice = await post_mobile_memoir_voice_session(
-        client,
-        project_id=project_id,
+    revised = await client.post(
+        (
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+            f"chapters/{chapter.id}/draft/revise"
+        ),
         json={
-            "guidance_mode": "guided_interview",
-            "session_goal": "book_completion",
-            "current_completion_item_id": summary["active_item"]["id"],
-            "provider": "volc_streaming_asr",
+            "expected_version_id": original_version_id,
+            "content": "那年，我参加了学校比赛。这件事至今仍留在我的记忆里。",
         },
     )
-    assert voice.status_code == 201, voice.text
-    resumed = await client.get(
-        f"/api/memoir/projects/{project_id}/book-completion/overview"
-    )
-    resumed_item = resumed.json()["chapters"][0]["active_item"]
-    assert resumed_item["status"] == "in_progress"
-    assert resumed_item["active_session_id"] == voice.json()["session"]["id"]
+    assert revised.status_code == 200, revised.text
+    assert revised.json()["latest_version"]["version"] == 2
+    assert revised.json()["status"] == "draft"
 
-
-async def test_prepare_auto_confirms_the_internal_chapter_direction(client, test_db):
-    project_id, chapter, _, user_id = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=False,
-        confirm_contract=False,
-    )
-
-    await _prepare_chapter(client, test_db, project_id, chapter.id)
-
-    contract = await test_db.scalar(
-        select(MemoirChapterContract).where(
-            MemoirChapterContract.project_id == project_id,
-            MemoirChapterContract.chapter_id == chapter.id,
+    confirmed = await client.post(
+        (
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+            f"chapters/{chapter.id}/draft/confirm"
         )
     )
-    assert contract is not None
-    assert contract.status == MemoirChapterContractStatus.CONFIRMED.value
-    assert contract.confirmed_by_user_id == user_id
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
+
+    final_overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert final_overview.json()["chapters"][0]["state"] == "confirmed"
 
 
-async def test_prepare_creates_and_confirms_an_internal_direction_when_none_exists(
+async def test_chapter_completion_exposes_one_interview_item_when_material_is_missing(
     client,
     test_db,
 ):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我想从学校生活讲起。",
-    )
-    project_id = created["session"]["project_id"]
+    source = await create_test_voice_transcript(client, test_db, "这段以后再讲。")
+    project_id = source["session"]["project_id"]
     _, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
-        chapter_titles=["学校生活"],
+        chapter_titles=["第一次离家"],
     )
     chapter = chapters[0]
 
-    response = await client.post(
+    prepared = await client.post(
         (
             f"/api/memoir/projects/{project_id}/book-completion/"
             f"chapters/{chapter.id}/prepare"
         ),
         json={},
     )
+    assert prepared.status_code == 202
+    job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
+    assert job is not None
+    await _run_refresh(test_db, job)
 
-    assert response.status_code == 202, response.text
-    contract = await test_db.scalar(
-        select(MemoirChapterContract).where(
-            MemoirChapterContract.project_id == project_id,
-            MemoirChapterContract.chapter_id == chapter.id,
-        )
-    )
-    assert contract is not None
-    assert contract.status == MemoirChapterContractStatus.CONFIRMED.value
-    assert await test_db.scalar(
-        select(func.count(MemoirChapterNode.id)).where(
-            MemoirChapterNode.contract_id == contract.id,
-        )
-    ) >= 1
-
-
-async def test_active_preparation_keeps_an_older_current_draft_out_of_review(
-    client,
-    test_db,
-):
-    project_id, chapter, story, _ = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=True,
-    )
-    node = await test_db.scalar(
-        select(MemoirChapterNode).where(
-            MemoirChapterNode.project_id == project_id,
-            MemoirChapterNode.chapter_id == chapter.id,
-        )
-    )
-    assert node is not None
-    block = MemoirDraftBlock(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        node_id=node.id,
-        block_role=MemoirDraftBlockRole.OPENING.value,
-        sort_order=0,
-        editorial_status=MemoirDraftBlockEditorialStatus.DRAFT.value,
-        freshness_status=MemoirDraftBlockFreshnessStatus.CURRENT.value,
-        locked=False,
-    )
-    test_db.add(block)
-    await test_db.flush()
-    version = MemoirDraftBlockVersion(
-        project_id=project_id,
-        block_id=block.id,
-        version=1,
-        content="那年我参加了学校比赛。",
-        created_by=MemoirNarrativeActorType.SYSTEM.value,
-    )
-    test_db.add(version)
-    await test_db.flush()
-    block.current_version_id = version.id
-    await test_db.commit()
-
-    response = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter.id}/prepare"
-        ),
-        json={},
-    )
-    assert response.status_code == 202, response.text
     overview = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
     )
-
-    summary = overview.json()["chapters"][0]
-    assert summary["state"] == "preparing"
-    assert summary["next_action"]["kind"] == "wait"
-
-
-async def test_prepare_rejects_a_chapter_outside_the_project(client, test_db):
-    project_id, _, _, _ = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=False,
-    )
-
-    response = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            "chapters/missing/prepare"
-        ),
-        json={},
-    )
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "章节不存在"
-
-
-async def test_book_completion_voice_session_requires_a_selected_task(client, test_db):
-    created = await create_test_voice_transcript(client, test_db)
-    response = await post_mobile_memoir_voice_session(
-        client,
-        project_id=created["session"]["project_id"],
-        json={
-            "guidance_mode": "guided_interview",
-            "session_goal": "book_completion",
-            "provider": "volc_streaming_asr",
-        },
-    )
-
-    assert response.status_code == 409
-    assert "问题尚未准备好" in response.json()["detail"]
-
-
-async def test_completion_refresh_requeues_when_content_changed_before_analysis(
-    client,
-    test_db,
-):
-    project_id, chapter, story, _ = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=False,
-    )
-    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        include_semantic_audit=False,
-        ai_model=None,
-        source="test_stale_before_analysis",
-    )
-    await test_db.commit()
-    story.version += 1
-    await test_db.commit()
-
-    register_memoir_editing_job_handlers()
-    assert await run_test_editing_job(test_db, refresh_job.id) is False
-    await test_db.refresh(refresh_job)
-    replacement_job = await test_db.get(
-        MemoirEditingJob,
-        refresh_job.result_json["replacement_job_id"],
-    )
-
-    assert refresh_job.status == "skipped"
-    assert replacement_job is not None
-    assert replacement_job.status == "pending"
-
-
-async def test_book_completion_overview_query_count_does_not_grow_per_chapter(
-    client,
-    test_db,
-):
-    project_id, first_chapter, _, _ = await _create_structured_chapter(
-        client,
-        test_db,
-        complete=True,
-    )
-    engine = test_db.bind
-    assert engine is not None
-    statement_counts: list[int] = []
-
-    async def count_overview_queries() -> None:
-        count = 0
-
-        def before_cursor_execute(*_args):
-            nonlocal count
-            count += 1
-
-        event.listen(engine.sync_engine, "before_cursor_execute", before_cursor_execute)
-        try:
-            await book_completion.get_book_completion_overview(
-                test_db,
-                project_id=project_id,
-            )
-        finally:
-            event.remove(
-                engine.sync_engine,
-                "before_cursor_execute",
-                before_cursor_execute,
-            )
-        statement_counts.append(count)
-
-    await count_overview_queries()
-    test_db.add_all(
-        MemoirBookPlanChapter(
-            plan_id=first_chapter.plan_id,
-            project_id=project_id,
-            title=f"补充章节 {index}",
-            sort_order=index,
-            source_refs_json=[],
-            metadata_json={},
+    chapter_summary = overview.json()["chapters"][0]
+    assert chapter_summary["state"] == "needs_input"
+    assert chapter_summary["next_action"]["kind"] == "start_interview"
+    assert chapter_summary["active_item"]["id"]
+    assert await test_db.scalar(
+        select(MemoirCompletionItem).where(
+            MemoirCompletionItem.chapter_id == chapter.id
         )
-        for index in range(1, 6)
-    )
-    await test_db.commit()
-    await count_overview_queries()
+    ) is not None
+    assert await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.chapter_id == chapter.id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
+        )
+    ) is None
 
-    assert statement_counts[1] <= statement_counts[0] + 1
 
+async def test_openapi_exposes_only_whole_chapter_completion_actions(client):
+    schema = (await client.get("/openapi.json")).json()
+    paths = schema["paths"]
+    schemas = schema["components"]["schemas"]
 
-async def test_openapi_exposes_only_the_simplified_completion_actions(client):
-    response = await client.get("/openapi.json")
-    assert response.status_code == 200
-    document = response.json()
-    paths = document["paths"]
-    schemas = document["components"]["schemas"]
-
-    assert (
-        "/api/memoir/projects/{project_id}/book-completion/"
-        "chapters/{chapter_id}/prepare"
-    ) in paths
-    assert (
-        "/api/memoir/projects/{project_id}/chapters/"
-        "{chapter_id}/completion-refresh-jobs"
-    ) not in paths
-    assert not any(
-        path.endswith("/accept-incomplete")
-        or path.endswith("/not-applicable")
-        or path.endswith("/dismiss")
-        or path.endswith("/draft-blocks/{block_id}/confirm")
-        or path.endswith("/draft-blocks/{block_id}/lock")
-        or path.endswith("/draft-blocks/{block_id}")
-        or path.endswith("/draft-blocks/{block_id}/versions")
-        or path.endswith("/revision-jobs")
-        or path.endswith("/apply-revision")
-        for path in paths
-    )
-    assert "MemoirChapterWorkspaceStoryResponse" not in schemas
-    assert "MemoirDraftBlockRevisionJobRequest" not in schemas
+    assert any(path.endswith("/draft/revise") for path in paths)
+    assert any(path.endswith("/draft/confirm") for path in paths)
+    assert any(path.endswith("/book-output/assemble") for path in paths)
+    assert not any("contract" in path for path in paths)
+    assert not any("chapter-nodes" in path for path in paths)
+    assert not any("draft-blocks" in path for path in paths)
+    assert "MemoirBookChapterDraftRevisionRequest" in schemas
+    assert not any("DraftBlock" in name for name in schemas)

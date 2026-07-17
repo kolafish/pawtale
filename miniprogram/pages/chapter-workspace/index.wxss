@@ -8,7 +8,6 @@
 
 .page-header,
 .draft-heading,
-.draft-row-head,
 .edit-actions {
   display: flex;
   align-items: center;
@@ -46,8 +45,6 @@
 .status-detail,
 .section-title,
 .section-detail,
-.draft-section-title,
-.draft-status,
 .draft-content,
 .empty-title,
 .empty-detail,
@@ -178,8 +175,7 @@ button[disabled] {
   line-height: 44rpx;
 }
 
-.draft-heading,
-.draft-row-head {
+.draft-heading {
   justify-content: space-between;
   gap: 20rpx;
 }
@@ -195,37 +191,13 @@ button[disabled] {
   line-height: 30rpx;
 }
 
-.draft-list {
+.draft-body {
   margin-top: 26rpx;
+  padding-top: 28rpx;
   border-top: 1rpx solid #e5ded6;
 }
 
-.draft-row {
-  padding: 28rpx 0;
-  border-bottom: 1rpx solid #e5ded6;
-}
-
-.draft-row.stale {
-  opacity: 0.62;
-}
-
-.draft-section-title {
-  min-width: 0;
-  flex: 1 1 auto;
-  font-size: 29rpx;
-  font-weight: 700;
-  line-height: 42rpx;
-}
-
-.draft-status {
-  flex: 0 0 auto;
-  color: #756963;
-  font-size: 22rpx;
-  line-height: 32rpx;
-}
-
 .draft-content {
-  margin-top: 18rpx;
   color: #403531;
   font-size: 29rpx;
   line-height: 52rpx;

@@ -12,7 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeDecisionAction,
     MemoirNarrativeDecisionTargetType,
     MemoirNarrativeEntityVerificationStatus,
-    MemoirStoryRevisionChangeType,
 )
 from app.models.memoir_narrative import (
     MemoirClaim,
@@ -22,10 +21,9 @@ from app.models.memoir_narrative import (
     MemoirStory,
 )
 from app.services.memoir.narrative import (
+    chapter_draft_state,
     decision_log,
-    draft_blocks,
     frameworks,
-    story_revisions,
 )
 
 
@@ -196,11 +194,6 @@ async def merge_entities(
             )
         ).all()
     )
-    story_snapshots = {
-        story.id: await story_revisions.story_snapshot(db, story)
-        for story in place_stories
-    }
-
     def reference_state() -> dict[str, object]:
         return {
             "claims": {
@@ -251,6 +244,7 @@ async def merge_entities(
         story.primary_place_entity_id = retained.id
         story.updated_by = MemoirNarrativeActorType.USER.value
         story.updated_by_user_id = actor_user_id
+        story.version += 1
     self_relationship_claims = [
         claim
         for claim in claims
@@ -277,7 +271,7 @@ async def merge_entities(
         source_transcript_version_id=source_transcript_version_id,
     )
     for claim in claims:
-        await draft_blocks.mark_blocks_stale_for_claim(
+        await chapter_draft_state.mark_chapter_drafts_stale_for_claim(
             db,
             project_id=project_id,
             claim_id=claim.id,
@@ -294,14 +288,10 @@ async def merge_entities(
             source_transcript_version_id=source_transcript_version_id,
         )
     for story in place_stories:
-        await story_revisions.record_story_revision(
+        await chapter_draft_state.mark_chapter_drafts_stale_for_story(
             db,
-            story=story,
-            before_state=story_snapshots[story.id],
-            change_type=MemoirStoryRevisionChangeType.CLAIMS_UPDATED,
-            actor_type=MemoirNarrativeActorType.USER,
-            actor_user_id=actor_user_id,
-            reason=f"entity merge decision {decision.id} updated the story place reference",
+            project_id=project_id,
+            story_id=story.id,
         )
     return decision
 
@@ -378,7 +368,7 @@ async def decide_claim_verification(
         idempotency_key=idempotency_key,
         source_transcript_version_id=source_transcript_version_id,
     )
-    await draft_blocks.mark_blocks_stale_for_claim(
+    await chapter_draft_state.mark_chapter_drafts_stale_for_claim(
         db,
         project_id=project_id,
         claim_id=claim.id,
@@ -446,7 +436,7 @@ async def decide_claim_publication(
         reason=reason,
         idempotency_key=idempotency_key,
     )
-    await draft_blocks.mark_blocks_stale_for_claim(
+    await chapter_draft_state.mark_chapter_drafts_stale_for_claim(
         db,
         project_id=project_id,
         claim_id=claim.id,
@@ -499,7 +489,7 @@ async def mark_claim_needs_review(
         idempotency_key=idempotency_key,
         source_transcript_version_id=source_transcript_version_id,
     )
-    await draft_blocks.mark_blocks_stale_for_claim(
+    await chapter_draft_state.mark_chapter_drafts_stale_for_claim(
         db,
         project_id=claim.project_id,
         claim_id=claim.id,

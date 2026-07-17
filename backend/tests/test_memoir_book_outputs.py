@@ -457,7 +457,7 @@ async def _seed_confirmed_book_output(test_db, *, project_id: str) -> MemoirBook
 
 async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     response = await anonymous_client.post(
-        "/api/memoir/projects/project-1/book-output/assemble-from-draft-blocks",
+        "/api/memoir/projects/project-1/book-output/assemble",
         json={},
     )
 

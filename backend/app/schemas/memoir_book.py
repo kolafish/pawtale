@@ -671,8 +671,17 @@ class MemoirBookChapterDraftVersionResponse(BaseModel):
     model: str | None = None
     prompt_snapshot: str
     feedback: str | None = None
-    block_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
     created_at: datetime
+
+
+class MemoirBookChapterDraftRevisionRequest(BaseModel):
+    expected_version_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=200_000)
+
+    @field_validator("expected_version_id", "content")
+    @classmethod
+    def _strip_draft_revision(cls, value: str) -> str:
+        return value.strip()
 
 
 class MemoirBookChapterDraftResponse(BaseModel):
@@ -687,6 +696,16 @@ class MemoirBookChapterDraftResponse(BaseModel):
     versions: list[MemoirBookChapterDraftVersionResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
+
+
+class MemoirBookAssemblyResponse(BaseModel):
+    project_id: str
+    output_id: str
+    output_version_id: str
+    version: int
+    content: str
+    chapter_snapshot_json: list[dict[str, object]]
+    created_at: datetime
 
 
 class MemoirBookAudioRequest(BaseModel):

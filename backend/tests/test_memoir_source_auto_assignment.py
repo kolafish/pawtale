@@ -7,13 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
-    MemoirChapterContractStatus,
-    MemoirChapterNodeStatus,
-    MemoirChapterNodeType,
     MemoirClaimType,
-    MemoirDraftBlockFreshnessStatus,
-    MemoirDraftBlockRole,
-    MemoirNarrativeActorType,
     MemoirNarrativeEntityType,
 )
 from app.domain.memoir.types import (
@@ -34,8 +28,6 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirChapterContract,
-    MemoirChapterNode,
     MemoirClaimEvidence,
     MemoirCompletionItem,
     MemoirNarrativeDecision,
@@ -48,7 +40,6 @@ from app.repositories.memoir_narrative import (
 from app.schemas.memoir_narrative import MemoirClaimCreate, MemoirNarrativeEntityCreate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
-from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_source_routing_for_ready_utterance,
@@ -210,44 +201,6 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
         chapter_id=chapter.id,
         content="小时候在外婆家的院子里摘菜。",
     )
-    contract = MemoirChapterContract(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        version=1,
-        objective="写清院子里的童年。",
-        reader_takeaway="理解这段童年记忆。",
-        status=MemoirChapterContractStatus.DRAFT.value,
-        created_by=MemoirNarrativeActorType.SYSTEM.value,
-    )
-    test_db.add(contract)
-    await test_db.flush()
-    node = MemoirChapterNode(
-        project_id=project_id,
-        chapter_id=chapter.id,
-        contract_id=contract.id,
-        node_type=MemoirChapterNodeType.OPENING.value,
-        title="院子里的童年",
-        purpose="交代童年场景。",
-        sort_order=0,
-        required=True,
-        status=MemoirChapterNodeStatus.READY.value,
-        created_by=MemoirNarrativeActorType.SYSTEM.value,
-        updated_by=MemoirNarrativeActorType.SYSTEM.value,
-    )
-    test_db.add(node)
-    await test_db.flush()
-    block = await draft_blocks.create_block(
-        test_db,
-        project_id=project_id,
-        chapter_id=chapter.id,
-        node_id=node.id,
-        block_role=MemoirDraftBlockRole.OPENING,
-        sort_order=0,
-        content="院子是童年最清晰的背景。",
-        created_by=MemoirNarrativeActorType.AI,
-        claims=[],
-        stories=[],
-    )
     await test_db.commit()
     uncovered = await create_test_voice_transcript(
         client,
@@ -276,10 +229,8 @@ async def test_source_auto_assignment_assigns_high_confidence_source_and_records
     assert source_ids == [first["utterance_id"], uncovered["utterance_id"]]
     assert plan_chapter["pending_source_count"] == 1
     await test_db.refresh(chapter_draft)
-    await test_db.refresh(block)
     assert chapter_draft.status == "draft"
     assert chapter_draft.metadata_json["status_reason"] == "new_sources_assigned"
-    assert block.freshness_status == MemoirDraftBlockFreshnessStatus.STALE.value
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(

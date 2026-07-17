@@ -34,17 +34,6 @@ def _reason_for_candidate(
     gap_type = candidate.gap_type
     target_slot = candidate.target_slot
 
-    if target_slot == "chapter_contract":
-        return MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED
-    if target_slot.startswith("node:"):
-        if ":eligible-story:" in target_slot:
-            return MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED
-        return MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
-    if target_slot.startswith(("book:stale-block:", "book:block:")):
-        return MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
-    if target_slot.startswith("book:locked-block:"):
-        return MemoirNarrativeGapActionReasonCode.FACT_CONFLICT_DETECTED
-
     if gap_type == MemoirNarrativeGapType.REPETITION:
         return MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE
     if gap_type == MemoirNarrativeGapType.CONTRADICTION:

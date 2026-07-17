@@ -420,8 +420,8 @@ function loadBookPage({
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
-    assembleMemoirBookDraftBlocks: async () => {
-      throw new Error("assembleMemoirBookDraftBlocks was not mocked");
+    assembleMemoirBookOutput: async () => {
+      throw new Error("assembleMemoirBookOutput was not mocked");
     },
     updateMemoirBookOutput: async () => {
       throw new Error("updateMemoirBookOutput was not mocked");
@@ -1804,12 +1804,12 @@ test("book page merges chapters and directs the user back to the workspace", asy
   delete global.wx;
 });
 
-test("book page assembles confirmed blocks and updates the full-book projection", async () => {
+test("book page assembles confirmed chapter drafts and updates the full-book projection", async () => {
   const calls = [];
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      assembleMemoirBookDraftBlocks: async (projectId) => {
+      assembleMemoirBookOutput: async (projectId) => {
         calls.push({ kind: "assemble", projectId });
       },
       updateMemoirBookOutput: async (projectId, data) => {
@@ -1854,7 +1854,7 @@ test("book page shows assembly errors without leaving the page busy", async () =
   global.wx = { showToast() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
-      assembleMemoirBookDraftBlocks: async () => {
+      assembleMemoirBookOutput: async () => {
         throw new Error("request:fail network");
       },
     },

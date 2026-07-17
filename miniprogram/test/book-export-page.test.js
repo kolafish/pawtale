@@ -81,7 +81,7 @@ function loadBookExportPage(voiceApiExports = {}) {
     formalizeMemoirBookOutput: async () => ({ status: "accepted" }),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
-    assembleMemoirBookDraftBlocks: async () => undefined,
+    assembleMemoirBookOutput: async () => undefined,
     updateMemoirBookOutput: async () => sampleBookOutput(),
     enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
     ...voiceApiExports,
@@ -477,7 +477,7 @@ test("book export page downloads reading PDF with the standard layout", async ()
   delete global.wx;
 });
 
-test("book export page assembles confirmed blocks as a new full-book version", async () => {
+test("book export page assembles confirmed chapter drafts as a new full-book version", async () => {
   const requests = [];
   const toasts = [];
   global.wx = {
@@ -486,7 +486,7 @@ test("book export page assembles confirmed blocks as a new full-book version", a
     },
   };
   const { page } = loadBookExportPage({
-    assembleMemoirBookDraftBlocks: async (projectId) => {
+    assembleMemoirBookOutput: async (projectId) => {
       requests.push({ kind: "assemble", projectId });
     },
     updateMemoirBookOutput: async (projectId, payload) => {

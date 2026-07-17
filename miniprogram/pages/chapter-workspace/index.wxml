@@ -35,57 +35,38 @@
         <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
       </view>
 
-      <view wx:if="{{draftBlocks.length}}" class="draft-list">
-        <view
-          wx:for="{{draftBlocks}}"
-          wx:key="id"
-          class="draft-row {{item.freshness_status === 'stale' ? 'stale' : ''}}"
-        >
-          <view class="draft-row-head">
-            <text class="draft-section-title">{{item.sectionTitle}}</text>
-            <text class="draft-status">{{item.statusText}}</text>
+      <view wx:if="{{workspace.draft_content}}" class="draft-body">
+        <block wx:if="{{editingDraft}}">
+          <textarea
+            class="draft-editor"
+            value="{{editingDraftContent}}"
+            maxlength="-1"
+            auto-height
+            cursor-spacing="24"
+            bindinput="changeDraftContent"
+          />
+          <view class="edit-actions">
+            <button
+              class="secondary-action"
+              disabled="{{savingDraft}}"
+              bindtap="cancelDraftEdit"
+            >取消</button>
+            <button
+              class="secondary-action strong"
+              loading="{{savingDraft}}"
+              disabled="{{savingDraft}}"
+              bindtap="saveDraftEdit"
+            >保存修改</button>
           </view>
-
-          <block wx:if="{{editingBlockId === item.id}}">
-            <textarea
-              class="draft-editor"
-              value="{{editingBlockContent}}"
-              maxlength="-1"
-              auto-height
-              cursor-spacing="24"
-              bindinput="changeDraftBlockContent"
-            />
-            <view class="edit-actions">
-              <button class="secondary-action" bindtap="cancelDraftBlockEdit">取消</button>
-              <button
-                class="secondary-action strong"
-                data-block-id="{{item.id}}"
-                loading="{{item.busy}}"
-                disabled="{{item.busy}}"
-                bindtap="saveDraftBlockEdit"
-              >保存修改</button>
-            </view>
-          </block>
-
-          <block wx:else>
-            <text class="draft-content">{{item.current_version.content}}</text>
-            <button
-              wx:if="{{item.locked}}"
-              class="text-action"
-              data-block-id="{{item.id}}"
-              loading="{{item.busy}}"
-              disabled="{{item.busy}}"
-              bindtap="unlockLegacyBlock"
-            >解除保护后修改</button>
-            <button
-              wx:elif="{{item.freshness_status === 'current'}}"
-              class="text-action"
-              data-block-id="{{item.id}}"
-              disabled="{{editingBlockId !== ''}}"
-              bindtap="startDraftBlockEdit"
-            >修改这一段</button>
-          </block>
-        </view>
+        </block>
+        <block wx:else>
+          <text class="draft-content">{{workspace.draft_content}}</text>
+          <button
+            class="text-action"
+            disabled="{{confirmingChapter}}"
+            bindtap="startDraftEdit"
+          >修改本章正文</button>
+        </block>
       </view>
 
       <view wx:else class="draft-empty">
@@ -94,10 +75,10 @@
       </view>
 
       <button
-        wx:if="{{draftBlocks.length && workspace.completion_summary.state === 'draft_ready'}}"
+        wx:if="{{workspace.draft_content && workspace.completion_summary.state === 'draft_ready'}}"
         class="primary-action confirm-chapter-action"
         loading="{{confirmingChapter}}"
-        disabled="{{!canConfirmChapter || confirmingChapter || editingBlockId !== ''}}"
+        disabled="{{!canConfirmChapter || confirmingChapter || editingDraft}}"
         bindtap="confirmChapter"
       >确认本章正文</button>
     </view>

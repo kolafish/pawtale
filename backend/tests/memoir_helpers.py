@@ -1,7 +1,24 @@
 from pathlib import Path
+from hashlib import sha256
 
 from sqlalchemy import select
 
+from app.domain.memoir.narrative_types import (
+    MemoirClaimCertainty,
+    MemoirClaimEvidenceRole,
+    MemoirClaimEvidenceSourceType,
+    MemoirClaimPredicate,
+    MemoirClaimPublicationStatus,
+    MemoirClaimTimePrecision,
+    MemoirClaimType,
+    MemoirClaimVerificationStatus,
+    MemoirNarrativeActorType,
+    MemoirStoryLifecycleStatus,
+    MemoirStoryNarrativeRole,
+    MemoirStoryPublicationStatus,
+    MemoirStoryType,
+    MemoirStoryVerificationStatus,
+)
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
@@ -21,6 +38,12 @@ from app.models.memoir import (
     MemoirChatMessage,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
+)
+from app.models.memoir_narrative import (
+    MemoirClaim,
+    MemoirClaimEvidence,
+    MemoirStory,
+    MemoirStoryClaim,
 )
 
 
@@ -364,3 +387,89 @@ async def create_test_chapter_draft(
             test_db.add(link)
     await test_db.commit()
     return draft
+
+
+async def create_test_source_backed_story(
+    test_db,
+    *,
+    project_id: str,
+    user_id: str,
+    source: dict,
+    title: str,
+    statement: str,
+    summary: str | None = None,
+    time_start=None,
+    time_end=None,
+    time_precision: MemoirClaimTimePrecision = MemoirClaimTimePrecision.UNKNOWN,
+) -> tuple[MemoirStory, MemoirClaim]:
+    transcript = await test_db.get(
+        MemoirTranscriptVersion,
+        source["transcript_version_id"],
+    )
+    assert transcript is not None
+    quote = statement if statement in transcript.content else transcript.content
+    story = MemoirStory(
+        project_id=project_id,
+        title=title,
+        title_normalized=title,
+        story_type=MemoirStoryType.EVENT.value,
+        summary=summary or statement,
+        time_start=time_start,
+        time_end=time_end,
+        time_precision=time_precision.value,
+        lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
+        verification_status=MemoirStoryVerificationStatus.CONFIRMED.value,
+        verification_decided_by_user_id=user_id,
+        publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
+        created_by=MemoirNarrativeActorType.USER.value,
+        created_by_user_id=user_id,
+        updated_by=MemoirNarrativeActorType.USER.value,
+        updated_by_user_id=user_id,
+    )
+    claim = MemoirClaim(
+        project_id=project_id,
+        claim_type=MemoirClaimType.EVENT.value,
+        statement=statement,
+        predicate_code=MemoirClaimPredicate.NARRATIVE_FACT.value,
+        time_start=time_start,
+        time_end=time_end,
+        time_precision=time_precision.value,
+        certainty=MemoirClaimCertainty.EXACT.value,
+        verification_status=MemoirClaimVerificationStatus.CONFIRMED.value,
+        publication_status=MemoirClaimPublicationStatus.ELIGIBLE.value,
+        created_by=MemoirNarrativeActorType.USER.value,
+        created_by_user_id=user_id,
+        updated_by=MemoirNarrativeActorType.USER.value,
+        updated_by_user_id=user_id,
+    )
+    test_db.add_all([story, claim])
+    await test_db.flush()
+    test_db.add_all(
+        [
+            MemoirStoryClaim(
+                project_id=project_id,
+                story_id=story.id,
+                claim_id=claim.id,
+                narrative_role=MemoirStoryNarrativeRole.ACTION.value,
+                sort_order=0,
+                is_core=True,
+                created_by=MemoirNarrativeActorType.USER.value,
+                created_by_user_id=user_id,
+            ),
+            MemoirClaimEvidence(
+                project_id=project_id,
+                claim_id=claim.id,
+                evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
+                evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT.value,
+                utterance_id=source["utterance_id"],
+                transcript_version_id=source["transcript_version_id"],
+                audio_file_id=source["audio_file_id"],
+                quote=quote,
+                source_text_hash=sha256(transcript.content.encode("utf-8")).hexdigest(),
+                created_by=MemoirNarrativeActorType.USER.value,
+                created_by_user_id=user_id,
+            ),
+        ]
+    )
+    await test_db.commit()
+    return story, claim

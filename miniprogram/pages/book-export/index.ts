@@ -8,7 +8,7 @@ import type {
 import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
-  assembleMemoirBookDraftBlocks,
+  assembleMemoirBookOutput,
   enqueueMemoirBookConsistencyAudit,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
@@ -763,7 +763,7 @@ definePage<BookExportData>()({
     const metadata = currentBookMetadataPayload(this.data, false);
     this.setData({ generatingBook: true, error: "" });
     try {
-      await assembleMemoirBookDraftBlocks(this.data.projectId);
+      await assembleMemoirBookOutput(this.data.projectId);
       const output = await updateMemoirBookOutput(this.data.projectId, {
         title: trimText(this.data.bookTitleInput) || undefined,
         ...metadata,

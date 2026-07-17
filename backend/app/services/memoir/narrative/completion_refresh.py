@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
-    MemoirChapterNodeStatus,
     MemoirCompletionItemStatus,
     MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRecommendedAction,
@@ -30,7 +29,6 @@ from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_j
 from app.services.memoir.narrative import (
     completion_planner,
     completion_items,
-    draft_blocks,
     draft_generation_jobs,
     gap_semantic,
 )
@@ -41,7 +39,7 @@ from app.services.memoir.narrative.gap_rules import (
 )
 
 
-COMPLETION_REFRESH_ENGINE_VERSION = "2"
+COMPLETION_REFRESH_ENGINE_VERSION = "3"
 
 
 def _persistent_candidates(
@@ -108,24 +106,6 @@ def chapter_completion_content_signature(context: ChapterAuditContext) -> str:
         "engine_version": COMPLETION_REFRESH_ENGINE_VERSION,
         "chapter_id": context.chapter.id,
         "chapter_title": context.chapter.title,
-        "contract": (
-            {
-                "id": context.contract.id,
-                "version": context.contract.version,
-                "status": context.contract.status,
-                "updated_at": context.contract.updated_at.isoformat(),
-            }
-            if context.contract
-            else None
-        ),
-        "nodes": [
-            [node.id, node.status, node.updated_at.isoformat()]
-            for node in context.nodes
-        ],
-        "links": [
-            [link.node_id, link.story_id, link.story_role, link.required]
-            for link in context.links
-        ],
         "stories": [
             [story.id, story.version, story.updated_at.isoformat()]
             for story in sorted(context.stories.values(), key=lambda item: item.id)
@@ -146,21 +126,18 @@ def chapter_completion_content_signature(context: ChapterAuditContext) -> str:
             ]
             for claim in sorted(context.claims.values(), key=lambda item: item.id)
         ],
-        "draft_blocks": [
+        "draft": (
             [
-                block.id,
-                block.node_id,
-                block.block_role,
-                block.sort_order,
-                block.current_version_id,
-                block.editorial_status,
-                block.freshness_status,
-                list(block.claim_ids),
-                list(block.story_ids),
-                sha256(block.content.encode("utf-8")).hexdigest(),
+                context.draft.id,
+                context.draft.version_id,
+                context.draft.version,
+                context.draft.status,
+                context.draft.source_changes_pending,
+                sha256(context.draft.content.encode("utf-8")).hexdigest(),
             ]
-            for block in context.draft_blocks
-        ],
+            if context.draft
+            else None
+        ),
     }
     encoded = json.dumps(payload, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
     return sha256(encoded.encode("utf-8")).hexdigest()
@@ -433,23 +410,12 @@ async def run_chapter_completion_refresh_job(
         .limit(1)
     )
     draft_job = None
-    if (
-        active_item_exists is None
-        and any(
-            node.status == MemoirChapterNodeStatus.READY.value
-            for node in current_context.nodes
-        )
-    ):
-        if editorial_guidance:
-            await draft_blocks.mark_chapter_blocks_stale(
-                db,
-                project_id=project_id,
-                chapter_ids={chapter_id},
-            )
-        draft_job = await draft_generation_jobs.enqueue_chapter_block_generation(
+    if active_item_exists is None:
+        draft_job = await draft_generation_jobs.enqueue_chapter_draft_generation(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
+            content_signature=current_content_signature,
             editorial_guidance=editorial_guidance,
             source="book_completion_auto",
         )

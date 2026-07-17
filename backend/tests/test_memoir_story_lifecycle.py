@@ -27,7 +27,7 @@ from app.schemas.memoir_narrative import (
     MemoirStoryClaimInput,
     MemoirStoryCreate,
 )
-from app.services.memoir.narrative import stories, story_merging
+from app.services.memoir.narrative import stories
 from app.services.memoir.narrative.ingestion import (
     ingest_transcript_version,
     transcript_text_hash,
@@ -135,7 +135,6 @@ async def test_story_api_is_idempotent_and_requires_evidence_before_confirmation
         "story_type": "event",
         "summary": "讲述第一次到新学校的经历。",
         "idempotency_key": "manual-story-new-school",
-        "reason": "用户手动整理",
     }
     first = await client.post(f"/api/memoir/projects/{project_id}/stories", json=request)
     repeated = await client.post(f"/api/memoir/projects/{project_id}/stories", json=request)
@@ -167,7 +166,6 @@ async def test_story_api_is_idempotent_and_requires_evidence_before_confirmation
                     "is_core": True,
                 }
             ],
-            "reason": "关联原始事实",
         },
     )
     assert attached.status_code == 200
@@ -282,91 +280,3 @@ async def test_later_transcript_reuses_story_and_attaches_new_claim(client, test
             MemoirStoryClaim.claim_id == later.created_claim_ids[0],
         )
     ) is not None
-
-
-async def test_manual_story_merge_moves_claims_and_is_idempotent(client, test_db):
-    created = await create_test_voice_transcript(client, test_db, text="两段故事。")
-    project_id = created["session"]["project_id"]
-    user_id = created["user_id"]
-    source = await stories.create_story(
-        test_db,
-        data=MemoirStoryCreate(
-            project_id=project_id,
-            title="搬家片段",
-            story_type=MemoirStoryType.EVENT,
-            created_by=MemoirNarrativeActorType.USER,
-            created_by_user_id=user_id,
-        ),
-    )
-    retained = await stories.create_story(
-        test_db,
-        data=MemoirStoryCreate(
-            project_id=project_id,
-            title="搬到成都",
-            story_type=MemoirStoryType.EVENT,
-            created_by=MemoirNarrativeActorType.USER,
-            created_by_user_id=user_id,
-        ),
-    )
-    source_claim = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="我们坐火车搬家。",
-    )
-    retained_claim = await _create_confirmed_claim(
-        client,
-        test_db,
-        project_id=project_id,
-        text="后来我在成都上学。",
-    )
-    for story, claim in ((source, source_claim), (retained, retained_claim)):
-        await stories.attach_claims_to_story(
-            test_db,
-            story=story,
-            claims=[
-                MemoirStoryClaimInput(
-                    claim_id=claim.id,
-                    narrative_role=MemoirStoryNarrativeRole.ACTION,
-                    is_core=True,
-                )
-            ],
-            actor_type=MemoirNarrativeActorType.USER,
-            actor_user_id=user_id,
-            reason="人工整理",
-        )
-
-    first = await story_merging.merge_stories(
-        test_db,
-        project_id=project_id,
-        source_story_id=source.id,
-        retained_story_id=retained.id,
-        actor_user_id=user_id,
-        idempotency_key="merge-moving-story",
-        reason="确认是同一次搬家",
-    )
-    repeated = await story_merging.merge_stories(
-        test_db,
-        project_id=project_id,
-        source_story_id=source.id,
-        retained_story_id=retained.id,
-        actor_user_id=user_id,
-        idempotency_key="merge-moving-story",
-        reason="确认是同一次搬家",
-    )
-
-    await test_db.refresh(source)
-    assert repeated.id == first.id
-    assert source.lifecycle_status == "merged"
-    assert source.merged_into_story_id == retained.id
-    retained_claim_ids = set(
-        (
-            await test_db.scalars(
-                select(MemoirStoryClaim.claim_id).where(
-                    MemoirStoryClaim.story_id == retained.id
-                )
-            )
-        ).all()
-    )
-    assert retained_claim_ids == {source_claim.id, retained_claim.id}
-    assert await test_db.get(MemoirStory, retained.id) is not None

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.narrative_types import MemoirChapterContractStatus
 from app.models.memoir import MemoirEditingJob
 from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionOverviewResponse,
@@ -13,7 +12,6 @@ from app.services.memoir.book_plan_sources import (
 )
 from app.services.memoir.narrative import (
     chapter_completion_summary,
-    chapter_contracts,
     completion_refresh,
 )
 from app.services.memoir.narrative.gap_rules import (
@@ -29,26 +27,12 @@ async def prepare_chapter(
     chapter_id: str,
     user_id: str,
 ) -> MemoirEditingJob:
-    context = await load_chapter_audit_context(
+    del user_id
+    await load_chapter_audit_context(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    contract = context.contract
-    if contract is None:
-        contract = await chapter_contracts.create_system_contract_suggestion(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            idempotency_key=f"book-completion:auto-direction:v1:{chapter_id}",
-        )
-    if contract.status == MemoirChapterContractStatus.DRAFT.value:
-        await chapter_contracts.confirm_contract(
-            db,
-            project_id=project_id,
-            contract_id=contract.id,
-            actor_user_id=user_id,
-        )
     return await completion_refresh.enqueue_chapter_completion_refresh(
         db,
         project_id=project_id,

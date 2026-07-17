@@ -45,7 +45,6 @@ class MemoirBookReadinessBlocker(BaseModel):
     chapter_id: str | None = None
     story_id: str | None = None
     claim_id: str | None = None
-    draft_block_id: str | None = None
     completion_item_id: str | None = None
 
 

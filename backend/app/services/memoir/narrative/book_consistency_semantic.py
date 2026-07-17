@@ -43,17 +43,13 @@ def build_book_semantic_prompt(
     context: BookConsistencyContext,
     *,
     chapter_ids: set[str] | None = None,
-    include_block_content: bool = True,
+    include_draft_content: bool = True,
 ) -> str:
     selected_chapters = [
         chapter
         for chapter in context.chapters
         if chapter_ids is None or chapter.chapter.id in chapter_ids
     ]
-    block_by_chapter: dict[str, list] = {}
-    for item in context.blocks:
-        if chapter_ids is None or item.block.chapter_id in chapter_ids:
-            block_by_chapter.setdefault(item.block.chapter_id, []).append(item)
     selected_story_ids = {
         story.id
         for chapter in selected_chapters
@@ -65,19 +61,12 @@ def build_book_semantic_prompt(
         for story_id, links in chapter.story_claims.items()
         if story_id in selected_story_ids
         for link in links
-    } | {
-        claim_id
-        for blocks in block_by_chapter.values()
-        for block in blocks
-        for claim_id in block.claim_ids
     }
     payload = {
         "chapters": [
             {
                 "id": chapter.chapter.id,
                 "title": chapter.chapter.title,
-                "objective": chapter.contract.objective if chapter.contract else "",
-                "reader_takeaway": chapter.contract.reader_takeaway if chapter.contract else "",
                 "stories": [
                     {
                         "id": story.id,
@@ -88,16 +77,18 @@ def build_book_semantic_prompt(
                     }
                     for story in sorted(chapter.stories.values(), key=lambda item: item.id)
                 ],
-                "blocks": [
+                "draft": (
                     {
-                        "id": item.block.id,
-                        "role": item.block.block_role,
-                        "content": item.version.content[:1200] if include_block_content else "",
-                        "story_ids": list(item.story_ids),
-                        "claim_ids": list(item.claim_ids),
+                        "version_id": chapter.draft.version_id,
+                        "content": (
+                            chapter.draft.content[:6000]
+                            if include_draft_content
+                            else ""
+                        ),
                     }
-                    for item in block_by_chapter.get(chapter.chapter.id, [])
-                ],
+                    if chapter.draft
+                    else None
+                ),
             }
             for chapter in selected_chapters
         ],
@@ -176,11 +167,6 @@ def _validated_book_candidates(
         for chapter in selected_chapters
         for links in chapter.story_claims.values()
         for link in links
-    } | {
-        claim_id
-        for block in context.blocks
-        if block.block.chapter_id in valid_chapter_ids
-        for claim_id in block.claim_ids
     }
     valid_claim_ids = {
         claim.id
@@ -196,11 +182,6 @@ def _validated_book_candidates(
         for story_id, links in chapter.story_claims.items():
             for link in links:
                 claim_chapter_ids.setdefault(link.claim_id, set()).add(chapter.chapter.id)
-    for block in context.blocks:
-        if block.block.chapter_id not in valid_chapter_ids:
-            continue
-        for claim_id in block.claim_ids:
-            claim_chapter_ids.setdefault(claim_id, set()).add(block.block.chapter_id)
     candidates: list[MemoirNarrativeGapCandidate] = []
     for item in output.gaps:
         if item.gap_type not in BOOK_SEMANTIC_GAP_TYPES:
@@ -295,7 +276,7 @@ async def evaluate_book_semantic_gaps(
                 build_book_semantic_prompt(
                     context,
                     chapter_ids=scope_chapter_ids,
-                    include_block_content=include_content,
+                    include_draft_content=include_content,
                 ),
                 temperature=0.0,
                 max_tokens=5000,

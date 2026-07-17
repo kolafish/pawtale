@@ -40,8 +40,7 @@ SEMANTIC_GAP_TYPES = {
     MemoirNarrativeGapType.UNCLEAR_REFERENCE,
     MemoirNarrativeGapType.UNSUPPORTED_FACT,
 }
-SEMANTIC_DRAFT_BLOCK_CHAR_BUDGET = 24000
-SEMANTIC_DRAFT_BLOCK_CHAR_LIMIT = 6000
+SEMANTIC_DRAFT_CHAR_LIMIT = 24000
 SEMANTIC_GAP_LIMIT = 3
 SEMANTIC_DIMENSION_GAP_TYPES = {
     "causality": MemoirNarrativeGapType.CAUSALITY,
@@ -60,55 +59,21 @@ SEMANTIC_DIMENSION_GAP_TYPES = {
 }
 
 
-def _draft_block_payload(context: ChapterAuditContext) -> list[dict[str, object]]:
-    payload: list[dict[str, object]] = []
-    remaining = SEMANTIC_DRAFT_BLOCK_CHAR_BUDGET
-    for block in context.draft_blocks:
-        if remaining <= 0:
-            break
-        content = block.content.strip()
-        visible_content = content[: min(SEMANTIC_DRAFT_BLOCK_CHAR_LIMIT, remaining)]
-        remaining -= len(visible_content)
-        payload.append(
-            {
-                "id": block.id,
-                "node_id": block.node_id,
-                "block_role": block.block_role,
-                "sort_order": block.sort_order,
-                "editorial_status": block.editorial_status,
-                "freshness_status": block.freshness_status,
-                "claim_ids": list(block.claim_ids),
-                "story_ids": list(block.story_ids),
-                "content": visible_content,
-                "content_truncated": len(visible_content) < len(content),
-            }
-        )
-    return payload
-
-
 def build_semantic_gap_prompt(context: ChapterAuditContext) -> str:
-    contract = context.contract
+    draft_content = context.draft.content.strip() if context.draft else ""
     input_payload = {
         "chapter": {
             "id": context.chapter.id,
             "title": context.chapter.title,
-            "objective": contract.objective if contract else "",
-            "reader_takeaway": contract.reader_takeaway if contract else "",
-        },
-        "nodes": [
-            {
-                "id": node.id,
-                "title": node.title,
-                "node_type": node.node_type,
-                "purpose": node.purpose,
-                "sort_order": node.sort_order,
-                "story_ids": [
-                    link.story_id for link in context.links if link.node_id == node.id
-                ],
+            "draft": {
+                "version_id": context.draft.version_id,
+                "status": context.draft.status,
+                "content": draft_content[:SEMANTIC_DRAFT_CHAR_LIMIT],
+                "content_truncated": len(draft_content) > SEMANTIC_DRAFT_CHAR_LIMIT,
             }
-            for node in context.nodes
-        ],
-        "draft_blocks": _draft_block_payload(context),
+            if context.draft
+            else None,
+        },
         "stories": [
             {
                 "id": story.id,
@@ -168,9 +133,9 @@ input:
 - 一本回忆录可以有意对次要事件一笔带过。不能仅因为事件简短、没有完整起因经过结果，就要求继续展开。
 - opening、closing、chapter_context、chapter_focus、transition、list_style 使用 causality gap_type；person_introduction、relationship_clarity 使用 relationship；reference 使用 unclear_reference。
 - reason_signal 只描述可核验的基础原因：确实缺少讲述者掌握的信息用 missing_new_evidence；相关素材已经存在但尚未正确归章用 existing_material_available；问题只在当前正文组织或素材使用上用 draft_usage_problem；事实互相冲突用 fact_conflict_detected；需要确认来源、人物身份或收录决定用 publication_decision_required。
-- draft_usage_problem 只用于 draft_blocks 中已经存在的正文问题；没有 draft_blocks 时，现有 Story 的选择、归章或结构组织问题使用 existing_material_available。
+- draft_usage_problem 只用于 chapter.draft 中已经存在的正文问题；没有整章正文时，现有 Story 的选择、归章或结构组织问题使用 existing_material_available。
 - 不得直接输出 interview/editorial/manual_review，最终解决通道由系统规则决定。
-- draft_blocks 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有 draft_blocks 时才主要依据结构与 Story 摘要。
+- chapter.draft 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有正文时才主要依据 Story 摘要。
 - 不把纯润色偏好当成需要采访的问题；只有补充讲述者掌握的信息才能实质改善时才输出。
 - 每个问题必须引用至少一个输入中的 Story 或 Claim；不能用不存在的 ID。
 - contradiction 必须引用至少两条互相冲突的 Claim。
@@ -203,7 +168,7 @@ def _validated_candidates(
         if (
             reason_signal
             == MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
-            and not context.draft_blocks
+            and context.draft is None
         ):
             reason_signal = (
                 MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE

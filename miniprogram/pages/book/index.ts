@@ -30,7 +30,7 @@ import {
   createMemoirBookPlanOutlineTTS,
   bookVoiceCommandGatewayUrl,
   bookVoiceAssistantTurnStreamUrl,
-  assembleMemoirBookDraftBlocks,
+  assembleMemoirBookOutput,
   executeMemoirBookVoiceCommand,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
@@ -1066,12 +1066,12 @@ definePage<BookPageData>()({
         title: defaultBookTitle(this.data.planTitle, this.data.projectTitle),
         narratorName: this.data.projectNarratorName,
       });
-      await assembleMemoirBookDraftBlocks(this.data.projectId);
+      await assembleMemoirBookOutput(this.data.projectId);
       const output = await updateMemoirBookOutput(this.data.projectId, settings);
       this.applyBookOutput(output);
       trackAuditAction(
         "book.output_generate",
-        { source: "confirmed_draft_blocks" },
+        { source: "confirmed_chapter_drafts" },
         { projectId: this.data.projectId },
       );
       wx.showToast({ title: "全书稿已更新", icon: "success" });

@@ -4,7 +4,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
-from app.migrations.memoir_draft_blocks import ensure_draft_block_triggers
 
 
 MEMOIR_NARRATIVE_TABLES = (
@@ -12,11 +11,7 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_claims",
     "memoir_claim_evidence",
     "memoir_stories",
-    "memoir_story_revisions",
     "memoir_story_claims",
-    "memoir_chapter_contracts",
-    "memoir_chapter_nodes",
-    "memoir_chapter_node_stories",
     "memoir_completion_items",
     "memoir_project_frameworks",
     "memoir_framework_items",
@@ -24,10 +19,6 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_interview_policy_decisions",
     "memoir_interview_policy_evaluations",
     "memoir_narrative_decisions",
-    "memoir_draft_blocks",
-    "memoir_draft_block_versions",
-    "memoir_draft_block_claims",
-    "memoir_draft_block_stories",
 )
 MEMOIR_NARRATIVE_TRIGGERS = (
     "memoir_narrative_decisions_no_update",
@@ -241,8 +232,7 @@ async def migrate_memoir_narrative_schema(
             if not await _table_exists(conn, table_name):
                 created.append(table_name)
         await conn.run_sync(Base.metadata.create_all)
-        changed_triggers = await ensure_draft_block_triggers(conn)
-        changed_triggers.extend(await _ensure_narrative_triggers(conn))
+        changed_triggers = await _ensure_narrative_triggers(conn)
     return {
         "changed_tables": created,
         "changed_columns": [],

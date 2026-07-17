@@ -11,7 +11,6 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -25,7 +24,6 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
-    MemoirStoryRevisionChangeType,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
@@ -44,11 +42,6 @@ class MemoirStory(Base):
             ["project_id", "primary_place_entity_id"],
             ["memoir_narrative_entities.project_id", "memoir_narrative_entities.id"],
             name="fk_memoir_stories_place_project",
-        ),
-        ForeignKeyConstraint(
-            ["project_id", "merged_into_story_id"],
-            ["memoir_stories.project_id", "memoir_stories.id"],
-            name="fk_memoir_stories_merged_project",
         ),
         CheckConstraint(f"story_type IN ({_enum_values(MemoirStoryType)})", name="ck_memoir_stories_type"),
         CheckConstraint(
@@ -99,15 +92,6 @@ class MemoirStory(Base):
             "(time_start IS NOT NULL AND time_end IS NOT NULL AND time_end >= time_start)",
             name="ck_memoir_stories_time_range",
         ),
-        CheckConstraint(
-            "(lifecycle_status = 'merged' AND merged_into_story_id IS NOT NULL) OR "
-            "(lifecycle_status != 'merged' AND merged_into_story_id IS NULL)",
-            name="ck_memoir_stories_merge_shape",
-        ),
-        CheckConstraint(
-            "merged_into_story_id IS NULL OR merged_into_story_id != id",
-            name="ck_memoir_stories_not_self_merged",
-        ),
         Index("ix_memoir_stories_project_lifecycle", "project_id", "lifecycle_status"),
         Index("ix_memoir_stories_project_type_title", "project_id", "story_type", "title_normalized"),
         Index("ix_memoir_stories_project_status", "project_id", "verification_status", "publication_status"),
@@ -132,7 +116,6 @@ class MemoirStory(Base):
     publication_decided_by_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id"), nullable=True
     )
-    merged_into_story_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     created_by: Mapped[str] = mapped_column(String(12), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
@@ -144,60 +127,6 @@ class MemoirStory(Base):
     claims: Mapped[list["MemoirStoryClaim"]] = relationship(
         "MemoirStoryClaim", back_populates="story", cascade="all, delete-orphan"
     )
-    revisions: Mapped[list["MemoirStoryRevision"]] = relationship(
-        "MemoirStoryRevision", back_populates="story", cascade="all, delete-orphan"
-    )
-
-
-class MemoirStoryRevision(Base):
-    __tablename__ = "memoir_story_revisions"
-    __table_args__ = (
-        UniqueConstraint("project_id", "id", name="uq_memoir_story_revisions_project_id"),
-        UniqueConstraint("project_id", "story_id", "story_version", name="uq_memoir_story_revisions_version"),
-        ForeignKeyConstraint(
-            ["project_id", "story_id"],
-            ["memoir_stories.project_id", "memoir_stories.id"],
-            ondelete="CASCADE",
-            name="fk_memoir_story_revisions_story_project",
-        ),
-        CheckConstraint(
-            f"change_type IN ({_enum_values(MemoirStoryRevisionChangeType)})",
-            name="ck_memoir_story_revisions_change_type",
-        ),
-        CheckConstraint(
-            f"created_by IN ({_enum_values(MemoirNarrativeActorType)})",
-            name="ck_memoir_story_revisions_created_by",
-        ),
-        CheckConstraint(
-            "created_by != 'user' OR created_by_user_id IS NOT NULL",
-            name="ck_memoir_story_revisions_created_actor",
-        ),
-        CheckConstraint("story_version >= 1", name="ck_memoir_story_revisions_version"),
-        Index(
-            "uq_memoir_story_revisions_project_story_id",
-            "project_id",
-            "story_id",
-            "id",
-            unique=True,
-        ),
-        Index("ix_memoir_story_revisions_project_story", "project_id", "story_id", "story_version"),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    story_id: Mapped[str] = mapped_column(String(36), nullable=False)
-    story_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    change_type: Mapped[str] = mapped_column(String(24), nullable=False)
-    before_state_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    after_state_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_by: Mapped[str] = mapped_column(String(12), nullable=False)
-    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id"), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-    story: Mapped[MemoirStory] = relationship("MemoirStory", back_populates="revisions")
-
-
 class MemoirStoryClaim(Base):
     __tablename__ = "memoir_story_claims"
     __table_args__ = (

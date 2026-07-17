@@ -47,8 +47,8 @@ def register_memoir_editing_job_handlers() -> None:
         completion_refresh.run_chapter_completion_refresh_job,
     )
     register_editing_job_handler(
-        MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,
-        draft_generation_jobs.run_draft_block_generation_job,
+        MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
+        draft_generation_jobs.run_chapter_draft_generation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY,

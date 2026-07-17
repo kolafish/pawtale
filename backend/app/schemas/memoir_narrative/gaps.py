@@ -58,6 +58,11 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     chapter_id: str
     chapter_title: str
     completion_summary: MemoirChapterCompletionSummary
+    draft_id: str | None = None
+    draft_version_id: str | None = None
+    draft_version: int | None = None
+    draft_status: str | None = None
+    draft_content: str = ""
 
 
 class MemoirSemanticGapCandidate(BaseModel):

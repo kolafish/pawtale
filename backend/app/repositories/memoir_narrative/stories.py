@@ -77,7 +77,6 @@ class MemoirStoryRepository:
         if with_relations:
             statement = statement.options(
                 selectinload(MemoirStory.claims),
-                selectinload(MemoirStory.revisions),
             )
         return await self._db.scalar(statement)
 
