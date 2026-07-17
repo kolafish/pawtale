@@ -703,6 +703,72 @@ async def test_book_completion_uses_the_latest_current_refresh_regardless_of_mod
     assert workspace.json()["latest_refresh_job"]["id"] == semantic_job.id
 
 
+async def test_completion_refresh_normalizes_draft_usage_without_draft_blocks(
+    client,
+    test_db,
+):
+    project_id, chapter, story = await _create_structured_chapter(
+        client,
+        test_db,
+        complete=False,
+    )
+    refresh_job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        include_semantic_audit=True,
+        ai_model="no-draft-semantic-model",
+        source="test_no_draft_reason_normalization",
+    )
+    await test_db.commit()
+
+    class NoDraftSemanticClient:
+        provider_name = "test"
+        model_name = "no-draft-semantic-model"
+
+        async def _call_llm(self, *_args, **_kwargs):
+            return f"""{{
+              "schema_version": "2",
+              "gaps": [{{
+                "gap_type": "causality",
+                "severity": "medium",
+                "dimension": "chapter_focus",
+                "reason_signal": "draft_usage_problem",
+                "title": "章节重点比较分散",
+                "description": "现有故事尚未形成清晰的章节重点。",
+                "story_ids": ["{story.id}"],
+                "claim_ids": []
+              }}]
+            }}"""
+
+    async def handler(db, job):
+        return await completion_refresh.run_chapter_completion_refresh_job(
+            db,
+            job,
+            semantic_ai_client=NoDraftSemanticClient(),
+        )
+
+    register_memoir_editing_job_handlers()
+    register_editing_job_handler(
+        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
+        handler,
+    )
+    assert await run_test_editing_job(test_db, refresh_job.id) is True
+    await test_db.refresh(refresh_job)
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+
+    assert refresh_job.status == "succeeded"
+    assert refresh_job.result_json["semantic_gap_count"] == 1
+    assert overview.status_code == 200
+    chapter_summary = overview.json()["chapters"][0]
+    assert chapter_summary["refresh_status"] == "succeeded"
+    assert chapter_summary["next_action"]["kind"] == "open_editorial_fix"
+    assert len(chapter_summary["editorial_gaps"]) == 1
+
+
 async def test_completion_refresh_does_not_publish_partial_gaps_on_semantic_failure(
     client,
     test_db,
