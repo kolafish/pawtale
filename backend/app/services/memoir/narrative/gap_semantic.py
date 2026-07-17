@@ -133,6 +133,7 @@ input:
 - 一本回忆录可以有意对次要事件一笔带过。不能仅因为事件简短、没有完整起因经过结果，就要求继续展开。
 - opening、closing、chapter_context、chapter_focus、transition、list_style 使用 causality gap_type；person_introduction、relationship_clarity 使用 relationship；reference 使用 unclear_reference。
 - reason_signal 只描述可核验的基础原因：确实缺少讲述者掌握的信息用 missing_new_evidence；相关素材已经存在但尚未正确归章用 existing_material_available；问题只在当前正文组织或素材使用上用 draft_usage_problem；事实互相冲突用 fact_conflict_detected；需要确认来源、人物身份或收录决定用 publication_decision_required。
+- 人物姓名、人物身份或人物关系如果没有被引用的 Claim 明确支持，不能标为 existing_material_available 或 draft_usage_problem：需要讲述者补充事实用 missing_new_evidence，需要在实名、匿名或具体指代之间做选择用 publication_decision_required。
 - draft_usage_problem 只用于 chapter.draft 中已经存在的正文问题；没有整章正文时，现有 Story 的选择、归章或结构组织问题使用 existing_material_available。
 - 不得直接输出 interview/editorial/manual_review，最终解决通道由系统规则决定。
 - chapter.draft 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有正文时才主要依据 Story 摘要。

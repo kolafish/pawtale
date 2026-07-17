@@ -29,6 +29,34 @@ class EmptyChapterAuditAI:
         return '{"schema_version":"2","gaps":[]}'
 
 
+class MissingPersonIdentityAuditAI:
+    provider_name = "test"
+    model_name = "test-person-identity-audit"
+
+    def __init__(self, story_id: str):
+        self.story_id = story_id
+
+    async def _call_llm(self, *_args, **_kwargs):
+        return json.dumps(
+            {
+                "schema_version": "2",
+                "gaps": [
+                    {
+                        "gap_type": "relationship",
+                        "severity": "medium",
+                        "dimension": "person_introduction",
+                        "reason_signal": "draft_usage_problem",
+                        "title": "主要朋友没有明确身份",
+                        "description": "正文只称呼“她”，现有事实没有说明姓名。",
+                        "story_ids": [self.story_id],
+                        "claim_ids": [],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+
 class WholeChapterDraftAI:
     provider_name = "test"
     model_name = "test-whole-chapter"
@@ -47,12 +75,17 @@ class WholeChapterDraftAI:
         )
 
 
-async def _run_refresh(test_db, job: MemoirEditingJob):
+async def _run_refresh(
+    test_db,
+    job: MemoirEditingJob,
+    *,
+    semantic_ai_client=None,
+):
     async def handler(db, queued_job):
         return await completion_refresh.run_chapter_completion_refresh_job(
             db,
             queued_job,
-            semantic_ai_client=EmptyChapterAuditAI(),
+            semantic_ai_client=semantic_ai_client or EmptyChapterAuditAI(),
         )
 
     register_memoir_editing_job_handlers()
@@ -253,6 +286,70 @@ async def test_chapter_completion_exposes_one_interview_item_when_material_is_mi
             == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
         )
     ) is None
+
+
+async def test_chapter_completion_interviews_for_unsupported_person_identity(
+    client,
+    test_db,
+):
+    source = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我有一个从小学认识到现在的好朋友。",
+    )
+    project_id = source["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["一生的朋友"],
+        source_refs_by_chapter=[[memoir_source_ref(source)]],
+    )
+    chapter = chapters[0]
+    story, _ = await create_test_source_backed_story(
+        test_db,
+        project_id=project_id,
+        user_id=source["user_id"],
+        source=source,
+        title="从小学认识的朋友",
+        statement="讲述者有一个从小学认识到现在的好朋友。",
+    )
+
+    prepared = await client.post(
+        (
+            f"/api/memoir/projects/{project_id}/book-completion/"
+            f"chapters/{chapter.id}/prepare"
+        ),
+        json={},
+    )
+    assert prepared.status_code == 202
+    job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
+    assert job is not None
+    await _run_refresh(
+        test_db,
+        job,
+        semantic_ai_client=MissingPersonIdentityAuditAI(story.id),
+    )
+
+    item = await test_db.scalar(
+        select(MemoirCompletionItem).where(
+            MemoirCompletionItem.chapter_id == chapter.id
+        )
+    )
+    assert item is not None
+    assert item.action == "interview"
+    assert item.dimension == "person_introduction"
+    assert item.question == "这里提到的关键人物分别是谁？他们彼此是什么关系？"
+    assert job.result_json["semantic_created_count"] == 1
+    assert job.result_json["editorial_guidance_count"] == 0
+    assert job.result_json["draft_generation_job_id"] is None
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    chapter_summary = overview.json()["chapters"][0]
+    assert chapter_summary["state"] == "needs_input"
+    assert chapter_summary["next_action"]["kind"] == "start_interview"
+    assert chapter_summary["next_action"]["item_id"] == item.id
 
 
 async def test_openapi_exposes_only_whole_chapter_completion_actions(client):

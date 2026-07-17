@@ -14,7 +14,12 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
+    MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeActorType,
+    MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapScopeType,
+    MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapType,
     MemoirNarrativeEntityType,
 )
 from app.domain.memoir.types import (
@@ -35,10 +40,11 @@ from app.repositories.memoir_narrative import MemoirClaimRepository, MemoirNarra
 from app.schemas.memoir_narrative import (
     MemoirClaimCreate,
     MemoirClaimEvidenceCreate,
+    MemoirNarrativeGapCandidate,
     MemoirNarrativeExtraction,
     MemoirNarrativeEntityCreate,
 )
-from app.services.memoir.narrative import decisions
+from app.services.memoir.narrative import completion_items, decisions
 from app.services.memoir.narrative.ingestion import (
     ingest_transcript_version,
 )
@@ -253,6 +259,49 @@ async def test_ingestion_requires_exact_evidence_and_is_idempotent(client, test_
     assert evidence is not None
     assert evidence.quote == "七二年前后，我搬到了成都"
     assert evidence.source_text_hash == sha256(source_text.encode("utf-8")).hexdigest()
+
+
+async def test_ingestion_reports_resolved_completion_answer(client, test_db):
+    source_text = "她叫小林，我们从小学三年级起就是朋友。"
+    created = await create_test_voice_transcript(client, test_db, text=source_text)
+    project, utterance, version = await _load_source(test_db, created)
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project.id,
+        chapter_titles=["一生的朋友"],
+    )
+    items, _ = await completion_items.upsert_candidates(
+        test_db,
+        project_id=project.id,
+        candidates=[
+            MemoirNarrativeGapCandidate(
+                scope_type=MemoirNarrativeGapScopeType.CHAPTER,
+                primary_chapter_id=chapters[0].id,
+                gap_type=MemoirNarrativeGapType.RELATIONSHIP,
+                severity=MemoirNarrativeGapSeverity.MEDIUM,
+                target_slot="semantic:person_introduction:test-evidence",
+                title="主要朋友没有明确身份",
+                description="正文没有说明主要朋友是谁。",
+                detected_by=MemoirNarrativeGapDetectedBy.AI,
+                action_reason_signal=(
+                    MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE
+                ),
+            )
+        ],
+    )
+    utterance.completion_item_id = items[0].id
+
+    result = await ingest_transcript_version(
+        test_db,
+        project=project,
+        utterance=utterance,
+        version=version,
+        ai_client=FakeNarrativeAI([_extraction_payload(source_text)]),
+    )
+
+    assert result.completion_item_id == items[0].id
+    assert result.completion_item_status == "resolved"
+    assert result.answered_completion_item_ids == (items[0].id,)
 
 
 async def test_ingestion_adds_new_story_to_unmodified_system_chapter_plan(

@@ -41,7 +41,7 @@ from app.services.memoir.narrative.claim_usage_policy import (
 )
 
 
-CHAPTER_COMPLETION_SIGNATURE_VERSION = "3"
+CHAPTER_COMPLETION_SIGNATURE_VERSION = "4"
 
 
 @dataclass(frozen=True)
