@@ -1,12 +1,8 @@
 import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
-import type {
-  MemoirChapterCompletionRefreshJob,
-  MemoirChapterCompletionRefreshRequest,
-} from "../domain/chapter-workspace";
+import type { MemoirChapterPreparationJob } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
-  withSelectedAIModel,
 } from "./memoir-api-client";
 
 
@@ -20,22 +16,18 @@ export function getMemoirBookCompletionOverview(
   return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
 }
 
-export function enqueueMemoirChapterCompletionRefresh(
+export function prepareMemoirBookChapter(
   projectId: string,
   chapterId: string,
-  data: MemoirChapterCompletionRefreshRequest = {},
-): Promise<MemoirChapterCompletionRefreshJob> {
-  return memoirRequest<MemoirChapterCompletionRefreshJob>(
+): Promise<MemoirChapterPreparationJob> {
+  return memoirRequest<MemoirChapterPreparationJob>(
     memoirNarrativeProjectPath(
       projectId,
-      `/chapters/${encodeURIComponent(chapterId)}/completion-refresh-jobs`,
+      `/book-completion/chapters/${encodeURIComponent(chapterId)}/prepare`,
     ),
     {
       method: "POST",
-      data: withSelectedAIModel({
-        include_semantic_audit: data.include_semantic_audit ?? true,
-        ai_model: data.ai_model,
-      }),
+      data: {},
     },
   );
 }

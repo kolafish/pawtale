@@ -1,34 +1,14 @@
-import type {
-  MemoirChapterWorkspace,
-  MemoirChapterWorkspaceContract,
-  MemoirNarrativeGap,
-  MemoirNarrativeGapAction,
-  MemoirNarrativeGapResolutionRequest,
-} from "../domain/chapter-workspace";
+import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
 } from "./memoir-api-client";
 
 
-function chapterWorkspacePath(projectId: string, chapterId: string, suffix = ""): string {
+function chapterWorkspacePath(projectId: string, chapterId: string): string {
   return memoirNarrativeProjectPath(
     projectId,
-    `/chapters/${encodeURIComponent(chapterId)}/workspace${suffix}`,
-  );
-}
-
-function gapPath(projectId: string, gapId: string, action: MemoirNarrativeGapAction): string {
-  return memoirNarrativeProjectPath(
-    projectId,
-    `/gaps/${encodeURIComponent(gapId)}/${action}`,
-  );
-}
-
-function chapterContractPath(projectId: string, contractId: string, suffix = ""): string {
-  return memoirNarrativeProjectPath(
-    projectId,
-    `/chapter-contracts/${encodeURIComponent(contractId)}${suffix}`,
+    `/chapters/${encodeURIComponent(chapterId)}/workspace`,
   );
 }
 
@@ -39,40 +19,22 @@ export function getMemoirChapterWorkspace(
   return memoirRequest<MemoirChapterWorkspace>(chapterWorkspacePath(projectId, chapterId));
 }
 
-export function suggestMemoirChapterDirection(
+export function confirmMemoirChapterFact(
   projectId: string,
-  chapterId: string,
-): Promise<MemoirChapterWorkspaceContract> {
-  return memoirRequest<MemoirChapterWorkspaceContract>(
+  confirmationId: string,
+  statement: string,
+): Promise<void> {
+  return memoirRequest<void>(
     memoirNarrativeProjectPath(
       projectId,
-      `/chapters/${encodeURIComponent(chapterId)}/contract/suggest`,
+      `/gaps/${encodeURIComponent(confirmationId)}/resolve`,
     ),
     {
       method: "POST",
-      data: { idempotency_key: `workspace:direction:${chapterId}` },
+      data: {
+        idempotency_key: `chapter-confirmation:${confirmationId}`,
+        note: statement,
+      },
     },
   );
-}
-
-export function confirmMemoirChapterContract(
-  projectId: string,
-  contractId: string,
-): Promise<MemoirChapterWorkspaceContract> {
-  return memoirRequest<MemoirChapterWorkspaceContract>(
-    chapterContractPath(projectId, contractId, "/confirm"),
-    { method: "POST" },
-  );
-}
-
-export function resolveMemoirNarrativeGap(
-  projectId: string,
-  gapId: string,
-  action: MemoirNarrativeGapAction,
-  data: MemoirNarrativeGapResolutionRequest,
-): Promise<MemoirNarrativeGap> {
-  return memoirRequest<MemoirNarrativeGap>(gapPath(projectId, gapId, action), {
-    method: "POST",
-    data,
-  });
 }

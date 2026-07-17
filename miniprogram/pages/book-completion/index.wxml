@@ -1,6 +1,6 @@
 <view class="completion-page">
   <view class="page-intro">
-    <text class="page-kicker">全书补全</text>
+    <text class="page-kicker">整理成书</text>
     <text class="page-title">{{headline}}</text>
     <text class="page-detail">{{detail}}</text>
     <text wx:if="{{progressText}}" class="progress-text">{{progressText}}</text>
@@ -26,10 +26,6 @@
       <text class="chapter-title">{{item.title}}</text>
       <text class="chapter-headline">{{item.headline}}</text>
       <text class="chapter-detail">{{item.detail}}</text>
-      <view wx:if="{{item.focusAreas.length}}" class="focus-list">
-        <text class="focus-label">建议先从这里讲</text>
-        <text wx:for="{{item.focusAreas}}" wx:key="*this" class="focus-item">{{item}}</text>
-      </view>
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
         {{item.actionText}}
       </view>

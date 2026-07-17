@@ -1,6 +1,3 @@
-import type { MemoirEditingJobStatus } from "./chapter-workspace";
-
-
 export type MemoirDraftBlockRole =
   | "factual"
   | "transition"
@@ -59,44 +56,16 @@ export interface MemoirDraftBlockListResponse {
   blocks: MemoirDraftBlock[];
 }
 
-export interface MemoirDraftBlockJob {
-  id: string;
-  project_id: string;
-  chapter_id: string | null;
-  job_type: "generate_draft_blocks";
-  status: MemoirEditingJobStatus;
-  result_json: Record<string, unknown>;
-  error_message: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface MemoirDraftBlockGenerationRequest {
-  node_ids?: string[];
-  ai_model?: string | null;
-}
-
 export interface MemoirDraftBlockManualRevisionRequest {
   expected_current_version_id: string;
   content: string;
   feedback?: string | null;
 }
 
-export interface MemoirDraftBlockDecisionRequest {
+export interface MemoirDraftBlockUnlockRequest {
   expected_current_version_id: string;
   idempotency_key: string;
   reason?: string;
-}
-
-export interface MemoirDraftBlockRevisionJobRequest {
-  expected_current_version_id: string;
-  feedback: string;
-  ai_model?: string | null;
-}
-
-export interface MemoirDraftBlockRevisionApplyRequest {
-  expected_current_version_id: string;
-  generation_job_id: string;
 }
 
 export interface MemoirChapterDraftBlockAssembly {
