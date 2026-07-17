@@ -47,6 +47,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterCard,
+    MemoirChatMessage,
     MemoirEditingJob,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -212,6 +213,24 @@ async def _seed_ai_derived_state(
         detected_by=MemoirNarrativeGapDetectedBy.AI.value,
         completed_at=datetime.utcnow(),
     )
+    deferred_item = MemoirCompletionItem(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        chapter_id=chapter.id,
+        story_id=story.id,
+        claim_id=claim.id,
+        item_type=MemoirNarrativeGapType.MISSING_SLOT.value,
+        severity=MemoirNarrativeGapSeverity.LOW.value,
+        dimension="closing",
+        title="补充结尾",
+        description="",
+        fingerprint="c" * 64,
+        action=MemoirNarrativeGapRecommendedAction.INTERVIEW.value,
+        question="最想让读者记住什么？",
+        status=MemoirCompletionItemStatus.DEFERRED.value,
+        detected_by=MemoirNarrativeGapDetectedBy.AI.value,
+        defer_until=datetime.utcnow() + timedelta(days=7),
+    )
     test_db.add_all(
         [
             evidence,
@@ -219,6 +238,7 @@ async def _seed_ai_derived_state(
             decision,
             active_item,
             answered_item,
+            deferred_item,
         ]
     )
     await test_db.flush()
@@ -266,6 +286,7 @@ async def _seed_ai_derived_state(
         "claim_id": claim.id,
         "active_item_id": active_item.id,
         "answered_item_id": answered_item.id,
+        "deferred_item_id": deferred_item.id,
         "event_id": event.id,
     }
 
@@ -356,6 +377,13 @@ async def test_rebuild_resets_only_ai_derived_state_and_enqueues_sources(
     assert answered.story_id is None
     assert answered.claim_id is None
     assert answered.outcome_note == "用户已经补充"
+    deferred = await test_db.get(
+        MemoirCompletionItem, seeded["deferred_item_id"]
+    )
+    assert deferred is not None
+    assert deferred.status == MemoirCompletionItemStatus.DEFERRED.value
+    assert deferred.story_id is None
+    assert deferred.claim_id is None
     preserved_utterance = await test_db.get(
         MemoirVoiceUtterance, source["utterance_id"]
     )
@@ -439,9 +467,17 @@ async def test_rebuild_requires_explicit_close_for_stale_active_session(
         text="这个会话已经很久没有活动了。",
     )
     session = await test_db.get(MemoirVoiceSession, source["session"]["id"])
+    utterance = await test_db.get(MemoirVoiceUtterance, source["utterance_id"])
+    message = await test_db.get(MemoirChatMessage, source["message_id"])
     assert session is not None
-    session.updated_at = datetime.utcnow() - timedelta(hours=2)
-    test_db.add(session)
+    assert utterance is not None
+    assert message is not None
+    stale_at = datetime.utcnow() - timedelta(hours=2)
+    session.created_at = stale_at
+    session.updated_at = stale_at
+    utterance.created_at = stale_at
+    message.updated_at = stale_at
+    test_db.add_all([session, utterance, message])
     await test_db.commit()
 
     with pytest.raises(NarrativeProjectRebuildError, match="活跃语音会话"):

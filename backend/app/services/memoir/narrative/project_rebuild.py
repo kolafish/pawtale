@@ -30,6 +30,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookQualityAuditSnapshot,
     MemoirChapterCard,
+    MemoirChatMessage,
     MemoirEditingJob,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
@@ -72,7 +73,6 @@ ACTIVE_JOB_STATUSES = {
 ACTIVE_COMPLETION_STATUSES = {
     MemoirCompletionItemStatus.OPEN.value,
     MemoirCompletionItemStatus.IN_PROGRESS.value,
-    MemoirCompletionItemStatus.DEFERRED.value,
 }
 REBUILD_JOB_TYPES = {
     MemoirEditingJobType.INGEST_NARRATIVE_STATE.value,
@@ -549,10 +549,50 @@ async def _close_active_sessions(
             "项目仍有活跃语音会话；确认会话已结束后使用 --close-active-sessions"
         )
     now = _utcnow()
+    session_ids = [session.id for session in sessions]
+    latest_utterance_activity = {
+        session_id: created_at
+        for session_id, created_at in (
+            await db.execute(
+                select(
+                    MemoirVoiceUtterance.voice_session_id,
+                    func.max(MemoirVoiceUtterance.created_at),
+                )
+                .where(
+                    MemoirVoiceUtterance.voice_session_id.in_(session_ids)
+                )
+                .group_by(MemoirVoiceUtterance.voice_session_id)
+            )
+        ).all()
+    }
+    latest_message_activity = {
+        session_id: updated_at
+        for session_id, updated_at in (
+            await db.execute(
+                select(
+                    MemoirChatMessage.voice_session_id,
+                    func.max(MemoirChatMessage.updated_at),
+                )
+                .where(MemoirChatMessage.voice_session_id.in_(session_ids))
+                .group_by(MemoirChatMessage.voice_session_id)
+            )
+        ).all()
+    }
     recent = [
         session.id
         for session in sessions
-        if now - (session.updated_at or session.created_at) < RECENT_ACTIVE_SESSION_WINDOW
+        if now
+        - max(
+            timestamp
+            for timestamp in (
+                session.updated_at,
+                session.created_at,
+                latest_utterance_activity.get(session.id),
+                latest_message_activity.get(session.id),
+            )
+            if timestamp is not None
+        )
+        < RECENT_ACTIVE_SESSION_WINDOW
     ]
     if recent:
         raise NarrativeProjectRebuildError(
