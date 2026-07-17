@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.narrative_types import (
@@ -16,10 +15,7 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus
 from app.schemas.memoir_narrative.book_completion import MemoirChapterCompletionSummary
-from app.schemas.memoir_narrative.chapter_structures import MemoirChapterContractResponse
-from app.schemas.memoir_narrative.responses import MemoirClaimResponse
 
 
 class MemoirNarrativeGapCandidate(BaseModel):
@@ -106,70 +102,12 @@ class MemoirNarrativeGapResolutionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     idempotency_key: str = Field(min_length=1, max_length=160)
-    note: str = Field(default="", max_length=2000)
+    note: str = Field(min_length=1, max_length=2000)
 
-    @field_validator("idempotency_key", "note")
+    @field_validator("idempotency_key", "note", mode="before")
     @classmethod
-    def strip_text(cls, value: str) -> str:
-        return value.strip()
-
-
-class MemoirNarrativeGapDismissRequest(MemoirNarrativeGapResolutionRequest):
-    @model_validator(mode="after")
-    def require_note(self):
-        if not self.note:
-            raise ValueError("dismissing a gap requires a reason")
-        return self
-
-
-class MemoirChapterCompletionRefreshRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    include_semantic_audit: bool = True
-    ai_model: str | None = Field(default=None, max_length=120)
-
-    @field_validator("ai_model")
-    @classmethod
-    def strip_model(cls, value: str | None) -> str | None:
-        value = value.strip() if value else None
-        return value or None
-
-
-class MemoirChapterCompletionRefreshJobResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    project_id: str
-    chapter_id: str | None
-    status: MemoirEditingJobStatus
-    result_json: dict
-    error_message: str
-    created_at: datetime
-    updated_at: datetime
-
-
-class MemoirChapterWorkspaceStoryResponse(BaseModel):
-    id: str
-    title: str
-    summary: str
-    publication_status: str
-    claims: list[MemoirClaimResponse] = Field(default_factory=list)
-
-
-class MemoirChapterWorkspaceGapGroups(BaseModel):
-    must_handle: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
-    suggested: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
-    accepted_incomplete: list[MemoirNarrativeGapResponse] = Field(default_factory=list)
-
-
-class MemoirChapterWorkspaceAnswerUpdateResponse(BaseModel):
-    id: str
-    task_id: str
-    status: Literal["applied", "needs_confirmation"]
-    question: str
-    answer_text: str = ""
-    summaries: list[str] = Field(default_factory=list)
-    created_at: datetime
+    def strip_text(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):
@@ -177,12 +115,6 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     chapter_id: str
     chapter_title: str
     completion_summary: MemoirChapterCompletionSummary
-    contract: MemoirChapterContractResponse | None = None
-    stories: list[MemoirChapterWorkspaceStoryResponse] = Field(default_factory=list)
-    answer_updates: list[MemoirChapterWorkspaceAnswerUpdateResponse] = Field(
-        default_factory=list
-    )
-    latest_refresh_job: MemoirChapterCompletionRefreshJobResponse | None = None
 
 
 class MemoirSemanticGapCandidate(BaseModel):

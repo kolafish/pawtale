@@ -75,6 +75,7 @@ from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.narrative import (
+    completion_refresh,
     followup_completion,
     followup_planner,
     followup_tasks,
@@ -1319,16 +1320,17 @@ async def test_completion_refresh_plans_followups_on_existing_background_worker(
 ):
     fixture = await _create_story_gap(client, test_db, generate=False)
     register_memoir_editing_job_handlers()
-    response = await client.post(
-        (
-            f"/api/memoir/projects/{fixture['project_id']}/chapters/"
-            f"{fixture['chapter'].id}/completion-refresh-jobs"
-        ),
-        json={"include_semantic_audit": False},
+    queued = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=fixture["project_id"],
+        chapter_id=fixture["chapter"].id,
+        include_semantic_audit=False,
+        ai_model=None,
+        source="test_followup_worker",
     )
-    assert response.status_code == 202, response.text
-    succeeded = await run_test_editing_job(test_db, response.json()["id"])
-    job = await test_db.get(MemoirEditingJob, response.json()["id"])
+    await test_db.commit()
+    succeeded = await run_test_editing_job(test_db, queued.id)
+    job = await test_db.get(MemoirEditingJob, queued.id)
     assert job is not None
     assert succeeded is True, job.error_message
     assert job.status == "succeeded"

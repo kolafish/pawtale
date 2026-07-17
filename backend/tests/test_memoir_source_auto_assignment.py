@@ -53,7 +53,7 @@ from app.repositories.memoir_narrative import (
 from app.schemas.memoir_narrative import MemoirClaimCreate, MemoirNarrativeEntityCreate
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers, enqueue_editing_job
-from app.services.memoir.narrative import draft_blocks
+from app.services.memoir.narrative import chapter_answer_updates, draft_blocks
 from app.services.memoir.source_auto_assignment import run_source_auto_assignment_for_utterances
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_source_routing_for_ready_utterance,
@@ -973,12 +973,8 @@ async def test_fact_resolution_applies_semantic_decisions_before_closing_task(
         f"/chapters/{case['chapter'].id}/workspace"
     )
     assert workspace_response.status_code == 200, workspace_response.json()
-    answer_update = workspace_response.json()["answer_updates"][0]
-    assert answer_update["status"] == "applied"
-    assert answer_update["task_id"] == case["task"].id
-    assert "工作时的经理" in "".join(answer_update["summaries"])
-    assert "后来邀请创业的人" in "".join(answer_update["summaries"])
-    assert "Claim" not in json.dumps(answer_update, ensure_ascii=False)
+    assert "answer_updates" not in workspace_response.json()
+    assert workspace_response.json()["completion_summary"]["active_task"] is None
 
     decisions_for_answer = list(
         (
@@ -1111,12 +1107,7 @@ async def test_ambiguous_fact_resolution_keeps_task_open_without_semantic_change
         f"/chapters/{case['chapter'].id}/workspace"
     )
     assert workspace_response.status_code == 200, workspace_response.json()
-    answer_update = workspace_response.json()["answer_updates"][0]
-    assert answer_update["task_id"] == case["task"].id
-    assert answer_update["status"] == "needs_confirmation"
-    assert answer_update["question"] == confirmation_question
-    assert answer_update["answer_text"] == ""
-    assert answer_update["summaries"] == []
+    assert "answer_updates" not in workspace_response.json()
     confirmed = await client.post(
         f"/api/mobile/memoir/projects/{case['project_id']}"
         f"/book-source-review-items/{review_event.id}/confirm",
@@ -1380,11 +1371,20 @@ async def test_uncertain_completion_answer_waits_for_user_without_assignment_or_
     assert review_event is not None
     assert review_event.summary_text == confirmation_question
     assert review_event.metadata_json["route"]["followup_answer"]["status"] == "needs_confirmation"
+    confirmations = (
+        await chapter_answer_updates.pending_answer_confirmations_by_chapter(
+            test_db,
+            project_id=project_id,
+            chapter_ids=[chapter.id],
+        )
+    )
+    assert confirmations[chapter.id][0].task_id == task.id
+    assert confirmations[chapter.id][0].question == confirmation_question
     workspace_response = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
     )
     assert workspace_response.status_code == 200, workspace_response.json()
-    assert workspace_response.json()["answer_updates"] == []
+    assert "answer_updates" not in workspace_response.json()
 
     pending_review = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-source-review-items"

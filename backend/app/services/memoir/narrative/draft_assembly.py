@@ -178,11 +178,6 @@ async def _current_chapter_assembly(
     if not rows:
         raise ValueError("chapter has no structured draft blocks to assemble")
     if any(
-        block.editorial_status != MemoirDraftBlockEditorialStatus.CONFIRMED.value
-        for block, _, _ in rows
-    ):
-        raise ValueError("confirm every included draft block before assembling the chapter")
-    if any(
         block.freshness_status != MemoirDraftBlockFreshnessStatus.CURRENT.value
         for block, _, _ in rows
     ):

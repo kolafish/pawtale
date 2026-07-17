@@ -11,24 +11,16 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockFreshnessStatus,
     MemoirNarrativeActorType,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirEditingJob
 from app.models.memoir_narrative import MemoirDraftBlock
-from app.schemas.memoir_narrative import (
-    MemoirDraftBlockGenerationRequest,
-    MemoirDraftBlockJobResponse,
-    MemoirDraftBlockRevisionApplyRequest,
-    MemoirDraftBlockRevisionJobRequest,
-)
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import draft_block_queries, draft_blocks
+from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.narrative.draft_block_ai import (
     DraftBlockEditorialContextInput,
-    DraftBlockLLMOutput,
     generate_draft_block_text,
-    validate_generation_output,
 )
 from app.services.memoir.narrative.draft_generation_context import (
     build_node_generation_context,
@@ -41,8 +33,6 @@ from app.services.memoir.narrative.draft_editorial_contexts import (
 )
 
 
-JOB_MODE_GENERATE = "generate"
-JOB_MODE_REVISE = "revise"
 GENERATION_PRIORITY = {
     MemoirChapterNodeType.OPENING.value: 0,
     MemoirChapterNodeType.BACKGROUND.value: 1,
@@ -62,10 +52,6 @@ def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
-
-
-def job_response(job: MemoirEditingJob) -> MemoirDraftBlockJobResponse:
-    return MemoirDraftBlockJobResponse.model_validate(job)
 
 
 async def _load_verified_editorial_contexts(
@@ -88,30 +74,14 @@ async def _load_verified_editorial_contexts(
     return contexts
 
 
-async def load_draft_generation_job(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    job_id: str,
-) -> MemoirEditingJob:
-    job = await db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.id == job_id,
-            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_DRAFT_BLOCKS.value,
-        )
-    )
-    if job is None:
-        raise ValueError("draft block generation job does not belong to the project")
-    return job
-
-
 async def enqueue_chapter_block_generation(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
-    request: MemoirDraftBlockGenerationRequest,
+    ai_model: str | None = None,
+    editorial_guidance: list[str] | None = None,
+    source: str = "chapter_workspace",
 ) -> MemoirEditingJob:
     contract, _ = await load_current_contract_nodes(
         db,
@@ -124,11 +94,18 @@ async def enqueue_chapter_block_generation(
         chapter_id=chapter_id,
     )
     context_signature = editorial_context_signature(editorial_contexts)
+    guidance = list(
+        dict.fromkeys(
+            item.strip()
+            for item in (editorial_guidance or [])
+            if item.strip()
+        )
+    )[:12]
     signature_payload = {
         "contract_id": contract.id,
-        "node_ids": request.node_ids,
-        "ai_model": request.ai_model or "default",
+        "ai_model": ai_model or "default",
         "editorial_context_signature": context_signature,
+        "editorial_guidance": guidance,
     }
     return await enqueue_editing_job(
         db,
@@ -136,14 +113,13 @@ async def enqueue_chapter_block_generation(
         chapter_id=chapter_id,
         job_type=MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,
         payload_json={
-            "mode": JOB_MODE_GENERATE,
             "chapter_id": chapter_id,
             "contract_id": contract.id,
-            "node_ids": request.node_ids,
-            "ai_model": request.ai_model,
+            "ai_model": ai_model,
             "editorial_context_signature": context_signature,
+            "editorial_guidance": guidance,
             "input_signature": _signature(signature_payload),
-            "source": "chapter_workspace",
+            "source": source,
         },
         dedupe_key=(
             f"generate-draft-blocks:{project_id}:{chapter_id}:"
@@ -154,60 +130,11 @@ async def enqueue_chapter_block_generation(
     )
 
 
-async def enqueue_block_revision(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    block_id: str,
-    request: MemoirDraftBlockRevisionJobRequest,
-) -> MemoirEditingJob:
-    block = await draft_block_queries.load_block(db, project_id=project_id, block_id=block_id)
-    if block.current_version_id != request.expected_current_version_id:
-        raise ValueError("draft block changed concurrently; reload and retry")
-    if block.locked:
-        raise ValueError("unlock the draft block before requesting a revision")
-    editorial_contexts = await load_chapter_editorial_contexts(
-        db,
-        project_id=project_id,
-        chapter_id=block.chapter_id,
-    )
-    context_signature = editorial_context_signature(editorial_contexts)
-    signature_payload = {
-        "block_id": block.id,
-        "current_version_id": block.current_version_id,
-        "feedback": request.feedback,
-        "ai_model": request.ai_model or "default",
-        "editorial_context_signature": context_signature,
-    }
-    return await enqueue_editing_job(
-        db,
-        project_id=project_id,
-        chapter_id=block.chapter_id,
-        job_type=MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,
-        payload_json={
-            "mode": JOB_MODE_REVISE,
-            "chapter_id": block.chapter_id,
-            "block_id": block.id,
-            "expected_current_version_id": block.current_version_id,
-            "feedback": request.feedback,
-            "ai_model": request.ai_model,
-            "editorial_context_signature": context_signature,
-            "input_signature": _signature(signature_payload),
-            "source": "chapter_workspace",
-        },
-        dedupe_key=(
-            f"revise-draft-block:{project_id}:{block.id}:"
-            f"{_signature(signature_payload)}"
-        ),
-        retry_failed=True,
-    )
-
-
-async def _run_initial_generation(
+async def run_draft_block_generation_job(
     db: AsyncSession,
     job: MemoirEditingJob,
     *,
-    ai_client: AITextClient | None,
+    ai_client: AITextClient | None = None,
 ) -> EditingJobResult:
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     chapter_id = str(payload.get("chapter_id") or job.chapter_id or "").strip()
@@ -224,10 +151,11 @@ async def _run_initial_generation(
         chapter_id=chapter_id,
         payload=payload,
     )
-    selected_nodes = select_generation_nodes(
-        nodes,
-        requested_node_ids=_string_list(payload.get("node_ids")),
+    editorial_guidance = _string_list(payload.get("editorial_guidance"))
+    editorial_feedback = "\n".join(
+        f"- {item}" for item in editorial_guidance
     )
+    selected_nodes = select_generation_nodes(nodes)
     if not selected_nodes:
         raise ValueError("the current chapter direction has no ready nodes")
     existing_blocks = list(
@@ -287,7 +215,6 @@ async def _run_initial_generation(
     if not nodes_to_generate:
         return EditingJobResult(
             result_json={
-                "mode": JOB_MODE_GENERATE,
                 "chapter_id": chapter_id,
                 "contract_id": contract.id,
                 "created_block_ids": [],
@@ -316,6 +243,7 @@ async def _run_initial_generation(
             nodes=nodes,
             node=node,
             editorial_contexts=editorial_contexts,
+            feedback=editorial_feedback,
         )
         generated = await generate_draft_block_text(client, context=context.ai_input)
         claims, stories = context.sources_for_claims(generated.used_claim_ids)
@@ -368,7 +296,6 @@ async def _run_initial_generation(
     ]
     return EditingJobResult(
         result_json={
-            "mode": JOB_MODE_GENERATE,
             "chapter_id": chapter_id,
             "contract_id": contract.id,
             "created_block_ids": created_block_ids,
@@ -378,157 +305,3 @@ async def _run_initial_generation(
             "model": getattr(client, "model_name", None),
         }
     )
-
-
-async def _run_revision_generation(
-    db: AsyncSession,
-    job: MemoirEditingJob,
-    *,
-    ai_client: AITextClient | None,
-) -> EditingJobResult:
-    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    block_id = str(payload.get("block_id") or "").strip()
-    expected_version_id = str(payload.get("expected_current_version_id") or "").strip()
-    block = await draft_block_queries.load_block(
-        db,
-        project_id=job.project_id,
-        block_id=block_id,
-    )
-    if block.current_version_id != expected_version_id:
-        raise ValueError("draft block changed after the revision job was queued")
-    if block.locked:
-        raise ValueError("locked draft block cannot be revised by an automatic task")
-    contract, nodes = await load_current_contract_nodes(
-        db,
-        project_id=job.project_id,
-        chapter_id=block.chapter_id,
-    )
-    editorial_contexts = await _load_verified_editorial_contexts(
-        db,
-        project_id=job.project_id,
-        chapter_id=block.chapter_id,
-        payload=payload,
-    )
-    node = next((item for item in nodes if item.id == block.node_id), None)
-    if node is None:
-        raise ValueError("draft block node is not part of the current chapter direction")
-    context = await build_node_generation_context(
-        db,
-        project_id=job.project_id,
-        contract=contract,
-        nodes=nodes,
-        node=node,
-        feedback=str(payload.get("feedback") or ""),
-        editorial_contexts=editorial_contexts,
-    )
-    client = ai_client or get_ai_service(
-        str(payload.get("ai_model") or "").strip() or None
-    )
-    generated = await generate_draft_block_text(client, context=context.ai_input)
-    claims, stories = context.sources_for_claims(generated.used_claim_ids)
-    return EditingJobResult(
-        result_json={
-            "mode": JOB_MODE_REVISE,
-            "chapter_id": block.chapter_id,
-            "block_id": block.id,
-            "expected_current_version_id": expected_version_id,
-            "content": generated.content,
-            "used_claim_ids": generated.used_claim_ids,
-            "claim_sources": [item.model_dump(mode="json") for item in claims],
-            "story_sources": [item.model_dump(mode="json") for item in stories],
-            "prompt_snapshot": generated.prompt_snapshot,
-            "feedback": str(payload.get("feedback") or ""),
-            "model": getattr(client, "model_name", None),
-            "editorial_context_signature": payload.get(
-                "editorial_context_signature"
-            ),
-        }
-    )
-
-
-async def run_draft_block_generation_job(
-    db: AsyncSession,
-    job: MemoirEditingJob,
-    *,
-    ai_client: AITextClient | None = None,
-) -> EditingJobResult:
-    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    mode = str(payload.get("mode") or "").strip()
-    if mode == JOB_MODE_GENERATE:
-        return await _run_initial_generation(db, job, ai_client=ai_client)
-    if mode == JOB_MODE_REVISE:
-        return await _run_revision_generation(db, job, ai_client=ai_client)
-    raise ValueError("draft block generation job has an invalid mode")
-
-
-async def apply_generated_revision(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    block_id: str,
-    request: MemoirDraftBlockRevisionApplyRequest,
-) -> MemoirDraftBlock:
-    job = await load_draft_generation_job(
-        db,
-        project_id=project_id,
-        job_id=request.generation_job_id,
-    )
-    if job.status != MemoirEditingJobStatus.SUCCEEDED.value:
-        raise ValueError("draft block revision job has not succeeded")
-    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    result = job.result_json if isinstance(job.result_json, dict) else {}
-    if payload.get("mode") != JOB_MODE_REVISE or result.get("mode") != JOB_MODE_REVISE:
-        raise ValueError("generation job is not a draft block revision")
-    if result.get("block_id") != block_id:
-        raise ValueError("generation job belongs to a different draft block")
-    expected_version_id = str(result.get("expected_current_version_id") or "").strip()
-    if request.expected_current_version_id != expected_version_id:
-        raise ValueError("revision suggestion was generated from a different block version")
-    block = await draft_block_queries.load_block(db, project_id=project_id, block_id=block_id)
-    if block.current_version_id != request.expected_current_version_id:
-        raise ValueError("draft block changed concurrently; reload and retry")
-    contract, nodes = await load_current_contract_nodes(
-        db,
-        project_id=project_id,
-        chapter_id=block.chapter_id,
-    )
-    editorial_contexts = await _load_verified_editorial_contexts(
-        db,
-        project_id=project_id,
-        chapter_id=block.chapter_id,
-        payload=payload,
-    )
-    node = next((item for item in nodes if item.id == block.node_id), None)
-    if node is None:
-        raise ValueError("draft block node is not part of the current chapter direction")
-    context = await build_node_generation_context(
-        db,
-        project_id=project_id,
-        contract=contract,
-        nodes=nodes,
-        node=node,
-        feedback=str(result.get("feedback") or ""),
-        editorial_contexts=editorial_contexts,
-    )
-    used_claim_ids = _string_list(result.get("used_claim_ids"))
-    output = DraftBlockLLMOutput(
-        content=str(result.get("content") or ""),
-        used_claim_ids=used_claim_ids,
-        unsupported_fact_candidates=[],
-    )
-    validate_generation_output(context.ai_input, output)
-    claims, stories = context.sources_for_claims(used_claim_ids)
-    await draft_blocks.append_version(
-        db,
-        block=block,
-        expected_current_version_id=request.expected_current_version_id,
-        content=output.content,
-        created_by=MemoirNarrativeActorType.AI,
-        claims=claims,
-        stories=stories,
-        model=str(result.get("model") or "").strip() or None,
-        prompt_snapshot=str(result.get("prompt_snapshot") or ""),
-        feedback=str(result.get("feedback") or "").strip() or None,
-        sources_refreshed=True,
-    )
-    return block

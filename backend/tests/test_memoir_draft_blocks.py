@@ -184,7 +184,7 @@ def _story_source(created: dict) -> MemoirDraftBlockStorySource:
     )
 
 
-async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
+async def test_factual_block_keeps_sources_across_manual_versions_and_legacy_unlock(
     client,
     test_db,
 ):
@@ -230,42 +230,15 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     )
     assert [item.id for item in audit_context.draft_blocks] == [block.id]
     assert audit_context.draft_blocks[0].content == "十八岁那年，我第一次离开家乡。"
-
-    stale_confirmation = await client.post(
-        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/confirm",
-        json={
-            "idempotency_key": "confirm-stale-version",
-            "reason": "simulated race",
-            "expected_current_version_id": "00000000-0000-0000-0000-000000000000",
-        },
-    )
-    assert stale_confirmation.status_code == 409
-
-    confirmed = await client.post(
-        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/confirm",
-        json={
-            "idempotency_key": "confirm-block-1",
-            "reason": "内容准确",
-            "expected_current_version_id": initial_version_id,
-        },
-    )
-    assert confirmed.status_code == 200, confirmed.text
-    locked = await client.post(
-        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/lock",
-        json={
-            "idempotency_key": "lock-block-1",
-            "reason": "保留本人措辞",
-            "expected_current_version_id": initial_version_id,
-        },
-    )
-    assert locked.status_code == 200, locked.text
-    current_version_id = locked.json()["current_version_id"]
+    block.locked = True
+    test_db.add(block)
+    await test_db.commit()
 
     try:
         await draft_blocks.append_version(
             test_db,
             block=block,
-            expected_current_version_id=current_version_id,
+            expected_current_version_id=str(initial_version_id),
             content="后台不应覆盖这段文字。",
             created_by=MemoirNarrativeActorType.AI,
             claims=[claim_source],
@@ -275,6 +248,27 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
         raise AssertionError("locked block accepted an automatic revision")
     except ValueError as exc:
         assert "locked draft block" in str(exc)
+
+    stale_unlock = await client.post(
+        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/unlock",
+        json={
+            "idempotency_key": "unlock-stale-version",
+            "reason": "simulated race",
+            "expected_current_version_id": "00000000-0000-0000-0000-000000000000",
+        },
+    )
+    assert stale_unlock.status_code == 409
+
+    unlocked = await client.post(
+        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/unlock",
+        json={
+            "idempotency_key": "unlock-block-1",
+            "reason": "迁移到整章确认",
+            "expected_current_version_id": initial_version_id,
+        },
+    )
+    assert unlocked.status_code == 200, unlocked.text
+    current_version_id = unlocked.json()["current_version_id"]
     edited = await client.post(
         f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/manual-revisions",
         json={
@@ -288,7 +282,7 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     assert body["node_id"] == node_id
     assert "legacy_draft_id" not in body
     assert "legacy_draft_version_id" not in body["current_version"]
-    assert body["locked"] is True
+    assert body["locked"] is False
     assert body["editorial_status"] == MemoirDraftBlockEditorialStatus.DRAFT.value
     assert body["version_count"] == 2
     assert body["current_version"]["claims"] == [
@@ -299,16 +293,21 @@ async def test_factual_block_keeps_sources_across_manual_versions_and_locking(
     ]
     assert body["current_version"]["stories"][0]["story_revision_id"] == revision_id
 
-    history = await client.get(
-        f"/api/memoir/projects/{created['project_id']}/draft-blocks/{block_id}/versions"
+    history = list(
+        (
+            await test_db.scalars(
+                select(MemoirDraftBlockVersion)
+                .where(MemoirDraftBlockVersion.block_id == block_id)
+                .order_by(MemoirDraftBlockVersion.version.desc())
+            )
+        ).all()
     )
-    assert history.status_code == 200, history.text
-    assert [item["version"] for item in history.json()] == [2, 1]
+    assert [item.version for item in history] == [2, 1]
 
     with pytest.raises(IntegrityError, match="draft block versions are immutable"):
         await test_db.execute(
             update(MemoirDraftBlockVersion)
-            .where(MemoirDraftBlockVersion.id == history.json()[-1]["id"])
+            .where(MemoirDraftBlockVersion.id == history[-1].id)
             .values(content="试图篡改旧版本")
         )
     await test_db.rollback()
@@ -335,25 +334,9 @@ async def test_claim_staleness_only_marks_current_versions_with_that_claim(
                 stories=[_story_source(created)],
             )
         )
-    await draft_blocks.confirm_block(
-        test_db,
-        project_id=created["project_id"],
-        block_id=blocks[0].id,
-        expected_current_version_id=str(blocks[0].current_version_id),
-        actor_user_id=created["user_id"],
-        idempotency_key="confirm-stale-block",
-        reason="verified",
-    )
-    await draft_blocks.set_block_locked(
-        test_db,
-        project_id=created["project_id"],
-        block_id=blocks[0].id,
-        expected_current_version_id=str(blocks[0].current_version_id),
-        locked=True,
-        actor_user_id=created["user_id"],
-        idempotency_key="lock-stale-block",
-        reason="keep wording",
-    )
+    blocks[0].editorial_status = MemoirDraftBlockEditorialStatus.CONFIRMED.value
+    blocks[0].locked = True
+    test_db.add(blocks[0])
     await test_db.commit()
 
     changed = await draft_blocks.mark_blocks_stale_for_claim(
