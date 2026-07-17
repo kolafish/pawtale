@@ -4,7 +4,7 @@
 
 这是回忆录小程序的新主线文档。此前的固定问题、整段录音上传、离线转写、整理稿确认路线只作为 legacy 参考，不再作为下一阶段产品目标。
 
-回忆录“事实命题、跨访谈故事、章节契约、成书缺口、补访任务和结构化正文块”的下一阶段设计统一由 [回忆录叙事架构与成书质量演进方案](MEMOIR_NARRATIVE_ARCHITECTURE.md) 约束。本文继续负责实时录音、Streaming ASR、LLM 动态追问、Streaming TTS 和 voice session 状态机；不在本文重复维护叙事领域模型和成书 PR 计划。
+回忆录“事实命题、跨访谈故事、成书补全项和整章正文”的设计统一由 [回忆录事实与成书架构](MEMOIR_NARRATIVE_ARCHITECTURE.md) 约束。本文继续负责实时录音、Streaming ASR、LLM 动态追问、Streaming TTS 和 voice session 状态机；不在本文重复维护叙事领域模型和成书 PR 计划。
 
 项目级结构化访谈框架、`guided_interview` 的持久覆盖状态、统一 InterviewBrief，以及成书补全的下一轮收敛由 [回忆录结构化访谈与成书补全重构规划](MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md) 约束。本文只负责它们共同复用的实时语音基础能力。
 
@@ -86,8 +86,8 @@ miniprogram/services/tts-settings.ts          # 小程序本地 TTS 音色偏好
 miniprogram/domain/voice-chat.ts              # 新版聊天消息和实时事件类型
 backend/app/routers/memoir/book.py            # 成书章节规划、章节稿、全书稿和朗读 mobile API
 backend/app/services/memoir/book_plans.py     # 章节规划生成、确认和 source ref 校验
-backend/app/services/memoir/narrative/draft_blocks.py # 基于事实节点生成、确认正文块
-backend/app/services/memoir/narrative/draft_assembly.py # 已确认正文块组装章节与全书投影
+backend/app/services/memoir/narrative/draft_generation_jobs.py # 基于 Story/Claim/Evidence 生成整章正文
+backend/app/services/memoir/narrative/book_output_assembly.py # 已确认整章正文组装全书投影
 backend/app/services/memoir/book_drafts.py    # 章节投影读取、确认和朗读
 backend/app/services/memoir/book_outputs.py   # 全书投影读取、编辑性文案、导出和朗读
 backend/app/services/memoir/book_audio.py     # 章节/全书 TTS 文本分片、缓存和音频落库
@@ -421,7 +421,7 @@ SourceRoutingDecision
 └─ evidence_summary
 ```
 
-只有高置信度 `assign_to_chapter` 才自动写入章节 source refs，并触发叙事摄取、章节完整度重算和受影响 DraftBlock 的 stale 传播。明显切换话题、信息过短或不确定时只能进入待确认或候选章节，不自动删除原始记录，也不自动重写整章。
+只有高置信度 `assign_to_chapter` 才自动写入章节 SourceLink，并触发叙事摄取、章节补全重算和整章草稿失效。明显切换话题、信息过短或不确定时只能进入待确认或候选章节，不自动删除原始记录，也不自动重写整章。
 
 ### Book Quality Audit
 
@@ -551,7 +551,7 @@ memoir_voice_utterances_fts
 
 FTS 使用 `trigram` tokenizer，适合中文三字以上片段检索；两字或更短的中文关键词仍保留普通 `LIKE` fallback，避免“外婆”“老师”这类常见短词搜不到。FTS 表通过 SQLite trigger 跟随 `memoir_voice_utterances` 的 insert/update/delete 自动同步。
 
-`memoir_transcript_versions` 当前只保留必要追溯窗口：每条转写记录、每种 `version_type` 最多保留最近 3 个版本。写入新版本时必须设置 `source_artifact_id = utterance.id`，再裁剪同一 `source_artifact_id + version_type` 下更旧的版本。`memoir_voice_utterances.transcript_raw` 和 `transcript_edited` 仍保存当前可展示文本，成书证据链继续引用当前有效转写记录和音频时间段。叙事架构落地 `ClaimEvidence` 后，被 Claim、DraftBlock 历史版本或正式书稿引用的 transcript version 必须 pin 并排除在裁剪范围之外，具体由叙事架构文档约束。
+`memoir_transcript_versions` 当前只保留必要追溯窗口：每条转写记录、每种 `version_type` 最多保留最近 3 个版本。写入新版本时必须设置 `source_artifact_id = utterance.id`，再裁剪同一 `source_artifact_id + version_type` 下更旧的版本。`memoir_voice_utterances.transcript_raw` 和 `transcript_edited` 仍保存当前可展示文本，成书证据链继续引用当前有效转写记录和音频时间段。被 ClaimEvidence 或正式书稿证据链引用的 transcript version 必须 pin 并排除在裁剪范围之外，具体由叙事架构文档约束。
 
 ### PostgreSQL Migration Roadmap
 
@@ -714,7 +714,7 @@ AI 下一轮追问当前走单独的 WebSocket：
    - 所有判断写入 automation event，保证能解释和回溯。
 
 5. PR 5: Auto Assignment To Auto Revision
-   - 把 PR 4 的高置信度归章结果接到叙事摄取、完整度重算和 DraftBlock stale 传播；不再触发整章自动重写。
+   - 把 PR 4 的高置信度归章结果接到叙事摄取、补全重算和整章草稿失效；不在归章事务中同步重写正文。
    - 自动归章后触发章节补写，并把补写完成事件暴露给成书页和 AI 访谈。
    - 支持 AI 播报“新增记录已补进某章”这类具体进展。
 

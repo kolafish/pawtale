@@ -48,7 +48,6 @@ from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution
 from app.services.memoir import source_cards
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
-from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
@@ -1027,11 +1026,6 @@ async def _sync_included_transcript_edit(
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
         draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
         db.add(draft)
-    await draft_blocks.mark_chapter_blocks_stale(
-        db,
-        project_id=project_id,
-        chapter_ids=changed_chapter_ids,
-    )
     return changed_chapter_ids
 
 

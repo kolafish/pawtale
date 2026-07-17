@@ -21,11 +21,10 @@ from app.schemas.memoir_narrative import (
     MemoirStoryClaimsAttachRequest,
     MemoirStoryCreate,
     MemoirStoryCreateRequest,
-    MemoirStoryMergeRequest,
     MemoirStoryResponse,
     MemoirStorySummaryResponse,
 )
-from app.services.memoir.narrative import stories, story_decisions, story_merging
+from app.services.memoir.narrative import stories, story_decisions
 
 from .common import authorize_project, decision_error
 
@@ -92,7 +91,6 @@ async def create_memoir_story(
                     created_by=MemoirNarrativeActorType.USER,
                     created_by_user_id=current_user.id,
                 ),
-                reason=req.reason,
             )
         await db.commit()
         return await stories.story_response(db, story=story)
@@ -146,7 +144,6 @@ async def attach_memoir_story_claims(
             claims=req.claims,
             actor_type=MemoirNarrativeActorType.USER,
             actor_user_id=current_user.id,
-            reason=req.reason,
         )
         await db.commit()
         return await stories.story_response(db, story=story)
@@ -222,35 +219,6 @@ async def reject_memoir_story(
         current_user=current_user,
         confirmed=False,
     )
-
-
-@router.post(
-    "/projects/{project_id}/stories/{story_id}/merge",
-    response_model=MemoirNarrativeDecisionResponse,
-)
-async def merge_memoir_story(
-    project_id: str,
-    story_id: str,
-    req: MemoirStoryMergeRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    try:
-        decision = await story_merging.merge_stories(
-            db,
-            project_id=project_id,
-            source_story_id=story_id,
-            retained_story_id=req.retained_story_id,
-            actor_user_id=current_user.id,
-            idempotency_key=req.idempotency_key,
-            reason=req.reason,
-        )
-        await db.commit()
-        return decision
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
 
 
 async def _decide_story_publication(

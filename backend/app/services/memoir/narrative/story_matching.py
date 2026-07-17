@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirStoryLifecycleStatus,
-    MemoirStoryRevisionChangeType,
     MemoirStoryVerificationStatus,
 )
 from app.models.memoir_narrative import MemoirStory, MemoirStoryClaim
@@ -159,8 +158,6 @@ async def resolve_extracted_story(
     claim_ids: set[str],
     force_needs_verification: bool = False,
     created_by: MemoirNarrativeActorType = MemoirNarrativeActorType.AI,
-    creation_change_type: MemoirStoryRevisionChangeType = MemoirStoryRevisionChangeType.CREATED,
-    creation_reason: str = "story candidate extracted from transcript evidence",
     allow_existing_story_reuse: bool = True,
     preferred_story_id: str | None = None,
 ) -> tuple[MemoirStory, tuple[str, ...], bool]:
@@ -252,16 +249,6 @@ async def resolve_extracted_story(
     existing = await repository.get(project_id=project_id, story_id=deterministic_id)
     if existing:
         _validate_deterministic_story_identity(existing, candidate)
-        if (
-            existing.lifecycle_status == MemoirStoryLifecycleStatus.MERGED.value
-            and existing.merged_into_story_id
-        ):
-            retained = await repository.get(
-                project_id=project_id,
-                story_id=existing.merged_into_story_id,
-            )
-            if retained is not None:
-                return retained, (), False
         return existing, tuple(review_candidate_ids), False
 
     try:
@@ -285,8 +272,6 @@ async def resolve_extracted_story(
                     created_by=created_by,
                 ),
                 story_id=deterministic_id,
-                change_type=creation_change_type,
-                reason=creation_reason,
             )
     except IntegrityError:
         concurrent = await repository.get(project_id=project_id, story_id=deterministic_id)

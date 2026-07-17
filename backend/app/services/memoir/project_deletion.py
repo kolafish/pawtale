@@ -24,7 +24,6 @@ from app.models.memoir import (
 from app.models.memoir_common import AudioFile
 from app.models.memoir_narrative import (
     MemoirCompletionItem,
-    MemoirDraftBlock,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
 )
@@ -180,12 +179,6 @@ async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
         .where(MemoirBookOutput.project_id == project_id)
         .values(formal_version_id=None, formal_audit_job_id=None)
     )
-    await db.execute(
-        update(MemoirDraftBlock)
-        .where(MemoirDraftBlock.project_id == project_id)
-        .values(current_version_id=None)
-    )
-
     for table in reversed(Base.metadata.sorted_tables):
         if (
             not table.name.startswith("memoir_")

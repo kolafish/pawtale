@@ -108,8 +108,6 @@ class MemoirNarrativeDecisionTargetType(str, Enum):
     CLAIM = "claim"
     STORY = "story"
     COMPLETION_ITEM = "completion_item"
-    CHAPTER_CONTRACT = "chapter_contract"
-    DRAFT_BLOCK = "draft_block"
 
 
 class MemoirNarrativeDecisionAction(str, Enum):
@@ -120,8 +118,6 @@ class MemoirNarrativeDecisionAction(str, Enum):
     RESOLVE = "resolve"
     EXCLUDE = "exclude"
     MARK_PRIVATE = "mark_private"
-    LOCK = "lock"
-    UNLOCK = "unlock"
     NEEDS_REVIEW = "needs_review"
     UNABLE_TO_ANSWER = "unable_to_answer"
     STOP_ASKING = "stop_asking"
@@ -136,7 +132,6 @@ class MemoirStoryType(str, Enum):
 
 class MemoirStoryLifecycleStatus(str, Enum):
     ACTIVE = "active"
-    MERGED = "merged"
     ARCHIVED = "archived"
 
 
@@ -162,78 +157,6 @@ class MemoirStoryNarrativeRole(str, Enum):
     OUTCOME = "outcome"
     REFLECTION = "reflection"
     CONTEXT = "context"
-
-
-class MemoirStoryRevisionChangeType(str, Enum):
-    CREATED = "created"
-    CLAIMS_UPDATED = "claims_updated"
-    NEEDS_REVIEW = "needs_review"
-    CONFIRMED = "confirmed"
-    REJECTED = "rejected"
-    MERGED = "merged"
-    PUBLICATION_CHANGED = "publication_changed"
-    BACKFILL_CANDIDATE = "backfill_candidate"
-
-
-class MemoirChapterContractStatus(str, Enum):
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    SUPERSEDED = "superseded"
-
-
-class MemoirChapterNodeType(str, Enum):
-    OPENING = "opening"
-    BACKGROUND = "background"
-    STORY = "story"
-    TRANSITION = "transition"
-    REFLECTION = "reflection"
-    CLOSING = "closing"
-
-
-class MemoirChapterNodeStatus(str, Enum):
-    PLANNED = "planned"
-    READY = "ready"
-    NEEDS_WORK = "needs_work"
-    EXCLUDED = "excluded"
-
-
-class MemoirChapterNodeStoryRole(str, Enum):
-    PRIMARY = "primary"
-    SUPPORTING = "supporting"
-    CONTRAST = "contrast"
-    TRANSITION_CONTEXT = "transition_context"
-
-
-class MemoirDraftBlockRole(str, Enum):
-    FACTUAL = "factual"
-    TRANSITION = "transition"
-    REFLECTION = "reflection"
-    OPENING = "opening"
-    CLOSING = "closing"
-
-
-class MemoirDraftBlockEditorialStatus(str, Enum):
-    DRAFT = "draft"
-    CONFIRMED = "confirmed"
-    EXCLUDED = "excluded"
-
-
-class MemoirDraftBlockFreshnessStatus(str, Enum):
-    CURRENT = "current"
-    STALE = "stale"
-
-
-class MemoirDraftBlockClaimUsageRole(str, Enum):
-    CORE = "core"
-    CONTEXT = "context"
-    DETAIL = "detail"
-    QUOTED = "quoted"
-
-
-class MemoirDraftBlockStoryUsageRole(str, Enum):
-    PRIMARY = "primary"
-    SUPPORTING = "supporting"
-    CONTRAST = "contrast"
 
 
 class MemoirNarrativeGapScopeType(str, Enum):

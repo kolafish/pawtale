@@ -11,7 +11,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeDecisionTargetType,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
-    MemoirStoryRevisionChangeType,
     MemoirStoryVerificationStatus,
 )
 from app.models.memoir_narrative import (
@@ -21,7 +20,7 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
 )
-from app.services.memoir.narrative import decision_log, story_revisions
+from app.services.memoir.narrative import chapter_draft_state, decision_log
 
 
 def story_state(story: MemoirStory) -> dict[str, object]:
@@ -29,7 +28,6 @@ def story_state(story: MemoirStory) -> dict[str, object]:
         "lifecycle_status": story.lifecycle_status,
         "verification_status": story.verification_status,
         "publication_status": story.publication_status,
-        "merged_into_story_id": story.merged_into_story_id,
         "version": story.version,
     }
 
@@ -91,7 +89,6 @@ async def mark_story_needs_review(
     if existing is not None:
         return existing
     before = story_state(story)
-    before_snapshot = await story_revisions.story_snapshot(db, story)
     status_changed = False
     if story.verification_status not in {
         MemoirStoryVerificationStatus.CONFIRMED.value,
@@ -105,16 +102,13 @@ async def mark_story_needs_review(
             story.verification_status = MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value
             story.updated_by = MemoirNarrativeActorType.SYSTEM.value
             story.updated_by_user_id = None
+            story.version += 1
             db.add(story)
             await db.flush()
-            await story_revisions.record_story_revision(
+            await chapter_draft_state.mark_chapter_drafts_stale_for_story(
                 db,
-                story=story,
-                before_state=before_snapshot,
-                change_type=MemoirStoryRevisionChangeType.NEEDS_REVIEW,
-                actor_type=MemoirNarrativeActorType.SYSTEM,
-                actor_user_id=None,
-                reason=reason,
+                project_id=story.project_id,
+                story_id=story.id,
             )
     return await decision_log.record_decision(
         db,
@@ -176,7 +170,6 @@ async def decide_story_verification(
             raise ValueError(
                 "story requires a core claim with supporting evidence before confirmation"
             )
-    before_snapshot = await story_revisions.story_snapshot(db, story)
     before = story_state(story)
     story.verification_status = (
         MemoirStoryVerificationStatus.CONFIRMED.value
@@ -186,20 +179,13 @@ async def decide_story_verification(
     story.verification_decided_by_user_id = actor_user_id
     story.updated_by = MemoirNarrativeActorType.USER.value
     story.updated_by_user_id = actor_user_id
+    story.version += 1
     db.add(story)
     await db.flush()
-    await story_revisions.record_story_revision(
+    await chapter_draft_state.mark_chapter_drafts_stale_for_story(
         db,
-        story=story,
-        before_state=before_snapshot,
-        change_type=(
-            MemoirStoryRevisionChangeType.CONFIRMED
-            if confirmed
-            else MemoirStoryRevisionChangeType.REJECTED
-        ),
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        reason=reason,
+        project_id=project_id,
+        story_id=story_id,
     )
     return await decision_log.record_decision(
         db,
@@ -255,22 +241,18 @@ async def decide_story_publication(
         raise ValueError("story does not belong to the project")
     if story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value:
         raise ValueError("only an active story publication can be changed")
-    before_snapshot = await story_revisions.story_snapshot(db, story)
     before = story_state(story)
     story.publication_status = publication_status.value
     story.publication_decided_by_user_id = actor_user_id
     story.updated_by = MemoirNarrativeActorType.USER.value
     story.updated_by_user_id = actor_user_id
+    story.version += 1
     db.add(story)
     await db.flush()
-    await story_revisions.record_story_revision(
+    await chapter_draft_state.mark_chapter_drafts_stale_for_story(
         db,
-        story=story,
-        before_state=before_snapshot,
-        change_type=MemoirStoryRevisionChangeType.PUBLICATION_CHANGED,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        reason=reason,
+        project_id=project_id,
+        story_id=story_id,
     )
     return await decision_log.record_decision(
         db,

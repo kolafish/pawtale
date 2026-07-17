@@ -55,7 +55,6 @@ from app.services.memoir.chapter_source_links import (
 from app.services.memoir.project_ai_preferences import (
     remember_project_ai_model as _remember_project_ai_model,
 )
-from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
 
 
@@ -83,11 +82,6 @@ async def _mark_chapter_drafts_sources_changed(
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
         draft.metadata_json = _draft_status_metadata(draft.metadata_json, status_reason)
         db.add(draft)
-    await draft_blocks.mark_chapter_blocks_stale(
-        db,
-        project_id=project_id,
-        chapter_ids=chapter_ids,
-    )
 
 
 async def get_book_source_coverage(

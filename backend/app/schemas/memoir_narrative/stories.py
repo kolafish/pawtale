@@ -70,7 +70,6 @@ class MemoirStoryCreateRequest(BaseModel):
     time_precision: MemoirClaimTimePrecision = MemoirClaimTimePrecision.UNKNOWN
     primary_place_entity_id: str | None = Field(default=None, min_length=1, max_length=36)
     idempotency_key: str = Field(min_length=1, max_length=160)
-    reason: str = Field(default="", max_length=1000)
 
     @field_validator("title")
     @classmethod
@@ -80,7 +79,7 @@ class MemoirStoryCreateRequest(BaseModel):
             raise ValueError("story title must not be blank")
         return stripped
 
-    @field_validator("summary", "reason")
+    @field_validator("summary")
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
@@ -107,15 +106,6 @@ class MemoirStoryClaimsAttachRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     claims: list[MemoirStoryClaimInput] = Field(min_length=1, max_length=50)
-    reason: str = Field(default="", max_length=1000)
-
-
-class MemoirStoryMergeRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    retained_story_id: str = Field(min_length=1, max_length=36)
-    idempotency_key: str = Field(min_length=1, max_length=160)
-    reason: str = Field(default="", max_length=1000)
 
 
 class MemoirStoryClaimLinkResponse(BaseModel):
@@ -126,20 +116,6 @@ class MemoirStoryClaimLinkResponse(BaseModel):
     narrative_role: str
     sort_order: int
     is_core: bool
-
-
-class MemoirStoryRevisionResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    story_version: int
-    change_type: str
-    before_state_json: dict
-    after_state_json: dict
-    reason: str
-    created_by: str
-    created_by_user_id: str | None
-    created_at: datetime
 
 
 class MemoirStorySummaryResponse(BaseModel):
@@ -157,11 +133,9 @@ class MemoirStorySummaryResponse(BaseModel):
     lifecycle_status: str
     verification_status: str
     publication_status: str
-    merged_into_story_id: str | None
     version: int
     updated_at: datetime
 
 
 class MemoirStoryResponse(MemoirStorySummaryResponse):
     claims: list[MemoirStoryClaimLinkResponse] = Field(default_factory=list)
-    revisions: list[MemoirStoryRevisionResponse] = Field(default_factory=list)

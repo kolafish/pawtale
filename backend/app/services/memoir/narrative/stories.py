@@ -6,13 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirStoryLifecycleStatus,
-    MemoirStoryRevisionChangeType,
 )
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStoryRevision,
 )
 from app.repositories.memoir_narrative import MemoirStoryRepository
 from app.schemas.memoir_narrative import (
@@ -20,10 +18,8 @@ from app.schemas.memoir_narrative import (
     MemoirStoryClaimLinkResponse,
     MemoirStoryCreate,
     MemoirStoryResponse,
-    MemoirStoryRevisionResponse,
     MemoirStorySummaryResponse,
 )
-from app.services.memoir.narrative import story_revisions
 
 
 async def create_story(
@@ -31,19 +27,8 @@ async def create_story(
     *,
     data: MemoirStoryCreate,
     story_id: str | None = None,
-    change_type: MemoirStoryRevisionChangeType = MemoirStoryRevisionChangeType.CREATED,
-    reason: str = "",
 ) -> MemoirStory:
-    story = await MemoirStoryRepository(db).create(data, story_id=story_id)
-    await story_revisions.create_initial_story_revision(
-        db,
-        story=story,
-        change_type=change_type,
-        actor_type=data.created_by,
-        actor_user_id=data.created_by_user_id,
-        reason=reason,
-    )
-    return story
+    return await MemoirStoryRepository(db).create(data, story_id=story_id)
 
 
 async def attach_claims_to_story(
@@ -53,7 +38,6 @@ async def attach_claims_to_story(
     claims: list[MemoirStoryClaimInput],
     actor_type: MemoirNarrativeActorType,
     actor_user_id: str | None,
-    reason: str,
 ) -> bool:
     if story.lifecycle_status != MemoirStoryLifecycleStatus.ACTIVE.value:
         raise ValueError("claims can only be attached to an active story")
@@ -73,7 +57,6 @@ async def attach_claims_to_story(
     if project_claim_ids != requested_claim_ids:
         raise ValueError("story claims must belong to the same project")
 
-    before = await story_revisions.story_snapshot(db, story)
     existing = {
         link.claim_id: link
         for link in (
@@ -116,16 +99,11 @@ async def attach_claims_to_story(
             changed = True
     if not changed:
         return False
+    story.version += 1
+    story.updated_by = actor_type.value
+    story.updated_by_user_id = actor_user_id
+    db.add(story)
     await db.flush()
-    await story_revisions.record_story_revision(
-        db,
-        story=story,
-        before_state=before,
-        change_type=MemoirStoryRevisionChangeType.CLAIMS_UPDATED,
-        actor_type=actor_type,
-        actor_user_id=actor_user_id,
-        reason=reason,
-    )
     return True
 
 
@@ -146,27 +124,11 @@ async def story_response(
             )
         ).all()
     )
-    revisions = list(
-        (
-            await db.scalars(
-                select(MemoirStoryRevision)
-                .where(
-                    MemoirStoryRevision.project_id == story.project_id,
-                    MemoirStoryRevision.story_id == story.id,
-                )
-                .order_by(MemoirStoryRevision.story_version.desc())
-            )
-        ).all()
-    )
     return MemoirStoryResponse(
         **MemoirStorySummaryResponse.model_validate(story).model_dump(),
         claims=[
             MemoirStoryClaimLinkResponse.model_validate(link)
             for link in claims
-        ],
-        revisions=[
-            MemoirStoryRevisionResponse.model_validate(revision)
-            for revision in revisions
         ],
     )
 

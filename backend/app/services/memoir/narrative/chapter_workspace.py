@@ -29,4 +29,9 @@ async def get_chapter_workspace(
         chapter_id=chapter_id,
         chapter_title=context.chapter.title,
         completion_summary=completion_summary,
+        draft_id=context.draft.id if context.draft else None,
+        draft_version_id=context.draft.version_id if context.draft else None,
+        draft_version=context.draft.version if context.draft else None,
+        draft_status=context.draft.status if context.draft else None,
+        draft_content=context.draft.content if context.draft else "",
     )

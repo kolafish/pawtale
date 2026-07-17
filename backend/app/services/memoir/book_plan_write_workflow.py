@@ -26,11 +26,6 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirImageAsset,
 )
-from app.models.memoir_narrative import (
-    MemoirChapterContract,
-    MemoirChapterNode,
-    MemoirDraftBlock,
-)
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
     MemoirBookChapterTitleGenerateRequest,
@@ -82,7 +77,6 @@ from app.services.memoir.book_structure_commands import (
 from app.services.memoir.chapter_source_links import (
     sync_plan_chapter_source_links as _sync_plan_chapter_source_links,
 )
-from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
 
 
@@ -92,34 +86,6 @@ class ValidatedChapterUpdate:
     title: str
     include_in_book: bool
     source_refs: list[MemoirBookChapterSourceRef]
-
-
-CHAPTER_DELETE_CONFLICT_DETAIL = (
-    "章节已进入结构化写作并建立可溯源内容，不能删除、合并或替换；"
-    "请保留该章节并调整标题、顺序或内容。"
-)
-
-
-async def _ensure_chapters_can_be_deleted(
-    db: AsyncSession,
-    chapters: list[MemoirBookPlanChapter],
-) -> None:
-    chapter_ids = {chapter.id for chapter in chapters}
-    if not chapter_ids:
-        return
-    protected_chapter_columns = (
-        MemoirChapterContract.chapter_id,
-        MemoirChapterNode.chapter_id,
-        MemoirDraftBlock.chapter_id,
-    )
-    for chapter_id_column in protected_chapter_columns:
-        protected_chapter_id = await db.scalar(
-            select(chapter_id_column)
-            .where(chapter_id_column.in_(chapter_ids))
-            .limit(1)
-        )
-        if protected_chapter_id:
-            raise HTTPException(status_code=409, detail=CHAPTER_DELETE_CONFLICT_DETAIL)
 
 
 async def _detach_chapter_operational_references(
@@ -235,18 +201,12 @@ async def _handle_chapter_source_changes(
         project_id=project_id,
         chapter_ids=chapter_ids,
     )
-    await draft_blocks.mark_chapter_blocks_stale(
-        db,
-        project_id=project_id,
-        chapter_ids=chapter_ids,
-    )
 
 
 async def _delete_plan_chapters(db: AsyncSession, plan: MemoirBookPlan) -> None:
     chapters = list(plan.chapters)
     if not chapters:
         return
-    await _ensure_chapters_can_be_deleted(db, chapters)
     await _detach_chapter_operational_references(db, chapters)
     chapter_ids = [chapter.id for chapter in chapters]
     drafts = (
@@ -635,7 +595,6 @@ async def update_book_plan(
         for chapter_id, chapter in existing_by_id.items()
         if chapter_id not in retained_ids
     ]
-    await _ensure_chapters_can_be_deleted(db, removed_chapters)
 
     for index, chapter in enumerate(plan.chapters):
         chapter.sort_order = 10000 + index
@@ -757,12 +716,6 @@ async def apply_book_plan_structure_command(
             project_id=project_id,
             plan=plan,
             req=req,
-        )
-
-    if req.type in {"delete_chapter", "merge_chapters"}:
-        await _ensure_chapters_can_be_deleted(
-            db,
-            [_chapter_by_id(plan, _require_command_chapter_id(req))],
         )
 
     chapters = _sorted_plan_chapters(plan)

@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirBookPlanStatus,
+    MemoirCreatedBy,
+    MemoirOutputStatus,
+)
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookOutput,
+    MemoirBookOutputVersion,
+    MemoirBookPlan,
+    MemoirBookPlanChapter,
+)
+from app.models.projects import Project
+from app.schemas.memoir_book import MemoirBookAssemblyResponse
+from app.services.memoir.book_output_manuscript import (
+    effective_book_metadata,
+    formal_book_title,
+    manuscript_from_snapshot,
+    stored_cover_style,
+)
+from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_plan_sources import included_book_chapters
+from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
+from app.services.memoir.image_assets import manuscript_image_snapshots
+from app.services.memoir.narrative.book_readiness import (
+    invalidate_formal_book_output,
+)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+async def _latest_output_version_number(
+    db: AsyncSession,
+    *,
+    output_id: str,
+) -> int:
+    value = await db.scalar(
+        select(func.max(MemoirBookOutputVersion.version)).where(
+            MemoirBookOutputVersion.output_id == output_id
+        )
+    )
+    return int(value or 0)
+
+
+def _latest_chapter_version(
+    chapter: MemoirBookPlanChapter,
+) -> MemoirBookChapterDraftVersion | None:
+    if chapter.draft is None or not chapter.draft.versions:
+        return None
+    return max(
+        chapter.draft.versions,
+        key=lambda version: (version.version, version.created_at, version.id),
+    )
+
+
+async def _load_latest_book_output_version(
+    db: AsyncSession,
+    *,
+    output_id: str,
+) -> MemoirBookOutputVersion | None:
+    return await db.scalar(
+        select(MemoirBookOutputVersion)
+        .where(MemoirBookOutputVersion.output_id == output_id)
+        .order_by(
+            MemoirBookOutputVersion.version.desc(),
+            MemoirBookOutputVersion.created_at.desc(),
+            MemoirBookOutputVersion.id.desc(),
+        )
+        .limit(1)
+    )
+
+
+async def assemble_book_output(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> MemoirBookAssemblyResponse:
+    plan = await db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.project_id == project_id)
+        .options(
+            selectinload(MemoirBookPlan.chapters)
+            .selectinload(MemoirBookPlanChapter.draft)
+            .selectinload(MemoirBookChapterDraft.versions)
+        )
+    )
+    if plan is None:
+        raise ValueError("book plan does not belong to the project")
+    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
+        raise ValueError("confirm the book plan before assembling the book output")
+    chapters = included_book_chapters(plan)
+    if not chapters:
+        raise ValueError("book plan has no chapters")
+    chapter_versions: list[
+        tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]
+    ] = []
+    incomplete_titles: list[str] = []
+    for chapter in chapters:
+        version = _latest_chapter_version(chapter)
+        if (
+            chapter.draft is None
+            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
+            or version is None
+            or not version.content.strip()
+        ):
+            incomplete_titles.append(chapter.title or "未命名章节")
+        else:
+            chapter_versions.append((chapter, version))
+    if incomplete_titles:
+        raise ValueError(
+            "book output requires confirmed chapter drafts: "
+            + ", ".join(incomplete_titles)
+        )
+
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise ValueError("project does not exist")
+    source_refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    toc = "\n".join(
+        f"{index}. {chapter.title}"
+        for index, (chapter, _) in enumerate(chapter_versions, start=1)
+    )
+    chapter_snapshots: list[dict[str, object]] = []
+    body: list[str] = []
+    for index, (chapter, version) in enumerate(chapter_versions, start=1):
+        chapter_content = version.content.strip()
+        body.append(f"第{index}章 {chapter.title}\n\n{chapter_content}")
+        chapter_snapshots.append(
+            chapter_snapshot(
+                chapter,
+                version,
+                chapter_index=index,
+                source_refs=source_refs_by_chapter.get(chapter.id),
+            )
+        )
+    output = await db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    title = (
+        output.title
+        if output is not None
+        else formal_book_title(plan.title or "我的回忆录")
+    )
+    content = (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body)).strip()
+    previous_version: MemoirBookOutputVersion | None = None
+    if output is None:
+        output = MemoirBookOutput(
+            project_id=project_id,
+            plan_id=plan.id,
+            title=title,
+            status=MemoirOutputStatus.DRAFT.value,
+            metadata_json={"source": "chapter_drafts"},
+        )
+        db.add(output)
+        await db.flush()
+    else:
+        previous_version = await _load_latest_book_output_version(
+            db,
+            output_id=output.id,
+        )
+        if (
+            previous_version is not None
+            and previous_version.content == content
+            and previous_version.chapter_snapshot_json == chapter_snapshots
+        ):
+            return MemoirBookAssemblyResponse(
+                project_id=project_id,
+                output_id=output.id,
+                output_version_id=previous_version.id,
+                version=previous_version.version,
+                content=previous_version.content,
+                chapter_snapshot_json=chapter_snapshots,
+                created_at=previous_version.created_at,
+            )
+        output.plan_id = plan.id
+        output.title = title
+        invalidate_formal_book_output(output)
+        output.metadata_json = {
+            **(
+                output.metadata_json
+                if isinstance(output.metadata_json, dict)
+                else {}
+            ),
+            "source": "chapter_drafts",
+            "book_tts": None,
+        }
+        output.updated_at = _utcnow()
+        db.add(output)
+    chapter_illustrations, image_appendix = await manuscript_image_snapshots(
+        db,
+        project_id=project_id,
+    )
+    manuscript = manuscript_from_snapshot(
+        title=title,
+        content=content,
+        snapshot=chapter_snapshots,
+        cover_style_value=(
+            stored_cover_style(previous_version)
+            if previous_version
+            else "classic_plain"
+        ),
+        metadata=effective_book_metadata(
+            project=project,
+            stored=previous_version.manuscript_json if previous_version else None,
+        ),
+        chapter_illustrations_by_chapter=chapter_illustrations,
+        image_appendix=image_appendix,
+    )
+    version = MemoirBookOutputVersion(
+        output_id=output.id,
+        project_id=project_id,
+        plan_id=plan.id,
+        version=await _latest_output_version_number(db, output_id=output.id) + 1,
+        content=content,
+        chapter_snapshot_json=chapter_snapshots,
+        manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
+        created_by=MemoirCreatedBy.SYSTEM.value,
+    )
+    db.add(version)
+    await db.flush()
+    return MemoirBookAssemblyResponse(
+        project_id=project_id,
+        output_id=output.id,
+        output_version_id=version.id,
+        version=version.version,
+        content=version.content,
+        chapter_snapshot_json=chapter_snapshots,
+        created_at=version.created_at,
+    )

@@ -24,30 +24,10 @@ from .completion_items import (
     MemoirCompletionItemResponse,
     MemoirCompletionItemSwitchRequest,
 )
-from .chapter_structures import (
-    MemoirChapterContractConstraints,
-    MemoirChapterContractResponse,
-    MemoirChapterContractSuggestionRequest,
-    MemoirChapterCoreQuestion,
-    MemoirChapterNodeResponse,
-    MemoirChapterNodeStoryResponse,
-)
 from .decisions import (
     MemoirNarrativeDecisionCreate,
     MemoirNarrativeDecisionRequest,
     MemoirNarrativeEntityMergeRequest,
-)
-from .draft_blocks import (
-    MemoirBookDraftBlockAssemblyResponse,
-    MemoirChapterDraftBlockAssemblyResponse,
-    MemoirDraftBlockAssemblyItem,
-    MemoirDraftBlockClaimSource,
-    MemoirDraftBlockListResponse,
-    MemoirDraftBlockManualRevisionRequest,
-    MemoirDraftBlockResponse,
-    MemoirDraftBlockStorySource,
-    MemoirDraftBlockUnlockRequest,
-    MemoirDraftBlockVersionResponse,
 )
 from .entities import MemoirNarrativeEntityCreate
 from .extraction import MemoirNarrativeExtraction
@@ -68,9 +48,7 @@ from .stories import (
     MemoirStoryClaimsAttachRequest,
     MemoirStoryCreate,
     MemoirStoryCreateRequest,
-    MemoirStoryMergeRequest,
     MemoirStoryResponse,
-    MemoirStoryRevisionResponse,
     MemoirStorySummaryResponse,
 )
 
@@ -95,27 +73,11 @@ __all__ = [
     "MemoirCompletionItemDeferRequest",
     "MemoirCompletionItemResponse",
     "MemoirCompletionItemSwitchRequest",
-    "MemoirChapterContractConstraints",
-    "MemoirChapterContractResponse",
-    "MemoirChapterContractSuggestionRequest",
-    "MemoirChapterCoreQuestion",
-    "MemoirChapterNodeResponse",
-    "MemoirChapterNodeStoryResponse",
     "MemoirClaimResponse",
     "MemoirClaimSummaryResponse",
     "MemoirNarrativeDecisionCreate",
     "MemoirNarrativeDecisionRequest",
     "MemoirNarrativeDecisionResponse",
-    "MemoirBookDraftBlockAssemblyResponse",
-    "MemoirChapterDraftBlockAssemblyResponse",
-    "MemoirDraftBlockAssemblyItem",
-    "MemoirDraftBlockClaimSource",
-    "MemoirDraftBlockListResponse",
-    "MemoirDraftBlockManualRevisionRequest",
-    "MemoirDraftBlockResponse",
-    "MemoirDraftBlockStorySource",
-    "MemoirDraftBlockUnlockRequest",
-    "MemoirDraftBlockVersionResponse",
     "MemoirNarrativeEntityCreate",
     "MemoirNarrativeEntityMergeRequest",
     "MemoirNarrativeEntityResponse",
@@ -129,8 +91,6 @@ __all__ = [
     "MemoirStoryClaimsAttachRequest",
     "MemoirStoryCreate",
     "MemoirStoryCreateRequest",
-    "MemoirStoryMergeRequest",
     "MemoirStoryResponse",
-    "MemoirStoryRevisionResponse",
     "MemoirStorySummaryResponse",
 ]

@@ -1,39 +1,61 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from hashlib import sha256
 import json
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.narrative_types import (
-    MemoirChapterNodeType,
-    MemoirDraftBlockFreshnessStatus,
-    MemoirNarrativeActorType,
+from app.domain.memoir.narrative_types import MemoirClaimEvidenceRole
+from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirChapterSourceLinkStatus,
+    MemoirCreatedBy,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
 )
-from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
-from app.models.memoir_narrative import MemoirDraftBlock
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookOutput,
+    MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
+    MemoirEditingJob,
+)
+from app.models.memoir_narrative import MemoirClaimEvidence
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
+from app.services.memoir import automation_event_resolution
+from app.services.memoir.book_plan_sources import (
+    DRAFT_STATUS_REASON_KEY,
+    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
+    metadata_without_keys,
+    source_change_metadata_keys,
+)
+from app.services.memoir.book_source_links import mark_chapter_sources_merged
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import draft_blocks
-from app.services.memoir.narrative.draft_block_ai import generate_draft_block_text
-from app.services.memoir.narrative.draft_generation_context import (
-    build_node_generation_context,
-    load_current_contract_nodes,
-    select_generation_nodes,
+from app.services.memoir.narrative.book_readiness import (
+    invalidate_formal_book_output,
+)
+from app.services.memoir.narrative.chapter_draft_ai import (
+    ChapterDraftClaimInput,
+    ChapterDraftGenerationInput,
+    ChapterDraftStoryInput,
+    generate_chapter_draft_text,
+)
+from app.services.memoir.narrative.claim_usage_policy import (
+    claim_usable_for_publication,
+)
+from app.services.memoir.narrative.gap_rules import (
+    ChapterAuditContext,
+    chapter_completion_content_signature,
+    load_chapter_audit_context,
 )
 
 
-GENERATION_PRIORITY = {
-    MemoirChapterNodeType.OPENING.value: 0,
-    MemoirChapterNodeType.BACKGROUND.value: 1,
-    MemoirChapterNodeType.STORY.value: 1,
-    MemoirChapterNodeType.REFLECTION.value: 2,
-    MemoirChapterNodeType.CLOSING.value: 3,
-    MemoirChapterNodeType.TRANSITION.value: 4,
-}
+def _utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _signature(payload: dict[str, object]) -> str:
@@ -44,58 +66,228 @@ def _signature(payload: dict[str, object]) -> str:
 def _string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
-    return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
+    return list(
+        dict.fromkeys(
+            item.strip()
+            for item in value
+            if isinstance(item, str) and item.strip()
+        )
+    )[:12]
 
 
-async def enqueue_chapter_block_generation(
+async def enqueue_chapter_draft_generation(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
+    content_signature: str,
     ai_model: str | None = None,
     editorial_guidance: list[str] | None = None,
     source: str = "chapter_workspace",
 ) -> MemoirEditingJob:
-    contract, _ = await load_current_contract_nodes(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
+    guidance = _string_list(editorial_guidance or [])
+    signature = _signature(
+        {
+            "content_signature": content_signature,
+            "ai_model": ai_model or "default",
+            "editorial_guidance": guidance,
+        }
     )
-    guidance = list(
-        dict.fromkeys(
-            item.strip()
-            for item in (editorial_guidance or [])
-            if item.strip()
-        )
-    )[:12]
-    signature_payload = {
-        "contract_id": contract.id,
-        "ai_model": ai_model or "default",
-        "editorial_guidance": guidance,
-    }
     return await enqueue_editing_job(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
-        job_type=MemoirEditingJobType.GENERATE_DRAFT_BLOCKS,
+        job_type=MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
         payload_json={
             "chapter_id": chapter_id,
-            "contract_id": contract.id,
+            "content_signature": content_signature,
             "ai_model": ai_model,
             "editorial_guidance": guidance,
-            "input_signature": _signature(signature_payload),
+            "input_signature": signature,
             "source": source,
         },
-        dedupe_key=(
-            f"generate-draft-blocks:{project_id}:{chapter_id}:"
-            f"{_signature(signature_payload)}"
-        ),
+        dedupe_key=f"generate-chapter-draft:{project_id}:{chapter_id}:{signature}",
         replace_completed=True,
         retry_failed=True,
     )
 
 
-async def run_draft_block_generation_job(
+async def _generation_input(
+    db: AsyncSession,
+    *,
+    context: ChapterAuditContext,
+    editorial_guidance: list[str],
+) -> ChapterDraftGenerationInput:
+    usable_claim_ids = {
+        claim.id
+        for claim in context.claims.values()
+        if claim_usable_for_publication(claim)
+        and context.evidence_counts.get(claim.id, 0) > 0
+    }
+    if not usable_claim_ids:
+        raise ValueError("chapter has no publishable claims with source evidence")
+    quotes_by_claim: dict[str, list[str]] = {}
+    evidence = (
+        await db.scalars(
+            select(MemoirClaimEvidence)
+            .join(
+                MemoirChapterSourceLink,
+                (
+                    MemoirChapterSourceLink.project_id
+                    == MemoirClaimEvidence.project_id
+                )
+                & (
+                    MemoirChapterSourceLink.utterance_id
+                    == MemoirClaimEvidence.utterance_id
+                )
+                & (
+                    MemoirChapterSourceLink.transcript_version_id.is_(None)
+                    | (
+                        MemoirChapterSourceLink.transcript_version_id
+                        == MemoirClaimEvidence.transcript_version_id
+                    )
+                ),
+            )
+            .where(
+                MemoirClaimEvidence.project_id == context.chapter.project_id,
+                MemoirClaimEvidence.claim_id.in_(usable_claim_ids),
+                MemoirClaimEvidence.evidence_role
+                == MemoirClaimEvidenceRole.SUPPORTS.value,
+                MemoirChapterSourceLink.chapter_id == context.chapter.id,
+                MemoirChapterSourceLink.status
+                == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            )
+            .order_by(
+                MemoirClaimEvidence.claim_id,
+                MemoirClaimEvidence.created_at,
+                MemoirClaimEvidence.id,
+            )
+        )
+    ).all()
+    for item in evidence:
+        text = (item.quote or item.evidence_note or "").strip()
+        if text:
+            quotes_by_claim.setdefault(item.claim_id, []).append(text[:800])
+
+    stories: list[ChapterDraftStoryInput] = []
+    for story in sorted(
+        context.stories.values(),
+        key=lambda item: (
+            item.time_start is None,
+            item.time_start or datetime.max,
+            item.created_at,
+            item.id,
+        ),
+    ):
+        claims = []
+        for link in context.story_claims.get(story.id, []):
+            claim = context.claims.get(link.claim_id)
+            if claim is None or claim.id not in usable_claim_ids:
+                continue
+            claims.append(
+                ChapterDraftClaimInput(
+                    claim_id=claim.id,
+                    statement=claim.statement,
+                    certainty=claim.certainty,
+                    narrative_role=link.narrative_role,
+                    is_core=link.is_core,
+                    evidence_quotes=quotes_by_claim.get(claim.id, [])[:4],
+                )
+            )
+        if claims:
+            stories.append(
+                ChapterDraftStoryInput(
+                    story_id=story.id,
+                    title=story.title,
+                    summary=story.summary,
+                    story_type=story.story_type,
+                    time_start=story.time_start.isoformat() if story.time_start else None,
+                    time_end=story.time_end.isoformat() if story.time_end else None,
+                    claims=claims,
+                )
+            )
+    if not stories:
+        raise ValueError("chapter has no story with publishable source evidence")
+    return ChapterDraftGenerationInput(
+        chapter_id=context.chapter.id,
+        chapter_title=context.chapter.title,
+        stories=stories,
+        existing_draft=context.draft.content if context.draft else "",
+        editorial_guidance=editorial_guidance,
+    )
+
+
+async def _next_version(db: AsyncSession, *, draft_id: str) -> int:
+    latest = await db.scalar(
+        select(func.max(MemoirBookChapterDraftVersion.version)).where(
+            MemoirBookChapterDraftVersion.draft_id == draft_id
+        )
+    )
+    return int(latest or 0) + 1
+
+
+async def _acknowledge_sources(
+    db: AsyncSession,
+    *,
+    chapter: MemoirBookPlanChapter,
+    draft: MemoirBookChapterDraft,
+    version_id: str,
+) -> None:
+    draft.metadata_json = metadata_without_keys(
+        draft.metadata_json,
+        {DRAFT_STATUS_REASON_KEY, REMOVED_SOURCE_UTTERANCE_IDS_KEY},
+    )
+    chapter.metadata_json = metadata_without_keys(
+        chapter.metadata_json,
+        source_change_metadata_keys(),
+    )
+    db.add_all([draft, chapter])
+    await mark_chapter_sources_merged(
+        db,
+        project_id=chapter.project_id,
+        chapter_id=chapter.id,
+        draft_version_id=version_id,
+        include_removed=True,
+    )
+    await automation_event_resolution.resolve_assembled_chapter_audit_events(
+        db,
+        project_id=chapter.project_id,
+        chapter_id=chapter.id,
+        result_version_id=version_id,
+    )
+
+
+async def _stale_generation_result(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    payload: dict,
+    skip_reason: str,
+) -> EditingJobResult:
+    from app.services.memoir.narrative import completion_refresh
+
+    replacement = await completion_refresh.enqueue_chapter_completion_refresh(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        include_semantic_audit=True,
+        ai_model=(str(payload["ai_model"]) if payload.get("ai_model") else None),
+        source=skip_reason,
+    )
+    return EditingJobResult(
+        status=MemoirEditingJobStatus.SKIPPED,
+        result_json={
+            "chapter_id": chapter_id,
+            "published": False,
+            "skip_reason": skip_reason,
+            "replacement_job_id": replacement.id,
+        },
+        error_message=skip_reason.replace("_", " "),
+    )
+
+
+async def run_chapter_draft_generation_job(
     db: AsyncSession,
     job: MemoirEditingJob,
     *,
@@ -103,163 +295,120 @@ async def run_draft_block_generation_job(
 ) -> EditingJobResult:
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     chapter_id = str(payload.get("chapter_id") or job.chapter_id or "").strip()
-    contract, nodes = await load_current_contract_nodes(
+    project_id = job.project_id
+    context = await load_chapter_audit_context(
         db,
-        project_id=job.project_id,
+        project_id=project_id,
         chapter_id=chapter_id,
     )
-    if payload.get("contract_id") != contract.id:
-        raise ValueError("chapter contract changed after the generation job was queued")
-    editorial_guidance = _string_list(payload.get("editorial_guidance"))
-    editorial_feedback = "\n".join(
-        f"- {item}" for item in editorial_guidance
-    )
-    selected_nodes = select_generation_nodes(nodes)
-    if not selected_nodes:
-        raise ValueError("the current chapter direction has no ready nodes")
-    existing_blocks = list(
-        (
-            await db.scalars(
-                select(MemoirDraftBlock).where(
-                    MemoirDraftBlock.project_id == job.project_id,
-                    MemoirDraftBlock.chapter_id == chapter_id,
-                    MemoirDraftBlock.node_id.in_([node.id for node in nodes]),
-                )
-            )
-        ).all()
-    )
-    blocks_by_node: dict[str, MemoirDraftBlock] = {}
-    for block in existing_blocks:
-        node_id = str(block.node_id)
-        if node_id in blocks_by_node:
-            raise ValueError("chapter direction has multiple draft blocks for one node")
-        blocks_by_node[node_id] = block
-    used_orders = set(
-        (
-            await db.scalars(
-                select(MemoirDraftBlock.sort_order).where(
-                    MemoirDraftBlock.project_id == job.project_id,
-                    MemoirDraftBlock.chapter_id == chapter_id,
-                )
-            )
-        ).all()
-    )
-    created_block_ids_by_node: dict[str, str] = {}
-    updated_block_ids_by_node: dict[str, str] = {}
-    skipped_node_ids = [
-        node.id
-        for node in selected_nodes
-        if (block := blocks_by_node.get(node.id)) is not None
-        and (
-            block.freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
-            or block.locked
+    input_signature = chapter_completion_content_signature(context)
+    expected_signature = str(payload.get("content_signature") or "").strip()
+    if expected_signature and expected_signature != input_signature:
+        return await _stale_generation_result(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            payload=payload,
+            skip_reason="chapter_content_changed_before_draft_generation",
         )
-    ]
-    skipped_locked_node_ids = [
-        node.id
-        for node in selected_nodes
-        if (block := blocks_by_node.get(node.id)) is not None
-        and block.freshness_status == MemoirDraftBlockFreshnessStatus.STALE.value
-        and block.locked
-    ]
-    nodes_to_generate = [
-        node
-        for node in selected_nodes
-        if (block := blocks_by_node.get(node.id)) is None
-        or (
-            block.freshness_status == MemoirDraftBlockFreshnessStatus.STALE.value
-            and not block.locked
-        )
-    ]
-    if not nodes_to_generate:
-        return EditingJobResult(
-            result_json={
-                "chapter_id": chapter_id,
-                "contract_id": contract.id,
-                "created_block_ids": [],
-                "updated_block_ids": [],
-                "skipped_node_ids": skipped_node_ids,
-                "skipped_locked_node_ids": skipped_locked_node_ids,
-                "model": None,
-            }
-        )
+    generation_input = await _generation_input(
+        db,
+        context=context,
+        editorial_guidance=_string_list(payload.get("editorial_guidance")),
+    )
     client = ai_client or get_ai_service(
         str(payload.get("ai_model") or "").strip() or None
     )
-    generation_order = sorted(
-        nodes_to_generate,
-        key=lambda node: (
-            GENERATION_PRIORITY[node.node_type],
-            node.sort_order,
-            node.id,
-        ),
+    generated = await generate_chapter_draft_text(
+        client,
+        context=generation_input,
     )
-    for node in generation_order:
-        context = await build_node_generation_context(
+    await db.rollback()
+    db.expire_all()
+    await db.refresh(job)
+    current_context = await load_chapter_audit_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if chapter_completion_content_signature(current_context) != input_signature:
+        return await _stale_generation_result(
             db,
-            project_id=job.project_id,
-            contract=contract,
-            nodes=nodes,
-            node=node,
-            feedback=editorial_feedback,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            payload=payload,
+            skip_reason="chapter_content_changed_during_draft_generation",
         )
-        generated = await generate_draft_block_text(client, context=context.ai_input)
-        claims, stories = context.sources_for_claims(generated.used_claim_ids)
-        existing_block = blocks_by_node.get(node.id)
-        if existing_block is not None:
-            if not existing_block.current_version_id:
-                raise ValueError("stale draft block has no current version")
-            await draft_blocks.append_version(
-                db,
-                block=existing_block,
-                expected_current_version_id=existing_block.current_version_id,
-                content=generated.content,
-                created_by=MemoirNarrativeActorType.AI,
-                claims=claims,
-                stories=stories,
-                model=getattr(client, "model_name", None),
-                prompt_snapshot=generated.prompt_snapshot,
-                sources_refreshed=True,
-            )
-            updated_block_ids_by_node[node.id] = existing_block.id
-        else:
-            sort_order = node.sort_order * 1000
-            while sort_order in used_orders:
-                sort_order += 1
-            used_orders.add(sort_order)
-            block = await draft_blocks.create_block(
-                db,
-                project_id=job.project_id,
-                chapter_id=chapter_id,
-                node_id=node.id,
-                block_role=context.ai_input.block_role,
-                sort_order=sort_order,
-                content=generated.content,
-                created_by=MemoirNarrativeActorType.AI,
-                claims=claims,
-                stories=stories,
-                model=getattr(client, "model_name", None),
-                prompt_snapshot=generated.prompt_snapshot,
-            )
-            created_block_ids_by_node[node.id] = block.id
-    created_block_ids = [
-        created_block_ids_by_node[node.id]
-        for node in selected_nodes
-        if node.id in created_block_ids_by_node
-    ]
-    updated_block_ids = [
-        updated_block_ids_by_node[node.id]
-        for node in selected_nodes
-        if node.id in updated_block_ids_by_node
-    ]
+    context = current_context
+    draft = await db.scalar(
+        select(MemoirBookChapterDraft).where(
+            MemoirBookChapterDraft.project_id == project_id,
+            MemoirBookChapterDraft.chapter_id == chapter_id,
+        )
+    )
+    if draft is None:
+        draft = MemoirBookChapterDraft(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            status=MemoirBookChapterDraftStatus.DRAFT.value,
+            metadata_json={"source": "chapter_generation"},
+        )
+        db.add(draft)
+        await db.flush()
+    latest = await db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+        .order_by(
+            MemoirBookChapterDraftVersion.version.desc(),
+            MemoirBookChapterDraftVersion.created_at.desc(),
+            MemoirBookChapterDraftVersion.id.desc(),
+        )
+        .limit(1)
+    )
+    if latest is not None and latest.content.strip() == generated.content.strip():
+        version = latest
+    else:
+        version = MemoirBookChapterDraftVersion(
+            draft_id=draft.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            version=await _next_version(db, draft_id=draft.id),
+            content=generated.content,
+            created_by=MemoirCreatedBy.AI.value,
+            model=getattr(client, "model_name", None),
+            prompt_snapshot=generated.prompt_snapshot,
+            feedback=None,
+        )
+        db.add(version)
+        await db.flush()
+    draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+    draft.updated_at = _utcnow()
+    draft.metadata_json = {
+        **(draft.metadata_json if isinstance(draft.metadata_json, dict) else {}),
+        "source": "chapter_generation",
+        "used_claim_ids": list(generated.used_claim_ids),
+    }
+    output = await db.scalar(
+        select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id
+        )
+    )
+    if output is not None:
+        invalidate_formal_book_output(output)
+        db.add(output)
+    await _acknowledge_sources(
+        db,
+        chapter=context.chapter,
+        draft=draft,
+        version_id=version.id,
+    )
     return EditingJobResult(
         result_json={
             "chapter_id": chapter_id,
-            "contract_id": contract.id,
-            "created_block_ids": created_block_ids,
-            "updated_block_ids": updated_block_ids,
-            "skipped_node_ids": skipped_node_ids,
-            "skipped_locked_node_ids": skipped_locked_node_ids,
+            "draft_id": draft.id,
+            "draft_version_id": version.id,
+            "version": version.version,
+            "used_claim_count": len(generated.used_claim_ids),
             "model": getattr(client, "model_name", None),
         }
     )

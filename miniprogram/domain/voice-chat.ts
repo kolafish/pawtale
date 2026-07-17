@@ -868,6 +868,21 @@ export interface MemoirBookChapterDraft {
   updated_at: string;
 }
 
+export interface MemoirBookChapterDraftRevisionRequest {
+  expected_version_id: string;
+  content: string;
+}
+
+export interface MemoirBookAssemblyResponse {
+  project_id: string;
+  output_id: string;
+  output_version_id: string;
+  version: number;
+  content: string;
+  chapter_snapshot_json: Array<Record<string, unknown>>;
+  created_at: string;
+}
+
 export interface MemoirBookAudioRequest {
   voice?: string;
   speed_ratio?: number;
@@ -1209,7 +1224,6 @@ export interface MemoirBookReadinessBlocker {
   chapter_id?: string | null;
   story_id?: string | null;
   claim_id?: string | null;
-  draft_block_id?: string | null;
   completion_item_id?: string | null;
 }
 

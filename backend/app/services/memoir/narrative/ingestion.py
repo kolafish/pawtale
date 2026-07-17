@@ -36,7 +36,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_narrative.extraction import MemoirNarrativeExtractedClaim
 from app.services.ai_types import AITextClient
 from app.services.memoir.narrative import (
-    chapter_contracts,
+    chapter_draft_state,
     decisions,
     entities,
     completion_items,
@@ -396,7 +396,7 @@ async def ingest_transcript_version(
                 story=story,
                 candidate_story_ids=review_candidates,
                 reason="story association requires manual merge review",
-                idempotency_key=f"story-merge-review:{story.id}:{version.id}",
+                idempotency_key=f"story-association-review:{story.id}:{version.id}",
             )
         changed = await stories.attach_claims_to_story(
             db,
@@ -412,23 +412,20 @@ async def ingest_transcript_version(
             ],
             actor_type=MemoirNarrativeActorType.AI,
             actor_user_id=None,
-            reason=f"narrative ingestion from transcript version {version.id}",
         )
         if changed:
             changed_story_ids.add(story.id)
+            await chapter_draft_state.mark_chapter_drafts_stale_for_story(
+                db,
+                project_id=project.id,
+                story_id=story.id,
+            )
 
     completed_item = await completion_items.link_utterance_answer(
         db,
         project_id=project.id,
         utterance=utterance,
     )
-    if created_story_ids or changed_story_ids:
-        await chapter_contracts.sync_system_drafts_for_utterance(
-            db,
-            project_id=project.id,
-            utterance_id=utterance.id,
-        )
-
     return NarrativeIngestionResult(
         created_claim_ids=tuple(created_claim_ids),
         reused_claim_ids=tuple(dict.fromkeys(reused_claim_ids)),

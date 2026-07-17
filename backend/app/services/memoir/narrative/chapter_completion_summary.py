@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-from typing import Sequence
-
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
-    MemoirChapterContractStatus,
     MemoirCompletionItemStatus,
-    MemoirDraftBlockEditorialStatus,
-    MemoirDraftBlockFreshnessStatus,
     MemoirNarrativeGapRecommendedAction,
 )
 from app.domain.memoir.types import (
@@ -23,17 +18,14 @@ from app.models.memoir import (
     MemoirEditingJob,
     MemoirVoiceSession,
 )
-from app.models.memoir_narrative import MemoirCompletionItem, MemoirDraftBlock
+from app.models.memoir_narrative import MemoirCompletionItem
 from app.schemas.memoir_narrative import (
     MemoirChapterCompletionItem,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
 )
 from app.services.memoir.narrative import completion_refresh
-from app.services.memoir.narrative.gap_rules import (
-    ChapterAuditContext,
-    ChapterAuditDraftBlock,
-)
+from app.services.memoir.narrative.gap_rules import ChapterAuditContext
 
 
 _ACTIVE_JOB_STATUSES = {
@@ -90,20 +82,6 @@ def _active_item_response(
     )
 
 
-def _blocks_are_current(
-    blocks: Sequence[MemoirDraftBlock | ChapterAuditDraftBlock],
-) -> bool:
-    active = [
-        block
-        for block in blocks
-        if block.editorial_status != MemoirDraftBlockEditorialStatus.EXCLUDED.value
-    ]
-    return bool(active) and all(
-        block.freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
-        for block in active
-    )
-
-
 def _summary(
     *,
     chapter: MemoirBookPlanChapter,
@@ -114,23 +92,12 @@ def _summary(
     draft_job: MemoirEditingJob | None,
     chapter_draft_status: str | None,
 ) -> MemoirChapterCompletionSummary:
-    contract_confirmed = (
-        context.contract is not None
-        and context.contract.status == MemoirChapterContractStatus.CONFIRMED.value
+    draft_current = (
+        context.draft is not None
+        and not context.draft.source_changes_pending
     )
-    blocks_current = _blocks_are_current(context.draft_blocks)
 
-    if not contract_confirmed:
-        state = "not_started"
-        headline = "可以开始整理"
-        detail = "系统会先查看现有讲述，再给出一个明确的下一步。"
-        action = _next_action(
-            "prepare",
-            "整理这一章",
-            detail,
-            action_text="开始整理",
-        )
-    elif refresh_job is not None and refresh_job.status in _ACTIVE_JOB_STATUSES:
+    if refresh_job is not None and refresh_job.status in _ACTIVE_JOB_STATUSES:
         state = "preparing"
         headline = "正在检查现有讲述"
         detail = "系统正在判断现有素材是否足够写成正文。"
@@ -180,7 +147,7 @@ def _summary(
         headline = "正在整理正文"
         detail = "系统正在把已有讲述写成连贯正文。"
         action = _next_action("wait", headline, detail, disabled=True)
-    elif blocks_current:
+    elif draft_current:
         if chapter_draft_status == MemoirBookChapterDraftStatus.CONFIRMED.value:
             state = "confirmed"
             headline = "本章已确认"
@@ -255,7 +222,7 @@ async def get_chapter_completion_summaries(
                     MemoirEditingJob.job_type.in_(
                         {
                             MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
-                            MemoirEditingJobType.GENERATE_DRAFT_BLOCKS.value,
+                            MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
                         }
                     ),
                 )
@@ -353,7 +320,7 @@ async def get_chapter_completion_summaries(
             (
                 job
                 for job in chapter_jobs
-                if job.job_type == MemoirEditingJobType.GENERATE_DRAFT_BLOCKS.value
+                if job.job_type == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value
             ),
             None,
         )

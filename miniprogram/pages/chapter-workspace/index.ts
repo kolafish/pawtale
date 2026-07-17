@@ -2,22 +2,17 @@ import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
-  assembleMemoirChapterDraftBlocks,
   confirmMemoirBookChapterDraft,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
-  listMemoirDraftBlocks,
-  manuallyReviseMemoirDraftBlock,
   prepareMemoirBookChapter,
   resolveMemoirCompletionItem,
-  unlockMemoirDraftBlock,
+  reviseMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
-  datasetString,
   pageUrl,
   queryParam,
-  type PageDatasetEvent,
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
@@ -32,8 +27,6 @@ import {
 } from "./chapter-next-action";
 import {
   chapterWorkspaceViewPatch,
-  draftBlockViews,
-  type DraftBlockView,
 } from "./chapter-workspace-view";
 
 export { chapterWorkspaceViewPatch };
@@ -51,12 +44,6 @@ function scrollToSection(selector: string) {
   }
 }
 
-interface WorkspaceDataset {
-  blockId?: string;
-}
-
-type DatasetEvent = PageDatasetEvent<WorkspaceDataset>;
-
 interface ChapterWorkspacePageData {
   loading: boolean;
   error: string;
@@ -66,13 +53,13 @@ interface ChapterWorkspacePageData {
   nextAction: ChapterNextAction;
   readinessTitle: string;
   readinessDetail: string;
-  draftBlocks: DraftBlockView[];
   canConfirmChapter: boolean;
   processBusy: boolean;
   startingTaskId: string;
   confirmingChapter: boolean;
-  editingBlockId: string;
-  editingBlockContent: string;
+  savingDraft: boolean;
+  editingDraft: boolean;
+  editingDraftContent: string;
 }
 
 definePage<ChapterWorkspacePageData>()({
@@ -89,13 +76,13 @@ definePage<ChapterWorkspacePageData>()({
     nextAction: LOADING_NEXT_ACTION,
     readinessTitle: "正在读取本章",
     readinessDetail: "",
-    draftBlocks: [],
     canConfirmChapter: false,
     processBusy: false,
     startingTaskId: "",
     confirmingChapter: false,
-    editingBlockId: "",
-    editingBlockContent: "",
+    savingDraft: false,
+    editingDraft: false,
+    editingDraftContent: "",
   },
 
   async onLoad(query: PageQuery = {}) {
@@ -141,18 +128,13 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
-      const [workspace, blockList] = await Promise.all([
-        getMemoirChapterWorkspace(this.data.projectId, this.data.chapterId),
-        listMemoirDraftBlocks(this.data.projectId, this.data.chapterId),
-      ]);
-      const draftBlocks = draftBlockViews(blockList.blocks, this.data.draftBlocks);
+      const workspace = await getMemoirChapterWorkspace(
+        this.data.projectId,
+        this.data.chapterId,
+      );
       this.setData({
         workspace,
-        draftBlocks,
-        ...chapterWorkspaceViewPatch(
-          workspace,
-          draftBlocks,
-        ),
+        ...chapterWorkspaceViewPatch(workspace),
         loading: false,
         error: "",
       });
@@ -300,84 +282,59 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  startDraftBlockEdit(event: DatasetEvent) {
-    const blockId = datasetString(event, "blockId");
-    const block = this.data.draftBlocks.find((item) => item.id === blockId);
-    if (!block || block.locked || block.freshness_status !== "current") {
+  startDraftEdit() {
+    const workspace = this.data.workspace;
+    if (!workspace?.draft_version_id || !workspace.draft_content) {
       return;
     }
     this.setData({
-      editingBlockId: block.id,
-      editingBlockContent: block.current_version.content,
+      editingDraft: true,
+      editingDraftContent: workspace.draft_content,
     });
   },
 
-  changeDraftBlockContent(event: PageTextInputEvent) {
-    this.setData({ editingBlockContent: event.detail.value });
+  changeDraftContent(event: PageTextInputEvent) {
+    this.setData({ editingDraftContent: event.detail.value });
   },
 
-  cancelDraftBlockEdit() {
-    this.setData({ editingBlockId: "", editingBlockContent: "" });
+  cancelDraftEdit() {
+    this.setData({ editingDraft: false, editingDraftContent: "" });
   },
 
-  patchDraftBlock(blockId: string, patch: Partial<DraftBlockView>) {
-    this.setData({
-      draftBlocks: this.data.draftBlocks.map(
-        (item) => item.id === blockId ? { ...item, ...patch } : item,
-      ),
-    });
-  },
-
-  async saveDraftBlockEdit(event: DatasetEvent) {
-    const blockId = datasetString(event, "blockId");
-    const block = this.data.draftBlocks.find((item) => item.id === blockId);
-    const content = this.data.editingBlockContent.trim();
-    if (!block || !content || block.busy) {
-      if (!content) {
-        wx.showToast({ title: "正文不能为空", icon: "none" });
-      }
+  async saveDraftEdit() {
+    const workspace = this.data.workspace;
+    const content = this.data.editingDraftContent.trim();
+    if (!workspace?.draft_version_id || this.data.savingDraft) {
       return;
     }
-    this.patchDraftBlock(block.id, { busy: true });
+    if (!content) {
+      wx.showToast({ title: "正文不能为空", icon: "none" });
+      return;
+    }
+    if (content === workspace.draft_content.trim()) {
+      this.cancelDraftEdit();
+      return;
+    }
+    this.setData({ savingDraft: true, error: "" });
     try {
-      await manuallyReviseMemoirDraftBlock(this.data.projectId, block.id, {
-        expected_current_version_id: block.current_version_id,
-        content,
-        feedback: "用户在章节正文页直接修改",
-      });
-      this.setData({ editingBlockId: "", editingBlockContent: "" });
+      await reviseMemoirBookChapterDraft(
+        this.data.projectId,
+        this.data.chapterId,
+        {
+          expected_version_id: workspace.draft_version_id,
+          content,
+        },
+      );
+      this.setData({ editingDraft: false, editingDraftContent: "" });
       await this.loadPageData(true);
+      wx.showToast({ title: "正文已保存", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
     } finally {
-      this.patchDraftBlock(block.id, { busy: false });
-    }
-  },
-
-  async unlockLegacyBlock(event: DatasetEvent) {
-    const blockId = datasetString(event, "blockId");
-    const block = this.data.draftBlocks.find((item) => item.id === blockId);
-    if (!block || !block.locked || block.busy) {
-      return;
-    }
-    this.patchDraftBlock(block.id, { busy: true });
-    try {
-      await unlockMemoirDraftBlock(this.data.projectId, block.id, {
-        expected_current_version_id: block.current_version_id,
-        idempotency_key: `chapter-unlock:${block.id}:${Date.now()}`,
-        reason: "迁移到简化章节确认流程",
-      });
-      await this.loadPageData(true);
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "正文解除保护失败" });
-    } finally {
-      this.patchDraftBlock(block.id, { busy: false });
+      this.setData({ savingDraft: false });
     }
   },
 
@@ -385,13 +342,12 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !this.data.canConfirmChapter
       || this.data.confirmingChapter
-      || this.data.editingBlockId
+      || this.data.editingDraft
     ) {
       return;
     }
     this.setData({ confirmingChapter: true, error: "" });
     try {
-      await assembleMemoirChapterDraftBlocks(this.data.projectId, this.data.chapterId);
       await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
       await this.loadPageData(true);
       wx.showToast({ title: "本章正文已确认", icon: "success" });

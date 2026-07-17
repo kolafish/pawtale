@@ -7,6 +7,7 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_book import (
     MemoirBookChapterDraftResponse,
+    MemoirBookChapterDraftRevisionRequest,
     MemoirBookChapterTitleGenerateRequest,
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
@@ -170,6 +171,27 @@ async def get_memoir_book_editor_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-editor/chapters/{chapter_id}/draft/revise",
+    response_model=MemoirBookChapterDraftResponse,
+)
+async def revise_memoir_book_editor_chapter_draft(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterDraftRevisionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_drafts.revise_chapter_draft(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
         allow_admin=is_admin_user(current_user),
     )
 

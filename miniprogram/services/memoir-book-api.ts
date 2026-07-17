@@ -1,7 +1,9 @@
 import type {
   MemoirBookAudioRequest,
   MemoirBookAudioResponse,
+  MemoirBookAssemblyResponse,
   MemoirBookChapterDraft,
+  MemoirBookChapterDraftRevisionRequest,
   MemoirBookChapterTitleGenerateRequest,
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
@@ -257,6 +259,32 @@ export function confirmMemoirBookChapterDraft(
     bookPlanChapterPath(projectId, chapterId, "/draft/confirm"),
     {
       method: "POST",
+    },
+  );
+}
+
+export function reviseMemoirBookChapterDraft(
+  projectId: string,
+  chapterId: string,
+  data: MemoirBookChapterDraftRevisionRequest,
+): Promise<MemoirBookChapterDraft> {
+  return memoirRequest<MemoirBookChapterDraft>(
+    bookPlanChapterPath(projectId, chapterId, "/draft/revise"),
+    {
+      method: "POST",
+      data,
+    },
+  );
+}
+
+export function assembleMemoirBookOutput(
+  projectId: string,
+): Promise<MemoirBookAssemblyResponse> {
+  return memoirRequest<MemoirBookAssemblyResponse>(
+    memoirNarrativeProjectPath(projectId, "/book-output/assemble"),
+    {
+      method: "POST",
+      data: {},
     },
   );
 }

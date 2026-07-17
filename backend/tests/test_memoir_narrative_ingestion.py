@@ -25,9 +25,6 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
-    MemoirChapterContract,
-    MemoirChapterNode,
-    MemoirChapterNodeStory,
     MemoirClaim,
     MemoirClaimEvidence,
     MemoirNarrativeDecision,
@@ -49,6 +46,7 @@ from app.services.memoir.narrative.ingestion_jobs import (
     run_narrative_ingestion_job,
     schedule_narrative_ingestion_job,
 )
+from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
 from app.services.memoir.narrative.extraction import (
     build_narrative_extraction_prompt,
     is_narrative_control_only,
@@ -270,25 +268,6 @@ async def test_ingestion_adds_new_story_to_unmodified_system_chapter_plan(
         chapter_titles=["来到成都"],
         source_refs_by_chapter=[[memoir_source_ref(created)]],
     )
-    suggested = await client.post(
-        f"/api/memoir/projects/{project.id}/chapters/{chapters[0].id}/contract/suggest",
-        json={"idempotency_key": "ingestion-story-bridge"},
-    )
-    assert suggested.status_code == 200, suggested.text
-    contract = await test_db.get(
-        MemoirChapterContract,
-        suggested.json()["id"],
-    )
-    assert contract is not None
-    assert await test_db.scalar(
-        select(func.count())
-        .select_from(MemoirChapterNode)
-        .where(
-            MemoirChapterNode.contract_id == contract.id,
-            MemoirChapterNode.title == "待补充核心故事",
-        )
-    ) == 1
-
     extraction = _extraction_payload(source_text)
     extraction["stories"] = [
         {
@@ -320,27 +299,14 @@ async def test_ingestion_adds_new_story_to_unmodified_system_chapter_plan(
     )
 
     assert len(result.created_story_ids) == 1
-    assert await test_db.scalar(
-        select(func.count())
-        .select_from(MemoirChapterNode)
-        .where(
-            MemoirChapterNode.contract_id == contract.id,
-            MemoirChapterNode.title == "待补充核心故事",
-        )
-    ) == 0
-    linked_story_ids = set(
-        (
-            await test_db.scalars(
-                select(MemoirChapterNodeStory.story_id)
-                .join(MemoirChapterNode, MemoirChapterNode.id == MemoirChapterNodeStory.node_id)
-                .where(
-                    MemoirChapterNode.contract_id == contract.id,
-                    MemoirChapterNodeStory.story_role == "primary",
-                )
-            )
-        ).all()
+    context = await load_chapter_audit_context(
+        test_db,
+        project_id=project.id,
+        chapter_id=chapters[0].id,
     )
-    assert linked_story_ids == set(result.created_story_ids)
+    assert set(context.stories) == set(result.created_story_ids)
+    assert set(context.claims).issubset(set(result.created_claim_ids))
+    assert len(context.claims) == 1
 
 
 async def test_delete_transcript_rejects_ingested_claim_evidence(client, test_db):
