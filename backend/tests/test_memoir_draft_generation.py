@@ -305,6 +305,21 @@ async def test_source_refresh_endpoint_bypasses_open_completion_question_and_upd
     assert job.payload_json["source"] == "book_pending_sources"
     assert job.payload_json["automation_event_id"] == event_data["id"]
     assert completion_item.status == MemoirCompletionItemStatus.OPEN.value
+    repeated_response = await client.post(
+        (
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/"
+            f"{chapter.id}/draft/source-refresh/jobs"
+        ),
+        json={},
+    )
+    assert repeated_response.status_code == 202
+    assert repeated_response.json()["id"] == event_data["id"]
+    assert await test_db.scalar(
+        select(func.count(MemoirAutomationEvent.id)).where(
+            MemoirAutomationEvent.editing_job_id == job.id,
+            MemoirAutomationEvent.event_type == "chapter_draft_generated",
+        )
+    ) == 1
 
     ai = FakeChapterDraftAI(
         {

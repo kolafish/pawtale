@@ -119,6 +119,36 @@ async def _enqueue_generation_job(
     )
 
 
+async def _generation_event_for_job(
+    db: AsyncSession,
+    *,
+    job: MemoirEditingJob,
+    event_type: MemoirAutomationEventType,
+) -> MemoirAutomationEvent | None:
+    payload = dict(job.payload_json or {})
+    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
+    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
+    if (
+        event
+        and event.project_id == job.project_id
+        and event.event_type == event_type.value
+    ):
+        return event
+    return await db.scalar(
+        select(MemoirAutomationEvent)
+        .where(
+            MemoirAutomationEvent.project_id == job.project_id,
+            MemoirAutomationEvent.editing_job_id == job.id,
+            MemoirAutomationEvent.event_type == event_type.value,
+        )
+        .order_by(
+            MemoirAutomationEvent.created_at.desc(),
+            MemoirAutomationEvent.id.desc(),
+        )
+        .limit(1)
+    )
+
+
 async def _ensure_generation_event(
     db: AsyncSession,
     *,
@@ -135,9 +165,12 @@ async def _ensure_generation_event(
         "job_type": job.job_type,
         **(metadata_json or {}),
     }
-    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
-    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
-    if event and event.project_id == job.project_id:
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=event_type,
+    )
+    if event:
         event.event_type = event_type.value
         event.status = MemoirAutomationEventStatus.PENDING.value
         event.chapter_id = chapter_id
@@ -148,6 +181,10 @@ async def _ensure_generation_event(
             **metadata,
         }
         db.add(event)
+        if payload.get(AUTOMATION_EVENT_ID_KEY) != event.id:
+            payload[AUTOMATION_EVENT_ID_KEY] = event.id
+            job.payload_json = payload
+            db.add(job)
         await db.flush()
     else:
         event = await automation_events.record_automation_event(
@@ -184,9 +221,12 @@ async def _update_generation_event(
         "job_type": job.job_type,
         **(metadata_json or {}),
     }
-    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
-    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
-    if event and event.project_id == job.project_id:
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=event_type,
+    )
+    if event:
         event.event_type = event_type.value
         event.status = status.value
         event.chapter_id = chapter_id
@@ -311,10 +351,24 @@ async def run_chapter_draft_generation_job(
 ) -> EditingJobResult:
     result = await draft_generation_jobs.run_chapter_draft_generation_job(db, job)
     payload = dict(job.payload_json or {})
-    if not _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY)):
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+    )
+    if event is None:
         return result
-    chapter_title = _safe_str(payload.get("chapter_title")) or "本章"
-    pending_count = int(payload.get("pending_source_count") or 0)
+    event_metadata = dict(event.metadata_json or {})
+    chapter_title = (
+        _safe_str(payload.get("chapter_title"))
+        or _safe_str(event_metadata.get("chapter_title"))
+        or "本章"
+    )
+    pending_count = int(
+        payload.get("pending_source_count")
+        or event_metadata.get("pending_source_count")
+        or 0
+    )
     if result.status == MemoirEditingJobStatus.SUCCEEDED:
         await _update_generation_event(
             db,
