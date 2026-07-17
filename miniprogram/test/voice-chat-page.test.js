@@ -1382,6 +1382,38 @@ test("human completion interview falls back to the selected speaker when provide
     turn_final: true,
   });
   assert.equal(verificationCalls, 1);
+  assert.equal(context.data.assistantExpectsAnswer, false);
+});
+
+test("completed book answer cannot start another recording", () => {
+  const page = loadVoiceChatPage();
+  let authorizationChecks = 0;
+  const context = {
+    ...page,
+    recordingStartPromise: null,
+    data: {
+      ...page.data,
+      sessionGoal: "book_completion",
+      assistantExpectsAnswer: false,
+      transcriptLines: [
+        { id: "answer-1", role: "user", text: "这段背景已经补充完整。" },
+      ],
+      completionItem: {
+        id: "item-1",
+        status: "in_progress",
+        question: "这段内容开始前还需要哪些背景？",
+      },
+    },
+    ensureVoiceAuthorization() {
+      authorizationChecks += 1;
+      return true;
+    },
+  };
+
+  const started = page.startRecording.call(context, false);
+
+  assert.equal(started, false);
+  assert.equal(authorizationChecks, 0);
 });
 
 test("voice chat clears live transcript when a new recording session starts", () => {

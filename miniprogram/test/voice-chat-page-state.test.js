@@ -240,6 +240,38 @@ test("deferred book completion returns to the whole-book overview", () => {
 
   assert.equal(patch.showCompletionItemContinue, true);
   assert.equal(patch.completionItemStatusText, "已留到以后再补");
+  assert.equal(patch.showControlBar, false);
+  assert.equal(patch.showAssistantActions, false);
+});
+
+test("answered book completion ends recording flow before background verification finishes", () => {
+  const patch = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    sessionGoal: "book_completion",
+    voiceAuthorizationAgreed: true,
+    assistantExpectsAnswer: false,
+    assistantPromptText: "这段背景已经保存，接下来可以返回全书概览。",
+    completionItem: {
+      id: "item-1",
+      question: "这段内容开始前，读者还需要知道哪些重要背景？",
+      status: "in_progress",
+    },
+    transcriptLines: [
+      {
+        id: "answer-1",
+        role: "user",
+        text: "今年看到山桃花照片以后，我们重新联系了。",
+      },
+    ],
+  });
+
+  assert.equal(patch.showControlBar, false);
+  assert.equal(patch.showCaptureStrip, false);
+  assert.equal(patch.micButtonDisabled, true);
+  assert.equal(patch.showAssistantActions, false);
+  assert.equal(patch.stageStatusText, "本次补充已经完成");
+  assert.equal(patch.liveDisplayText, "回答已经保存，可以返回全书概览。");
+  assert.equal(patch.assistantLabelText, "本次补充已结束");
 });
 
 test("voice chat view patch adds focused large text root classes", () => {

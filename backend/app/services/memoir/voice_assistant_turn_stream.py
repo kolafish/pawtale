@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 import uuid
 
@@ -288,14 +288,26 @@ class VoiceAssistantTurnStreamSession:
             has_user_message=has_user_message,
             regenerate=req.regenerate,
         )
-        project_progress_context = build_progress_prompt_context(
-            await progress_snapshot.get_project_progress_snapshot(
-                self.db,
-                user_id=self.user_id,
-                project_id=voice_session.project_id,
-                voice_unannounced_events_only=True,
+        if voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
+            project_progress_context = ProgressPromptContext(
+                prompt_text=(
+                    "当前是单项成书补访。不要播报全书进度、其他章节状态、"
+                    "未归章数量或后台任务；只围绕当前补全问题回应。"
+                ),
+                progress_update=None,
+                automation_event_ids=[],
+                speech_prefix="",
+                voice_announcement_event_ids=[],
             )
-        )
+        else:
+            project_progress_context = build_progress_prompt_context(
+                await progress_snapshot.get_project_progress_snapshot(
+                    self.db,
+                    user_id=self.user_id,
+                    project_id=voice_session.project_id,
+                    voice_unannounced_events_only=True,
+                )
+            )
         completion_prompt_context = await completion_items.prompt_context_for_session(
             self.db,
             voice_session=voice_session,
@@ -389,6 +401,12 @@ class VoiceAssistantTurnStreamSession:
         if cancel_event.is_set():
             return
         turn = _parse_interviewer_turn(artifacts.text, fallback_intent=fallback_intent)
+        if (
+            voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
+            and has_user_message
+            and turn.expects_answer
+        ):
+            turn = replace(turn, expects_answer=False)
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
         message, audio_file_id = await self._persist_completed_turn(
@@ -764,21 +782,22 @@ def _build_stream_turn_prompt(
         if policy_instruction
         else ""
     )
-    if (
-        voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
-        and completion_prompt_context is not None
-    ):
+    if voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
         if has_user_message:
             mode_instruction = """当前是成书补访，只围绕“当前补全问题”推进。
 - 先承接叙述者刚才真正回答到的内容，用一句话感谢并说明这一段已经保存
 - 不再继续追问细节，也不要自动切换到下一题；后台会核对内容，用户随后回到全书概览自行选择
 - 如果回答跑题，先自然接住，再温和带回当前唯一目标
 - 不要重复询问已经列为“不要重复追问”的事实"""
-        else:
+        elif completion_prompt_context is not None:
             mode_instruction = f"""当前是成书补访首次开场。
 - 最多两句，第一句简短说明今天只补一件事
 - 第二句自然地提出这个具体问题：{completion_prompt_context.question}
 - 不要展示任务 ID，不要念系统说明，不要扩展成多个问题"""
+        else:
+            mode_instruction = """当前成书补访已经没有待回答的问题。
+- 简短说明本轮已经结束，请用户返回全书概览
+- 不要继续提问，也不要引导用户再次录音"""
     elif voice_session.guidance_mode == "guided_interview":
         if has_user_message:
             mode_instruction = f"""当前是主题讲述，当前主题线索是“{module_label}”；如果最近对话中叙述者已经选择了其他主题，以最近对话为准。

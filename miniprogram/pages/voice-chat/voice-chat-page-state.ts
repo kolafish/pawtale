@@ -136,6 +136,7 @@ export interface VoiceChatData {
   showAssistantTTS: boolean;
   assistantDisplayText: string;
   showTTSProgress: boolean;
+  showAssistantActions: boolean;
   replayButtonText: string;
   followUpButtonText: string;
   showSkipFollowUp: boolean;
@@ -280,6 +281,7 @@ export function initialVoiceChatData(): VoiceChatData {
     showAssistantTTS: false,
     assistantDisplayText: "小余会先问一句，帮您开始讲。",
     showTTSProgress: false,
+    showAssistantActions: true,
     replayButtonText: "读给我听",
     followUpButtonText: "让小余问一句",
     showSkipFollowUp: false,
@@ -343,6 +345,7 @@ export type VoiceChatViewPatch = Pick<
   | "showAssistantTTS"
   | "assistantDisplayText"
   | "showTTSProgress"
+  | "showAssistantActions"
   | "replayButtonText"
   | "followUpButtonText"
   | "showSkipFollowUp"
@@ -410,11 +413,29 @@ function completionItemStatusText(state: VoiceChatData): string {
   })[status];
 }
 
+export function bookCompletionRoundFinished(
+  state: Pick<
+    VoiceChatData,
+    "sessionGoal" | "completionItem" | "assistantExpectsAnswer" | "transcriptLines"
+  >,
+): boolean {
+  if (state.sessionGoal !== "book_completion") {
+    return false;
+  }
+  const status = state.completionItem?.status;
+  if (status === "resolved" || status === "deferred" || status === "unable_to_answer") {
+    return true;
+  }
+  return state.assistantExpectsAnswer === false
+    && state.transcriptLines.some((line) => line.role === "user");
+}
+
 export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
   const isHumanInterview = state.interviewType === "human_interview";
   const isBookCompletion = state.sessionGoal === "book_completion";
+  const completionRoundFinished = bookCompletionRoundFinished(state);
   const completionUnavailable = isBookCompletion
     && !state.completionItemLoading
     && !state.completionItem;
@@ -423,18 +444,22 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
   const showHumanRecordActions = isHumanInterview
+    && !completionRoundFinished
     && !state.recording
     && !state.recordingStarting
     && state.voiceAuthorizationAgreed;
-  const showControlBar = !showHumanRecordActions;
+  const showControlBar = !showHumanRecordActions && !completionRoundFinished;
   const showStageStatus = !isHumanInterview || Boolean(state.error);
   const showHumanTranscriptOverlay = isHumanInterview && state.recording;
-  const showCaptureStrip = !isHumanInterview || state.recording;
+  const showCaptureStrip = (!isHumanInterview || state.recording)
+    && !completionRoundFinished;
   let stageStatusText = "可以开始讲了";
   if (state.error) {
     stageStatusText = "需要处理一下";
   } else if (completionUnavailable) {
     stageStatusText = "请重新进入补全成书";
+  } else if (completionRoundFinished) {
+    stageStatusText = "本次补充已经完成";
   } else if (state.recording) {
     stageStatusText = isHumanInterview ? `正在记录${speakerRoleLabel(state.speakerRole)}` : "我在听，您慢慢说";
   } else if (state.persistenceStateText === "已保存") {
@@ -461,10 +486,14 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
       ));
   }
   if (isBookCompletion && !state.recording && !assistantBusy) {
-    liveDisplayText = state.latestTranscriptText
-      || (state.completionItem
-        ? "按您记得的顺序讲一段就好"
-        : (state.completionItemLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"));
+    liveDisplayText = completionRoundFinished
+      ? "回答已经保存，可以返回全书概览。"
+      : (
+        state.latestTranscriptText
+        || (state.completionItem
+          ? "按您记得的顺序讲一段就好"
+          : (state.completionItemLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"))
+      );
   }
   let controlHintText = isHumanInterview
     ? ""
@@ -475,6 +504,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     controlHintText = "小余先问一句，稍等一下。";
   } else if (!isHumanInterview && assistantBusy) {
     controlHintText = "点这里就可以开始说";
+  }
+  if (completionRoundFinished) {
+    controlHintText = "";
   }
   let micButtonText = state.primaryActionText;
   if (!state.voiceAuthorizationAgreed) {
@@ -516,6 +548,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   }
   const micButtonDisabled = state.recordingStarting
     || !state.voiceAuthorizationAgreed
+    || completionRoundFinished
     || (completionUnavailable && !state.recording);
   const roleRecordButtonSuffix = micButtonDisabled ? " disabled" : "";
   const micButtonClass = [
@@ -558,7 +591,11 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     completionItemControlsDisabled,
     completionItemActionText: state.completionItemAction ? "正在处理" : "",
     assistantPanelClass: state.followUpError ? "assistant-panel error-state" : "assistant-panel",
-    assistantLabelText: state.followUpError ? "小余没说好" : (isBookCompletion ? "小余正在问这一章" : "小余想听您讲讲"),
+    assistantLabelText: state.followUpError
+      ? "小余没说好"
+      : (isBookCompletion
+        ? (completionRoundFinished ? "本次补充已结束" : "小余正在问这一章")
+        : "小余想听您讲讲"),
     showAssistantOpening: !isBookCompletion
       && !state.latestTranscriptText
       && !state.followUpLoading
@@ -570,6 +607,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     assistantDisplayText: state.assistantPromptText
       || (state.followUpLoading ? state.assistantLoadingText : (state.followUpError || state.assistantEmptyText)),
     showTTSProgress: Boolean(state.assistantPromptText && state.followUpTTSPlaying),
+    showAssistantActions: !completionRoundFinished,
     replayButtonText: state.followUpAudioFileId ? "重听一遍" : (state.followUpTTSError ? "重试朗读" : "读给我听"),
     followUpButtonText: state.followUpError ? "再问一次" : (state.assistantPromptText ? "换个问法" : "让小余问一句"),
     showSkipFollowUp: !isBookCompletion

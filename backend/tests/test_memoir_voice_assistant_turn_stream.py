@@ -20,8 +20,12 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirVoiceSession,
 )
-from app.models.memoir_narrative import MemoirInterviewPolicyDecision
+from app.models.memoir_narrative import (
+    MemoirCompletionItem,
+    MemoirInterviewPolicyDecision,
+)
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
@@ -147,6 +151,71 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
+
+
+async def test_book_completion_acknowledgement_suppresses_global_progress_and_ends_round(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="今年看到山桃花照片以后，我们重新联系并约好一起爬山。",
+        guidance_mode="guided_interview",
+    )
+    _, chapter = await create_test_book_plan(
+        test_db,
+        project_id=created["session"]["project_id"],
+        chapter_title="山桃花开的心动",
+    )
+    item = MemoirCompletionItem(
+        project_id=created["session"]["project_id"],
+        scope_type="chapter",
+        chapter_id=chapter.id,
+        item_type="causality",
+        severity="medium",
+        dimension="chapter_context",
+        title="补充重新联系的背景",
+        description="说明两人如何重新联系。",
+        fingerprint="a" * 64,
+        action="interview",
+        question="这段内容开始前，读者还需要知道哪些重要背景？",
+        priority=100,
+        status="in_progress",
+        detected_by="ai",
+    )
+    test_db.add(item)
+    await test_db.flush()
+    session = await test_db.get(MemoirVoiceSession, created["session"]["id"])
+    assert session is not None
+    session.session_goal = "book_completion"
+    session.current_completion_item_id = item.id
+    test_db.add(session)
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=created["session"]["project_id"],
+        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
+        summary_text="另有5条讲述未归入章节。",
+        metadata_json={"source": "book_quality_audit"},
+    )
+    await test_db.commit()
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=session.id,
+        user_id=created["user_id"],
+        chunks=["这段背景已经保存，接下来请返回全书概览。"],
+    )
+
+    assert completed["text"] == "这段背景已经保存，接下来请返回全书概览。"
+    assert completed["expects_answer"] is False
+    assert completed["progress_update_used"] is False
+    assert completed["progress_spoken_text"] == ""
+    assert "另有5条讲述未归入章节" not in ai_client.calls[0]["user_prompt"]
+    assert "不要播报全书进度" in ai_client.calls[0]["user_prompt"]
+    assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert assistant_message is not None
+    assert assistant_message.metadata_json["expects_answer"] is False
 
 
 async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing_reply(

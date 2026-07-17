@@ -38,12 +38,24 @@ class ChapterDraftStoryInput(BaseModel):
     claims: list[ChapterDraftClaimInput] = Field(default_factory=list)
 
 
+class ChapterDraftSupplementInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    utterance_id: str
+    text: str = Field(min_length=1, max_length=20_000)
+    question: str
+    purpose: str = ""
+    dimension: str = ""
+    claim_ids: list[str] = Field(default_factory=list)
+
+
 class ChapterDraftGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chapter_id: str
     chapter_title: str
     stories: list[ChapterDraftStoryInput]
+    supplement_blocks: list[ChapterDraftSupplementInput] = Field(default_factory=list)
     existing_draft: str = ""
     editorial_guidance: list[str] = Field(default_factory=list)
 
@@ -100,6 +112,10 @@ def build_chapter_draft_prompt(context: ChapterDraftGenerationInput) -> str:
 - 优先保证章节背景、开头、收束、人物关系、指代和转场清楚，避免履历式罗列和重复。
 - 所有事实性陈述必须由输入 Claim 及 evidence_quotes 支撑；used_claim_ids 只能来自输入。
 - certainty 不是 exact 时保留不确定语气，不得改写成确定事实。
+- supplement_blocks 是用户针对补全问题所作的一次次完整回答。每个 block 内的内容和先后关系应作为
+  一个连贯叙事单元处理，不要让 existing_draft 或其他素材插入 block 中间；可以润色或取舍次要细节，
+  但不能打乱其内部事件顺序。若它补充的是背景或衔接，应整体放在它所解释的事件之前。
+- supplement_blocks 只能作为其 claim_ids 的原始证据使用，不能据此扩张出输入 Claim 未表达的新事实。
 - 可以调整 existing_draft 的结构和表达，但它不是事实来源；没有 Claim 支撑的旧内容必须删除。
 - editorial_guidance 只控制本章组织和表达，不能成为事实来源。
 - 想写但缺少依据的内容放入 unsupported_fact_candidates，且不得出现在 content 中。

@@ -176,6 +176,8 @@ def build_narrative_extraction_repair_prompt(
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
 - Story 必须是可独立讲述的事件、持续关系、人生阶段或贯穿主题；孤立的时间、身份、属性、症状或背景事实只保留为 Claim。
 - 同一段经历的多条 Claim 应归入同一个 Story，不得拆成一批只有单个事实片段的微型 Story。
+- Claim 粒度应稍高、能够独立理解；同一场景中连续发生并共同表达同一转折或结果的动作，
+  优先合并为一条 Claim，明显属于不同时间、人物关系或事件阶段时再拆分。
 - validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
 - active_completion 非空且原文确实回答该问题时，保留对 active_completion.story_id 的关联；原文无关时不得强行关联。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
@@ -307,7 +309,7 @@ def _candidate_score(
     candidate: tuple[MemoirNarrativeExtraction, dict[str, int]],
     *,
     source_text: str,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int]:
     extraction, discarded_counts = candidate
     supported_claims = [
         claim
@@ -320,14 +322,15 @@ def _candidate_score(
         for story in extraction.stories
         if any(link.claim_key in supported_claim_keys for link in story.claims)
     ]
+    supported_quotes = {
+        quote
+        for claim in supported_claims
+        for quote in claim.evidence_quotes
+        if quote in source_text
+    }
     return (
-        len(supported_claims),
         len(supported_stories),
-        sum(
-            quote in source_text
-            for claim in supported_claims
-            for quote in claim.evidence_quotes
-        ),
+        sum(len(quote) for quote in supported_quotes),
         -sum(discarded_counts.values()),
     )
 
@@ -415,6 +418,8 @@ source_text:
 - 不推断原文没有说出的人物关系、年份、地点、因果或身份。
 - “我”指叙述者时，创建 is_narrator=true 的 person entity，并让相关 claim 引用它。
 - 每条 claim 至少提供一段逐字引文；无法找到逐字引文就不要输出该 claim。
+- Claim 采用稍高层次、可独立理解的事实粒度；同一场景中连续发生并共同表达同一转折或结果的动作，
+  优先合并为一条 Claim，明显属于不同时间、人物关系或事件阶段时再拆分。
 - 时间不确定时保留 time_text，certainty 使用 approximate 或 uncertain，不猜具体日期。
 - speaker_role=interviewer 时，采访者提出的问题不是叙述者事实；采访者自己陈述的新事实可以抽取，但会由系统进入人工核实。
 - “接着聊那个朋友吧”“换个话题”等只控制访谈流程的句子不是人物关系或回忆事实；整条 source_text 只有这类话语时，entities、claims、stories 全部返回空数组。
@@ -545,7 +550,10 @@ async def extract_narrative_state(
         ]
         source, selected = max(
             usable_candidates,
-            key=lambda item: _candidate_score(item[1], source_text=source_text),
+            key=lambda item: (
+                _candidate_score(item[1], source_text=source_text),
+                item[0] == "repaired",
+            ),
         )
         extraction, discarded_counts = selected
         diagnostics.update(discarded_counts)
