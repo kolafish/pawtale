@@ -29,7 +29,7 @@ class EmptyChapterAuditAI:
         return '{"schema_version":"2","gaps":[]}'
 
 
-class MissingPersonIdentityAuditAI:
+class MismatchedPersonIdentityAuditAI:
     provider_name = "test"
     model_name = "test-person-identity-audit"
 
@@ -42,7 +42,9 @@ class MissingPersonIdentityAuditAI:
                 "schema_version": "2",
                 "gaps": [
                     {
-                        "gap_type": "relationship",
+                        # The provider sometimes chooses a plausible semantic
+                        # type that conflicts with the controlled dimension.
+                        "gap_type": "unclear_reference",
                         "severity": "medium",
                         "dimension": "person_introduction",
                         "reason_signal": "draft_usage_problem",
@@ -327,7 +329,7 @@ async def test_chapter_completion_interviews_for_unsupported_person_identity(
     await _run_refresh(
         test_db,
         job,
-        semantic_ai_client=MissingPersonIdentityAuditAI(story.id),
+        semantic_ai_client=MismatchedPersonIdentityAuditAI(story.id),
     )
 
     item = await test_db.scalar(
