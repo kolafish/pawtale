@@ -94,10 +94,102 @@ test("book completion overview exposes confirmed chapter progress and one action
   const { bookCompletionViewPatch } = loadBookCompletionPage().mod;
   const patch = bookCompletionViewPatch(readyOverview());
 
-  assert.equal(patch.progressText, "1 / 2 章已确认");
+  assert.equal(patch.progressText, "1 / 2 章正文已确认");
   assert.equal(patch.chapters[0].actionText, "开始讲");
   assert.equal(patch.chapters[1].actionText, "查看正文");
+  assert.equal(patch.allChaptersConfirmed, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
+});
+
+test("book completion makes confirmed chapters explicitly recheckable", async () => {
+  const prepared = [];
+  const toasts = [];
+  const overview = readyOverview();
+  overview.completed_chapters = 2;
+  overview.chapters[0] = completionChapter({
+    state: "confirmed",
+    next_action: {
+      kind: "complete",
+      title: "本章已确认",
+      detail: "正文已经收入书稿。",
+      action_text: "",
+      disabled: true,
+    },
+    active_item: null,
+    headline: "本章已确认",
+    detail: "正文已经收入书稿。",
+  });
+  global.wx = {
+    navigateTo() {},
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page, mod } = loadBookCompletionPage({
+    voiceApiExports: {
+      prepareMemoirBookChapter: async (projectId, chapterId) => {
+        prepared.push([projectId, chapterId]);
+      },
+      getMemoirBookCompletionOverview: async () => overview,
+    },
+  });
+  const patch = mod.bookCompletionViewPatch(overview);
+  assert.equal(patch.allChaptersConfirmed, true);
+  assert.equal(patch.chapters.every((chapter) => chapter.canRecheck), true);
+
+  const context = pageContext(page, {
+    projectId: "project-1",
+    chapters: patch.chapters,
+    allChaptersConfirmed: true,
+  });
+  await page.recheckChapter.call(context, {
+    currentTarget: { dataset: { chapterId: "chapter-1" } },
+  });
+  await page.recheckAllChapters.call(context);
+
+  assert.deepEqual(prepared, [
+    ["project-1", "chapter-1"],
+    ["project-1", "chapter-1"],
+    ["project-1", "chapter-2"],
+  ]);
+  assert.ok(toasts.every((title) => title === "暂未发现待补内容"));
+  delete global.wx;
+});
+
+test("book completion resumes polling after a transient recheck refresh failure", async () => {
+  const scheduled = [];
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = (callback, delay) => {
+    scheduled.push([callback, delay]);
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  global.wx = {};
+  try {
+    const { page } = loadBookCompletionPage({
+      voiceApiExports: {
+        getMemoirBookCompletionOverview: async () => {
+          throw new Error("network unavailable");
+        },
+      },
+    });
+    const context = pageContext(page, {
+      projectId: "project-1",
+      recheckingAll: true,
+    });
+    context.pageVisible = true;
+
+    await page.loadOverview.call(context, true);
+
+    assert.equal(context.data.error, "network unavailable");
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0][1], 1500);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    delete global.wx;
+  }
 });
 
 test("book completion starts the selected completion directly", async () => {

@@ -188,6 +188,26 @@ async def test_chapter_completion_runs_from_source_material_to_one_confirmed_dra
     )
     assert final_overview.json()["chapters"][0]["state"] == "confirmed"
 
+    recheck = await client.post(
+        (
+            f"/api/memoir/projects/{project_id}/book-completion/"
+            f"chapters/{chapter.id}/prepare"
+        ),
+        json={},
+    )
+    assert recheck.status_code == 202, recheck.text
+    recheck_job = await test_db.get(MemoirEditingJob, recheck.json()["id"])
+    assert recheck_job is not None
+    await _run_refresh(test_db, recheck_job)
+    assert recheck_job.result_json["draft_generation_job_id"] is None
+
+    checked_overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    checked_chapter = checked_overview.json()["chapters"][0]
+    assert checked_chapter["state"] == "confirmed"
+    assert checked_chapter["headline"] == "本次检查未发现待补内容"
+
 
 async def test_chapter_completion_exposes_one_interview_item_when_material_is_missing(
     client,

@@ -369,8 +369,15 @@ async def run_chapter_completion_refresh_job(
         )
         .limit(1)
     )
+    draft_is_current = (
+        current_context.draft is not None
+        and not current_context.draft.source_changes_pending
+    )
     draft_job = None
-    if active_item_exists is None:
+    if (
+        active_item_exists is None
+        and (not draft_is_current or bool(editorial_guidance))
+    ):
         draft_job = await draft_generation_jobs.enqueue_chapter_draft_generation(
             db,
             project_id=project_id,

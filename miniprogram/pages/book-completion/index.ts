@@ -31,6 +31,7 @@ interface ChapterView extends MemoirChapterCompletionSummary {
   actionText: string;
   chapterClass: string;
   disabled: boolean;
+  canRecheck: boolean;
 }
 
 interface BookCompletionData {
@@ -42,7 +43,9 @@ interface BookCompletionData {
   detail: string;
   progressText: string;
   chapters: ChapterView[];
+  allChaptersConfirmed: boolean;
   preparingChapterId: string;
+  recheckingAll: boolean;
   startingTaskId: string;
 }
 
@@ -55,6 +58,7 @@ type ChapterTapEvent = PageDatasetEvent<ChapterDataset>;
 function chapterView(
   item: MemoirChapterCompletionSummary,
   preparingChapterId: string,
+  recheckingAll = false,
 ): ChapterView {
   const stateText = {
     not_started: "等待整理",
@@ -64,7 +68,11 @@ function chapterView(
     confirmed: "已经确认",
     failed: "整理未完成",
   }[item.state];
-  const busy = preparingChapterId === item.chapter_id || item.state === "preparing";
+  const busy = (
+    recheckingAll
+    || preparingChapterId === item.chapter_id
+    || item.state === "preparing"
+  );
   return {
     ...item,
     stateText: busy ? "正在整理" : stateText,
@@ -75,20 +83,31 @@ function chapterView(
         : (item.next_action.action_text || "查看本章")),
     chapterClass: `chapter-item ${item.state}`,
     disabled: busy,
+    canRecheck: item.state === "confirmed" && !busy,
   };
 }
 
 export function bookCompletionViewPatch(
   overview: MemoirBookCompletionOverview,
   preparingChapterId = "",
-): Pick<BookCompletionData, "headline" | "detail" | "progressText" | "chapters"> {
+  recheckingAll = false,
+): Pick<
+  BookCompletionData,
+  "headline" | "detail" | "progressText" | "chapters" | "allChaptersConfirmed"
+> {
   return {
     headline: overview.headline,
     detail: overview.detail,
     progressText: overview.total_chapters
-      ? `${overview.completed_chapters} / ${overview.total_chapters} 章已确认`
+      ? `${overview.completed_chapters} / ${overview.total_chapters} 章正文已确认`
       : "还没有章节",
-    chapters: overview.chapters.map((item) => chapterView(item, preparingChapterId)),
+    chapters: overview.chapters.map(
+      (item) => chapterView(item, preparingChapterId, recheckingAll),
+    ),
+    allChaptersConfirmed: (
+      overview.chapters.length > 0
+      && overview.chapters.every((item) => item.state === "confirmed")
+    ),
   };
 }
 
@@ -105,7 +124,9 @@ definePage<BookCompletionData>()({
     detail: "",
     progressText: "",
     chapters: [],
+    allChaptersConfirmed: false,
     preparingChapterId: "",
+    recheckingAll: false,
     startingTaskId: "",
   },
 
@@ -147,7 +168,11 @@ definePage<BookCompletionData>()({
     try {
       const overview = await getMemoirBookCompletionOverview(this.data.projectId);
       this.setData({
-        ...bookCompletionViewPatch(overview, this.data.preparingChapterId),
+        ...bookCompletionViewPatch(
+          overview,
+          this.data.preparingChapterId,
+          this.data.recheckingAll,
+        ),
         loading: false,
         error: "",
       });
@@ -155,11 +180,23 @@ definePage<BookCompletionData>()({
         this.schedulePolling();
       } else {
         this.stopPolling();
-        if (this.data.preparingChapterId) {
+        const finishedChapterId = this.data.preparingChapterId;
+        const finishedWholeBook = this.data.recheckingAll;
+        if (finishedChapterId || finishedWholeBook) {
           this.setData({
             preparingChapterId: "",
+            recheckingAll: false,
             chapters: overview.chapters.map((item) => chapterView(item, "")),
           });
+          const checkedChapters = finishedWholeBook
+            ? overview.chapters
+            : overview.chapters.filter((item) => item.chapter_id === finishedChapterId);
+          const toastTitle = checkedChapters.some((item) => item.state === "needs_input")
+            ? "发现需要补充的内容"
+            : (checkedChapters.every((item) => item.state === "confirmed")
+              ? "暂未发现待补内容"
+              : "检查完成，请查看结果");
+          wx.showToast({ title: toastTitle, icon: "none" });
         }
       }
     } catch (error) {
@@ -170,13 +207,22 @@ definePage<BookCompletionData>()({
         loading: false,
         error: error instanceof Error ? error.message : "全书整理情况加载失败",
       });
+      if (this.data.preparingChapterId || this.data.recheckingAll) {
+        this.schedulePolling();
+      }
     }
   },
 
   async tapChapter(event: ChapterTapEvent) {
     const chapterId = datasetString(event, "chapterId");
     const chapter = this.data.chapters.find((item) => item.chapter_id === chapterId);
-    if (!chapter || chapter.disabled || this.data.preparingChapterId || this.data.startingTaskId) {
+    if (
+      !chapter
+      || chapter.disabled
+      || this.data.preparingChapterId
+      || this.data.recheckingAll
+      || this.data.startingTaskId
+    ) {
       return;
     }
     if (chapter.next_action.kind === "prepare") {
@@ -198,6 +244,9 @@ definePage<BookCompletionData>()({
   },
 
   async prepareChapter(chapterId: string) {
+    if (this.data.recheckingAll || this.data.preparingChapterId) {
+      return;
+    }
     this.setData({
       preparingChapterId: chapterId,
       error: "",
@@ -213,6 +262,46 @@ definePage<BookCompletionData>()({
       this.setData({
         preparingChapterId: "",
         error: error instanceof Error ? error.message : "本章整理失败",
+        chapters: this.data.chapters.map((item) => chapterView(item, "")),
+      });
+    }
+  },
+
+  async recheckChapter(event: ChapterTapEvent) {
+    const chapterId = datasetString(event, "chapterId");
+    const chapter = this.data.chapters.find((item) => item.chapter_id === chapterId);
+    if (!chapter?.canRecheck) {
+      return;
+    }
+    await this.prepareChapter(chapterId);
+  },
+
+  async recheckAllChapters() {
+    if (
+      !this.data.allChaptersConfirmed
+      || this.data.recheckingAll
+      || this.data.preparingChapterId
+      || !this.data.chapters.length
+    ) {
+      return;
+    }
+    this.setData({
+      recheckingAll: true,
+      error: "",
+      chapters: this.data.chapters.map((item) => chapterView(item, "", true)),
+    });
+    try {
+      for (const chapter of this.data.chapters) {
+        await prepareMemoirBookChapter(this.data.projectId, chapter.chapter_id);
+      }
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        recheckingAll: false,
+        error: error instanceof Error ? error.message : "全书检查没有完成",
         chapters: this.data.chapters.map((item) => chapterView(item, "")),
       });
     }
