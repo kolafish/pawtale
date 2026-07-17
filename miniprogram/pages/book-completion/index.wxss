@@ -221,10 +221,6 @@
   transition-timing-function: ease-out;
 }
 
-.chapter-recheck-action.disabled {
-  color: #9d958f;
-}
-
 .chapter-recheck-action:active {
   transform: scale(0.96);
 }

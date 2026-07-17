@@ -207,6 +207,9 @@ definePage<BookCompletionData>()({
         loading: false,
         error: error instanceof Error ? error.message : "全书整理情况加载失败",
       });
+      if (this.data.preparingChapterId || this.data.recheckingAll) {
+        this.schedulePolling();
+      }
     }
   },
 

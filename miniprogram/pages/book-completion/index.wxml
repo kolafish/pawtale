@@ -43,12 +43,11 @@
         {{item.actionText}}
       </view>
       <view
-        wx:if="{{item.state === 'confirmed'}}"
-        class="chapter-recheck-action {{item.canRecheck ? '' : 'disabled'}}"
+        wx:if="{{item.state === 'confirmed' && item.canRecheck}}"
+        class="chapter-recheck-action"
         data-chapter-id="{{item.chapter_id}}"
         catchtap="recheckChapter"
         aria-role="button"
-        aria-disabled="{{!item.canRecheck}}"
       >重新检查本章</view>
     </view>
 

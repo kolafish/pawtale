@@ -156,6 +156,42 @@ test("book completion makes confirmed chapters explicitly recheckable", async ()
   delete global.wx;
 });
 
+test("book completion resumes polling after a transient recheck refresh failure", async () => {
+  const scheduled = [];
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = (callback, delay) => {
+    scheduled.push([callback, delay]);
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  global.wx = {};
+  try {
+    const { page } = loadBookCompletionPage({
+      voiceApiExports: {
+        getMemoirBookCompletionOverview: async () => {
+          throw new Error("network unavailable");
+        },
+      },
+    });
+    const context = pageContext(page, {
+      projectId: "project-1",
+      recheckingAll: true,
+    });
+    context.pageVisible = true;
+
+    await page.loadOverview.call(context, true);
+
+    assert.equal(context.data.error, "network unavailable");
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0][1], 1500);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    delete global.wx;
+  }
+});
+
 test("book completion starts the selected completion directly", async () => {
   const navigations = [];
   global.wx = {
