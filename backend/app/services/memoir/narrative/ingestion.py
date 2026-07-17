@@ -11,6 +11,7 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSourceType,
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimVerificationStatus,
+    MemoirCompletionItemStatus,
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import (

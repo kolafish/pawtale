@@ -27,6 +27,23 @@ _ACTION_BY_REASON = {
     ),
 }
 
+_FACT_SENSITIVE_SEMANTIC_DIMENSIONS = {
+    "person_introduction",
+    "relationship_clarity",
+    "reference",
+}
+_EDITORIAL_REASON_CODES = {
+    MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE,
+    MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM,
+}
+
+
+def _semantic_dimension(candidate: MemoirNarrativeGapCandidate) -> str | None:
+    if not candidate.target_slot.startswith("semantic:"):
+        return None
+    parts = candidate.target_slot.split(":", 2)
+    return parts[1] if len(parts) >= 2 else None
+
 
 def _reason_for_candidate(
     candidate: MemoirNarrativeGapCandidate,
@@ -46,7 +63,15 @@ def _reason_for_candidate(
         return MemoirNarrativeGapActionReasonCode.FACT_CONFLICT_DETECTED
 
     if candidate.action_reason_signal is not None:
-        return candidate.action_reason_signal
+        reason = candidate.action_reason_signal
+        if (
+            reason in _EDITORIAL_REASON_CODES
+            and _semantic_dimension(candidate)
+            in _FACT_SENSITIVE_SEMANTIC_DIMENSIONS
+            and not candidate.claim_roles
+        ):
+            return MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED
+        return reason
 
     if gap_type == MemoirNarrativeGapType.MISSING_SLOT:
         return MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE

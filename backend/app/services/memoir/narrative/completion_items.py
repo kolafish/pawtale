@@ -75,7 +75,7 @@ def item_fingerprint(candidate: MemoirNarrativeGapCandidate) -> str:
 
 def _dimension(candidate: MemoirNarrativeGapCandidate) -> str:
     if candidate.target_slot.startswith("semantic:"):
-        return candidate.target_slot.rsplit(":", 1)[-1]
+        return candidate.target_slot.split(":", 2)[1]
     return candidate.target_slot
 
 
