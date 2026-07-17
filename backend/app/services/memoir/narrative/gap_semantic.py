@@ -176,22 +176,21 @@ def _validated_candidates(
             )
         if item.gap_type not in SEMANTIC_GAP_TYPES:
             raise ValueError("semantic audit returned a deterministic-only gap type")
-        if item.gap_type != SEMANTIC_DIMENSION_GAP_TYPES[item.dimension]:
-            raise ValueError("semantic gap dimension does not match its gap type")
+        gap_type = SEMANTIC_DIMENSION_GAP_TYPES[item.dimension]
         story_ids = set(item.story_ids)
         claim_ids = set(item.claim_ids)
         if not story_ids and not claim_ids:
             raise ValueError("semantic gap requires Story or Claim evidence")
         if not story_ids.issubset(valid_story_ids) or not claim_ids.issubset(valid_claim_ids):
             raise ValueError("semantic gap referenced evidence outside the chapter")
-        if item.gap_type == MemoirNarrativeGapType.CONTRADICTION and len(claim_ids) < 2:
+        if gap_type == MemoirNarrativeGapType.CONTRADICTION and len(claim_ids) < 2:
             raise ValueError("semantic contradiction requires at least two Claims")
-        if item.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT and not claim_ids:
+        if gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT and not claim_ids:
             raise ValueError("semantic unsupported fact requires a Claim")
         if (
             reason_signal
             == MemoirNarrativeGapActionReasonCode.FACT_CONFLICT_DETECTED
-            and item.gap_type != MemoirNarrativeGapType.CONTRADICTION
+            and gap_type != MemoirNarrativeGapType.CONTRADICTION
         ):
             raise ValueError("fact conflict signal requires a contradiction gap")
         if item.dimension in selected_dimensions:
@@ -205,7 +204,7 @@ def _validated_candidates(
         severity = item.severity
         if (
             severity == MemoirNarrativeGapSeverity.HIGH
-            and item.gap_type
+            and gap_type
             not in {
                 MemoirNarrativeGapType.CONTRADICTION,
                 MemoirNarrativeGapType.UNSUPPORTED_FACT,
@@ -216,16 +215,16 @@ def _validated_candidates(
         evidence_hash = sha256(evidence_identity.encode("utf-8")).hexdigest()[:20]
         claim_role = (
             MemoirNarrativeGapClaimRole.CONFLICTING
-            if item.gap_type == MemoirNarrativeGapType.CONTRADICTION
+            if gap_type == MemoirNarrativeGapType.CONTRADICTION
             else MemoirNarrativeGapClaimRole.UNSUPPORTED_CANDIDATE
-            if item.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT
+            if gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT
             else MemoirNarrativeGapClaimRole.SUPPORTING
         )
         candidates.append(
             MemoirNarrativeGapCandidate(
                 scope_type=MemoirNarrativeGapScopeType.CHAPTER,
                 primary_chapter_id=context.chapter.id,
-                gap_type=item.gap_type,
+                gap_type=gap_type,
                 severity=severity,
                 target_slot=f"semantic:{item.dimension}:{evidence_hash}",
                 title=item.title,
