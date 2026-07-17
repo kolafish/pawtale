@@ -22,6 +22,10 @@ from app.services.memoir.narrative.draft_generation_jobs import (
     enqueue_chapter_draft_generation,
     run_chapter_draft_generation_job,
 )
+from app.services.memoir.narrative.gap_rules import (
+    chapter_completion_content_signature,
+    load_chapter_audit_context,
+)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_source_backed_story,
@@ -153,8 +157,15 @@ async def test_generation_job_writes_one_whole_draft_and_acknowledges_sources(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        content_signature="first",
+        content_signature=chapter_completion_content_signature(
+            await load_chapter_audit_context(
+                test_db,
+                project_id=project_id,
+                chapter_id=chapter.id,
+            )
+        ),
     )
+    await test_db.commit()
     first = await run_chapter_draft_generation_job(
         test_db,
         first_job,
@@ -183,8 +194,15 @@ async def test_generation_job_writes_one_whole_draft_and_acknowledges_sources(
         test_db,
         project_id=project_id,
         chapter_id=chapter.id,
-        content_signature="second",
+        content_signature=chapter_completion_content_signature(
+            await load_chapter_audit_context(
+                test_db,
+                project_id=project_id,
+                chapter_id=chapter.id,
+            )
+        ),
     )
+    await test_db.commit()
     second = await run_chapter_draft_generation_job(
         test_db,
         second_job,
@@ -198,3 +216,67 @@ async def test_generation_job_writes_one_whole_draft_and_acknowledges_sources(
             MemoirBookChapterDraftVersion.draft_id == draft.id
         )
     ) == 1
+
+
+async def test_generation_job_skips_stale_input_and_requeues_chapter_refresh(
+    client,
+    test_db,
+):
+    source_text = "十八岁那年，我离开家乡去成都读书。"
+    created = await create_test_voice_transcript(client, test_db, source_text)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["第一次离家"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+    )
+    chapter = chapters[0]
+    await create_test_source_backed_story(
+        test_db,
+        project_id=project_id,
+        user_id=created["user_id"],
+        source=created,
+        title="第一次离家",
+        statement=source_text,
+    )
+    signature = chapter_completion_content_signature(
+        await load_chapter_audit_context(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
+    )
+    job = await enqueue_chapter_draft_generation(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        content_signature=signature,
+    )
+    await test_db.commit()
+    link = await test_db.scalar(
+        select(MemoirChapterSourceLink).where(
+            MemoirChapterSourceLink.chapter_id == chapter.id
+        )
+    )
+    assert link is not None
+    link.quote = f"{link.quote} 后来又补充了一句话。"
+    await test_db.commit()
+    ai = FakeChapterDraftAI()
+
+    result = await run_chapter_draft_generation_job(
+        test_db,
+        job,
+        ai_client=ai,
+    )
+    await test_db.commit()
+
+    assert result.status.value == "skipped"
+    assert result.result_json["published"] is False
+    assert result.result_json["replacement_job_id"]
+    assert ai.prompts == []
+    assert await test_db.scalar(
+        select(func.count(MemoirBookChapterDraft.id)).where(
+            MemoirBookChapterDraft.chapter_id == chapter.id
+        )
+    ) == 0

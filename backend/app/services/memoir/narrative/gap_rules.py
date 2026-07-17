@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+from hashlib import sha256
+import json
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +41,9 @@ from app.services.memoir.narrative.claim_usage_policy import (
 )
 
 
+CHAPTER_COMPLETION_SIGNATURE_VERSION = "3"
+
+
 @dataclass(frozen=True)
 class ChapterAuditDraft:
     id: str
@@ -53,6 +58,7 @@ class ChapterAuditDraft:
 @dataclass(frozen=True)
 class ChapterAuditContext:
     chapter: MemoirBookPlanChapter
+    source_links: tuple[MemoirChapterSourceLink, ...]
     stories: dict[str, MemoirStory]
     story_claims: dict[str, list[MemoirStoryClaim]]
     claims: dict[str, MemoirClaim]
@@ -83,13 +89,45 @@ async def load_chapter_audit_contexts(
     if not chapter_ids:
         return {}
 
+    source_link_rows = list(
+        (
+            await db.scalars(
+                select(MemoirChapterSourceLink)
+                .where(
+                    MemoirChapterSourceLink.project_id == project_id,
+                    MemoirChapterSourceLink.chapter_id.in_(chapter_ids),
+                )
+                .order_by(
+                    MemoirChapterSourceLink.chapter_id,
+                    MemoirChapterSourceLink.created_at,
+                    MemoirChapterSourceLink.id,
+                )
+            )
+        ).all()
+    )
+    source_links_by_chapter: dict[str, list[MemoirChapterSourceLink]] = defaultdict(
+        list
+    )
+    for link in source_link_rows:
+        source_links_by_chapter[link.chapter_id].append(link)
+
     story_rows = (
         await db.execute(
             select(MemoirChapterSourceLink.chapter_id, MemoirStory)
             .join(
                 MemoirClaimEvidence,
                 (MemoirClaimEvidence.project_id == MemoirChapterSourceLink.project_id)
-                & (MemoirClaimEvidence.utterance_id == MemoirChapterSourceLink.utterance_id),
+                & (
+                    MemoirClaimEvidence.utterance_id
+                    == MemoirChapterSourceLink.utterance_id
+                )
+                & (
+                    MemoirChapterSourceLink.transcript_version_id.is_(None)
+                    | (
+                        MemoirClaimEvidence.transcript_version_id
+                        == MemoirChapterSourceLink.transcript_version_id
+                    )
+                ),
             )
             .join(
                 MemoirStoryClaim,
@@ -106,6 +144,8 @@ async def load_chapter_audit_contexts(
                 MemoirChapterSourceLink.chapter_id.in_(chapter_ids),
                 MemoirChapterSourceLink.status
                 == MemoirChapterSourceLinkStatus.ACTIVE.value,
+                MemoirClaimEvidence.evidence_role
+                == MemoirClaimEvidenceRole.SUPPORTS.value,
                 MemoirStory.lifecycle_status
                 == MemoirStoryLifecycleStatus.ACTIVE.value,
             )
@@ -141,7 +181,52 @@ async def load_chapter_audit_contexts(
     story_claims: dict[str, list[MemoirStoryClaim]] = defaultdict(list)
     for link in story_claim_rows:
         story_claims[link.story_id].append(link)
-    claim_ids = {link.claim_id for link in story_claim_rows}
+
+    chapter_evidence_rows = (
+        await db.execute(
+            select(
+                MemoirChapterSourceLink.chapter_id,
+                MemoirClaimEvidence.claim_id,
+                func.count(MemoirClaimEvidence.id),
+            )
+            .join(
+                MemoirClaimEvidence,
+                (MemoirClaimEvidence.project_id == MemoirChapterSourceLink.project_id)
+                & (
+                    MemoirClaimEvidence.utterance_id
+                    == MemoirChapterSourceLink.utterance_id
+                )
+                & (
+                    MemoirChapterSourceLink.transcript_version_id.is_(None)
+                    | (
+                        MemoirClaimEvidence.transcript_version_id
+                        == MemoirChapterSourceLink.transcript_version_id
+                    )
+                ),
+            )
+            .where(
+                MemoirChapterSourceLink.project_id == project_id,
+                MemoirChapterSourceLink.chapter_id.in_(chapter_ids),
+                MemoirChapterSourceLink.status
+                == MemoirChapterSourceLinkStatus.ACTIVE.value,
+                MemoirClaimEvidence.evidence_role
+                == MemoirClaimEvidenceRole.SUPPORTS.value,
+            )
+            .group_by(
+                MemoirChapterSourceLink.chapter_id,
+                MemoirClaimEvidence.claim_id,
+            )
+        )
+    ).all()
+    evidence_counts_by_chapter: dict[str, dict[str, int]] = defaultdict(dict)
+    for chapter_id, claim_id, count in chapter_evidence_rows:
+        evidence_counts_by_chapter[str(chapter_id)][str(claim_id)] = int(count)
+
+    claim_ids = {
+        claim_id
+        for counts in evidence_counts_by_chapter.values()
+        for claim_id in counts
+    }
     claims = (
         {
             claim.id: claim
@@ -151,28 +236,6 @@ async def load_chapter_audit_contexts(
                         MemoirClaim.project_id == project_id,
                         MemoirClaim.id.in_(claim_ids),
                     )
-                )
-            ).all()
-        }
-        if claim_ids
-        else {}
-    )
-    evidence_counts = (
-        {
-            str(claim_id): int(count)
-            for claim_id, count in (
-                await db.execute(
-                    select(
-                        MemoirClaimEvidence.claim_id,
-                        func.count(MemoirClaimEvidence.id),
-                    )
-                    .where(
-                        MemoirClaimEvidence.project_id == project_id,
-                        MemoirClaimEvidence.claim_id.in_(claim_ids),
-                        MemoirClaimEvidence.evidence_role
-                        == MemoirClaimEvidenceRole.SUPPORTS.value,
-                    )
-                    .group_by(MemoirClaimEvidence.claim_id)
                 )
             ).all()
         }
@@ -196,7 +259,8 @@ async def load_chapter_audit_contexts(
     contexts: dict[str, ChapterAuditContext] = {}
     for chapter in chapters:
         chapter_stories = stories_by_chapter.get(chapter.id, {})
-        chapter_claim_ids = {
+        chapter_evidence_counts = evidence_counts_by_chapter.get(chapter.id, {})
+        chapter_claim_ids = set(chapter_evidence_counts) & {
             link.claim_id
             for story_id in chapter_stories
             for link in story_claims.get(story_id, [])
@@ -212,9 +276,14 @@ async def load_chapter_audit_contexts(
         )
         contexts[chapter.id] = ChapterAuditContext(
             chapter=chapter,
+            source_links=tuple(source_links_by_chapter.get(chapter.id, [])),
             stories=dict(chapter_stories),
             story_claims={
-                story_id: list(story_claims.get(story_id, []))
+                story_id: [
+                    link
+                    for link in story_claims.get(story_id, [])
+                    if link.claim_id in chapter_claim_ids
+                ]
                 for story_id in chapter_stories
             },
             claims={
@@ -223,7 +292,7 @@ async def load_chapter_audit_contexts(
                 if claim_id in claims
             },
             evidence_counts={
-                claim_id: evidence_counts.get(claim_id, 0)
+                claim_id: chapter_evidence_counts.get(claim_id, 0)
                 for claim_id in chapter_claim_ids
                 if claim_id in claims
             },
@@ -269,6 +338,69 @@ async def load_chapter_audit_context(
             chapters=[chapter],
         )
     )[chapter.id]
+
+
+def chapter_completion_content_signature(context: ChapterAuditContext) -> str:
+    payload = {
+        "engine_version": CHAPTER_COMPLETION_SIGNATURE_VERSION,
+        "chapter_id": context.chapter.id,
+        "chapter_title": context.chapter.title,
+        "source_links": [
+            [
+                link.id,
+                link.utterance_id,
+                link.transcript_version_id,
+                link.audio_file_id,
+                link.start_ms,
+                link.end_ms,
+                sha256(link.quote.encode("utf-8")).hexdigest(),
+                link.status,
+                link.merged_draft_version_id,
+                link.removed_at.isoformat() if link.removed_at else None,
+                link.updated_at.isoformat(),
+            ]
+            for link in context.source_links
+        ],
+        "stories": [
+            [story.id, story.version, story.updated_at.isoformat()]
+            for story in sorted(context.stories.values(), key=lambda item: item.id)
+        ],
+        "story_claims": [
+            [story_id, link.claim_id, link.narrative_role, link.is_core]
+            for story_id, links in sorted(context.story_claims.items())
+            for link in sorted(links, key=lambda item: (item.sort_order, item.id))
+        ],
+        "claims": [
+            [
+                claim.id,
+                claim.updated_at.isoformat(),
+                claim.verification_status,
+                claim.publication_status,
+                claim.superseded_by_claim_id,
+                context.evidence_counts.get(claim.id, 0),
+            ]
+            for claim in sorted(context.claims.values(), key=lambda item: item.id)
+        ],
+        "draft": (
+            [
+                context.draft.id,
+                context.draft.version_id,
+                context.draft.version,
+                context.draft.status,
+                context.draft.source_changes_pending,
+                sha256(context.draft.content.encode("utf-8")).hexdigest(),
+            ]
+            if context.draft
+            else None
+        ),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return sha256(encoded.encode("utf-8")).hexdigest()
 
 
 def _chapter_candidate(

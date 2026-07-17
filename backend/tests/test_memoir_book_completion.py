@@ -169,6 +169,20 @@ async def test_chapter_completion_runs_from_source_material_to_one_confirmed_dra
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["status"] == "confirmed"
 
+    no_op_revision = await client.post(
+        (
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+            f"chapters/{chapter.id}/draft/revise"
+        ),
+        json={
+            "expected_version_id": confirmed.json()["latest_version"]["id"],
+            "content": confirmed.json()["latest_version"]["content"],
+        },
+    )
+    assert no_op_revision.status_code == 200, no_op_revision.text
+    assert no_op_revision.json()["status"] == "confirmed"
+    assert no_op_revision.json()["latest_version"]["version"] == 2
+
     final_overview = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
     )

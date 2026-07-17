@@ -269,21 +269,26 @@ async def revise_chapter_draft(
     )
     if latest.id != req.expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
-    current_version = latest
-    if latest.content.strip() != req.content:
-        current_version = MemoirBookChapterDraftVersion(
-            draft_id=draft.id,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            version=latest.version + 1,
-            content=req.content,
-            created_by=MemoirCreatedBy.USER.value,
-            model=None,
-            prompt_snapshot="",
-            feedback="用户修改整章正文",
+    if latest.content.strip() == req.content:
+        return _draft_response(
+            draft,
+            chapter_metadata_json=chapter.metadata_json,
+            pending_source_count=0,
+            removed_source_count=0,
         )
-        db.add(current_version)
-        await db.flush()
+    current_version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        version=latest.version + 1,
+        content=req.content,
+        created_by=MemoirCreatedBy.USER.value,
+        model=None,
+        prompt_snapshot="",
+        feedback="用户修改整章正文",
+    )
+    db.add(current_version)
+    await db.flush()
     draft.status = MemoirBookChapterDraftStatus.DRAFT.value
     await mark_chapter_sources_merged(
         db,

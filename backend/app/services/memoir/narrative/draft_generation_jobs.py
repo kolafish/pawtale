@@ -10,7 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.narrative_types import MemoirClaimEvidenceRole
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
+    MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
 from app.models.memoir import (
@@ -18,6 +20,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookPlanChapter,
+    MemoirChapterSourceLink,
     MemoirEditingJob,
 )
 from app.models.memoir_narrative import MemoirClaimEvidence
@@ -46,6 +49,7 @@ from app.services.memoir.narrative.claim_usage_policy import (
 )
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
+    chapter_completion_content_signature,
     load_chapter_audit_context,
 )
 
@@ -126,11 +130,32 @@ async def _generation_input(
     evidence = (
         await db.scalars(
             select(MemoirClaimEvidence)
+            .join(
+                MemoirChapterSourceLink,
+                (
+                    MemoirChapterSourceLink.project_id
+                    == MemoirClaimEvidence.project_id
+                )
+                & (
+                    MemoirChapterSourceLink.utterance_id
+                    == MemoirClaimEvidence.utterance_id
+                )
+                & (
+                    MemoirChapterSourceLink.transcript_version_id.is_(None)
+                    | (
+                        MemoirChapterSourceLink.transcript_version_id
+                        == MemoirClaimEvidence.transcript_version_id
+                    )
+                ),
+            )
             .where(
                 MemoirClaimEvidence.project_id == context.chapter.project_id,
                 MemoirClaimEvidence.claim_id.in_(usable_claim_ids),
                 MemoirClaimEvidence.evidence_role
                 == MemoirClaimEvidenceRole.SUPPORTS.value,
+                MemoirChapterSourceLink.chapter_id == context.chapter.id,
+                MemoirChapterSourceLink.status
+                == MemoirChapterSourceLinkStatus.ACTIVE.value,
             )
             .order_by(
                 MemoirClaimEvidence.claim_id,
@@ -232,6 +257,36 @@ async def _acknowledge_sources(
     )
 
 
+async def _stale_generation_result(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    payload: dict,
+    skip_reason: str,
+) -> EditingJobResult:
+    from app.services.memoir.narrative import completion_refresh
+
+    replacement = await completion_refresh.enqueue_chapter_completion_refresh(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        include_semantic_audit=True,
+        ai_model=(str(payload["ai_model"]) if payload.get("ai_model") else None),
+        source=skip_reason,
+    )
+    return EditingJobResult(
+        status=MemoirEditingJobStatus.SKIPPED,
+        result_json={
+            "chapter_id": chapter_id,
+            "published": False,
+            "skip_reason": skip_reason,
+            "replacement_job_id": replacement.id,
+        },
+        error_message=skip_reason.replace("_", " "),
+    )
+
+
 async def run_chapter_draft_generation_job(
     db: AsyncSession,
     job: MemoirEditingJob,
@@ -240,11 +295,22 @@ async def run_chapter_draft_generation_job(
 ) -> EditingJobResult:
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     chapter_id = str(payload.get("chapter_id") or job.chapter_id or "").strip()
+    project_id = job.project_id
     context = await load_chapter_audit_context(
         db,
-        project_id=job.project_id,
+        project_id=project_id,
         chapter_id=chapter_id,
     )
+    input_signature = chapter_completion_content_signature(context)
+    expected_signature = str(payload.get("content_signature") or "").strip()
+    if expected_signature and expected_signature != input_signature:
+        return await _stale_generation_result(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            payload=payload,
+            skip_reason="chapter_content_changed_before_draft_generation",
+        )
     generation_input = await _generation_input(
         db,
         context=context,
@@ -257,15 +323,32 @@ async def run_chapter_draft_generation_job(
         client,
         context=generation_input,
     )
+    await db.rollback()
+    db.expire_all()
+    await db.refresh(job)
+    current_context = await load_chapter_audit_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if chapter_completion_content_signature(current_context) != input_signature:
+        return await _stale_generation_result(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            payload=payload,
+            skip_reason="chapter_content_changed_during_draft_generation",
+        )
+    context = current_context
     draft = await db.scalar(
         select(MemoirBookChapterDraft).where(
-            MemoirBookChapterDraft.project_id == job.project_id,
+            MemoirBookChapterDraft.project_id == project_id,
             MemoirBookChapterDraft.chapter_id == chapter_id,
         )
     )
     if draft is None:
         draft = MemoirBookChapterDraft(
-            project_id=job.project_id,
+            project_id=project_id,
             chapter_id=chapter_id,
             status=MemoirBookChapterDraftStatus.DRAFT.value,
             metadata_json={"source": "chapter_generation"},
@@ -287,7 +370,7 @@ async def run_chapter_draft_generation_job(
     else:
         version = MemoirBookChapterDraftVersion(
             draft_id=draft.id,
-            project_id=job.project_id,
+            project_id=project_id,
             chapter_id=chapter_id,
             version=await _next_version(db, draft_id=draft.id),
             content=generated.content,
@@ -307,7 +390,7 @@ async def run_chapter_draft_generation_job(
     }
     output = await db.scalar(
         select(MemoirBookOutput).where(
-            MemoirBookOutput.project_id == job.project_id
+            MemoirBookOutput.project_id == project_id
         )
     )
     if output is not None:
