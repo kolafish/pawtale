@@ -164,11 +164,6 @@ button[disabled] {
   opacity: 0.46;
 }
 
-.confirmation-card {
-  background: #fffaf6;
-}
-
-.confirmation-input,
 .draft-editor {
   width: 100%;
   min-height: 150rpx;

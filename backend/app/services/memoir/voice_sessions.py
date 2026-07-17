@@ -26,7 +26,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import progress_snapshot
-from app.services.memoir.narrative import followup_planner, followup_tasks
+from app.services.memoir.narrative import completion_items
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
@@ -68,18 +68,18 @@ async def create_voice_session(
 
     task = None
     if req.session_goal == MemoirSessionGoal.BOOK_COMPLETION:
-        if not req.current_followup_task_id:
+        if not req.current_completion_item_id:
             raise HTTPException(
                 status_code=409,
                 detail="本次要补的问题尚未准备好，请从首页重新进入补全成书",
             )
-        task = await followup_tasks.get_task(
+        task = await completion_items.get_item(
             db,
             project_id=project.id,
-            task_id=req.current_followup_task_id,
+            item_id=req.current_completion_item_id,
         )
         if task is None:
-            raise HTTPException(status_code=404, detail="补访任务不存在")
+            raise HTTPException(status_code=404, detail="补全项不存在")
 
     anchor_item = None
     if req.anchor_framework_item_id:
@@ -139,11 +139,10 @@ async def create_voice_session(
     await db.flush()
     if task is not None:
         try:
-            await followup_planner.start_task_for_session(
+            await completion_items.start_item_for_session(
                 db,
-                task=task,
+                item=task,
                 voice_session=voice_session,
-                actor_user_id=user_id,
             )
         except ValueError as exc:
             await db.rollback()
@@ -228,7 +227,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         guidance_mode=voice_session.guidance_mode,
         interview_type=voice_session.interview_type,
         session_goal=voice_session.session_goal,
-        current_followup_task_id=voice_session.current_followup_task_id,
+        current_completion_item_id=voice_session.current_completion_item_id,
         anchor_framework_item_id=voice_session.anchor_framework_item_id,
         current_guidance_module=voice_session.current_guidance_module,
         started_at=voice_session.started_at,
@@ -324,7 +323,7 @@ async def stop_voice_session(
         MemoirVoiceSessionStatus.STOPPED.value,
         MemoirVoiceSessionStatus.FAILED.value,
     }:
-        await followup_planner.release_session_task(
+        await completion_items.release_session_item(
             db,
             voice_session=voice_session,
             reason="voice session ended before new evidence completed the task",

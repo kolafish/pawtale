@@ -16,11 +16,12 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir_narrative import MemoirCompletionItem, MemoirFrameworkItem
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.narrative import followup_completion
+from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_ROUTE_ACTION,
     INTERVIEWER_SOURCE_MATERIAL_TYPE,
@@ -47,6 +48,42 @@ class VoiceFinalPersistenceResult:
         if self.transcript_version_id:
             payload["transcript_version_id"] = self.transcript_version_id
         return payload
+
+
+async def _assign_interview_target(
+    db: AsyncSession,
+    *,
+    voice_session: MemoirVoiceSession,
+    utterance: MemoirVoiceUtterance,
+) -> None:
+    completion_item = (
+        await db.get(MemoirCompletionItem, voice_session.current_completion_item_id)
+        if voice_session.current_completion_item_id
+        else None
+    )
+    framework_item = (
+        await db.get(MemoirFrameworkItem, voice_session.anchor_framework_item_id)
+        if voice_session.anchor_framework_item_id
+        else None
+    )
+    assigned = await interview_policy.assign_utterance(
+        db,
+        utterance=utterance,
+        completion_item=completion_item,
+        framework_item=framework_item,
+    )
+    if (
+        assigned.framework_item_id
+        and voice_session.anchor_framework_item_id != assigned.framework_item_id
+    ):
+        voice_session.anchor_framework_item_id = assigned.framework_item_id
+        db.add(voice_session)
+        await db.flush()
+    await interview_policy_outcomes.schedule_policy_outcome_evaluation(
+        db,
+        project_id=voice_session.project_id,
+        utterance=utterance,
+    )
 
 
 class VoiceFinalPersistenceService:
@@ -157,7 +194,7 @@ class VoiceFinalPersistenceService:
             transcript_version.source_artifact_id = utterance.id
             await self.db.flush()
             if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
-                await followup_completion.link_utterance_to_interview_target(
+                await _assign_interview_target(
                     self.db,
                     voice_session=voice_session,
                     utterance=utterance,
@@ -262,7 +299,7 @@ class VoiceFinalPersistenceService:
             self.db.add(utterance)
             await self.db.flush()
             if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
-                await followup_completion.link_utterance_to_interview_target(
+                await _assign_interview_target(
                     self.db,
                     voice_session=voice_session,
                     utterance=utterance,

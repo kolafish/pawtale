@@ -5,15 +5,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.domain.memoir.narrative_types import MemoirFollowupAnswerInterpretationStatus
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirChapterSourceAssignedBy,
     MemoirEditingJobStatus,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
-from app.models.memoir_narrative import MemoirFollowupTaskAnswer
+from app.models.memoir import (
+    MemoirAutomationEvent,
+    MemoirBookPlanChapter,
+    MemoirEditingJob,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
 from app.models.projects import Project
 from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
@@ -23,7 +27,6 @@ from app.schemas.memoir_book import (
     MemoirBookSourceAutoAssignmentRunRequest,
     MemoirBookSourceAutoAssignmentRunResponse,
     MemoirBookSourceRouteResponse,
-    MemoirFollowupAnswerInterpretationResponse,
 )
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
@@ -31,7 +34,7 @@ from app.services.memoir import book_quality_audit
 from app.services.memoir import book_plans
 from app.services.memoir import book_source_workflow
 from app.services.memoir import source_cards
-from app.services.memoir.narrative import followup_completion
+from app.services.memoir.narrative import completion_items
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.chapter_source_links import ChapterSourceAssignmentMetadata
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -59,30 +62,6 @@ def _route_is_assignable(
     )
 
 
-def _route_after_semantic_completion(
-    route: MemoirBookSourceRouteResponse,
-    relation: MemoirFollowupTaskAnswer,
-) -> MemoirBookSourceRouteResponse:
-    if (
-        relation.interpretation_status
-        != MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION.value
-    ):
-        return route
-    followup_answer = MemoirFollowupAnswerInterpretationResponse(
-        task_id=relation.task_id,
-        status=MemoirFollowupAnswerInterpretationStatus.NEEDS_CONFIRMATION,
-        confirmation_type="fact_resolution",
-        confirmation_question=relation.confirmation_question,
-        reason=relation.interpretation_reason,
-    )
-    return route.model_copy(
-        update={
-            "action": "hold_for_review",
-            "followup_answer": followup_answer,
-        }
-    )
-
-
 def _auto_assignment_item(
     route: MemoirBookSourceRouteResponse,
     *,
@@ -92,8 +71,6 @@ def _auto_assignment_item(
     if not assigned:
         if route.action == "assign_to_chapter":
             skip_reason = "confidence_below_threshold"
-        elif route.action == "record_as_context":
-            skip_reason = "recorded_as_completion_context"
         elif route.action == "ignore":
             skip_reason = "ignored_non_memoir_material"
         else:
@@ -132,11 +109,6 @@ def _route_metadata(
         "confidence": route.confidence,
         "reason": route.reason,
         "assignment_basis": route.assignment_basis,
-        "followup_answer": (
-            route.followup_answer.model_dump(mode="json")
-            if route.followup_answer is not None
-            else None
-        ),
         "evidence": [item.model_dump(mode="json") for item in route.evidence],
     }
     lineage = (source_lineage_by_utterance or {}).get(route.utterance_id)
@@ -182,7 +154,7 @@ def _assignment_link_metadata(
         route.utterance_id: ChapterSourceAssignmentMetadata(
             assigned_by=(
                 MemoirChapterSourceAssignedBy.SYSTEM
-                if route.assignment_basis == "completion_task"
+                if route.assignment_basis == "completion_item"
                 else MemoirChapterSourceAssignedBy.AI
             ),
             confidence=route.confidence,
@@ -220,12 +192,6 @@ async def _record_route_dispositions(
         if (
             is_ignored_non_memoir_source(utterance)
             and utterance.source_material_type != INTERVIEWER_SOURCE_MATERIAL_TYPE
-        ):
-            continue
-        if route.followup_answer is not None and (
-            route.followup_answer.status
-            != MemoirFollowupAnswerInterpretationStatus.RESOLVED
-            or not route.followup_answer.direct_narrative_text
         ):
             continue
         narrative_job = await narrative_ingestion.schedule_narrative_ingestion_job(
@@ -304,8 +270,6 @@ async def _record_assignment_events(
 
 
 def _held_event_summary(route: MemoirBookSourceRouteResponse) -> str:
-    if route.followup_answer and route.followup_answer.confirmation_question:
-        return route.followup_answer.confirmation_question
     title = route.target_chapter_title or route.suggested_title or "待确认章节"
     if route.action == "suggest_new_chapter":
         return f"1 条讲述可能是新话题，建议确认是否新建「{title}」。"
@@ -361,7 +325,7 @@ async def _record_held_events(
     for route in routes:
         if _route_is_assignable(route, threshold=threshold):
             continue
-        if route.action in {"ignore", "record_as_context"}:
+        if route.action == "ignore":
             continue
         summary = _held_event_summary(route)
         metadata = _held_event_metadata(
@@ -370,11 +334,8 @@ async def _record_held_events(
             source_lineage_by_utterance=source_lineage_by_utterance,
         )
         event = pending_events.get(route.utterance_id)
-        followup_task_id = (
-            route.followup_answer.task_id
-            if route.followup_answer is not None
-            else None
-        )
+        utterance = await db.get(MemoirVoiceUtterance, route.utterance_id)
+        completion_item_id = utterance.completion_item_id if utterance else None
         editing_job_id = _route_editing_job_id(
             route,
             source_lineage_by_utterance=source_lineage_by_utterance,
@@ -382,7 +343,7 @@ async def _record_held_events(
         if event:
             event.chapter_id = route.target_chapter_id
             event.review_utterance_id = route.utterance_id
-            event.followup_task_id = followup_task_id
+            event.completion_item_id = completion_item_id
             event.editing_job_id = editing_job_id
             event.utterance_ids_json = []
             event.summary_text = summary
@@ -398,7 +359,7 @@ async def _record_held_events(
                 status=MemoirAutomationEventStatus.NEEDS_REVIEW,
                 chapter_id=route.target_chapter_id,
                 review_utterance_id=route.utterance_id,
-                followup_task_id=followup_task_id,
+                completion_item_id=completion_item_id,
                 editing_job_id=editing_job_id,
                 summary_text=summary,
                 confidence=route.confidence,
@@ -424,13 +385,13 @@ async def run_source_auto_assignment_for_utterances(
     routes: list[MemoirBookSourceRouteResponse] = []
     for utterance_id in dict.fromkeys(item.strip() for item in utterance_ids if item.strip()):
         utterance = await db.get(MemoirVoiceUtterance, utterance_id)
-        completion_context = (
-            await followup_completion.ingestion_context_for_utterance(
+        completion_item = (
+            await completion_items.get_item(
                 db,
                 project_id=project_id,
-                utterance=utterance,
+                item_id=utterance.completion_item_id,
             )
-            if utterance is not None
+            if utterance is not None and utterance.completion_item_id
             else None
         )
         route = await source_router.route_book_source(
@@ -439,37 +400,19 @@ async def run_source_auto_assignment_for_utterances(
             project_id=project_id,
             utterance_id=utterance_id,
             ai_model=ai_model,
-            followup_context=(
-                source_router.SourceRouteFollowupContext(
-                    task_id=completion_context.task_id,
-                    chapter_id=completion_context.chapter_id,
-                    target_slot=completion_context.target_slot,
-                    question=completion_context.question,
-                    purpose=completion_context.purpose,
-                    expected_answer_use=completion_context.expected_answer_use,
-                    known_context_summary=completion_context.known_context_summary,
-                    story_id=completion_context.story_id,
-                    story_title=completion_context.story_title,
-                    story_summary=completion_context.story_summary,
-                )
-                if completion_context
-                else None
-            ),
         )
-        if route.followup_answer is not None:
-            relation = await followup_completion.record_answer_interpretation(
-                db,
-                project_id=project_id,
-                utterance_id=utterance_id,
-                interpretation=route.followup_answer,
+        if completion_item is not None and completion_item.chapter_id:
+            chapter = await db.get(MemoirBookPlanChapter, completion_item.chapter_id)
+            route = route.model_copy(
+                update={
+                    "action": "assign_to_chapter",
+                    "target_chapter_id": completion_item.chapter_id,
+                    "target_chapter_title": chapter.title if chapter else "",
+                    "confidence": 1.0,
+                    "reason": "这条回答属于当前成书补全章节。",
+                    "assignment_basis": "completion_item",
+                }
             )
-            await followup_completion.complete_task_from_semantic_interpretation(
-                db,
-                project_id=project_id,
-                relation=relation,
-                ai_model=ai_model,
-            )
-            route = _route_after_semantic_completion(route, relation)
         routes.append(route)
 
     narrative_jobs = await _record_route_dispositions(

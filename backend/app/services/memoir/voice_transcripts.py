@@ -34,7 +34,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.models.memoir_narrative import MemoirClaimEvidence, MemoirFollowupTaskAnswer
+from app.models.memoir_narrative import MemoirClaimEvidence
 from app.schemas.memoir_voice import (
     MemoirMaterialOfflineASRStateResponse,
     MemoirVoiceTranscriptIncludedChapterResponse,
@@ -1268,7 +1268,6 @@ async def _ensure_voice_transcript_can_be_deleted(
 ) -> None:
     protected_references = (
         (MemoirClaimEvidence.id, MemoirClaimEvidence.utterance_id),
-        (MemoirFollowupTaskAnswer.id, MemoirFollowupTaskAnswer.utterance_id),
         (MemoirMaterialShareVideo.id, MemoirMaterialShareVideo.utterance_id),
         (MemoirImageAsset.id, MemoirImageAsset.source_utterance_id),
     )

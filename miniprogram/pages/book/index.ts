@@ -53,7 +53,6 @@ import {
 import {
   datasetChoice,
   datasetString,
-  pageUrl,
   pickerIndex,
   type PageDatasetEvent,
   type PagePickerEvent,
@@ -594,19 +593,6 @@ definePage<BookPageData>()({
     const eventId = datasetString(event, "id");
     const eventIdsText = datasetString(event, "eventIds") || eventId;
     const action = datasetString(event, "action") || "acknowledge";
-    if (action === "confirm_answer") {
-      if (!this.data.projectId || !eventId) {
-        this.setData({ automationEventError: "缺少要确认的回答" });
-        return;
-      }
-      wx.navigateTo({
-        url: pageUrl("/pages/source-review/index", {
-          projectId: this.data.projectId,
-          eventId,
-        }),
-      });
-      return;
-    }
     if (action === "review_source") {
       const utteranceId = datasetString(event, "utteranceId");
       if (!utteranceId) {

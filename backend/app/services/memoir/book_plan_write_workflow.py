@@ -30,9 +30,6 @@ from app.models.memoir_narrative import (
     MemoirChapterContract,
     MemoirChapterNode,
     MemoirDraftBlock,
-    MemoirFollowupTask,
-    MemoirNarrativeGap,
-    MemoirNarrativeGapChapter,
 )
 from app.schemas.memoir_book import (
     MemoirBookChapterSourceRef,
@@ -114,9 +111,6 @@ async def _ensure_chapters_can_be_deleted(
         MemoirChapterContract.chapter_id,
         MemoirChapterNode.chapter_id,
         MemoirDraftBlock.chapter_id,
-        MemoirNarrativeGap.primary_chapter_id,
-        MemoirNarrativeGapChapter.chapter_id,
-        MemoirFollowupTask.chapter_id,
     )
     for chapter_id_column in protected_chapter_columns:
         protected_chapter_id = await db.scalar(

@@ -41,16 +41,14 @@ function completionChapter(overrides = {}) {
       detail: "讲完后会自动继续整理。",
       action_text: "开始讲",
       disabled: false,
-      task_id: "task-1",
-      confirmation_id: null,
+      item_id: "item-1",
     },
-    active_task: {
-      id: "task-1",
+    active_item: {
+      id: "item-1",
       question: "这段回忆为什么重要？",
       status: "pending",
       active_session_id: null,
     },
-    confirmation: null,
     headline: "还需要讲一件事",
     detail: "讲完后会自动继续整理。",
     ...overrides,
@@ -77,10 +75,9 @@ function readyOverview() {
           detail: "正文已经收入书稿。",
           action_text: "",
           disabled: true,
-          task_id: null,
-          confirmation_id: null,
+          item_id: null,
         },
-        active_task: null,
+        active_item: null,
         headline: "本章已确认",
         detail: "正文已经收入书稿。",
       }),
@@ -103,7 +100,7 @@ test("book completion overview exposes confirmed chapter progress and one action
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
 });
 
-test("book completion starts the selected follow-up directly", async () => {
+test("book completion starts the selected completion directly", async () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -144,7 +141,7 @@ test("book completion prepares an untouched chapter in place", async () => {
       action_text: "开始整理",
       disabled: false,
     },
-    active_task: null,
+    active_item: null,
   });
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {

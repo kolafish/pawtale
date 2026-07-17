@@ -57,23 +57,20 @@ function loadVoiceChatPage({
       messages: [],
       utterances: [],
     }),
-    getMemoirFollowupTask: async () => {
-      throw new Error("getMemoirFollowupTask was not mocked");
+    getMemoirCompletionItem: async () => {
+      throw new Error("getMemoirCompletionItem was not mocked");
     },
     getMemoirCompletionOutcome: async () => {
       throw new Error("getMemoirCompletionOutcome was not mocked");
     },
-    switchMemoirFollowupTask: async () => {
-      throw new Error("switchMemoirFollowupTask was not mocked");
+    switchMemoirCompletionItem: async () => {
+      throw new Error("switchMemoirCompletionItem was not mocked");
     },
-    deferMemoirFollowupTask: async () => {
-      throw new Error("deferMemoirFollowupTask was not mocked");
+    deferMemoirCompletionItem: async () => {
+      throw new Error("deferMemoirCompletionItem was not mocked");
     },
-    markMemoirFollowupTaskUnableToAnswer: async () => {
-      throw new Error("markMemoirFollowupTaskUnableToAnswer was not mocked");
-    },
-    stopAskingMemoirFollowupTask: async () => {
-      throw new Error("stopAskingMemoirFollowupTask was not mocked");
+    markMemoirCompletionItemUnableToAnswer: async () => {
+      throw new Error("markMemoirCompletionItemUnableToAnswer was not mocked");
     },
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
     stopMemoirVoiceSession: async () => {
@@ -81,7 +78,7 @@ function loadVoiceChatPage({
     },
     ...voiceApiExports,
   });
-  clearModule("../pages/voice-chat/voice-chat-completion-task-runtime.ts");
+  clearModule("../pages/voice-chat/voice-chat-completion-item-runtime.ts");
   clearModule("../services/audio-playback.ts");
   mockModule("../services/tts-text-progress.ts", {
     splitTextByAudioPlaybackProgress: () => ({
@@ -270,17 +267,17 @@ test("voice chat blocks recording before voice authorization consent", () => {
   delete global.wx;
 });
 
-test("switching a completion task leaves microphone and finish controls available", async () => {
+test("switching a completion item leaves microphone and finish controls available", async () => {
   let releaseSwitch;
   const switchStarted = new Promise((resolve) => {
     releaseSwitch = resolve;
   });
   const page = loadVoiceChatPage({
     voiceApiExports: {
-      switchMemoirFollowupTask: async () => {
+      switchMemoirCompletionItem: async () => {
         await switchStarted;
         return {
-          id: "task-2",
+          id: "item-2",
           project_id: "project-1",
           question: "后来这件事怎样影响了家里？",
           purpose: "补足后续影响。",
@@ -296,10 +293,10 @@ test("switching a completion task leaves microphone and finish controls availabl
       voiceSessionId: "voice-1",
       projectId: "project-1",
       sessionGoal: "book_completion",
-      currentFollowupTaskId: "task-1",
+      currentCompletionItemId: "item-1",
       voiceAuthorizationAgreed: true,
-      completionTask: {
-        id: "task-1",
+      completionItem: {
+        id: "item-1",
         question: "第一次离家后发生了什么？",
         status: "in_progress",
       },
@@ -309,17 +306,17 @@ test("switching a completion task leaves microphone and finish controls availabl
     },
   };
 
-  const request = page.switchCompletionTask.call(context);
-  assert.equal(context.data.completionTaskAction, "switch");
-  assert.equal(context.data.completionTaskControlsDisabled, true);
+  const request = page.switchCompletionItem.call(context);
+  assert.equal(context.data.completionItemAction, "switch");
+  assert.equal(context.data.completionItemControlsDisabled, true);
   assert.equal(context.data.micButtonDisabled, false);
   assert.equal(context.data.finishButtonText, "保存离开");
 
   releaseSwitch();
   await request;
-  assert.equal(context.data.currentFollowupTaskId, "task-2");
-  assert.equal(context.data.completionTask.question, "后来这件事怎样影响了家里？");
-  assert.equal(context.data.completionTaskAction, "");
+  assert.equal(context.data.currentCompletionItemId, "item-2");
+  assert.equal(context.data.completionItem.question, "后来这件事怎样影响了家里？");
+  assert.equal(context.data.completionItemAction, "");
 });
 
 test("book completion return stops the backend session when websocket is absent", async () => {
@@ -344,24 +341,24 @@ test("book completion return stops the backend session when websocket is absent"
       ...page.data,
       voiceSessionId: "voice-1",
       sessionGoal: "book_completion",
-      completionTask: {
-        id: "task-1",
+      completionItem: {
+        id: "item-1",
         question: "请按顺序讲讲这段经历。",
-        status: "answered",
+        status: "resolved",
       },
     },
     recordingStartGeneration: 0,
     voiceStreaming: {
       hasClient: () => false,
     },
-    stopCompletionTaskRefresh() {},
+    stopCompletionItemRefresh() {},
     cancelFollowUpTTS() {},
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
   };
 
-  await page.continueToNextCompletionTask.call(context);
+  await page.continueToNextCompletionItem.call(context);
 
   assert.deepEqual(stoppedSessions, ["voice-1"]);
   assert.deepEqual(navigations, [{ delta: 1 }]);
@@ -560,7 +557,7 @@ test("voice chat starts the opening assistant turn after a normal session load",
   assert.equal(context.data.status, "ready");
 });
 
-test("book completion without a current task does not generate a generic opening question", () => {
+test("book completion without a current item does not generate a generic opening question", () => {
   const page = loadVoiceChatPage();
   let followUpCalls = 0;
   const context = {
@@ -569,8 +566,8 @@ test("book completion without a current task does not generate a generic opening
       ...page.data,
       voiceSessionId: "voice-1",
       sessionGoal: "book_completion",
-      currentFollowupTaskId: "",
-      completionTask: null,
+      currentCompletionItemId: "",
+      completionItem: null,
     },
     generateFollowUp() {
       followUpCalls += 1;
@@ -897,7 +894,7 @@ test("book completion finish shows the actual chapter outcome", async () => {
           current_guidance_module: "",
           interview_type: "ai_interview",
           session_goal: "book_completion",
-          current_followup_task_id: "task-1",
+          current_completion_item_id: "item-1",
           error_message: "",
         },
         messages: [],
@@ -908,8 +905,8 @@ test("book completion finish shows the actual chapter outcome", async () => {
         return {
           status: "incorporated",
           voice_session_id: voiceSessionId,
-          task_id: "task-1",
-          task_status: "answered",
+          item_id: "item-1",
+          item_status: "resolved",
           chapter_id: "chapter-1",
           chapter_title: "观鸟与晚餐",
           utterance_id: "utterance-1",
@@ -1361,12 +1358,12 @@ test("human completion interview falls back to the selected speaker when provide
       interviewType: "human_interview",
       sessionGoal: "book_completion",
       speakerRole: "interviewer",
-      completionTask: { id: "task-1", status: "in_progress", question: "后来发生了什么？" },
+      completionItem: { id: "item-1", status: "in_progress", question: "后来发生了什么？" },
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
-    startCompletionTaskVerification() {
+    startCompletionItemVerification() {
       verificationCalls += 1;
     },
   };

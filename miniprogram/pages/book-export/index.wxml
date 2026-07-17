@@ -54,13 +54,6 @@
         </view>
       </view>
 
-      <view wx:if="{{bookConsistencyAcceptedItems.length}}" class="book-consistency-group accepted">
-        <text class="book-consistency-group-title">可以接受的不完整 · {{bookConsistencyAcceptedItems.length}}</text>
-        <view wx:for="{{bookConsistencyAcceptedItems}}" wx:key="id" class="book-consistency-item">
-          <text class="book-consistency-item-title">{{item.title}}</text>
-          <text wx:if="{{item.detail}}" class="book-consistency-item-detail">{{item.detail}}</text>
-        </view>
-      </view>
 
       <view class="book-consistency-actions">
         <button

@@ -4,12 +4,12 @@ import { definePage } from "../../services/page-definition";
 import {
   assembleMemoirChapterDraftBlocks,
   confirmMemoirBookChapterDraft,
-  confirmMemoirChapterFact,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
   listMemoirDraftBlocks,
   manuallyReviseMemoirDraftBlock,
   prepareMemoirBookChapter,
+  resolveMemoirCompletionItem,
   unlockMemoirDraftBlock,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
@@ -33,7 +33,6 @@ import {
 import {
   chapterWorkspaceViewPatch,
   draftBlockViews,
-  type ConfirmationView,
   type DraftBlockView,
 } from "./chapter-workspace-view";
 
@@ -67,12 +66,10 @@ interface ChapterWorkspacePageData {
   nextAction: ChapterNextAction;
   readinessTitle: string;
   readinessDetail: string;
-  confirmation: ConfirmationView | null;
   draftBlocks: DraftBlockView[];
   canConfirmChapter: boolean;
   processBusy: boolean;
   startingTaskId: string;
-  confirmingFact: boolean;
   confirmingChapter: boolean;
   editingBlockId: string;
   editingBlockContent: string;
@@ -92,12 +89,10 @@ definePage<ChapterWorkspacePageData>()({
     nextAction: LOADING_NEXT_ACTION,
     readinessTitle: "正在读取本章",
     readinessDetail: "",
-    confirmation: null,
     draftBlocks: [],
     canConfirmChapter: false,
     processBusy: false,
     startingTaskId: "",
-    confirmingFact: false,
     confirmingChapter: false,
     editingBlockId: "",
     editingBlockContent: "",
@@ -157,7 +152,6 @@ definePage<ChapterWorkspacePageData>()({
         ...chapterWorkspaceViewPatch(
           workspace,
           draftBlocks,
-          this.data.confirmation,
         ),
         loading: false,
         error: "",
@@ -187,12 +181,12 @@ definePage<ChapterWorkspacePageData>()({
       await this.prepareChapter();
       return;
     }
-    if (action.kind === "start_interview" || action.kind === "continue_confirmation") {
-      await this.beginFollowupInterview();
+    if (action.kind === "start_interview") {
+      await this.beginCompletionInterview();
       return;
     }
-    if (action.kind === "confirm_fact") {
-      scrollToSection("#chapter-confirmation");
+    if (action.kind === "confirm") {
+      await this.confirmCurrentItem();
       return;
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
@@ -220,8 +214,8 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  async beginFollowupInterview() {
-    const task = this.data.workspace?.completion_summary.active_task;
+  async beginCompletionInterview() {
+    const task = this.data.workspace?.completion_summary.active_item;
     if (!task) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
       return;
@@ -241,13 +235,13 @@ definePage<ChapterWorkspacePageData>()({
         guidance_mode: "guided_interview",
         interview_type: "ai_interview",
         session_goal: "book_completion",
-        current_followup_task_id: task.id,
+        current_completion_item_id: task.id,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: "miniprogram_chapter_workspace",
           chapter_id: this.data.chapterId,
-          followup_task_id: task.id,
+          completion_item_id: task.id,
         },
       }, { projectId: this.data.projectId });
       trackAuditAction(
@@ -283,41 +277,26 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
-  changeConfirmationStatement(event: PageTextInputEvent) {
-    if (!this.data.confirmation) {
+  async confirmCurrentItem() {
+    const itemId = this.data.nextAction.itemId;
+    if (!itemId || this.data.processBusy) {
       return;
     }
-    this.setData({
-      confirmation: {
-        ...this.data.confirmation,
-        statement: event.detail.value,
-      },
-    });
-  },
-
-  async saveConfirmation() {
-    const confirmation = this.data.confirmation;
-    const statement = confirmation?.statement.trim() || "";
-    if (!confirmation || !statement || this.data.confirmingFact) {
-      if (!statement) {
-        wx.showToast({ title: "请先写下准确说法", icon: "none" });
-      }
-      return;
-    }
-    this.setData({ confirmingFact: true, error: "" });
+    this.setData({ processBusy: true, error: "" });
     try {
-      await confirmMemoirChapterFact(this.data.projectId, confirmation.id, statement);
+      await resolveMemoirCompletionItem(this.data.projectId, itemId, {
+        note: "用户已确认按当前建议处理",
+      });
       await prepareMemoirBookChapter(this.data.projectId, this.data.chapterId);
-      this.setData({ confirmation: null });
       await this.loadPageData(true);
       this.schedulePreparationPolling();
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "确认内容保存失败" });
+      this.setData({ error: error instanceof Error ? error.message : "确认失败" });
     } finally {
-      this.setData({ confirmingFact: false });
+      this.setData({ processBusy: false });
     }
   },
 

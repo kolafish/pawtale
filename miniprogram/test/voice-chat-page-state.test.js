@@ -181,47 +181,47 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
-test("book completion renders one task question without disabling unrelated recording controls", () => {
+test("book completion renders one item question without disabling unrelated recording controls", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
     voiceAuthorizationAgreed: true,
     assistantPromptText: "模型生成的另一个问法",
-    completionTaskAction: "switch",
-    completionTask: {
-      id: "task-1",
+    completionItemAction: "switch",
+    completionItem: {
+      id: "item-1",
       question: "爷爷退休以后为什么还一直忙公司的事？",
       purpose: "补足退休后的动机和影响。",
       status: "in_progress",
     },
   });
 
-  assert.equal(patch.showCompletionTaskPanel, true);
+  assert.equal(patch.showCompletionItemPanel, true);
   assert.equal(patch.topSubtitle, "一次只补一个重点");
   assert.equal(patch.showAssistantPanel, true);
   assert.equal(patch.showAssistantOpening, false);
   assert.equal(patch.assistantDisplayText, "模型生成的另一个问法");
-  assert.equal(patch.completionTaskQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
-  assert.equal("completionTaskPurposeText" in patch, false);
-  assert.equal(patch.showCompletionTaskActions, true);
-  assert.equal(patch.completionTaskControlsDisabled, true);
+  assert.equal(patch.completionItemQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
+  assert.equal("completionItemPurposeText" in patch, false);
+  assert.equal(patch.showCompletionItemActions, true);
+  assert.equal(patch.completionItemControlsDisabled, true);
   assert.equal(patch.micButtonDisabled, false);
   assert.equal(patch.finishButtonText, "保存离开");
 });
 
-test("book completion without a task exposes the invalid session and disables recording", () => {
+test("book completion without an item exposes the invalid session and disables recording", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
     voiceAuthorizationAgreed: true,
-    completionTask: null,
-    completionTaskLoading: false,
+    completionItem: null,
+    completionItemLoading: false,
   });
 
-  assert.equal(patch.completionTaskStatusText, "没有拿到本次要补的问题");
-  assert.equal(patch.completionTaskQuestionText, "本次问题没有准备好");
+  assert.equal(patch.completionItemStatusText, "没有拿到本次要补的问题");
+  assert.equal(patch.completionItemQuestionText, "本次问题没有准备好");
   assert.equal(patch.liveDisplayText, "请保存离开后，从首页重新进入");
-  assert.equal(patch.showCompletionTaskActions, false);
+  assert.equal(patch.showCompletionItemActions, false);
   assert.equal(patch.showAssistantPanel, false);
   assert.equal(patch.micButtonDisabled, true);
   assert.equal(patch.micButtonText, "请先保存离开");
@@ -231,15 +231,15 @@ test("deferred book completion returns to the whole-book overview", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
-    completionTask: {
-      id: "task-1",
+    completionItem: {
+      id: "item-1",
       question: "请按顺序讲讲这段经历。",
       status: "deferred",
     },
   });
 
-  assert.equal(patch.showCompletionTaskContinue, true);
-  assert.equal(patch.completionTaskStatusText, "已留到以后再补");
+  assert.equal(patch.showCompletionItemContinue, true);
+  assert.equal(patch.completionItemStatusText, "已留到以后再补");
 });
 
 test("voice chat view patch adds focused large text root classes", () => {
@@ -377,7 +377,7 @@ test("voice chat session detail selector applies saved and assistant state", () 
   assert.equal(patch.followUpAudioFileId, "audio-assistant");
 });
 
-test("voice session detail selector carries the canonical completion task binding", () => {
+test("voice session detail selector carries the canonical completion item binding", () => {
   const data = initialVoiceChatData();
   const patch = voiceSessionDetailPatch({
     session: {
@@ -386,7 +386,7 @@ test("voice session detail selector carries the canonical completion task bindin
       guidance_mode: "guided_interview",
       interview_type: "human_interview",
       session_goal: "book_completion",
-      current_followup_task_id: "task-1",
+      current_completion_item_id: "item-1",
       error_message: "",
     },
     messages: [],
@@ -395,7 +395,7 @@ test("voice session detail selector carries the canonical completion task bindin
 
   assert.equal(patch.projectId, "project-1");
   assert.equal(patch.sessionGoal, "book_completion");
-  assert.equal(patch.currentFollowupTaskId, "task-1");
+  assert.equal(patch.currentCompletionItemId, "item-1");
 });
 
 test("voice chat realtime selectors derive capture, gateway, status, and error patches", () => {

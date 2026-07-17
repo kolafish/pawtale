@@ -12,7 +12,6 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -136,55 +135,4 @@ class MemoirInterviewPolicyEvaluation(Base):
     )
     expected_action: Mapped[str | None] = mapped_column(String(40), nullable=True)
     failure_codes_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
-class MemoirUtteranceInterviewAssignment(Base):
-    __tablename__ = "memoir_utterance_interview_assignments"
-    __table_args__ = (
-        UniqueConstraint(
-            "utterance_id",
-            name="uq_memoir_utterance_interview_assignments_utterance",
-        ),
-        CheckConstraint(
-            "framework_item_id IS NULL OR followup_task_id IS NULL",
-            name="ck_memoir_utterance_interview_assignments_one_target",
-        ),
-        Index(
-            "ix_memoir_utterance_interview_assignments_framework",
-            "framework_item_id",
-        ),
-        Index(
-            "ix_memoir_utterance_interview_assignments_followup",
-            "followup_task_id",
-        ),
-        Index(
-            "ix_memoir_utterance_interview_assignments_policy",
-            "policy_decision_id",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
-    utterance_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    framework_item_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_framework_items.id"),
-        nullable=True,
-    )
-    followup_task_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_followup_tasks.id"),
-        nullable=True,
-    )
-    policy_decision_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_interview_policy_decisions.id"),
-        nullable=True,
-    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

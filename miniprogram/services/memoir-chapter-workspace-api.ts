@@ -18,23 +18,3 @@ export function getMemoirChapterWorkspace(
 ): Promise<MemoirChapterWorkspace> {
   return memoirRequest<MemoirChapterWorkspace>(chapterWorkspacePath(projectId, chapterId));
 }
-
-export function confirmMemoirChapterFact(
-  projectId: string,
-  confirmationId: string,
-  statement: string,
-): Promise<void> {
-  return memoirRequest<void>(
-    memoirNarrativeProjectPath(
-      projectId,
-      `/gaps/${encodeURIComponent(confirmationId)}/resolve`,
-    ),
-    {
-      method: "POST",
-      data: {
-        idempotency_key: `chapter-confirmation:${confirmationId}`,
-        note: statement,
-      },
-    },
-  );
-}

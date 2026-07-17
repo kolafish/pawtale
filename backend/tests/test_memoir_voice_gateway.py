@@ -22,7 +22,6 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
-from app.models.memoir_narrative import MemoirUtteranceInterviewAssignment
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
@@ -1373,21 +1372,14 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert persisted is not None
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == persisted["audio_file_id"]))
     utterance = await test_db.scalar(select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == persisted["utterance_id"]))
-    assignment = await test_db.scalar(
-        select(MemoirUtteranceInterviewAssignment).where(
-            MemoirUtteranceInterviewAssignment.utterance_id
-            == persisted["utterance_id"]
-        )
-    )
-
     assert audio_file is not None
     assert audio_file.size_bytes == len(b"partial-pcm")
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"partial-pcm"
     assert utterance is not None
     assert utterance.transcript_raw == ""
     assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
-    assert assignment is not None
-    assert assignment.followup_task_id is None
+    assert utterance.completion_item_id is None
+    assert utterance.framework_item_id is None
     assert not pending_path.exists()
     assert persistence.pending_audio_path is None
 
@@ -1427,12 +1419,6 @@ async def test_voice_gateway_persistence_keeps_unfinalized_interviewer_as_contex
         MemoirVoiceUtterance,
         persisted["utterance_id"],
     )
-    assignment = await test_db.scalar(
-        select(MemoirUtteranceInterviewAssignment).where(
-            MemoirUtteranceInterviewAssignment.utterance_id
-            == persisted["utterance_id"]
-        )
-    )
     assert utterance is not None
     assert utterance.provider_payload_json == {
         "source": "unfinalized_audio",
@@ -1440,7 +1426,8 @@ async def test_voice_gateway_persistence_keeps_unfinalized_interviewer_as_contex
     }
     assert utterance.source_material_type == "interviewer_prompt"
     assert utterance.source_route_action == "ignore"
-    assert assignment is None
+    assert utterance.completion_item_id is None
+    assert utterance.framework_item_id is None
 
 
 async def test_voice_gateway_persistence_keeps_pending_audio_when_final_persist_fails(

@@ -173,7 +173,7 @@ def event_response(
         status=MemoirAutomationEventStatus(event.status),
         chapter_id=event.chapter_id,
         review_utterance_id=event.review_utterance_id,
-        followup_task_id=event.followup_task_id,
+        completion_item_id=event.completion_item_id,
         editing_job_id=event.editing_job_id,
         utterance_ids=_event_utterance_ids(event),
         summary_text=event.summary_text,
@@ -195,7 +195,7 @@ async def record_automation_event(
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
     review_utterance_id: str | None = None,
-    followup_task_id: str | None = None,
+    completion_item_id: str | None = None,
     editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
@@ -217,7 +217,7 @@ async def record_automation_event(
         project_id=project_id,
         chapter_id=chapter_id,
         review_utterance_id=review_id,
-        followup_task_id=(followup_task_id or "").strip() or None,
+        completion_item_id=(completion_item_id or "").strip() or None,
         editing_job_id=(editing_job_id or "").strip() or None,
         event_type=event_type.value,
         status=status.value,
@@ -242,7 +242,7 @@ async def record_or_update_automation_event(
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
     review_utterance_id: str | None = None,
-    followup_task_id: str | None = None,
+    completion_item_id: str | None = None,
     editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
@@ -269,7 +269,7 @@ async def record_or_update_automation_event(
             chapter_id=chapter_id,
             utterance_ids=utterance_ids,
             review_utterance_id=review_utterance_id,
-            followup_task_id=followup_task_id,
+            completion_item_id=completion_item_id,
             editing_job_id=editing_job_id,
             summary_text=summary_text,
             confidence=confidence,
@@ -280,7 +280,7 @@ async def record_or_update_automation_event(
     existing.review_utterance_id = (
         (review_utterance_id or "").strip() or None
     )
-    existing.followup_task_id = (followup_task_id or "").strip() or None
+    existing.completion_item_id = (completion_item_id or "").strip() or None
     existing.editing_job_id = (editing_job_id or "").strip() or None
     existing.status = status.value
     existing.utterance_ids_json = _clean_utterance_ids(utterance_ids)

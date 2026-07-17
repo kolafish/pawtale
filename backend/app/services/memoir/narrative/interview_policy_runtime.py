@@ -13,7 +13,6 @@ from app.config import get_settings
 from app.domain.memoir.interview_policy import InterviewBrief, brief_context_snapshot
 from app.domain.memoir.narrative_types import (
     MemoirConversationMomentum,
-    MemoirFollowupTaskClaimRole,
     MemoirInterviewAction,
     MemoirInterviewPolicyExecutionMode,
     MemoirInterviewStoryState,
@@ -36,7 +35,7 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
-    MemoirFollowupTask,
+    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirStoryClaim,
 )
@@ -45,7 +44,7 @@ from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import (
-    followup_tasks,
+    completion_items,
     interview_policy,
     interview_topics,
 )
@@ -303,15 +302,19 @@ async def _recent_material_state(
 
 async def _completion_context(
     db: AsyncSession,
-    task: MemoirFollowupTask,
+    item: MemoirCompletionItem,
 ) -> str:
-    claim_ids = [relation.claim_id for relation in task.claims]
+    claim_ids = [
+        claim_id
+        for claim_id in (item.claim_id, item.related_claim_id)
+        if claim_id
+    ]
     claims = (
         list(
             (
                 await db.scalars(
                     select(MemoirClaim).where(
-                        MemoirClaim.project_id == task.project_id,
+                        MemoirClaim.project_id == item.project_id,
                         MemoirClaim.id.in_(claim_ids),
                     )
                 )
@@ -320,29 +323,13 @@ async def _completion_context(
         if claim_ids
         else []
     )
-    claims_by_id = {claim.id: claim for claim in claims}
-    known = [
-        claims_by_id[relation.claim_id].statement.strip()
-        for relation in task.claims
-        if relation.context_role == MemoirFollowupTaskClaimRole.KNOWN.value
-        and relation.claim_id in claims_by_id
-        and claims_by_id[relation.claim_id].statement.strip()
-    ]
-    do_not_repeat = [
-        claims_by_id[relation.claim_id].statement.strip()
-        for relation in task.claims
-        if relation.context_role == MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value
-        and relation.claim_id in claims_by_id
-        and claims_by_id[relation.claim_id].statement.strip()
-    ]
+    known = [claim.statement.strip() for claim in claims if claim.statement.strip()]
     lines = [
-        f"补访目的：{task.purpose.strip()}",
-        f"当前唯一问题：{task.question.strip()}",
+        f"补访目的：{(item.description or item.title).strip()}",
+        f"当前唯一问题：{(item.question or item.title).strip()}",
     ]
     if known:
         lines.append(f"已知事实（不要重复索取）：{'；'.join(known[:6])}")
-    if do_not_repeat:
-        lines.append(f"明确不要重复追问：{'；'.join(do_not_repeat[:6])}")
     return "\n".join(lines)
 
 
@@ -351,14 +338,14 @@ async def _load_shadow_context(
     *,
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
-    followup_task_id: str | None,
+    completion_item_id: str | None,
 ) -> InterviewPolicyContext | None:
     messages = _ordered_messages_before(session, generated_message)
     return await _build_policy_context(
         db,
         session=session,
         messages=messages,
-        followup_task_id=followup_task_id,
+        completion_item_id=completion_item_id,
         policy_version=SHADOW_POLICY_VERSION,
     )
 
@@ -368,7 +355,7 @@ async def _build_policy_context(
     *,
     session: MemoirVoiceSession,
     messages: list[MemoirChatMessage],
-    followup_task_id: str | None,
+    completion_item_id: str | None,
     policy_version: str,
 ) -> InterviewPolicyContext | None:
     latest_user = _latest_user_message(messages)
@@ -405,17 +392,17 @@ async def _build_policy_context(
         ...,
     ] = ()
     if completion_session:
-        if not followup_task_id:
+        if not completion_item_id:
             return None
-        task = await followup_tasks.get_task(
+        item = await completion_items.get_item(
             db,
             project_id=session.project_id,
-            task_id=followup_task_id,
+            item_id=completion_item_id,
         )
-        if task is None:
+        if item is None:
             return None
-        brief = interview_policy.followup_task_brief(
-            task=task,
+        brief = interview_policy.completion_item_brief(
+            item=item,
             current_story_state=current_story_state,
             conversation_momentum=conversation_momentum,
             recent_material_refs=material_refs,
@@ -423,7 +410,7 @@ async def _build_policy_context(
             safety_constraints=safety_constraints,
             policy_version=policy_version,
         )
-        completion_context = await _completion_context(db, task)
+        completion_context = await _completion_context(db, item)
     else:
         topic_candidates = await interview_topics.candidate_topics(
             db,
@@ -458,7 +445,7 @@ async def build_current_policy_context(
     db: AsyncSession,
     *,
     session: MemoirVoiceSession,
-    followup_task_id: str | None,
+    completion_item_id: str | None,
     policy_version: str,
 ) -> InterviewPolicyContext | None:
     messages = [
@@ -474,7 +461,7 @@ async def build_current_policy_context(
         db,
         session=session,
         messages=messages,
-        followup_task_id=followup_task_id,
+        completion_item_id=completion_item_id,
         policy_version=policy_version,
     )
 
@@ -676,7 +663,7 @@ async def prepare_active_policy_turn(
     db: AsyncSession,
     *,
     session: MemoirVoiceSession,
-    followup_task_id: str | None,
+    completion_item_id: str | None,
     requested_ai_model: str | None,
     ai_client_factory=get_ai_service,
     enabled: bool | None = None,
@@ -705,7 +692,7 @@ async def prepare_active_policy_turn(
     context = await build_current_policy_context(
         db,
         session=session,
-        followup_task_id=followup_task_id,
+        completion_item_id=completion_item_id,
         policy_version=ACTIVE_POLICY_VERSION,
     )
     if context is None:
@@ -792,7 +779,7 @@ async def anchored_opening_reply_instruction(
     context = await build_current_policy_context(
         db,
         session=session,
-        followup_task_id=None,
+        completion_item_id=None,
         policy_version=ACTIVE_POLICY_VERSION,
     )
     if context is None or len(context.topic_candidates) != 1:
@@ -844,7 +831,7 @@ async def schedule_shadow_policy_evaluation(
     *,
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
-    followup_task_id: str | None,
+    completion_item_id: str | None,
     requested_ai_model: str | None,
     enabled: bool | None = None,
 ) -> MemoirEditingJob | None:
@@ -880,7 +867,7 @@ async def schedule_shadow_policy_evaluation(
         "session_id": session.id,
         "generated_message_id": generated_message.id,
         "trigger_message_id": trigger.id if trigger else None,
-        "followup_task_id": followup_task_id,
+        "completion_item_id": completion_item_id,
         "policy_version": SHADOW_POLICY_VERSION,
         "prompt_version": SHADOW_PROMPT_VERSION,
     }
@@ -908,7 +895,7 @@ async def run_shadow_policy_evaluation_job(
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     session_id = str(payload.get("session_id") or "").strip()
     generated_message_id = str(payload.get("generated_message_id") or "").strip()
-    followup_task_id = str(payload.get("followup_task_id") or "").strip() or None
+    completion_item_id = str(payload.get("completion_item_id") or "").strip() or None
     if not session_id or not generated_message_id:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
@@ -960,7 +947,7 @@ async def run_shadow_policy_evaluation_job(
         db,
         session=session,
         generated_message=generated_message,
-        followup_task_id=followup_task_id,
+        completion_item_id=completion_item_id,
     )
     if context is None:
         return EditingJobResult(

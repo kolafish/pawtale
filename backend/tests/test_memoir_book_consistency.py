@@ -26,11 +26,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
     MemoirNarrativeEntityType,
     MemoirNarrativeEntityVerificationStatus,
-    MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapScopeType,
-    MemoirNarrativeGapSeverity,
-    MemoirNarrativeGapStatus,
-    MemoirNarrativeGapType,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
@@ -54,7 +49,6 @@ from app.models.memoir_narrative import (
     MemoirChapterNodeStory,
     MemoirClaim,
     MemoirClaimEvidence,
-    MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
@@ -64,7 +58,7 @@ from app.schemas.memoir_narrative import (
     MemoirDraftBlockStorySource,
 )
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
-from app.services.memoir.narrative import chapter_contracts, draft_blocks, gaps
+from app.services.memoir.narrative import chapter_contracts, draft_blocks
 from app.services.memoir.narrative.book_consistency_semantic import (
     evaluate_book_semantic_gaps,
 )
@@ -369,176 +363,6 @@ async def test_structured_book_requires_a_confirmed_plan(client, test_db):
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     assert output is None
-
-
-async def test_current_full_audit_is_required_before_formalizing_and_edits_reopen_draft(
-    client,
-    test_db,
-    monkeypatch,
-):
-    project_id, user_id, _ = await _create_ready_structured_book(
-        client,
-        test_db,
-        include_hidden_chapter=True,
-    )
-    chapter_story = await test_db.scalar(
-        select(MemoirStory).where(
-            MemoirStory.project_id == project_id,
-            MemoirStory.title == "第一次离家",
-        )
-    )
-    assert chapter_story is not None
-    chapter_story.verification_status = MemoirStoryVerificationStatus.UNREVIEWED.value
-    await test_db.commit()
-    unrelated_story = MemoirStory(
-        project_id=project_id,
-        title="未纳入本书的旁支故事",
-        title_normalized="未纳入本书的旁支故事",
-        story_type=MemoirStoryType.EVENT.value,
-        summary="这条故事没有关联当前章节结构。",
-        time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
-        lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
-        publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=user_id,
-    )
-    test_db.add(unrelated_story)
-    await test_db.flush()
-    test_db.add(
-        MemoirNarrativeGap(
-            project_id=project_id,
-            scope_type=MemoirNarrativeGapScopeType.STORY.value,
-            primary_story_id=unrelated_story.id,
-            gap_type=MemoirNarrativeGapType.MISSING_SLOT.value,
-            severity=MemoirNarrativeGapSeverity.HIGH.value,
-            target_slot="background",
-            title="未纳入本书的故事缺少背景",
-            description="不应阻塞当前书稿。",
-            fingerprint="f" * 64,
-            detected_by=MemoirNarrativeGapDetectedBy.AI.value,
-        )
-    )
-    await test_db.commit()
-    before = await client.get(f"/api/memoir/projects/{project_id}/book-readiness")
-    assert before.status_code == 200, before.text
-    assert before.json()["ready_for_formal"] is False
-    assert "book_consistency_audit_required" in {
-        item["code"] for item in before.json()["groups"]["must_handle"]
-    }
-
-    monkeypatch.setattr(
-        "app.services.memoir.narrative.book_consistency_semantic.get_ai_service",
-        lambda _model=None: EmptySemanticAuditAI(),
-    )
-    queued = await client.post(
-        f"/api/memoir/projects/{project_id}/book-consistency-audits",
-        json={"include_semantic_audit": True},
-    )
-    assert queued.status_code == 202, queued.text
-    register_memoir_editing_job_handlers()
-    assert await run_test_editing_job(test_db, queued.json()["id"]) is True
-
-    readiness = await client.get(f"/api/memoir/projects/{project_id}/book-readiness")
-    assert readiness.status_code == 200, readiness.text
-    body = readiness.json()
-    assert body["ready_for_formal"] is True
-    assert body["audit_is_current"] is True
-
-    legacy_high_detail_gap = MemoirNarrativeGap(
-        project_id=project_id,
-        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
-        primary_chapter_id=(
-            await test_db.scalar(
-                select(MemoirChapterNode.chapter_id).where(
-                    MemoirChapterNode.project_id == project_id
-                )
-            )
-        ),
-        gap_type=MemoirNarrativeGapType.MISSING_SLOT.value,
-        severity=MemoirNarrativeGapSeverity.HIGH.value,
-        target_slot="legacy-required-detail",
-        title="历史数据中的必要细节缺失",
-        description="内容丰富度问题不应阻止正式成书。",
-        fingerprint="d" * 64,
-        detected_by=MemoirNarrativeGapDetectedBy.RULES.value,
-    )
-    test_db.add(legacy_high_detail_gap)
-    await test_db.commit()
-    detail_readiness = await client.get(
-        f"/api/memoir/projects/{project_id}/book-readiness"
-    )
-    assert detail_readiness.json()["ready_for_formal"] is True
-    assert f"gap:{legacy_high_detail_gap.id}" in {
-        item["code"] for item in detail_readiness.json()["groups"]["suggested"]
-    }
-
-    contradiction = MemoirNarrativeGap(
-        project_id=project_id,
-        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
-        primary_chapter_id=legacy_high_detail_gap.primary_chapter_id,
-        gap_type=MemoirNarrativeGapType.CONTRADICTION.value,
-        severity=MemoirNarrativeGapSeverity.HIGH.value,
-        title="同一事件存在冲突说法",
-        description="冲突会改变正文事实，需要先由用户确认。",
-        fingerprint="c" * 64,
-        detected_by=MemoirNarrativeGapDetectedBy.RULES.value,
-    )
-    test_db.add(contradiction)
-    await test_db.commit()
-    contradiction_readiness = await client.get(
-        f"/api/memoir/projects/{project_id}/book-readiness"
-    )
-    assert contradiction_readiness.json()["ready_for_formal"] is False
-    assert f"gap:{contradiction.id}" in {
-        item["code"]
-        for item in contradiction_readiness.json()["groups"]["must_handle"]
-    }
-    await gaps.resolve_gap(
-        test_db,
-        project_id=project_id,
-        gap_id=contradiction.id,
-        status=MemoirNarrativeGapStatus.RESOLVED,
-        actor_user_id=user_id,
-        idempotency_key="resolve-readiness-contradiction",
-        note="用户已确认正确说法。",
-    )
-    await test_db.commit()
-
-    readiness = await client.get(f"/api/memoir/projects/{project_id}/book-readiness")
-    body = readiness.json()
-    assert body["ready_for_formal"] is True
-    formalized = await client.post(
-        f"/api/memoir/projects/{project_id}/book-output/formalize",
-        json={
-            "audit_job_id": body["latest_audit_job"]["id"],
-            "output_version_id": body["output_version_id"],
-        },
-    )
-    assert formalized.status_code == 200, formalized.text
-    assert formalized.json()["status"] == MemoirOutputStatus.ACCEPTED.value
-    repeated_formalize = await client.post(
-        f"/api/memoir/projects/{project_id}/book-output/formalize",
-        json={
-            "audit_job_id": body["latest_audit_job"]["id"],
-            "output_version_id": body["output_version_id"],
-        },
-    )
-    assert repeated_formalize.status_code == 200, repeated_formalize.text
-    assert repeated_formalize.json()["formalized_at"] == formalized.json()["formalized_at"]
-
-    edited = await client.patch(
-        f"/api/mobile/memoir/projects/{project_id}/book-output",
-        json={"title": "新的书名"},
-    )
-    assert edited.status_code == 200, edited.text
-    assert edited.json()["status"] == MemoirOutputStatus.DRAFT.value
-    assert edited.json()["formal_version_id"] is None
-    after = await client.get(f"/api/memoir/projects/{project_id}/book-readiness")
-    assert after.json()["ready_for_formal"] is False
-    assert after.json()["audit_is_current"] is False
 
 
 def test_explicit_story_time_reversal_is_a_high_book_gap():

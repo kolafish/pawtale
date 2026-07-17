@@ -18,33 +18,12 @@
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
       <button
-        wx:if="{{nextAction.actionText && nextAction.kind !== 'confirm_fact'}}"
+        wx:if="{{nextAction.actionText}}"
         class="primary-action"
         loading="{{processBusy || startingTaskId !== ''}}"
         disabled="{{nextAction.disabled || processBusy || startingTaskId !== ''}}"
         bindtap="runNextAction"
       >{{nextAction.actionText}}</button>
-    </view>
-
-    <view wx:if="{{confirmation}}" class="content-card confirmation-card" id="chapter-confirmation">
-      <text class="section-kicker">请确认一处事实</text>
-      <text class="section-title">{{confirmation.question}}</text>
-      <text wx:if="{{confirmation.detail}}" class="section-detail">{{confirmation.detail}}</text>
-      <textarea
-        class="confirmation-input"
-        value="{{confirmation.statement}}"
-        placeholder="请写下准确说法"
-        maxlength="1000"
-        auto-height
-        cursor-spacing="24"
-        bindinput="changeConfirmationStatement"
-      />
-      <button
-        class="primary-action"
-        loading="{{confirmingFact}}"
-        disabled="{{confirmingFact || !confirmation.statement}}"
-        bindtap="saveConfirmation"
-      >保存并继续整理</button>
     </view>
 
     <view class="content-card draft-card" id="chapter-draft">

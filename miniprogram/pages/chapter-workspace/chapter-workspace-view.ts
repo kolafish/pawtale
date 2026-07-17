@@ -9,18 +9,10 @@ export interface DraftBlockView extends MemoirDraftBlock {
   statusText: string;
 }
 
-export interface ConfirmationView {
-  id: string;
-  question: string;
-  detail: string;
-  statement: string;
-}
-
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
   readinessTitle: string;
   readinessDetail: string;
-  confirmation: ConfirmationView | null;
   canConfirmChapter: boolean;
 }
 
@@ -59,24 +51,12 @@ export function draftBlockViews(
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
   draftBlocks: DraftBlockView[],
-  currentConfirmation: ConfirmationView | null = null,
 ): ChapterWorkspaceViewPatch {
   const summary = workspace.completion_summary;
-  const confirmation = summary.confirmation
-    ? {
-      id: summary.confirmation.id,
-      question: summary.confirmation.question,
-      detail: summary.confirmation.detail,
-      statement: currentConfirmation?.id === summary.confirmation.id
-        ? currentConfirmation.statement
-        : "",
-    }
-    : null;
   return {
     nextAction: chapterNextAction(summary),
     readinessTitle: summary.headline,
     readinessDetail: summary.detail,
-    confirmation,
     canConfirmChapter:
       summary.state === "draft_ready"
       && Boolean(draftBlocks.length)

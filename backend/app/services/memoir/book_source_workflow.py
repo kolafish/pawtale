@@ -57,7 +57,6 @@ from app.services.memoir.project_ai_preferences import (
 )
 from app.services.memoir.narrative import draft_blocks
 from app.services.memoir.utterance_editing_pipeline import schedule_source_routing_for_ready_utterance
-from app.services.memoir.source_disposition import CONTEXT_SOURCE_ROUTE_ACTION
 
 
 PLAN_CONFIRMED_SOURCE_ROUTING_SOURCE = "book_plan_confirmed"
@@ -104,11 +103,6 @@ async def get_book_source_coverage(
         project_id=project_id,
         allow_admin=allow_admin,
     )
-    sources = [
-        source
-        for source in sources
-        if source.source_route_action != CONTEXT_SOURCE_ROUTE_ACTION
-    ]
     plan = await _load_plan(db, project_id)
     included_by_utterance = await _included_chapters_by_utterance(db, plan)
     covered_ids = set(included_by_utterance)

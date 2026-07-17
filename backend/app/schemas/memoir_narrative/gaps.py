@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.narrative_types import (
-    MemoirNarrativeGapActionDecisionSource,
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapClaimRole,
     MemoirNarrativeGapDetectedBy,
-    MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapSeverity,
-    MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
 )
 from app.schemas.memoir_narrative.book_completion import MemoirChapterCompletionSummary
@@ -57,59 +53,6 @@ class MemoirNarrativeGapCandidate(BaseModel):
         return self
 
 
-class MemoirNarrativeGapClaimResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    claim_id: str
-    role: MemoirNarrativeGapClaimRole
-
-
-class MemoirNarrativeGapResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    project_id: str
-    scope_type: MemoirNarrativeGapScopeType
-    primary_story_id: str | None
-    primary_chapter_id: str | None
-    gap_type: MemoirNarrativeGapType
-    severity: MemoirNarrativeGapSeverity
-    target_slot: str
-    title: str
-    description: str
-    fingerprint: str
-    status: MemoirNarrativeGapStatus
-    recommended_action: MemoirNarrativeGapRecommendedAction
-    action_reason_code: MemoirNarrativeGapActionReasonCode
-    action_decision_source: MemoirNarrativeGapActionDecisionSource
-    action_policy_version: str
-    detected_by: MemoirNarrativeGapDetectedBy
-    detection_count: int
-    resolution_note: str
-    resolved_by: str | None
-    resolved_by_user_id: str | None
-    resolved_at: datetime | None
-    first_detected_at: datetime
-    last_detected_at: datetime
-    claims: list[MemoirNarrativeGapClaimResponse] = Field(default_factory=list)
-    involved_story_ids: list[str] = Field(default_factory=list)
-    involved_chapter_ids: list[str] = Field(default_factory=list)
-    created_at: datetime
-    updated_at: datetime
-
-
-class MemoirNarrativeGapResolutionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    idempotency_key: str = Field(min_length=1, max_length=160)
-    note: str = Field(min_length=1, max_length=2000)
-
-    @field_validator("idempotency_key", "note", mode="before")
-    @classmethod
-    def strip_text(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-
 class MemoirChapterWorkspaceResponse(BaseModel):
     project_id: str
     chapter_id: str
@@ -147,16 +90,6 @@ class MemoirSemanticGapCandidate(BaseModel):
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
-
-    @field_validator("reason_signal")
-    @classmethod
-    def reject_migration_reason(
-        cls,
-        value: MemoirNarrativeGapActionReasonCode,
-    ) -> MemoirNarrativeGapActionReasonCode:
-        if value == MemoirNarrativeGapActionReasonCode.MIGRATION_REVIEW_REQUIRED:
-            raise ValueError("migration reason cannot come from semantic audit")
-        return value
 
     @field_validator("story_ids", "claim_ids")
     @classmethod

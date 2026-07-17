@@ -1,19 +1,16 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Sequence
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
+    MemoirCompletionItemStatus,
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
-    MemoirFollowupTaskStatus,
     MemoirNarrativeGapRecommendedAction,
-    MemoirNarrativeGapStatus,
 )
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -24,26 +21,19 @@ from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookPlanChapter,
     MemoirEditingJob,
+    MemoirVoiceSession,
 )
-from app.models.memoir_narrative import (
-    MemoirDraftBlock,
-    MemoirFollowupTask,
-    MemoirNarrativeGap,
-    MemoirNarrativeGapChapter,
-)
+from app.models.memoir_narrative import MemoirCompletionItem, MemoirDraftBlock
 from app.schemas.memoir_narrative import (
-    MemoirChapterCompletionConfirmation,
+    MemoirChapterCompletionItem,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
-    MemoirChapterCompletionTask,
-    MemoirNarrativeGapResponse,
 )
-from app.services.memoir.narrative import chapter_answer_updates, completion_refresh
+from app.services.memoir.narrative import completion_refresh
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
     ChapterAuditDraftBlock,
 )
-from app.services.memoir.narrative.readiness_policy import gap_blocks_formalization
 
 
 _ACTIVE_JOB_STATUSES = {
@@ -54,26 +44,11 @@ _FAILED_JOB_STATUSES = {
     MemoirEditingJobStatus.FAILED.value,
     MemoirEditingJobStatus.SKIPPED.value,
 }
-_ACTIVE_TASK_STATUSES = {
-    MemoirFollowupTaskStatus.PENDING.value,
-    MemoirFollowupTaskStatus.IN_PROGRESS.value,
-    MemoirFollowupTaskStatus.DEFERRED.value,
+_ACTIVE_ITEM_STATUSES = {
+    MemoirCompletionItemStatus.OPEN.value,
+    MemoirCompletionItemStatus.IN_PROGRESS.value,
+    MemoirCompletionItemStatus.DEFERRED.value,
 }
-
-
-@dataclass(frozen=True)
-class ChapterGapGroups:
-    must_handle: list[MemoirNarrativeGapResponse]
-    suggested: list[MemoirNarrativeGapResponse]
-
-
-def _task_response(task: MemoirFollowupTask) -> MemoirChapterCompletionTask:
-    return MemoirChapterCompletionTask(
-        id=task.id,
-        question=task.question,
-        status=task.status,
-        active_session_id=task.assigned_session_id,
-    )
 
 
 def _next_action(
@@ -83,8 +58,7 @@ def _next_action(
     *,
     action_text: str = "",
     disabled: bool = False,
-    task_id: str | None = None,
-    confirmation_id: str | None = None,
+    item_id: str | None = None,
 ) -> MemoirChapterCompletionNextAction:
     return MemoirChapterCompletionNextAction(
         kind=kind,
@@ -92,101 +66,64 @@ def _next_action(
         detail=detail,
         action_text=action_text,
         disabled=disabled,
-        task_id=task_id,
-        confirmation_id=confirmation_id,
+        item_id=item_id,
     )
 
 
-def _current_draft_blocks(
+def _active_item_response(
+    item: MemoirCompletionItem | None,
+    *,
+    active_session_id: str | None,
+) -> MemoirChapterCompletionItem | None:
+    if item is None:
+        return None
+    public_status = (
+        "pending"
+        if item.status == MemoirCompletionItemStatus.OPEN.value
+        else item.status
+    )
+    return MemoirChapterCompletionItem(
+        id=item.id,
+        question=item.question or item.title,
+        status=public_status,
+        active_session_id=active_session_id,
+    )
+
+
+def _blocks_are_current(
     blocks: Sequence[MemoirDraftBlock | ChapterAuditDraftBlock],
-) -> list[MemoirDraftBlock | ChapterAuditDraftBlock]:
-    return [
+) -> bool:
+    active = [
         block
         for block in blocks
         if block.editorial_status != MemoirDraftBlockEditorialStatus.EXCLUDED.value
     ]
+    return bool(active) and all(
+        block.freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
+        for block in active
+    )
 
 
 def _summary(
     *,
     chapter: MemoirBookPlanChapter,
     context: ChapterAuditContext,
-    gap_groups: ChapterGapGroups,
-    pending_confirmations: list[
-        chapter_answer_updates.ChapterPendingAnswerConfirmation
-    ],
-    active_tasks: list[MemoirFollowupTask],
+    active_item: MemoirCompletionItem | None,
+    active_session_id: str | None,
     refresh_job: MemoirEditingJob | None,
     draft_job: MemoirEditingJob | None,
     chapter_draft_status: str | None,
 ) -> MemoirChapterCompletionSummary:
-    contract_is_confirmed = (
+    contract_confirmed = (
         context.contract is not None
         and context.contract.status == MemoirChapterContractStatus.CONFIRMED.value
     )
-    open_gaps = {
-        gap.id: gap
-        for gap in [*gap_groups.must_handle, *gap_groups.suggested]
-    }
-    tasks_by_id = {task.id: task for task in active_tasks}
-    confirmation_update = next(
-        (
-            update
-            for update in pending_confirmations
-            if update.task_id in tasks_by_id
-        ),
-        None,
-    )
-    confirmation_task = (
-        tasks_by_id.get(confirmation_update.task_id)
-        if confirmation_update is not None
-        else None
-    )
-    confirmation_task_ids = {
-        update.task_id
-        for update in pending_confirmations
-    }
-    interview_tasks = [
-        task
-        for task in active_tasks
-        if task.id not in confirmation_task_ids
-        and (gap := open_gaps.get(task.gap_id)) is not None
-        and gap.recommended_action
-        == MemoirNarrativeGapRecommendedAction.INTERVIEW
-    ]
-    active_task = next(
-        (
-            task
-            for status in (
-                MemoirFollowupTaskStatus.IN_PROGRESS.value,
-                MemoirFollowupTaskStatus.PENDING.value,
-                MemoirFollowupTaskStatus.DEFERRED.value,
-            )
-            for task in interview_tasks
-            if task.status == status
-        ),
-        None,
-    )
-    manual_gap = next(
-        (
-            gap
-            for gap in open_gaps.values()
-            if gap.recommended_action
-            == MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW
-        ),
-        None,
-    )
-    blocks = _current_draft_blocks(context.draft_blocks)
-    blocks_are_current = bool(blocks) and all(
-        block.freshness_status == MemoirDraftBlockFreshnessStatus.CURRENT.value
-        for block in blocks
-    )
+    blocks_current = _blocks_are_current(context.draft_blocks)
 
-    confirmation: MemoirChapterCompletionConfirmation | None = None
-    if not contract_is_confirmed:
+    if not contract_confirmed:
         state = "not_started"
         headline = "可以开始整理"
-        detail = "系统会根据现有讲述确定写作顺序，并判断是否真的还需要补充。"
+        detail = "系统会先查看现有讲述，再给出一个明确的下一步。"
         action = _next_action(
             "prepare",
             "整理这一章",
@@ -196,7 +133,7 @@ def _summary(
     elif refresh_job is not None and refresh_job.status in _ACTIVE_JOB_STATUSES:
         state = "preparing"
         headline = "正在检查现有讲述"
-        detail = "系统正在判断哪些内容可以直接写入正文。"
+        detail = "系统正在判断现有素材是否足够写成正文。"
         action = _next_action("wait", headline, detail, disabled=True)
     elif refresh_job is not None and refresh_job.status in _FAILED_JOB_STATUSES:
         state = "failed"
@@ -208,74 +145,51 @@ def _summary(
             detail,
             action_text="重新整理",
         )
-    elif confirmation_update is not None and confirmation_task is not None:
+    elif active_item is not None:
         state = "needs_input"
-        headline = "还需要说明一句"
-        detail = "刚才的回答还不能准确对应到书里的人物或事实。"
-        active_task = confirmation_task
-        action = _next_action(
-            "continue_confirmation",
-            confirmation_update.question,
-            detail,
-            action_text="继续说明",
-            task_id=confirmation_task.id,
-        )
-    elif active_task is not None:
-        state = "needs_input"
-        headline = "还需要讲一件事"
-        detail = "讲完这一件，系统会自动继续整理正文。"
-        action = _next_action(
-            "start_interview",
-            active_task.question,
-            detail,
-            action_text=(
-                "继续讲"
-                if active_task.status == MemoirFollowupTaskStatus.IN_PROGRESS.value
-                else "开始讲"
-            ),
-            task_id=active_task.id,
-        )
-    elif manual_gap is not None:
-        state = "needs_input"
-        headline = "还需要确认一件事"
-        detail = "这会影响正文中的事实是否准确，确认后系统会继续整理。"
-        confirmation = MemoirChapterCompletionConfirmation(
-            id=manual_gap.id,
-            question=manual_gap.title,
-            detail=manual_gap.description,
-        )
-        action = _next_action(
-            "confirm_fact",
-            manual_gap.title,
-            manual_gap.description,
-            action_text="确认正确说法",
-            confirmation_id=manual_gap.id,
-        )
+        if (
+            active_item.action
+            == MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW.value
+        ):
+            headline = "还需要确认一件事"
+            detail = active_item.description or "确认后系统会继续整理正文。"
+            action = _next_action(
+                "confirm",
+                active_item.title,
+                detail,
+                action_text="确认",
+                item_id=active_item.id,
+            )
+        else:
+            headline = "还需要讲一件事"
+            detail = "回答会直接保存为本章素材，之后自动继续整理。"
+            action = _next_action(
+                "start_interview",
+                active_item.question or active_item.title,
+                detail,
+                action_text=(
+                    "继续讲"
+                    if active_item.status
+                    == MemoirCompletionItemStatus.IN_PROGRESS.value
+                    else "开始讲"
+                ),
+                item_id=active_item.id,
+            )
     elif draft_job is not None and draft_job.status in _ACTIVE_JOB_STATUSES:
         state = "preparing"
         headline = "正在整理正文"
-        detail = "系统正在把已有讲述写成连贯正文，完成后可以直接通读。"
-        action = _next_action(
-            "wait",
-            headline,
-            detail,
-            disabled=True,
-        )
-    elif blocks_are_current:
+        detail = "系统正在把已有讲述写成连贯正文。"
+        action = _next_action("wait", headline, detail, disabled=True)
+    elif blocks_current:
         if chapter_draft_status == MemoirBookChapterDraftStatus.CONFIRMED.value:
             state = "confirmed"
             headline = "本章已确认"
-            detail = "正文已经收入书稿；以后有新讲述时还可以重新整理。"
-            action = _next_action(
-                "complete",
-                headline,
-                detail,
-                disabled=True,
-            )
+            detail = "正文已经收入书稿。"
+            action = _next_action("complete", headline, detail, disabled=True)
         else:
             state = "draft_ready"
             headline = "正文已经整理好"
-            detail = "请通读整章；需要时可以修改，确认后就会收入书稿。"
+            detail = "请通读整章，需要时修改，然后确认收入书稿。"
             action = _next_action(
                 "review_draft",
                 "通读本章正文",
@@ -292,21 +206,10 @@ def _summary(
             detail,
             action_text="重新整理",
         )
-    elif refresh_job is None:
-        state = "not_started"
-        headline = "可以开始整理"
-        detail = "系统会查看现有讲述；只有关键内容确实缺失时才会请您补充。"
-        action = _next_action(
-            "prepare",
-            "整理这一章",
-            detail,
-            action_text="开始整理",
-        )
     else:
-        # This covers data created before automatic draft generation was added.
         state = "not_started"
         headline = "可以继续整理正文"
-        detail = "现有内容已经检查过，再点一次就会按新流程自动生成正文。"
+        detail = "再次整理后，系统会按当前素材生成正文。"
         action = _next_action(
             "prepare",
             "继续整理这一章",
@@ -320,35 +223,12 @@ def _summary(
         sort_order=chapter.sort_order,
         state=state,
         next_action=action,
-        active_task=(_task_response(active_task) if active_task is not None else None),
-        confirmation=confirmation,
+        active_item=_active_item_response(
+            active_item,
+            active_session_id=active_session_id,
+        ),
         headline=headline,
         detail=detail,
-    )
-
-
-def _gap_groups(
-    gap_responses: list[MemoirNarrativeGapResponse],
-) -> ChapterGapGroups:
-    return ChapterGapGroups(
-        must_handle=[
-            gap
-            for gap in gap_responses
-            if gap.status == MemoirNarrativeGapStatus.OPEN
-            and gap_blocks_formalization(
-                gap_type=gap.gap_type.value,
-                severity=gap.severity.value,
-            )
-        ],
-        suggested=[
-            gap
-            for gap in gap_responses
-            if gap.status == MemoirNarrativeGapStatus.OPEN
-            and not gap_blocks_formalization(
-                gap_type=gap.gap_type.value,
-                severity=gap.severity.value,
-            )
-        ],
     )
 
 
@@ -380,7 +260,6 @@ async def get_chapter_completion_summaries(
                     ),
                 )
                 .order_by(
-                    MemoirEditingJob.chapter_id,
                     MemoirEditingJob.updated_at.desc(),
                     MemoirEditingJob.created_at.desc(),
                 )
@@ -392,77 +271,51 @@ async def get_chapter_completion_summaries(
         chapter_id: [] for chapter_id in chapter_ids
     }
     for job in jobs:
-        if job.chapter_id is not None:
+        if job.chapter_id in jobs_by_chapter:
             jobs_by_chapter[job.chapter_id].append(job)
 
-    chapter_gap_ids = select(MemoirNarrativeGapChapter.gap_id).where(
-        MemoirNarrativeGapChapter.project_id == project_id,
-        MemoirNarrativeGapChapter.chapter_id.in_(chapter_ids),
-    )
-    chapter_gaps = list(
+    items = list(
         (
             await db.scalars(
-                select(MemoirNarrativeGap)
-                .options(
-                    selectinload(MemoirNarrativeGap.claims),
-                    selectinload(MemoirNarrativeGap.stories),
-                    selectinload(MemoirNarrativeGap.chapters),
-                )
+                select(MemoirCompletionItem)
                 .where(
-                    MemoirNarrativeGap.project_id == project_id,
-                    or_(
-                        MemoirNarrativeGap.primary_chapter_id.in_(chapter_ids),
-                        MemoirNarrativeGap.id.in_(chapter_gap_ids),
-                    ),
+                    MemoirCompletionItem.project_id == project_id,
+                    MemoirCompletionItem.chapter_id.in_(chapter_ids),
+                    MemoirCompletionItem.status.in_(_ACTIVE_ITEM_STATUSES),
                 )
                 .order_by(
-                    MemoirNarrativeGap.status,
-                    MemoirNarrativeGap.severity,
-                    MemoirNarrativeGap.last_detected_at.desc(),
-                )
-            )
-        ).unique().all()
-    )
-    gap_responses_by_chapter: dict[str, list[MemoirNarrativeGapResponse]] = {
-        chapter_id: [] for chapter_id in chapter_ids
-    }
-    for gap in chapter_gaps:
-        response = MemoirNarrativeGapResponse.model_validate(gap)
-        related_chapter_ids = {relation.chapter_id for relation in gap.chapters}
-        if gap.primary_chapter_id:
-            related_chapter_ids.add(gap.primary_chapter_id)
-        for related_chapter_id in related_chapter_ids:
-            if related_chapter_id in gap_responses_by_chapter:
-                gap_responses_by_chapter[related_chapter_id].append(response)
-
-    active_tasks = list(
-        (
-            await db.scalars(
-                select(MemoirFollowupTask)
-                .where(
-                    MemoirFollowupTask.project_id == project_id,
-                    MemoirFollowupTask.chapter_id.in_(chapter_ids),
-                    MemoirFollowupTask.status.in_(_ACTIVE_TASK_STATUSES),
-                )
-                .order_by(
-                    MemoirFollowupTask.chapter_id,
                     (
-                        MemoirFollowupTask.status
-                        == MemoirFollowupTaskStatus.IN_PROGRESS.value
+                        MemoirCompletionItem.status
+                        == MemoirCompletionItemStatus.IN_PROGRESS.value
                     ).desc(),
-                    MemoirFollowupTask.priority.desc(),
-                    MemoirFollowupTask.created_at,
-                    MemoirFollowupTask.id,
+                    MemoirCompletionItem.priority.desc(),
+                    MemoirCompletionItem.created_at,
                 )
             )
         ).all()
     )
-    tasks_by_chapter: dict[str, list[MemoirFollowupTask]] = {
+    items_by_chapter: dict[str, list[MemoirCompletionItem]] = {
         chapter_id: [] for chapter_id in chapter_ids
     }
-    for task in active_tasks:
-        if task.chapter_id is not None:
-            tasks_by_chapter[task.chapter_id].append(task)
+    for item in items:
+        if item.chapter_id in items_by_chapter:
+            items_by_chapter[item.chapter_id].append(item)
+
+    active_session_ids = dict(
+        (
+            await db.execute(
+                select(
+                    MemoirVoiceSession.current_completion_item_id,
+                    MemoirVoiceSession.id,
+                ).where(
+                    MemoirVoiceSession.project_id == project_id,
+                    MemoirVoiceSession.current_completion_item_id.in_(
+                        [item.id for item in items]
+                    ),
+                )
+            )
+        ).all()
+    )
 
     draft_statuses = dict(
         (
@@ -476,13 +329,6 @@ async def get_chapter_completion_summaries(
                 )
             )
         ).all()
-    )
-    pending_confirmations_by_chapter = (
-        await chapter_answer_updates.pending_answer_confirmations_by_chapter(
-            db,
-            project_id=project_id,
-            chapter_ids=chapter_ids,
-        )
     )
 
     summaries: dict[str, MemoirChapterCompletionSummary] = {}
@@ -511,14 +357,14 @@ async def get_chapter_completion_summaries(
             ),
             None,
         )
-        gap_groups = _gap_groups(gap_responses_by_chapter[chapter.id])
-        pending_confirmations = pending_confirmations_by_chapter[chapter.id]
+        active_item = next(iter(items_by_chapter[chapter.id]), None)
         summaries[chapter.id] = _summary(
             chapter=chapter,
             context=context,
-            gap_groups=gap_groups,
-            pending_confirmations=pending_confirmations,
-            active_tasks=tasks_by_chapter[chapter.id],
+            active_item=active_item,
+            active_session_id=(
+                active_session_ids.get(active_item.id) if active_item else None
+            ),
             refresh_job=refresh_job,
             draft_job=draft_job,
             chapter_draft_status=draft_statuses.get(chapter.id),

@@ -76,25 +76,24 @@
     </checkbox-group>
   </view>
 
-  <view wx:if="{{showCompletionTaskPanel}}" class="{{completionTaskPanelClass}}">
-    <view class="completion-task-head">
-      <text class="completion-task-label">本次补充</text>
-      <text class="completion-task-status">{{completionTaskStatusText}}</text>
+  <view wx:if="{{showCompletionItemPanel}}" class="{{completionItemPanelClass}}">
+    <view class="completion-item-head">
+      <text class="completion-item-label">本次补充</text>
+      <text class="completion-item-status">{{completionItemStatusText}}</text>
     </view>
-    <text class="completion-task-question">{{completionTaskQuestionText}}</text>
-    <text wx:if="{{completionTaskError}}" class="completion-task-error">{{completionTaskError}}</text>
-    <text wx:if="{{completionTaskActionText}}" class="completion-task-action-state">{{completionTaskActionText}}</text>
-    <view wx:if="{{showCompletionTaskActions}}" class="completion-task-actions">
-      <button disabled="{{completionTaskControlsDisabled}}" bindtap="switchCompletionTask">换一个</button>
-      <button disabled="{{completionTaskControlsDisabled}}" bindtap="chooseUnableToAnswerResolution">想不起来</button>
-      <button disabled="{{completionTaskControlsDisabled}}" bindtap="deferCompletionTask">以后再说</button>
-      <button class="danger" disabled="{{completionTaskControlsDisabled}}" bindtap="confirmStopAskingCompletionTask">不再问这个问题</button>
+    <text class="completion-item-question">{{completionItemQuestionText}}</text>
+    <text wx:if="{{completionItemError}}" class="completion-item-error">{{completionItemError}}</text>
+    <text wx:if="{{completionItemActionText}}" class="completion-item-action-state">{{completionItemActionText}}</text>
+    <view wx:if="{{showCompletionItemActions}}" class="completion-item-actions">
+      <button disabled="{{completionItemControlsDisabled}}" bindtap="switchCompletionItem">换一个</button>
+      <button disabled="{{completionItemControlsDisabled}}" bindtap="chooseUnableToAnswerResolution">想不起来</button>
+      <button disabled="{{completionItemControlsDisabled}}" bindtap="deferCompletionItem">以后再说</button>
     </view>
     <button
-      wx:if="{{showCompletionTaskContinue}}"
-      class="completion-task-continue"
-      disabled="{{completionTaskControlsDisabled}}"
-      bindtap="continueToNextCompletionTask"
+      wx:if="{{showCompletionItemContinue}}"
+      class="completion-item-continue"
+      disabled="{{completionItemControlsDisabled}}"
+      bindtap="continueToNextCompletionItem"
     >
       返回全书概览
     </button>

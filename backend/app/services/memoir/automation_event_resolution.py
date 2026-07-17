@@ -94,7 +94,7 @@ def _apply_deleted_utterance_cleanup(
     remaining_direct_ids = _without_deleted_ids(event.utterance_ids_json, deleted_ids)
     if event.review_utterance_id in deleted_ids:
         event.review_utterance_id = None
-        event.followup_task_id = None
+        event.completion_item_id = None
     remaining_ids = _clean_utterance_ids(
         ([event.review_utterance_id] if event.review_utterance_id else [])
         + remaining_direct_ids
@@ -290,39 +290,6 @@ async def resolve_assigned_source_review_events(
         updated_event_count=updated_count,
         resolved_utterance_ids=sorted(set(resolved_ids)),
     )
-
-
-async def resolve_followup_source_review_events(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    task_id: str,
-    resolved_by_utterance_id: str,
-) -> int:
-    result = await db.execute(
-        select(MemoirAutomationEvent).where(
-            MemoirAutomationEvent.project_id == project_id,
-            MemoirAutomationEvent.event_type == MemoirAutomationEventType.SOURCE_HELD.value,
-            MemoirAutomationEvent.status == MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-            MemoirAutomationEvent.followup_task_id == task_id,
-        )
-    )
-    now_iso = _utcnow_iso()
-    updated_count = 0
-    for event in result.scalars().all():
-        metadata = dict(event.metadata_json or {})
-        metadata[RESOLUTION_KEY] = "confirmed"
-        metadata[RESOLUTION_REASON_KEY] = "followup_answer_resolved"
-        metadata[RESOLVED_AT_KEY] = now_iso
-        metadata[RESOLVED_UTTERANCE_IDS_KEY] = [resolved_by_utterance_id]
-        event.status = MemoirAutomationEventStatus.COMPLETED.value
-        event.summary_text = "需要确认的内容已通过后续回答处理。"
-        event.metadata_json = metadata
-        db.add(event)
-        updated_count += 1
-    if updated_count:
-        await db.flush()
-    return updated_count
 
 
 async def resolve_assembled_chapter_audit_events(

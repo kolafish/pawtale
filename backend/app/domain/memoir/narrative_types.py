@@ -107,8 +107,7 @@ class MemoirNarrativeDecisionTargetType(str, Enum):
     ENTITY = "entity"
     CLAIM = "claim"
     STORY = "story"
-    GAP = "gap"
-    FOLLOWUP_TASK = "followup_task"
+    COMPLETION_ITEM = "completion_item"
     CHAPTER_CONTRACT = "chapter_contract"
     DRAFT_BLOCK = "draft_block"
 
@@ -119,7 +118,6 @@ class MemoirNarrativeDecisionAction(str, Enum):
     REJECT = "reject"
     MERGE = "merge"
     RESOLVE = "resolve"
-    ACCEPT_INCOMPLETE = "accept_incomplete"
     EXCLUDE = "exclude"
     MARK_PRIVATE = "mark_private"
     LOCK = "lock"
@@ -261,12 +259,12 @@ class MemoirNarrativeGapSeverity(str, Enum):
     LOW = "low"
 
 
-class MemoirNarrativeGapStatus(str, Enum):
+class MemoirCompletionItemStatus(str, Enum):
     OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    DEFERRED = "deferred"
     RESOLVED = "resolved"
-    ACCEPTED_INCOMPLETE = "accepted_incomplete"
-    NOT_APPLICABLE = "not_applicable"
-    DISMISSED = "dismissed"
+    UNABLE_TO_ANSWER = "unable_to_answer"
 
 
 class MemoirNarrativeGapRecommendedAction(str, Enum):
@@ -281,13 +279,6 @@ class MemoirNarrativeGapActionReasonCode(str, Enum):
     FACT_CONFLICT_DETECTED = "fact_conflict_detected"
     PUBLICATION_DECISION_REQUIRED = "publication_decision_required"
     DRAFT_USAGE_PROBLEM = "draft_usage_problem"
-    MIGRATION_REVIEW_REQUIRED = "migration_review_required"
-
-
-class MemoirNarrativeGapActionDecisionSource(str, Enum):
-    DETERMINISTIC_POLICY = "deterministic_policy"
-    MIGRATION = "migration"
-    MANUAL_OVERRIDE = "manual_override"
 
 
 class MemoirNarrativeGapDetectedBy(str, Enum):
@@ -302,47 +293,7 @@ class MemoirNarrativeGapClaimRole(str, Enum):
     UNSUPPORTED_CANDIDATE = "unsupported_candidate"
 
 
-class MemoirFollowupTaskStatus(str, Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    ANSWERED = "answered"
-    DEFERRED = "deferred"
-    UNABLE_TO_ANSWER = "unable_to_answer"
-    CLOSED_WITHOUT_ANSWER = "closed_without_answer"
-    CANCELLED = "cancelled"
-
-
-class MemoirFollowupAnswerUse(str, Enum):
-    DIRECT_NARRATIVE = "direct_narrative"
-    CLARIFICATION = "clarification"
-    FACT_RESOLUTION = "fact_resolution"
-
-
-class MemoirFollowupAnswerInterpretationStatus(str, Enum):
-    PENDING = "pending"
-    RESOLVED = "resolved"
-    NEEDS_CONFIRMATION = "needs_confirmation"
-
-
-class MemoirFollowupAnswerKind(str, Enum):
-    DIRECT_NARRATIVE = "direct_narrative"
-    CLARIFICATION = "clarification"
-    FACT_RESOLUTION = "fact_resolution"
-    MIXED = "mixed"
-
-
 MEMOIR_STORY_NARRATION_TARGET = "story_narration"
-
-
-class MemoirFollowupTaskClaimRole(str, Enum):
-    KNOWN = "known"
-    DO_NOT_REPEAT = "do_not_repeat"
-    EXPECTED_EVIDENCE = "expected_evidence"
-
-
-class MemoirFollowupTaskAnswerRole(str, Enum):
-    TARGET_ANSWER = "target_answer"
-    RELATED_CONTEXT = "related_context"
 
 
 class MemoirInterviewBriefSourceKind(str, Enum):

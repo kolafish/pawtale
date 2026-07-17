@@ -185,9 +185,8 @@ definePage<BookCompletionData>()({
     }
     if (
       chapter.next_action.kind === "start_interview"
-      || chapter.next_action.kind === "continue_confirmation"
     ) {
-      await this.beginFollowupInterview(chapter);
+      await this.beginCompletionInterview(chapter);
       return;
     }
     wx.navigateTo({
@@ -219,8 +218,8 @@ definePage<BookCompletionData>()({
     }
   },
 
-  async beginFollowupInterview(chapter: ChapterView) {
-    const task = chapter.active_task;
+  async beginCompletionInterview(chapter: ChapterView) {
+    const task = chapter.active_item;
     if (!task) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
       return;
@@ -240,13 +239,13 @@ definePage<BookCompletionData>()({
         guidance_mode: "guided_interview",
         interview_type: "ai_interview",
         session_goal: "book_completion",
-        current_followup_task_id: task.id,
+        current_completion_item_id: task.id,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: "miniprogram_book_completion",
           chapter_id: chapter.chapter_id,
-          followup_task_id: task.id,
+          completion_item_id: task.id,
         },
       }, { projectId: this.data.projectId });
       trackAuditAction(
