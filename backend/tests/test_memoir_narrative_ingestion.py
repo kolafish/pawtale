@@ -101,6 +101,8 @@ def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
     assert "Story 是可独立讲述的叙事单元，不是 Claim 的同义包装" in prompt
     assert "孤立的时间范围、身份、属性、症状清单" in prompt
     assert "不要为了覆盖每条 Claim 而拆成多个" in prompt
+    assert "Claim 采用稍高层次、可独立理解的事实粒度" in prompt
+    assert "共同表达同一转折或结果的动作" in prompt
 
 
 def _extraction_payload(source_text: str) -> dict:

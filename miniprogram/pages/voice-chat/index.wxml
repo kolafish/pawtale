@@ -129,7 +129,7 @@
       <view class="tts-progress-fill" style="width: {{ttsProgressPercent}}%;"></view>
     </view>
     <text wx:if="{{followUpTTSError}}" class="tts-error">{{followUpTTSError}}</text>
-    <view class="assistant-actions">
+    <view wx:if="{{showAssistantActions}}" class="assistant-actions">
       <button
         wx:if="{{assistantPromptText}}"
         class="assistant-button ghost"

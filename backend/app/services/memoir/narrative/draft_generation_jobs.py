@@ -22,8 +22,9 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChapterSourceLink,
     MemoirEditingJob,
+    MemoirVoiceUtterance,
 )
-from app.models.memoir_narrative import MemoirClaimEvidence
+from app.models.memoir_narrative import MemoirClaimEvidence, MemoirCompletionItem
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_event_resolution
@@ -42,6 +43,7 @@ from app.services.memoir.narrative.chapter_draft_ai import (
     ChapterDraftClaimInput,
     ChapterDraftGenerationInput,
     ChapterDraftStoryInput,
+    ChapterDraftSupplementInput,
     generate_chapter_draft_text,
 )
 from app.services.memoir.narrative.claim_usage_policy import (
@@ -127,6 +129,7 @@ async def _generation_input(
     if not usable_claim_ids:
         raise ValueError("chapter has no publishable claims with source evidence")
     quotes_by_claim: dict[str, list[str]] = {}
+    claim_ids_by_utterance: dict[str, list[str]] = {}
     evidence = (
         await db.scalars(
             select(MemoirClaimEvidence)
@@ -168,6 +171,10 @@ async def _generation_input(
         text = (item.quote or item.evidence_note or "").strip()
         if text:
             quotes_by_claim.setdefault(item.claim_id, []).append(text[:800])
+        if item.utterance_id:
+            claim_ids_by_utterance.setdefault(item.utterance_id, []).append(
+                item.claim_id
+            )
 
     stories: list[ChapterDraftStoryInput] = []
     for story in sorted(
@@ -208,10 +215,51 @@ async def _generation_input(
             )
     if not stories:
         raise ValueError("chapter has no story with publishable source evidence")
+    supplement_blocks: list[ChapterDraftSupplementInput] = []
+    if claim_ids_by_utterance:
+        supplement_rows = (
+            await db.execute(
+                select(MemoirVoiceUtterance, MemoirCompletionItem)
+                .join(
+                    MemoirCompletionItem,
+                    MemoirCompletionItem.id
+                    == MemoirVoiceUtterance.completion_item_id,
+                )
+                .where(
+                    MemoirCompletionItem.project_id
+                    == context.chapter.project_id,
+                    MemoirVoiceUtterance.id.in_(list(claim_ids_by_utterance)),
+                )
+                .order_by(
+                    MemoirVoiceUtterance.created_at,
+                    MemoirVoiceUtterance.id,
+                )
+            )
+        ).all()
+        for utterance, completion_item in supplement_rows:
+            text = (
+                (utterance.transcript_edited or "").strip()
+                or (utterance.transcript_raw or "").strip()
+            )
+            claim_ids = list(
+                dict.fromkeys(claim_ids_by_utterance.get(utterance.id, []))
+            )
+            if text and claim_ids:
+                supplement_blocks.append(
+                    ChapterDraftSupplementInput(
+                        utterance_id=utterance.id,
+                        text=text,
+                        question=completion_item.question,
+                        purpose=completion_item.description,
+                        dimension=completion_item.dimension,
+                        claim_ids=claim_ids,
+                    )
+                )
     return ChapterDraftGenerationInput(
         chapter_id=context.chapter.id,
         chapter_title=context.chapter.title,
         stories=stories,
+        supplement_blocks=supplement_blocks,
         existing_draft=context.draft.content if context.draft else "",
         editorial_guidance=editorial_guidance,
     )

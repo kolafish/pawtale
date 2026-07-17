@@ -20,6 +20,7 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirChapterSourceLink,
     MemoirEditingJob,
+    MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import MemoirCompletionItem
 from app.services.memoir import book_generation_jobs
@@ -28,10 +29,12 @@ from app.services.memoir.narrative.chapter_draft_ai import (
     ChapterDraftGenerationInput,
     ChapterDraftLLMOutput,
     ChapterDraftStoryInput,
+    build_chapter_draft_prompt,
     generate_chapter_draft_text,
     validate_chapter_draft_output,
 )
 from app.services.memoir.narrative.draft_generation_jobs import (
+    _generation_input,
     enqueue_chapter_draft_generation,
     run_chapter_draft_generation_job,
 )
@@ -229,6 +232,80 @@ async def test_generation_job_writes_one_whole_draft_and_acknowledges_sources(
             MemoirBookChapterDraftVersion.draft_id == draft.id
         )
     ) == 1
+
+
+async def test_generation_input_keeps_one_completion_answer_as_a_coherent_block(
+    client,
+    test_db,
+):
+    source_text = (
+        "朋友告诉我他在组织爬山，我一两年前问过但时间不合适。"
+        "今年我发了山桃花朋友圈，他发来照片并说是周末路线，我就请他带上我。"
+    )
+    created = await create_test_voice_transcript(client, test_db, source_text)
+    project_id = created["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["山桃花开的心动"],
+        source_refs_by_chapter=[[memoir_source_ref(created)]],
+        draft_contents=["后来我们一起去爬山。"],
+    )
+    chapter = chapters[0]
+    _, claim = await create_test_source_backed_story(
+        test_db,
+        project_id=project_id,
+        user_id=created["user_id"],
+        source=created,
+        title="重新联系并相约爬山",
+        statement=source_text,
+    )
+    completion_item = MemoirCompletionItem(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        chapter_id=chapter.id,
+        item_type=MemoirNarrativeGapType.CAUSALITY.value,
+        severity=MemoirNarrativeGapSeverity.MEDIUM.value,
+        dimension="chapter_context",
+        title="补充重新联系的背景",
+        description="解释两人如何从弱联系重新搭上线。",
+        fingerprint=sha256(b"coherent-completion-answer").hexdigest(),
+        action=MemoirNarrativeGapRecommendedAction.INTERVIEW.value,
+        question="这段内容开始前，读者还需要知道哪些重要背景？",
+        priority=100,
+        status=MemoirCompletionItemStatus.RESOLVED.value,
+        detected_by=MemoirNarrativeGapDetectedBy.AI.value,
+    )
+    test_db.add(completion_item)
+    await test_db.flush()
+    utterance = await test_db.get(
+        MemoirVoiceUtterance,
+        created["utterance_id"],
+    )
+    assert utterance is not None
+    utterance.completion_item_id = completion_item.id
+    test_db.add(utterance)
+    await test_db.commit()
+
+    generation_input = await _generation_input(
+        test_db,
+        context=await load_chapter_audit_context(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        ),
+        editorial_guidance=[],
+    )
+
+    assert len(generation_input.supplement_blocks) == 1
+    supplement = generation_input.supplement_blocks[0]
+    assert supplement.text == source_text
+    assert supplement.question == completion_item.question
+    assert supplement.dimension == "chapter_context"
+    assert supplement.claim_ids == [claim.id]
+    prompt = build_chapter_draft_prompt(generation_input)
+    assert "不要让 existing_draft 或其他素材插入 block 中间" in prompt
+    assert source_text in prompt
 
 
 async def test_source_refresh_endpoint_bypasses_open_completion_question_and_updates_event(

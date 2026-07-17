@@ -77,6 +77,7 @@ import {
 } from "../../stores/memoir-cache";
 import {
   type VoiceChatData,
+  bookCompletionRoundFinished,
   initialVoiceChatData,
   voiceChatViewPatch,
   voiceAuthorizationChangePatch,
@@ -207,13 +208,15 @@ definePage<VoiceChatData>()({
 
   autoListenGateSnapshot() {
     const hasClient = this.voiceStreaming.hasClient();
-    const canStart = hasClient && canAutoStartListeningAfterTTS({
-      autoListenEnabled: this.data.autoListenEnabled,
-      status: this.data.status,
-      recording: this.data.recording,
-      connecting: this.data.connecting,
-      followUpLoading: this.data.followUpLoading,
-    });
+    const canStart = hasClient
+      && !bookCompletionRoundFinished(this.data)
+      && canAutoStartListeningAfterTTS({
+        autoListenEnabled: this.data.autoListenEnabled,
+        status: this.data.status,
+        recording: this.data.recording,
+        connecting: this.data.connecting,
+        followUpLoading: this.data.followUpLoading,
+      });
     return voiceChatAutoListenGateSnapshot(this.data, {
       hasClient,
       pendingAfterPlayback: this.autoListenPendingAfterPlayback,
@@ -811,7 +814,10 @@ definePage<VoiceChatData>()({
         followUpAudioFileId: "",
         followUpTTSStateText: "",
         ttsAlignment: [],
-        assistantExpectsAnswer: true,
+        assistantExpectsAnswer: this.data.sessionGoal === "book_completion"
+          && this.data.transcriptLines.some((line) => line.role === "user")
+          ? false
+          : true,
         canRequestFollowUp: true,
       }),
       dismissedFollowUpMessageId: "",
@@ -852,7 +858,10 @@ definePage<VoiceChatData>()({
         followUpAudioFileId: "",
         followUpTTSStateText: this.data.followUpTTSStateText,
         ttsAlignment: [],
-        assistantExpectsAnswer: true,
+        assistantExpectsAnswer: this.data.sessionGoal === "book_completion"
+          && this.data.transcriptLines.some((line) => line.role === "user")
+          ? false
+          : true,
         canRequestFollowUp: false,
       }),
       followUpTTSError: "",
@@ -1376,6 +1385,7 @@ definePage<VoiceChatData>()({
   startAssistantBargeInMonitor(requestSerial: number) {
     if (
       this.data.recording
+      || bookCompletionRoundFinished(this.data)
       || !this.data.autoBargeInEnabled
       || !this.assistantTurnActiveForBargeIn()
       || this.assistantBargeInMonitor.isRunning()
@@ -1412,6 +1422,7 @@ definePage<VoiceChatData>()({
     if (
       requestSerial !== followUpRequestSerial
       || this.data.recording
+      || bookCompletionRoundFinished(this.data)
       || !this.assistantTurnActiveForBargeIn()
     ) {
       await this.stopAssistantBargeInMonitor();
@@ -1579,7 +1590,11 @@ definePage<VoiceChatData>()({
   },
 
   startRecording(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
-    if (this.data.finishingSession || !this.ensureVoiceAuthorization(autoTriggered)) {
+    if (
+      this.data.finishingSession
+      || bookCompletionRoundFinished(this.data)
+      || !this.ensureVoiceAuthorization(autoTriggered)
+    ) {
       return false;
     }
     if (this.recordingStartPromise) {
@@ -1630,6 +1645,7 @@ definePage<VoiceChatData>()({
       requestGeneration !== this.recordingStartGeneration
       || this.pageSuspended
       || this.data.finishingSession
+      || bookCompletionRoundFinished(this.data)
     ) {
       return false;
     }
@@ -1648,6 +1664,7 @@ definePage<VoiceChatData>()({
       requestGeneration !== this.recordingStartGeneration
       || this.pageSuspended
       || this.data.finishingSession
+      || bookCompletionRoundFinished(this.data)
     ) {
       return false;
     }
@@ -1662,6 +1679,7 @@ definePage<VoiceChatData>()({
         || requestGeneration !== this.recordingStartGeneration
         || this.pageSuspended
         || this.data.finishingSession
+        || bookCompletionRoundFinished(this.data)
         || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
       ) {
         setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
@@ -1672,6 +1690,7 @@ definePage<VoiceChatData>()({
       requestGeneration !== this.recordingStartGeneration
       || this.pageSuspended
       || this.data.finishingSession
+      || bookCompletionRoundFinished(this.data)
     ) {
       return false;
     }
@@ -1956,7 +1975,15 @@ definePage<VoiceChatData>()({
     }
     this.consecutiveNoAnswerPrompts = 0;
     this.cancelPendingNoAnswerPrompt();
-    setVoiceChatData(this, result.patch);
+    const completedBookAnswer = this.data.sessionGoal === "book_completion"
+      && result.line.role === "user";
+    if (completedBookAnswer) {
+      this.autoListenPendingAfterPlayback = false;
+    }
+    setVoiceChatData(this, {
+      ...result.patch,
+      ...(completedBookAnswer ? { assistantExpectsAnswer: false } : {}),
+    });
     writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines: result.transcriptLines });
     trackAuditAction(
       "voice_chat.asr_final",
