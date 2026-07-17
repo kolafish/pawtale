@@ -201,6 +201,11 @@ async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) ->
         )
     ).all()
     for event in events:
+        if (
+            (event.metadata_json or {}).get("source")
+            != EDITING_JOB_FAILURE_SOURCE
+        ):
+            continue
         event.metadata_json = {
             **(event.metadata_json or {}),
             RESOLUTION_KEY: "confirmed",
@@ -209,7 +214,6 @@ async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) ->
         }
         db.add(event)
         await db.flush()
-        return
 
 
 def register_editing_job_handler(

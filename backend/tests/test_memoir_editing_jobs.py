@@ -327,7 +327,7 @@ async def test_run_editing_job_records_failed_automation_event(test_db):
 async def test_successful_retry_resolves_prior_failure_event(test_db):
     project = await _create_project(test_db)
     project_id = project.id
-    await enqueue_editing_job(
+    job = await enqueue_editing_job(
         test_db,
         project_id=project_id,
         job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
@@ -342,6 +342,16 @@ async def test_successful_retry_resolves_prior_failure_event(test_db):
     register_editing_job_handler(MemoirEditingJobType.INGEST_NARRATIVE_STATE, failing_handler)
     first_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
     assert await run_editing_job(test_db, first_lease) is False
+    successful_event = MemoirAutomationEvent(
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED.value,
+        status=MemoirAutomationEventStatus.COMPLETED.value,
+        editing_job_id=job.id,
+        summary_text="素材事实已经整理完成。",
+        metadata_json={"source": "narrative_ingestion"},
+    )
+    test_db.add(successful_event)
+    await test_db.commit()
 
     await enqueue_editing_job(
         test_db,
@@ -360,14 +370,27 @@ async def test_successful_retry_resolves_prior_failure_event(test_db):
     retry_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
     assert await run_editing_job(test_db, retry_lease) is True
 
-    event = await test_db.scalar(
-        select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
+    events = list(
+        (
+            await test_db.scalars(
+                select(MemoirAutomationEvent).where(
+                    MemoirAutomationEvent.project_id == project_id
+                )
+            )
+        ).all()
     )
-    assert event is not None
-    assert event.status == MemoirAutomationEventStatus.FAILED.value
-    assert event.metadata_json["resolution"] == "confirmed"
-    assert event.metadata_json["resolution_reason"] == "editing_job_succeeded"
-    assert event.metadata_json["resolved_at"]
+    failure_event = next(
+        event
+        for event in events
+        if event.status == MemoirAutomationEventStatus.FAILED.value
+    )
+    assert failure_event.metadata_json["resolution"] == "confirmed"
+    assert (
+        failure_event.metadata_json["resolution_reason"]
+        == "editing_job_succeeded"
+    )
+    assert failure_event.metadata_json["resolved_at"]
+    assert "resolution" not in successful_event.metadata_json
 
 
 async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test_db):
