@@ -1,71 +1,63 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
-from app.domain.memoir.narrative_types import MemoirNarrativeGapRecommendedAction
 from app.domain.memoir.types import MemoirEditingJobStatus
 
 
 MemoirBookCompletionState = Literal[
-    "ready",
-    "in_progress",
+    "not_started",
     "preparing",
-    "needs_preparation",
-    "needs_review",
-    "complete",
+    "needs_input",
+    "draft_ready",
+    "confirmed",
     "failed",
 ]
-MemoirChapterCompletionRefreshStatus = Literal["not_started"] | MemoirEditingJobStatus
 MemoirChapterCompletionTaskStatus = Literal["pending", "in_progress", "deferred"]
-MemoirChapterCompletionDraftReadiness = Literal[
-    "blocked",
-    "ready_to_generate",
-    "needs_review",
-    "ready",
-]
 MemoirChapterCompletionNextActionKind = Literal[
-    "create_direction",
-    "confirm_direction",
-    "refresh_completion",
+    "prepare",
     "wait",
     "continue_confirmation",
     "start_interview",
-    "open_editorial_fix",
-    "open_manual_review",
-    "generate_draft",
+    "confirm_fact",
     "review_draft",
     "complete",
 ]
 
 
+class MemoirChapterPreparationJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    chapter_id: str
+    status: MemoirEditingJobStatus
+    created_at: datetime
+
+
 class MemoirChapterCompletionNextAction(BaseModel):
     kind: MemoirChapterCompletionNextActionKind
-    eyebrow: str
     title: str
     detail: str
     action_text: str = ""
     disabled: bool = False
     task_id: str | None = None
+    confirmation_id: str | None = None
 
 
 class MemoirChapterCompletionTask(BaseModel):
     id: str
-    gap_id: str
     question: str
-    purpose: str
-    known_context_summary: str
-    priority: int
     status: MemoirChapterCompletionTaskStatus
     active_session_id: str | None = None
 
 
-class MemoirChapterCompletionGap(BaseModel):
+class MemoirChapterCompletionConfirmation(BaseModel):
     id: str
-    title: str
-    description: str
-    recommended_action: MemoirNarrativeGapRecommendedAction
+    question: str
+    detail: str
 
 
 class MemoirChapterCompletionSummary(BaseModel):
@@ -73,17 +65,9 @@ class MemoirChapterCompletionSummary(BaseModel):
     title: str
     sort_order: int
     state: MemoirBookCompletionState
-    refresh_status: MemoirChapterCompletionRefreshStatus
-    refresh_is_current: bool
     next_action: MemoirChapterCompletionNextAction
-    must_handle_count: int
-    suggested_count: int
-    accepted_incomplete_count: int
     active_task: MemoirChapterCompletionTask | None = None
-    visible_tasks: list[MemoirChapterCompletionTask] = Field(default_factory=list)
-    editorial_gaps: list[MemoirChapterCompletionGap] = Field(default_factory=list)
-    review_gaps: list[MemoirChapterCompletionGap] = Field(default_factory=list)
-    draft_readiness: MemoirChapterCompletionDraftReadiness
+    confirmation: MemoirChapterCompletionConfirmation | None = None
     headline: str
     detail: str
 

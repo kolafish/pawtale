@@ -477,24 +477,9 @@ async def build_node_generation_context(
 
 def select_generation_nodes(
     nodes: list[MemoirChapterNode],
-    *,
-    requested_node_ids: list[str],
 ) -> list[MemoirChapterNode]:
-    by_id = {node.id: node for node in nodes}
-    requested = list(dict.fromkeys(requested_node_ids))
-    missing = set(requested) - set(by_id)
-    if missing:
-        raise ValueError("requested draft nodes do not belong to the current chapter direction")
-    selected = [by_id[node_id] for node_id in requested] if requested else nodes
-    not_ready = [
-        node.title
-        for node in selected
-        if node.status != MemoirChapterNodeStatus.READY.value
-    ]
-    if requested and not_ready:
-        raise ValueError("requested draft nodes are not ready: " + ", ".join(not_ready))
     return [
         node
-        for node in selected
+        for node in nodes
         if node.status == MemoirChapterNodeStatus.READY.value
     ]

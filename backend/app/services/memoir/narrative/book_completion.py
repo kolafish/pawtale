@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.memoir.narrative_types import MemoirChapterContractStatus
+from app.models.memoir import MemoirEditingJob
 from app.schemas.memoir_narrative.book_completion import (
     MemoirBookCompletionOverviewResponse,
 )
@@ -9,8 +11,52 @@ from app.services.memoir.book_plan_sources import (
     included_book_chapters,
     load_plan_with_chapters,
 )
-from app.services.memoir.narrative import chapter_completion_summary
-from app.services.memoir.narrative.gap_rules import load_chapter_audit_contexts
+from app.services.memoir.narrative import (
+    chapter_completion_summary,
+    chapter_contracts,
+    completion_refresh,
+)
+from app.services.memoir.narrative.gap_rules import (
+    load_chapter_audit_context,
+    load_chapter_audit_contexts,
+)
+
+
+async def prepare_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    user_id: str,
+) -> MemoirEditingJob:
+    context = await load_chapter_audit_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    contract = context.contract
+    if contract is None:
+        contract = await chapter_contracts.create_system_contract_suggestion(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            idempotency_key=f"book-completion:auto-direction:v1:{chapter_id}",
+        )
+    if contract.status == MemoirChapterContractStatus.DRAFT.value:
+        await chapter_contracts.confirm_contract(
+            db,
+            project_id=project_id,
+            contract_id=contract.id,
+            actor_user_id=user_id,
+        )
+    return await completion_refresh.enqueue_chapter_completion_refresh(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        include_semantic_audit=True,
+        ai_model=None,
+        source="book_completion_prepare",
+    )
 
 
 async def get_book_completion_overview(
@@ -24,7 +70,7 @@ async def get_book_completion_overview(
         return MemoirBookCompletionOverviewResponse(
             project_id=project_id,
             headline="先确定这本书准备写哪些章节",
-            detail="有了章节后，这里会按章显示还值得补充的内容。",
+            detail="有了章节后，可以逐章整理、通读并确认正文。",
             total_chapters=0,
             completed_chapters=0,
             chapters=[],
@@ -35,18 +81,21 @@ async def get_book_completion_overview(
         project_id=project_id,
         chapters=chapters,
     )
-    read_models = await chapter_completion_summary.get_chapter_completion_read_models(
+    summaries = await chapter_completion_summary.get_chapter_completion_summaries(
         db,
         project_id=project_id,
         chapters=chapters,
         contexts=contexts,
     )
-    chapter_items = [read_models[chapter.id].summary for chapter in chapters]
-    completed = sum(item.state == "complete" for item in chapter_items)
+    chapter_items = [summaries[chapter.id] for chapter in chapters]
+    completed = sum(item.state == "confirmed" for item in chapter_items)
     return MemoirBookCompletionOverviewResponse(
         project_id=project_id,
-        headline="先看全书，再选择要补的章节",
-        detail=f"全书共 {len(chapter_items)} 章，其中 {completed} 章目前不需要再补。",
+        headline="逐章整理这本书",
+        detail=(
+            "每章只显示一个下一步：需要补充时先讲一件事，"
+            "否则直接生成正文供您通读。"
+        ),
         total_chapters=len(chapter_items),
         completed_chapters=completed,
         chapters=chapter_items,

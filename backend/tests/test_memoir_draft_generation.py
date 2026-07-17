@@ -33,7 +33,7 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.domain.memoir.types import MemoirBookChapterDraftStatus, MemoirEditingJobStatus
+from app.domain.memoir.types import MemoirBookChapterDraftStatus
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -56,11 +56,6 @@ from app.models.memoir_narrative import (
     MemoirStoryRevision,
     MemoirStorySlot,
     MemoirStorySlotClaim,
-)
-from app.schemas.memoir_narrative import (
-    MemoirDraftBlockGenerationRequest,
-    MemoirDraftBlockRevisionApplyRequest,
-    MemoirDraftBlockRevisionJobRequest,
 )
 from app.services.memoir.narrative import (
     draft_assembly,
@@ -630,28 +625,6 @@ def test_factual_generation_requires_supported_slot_coverage_and_narrator_voice(
     )
 
 
-async def test_draft_generation_job_routes_enqueue_and_read_scoped_job(client, test_db):
-    created = await _create_generation_fixture(client, test_db)
-    queued = await client.post(
-        (
-            f"/api/memoir/projects/{created['project_id']}"
-            f"/chapters/{created['chapter'].id}/draft-blocks/generation-jobs"
-        ),
-        json={"node_ids": [created["nodes"][0].id]},
-    )
-    assert queued.status_code == 200, queued.text
-    body = queued.json()
-    assert body["job_type"] == "generate_draft_blocks"
-    assert body["status"] == "pending"
-
-    loaded = await client.get(
-        f"/api/memoir/projects/{created['project_id']}"
-        f"/draft-block-generation-jobs/{body['id']}"
-    )
-    assert loaded.status_code == 200, loaded.text
-    assert loaded.json()["id"] == body["id"]
-
-
 async def test_draft_generation_uses_the_current_draft_chapter_direction(
     client,
     test_db,
@@ -666,7 +639,6 @@ async def test_draft_generation_uses_the_current_draft_chapter_direction(
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(node_ids=[created["nodes"][0].id]),
     )
 
     result = await draft_generation_jobs.run_draft_block_generation_job(
@@ -677,13 +649,17 @@ async def test_draft_generation_uses_the_current_draft_chapter_direction(
                 _ai_output(
                     "十八岁那年，我离开家乡，前往成都读书。",
                     created["claims"][0].id,
-                )
+                ),
+                _ai_output(
+                    "抵达成都后，我住进了学校宿舍。",
+                    created["claims"][1].id,
+                ),
             ]
         ),
     )
 
     assert result.result_json["contract_id"] == created["contract"].id
-    assert len(result.result_json["created_block_ids"]) == 1
+    assert len(result.result_json["created_block_ids"]) == 2
 
 
 async def test_node_generation_uses_claim_allowlists_and_skips_current_blocks(
@@ -692,12 +668,10 @@ async def test_node_generation_uses_claim_allowlists_and_skips_current_blocks(
     monkeypatch,
 ):
     created = await _create_generation_fixture(client, test_db)
-    request = MemoirDraftBlockGenerationRequest()
     job = await draft_generation_jobs.enqueue_chapter_block_generation(
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=request,
     )
     ai = FakeDraftAI(
         [
@@ -807,7 +781,6 @@ async def test_clarification_marks_blocks_stale_and_regenerates_only_unlocked_bl
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(),
     )
     await draft_generation_jobs.run_draft_block_generation_job(
         test_db,
@@ -855,7 +828,6 @@ async def test_clarification_marks_blocks_stale_and_regenerates_only_unlocked_bl
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(),
     )
     ai = FakeDraftAI(
         [_ai_output("十八岁那年，我从家乡动身去成都。", created["claims"][0].id)]
@@ -897,7 +869,6 @@ async def test_generation_rejects_changed_editorial_context_before_calling_ai(
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(node_ids=[created["nodes"][0].id]),
     )
     relation.clarification_text = "第二种解释是章节关系。"
     test_db.add(relation)
@@ -924,7 +895,6 @@ async def test_initial_generation_builds_source_backed_opening_before_facts(
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(),
     )
     ai = FakeDraftAI(
         [
@@ -972,7 +942,6 @@ async def test_initial_generation_builds_transition_after_both_endpoint_blocks(
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(),
     )
     ai = FakeDraftAI(
         [
@@ -1004,7 +973,6 @@ async def test_generation_rejects_provider_claim_outside_node_allowlist(client, 
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(node_ids=[created["nodes"][0].id]),
     )
     ai = FakeDraftAI(
         [
@@ -1028,7 +996,7 @@ async def test_generation_rejects_provider_claim_outside_node_allowlist(client, 
     assert count == 0
 
 
-async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_snapshots(
+async def test_chapter_assembly_accepts_current_blocks_and_keeps_snapshots(
     client,
     test_db,
 ):
@@ -1037,7 +1005,6 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         test_db,
         project_id=created["project_id"],
         chapter_id=created["chapter"].id,
-        request=MemoirDraftBlockGenerationRequest(),
     )
     await draft_generation_jobs.run_draft_block_generation_job(
         test_db,
@@ -1058,65 +1025,6 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         ).all()
     )
     first = blocks[0]
-    original_version_id = first.current_version_id
-    revision_job = await draft_generation_jobs.enqueue_block_revision(
-        test_db,
-        project_id=created["project_id"],
-        block_id=first.id,
-        request=MemoirDraftBlockRevisionJobRequest(
-            expected_current_version_id=str(original_version_id),
-            feedback="保留第一人称，并把句子写得更自然。",
-        ),
-    )
-    suggestion = await draft_generation_jobs.run_draft_block_generation_job(
-        test_db,
-        revision_job,
-        ai_client=FakeDraftAI(
-            [_ai_output("十八岁那年，我第一次独自离开家乡。", created["claims"][0].id)]
-        ),
-    )
-    assert first.current_version_id == original_version_id
-    revision_job.status = MemoirEditingJobStatus.SUCCEEDED.value
-    revision_job.result_json = suggestion.result_json
-    await test_db.flush()
-
-    await draft_generation_jobs.apply_generated_revision(
-        test_db,
-        project_id=created["project_id"],
-        block_id=first.id,
-        request=MemoirDraftBlockRevisionApplyRequest(
-            expected_current_version_id=str(original_version_id),
-            generation_job_id=revision_job.id,
-        ),
-    )
-    assert first.current_version_id != original_version_id
-    with pytest.raises(ValueError, match="changed concurrently"):
-        await draft_generation_jobs.apply_generated_revision(
-            test_db,
-            project_id=created["project_id"],
-            block_id=first.id,
-            request=MemoirDraftBlockRevisionApplyRequest(
-                expected_current_version_id=str(original_version_id),
-                generation_job_id=revision_job.id,
-            ),
-        )
-
-    with pytest.raises(ValueError, match="confirm every included draft block"):
-        await draft_assembly.assemble_chapter_draft(
-            test_db,
-            project_id=created["project_id"],
-            chapter_id=created["chapter"].id,
-        )
-    for block in blocks:
-        await draft_blocks.confirm_block(
-            test_db,
-            project_id=created["project_id"],
-            block_id=block.id,
-            expected_current_version_id=str(block.current_version_id),
-            actor_user_id=created["user_id"],
-            idempotency_key=f"test-confirm:{block.id}:{block.current_version_id}",
-            reason="test chapter assembly gate",
-        )
     first_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,
         project_id=created["project_id"],
@@ -1137,15 +1045,6 @@ async def test_local_revision_is_a_suggestion_until_applied_and_assembly_keeps_s
         expected_current_version_id=str(first.current_version_id),
         content=first_version_content + " 我也第一次学会独自面对陌生环境。",
         feedback="补充这次离家带来的变化。",
-    )
-    await draft_blocks.confirm_block(
-        test_db,
-        project_id=created["project_id"],
-        block_id=first.id,
-        expected_current_version_id=str(first.current_version_id),
-        actor_user_id=created["user_id"],
-        idempotency_key=f"test-reconfirm:{first.id}:{first.current_version_id}",
-        reason="test edited block assembly gate",
     )
     second_assembly = await draft_assembly.assemble_chapter_draft(
         test_db,

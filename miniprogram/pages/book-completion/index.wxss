@@ -17,9 +17,7 @@
 .progress-text,
 .chapter-title,
 .chapter-headline,
-.chapter-detail,
-.focus-label,
-.focus-item {
+.chapter-detail {
   display: block;
   overflow-wrap: anywhere;
 }
@@ -87,12 +85,12 @@
   font-weight: 700;
 }
 
-.chapter-item.complete .chapter-state {
+.chapter-item.confirmed .chapter-state {
   color: #386552;
 }
 
 .chapter-item.preparing .chapter-state,
-.chapter-item.needs_preparation .chapter-state {
+.chapter-item.not_started .chapter-state {
   color: #53677a;
 }
 
@@ -119,29 +117,8 @@
   text-wrap: pretty;
 }
 
-.focus-list {
-  margin-top: 24rpx;
-  padding: 20rpx 22rpx;
-  border-left: 6rpx solid #bd7b6f;
-  background: #fffaf5;
-}
-
-.focus-label {
-  color: #8d453a;
-  font-size: 24rpx;
-  font-weight: 700;
-  line-height: 34rpx;
-}
-
-.focus-item {
-  margin-top: 8rpx;
-  font-size: 27rpx;
-  line-height: 42rpx;
-  text-wrap: pretty;
-}
-
 .chapter-action {
-  min-height: 76rpx;
+  min-height: 88rpx;
   margin-top: 26rpx;
   padding: 0 24rpx;
   display: flex;
@@ -160,10 +137,10 @@
   transition-timing-function: ease-out;
 }
 
-.chapter-item.ready:active .chapter-action,
-.chapter-item.in_progress:active .chapter-action,
-.chapter-item.needs_preparation:active .chapter-action,
-.chapter-item.needs_review:active .chapter-action,
+.chapter-item.not_started:active .chapter-action,
+.chapter-item.needs_input:active .chapter-action,
+.chapter-item.draft_ready:active .chapter-action,
+.chapter-item.confirmed:active .chapter-action,
 .chapter-item.failed:active .chapter-action {
   transform: scale(0.96);
   background: #fff8f2;

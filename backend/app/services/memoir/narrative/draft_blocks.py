@@ -356,7 +356,7 @@ async def manually_edit_block(
     return block
 
 
-async def confirm_block(
+async def unlock_block(
     db: AsyncSession,
     *,
     project_id: str,
@@ -372,7 +372,7 @@ async def confirm_block(
         idempotency_key=idempotency_key,
         target_type=MemoirNarrativeDecisionTargetType.DRAFT_BLOCK,
         target_id=block_id,
-        action=MemoirNarrativeDecisionAction.CONFIRM,
+        action=MemoirNarrativeDecisionAction.UNLOCK,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
     )
@@ -381,10 +381,10 @@ async def confirm_block(
         return block
     if block.current_version_id != expected_current_version_id:
         raise ValueError("draft block changed concurrently; reload and retry")
-    if block.editorial_status == MemoirDraftBlockEditorialStatus.CONFIRMED.value:
-        raise ValueError("draft block is already confirmed")
+    if not block.locked:
+        raise ValueError("draft block is already unlocked")
     before = _block_state(block)
-    block.editorial_status = MemoirDraftBlockEditorialStatus.CONFIRMED.value
+    block.locked = False
     block.updated_at = _utcnow()
     db.add(block)
     await decision_log.record_decision(
@@ -392,60 +392,7 @@ async def confirm_block(
         project_id=project_id,
         target_type=MemoirNarrativeDecisionTargetType.DRAFT_BLOCK,
         target_id=block.id,
-        action=MemoirNarrativeDecisionAction.CONFIRM,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        before_state=before,
-        after_state=_block_state(block),
-        reason=reason,
-        idempotency_key=idempotency_key,
-    )
-    return block
-
-
-async def set_block_locked(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    block_id: str,
-    expected_current_version_id: str,
-    locked: bool,
-    actor_user_id: str,
-    idempotency_key: str,
-    reason: str,
-) -> MemoirDraftBlock:
-    action = (
-        MemoirNarrativeDecisionAction.LOCK
-        if locked
-        else MemoirNarrativeDecisionAction.UNLOCK
-    )
-    existing = await decision_log.existing_decision(
-        db,
-        project_id=project_id,
-        idempotency_key=idempotency_key,
-        target_type=MemoirNarrativeDecisionTargetType.DRAFT_BLOCK,
-        target_id=block_id,
-        action=action,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-    )
-    block = await draft_block_queries.load_block(db, project_id=project_id, block_id=block_id)
-    if existing is not None:
-        return block
-    if block.current_version_id != expected_current_version_id:
-        raise ValueError("draft block changed concurrently; reload and retry")
-    if block.locked == locked:
-        raise ValueError(f"draft block is already {'locked' if locked else 'unlocked'}")
-    before = _block_state(block)
-    block.locked = locked
-    block.updated_at = _utcnow()
-    db.add(block)
-    await decision_log.record_decision(
-        db,
-        project_id=project_id,
-        target_type=MemoirNarrativeDecisionTargetType.DRAFT_BLOCK,
-        target_id=block.id,
-        action=action,
+        action=MemoirNarrativeDecisionAction.UNLOCK,
         actor_type=MemoirNarrativeActorType.USER,
         actor_user_id=actor_user_id,
         before_state=before,

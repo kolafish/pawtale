@@ -235,37 +235,3 @@ async def list_chapter_blocks(
         chapter_id=chapter_id,
         blocks=await _block_responses(db, project_id=project_id, blocks=blocks),
     )
-
-
-async def list_block_versions(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    block_id: str,
-) -> list[MemoirDraftBlockVersionResponse]:
-    await load_block(db, project_id=project_id, block_id=block_id)
-    versions = list(
-        (
-            await db.scalars(
-                select(MemoirDraftBlockVersion)
-                .where(
-                    MemoirDraftBlockVersion.project_id == project_id,
-                    MemoirDraftBlockVersion.block_id == block_id,
-                )
-                .order_by(MemoirDraftBlockVersion.version.desc())
-            )
-        ).all()
-    )
-    claims_by_version, stories_by_version = await load_version_sources(
-        db,
-        project_id=project_id,
-        version_ids=[version.id for version in versions],
-    )
-    return [
-        _version_response(
-            version,
-            claims=claims_by_version.get(version.id, []),
-            stories=stories_by_version.get(version.id, []),
-        )
-        for version in versions
-    ]

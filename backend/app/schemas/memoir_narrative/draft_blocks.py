@@ -12,7 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockStoryUsageRole,
     MemoirNarrativeActorType,
 )
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.schemas.memoir_narrative.decisions import MemoirNarrativeDecisionRequest
 
 
@@ -95,77 +94,13 @@ class MemoirDraftBlockManualRevisionRequest(BaseModel):
         return value.strip() if isinstance(value, str) else value
 
 
-class MemoirDraftBlockDecisionRequest(MemoirNarrativeDecisionRequest):
+class MemoirDraftBlockUnlockRequest(MemoirNarrativeDecisionRequest):
     expected_current_version_id: str = Field(min_length=1, max_length=36)
 
     @field_validator("expected_current_version_id", mode="before")
     @classmethod
     def strip_expected_current_version_id(cls, value: object) -> object:
         return value.strip() if isinstance(value, str) else value
-
-
-class MemoirDraftBlockGenerationRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    node_ids: list[str] = Field(default_factory=list, max_length=100)
-    ai_model: str | None = Field(default=None, max_length=120)
-
-    @field_validator("node_ids")
-    @classmethod
-    def unique_node_ids(cls, value: list[str]) -> list[str]:
-        normalized = list(dict.fromkeys(item.strip() for item in value if item.strip()))
-        if any(len(item) > 36 for item in normalized):
-            raise ValueError("node id cannot exceed 36 characters")
-        return normalized
-
-    @field_validator("ai_model")
-    @classmethod
-    def strip_ai_model(cls, value: str | None) -> str | None:
-        return value.strip() or None if value is not None else None
-
-
-class MemoirDraftBlockRevisionJobRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    expected_current_version_id: str = Field(min_length=1, max_length=36)
-    feedback: str = Field(min_length=1, max_length=4000)
-    ai_model: str | None = Field(default=None, max_length=120)
-
-    @field_validator("expected_current_version_id", "feedback", mode="before")
-    @classmethod
-    def strip_required_revision_text(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-    @field_validator("ai_model")
-    @classmethod
-    def strip_revision_ai_model(cls, value: str | None) -> str | None:
-        return value.strip() or None if value is not None else None
-
-
-class MemoirDraftBlockRevisionApplyRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    expected_current_version_id: str = Field(min_length=1, max_length=36)
-    generation_job_id: str = Field(min_length=1, max_length=36)
-
-    @field_validator("expected_current_version_id", "generation_job_id", mode="before")
-    @classmethod
-    def strip_apply_ids(cls, value: object) -> object:
-        return value.strip() if isinstance(value, str) else value
-
-
-class MemoirDraftBlockJobResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    project_id: str
-    chapter_id: str | None
-    job_type: MemoirEditingJobType
-    status: MemoirEditingJobStatus
-    result_json: dict[str, object] = Field(default_factory=dict)
-    error_message: str
-    created_at: datetime
-    updated_at: datetime
 
 
 class MemoirDraftBlockAssemblyItem(BaseModel):

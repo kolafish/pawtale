@@ -49,42 +49,28 @@ function installWx(requests) {
   };
 }
 
-test("chapter workspace API uses narrative resource routes and explicit action payloads", async () => {
+test("chapter completion API exposes only workspace, prepare, and fact confirmation actions", async () => {
   const requests = [];
   installWx(requests);
   resetModules();
   const {
     getMemoirChapterWorkspace,
-    resolveMemoirNarrativeGap,
-    suggestMemoirChapterDirection,
+    confirmMemoirChapterFact,
   } = require("../services/memoir-chapter-workspace-api.ts");
   const {
-    enqueueMemoirChapterCompletionRefresh,
+    prepareMemoirBookChapter,
   } = require("../services/memoir-book-completion-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
-  await suggestMemoirChapterDirection("project/1", "chapter/1");
-  await enqueueMemoirChapterCompletionRefresh("project/1", "chapter/1");
-  await resolveMemoirNarrativeGap("project/1", "gap/1", "not-applicable", {
-    idempotency_key: "decision-1",
-    note: "该项不适用于本章",
-  });
+  await prepareMemoirBookChapter("project/1", "chapter/1");
+  await confirmMemoirChapterFact("project/1", "gap/1", "正确的是十八岁");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
-  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/contract/suggest");
-  assert.deepEqual(apiRequests[1].data, {
-    idempotency_key: "workspace:direction:chapter/1",
-  });
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/completion-refresh-jobs");
-  assert.deepEqual(apiRequests[2].data, {
-    include_semantic_audit: true,
-    ai_model: "deepseek-v4-flash",
-  });
-  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/not-applicable");
-  assert.deepEqual(apiRequests[3].data, {
-    idempotency_key: "decision-1",
-    note: "该项不适用于本章",
-  });
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
+  assert.deepEqual(apiRequests[1].data, {});
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/gaps/gap%2F1/resolve");
+  assert.equal(apiRequests[2].data.idempotency_key, "chapter-confirmation:gap/1");
+  assert.equal(apiRequests[2].data.note, "正确的是十八岁");
   delete global.wx;
 });

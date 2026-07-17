@@ -138,15 +138,15 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     assert created_count == 1
     gap_id = first[0].id
 
-    accepted = await client.post(
-        f"/api/memoir/projects/{project_id}/gaps/{gap_id}/accept-incomplete",
+    resolved = await client.post(
+        f"/api/memoir/projects/{project_id}/gaps/{gap_id}/resolve",
         json={
-            "idempotency_key": "accept-missing-contract",
-            "note": "目前素材有限，保留为未完成章节。",
+            "idempotency_key": "resolve-missing-contract",
+            "note": "用户确认目前素材里没有更多内容。",
         },
     )
-    assert accepted.status_code == 200, accepted.text
-    assert accepted.json()["status"] == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["status"] == MemoirNarrativeGapStatus.RESOLVED.value
 
     repeated, repeated_created_count = await gaps.upsert_gaps(
         test_db,
@@ -156,14 +156,14 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     await test_db.commit()
     assert repeated_created_count == 0
     assert repeated[0].id == gap_id
-    assert repeated[0].status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
+    assert repeated[0].status == MemoirNarrativeGapStatus.RESOLVED.value
     assert repeated[0].detection_count == 2
     assert await gaps.reconcile_project_rule_gaps(
         test_db,
         project_id=project_id,
         complete_candidates=[],
     ) == 0
-    assert repeated[0].status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value
+    assert repeated[0].status == MemoirNarrativeGapStatus.RESOLVED.value
     assert await test_db.scalar(
         select(func.count(MemoirNarrativeGap.id)).where(
             MemoirNarrativeGap.project_id == project_id
@@ -182,12 +182,12 @@ async def test_repeated_gap_audit_preserves_user_resolution_without_duplicates(
     assert workspace.status_code == 200, workspace.text
     body = workspace.json()
     summary = body["completion_summary"]
-    assert summary["must_handle_count"] == 0
-    assert summary["accepted_incomplete_count"] == 1
-    assert "percentage" not in str(body).lower()
+    assert summary["state"] == "not_started"
+    assert "must_handle_count" not in summary
+    assert "accepted_incomplete_count" not in summary
 
 
-async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
+async def test_chapter_workspace_hides_internal_gap_groups(
     client,
     test_db,
 ):
@@ -230,12 +230,21 @@ async def test_chapter_workspace_uses_formalization_policy_for_gap_groups(
     )
 
     assert workspace.status_code == 200, workspace.text
-    summary = workspace.json()["completion_summary"]
-    gaps_by_type = {gap.gap_type: gap.id for gap in created_gaps}
-    assert [item["id"] for item in summary["review_gaps"]] == [
-        gaps_by_type[MemoirNarrativeGapType.CONTRADICTION.value]
-    ]
-    assert summary["suggested_count"] == 1
+    body = workspace.json()
+    summary = body["completion_summary"]
+    assert {gap.gap_type for gap in created_gaps} == {
+        MemoirNarrativeGapType.MISSING_SLOT.value,
+        MemoirNarrativeGapType.CONTRADICTION.value,
+    }
+    assert summary["state"] == "not_started"
+    assert "review_gaps" not in summary
+    assert "suggested_count" not in summary
+    assert set(body) == {
+        "project_id",
+        "chapter_id",
+        "chapter_title",
+        "completion_summary",
+    }
 
 
 async def test_project_rule_audit_resolves_obsolete_gap_and_reopens_it_if_condition_returns(
@@ -303,20 +312,21 @@ async def test_completion_refresh_is_queued_on_existing_editing_job_worker(
         chapter_titles=["青年时期"],
     )
 
-    response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/completion-refresh-jobs",
-        json={"include_semantic_audit": False},
+    job = await completion_refresh.enqueue_chapter_completion_refresh(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        include_semantic_audit=False,
+        ai_model=None,
+        source="test_background_worker",
     )
-
-    assert response.status_code == 202, response.text
-    assert response.json()["status"] == "pending"
-    assert response.json()["chapter_id"] == chapters[0].id
+    await test_db.commit()
 
     register_memoir_editing_job_handlers()
-    lease = await claim_editing_job(test_db, response.json()["id"])
+    lease = await claim_editing_job(test_db, job.id)
     assert lease is not None
     assert await run_editing_job(test_db, lease) is True
-    job = await test_db.get(MemoirEditingJob, response.json()["id"])
+    job = await test_db.get(MemoirEditingJob, job.id)
     assert job is not None
     assert job.status == "succeeded"
     assert job.result_json["deterministic_gap_count"] == 1
@@ -327,19 +337,11 @@ async def test_completion_refresh_is_queued_on_existing_editing_job_worker(
         )
     ) == 1
 
-    semantic_response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/completion-refresh-jobs",
-        json={"include_semantic_audit": True, "ai_model": "test-semantic-model"},
-    )
-    assert semantic_response.status_code == 202, semantic_response.text
     workspace = await client.get(
         f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/workspace"
     )
     assert workspace.status_code == 200
-    assert (
-        workspace.json()["latest_refresh_job"]["id"]
-        == semantic_response.json()["id"]
-    )
+    assert "latest_refresh_job" not in workspace.json()
 
 
 async def test_semantic_reaudit_resolves_then_reopens_gap_and_task_if_it_recurs(
