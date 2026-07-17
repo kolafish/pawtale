@@ -5,11 +5,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.database import register_models
+from app.database import create_database_engine, register_models, settings
 from app.migrations.memoir_schema_cutover import OBSOLETE_MEMOIR_TABLES
 from app.migrations.runtime import assert_runtime_schema, migrate_runtime_schema
 from app.models.memoir import (
     MemoirAutomationEvent,
+    MemoirBookOutput,
+    MemoirBookPlan,
     MemoirEditingJob,
     MemoirVoiceSession,
 )
@@ -112,7 +114,14 @@ async def test_runtime_schema_assert_reports_missing_columns_without_mutating_sc
 
 async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
     register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    engine = create_database_engine(
+        settings.model_copy(
+            update={
+                "app_env": "test",
+                "database_url": "sqlite+aiosqlite:///:memory:",
+            }
+        )
+    )
     now = datetime(2026, 7, 17, 12, 0, 0)
     try:
         await migrate_runtime_schema(engine)
@@ -125,6 +134,7 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
                     metadata_json={},
                 )
             )
+            await session.flush()
             session.add(
                 MemoirStory(
                     id="story-1",
@@ -161,6 +171,33 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
                     )
                 )
             await session.flush()
+            session.add(
+                MemoirBookPlan(
+                    id="plan-1",
+                    project_id="project-1",
+                    title="章节规划",
+                    status="draft",
+                    created_by="system",
+                    prompt_snapshot="",
+                    metadata_json={},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            await session.flush()
+            session.add(
+                MemoirBookOutput(
+                    id="output-1",
+                    project_id="project-1",
+                    plan_id="plan-1",
+                    title="测试回忆录",
+                    status="draft",
+                    formal_audit_job_id="job-obsolete",
+                    metadata_json={},
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
             session.add(
                 MemoirAutomationEvent(
                     id="event-1",
@@ -221,6 +258,7 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
             await session.commit()
 
         async with engine.begin() as conn:
+            assert await conn.scalar(text("PRAGMA foreign_keys")) == 1
             await conn.execute(
                 text("DROP TRIGGER memoir_narrative_decisions_no_update")
             )
@@ -305,11 +343,11 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
             "memoir_automation_events": 1,
             "memoir_narrative_decisions": 1,
         }
+        assert cutover["cleared_references"] == {
+            "memoir_book_outputs.formal_audit_job_id": 1,
+        }
 
-        await assert_runtime_schema(
-            engine,
-            require_sqlite_foreign_keys=False,
-        )
+        await assert_runtime_schema(engine)
         async with engine.begin() as conn:
             tables = set(
                 (
@@ -339,6 +377,12 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
                     "WHERE id = 'event-1'"
                 )
             ) is None
+            assert await conn.scalar(
+                text(
+                    "SELECT formal_audit_job_id FROM memoir_book_outputs "
+                    "WHERE id = 'output-1'"
+                )
+            ) is None
             assert (
                 await conn.execute(
                     text(
@@ -360,6 +404,7 @@ async def test_destructive_memoir_cutover_drops_only_known_legacy_schema():
             "dropped_triggers": [],
             "rebuilt_tables": [],
             "discarded_rows": {},
+            "cleared_references": {},
         }
     finally:
         await engine.dispose()

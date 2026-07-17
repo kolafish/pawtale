@@ -307,6 +307,31 @@ async def _rebuild_table(
     return before_count - after_count
 
 
+async def _clear_discarded_job_references(
+    conn: AsyncConnection,
+) -> dict[str, int]:
+    table_names = await _object_names(conn, "table")
+    if "memoir_book_outputs" not in table_names:
+        return {}
+    result = await conn.execute(
+        text(
+            "UPDATE memoir_book_outputs "
+            "SET formal_audit_job_id = NULL "
+            "WHERE formal_audit_job_id IS NOT NULL "
+            "AND NOT EXISTS ("
+            "SELECT 1 FROM memoir_editing_jobs AS job "
+            "WHERE job.id = memoir_book_outputs.formal_audit_job_id"
+            ")"
+        )
+    )
+    changed = max(0, int(result.rowcount or 0))
+    return (
+        {"memoir_book_outputs.formal_audit_job_id": changed}
+        if changed
+        else {}
+    )
+
+
 async def migrate_memoir_schema_cutover(
     engine: AsyncEngine,
 ) -> dict[str, object]:
@@ -319,6 +344,7 @@ async def migrate_memoir_schema_cutover(
     dropped_triggers: list[str] = []
     rebuilt_tables: list[str] = []
     discarded_rows: dict[str, int] = {}
+    cleared_references: dict[str, int] = {}
 
     async with engine.connect() as conn:
         foreign_keys_enabled = int(
@@ -355,6 +381,9 @@ async def migrate_memoir_schema_cutover(
                     rebuilt_tables.append(table_name)
                     if discarded_count:
                         discarded_rows[table_name] = discarded_count
+                cleared_references = await _clear_discarded_job_references(
+                    conn
+                )
         finally:
             await conn.execute(text("PRAGMA legacy_alter_table = OFF"))
             await conn.execute(
@@ -370,4 +399,5 @@ async def migrate_memoir_schema_cutover(
         "dropped_triggers": dropped_triggers,
         "rebuilt_tables": rebuilt_tables,
         "discarded_rows": discarded_rows,
+        "cleared_references": cleared_references,
     }
