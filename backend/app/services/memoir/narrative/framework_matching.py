@@ -174,6 +174,7 @@ async def schedule_framework_matching_job(
     match_source: MemoirFrameworkMatchSource,
     ai_model: str | None = None,
     enabled: bool | None = None,
+    rebuild_run_id: str | None = None,
 ) -> MemoirEditingJob | None:
     settings = get_settings()
     is_enabled = (
@@ -202,6 +203,8 @@ async def schedule_framework_matching_job(
     }
     if selected_model:
         payload["ai_model"] = selected_model
+    if rebuild_run_id:
+        payload["rebuild_run_id"] = rebuild_run_id
     return await enqueue_editing_job(
         db,
         project_id=project_id,
@@ -224,6 +227,7 @@ async def schedule_framework_matching_jobs(
     match_source: MemoirFrameworkMatchSource,
     ai_model: str | None = None,
     enabled: bool | None = None,
+    rebuild_run_id: str | None = None,
 ) -> list[MemoirEditingJob]:
     normalized_ids = _normalized_claim_ids(list(claim_ids))
     jobs: list[MemoirEditingJob] = []
@@ -235,6 +239,7 @@ async def schedule_framework_matching_jobs(
             match_source=match_source,
             ai_model=ai_model,
             enabled=enabled,
+            rebuild_run_id=rebuild_run_id,
         )
         if job is not None:
             jobs.append(job)

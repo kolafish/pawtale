@@ -135,6 +135,7 @@ async def enqueue_chapter_completion_refresh(
     include_semantic_audit: bool,
     ai_model: str | None,
     source: str = "chapter_workspace",
+    rebuild_run_id: str | None = None,
 ) -> MemoirEditingJob:
     context = await load_chapter_audit_context(
         db,
@@ -150,6 +151,7 @@ async def enqueue_chapter_completion_refresh(
         ai_model=ai_model,
         source=source,
         replace_completed=True,
+        rebuild_run_id=rebuild_run_id,
     )
 
 
@@ -163,26 +165,30 @@ async def _enqueue_chapter_completion_refresh_for_context(
     ai_model: str | None,
     source: str,
     replace_completed: bool,
+    rebuild_run_id: str | None = None,
 ) -> MemoirEditingJob:
     signature = chapter_completion_refresh_signature(
         context,
         include_semantic_audit=include_semantic_audit,
         ai_model=ai_model,
     )
+    payload_json: dict[str, object] = {
+        "chapter_id": chapter_id,
+        "include_semantic_audit": include_semantic_audit,
+        "ai_model": ai_model,
+        "input_signature": signature,
+        "content_signature": chapter_completion_content_signature(context),
+        "engine_version": COMPLETION_REFRESH_ENGINE_VERSION,
+        "source": source,
+    }
+    if rebuild_run_id:
+        payload_json["rebuild_run_id"] = rebuild_run_id
     return await enqueue_editing_job(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
         job_type=MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
-        payload_json={
-            "chapter_id": chapter_id,
-            "include_semantic_audit": include_semantic_audit,
-            "ai_model": ai_model,
-            "input_signature": signature,
-            "content_signature": chapter_completion_content_signature(context),
-            "engine_version": COMPLETION_REFRESH_ENGINE_VERSION,
-            "source": source,
-        },
+        payload_json=payload_json,
         dedupe_key=chapter_completion_refresh_dedupe_key(
             project_id=project_id,
             chapter_id=chapter_id,
