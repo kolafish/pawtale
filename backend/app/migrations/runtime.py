@@ -11,6 +11,7 @@ from app.migrations.memoir_narrative import (
     assert_memoir_narrative_schema,
     migrate_memoir_narrative_schema,
 )
+from app.migrations.memoir_schema_cutover import migrate_memoir_schema_cutover
 from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
@@ -23,6 +24,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    memoir_schema_cutover = await migrate_memoir_schema_cutover(engine)
     auth = await migrate_auth_schema(engine)
     audit = await migrate_audit_schema(engine)
     git_sync = await migrate_git_sync_schema(engine)
@@ -32,6 +34,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     memoir_narrative = await migrate_memoir_narrative_schema(engine)
     await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
     return {
+        "memoir_schema_cutover": memoir_schema_cutover,
         "auth": auth,
         "audit": audit,
         "git_sync": git_sync,
