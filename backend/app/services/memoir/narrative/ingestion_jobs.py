@@ -28,7 +28,17 @@ def narrative_ingestion_dedupe_key(
     project_id: str,
     utterance_id: str,
     transcript_version_id: str,
+    rebuild_run_id: str | None = None,
 ) -> str:
+    if rebuild_run_id:
+        return ":".join(
+            (
+                "rebuild_narrative",
+                rebuild_run_id,
+                utterance_id,
+                transcript_version_id,
+            )
+        )
     return ":".join(
         (
             "ingest_narrative",
@@ -84,6 +94,7 @@ async def schedule_narrative_ingestion_job(
     utterance: MemoirVoiceUtterance,
     source: str,
     ai_model: str | None = None,
+    rebuild_run_id: str | None = None,
 ) -> MemoirEditingJob | None:
     transcript_version_id = (
         utterance.chat_message.transcript_version_id
@@ -120,10 +131,13 @@ async def schedule_narrative_ingestion_job(
     }
     if ai_model:
         payload["ai_model"] = ai_model
+    if rebuild_run_id:
+        payload["rebuild_run_id"] = rebuild_run_id
     dedupe_key = narrative_ingestion_dedupe_key(
         project_id=project_id,
         utterance_id=utterance.id,
         transcript_version_id=version.id,
+        rebuild_run_id=rebuild_run_id,
     )
     return await enqueue_editing_job(
         db,
@@ -199,6 +213,11 @@ async def run_narrative_ingestion_job(
         ai_model=(
             payload.get("ai_model")
             if isinstance(payload.get("ai_model"), str)
+            else None
+        ),
+        rebuild_run_id=(
+            payload.get("rebuild_run_id")
+            if isinstance(payload.get("rebuild_run_id"), str)
             else None
         ),
     )
