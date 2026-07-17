@@ -70,7 +70,7 @@ def _reason_for_candidate(
             in _FACT_SENSITIVE_SEMANTIC_DIMENSIONS
             and not candidate.claim_roles
         ):
-            return MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED
+            return MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE
         return reason
 
     if gap_type == MemoirNarrativeGapType.MISSING_SLOT:

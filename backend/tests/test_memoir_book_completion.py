@@ -29,7 +29,7 @@ class EmptyChapterAuditAI:
         return '{"schema_version":"2","gaps":[]}'
 
 
-class UnsupportedPersonIdentityAuditAI:
+class MissingPersonIdentityAuditAI:
     provider_name = "test"
     model_name = "test-person-identity-audit"
 
@@ -288,7 +288,7 @@ async def test_chapter_completion_exposes_one_interview_item_when_material_is_mi
     ) is None
 
 
-async def test_chapter_completion_requires_confirmation_for_unsupported_person_identity(
+async def test_chapter_completion_interviews_for_unsupported_person_identity(
     client,
     test_db,
 ):
@@ -327,7 +327,7 @@ async def test_chapter_completion_requires_confirmation_for_unsupported_person_i
     await _run_refresh(
         test_db,
         job,
-        semantic_ai_client=UnsupportedPersonIdentityAuditAI(story.id),
+        semantic_ai_client=MissingPersonIdentityAuditAI(story.id),
     )
 
     item = await test_db.scalar(
@@ -336,7 +336,7 @@ async def test_chapter_completion_requires_confirmation_for_unsupported_person_i
         )
     )
     assert item is not None
-    assert item.action == "manual_review"
+    assert item.action == "interview"
     assert item.dimension == "person_introduction"
     assert item.question == "这里提到的关键人物分别是谁？他们彼此是什么关系？"
     assert job.result_json["semantic_created_count"] == 1
@@ -348,7 +348,7 @@ async def test_chapter_completion_requires_confirmation_for_unsupported_person_i
     )
     chapter_summary = overview.json()["chapters"][0]
     assert chapter_summary["state"] == "needs_input"
-    assert chapter_summary["next_action"]["kind"] == "confirm"
+    assert chapter_summary["next_action"]["kind"] == "start_interview"
     assert chapter_summary["next_action"]["item_id"] == item.id
 
 
