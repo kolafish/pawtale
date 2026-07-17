@@ -268,6 +268,8 @@ test("answered book completion ends recording flow before background verificatio
   assert.equal(patch.showControlBar, false);
   assert.equal(patch.showCaptureStrip, false);
   assert.equal(patch.micButtonDisabled, true);
+  assert.equal(patch.showCompletionItemActions, false);
+  assert.equal(patch.showCompletionItemContinue, true);
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusText, "本次补充已经完成");
   assert.equal(patch.liveDisplayText, "回答已经保存，可以返回全书概览。");

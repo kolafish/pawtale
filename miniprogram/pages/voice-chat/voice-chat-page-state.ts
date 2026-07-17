@@ -557,8 +557,10 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     micButtonDisabled ? "disabled" : "",
   ].filter(Boolean).join(" ");
   const completionItemStatus = state.completionItem?.status;
-  const showCompletionItemActions = completionItemStatus === "open" || completionItemStatus === "in_progress";
-  const showCompletionItemContinue = completionItemStatus === "resolved"
+  const showCompletionItemActions = !completionRoundFinished
+    && (completionItemStatus === "open" || completionItemStatus === "in_progress");
+  const showCompletionItemContinue = completionRoundFinished
+    || completionItemStatus === "resolved"
     || completionItemStatus === "deferred"
     || completionItemStatus === "unable_to_answer";
   const completionItemControlsDisabled = Boolean(state.completionItemAction) || state.recording;
