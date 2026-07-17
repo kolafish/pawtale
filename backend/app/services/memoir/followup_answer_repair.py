@@ -43,8 +43,6 @@ from app.models.memoir_narrative import (
     MemoirNarrativeGapStory,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
 )
 from app.schemas.memoir_book import MemoirBookSourceRouteResponse
 from app.services.memoir.book_plan_sources import (
@@ -254,16 +252,6 @@ async def _validate_story_graph(
         "派生 Claim 还包含其他讲述证据",
     )
 
-    story_slot_ids = set(
-        (
-            await db.scalars(
-                select(MemoirStorySlot.id).where(
-                    MemoirStorySlot.project_id == spec.project_id,
-                    MemoirStorySlot.story_id.in_(story_ids),
-                )
-            )
-        ).all()
-    )
     external_claim_references = sum(
         [
             await _count(
@@ -272,13 +260,6 @@ async def _validate_story_graph(
                 MemoirStoryClaim.project_id == spec.project_id,
                 MemoirStoryClaim.claim_id.in_(claim_ids),
                 MemoirStoryClaim.story_id.not_in(story_ids),
-            ),
-            await _count(
-                db,
-                MemoirStorySlotClaim,
-                MemoirStorySlotClaim.project_id == spec.project_id,
-                MemoirStorySlotClaim.claim_id.in_(claim_ids),
-                MemoirStorySlotClaim.story_slot_id.not_in(story_slot_ids),
             ),
             await _count(
                 db,

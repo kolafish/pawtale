@@ -12,7 +12,6 @@ from app.domain.memoir.narrative_types import (
     MemoirChapterContractStatus,
     MemoirChapterNodeStoryRole,
     MemoirClaimPublicationStatus,
-    MemoirClaimEvidenceRole,
     MemoirFollowupAnswerInterpretationStatus,
     MemoirFollowupAnswerUse,
     MemoirFollowupTaskClaimRole,
@@ -26,7 +25,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapType,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
-    MemoirStorySlotStatus,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
@@ -43,14 +41,11 @@ from app.models.memoir_narrative import (
     MemoirUtteranceInterviewAssignment,
     MemoirNarrativeGap,
     MemoirStory,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
+    MemoirStoryClaim,
 )
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative import gaps as gap_service
 from app.services.memoir.narrative import followup_tasks
 from app.services.memoir.narrative.claim_usage_policy import (
-    claim_known_for_conversation,
     claim_usable_for_publication,
     evaluate_claim_usage,
     known_for_conversation_filters,
@@ -59,35 +54,6 @@ from app.services.memoir.narrative.claim_usage_policy import (
 
 
 FOLLOWUP_PLANNER_VERSION = "7"
-TERMINAL_SLOT_STATUSES = {
-    MemoirStorySlotStatus.SUFFICIENT.value,
-    MemoirStorySlotStatus.ACCEPTED_INCOMPLETE.value,
-    MemoirStorySlotStatus.NOT_APPLICABLE.value,
-}
-SLOT_LABELS = {
-    "background": "当时的背景",
-    "trigger": "事情的起因",
-    "people": "在场的人",
-    "difficulty": "遇到的困难",
-    "actions": "当时采取的行动",
-    "turning_point": "事情的转折",
-    "outcome": "最后的结果",
-    "reflection": "现在回想时的感受",
-    "meeting": "最初怎么认识",
-    "person_portrait": "这个人的样子和性格",
-    "shared_experience": "共同经历",
-    "relationship_change": "关系后来怎么变化",
-    "representative_scene": "最能代表这段关系的一幕",
-    "entry_reason": "为什么进入这个人生阶段",
-    "responsibilities": "当时承担的责任",
-    "representative_events": "最有代表性的一件事",
-    "ability_and_character": "那段经历形成的能力和性格",
-    "transition": "后来如何进入下一阶段",
-    "theme_definition": "这件事对你的含义",
-    "supporting_cases": "能说明这个主题的具体事情",
-    "contrast_or_failure": "一次对照或挫折",
-    "continuity": "这件事后来的影响",
-}
 
 
 @dataclass(frozen=True)
@@ -164,13 +130,6 @@ def _gap_chapter_ids(gap: MemoirNarrativeGap) -> set[str]:
     return chapter_ids
 
 
-def _story_slot_key(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
-    if story is None or gap.gap_type != MemoirNarrativeGapType.MISSING_SLOT.value:
-        return ""
-    schema = story_slot_schema(story.story_type, story.slot_schema_version)
-    return gap.target_slot if gap.target_slot in schema.slot_keys else ""
-
-
 def _task_target_slot(
     gap: MemoirNarrativeGap,
     story: MemoirStory | None,
@@ -181,7 +140,7 @@ def _task_target_slot(
         return MEMOIR_STORY_NARRATION_TARGET
     if _semantic_dimension(gap):
         return gap.target_slot
-    return _story_slot_key(gap, story)
+    return ""
 
 
 def _semantic_dimension(gap: MemoirNarrativeGap) -> str:
@@ -221,7 +180,7 @@ def _answer_use(gap: MemoirNarrativeGap) -> MemoirFollowupAnswerUse:
     raise ValueError(f"unsupported follow-up gap type: {gap_type.value}")
 
 
-def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key: str) -> str:
+def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None) -> str:
     story_prefix = f"关于“{story.title}”，" if story else ""
     semantic_dimension = _semantic_dimension(gap)
     semantic_questions = {
@@ -236,8 +195,6 @@ def _task_question(gap: MemoirNarrativeGap, story: MemoirStory | None, slot_key:
     }
     if semantic_dimension in semantic_questions:
         return semantic_questions[semantic_dimension]
-    if slot_key:
-        return f"{story_prefix}{SLOT_LABELS.get(slot_key, slot_key)}，你还记得哪些具体情况？"
     if gap.gap_type == MemoirNarrativeGapType.CHRONOLOGY.value:
         return f"{story_prefix}我还不能确定这些事情的先后顺序。请按发生顺序再说明一下。"
     if gap.gap_type == MemoirNarrativeGapType.RELATIONSHIP.value:
@@ -500,35 +457,17 @@ async def generate_followup_tasks(
         )
     }
 
-    slot_claim_ids: dict[tuple[str, str], set[str]] = {}
+    story_claim_ids: dict[str, set[str]] = {}
     if story_ids:
-        rows = (
+        for story_id, claim_id in (
             await db.execute(
-                select(
-                    MemoirStorySlot.story_id,
-                    MemoirStorySlot.slot_key,
-                    MemoirStorySlot.schema_version,
-                    MemoirStorySlotClaim.claim_id,
-                )
-                .join(
-                    MemoirStorySlotClaim,
-                    MemoirStorySlotClaim.story_slot_id == MemoirStorySlot.id,
-                )
-                .where(
-                    MemoirStorySlot.project_id == project_id,
-                    MemoirStorySlot.story_id.in_(story_ids),
-                    MemoirStorySlotClaim.project_id == project_id,
-                    MemoirStorySlotClaim.evidence_role
-                    == MemoirClaimEvidenceRole.SUPPORTS.value,
+                select(MemoirStoryClaim.story_id, MemoirStoryClaim.claim_id).where(
+                    MemoirStoryClaim.project_id == project_id,
+                    MemoirStoryClaim.story_id.in_(story_ids),
                 )
             )
-        ).all()
-        for row in rows:
-            story = stories.get(row.story_id)
-            if story is None or row.schema_version != story.slot_schema_version:
-                continue
-            slot_claim_ids.setdefault((row.story_id, row.slot_key), set()).add(row.claim_id)
-
+        ).all():
+            story_claim_ids.setdefault(story_id, set()).add(claim_id)
     all_claim_ids = {
         relation.claim_id
         for gap in gaps
@@ -536,7 +475,7 @@ async def generate_followup_tasks(
     }
     all_claim_ids.update(
         claim_id
-        for claim_ids in slot_claim_ids.values()
+        for claim_ids in story_claim_ids.values()
         for claim_id in claim_ids
     )
     claims = {
@@ -667,7 +606,6 @@ async def generate_followup_tasks(
         gap_type = MemoirNarrativeGapType(gap.gap_type)
         story_id = _gap_story_id(gap)
         story = stories.get(story_id or "")
-        slot_key = _story_slot_key(gap, story)
         claim_roles: dict[str, MemoirFollowupTaskClaimRole] = {}
         for relation in gap.claims:
             claim = claims.get(relation.claim_id)
@@ -687,12 +625,6 @@ async def generate_followup_tasks(
                 claim_roles[claim.id] = MemoirFollowupTaskClaimRole.KNOWN
             else:
                 claim_roles[claim.id] = MemoirFollowupTaskClaimRole.DO_NOT_REPEAT
-        if story_id and slot_key:
-            for claim_id in slot_claim_ids.get((story_id, slot_key), set()):
-                claim = claims.get(claim_id)
-                if claim is not None and claim_known_for_conversation(claim):
-                    claim_roles.setdefault(claim_id, MemoirFollowupTaskClaimRole.DO_NOT_REPEAT)
-
         existing = existing_tasks.get(gap.id)
         semantic_target = gap.target_slot if _semantic_dimension(gap) else ""
         semantic_leader = semantic_task_leaders.get(semantic_target)
@@ -730,6 +662,16 @@ async def generate_followup_tasks(
         )
         if blocked_by_other_narration:
             is_story_narration = False
+        if is_story_narration and story is not None:
+            for claim_id in story_claim_ids.get(story.id, set()):
+                claim = claims.get(claim_id)
+                if claim is None:
+                    continue
+                usage = evaluate_claim_usage(claim)
+                if usage.usable_for_publication:
+                    claim_roles[claim.id] = MemoirFollowupTaskClaimRole.KNOWN
+                elif usage.known_for_conversation:
+                    claim_roles[claim.id] = MemoirFollowupTaskClaimRole.DO_NOT_REPEAT
         interview_action = (
             gap.recommended_action
             == MemoirNarrativeGapRecommendedAction.INTERVIEW.value
@@ -792,7 +734,7 @@ async def generate_followup_tasks(
             "question": (
                 _story_narration_question(story)
                 if is_story_narration and story is not None
-                else _task_question(gap, story, slot_key)
+                else _task_question(gap, story)
             ),
             "purpose": (
                 _story_narration_purpose(story)
@@ -889,21 +831,6 @@ async def _task_is_selectable(
         )
         if story is None:
             return False
-        if (
-            task.target_slot
-            and task.target_slot != MEMOIR_STORY_NARRATION_TARGET
-            and not task.target_slot.startswith("semantic:")
-        ):
-            slot_status = await db.scalar(
-                select(MemoirStorySlot.status).where(
-                    MemoirStorySlot.project_id == task.project_id,
-                    MemoirStorySlot.story_id == task.story_id,
-                    MemoirStorySlot.schema_version == story.slot_schema_version,
-                    MemoirStorySlot.slot_key == task.target_slot,
-                )
-            )
-            if slot_status in TERMINAL_SLOT_STATUSES:
-                return False
     invalid_expected_claim_exists = await db.scalar(
         select(MemoirClaim.id)
         .join(

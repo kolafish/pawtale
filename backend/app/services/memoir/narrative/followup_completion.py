@@ -34,8 +34,6 @@ from app.models.memoir_narrative import (
     MemoirFollowupTaskAnswer,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
     MemoirUtteranceInterviewAssignment,
 )
 from app.schemas.memoir_book import MemoirFollowupAnswerInterpretationResponse
@@ -107,45 +105,6 @@ async def _new_effective_claim_ids(
             )
         ).all()
     )
-
-
-async def _target_slot_received_evidence(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    story_id: str,
-    target_slot: str,
-    claim_ids: set[str],
-) -> bool:
-    if not claim_ids:
-        return False
-    story = await db.scalar(
-        select(MemoirStory).where(
-            MemoirStory.project_id == project_id,
-            MemoirStory.id == story_id,
-        )
-    )
-    if story is None:
-        return False
-    slot = await db.scalar(
-        select(MemoirStorySlot).where(
-            MemoirStorySlot.project_id == project_id,
-            MemoirStorySlot.story_id == story_id,
-            MemoirStorySlot.schema_version == story.slot_schema_version,
-            MemoirStorySlot.slot_key == target_slot,
-        )
-    )
-    if slot is None:
-        return False
-    supporting_claim = await db.scalar(
-        select(MemoirStorySlotClaim.claim_id).where(
-            MemoirStorySlotClaim.project_id == project_id,
-            MemoirStorySlotClaim.story_slot_id == slot.id,
-            MemoirStorySlotClaim.claim_id.in_(claim_ids),
-            MemoirStorySlotClaim.evidence_role == MemoirClaimEvidenceRole.SUPPORTS.value,
-        ).limit(1)
-    )
-    return supporting_claim is not None
 
 
 async def _add_task_answer_relation(
@@ -608,18 +567,6 @@ async def evaluate_after_narrative_ingestion(
             and role == MemoirFollowupTaskClaimRole.EXPECTED_EVIDENCE.value
             for claim_id, role in task_claim_roles.items()
         )
-        target_slot_completed = bool(
-            task.story_id
-            and task.target_slot
-            and task.target_slot != MEMOIR_STORY_NARRATION_TARGET
-            and await _target_slot_received_evidence(
-                db,
-                project_id=project_id,
-                story_id=task.story_id,
-                target_slot=task.target_slot,
-                claim_ids=new_claim_ids,
-            )
-        )
         broad_story_answered = bool(
             task.story_id
             and task.target_slot == MEMOIR_STORY_NARRATION_TARGET
@@ -632,7 +579,6 @@ async def evaluate_after_narrative_ingestion(
         )
         answered = (
             expected_evidence_received
-            or target_slot_completed
             or broad_story_answered
             or semantic_narrative_answered
         )

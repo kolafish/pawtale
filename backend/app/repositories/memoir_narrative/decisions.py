@@ -14,7 +14,6 @@ from app.models.memoir_narrative import (
     MemoirNarrativeEntity,
     MemoirNarrativeGap,
     MemoirStory,
-    MemoirStorySlot,
 )
 from app.models.projects import Project
 from app.models.users import User
@@ -123,13 +122,6 @@ class MemoirNarrativeDecisionRepository:
                 select(MemoirStory.id).where(
                     MemoirStory.project_id == data.project_id,
                     MemoirStory.id == data.target_id,
-                )
-            )
-        elif data.target_type == MemoirNarrativeDecisionTargetType.STORY_SLOT:
-            target_exists = await self._db.scalar(
-                select(MemoirStorySlot.id).where(
-                    MemoirStorySlot.project_id == data.project_id,
-                    MemoirStorySlot.id == data.target_id,
                 )
             )
         elif data.target_type == MemoirNarrativeDecisionTargetType.GAP:

@@ -47,7 +47,6 @@ from app.schemas.memoir_narrative import (
 )
 from app.services.memoir.narrative import decisions
 from app.services.memoir.narrative.ingestion import (
-    _extraction_followup_target_slot,
     ingest_transcript_version,
 )
 from app.services.memoir.narrative.ingestion_jobs import (
@@ -102,21 +101,6 @@ def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
     assert "Story 是可独立讲述的叙事单元，不是 Claim 的同义包装" in prompt
     assert "孤立的时间范围、身份、属性、症状清单" in prompt
     assert "不要为了覆盖每条 Claim 而拆成多个" in prompt
-
-
-def test_extraction_only_receives_real_story_slot_from_followup():
-    assert _extraction_followup_target_slot(
-        story_type="event",
-        target_slot="background",
-    ) == "background"
-    assert _extraction_followup_target_slot(
-        story_type="event",
-        target_slot="semantic:opening:gap-id",
-    ) is None
-    assert _extraction_followup_target_slot(
-        story_type="event",
-        target_slot="__story_narration__",
-    ) is None
 
 
 def _extraction_payload(source_text: str) -> dict:
@@ -326,8 +310,6 @@ async def test_ingestion_adds_new_story_to_unmodified_system_chapter_plan(
                 {
                     "claim_key": "move",
                     "narrative_role": "action",
-                    "slot_keys": ["actions"],
-                    "evidence_role": "supports",
                     "is_core": True,
                 }
             ],
@@ -571,15 +553,11 @@ async def test_incompletely_grouped_evidenced_claim_cluster_requests_one_repair(
                     {
                         "claim_key": "friendship",
                         "narrative_role": "background",
-                        "slot_keys": ["meeting"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     },
                     {
                         "claim_key": "visits",
                         "narrative_role": "action",
-                        "slot_keys": ["shared_experience"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     },
                 ],
@@ -604,22 +582,16 @@ async def test_incompletely_grouped_evidenced_claim_cluster_requests_one_repair(
                     {
                         "claim_key": "friendship",
                         "narrative_role": "background",
-                        "slot_keys": ["meeting"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     },
                     {
                         "claim_key": "visits",
                         "narrative_role": "action",
-                        "slot_keys": ["shared_experience"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     },
                     {
                         "claim_key": "duration",
                         "narrative_role": "outcome",
-                        "slot_keys": ["relationship_change"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     },
                 ],
@@ -692,8 +664,6 @@ async def test_real_provider_schema_errors_are_repaired_once(client, test_db):
                     {
                         "claim_key": "move",
                         "narrative_role": "theme_definition",
-                        "slot_keys": ["theme_definition"],
-                        "evidence_role": "supports",
                         "is_core": True,
                     }
                 ],
@@ -811,8 +781,6 @@ async def test_repair_retains_valid_items_without_coercing_invalid_semantics(
                 {
                     "claim_key": "move",
                     "narrative_role": "action",
-                    "slot_keys": ["actions", "theme_definition"],
-                    "evidence_role": "supports",
                     "is_core": True,
                 }
             ],
@@ -840,12 +808,11 @@ async def test_repair_retains_valid_items_without_coercing_invalid_semantics(
         "discarded_entity_count": 0,
         "discarded_claim_count": 1,
         "discarded_story_count": 0,
-        "discarded_story_slot_key_count": 1,
         "used_initial_response_after_repair": False,
     }
 
 
-async def test_repair_does_not_replace_more_informative_valid_initial_items(
+async def test_valid_initial_extraction_does_not_request_repair(
     client,
     test_db,
 ):
@@ -869,8 +836,6 @@ async def test_repair_does_not_replace_more_informative_valid_initial_items(
                 {
                     "claim_key": "move",
                     "narrative_role": "action",
-                    "slot_keys": ["actions", "theme_definition"],
-                    "evidence_role": "supports",
                     "is_core": True,
                 }
             ],
@@ -889,10 +854,7 @@ async def test_repair_does_not_replace_more_informative_valid_initial_items(
 
     assert len(result.created_claim_ids) == 2
     assert len(result.created_story_ids) == 1
-    assert result.extraction_diagnostics[
-        "used_initial_response_after_repair"
-    ] is True
-    assert result.extraction_diagnostics["discarded_story_slot_key_count"] == 1
+    assert result.extraction_diagnostics["repair_attempted"] is False
 
 
 async def test_repair_prefers_evidence_supported_claims_over_schema_item_count(

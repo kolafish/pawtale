@@ -7,15 +7,13 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeDecisionTargetType,
     MemoirStoryLifecycleStatus,
     MemoirStoryRevisionChangeType,
-    MemoirStorySlotStatus,
 )
 from app.models.memoir_narrative import (
     MemoirNarrativeDecision,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlotClaim,
 )
-from app.services.memoir.narrative import decision_log, story_revisions, story_slots
+from app.services.memoir.narrative import decision_log, story_revisions
 from app.services.memoir.narrative.story_decisions import story_state
 
 
@@ -65,39 +63,9 @@ async def merge_stories(
         raise ValueError("only active stories can be merged")
     if source.story_type != retained.story_type:
         raise ValueError("only stories of the same type can be merged")
-    if source.slot_schema_version != retained.slot_schema_version:
-        raise ValueError("story slot schemas must match before merge")
 
     source_before = await story_revisions.story_snapshot(db, source)
     retained_before = await story_revisions.story_snapshot(db, retained)
-    source_slots = await story_slots.load_story_slots(db, story=source)
-    retained_slots = await story_slots.ensure_story_slot_keys(
-        db,
-        story=retained,
-        slot_keys={slot.slot_key for slot in source_slots},
-    )
-    source_slots_by_key = {slot.slot_key: slot for slot in source_slots}
-    retained_slots_by_key = {slot.slot_key: slot for slot in retained_slots}
-    for slot_key, source_slot in source_slots_by_key.items():
-        if source_slot.status not in story_slots.MANUAL_SLOT_STATUSES:
-            continue
-        retained_slot = retained_slots_by_key[slot_key]
-        if retained_slot.status == MemoirStorySlotStatus.SUFFICIENT.value:
-            continue
-        if retained_slot.status in story_slots.MANUAL_SLOT_STATUSES:
-            if (
-                retained_slot.status != source_slot.status
-                or retained_slot.user_resolution_note != source_slot.user_resolution_note
-            ):
-                raise ValueError("story merge has conflicting manual slot resolutions")
-            continue
-        retained_slot.status = source_slot.status
-        retained_slot.user_resolution_note = source_slot.user_resolution_note
-        retained_slot.resolution_actor_type = source_slot.resolution_actor_type
-        retained_slot.resolved_by_user_id = source_slot.resolved_by_user_id
-        retained_slot.resolved_at = source_slot.resolved_at
-        db.add(retained_slot)
-
     source_claims = list(
         (
             await db.scalars(
@@ -120,72 +88,28 @@ async def merge_stories(
             )
         ).all()
     )
-    retained_claims_by_id = {link.claim_id: link for link in retained_claims}
-    next_sort_order = max((link.sort_order for link in retained_claims), default=-1) + 1
-    for link in source_claims:
-        retained_link = retained_claims_by_id.get(link.claim_id)
+    retained_by_claim = {link.claim_id: link for link in retained_claims}
+    next_order = max((link.sort_order for link in retained_claims), default=-1) + 1
+    for source_link in source_claims:
+        retained_link = retained_by_claim.get(source_link.claim_id)
         if retained_link is not None:
-            if link.is_core and not retained_link.is_core:
+            if source_link.is_core and not retained_link.is_core:
                 retained_link.is_core = True
                 db.add(retained_link)
             continue
         retained_link = MemoirStoryClaim(
             project_id=project_id,
             story_id=retained.id,
-            claim_id=link.claim_id,
-            narrative_role=link.narrative_role,
-            sort_order=next_sort_order,
-            is_core=link.is_core,
+            claim_id=source_link.claim_id,
+            narrative_role=source_link.narrative_role,
+            sort_order=next_order,
+            is_core=source_link.is_core,
             created_by=MemoirNarrativeActorType.USER.value,
             created_by_user_id=actor_user_id,
         )
         db.add(retained_link)
-        retained_claims_by_id[link.claim_id] = retained_link
-        next_sort_order += 1
-
-    source_slot_ids = [slot.id for slot in source_slots]
-    source_slot_claims = list(
-        (
-            await db.scalars(
-                select(MemoirStorySlotClaim).where(
-                    MemoirStorySlotClaim.project_id == project_id,
-                    MemoirStorySlotClaim.story_slot_id.in_(source_slot_ids),
-                )
-            )
-        ).all()
-    )
-    source_slot_key_by_id = {slot.id: slot.slot_key for slot in source_slots}
-    retained_slot_ids = [slot.id for slot in retained_slots]
-    retained_slot_relations = set(
-        (
-            await db.execute(
-                select(
-                    MemoirStorySlotClaim.story_slot_id,
-                    MemoirStorySlotClaim.claim_id,
-                    MemoirStorySlotClaim.evidence_role,
-                ).where(
-                    MemoirStorySlotClaim.project_id == project_id,
-                    MemoirStorySlotClaim.story_slot_id.in_(retained_slot_ids),
-                )
-            )
-        ).all()
-    )
-    for link in source_slot_claims:
-        retained_slot = retained_slots_by_key[source_slot_key_by_id[link.story_slot_id]]
-        relation = (retained_slot.id, link.claim_id, link.evidence_role)
-        if relation in retained_slot_relations:
-            continue
-        db.add(
-            MemoirStorySlotClaim(
-                project_id=project_id,
-                story_slot_id=retained_slot.id,
-                claim_id=link.claim_id,
-                evidence_role=link.evidence_role,
-                created_by=MemoirNarrativeActorType.USER.value,
-                created_by_user_id=actor_user_id,
-            )
-        )
-        retained_slot_relations.add(relation)
+        retained_by_claim[source_link.claim_id] = retained_link
+        next_order += 1
 
     source.lifecycle_status = MemoirStoryLifecycleStatus.MERGED.value
     source.merged_into_story_id = retained.id
@@ -193,25 +117,16 @@ async def merge_stories(
     source.updated_by_user_id = actor_user_id
     db.add(source)
     await db.flush()
-    await story_slots.recompute_story_slots(db, story=retained)
-    await story_revisions.record_story_revision(
-        db,
-        story=source,
-        before_state=source_before,
-        change_type=MemoirStoryRevisionChangeType.MERGED,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        reason=reason,
-    )
-    await story_revisions.record_story_revision(
-        db,
-        story=retained,
-        before_state=retained_before,
-        change_type=MemoirStoryRevisionChangeType.MERGED,
-        actor_type=MemoirNarrativeActorType.USER,
-        actor_user_id=actor_user_id,
-        reason=reason,
-    )
+    for story, before in ((source, source_before), (retained, retained_before)):
+        await story_revisions.record_story_revision(
+            db,
+            story=story,
+            before_state=before,
+            change_type=MemoirStoryRevisionChangeType.MERGED,
+            actor_type=MemoirNarrativeActorType.USER,
+            actor_user_id=actor_user_id,
+            reason=reason,
+        )
     return await decision_log.record_decision(
         db,
         project_id=project_id,

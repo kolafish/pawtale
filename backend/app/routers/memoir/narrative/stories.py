@@ -8,7 +8,6 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStoryType,
@@ -24,7 +23,6 @@ from app.schemas.memoir_narrative import (
     MemoirStoryCreateRequest,
     MemoirStoryMergeRequest,
     MemoirStoryResponse,
-    MemoirStorySlotResolutionRequest,
     MemoirStorySummaryResponse,
 )
 from app.services.memoir.narrative import stories, story_decisions, story_merging
@@ -40,7 +38,6 @@ async def list_memoir_stories(
     project_id: str,
     story_type: MemoirStoryType | None = None,
     lifecycle_status: MemoirStoryLifecycleStatus | None = None,
-    completion_status: MemoirStoryCompletionStatus | None = None,
     verification_status: MemoirStoryVerificationStatus | None = None,
     publication_status: MemoirStoryPublicationStatus | None = None,
     limit: int = Query(default=100, ge=1, le=500),
@@ -54,7 +51,6 @@ async def list_memoir_stories(
         project_id=project_id,
         story_type=story_type,
         lifecycle_status=lifecycle_status,
-        completion_status=completion_status,
         verification_status=verification_status,
         publication_status=publication_status,
         limit=limit,
@@ -249,37 +245,6 @@ async def merge_memoir_story(
             actor_user_id=current_user.id,
             idempotency_key=req.idempotency_key,
             reason=req.reason,
-        )
-        await db.commit()
-        return decision
-    except ValueError as exc:
-        await db.rollback()
-        raise decision_error(exc) from exc
-
-
-@router.post(
-    "/projects/{project_id}/stories/{story_id}/slots/{slot_key}/resolve",
-    response_model=MemoirNarrativeDecisionResponse,
-)
-async def resolve_memoir_story_slot(
-    project_id: str,
-    story_id: str,
-    slot_key: str,
-    req: MemoirStorySlotResolutionRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    try:
-        decision = await story_decisions.resolve_story_slot(
-            db,
-            project_id=project_id,
-            story_id=story_id,
-            slot_key=slot_key,
-            status=req.status,
-            actor_user_id=current_user.id,
-            idempotency_key=req.idempotency_key,
-            note=req.note,
         )
         await db.commit()
         return decision

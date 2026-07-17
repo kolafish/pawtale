@@ -20,7 +20,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapType,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
-    MemoirStorySlotStatus,
     MemoirStoryVerificationStatus,
 )
 from app.models.memoir import MemoirBookPlanChapter
@@ -34,10 +33,8 @@ from app.models.memoir_narrative import (
     MemoirDraftBlockVersion,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlot,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.narrative.claim_usage_policy import (
     claim_usable_for_publication,
 )
@@ -67,34 +64,7 @@ class ChapterAuditContext:
     story_claims: dict[str, list[MemoirStoryClaim]]
     claims: dict[str, MemoirClaim]
     evidence_counts: dict[str, int]
-    slots: dict[str, dict[str, MemoirStorySlot]]
     draft_blocks: tuple[ChapterAuditDraftBlock, ...] = ()
-
-
-SLOT_LABELS = {
-    "background": "背景",
-    "trigger": "起因",
-    "people": "人物",
-    "difficulty": "困难",
-    "actions": "行动",
-    "turning_point": "转折",
-    "outcome": "结果",
-    "reflection": "感受",
-    "meeting": "相识",
-    "person_portrait": "人物印象",
-    "shared_experience": "共同经历",
-    "relationship_change": "关系变化",
-    "representative_scene": "代表场景",
-    "entry_reason": "进入原因",
-    "responsibilities": "承担的责任",
-    "representative_events": "代表事件",
-    "ability_and_character": "能力与性格",
-    "transition": "阶段变化",
-    "theme_definition": "主题含义",
-    "supporting_cases": "支撑故事",
-    "contrast_or_failure": "对照或挫折",
-    "continuity": "延续与影响",
-}
 
 
 async def load_chapter_audit_contexts(
@@ -271,18 +241,6 @@ async def load_chapter_audit_contexts(
         if claim_ids
         else {}
     )
-    slots_by_story: dict[str, dict[str, MemoirStorySlot]] = defaultdict(dict)
-    if story_ids:
-        for slot in (
-            await db.scalars(
-                select(MemoirStorySlot).where(
-                    MemoirStorySlot.project_id == project_id,
-                    MemoirStorySlot.story_id.in_(story_ids),
-                ).execution_options(populate_existing=True)
-            )
-        ).all():
-            slots_by_story[slot.story_id][slot.slot_key] = slot
-
     draft_rows = (
         await db.execute(
             select(MemoirDraftBlock, MemoirDraftBlockVersion)
@@ -359,10 +317,6 @@ async def load_chapter_audit_contexts(
                 for story_id in chapter_story_ids
                 for link in story_claims.get(story_id, [])
                 if link.claim_id in claims
-            },
-            slots={
-                story_id: slots_by_story.get(story_id, {})
-                for story_id in chapter_story_ids
             },
             draft_blocks=tuple(draft_blocks_by_chapter.get(chapter.id, [])),
         )
@@ -510,33 +464,6 @@ def evaluate_deterministic_gaps(
             or story.verification_status == MemoirStoryVerificationStatus.REJECTED.value
         ):
             continue
-        required_slots = story_slot_schema(story.story_type, story.slot_schema_version).required_slot_keys
-        by_key = context.slots.get(story_id, {})
-        for slot_key in required_slots:
-            slot = by_key.get(slot_key)
-            status = slot.status if slot else MemoirStorySlotStatus.MISSING.value
-            if status not in {
-                MemoirStorySlotStatus.MISSING.value,
-                MemoirStorySlotStatus.PARTIAL.value,
-            }:
-                continue
-            candidates.append(
-                MemoirNarrativeGapCandidate(
-                    scope_type=MemoirNarrativeGapScopeType.STORY,
-                    primary_story_id=story_id,
-                    gap_type=MemoirNarrativeGapType.MISSING_SLOT,
-                    severity=MemoirNarrativeGapSeverity.MEDIUM,
-                    target_slot=slot_key,
-                    title=f"“{story.title}”缺少{SLOT_LABELS.get(slot_key, slot_key)}信息",
-                    description=(
-                        "这部分已有一些内容，还需要补充一两项具体细节。"
-                        if status == MemoirStorySlotStatus.PARTIAL.value
-                        else "这部分还没有可用于成书的具体信息。"
-                    ),
-                    detected_by=MemoirNarrativeGapDetectedBy.RULES,
-                    involved_chapter_ids={context.chapter.id},
-                )
-            )
         for story_claim in context.story_claims.get(story_id, []):
             claim = context.claims.get(story_claim.claim_id)
             if (

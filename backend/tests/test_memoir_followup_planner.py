@@ -32,11 +32,9 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
-    MemoirStorySlotStatus,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
@@ -68,26 +66,20 @@ from app.models.memoir_narrative import (
     MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
-from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.narrative import (
-    completion_refresh,
     followup_completion,
     followup_planner,
     followup_tasks,
     gaps,
-    story_slots,
 )
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     post_mobile_memoir_voice_session,
-    run_test_editing_job,
 )
 
 
@@ -113,10 +105,8 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
         summary="讲述者参加了一次学校比赛，但结果还不完整。",
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         created_by=MemoirNarrativeActorType.USER.value,
         created_by_user_id=user_id,
         updated_by=MemoirNarrativeActorType.USER.value,
@@ -183,21 +173,6 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
     contract.status = MemoirChapterContractStatus.CONFIRMED.value
     contract.confirmed_by_user_id = user_id
     contract.confirmed_at = datetime.now(UTC).replace(tzinfo=None)
-    await story_slots.ensure_story_slot_keys(
-        test_db,
-        story=story,
-        slot_keys={"outcome"},
-    )
-    outcome_slot = await test_db.scalar(
-        select(MemoirStorySlot).where(
-            MemoirStorySlot.project_id == project_id,
-            MemoirStorySlot.story_id == story.id,
-            MemoirStorySlot.slot_key == "outcome",
-        )
-    )
-    assert outcome_slot is not None
-    outcome_slot.status = MemoirStorySlotStatus.PARTIAL.value
-    outcome_slot.assessment_summary = "只知道比赛结束后回了学校，还不知道比赛结果。"
     test_db.add_all(
         [
             MemoirClaimEvidence(
@@ -225,14 +200,6 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
                 narrative_role=MemoirStoryNarrativeRole.OUTCOME.value,
                 sort_order=0,
                 is_core=True,
-                created_by=MemoirNarrativeActorType.USER.value,
-                created_by_user_id=user_id,
-            ),
-            MemoirStorySlotClaim(
-                project_id=project_id,
-                story_slot_id=outcome_slot.id,
-                claim_id=claim.id,
-                evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
                 created_by=MemoirNarrativeActorType.USER.value,
                 created_by_user_id=user_id,
             ),
@@ -278,7 +245,6 @@ async def _create_story_gap(client, test_db, *, generate: bool = True):
         "chapter": chapter,
         "story": story,
         "claim": claim,
-        "slot": outcome_slot,
         "gap": gap_items[0],
         "task": task,
     }
@@ -364,27 +330,16 @@ async def _add_narrative_evidence(
             source_text_hash=sha256(text.encode("utf-8")).hexdigest(),
             created_by=MemoirNarrativeActorType.AI.value,
         ),
-        MemoirStoryClaim(
-            project_id=fixture["project_id"],
-            story_id=fixture["story"].id,
-            claim_id=claim.id,
-            narrative_role=(
-                MemoirStoryNarrativeRole.OUTCOME.value
-                if completes_target
-                else MemoirStoryNarrativeRole.BACKGROUND.value
-            ),
-            sort_order=1,
-            is_core=True,
-            created_by=MemoirNarrativeActorType.AI.value,
-        ),
     ]
     if completes_target:
         relations.append(
-            MemoirStorySlotClaim(
+            MemoirStoryClaim(
                 project_id=fixture["project_id"],
-                story_slot_id=fixture["slot"].id,
+                story_id=fixture["story"].id,
                 claim_id=claim.id,
-                evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
+                narrative_role=MemoirStoryNarrativeRole.OUTCOME.value,
+                sort_order=1,
+                is_core=True,
                 created_by=MemoirNarrativeActorType.AI.value,
             )
         )
@@ -491,10 +446,8 @@ async def test_followup_generation_exposes_one_broad_question_for_one_core_story
         summary="讲述者顺路提到比赛那天天气很热。",
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         created_by=MemoirNarrativeActorType.USER.value,
         created_by_user_id=fixture["user_id"],
         updated_by=MemoirNarrativeActorType.USER.value,
@@ -589,7 +542,6 @@ def test_story_narration_questions_follow_story_type_and_editorial_value():
     assert "具体场景开始这一章" in followup_planner._task_question(
         opening_gap,
         None,
-        "",
     )
 
 
@@ -846,7 +798,7 @@ async def test_followup_generation_marks_chapter_causality_as_clarification(
     assert "为什么后来这样发展" not in task.question
 
 
-async def test_followup_task_finishes_after_new_slot_evidence_without_confirmation(
+async def test_followup_task_finishes_after_new_story_evidence_without_confirmation(
     client,
     test_db,
 ):
@@ -930,8 +882,6 @@ async def test_followup_task_finishes_after_new_slot_evidence_without_confirmati
     assert [(item.utterance_id, item.result_role) for item in task.answers] == [
         (utterance.id, "target_answer")
     ]
-    await test_db.refresh(fixture["slot"])
-    assert fixture["slot"].status == MemoirStorySlotStatus.PARTIAL.value
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
     assert gap is not None
     assert gap.status == MemoirNarrativeGapStatus.RESOLVED.value
@@ -1119,7 +1069,6 @@ async def test_story_narration_task_completes_after_one_valid_answer(client, tes
         test_db,
         fixture,
         voice_session_id=session["id"],
-        completes_target=False,
     )
 
     completion = await followup_completion.evaluate_after_narrative_ingestion(
@@ -1312,29 +1261,6 @@ async def test_concurrent_answer_does_not_rollback_new_narrative_evidence(
     gap = await test_db.get(MemoirNarrativeGap, fixture["gap"].id)
     assert gap is not None
     assert gap.status == MemoirNarrativeGapStatus.RESOLVED.value
-
-
-async def test_completion_refresh_plans_followups_on_existing_background_worker(
-    client,
-    test_db,
-):
-    fixture = await _create_story_gap(client, test_db, generate=False)
-    register_memoir_editing_job_handlers()
-    queued = await completion_refresh.enqueue_chapter_completion_refresh(
-        test_db,
-        project_id=fixture["project_id"],
-        chapter_id=fixture["chapter"].id,
-        include_semantic_audit=False,
-        ai_model=None,
-        source="test_followup_worker",
-    )
-    await test_db.commit()
-    succeeded = await run_test_editing_job(test_db, queued.id)
-    job = await test_db.get(MemoirEditingJob, queued.id)
-    assert job is not None
-    assert succeeded is True, job.error_message
-    assert job.status == "succeeded"
-    assert len(job.result_json["created_task_ids"]) == 1
 
 
 async def test_unable_to_answer_is_local_to_task_and_prevents_reselection(client, test_db):
@@ -1556,84 +1482,6 @@ async def test_followup_prompt_hides_rejected_claim_statement_but_keeps_conflict
     assert context is not None
     assert fixture["claim"].statement not in context.prompt_text
     assert "存在已被否定或仍有争议的旧说法" in context.prompt_text
-
-
-async def test_followup_planner_replaces_superseded_do_not_repeat_claim(client, test_db):
-    fixture = await _create_story_gap(client, test_db)
-    successor = MemoirClaim(
-        project_id=fixture["project_id"],
-        claim_type=MemoirClaimType.EVENT.value,
-        statement="后来确认，比赛结束后大家一起走回了学校。",
-        predicate_code=MemoirClaimPredicate.NARRATIVE_FACT.value,
-        time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
-        certainty=MemoirClaimCertainty.EXACT.value,
-        verification_status=MemoirClaimVerificationStatus.CONFIRMED.value,
-        publication_status=MemoirClaimPublicationStatus.ELIGIBLE.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=fixture["user_id"],
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=fixture["user_id"],
-    )
-    test_db.add(successor)
-    await test_db.flush()
-    fixture["claim"].superseded_by_claim_id = successor.id
-    test_db.add(
-        MemoirStorySlotClaim(
-            project_id=fixture["project_id"],
-            story_slot_id=fixture["slot"].id,
-            claim_id=successor.id,
-            evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
-            created_by=MemoirNarrativeActorType.USER.value,
-            created_by_user_id=fixture["user_id"],
-        )
-    )
-    await test_db.commit()
-
-    result = await followup_planner.generate_followup_tasks(
-        test_db,
-        project_id=fixture["project_id"],
-        chapter_id=fixture["chapter"].id,
-    )
-    await test_db.commit()
-    assert result.updated_task_ids == (fixture["task"].id,)
-    refreshed = await followup_tasks.get_task(
-        test_db,
-        project_id=fixture["project_id"],
-        task_id=fixture["task"].id,
-    )
-    assert refreshed is not None
-    assert {
-        (relation.claim_id, relation.context_role)
-        for relation in refreshed.claims
-    } == {
-        (
-            successor.id,
-            MemoirFollowupTaskClaimRole.DO_NOT_REPEAT.value,
-        )
-    }
-
-    started = await post_mobile_memoir_voice_session(
-        client,
-        project_id=fixture["project_id"],
-        json={
-            "guidance_mode": "guided_interview",
-            "session_goal": "book_completion",
-            "current_followup_task_id": refreshed.id,
-        },
-    )
-    assert started.status_code == 201, started.text
-    voice_session = await test_db.get(
-        MemoirVoiceSession,
-        started.json()["session"]["id"],
-    )
-    assert voice_session is not None
-    context = await followup_planner.prompt_context_for_session(
-        test_db,
-        voice_session=voice_session,
-    )
-    assert context is not None
-    assert fixture["claim"].statement not in context.prompt_text
-    assert successor.statement in context.prompt_text
 
 
 async def test_followup_prompt_uses_the_pending_fact_confirmation_question(client, test_db):

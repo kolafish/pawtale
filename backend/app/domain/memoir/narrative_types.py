@@ -107,7 +107,6 @@ class MemoirNarrativeDecisionTargetType(str, Enum):
     ENTITY = "entity"
     CLAIM = "claim"
     STORY = "story"
-    STORY_SLOT = "story_slot"
     GAP = "gap"
     FOLLOWUP_TASK = "followup_task"
     CHAPTER_CONTRACT = "chapter_contract"
@@ -143,12 +142,6 @@ class MemoirStoryLifecycleStatus(str, Enum):
     ARCHIVED = "archived"
 
 
-class MemoirStoryCompletionStatus(str, Enum):
-    INCOMPLETE = "incomplete"
-    SUFFICIENT = "sufficient"
-    ACCEPTED_INCOMPLETE = "accepted_incomplete"
-
-
 class MemoirStoryVerificationStatus(str, Enum):
     UNREVIEWED = "unreviewed"
     CONFIRMED = "confirmed"
@@ -173,23 +166,13 @@ class MemoirStoryNarrativeRole(str, Enum):
     CONTEXT = "context"
 
 
-class MemoirStorySlotStatus(str, Enum):
-    MISSING = "missing"
-    PARTIAL = "partial"
-    SUFFICIENT = "sufficient"
-    ACCEPTED_INCOMPLETE = "accepted_incomplete"
-    NOT_APPLICABLE = "not_applicable"
-
-
 class MemoirStoryRevisionChangeType(str, Enum):
     CREATED = "created"
     CLAIMS_UPDATED = "claims_updated"
-    SLOTS_RECOMPUTED = "slots_recomputed"
     NEEDS_REVIEW = "needs_review"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
     MERGED = "merged"
-    SLOT_RESOLVED = "slot_resolved"
     PUBLICATION_CHANGED = "publication_changed"
     BACKFILL_CANDIDATE = "backfill_candidate"
 

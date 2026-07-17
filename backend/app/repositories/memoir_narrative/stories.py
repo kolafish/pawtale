@@ -4,13 +4,12 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeEntityType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
-from app.models.memoir_narrative import MemoirNarrativeEntity, MemoirStory, MemoirStorySlot
+from app.models.memoir_narrative import MemoirNarrativeEntity, MemoirStory
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirStoryCreate
 
@@ -52,10 +51,8 @@ class MemoirStoryRepository:
             time_precision=data.time_precision.value,
             primary_place_entity_id=data.primary_place_entity_id,
             lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-            completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
             verification_status=data.verification_status.value,
             publication_status=data.publication_status.value,
-            slot_schema_version=data.slot_schema_version,
             version=1,
             created_by=data.created_by.value,
             created_by_user_id=data.created_by_user_id,
@@ -80,7 +77,6 @@ class MemoirStoryRepository:
         if with_relations:
             statement = statement.options(
                 selectinload(MemoirStory.claims),
-                selectinload(MemoirStory.slots).selectinload(MemoirStorySlot.claims),
                 selectinload(MemoirStory.revisions),
             )
         return await self._db.scalar(statement)
@@ -91,7 +87,6 @@ class MemoirStoryRepository:
         project_id: str,
         story_type: MemoirStoryType | None = None,
         lifecycle_status: MemoirStoryLifecycleStatus | None = None,
-        completion_status: MemoirStoryCompletionStatus | None = None,
         verification_status: MemoirStoryVerificationStatus | None = None,
         publication_status: MemoirStoryPublicationStatus | None = None,
         limit: int = 100,
@@ -101,7 +96,6 @@ class MemoirStoryRepository:
         filters = (
             (MemoirStory.story_type, story_type),
             (MemoirStory.lifecycle_status, lifecycle_status),
-            (MemoirStory.completion_status, completion_status),
             (MemoirStory.verification_status, verification_status),
             (MemoirStory.publication_status, publication_status),
         )
