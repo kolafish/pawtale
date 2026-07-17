@@ -716,6 +716,60 @@ async def test_semantic_gap_audit_reads_draft_blocks_and_accepts_chapter_level_i
     ) != completion_refresh.chapter_completion_content_signature(changed_context)
 
 
+async def test_semantic_gap_audit_normalizes_draft_usage_without_draft_blocks():
+    context = _semantic_context()
+    prompt = gap_semantic.build_semantic_gap_prompt(context)
+    payload = """{
+      "schema_version": "2",
+      "gaps": [
+        {
+          "gap_type": "causality",
+          "severity": "medium",
+          "dimension": "chapter_focus",
+          "reason_signal": "draft_usage_problem",
+          "title": "章节重点比较分散",
+          "description": "现有几个故事尚未形成清晰的章节重点。",
+          "story_ids": ["story-1"],
+          "claim_ids": []
+        },
+        {
+          "gap_type": "causality",
+          "severity": "medium",
+          "dimension": "opening",
+          "reason_signal": "missing_new_evidence",
+          "title": "开头还缺少背景",
+          "description": "现有素材没有说明离家前的处境。",
+          "story_ids": ["story-1"],
+          "claim_ids": ["claim-1"]
+        }
+      ]
+    }"""
+
+    candidates, _, _ = await gap_semantic.evaluate_semantic_gaps(
+        context,
+        ai_client=FakeAIClient(payload),
+    )
+
+    assert "没有 draft_blocks 时" in prompt
+    assert len(candidates) == 2
+    assert (
+        candidates[0].action_reason_signal
+        == MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE
+    )
+    assert (
+        completion_planner.plan_gap_action(candidates[0]).recommended_action
+        == MemoirNarrativeGapRecommendedAction.EDITORIAL
+    )
+    assert (
+        candidates[1].action_reason_signal
+        == MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE
+    )
+    assert (
+        completion_planner.plan_gap_action(candidates[1]).recommended_action
+        == MemoirNarrativeGapRecommendedAction.INTERVIEW
+    )
+
+
 async def test_semantic_gap_routes_truly_missing_background_to_interview():
     context = _semantic_context()
     payload = """{

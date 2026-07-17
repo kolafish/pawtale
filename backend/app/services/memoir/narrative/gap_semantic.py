@@ -168,6 +168,7 @@ input:
 - 一本回忆录可以有意对次要事件一笔带过。不能仅因为事件简短、没有完整起因经过结果，就要求继续展开。
 - opening、closing、chapter_context、chapter_focus、transition、list_style 使用 causality gap_type；person_introduction、relationship_clarity 使用 relationship；reference 使用 unclear_reference。
 - reason_signal 只描述可核验的基础原因：确实缺少讲述者掌握的信息用 missing_new_evidence；相关素材已经存在但尚未正确归章用 existing_material_available；问题只在当前正文组织或素材使用上用 draft_usage_problem；事实互相冲突用 fact_conflict_detected；需要确认来源、人物身份或收录决定用 publication_decision_required。
+- draft_usage_problem 只用于 draft_blocks 中已经存在的正文问题；没有 draft_blocks 时，现有 Story 的选择、归章或结构组织问题使用 existing_material_available。
 - 不得直接输出 interview/editorial/manual_review，最终解决通道由系统规则决定。
 - draft_blocks 是当前实际书稿，应优先依据它判断开头、结尾、转场、人物关系和章节重点；没有 draft_blocks 时才主要依据结构与 Story 摘要。
 - 不把纯润色偏好当成需要采访的问题；只有补充讲述者掌握的信息才能实质改善时才输出。
@@ -198,6 +199,15 @@ def _validated_candidates(
     candidates: list[MemoirNarrativeGapCandidate] = []
     selected_dimensions: set[str] = set()
     for item in output.gaps:
+        reason_signal = item.reason_signal
+        if (
+            reason_signal
+            == MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
+            and not context.draft_blocks
+        ):
+            reason_signal = (
+                MemoirNarrativeGapActionReasonCode.EXISTING_MATERIAL_AVAILABLE
+            )
         if item.gap_type not in SEMANTIC_GAP_TYPES:
             raise ValueError("semantic audit returned a deterministic-only gap type")
         if item.gap_type != SEMANTIC_DIMENSION_GAP_TYPES[item.dimension]:
@@ -213,15 +223,11 @@ def _validated_candidates(
         if item.gap_type == MemoirNarrativeGapType.UNSUPPORTED_FACT and not claim_ids:
             raise ValueError("semantic unsupported fact requires a Claim")
         if (
-            item.reason_signal == MemoirNarrativeGapActionReasonCode.FACT_CONFLICT_DETECTED
+            reason_signal
+            == MemoirNarrativeGapActionReasonCode.FACT_CONFLICT_DETECTED
             and item.gap_type != MemoirNarrativeGapType.CONTRADICTION
         ):
             raise ValueError("fact conflict signal requires a contradiction gap")
-        if (
-            item.reason_signal == MemoirNarrativeGapActionReasonCode.DRAFT_USAGE_PROBLEM
-            and not context.draft_blocks
-        ):
-            raise ValueError("draft usage signal requires a current draft block")
         if item.dimension in selected_dimensions:
             continue
         story_ids.update(
@@ -259,7 +265,7 @@ def _validated_candidates(
                 title=item.title,
                 description=item.description,
                 detected_by=MemoirNarrativeGapDetectedBy.AI,
-                action_reason_signal=item.reason_signal,
+                action_reason_signal=reason_signal,
                 claim_roles={claim_id: claim_role for claim_id in sorted(claim_ids)},
                 involved_story_ids=set(story_ids),
             )
