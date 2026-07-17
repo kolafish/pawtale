@@ -96,6 +96,17 @@ def _summary(
         context.draft is not None
         and not context.draft.source_changes_pending
     )
+    refresh_result = (
+        refresh_job.result_json
+        if refresh_job is not None and isinstance(refresh_job.result_json, dict)
+        else {}
+    )
+    refresh_found_no_gaps = (
+        refresh_job is not None
+        and refresh_job.status == MemoirEditingJobStatus.SUCCEEDED.value
+        and refresh_result.get("deterministic_gap_count") == 0
+        and refresh_result.get("semantic_gap_count") == 0
+    )
 
     if refresh_job is not None and refresh_job.status in _ACTIVE_JOB_STATUSES:
         state = "preparing"
@@ -150,8 +161,12 @@ def _summary(
     elif draft_current:
         if chapter_draft_status == MemoirBookChapterDraftStatus.CONFIRMED.value:
             state = "confirmed"
-            headline = "本章已确认"
-            detail = "正文已经收入书稿。"
+            if refresh_found_no_gaps:
+                headline = "本次检查未发现待补内容"
+                detail = "已按当前素材重新检查，正文仍保持确认状态。"
+            else:
+                headline = "本章已确认"
+                detail = "正文已经收入书稿，但仍可按当前素材重新检查。"
             action = _next_action("complete", headline, detail, disabled=True)
         else:
             state = "draft_ready"

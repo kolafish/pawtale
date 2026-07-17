@@ -10,6 +10,19 @@
   <view wx:if="{{loading}}" class="loading-state">正在查看全书...</view>
 
   <view wx:else class="chapter-list">
+    <view wx:if="{{allChaptersConfirmed}}" class="completion-notice">
+      <text class="completion-notice-title">当前没有待处理的补充</text>
+      <text class="completion-notice-detail">
+        所有章节正文都已确认，但这不代表内容已经绝对完整。需要时可以按当前素材重新检查一次。
+      </text>
+      <button
+        class="recheck-book-action"
+        loading="{{recheckingAll}}"
+        disabled="{{recheckingAll}}"
+        bindtap="recheckAllChapters"
+      >重新检查全书</button>
+    </view>
+
     <view
       wx:for="{{chapters}}"
       wx:key="chapter_id"
@@ -29,6 +42,14 @@
       <view class="chapter-action {{item.disabled ? 'disabled' : ''}}">
         {{item.actionText}}
       </view>
+      <view
+        wx:if="{{item.state === 'confirmed'}}"
+        class="chapter-recheck-action {{item.canRecheck ? '' : 'disabled'}}"
+        data-chapter-id="{{item.chapter_id}}"
+        catchtap="recheckChapter"
+        aria-role="button"
+        aria-disabled="{{!item.canRecheck}}"
+      >重新检查本章</view>
     </view>
 
     <view wx:if="{{!chapters.length}}" class="empty-state">
