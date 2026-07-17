@@ -330,7 +330,7 @@ async def run_chapter_completion_refresh_job(
         )
 
     # End the analysis transaction before validating and atomically publishing
-    # the planned Gap/Task revision.
+    # the planned completion revision.
     await db.rollback()
     db.expire_all()
     await db.refresh(job)
@@ -363,10 +363,10 @@ async def run_chapter_completion_refresh_job(
             error_message="chapter content changed during refresh analysis",
         )
 
-    # Establish the database write transaction before Gap upserts open their
-    # uniqueness savepoints. SQLite otherwise treats the first SAVEPOINT as the
-    # outer transaction and releasing it can make partial Gap writes survive a
-    # later rollback. The job row is already owned by this worker lease.
+    # Establish the database write transaction before completion upserts open
+    # their uniqueness savepoints. SQLite otherwise treats the first SAVEPOINT
+    # as the outer transaction, and releasing it can make partial writes survive
+    # a later rollback. The job row is already owned by this worker lease.
     job.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(job)
     await db.flush()

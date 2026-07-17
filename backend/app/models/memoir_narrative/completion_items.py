@@ -43,6 +43,12 @@ class MemoirCompletionItem(Base):
             name="uq_memoir_completion_items_project_fingerprint",
         ),
         ForeignKeyConstraint(
+            ["project_id", "chapter_id"],
+            ["memoir_book_plan_chapters.project_id", "memoir_book_plan_chapters.id"],
+            name="fk_memoir_completion_items_chapter_project",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
             ["project_id", "story_id"],
             ["memoir_stories.project_id", "memoir_stories.id"],
             name="fk_memoir_completion_items_story_project",
@@ -111,11 +117,7 @@ class MemoirCompletionItem(Base):
         String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     scope_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    chapter_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"),
-        nullable=True,
-    )
+    chapter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     story_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     related_claim_id: Mapped[str | None] = mapped_column(String(36), nullable=True)

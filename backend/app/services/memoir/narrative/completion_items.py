@@ -28,10 +28,6 @@ ACTIVE_STATUSES = {
     MemoirCompletionItemStatus.IN_PROGRESS.value,
     MemoirCompletionItemStatus.DEFERRED.value,
 }
-TERMINAL_STATUSES = {
-    MemoirCompletionItemStatus.RESOLVED.value,
-    MemoirCompletionItemStatus.UNABLE_TO_ANSWER.value,
-}
 
 
 @dataclass(frozen=True)

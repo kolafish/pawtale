@@ -567,6 +567,11 @@ class MemoirBookPlanChapter(Base):
     __tablename__ = "memoir_book_plan_chapters"
     __table_args__ = (
         UniqueConstraint("plan_id", "sort_order", name="uq_memoir_book_plan_chapters_plan_order"),
+        UniqueConstraint(
+            "project_id",
+            "id",
+            name="uq_memoir_book_plan_chapters_project_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))

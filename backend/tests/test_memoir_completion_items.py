@@ -1,4 +1,6 @@
+import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapActionReasonCode,
@@ -14,6 +16,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import MemoirCompletionItem
+from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.memoir.narrative import completion_items, interview_policy
 from tests.memoir_helpers import (
@@ -294,3 +297,34 @@ async def test_switch_completion_item_never_reselects_the_current_item(
     await test_db.refresh(first)
     assert first.status == "deferred"
     assert first.defer_until is None
+
+
+async def test_completion_item_rejects_chapter_from_another_project(
+    client,
+    test_db,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    other_project = Project(type="memoir", title="另一本回忆录")
+    test_db.add(other_project)
+    await test_db.flush()
+    other_chapter = await _chapter(test_db, project_id=other_project.id)
+    item = MemoirCompletionItem(
+        project_id=project_id,
+        scope_type="chapter",
+        chapter_id=other_chapter.id,
+        item_type="causality",
+        severity="medium",
+        dimension="transition",
+        title="跨项目补全项",
+        description="不应允许保存。",
+        fingerprint="b" * 64,
+        action="interview",
+        question="后来发生了什么？",
+        priority=200,
+        detected_by="ai",
+    )
+    test_db.add(item)
+
+    with pytest.raises(IntegrityError):
+        await test_db.flush()
+    await test_db.rollback()
