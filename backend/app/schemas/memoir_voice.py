@@ -235,6 +235,10 @@ class MemoirAutomationEventListResponse(BaseModel):
     limit: int
 
 
+class MemoirAutomationEventAcknowledgeDismissibleResponse(BaseModel):
+    updated_count: int
+
+
 class MemoirAutomationEventVoicePlaybackRequest(BaseModel):
     event_ids: list[str] = Field(default_factory=list, max_length=20)
     voice_session_id: str

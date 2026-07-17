@@ -23,6 +23,7 @@ import { memoirProjectProfile } from "../../services/memoir-project-profile";
 
 import {
   acknowledgeMemoirAutomationEvent,
+  acknowledgeDismissibleMemoirAutomationEvents,
   applyMemoirBookPlanStructureCommand,
   assignMemoirBookSources,
   confirmMemoirBookPlan,
@@ -32,6 +33,7 @@ import {
   bookVoiceAssistantTurnStreamUrl,
   assembleMemoirBookOutput,
   executeMemoirBookVoiceCommand,
+  enqueueMemoirBookChapterSourceRefresh,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
@@ -125,7 +127,9 @@ import {
   trimText,
   bookOutlineNarrationText,
   buildAutomationEventViews,
+  mergeAutomationEvent,
   pendingBookGenerationEvents,
+  pendingChapterDraftGenerationIds,
 } from "./book-view-model";
 import {
   bookGenerationSettings,
@@ -282,6 +286,8 @@ definePage<BookPageData>()({
     bookVoiceCommandExecuting: false,
     automationEventItems: [],
     automationEventBusyTarget: "",
+    automationDismissibleCount: 0,
+    automationEventClearing: false,
     automationEventExpandedTargets: {},
     automationEventLoading: false,
     automationEventError: "",
@@ -554,12 +560,26 @@ definePage<BookPageData>()({
 
   applyAutomationEvents(events: MemoirAutomationEvent[]) {
     this.automationEvents = events;
+    const pendingChapterIds = pendingChapterDraftGenerationIds(events);
+    const chapters = this.data.chapters.map((chapter) => ({
+      ...chapter,
+      draftBusy: pendingChapterIds.has(chapter.id),
+    }));
     this.setData({
+      ...chapterCollectionData(
+        chapters,
+        this.data.stage,
+        this.data.sourceCoverage,
+        this.data.splitSourceSelections,
+      ),
       automationEventItems: buildAutomationEventViews(
         events,
         this.data.automationEventBusyTarget,
         this.data.automationEventExpandedTargets,
       ),
+      automationDismissibleCount: events.filter((event) => (
+        event.status === "completed" || event.status === "failed"
+      )).length,
     });
     this.scheduleBookGenerationEventPoll();
   },
@@ -622,15 +642,42 @@ definePage<BookPageData>()({
     });
     try {
       await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(this.data.projectId, id)));
-      this.setData({
-        automationEventItems: this.data.automationEventItems.filter((item) => item.id !== eventId),
-      });
+      const acknowledgedIds = new Set(eventIds);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((item) => !acknowledgedIds.has(item.id)),
+      );
     } catch (error) {
       this.setData({
         automationEventError: error instanceof Error ? error.message : "自动处理记录确认失败",
       });
     } finally {
       this.setData({ automationEventBusyTarget: "" });
+    }
+  },
+
+  async acknowledgeDismissibleAutomationEvents() {
+    if (
+      !this.data.projectId
+      || !this.data.automationDismissibleCount
+      || this.data.automationEventClearing
+    ) {
+      return;
+    }
+    this.setData({ automationEventClearing: true, automationEventError: "" });
+    try {
+      await acknowledgeDismissibleMemoirAutomationEvents(this.data.projectId);
+      this.applyAutomationEvents(
+        this.automationEvents.filter((event) => (
+          event.status === "pending" || event.status === "needs_review"
+        )),
+      );
+      wx.showToast({ title: "已收起完成记录", icon: "none" });
+    } catch (error) {
+      this.setData({
+        automationEventError: error instanceof Error ? error.message : "完成记录收起失败",
+      });
+    } finally {
+      this.setData({ automationEventClearing: false });
     }
   },
 
@@ -718,6 +765,38 @@ definePage<BookPageData>()({
     }
     this.stopPlayback();
     wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId) });
+  },
+
+  async runChapterPrimaryAction(event: DatasetEvent) {
+    const chapterId = datasetString(event, "id");
+    const chapter = findBookChapter(this.data.chapters, chapterId);
+    if (!chapter || !this.data.projectId) {
+      this.setData({ error: "缺少章节信息" });
+      return;
+    }
+    if (!chapter.pendingSourceCount || chapter.removedSourceCount) {
+      this.openChapterEditor(event);
+      return;
+    }
+    if (chapter.draftBusy) {
+      return;
+    }
+    this.patchChapter(chapterId, { draftBusy: true, draftError: "" });
+    try {
+      const generationEvent = await enqueueMemoirBookChapterSourceRefresh(
+        this.data.projectId,
+        chapterId,
+      );
+      this.applyAutomationEvents(
+        mergeAutomationEvent(this.automationEvents, generationEvent),
+      );
+      wx.showToast({ title: "正在补写新增讲述", icon: "none" });
+    } catch (error) {
+      this.patchChapter(chapterId, {
+        draftBusy: false,
+        draftError: error instanceof Error ? error.message : "新增讲述补写失败",
+      });
+    }
   },
 
   toggleChapterStructureEditing() {

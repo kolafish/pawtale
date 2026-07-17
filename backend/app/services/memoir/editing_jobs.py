@@ -124,6 +124,36 @@ async def _record_job_failure_event(
     if isinstance(payload_source, str) and payload_source.strip():
         metadata["pipeline_source"] = payload_source.strip()
 
+    automation_event_id = payload.get("automation_event_id")
+    if isinstance(automation_event_id, str) and automation_event_id.strip():
+        event = await db.get(MemoirAutomationEvent, automation_event_id.strip())
+        if event is not None and event.project_id == job.project_id:
+            was_failed = event.status == MemoirAutomationEventStatus.FAILED.value
+            event.status = MemoirAutomationEventStatus.FAILED.value
+            event.editing_job_id = job.id
+            if not was_failed:
+                event.summary_text = _FAILURE_SUMMARIES[job_type]
+            event.metadata_json = {
+                **(event.metadata_json or {}),
+                **metadata,
+            }
+            updated_metadata = dict(event.metadata_json or {})
+            for key in (
+                ACKNOWLEDGED_AT_KEY,
+                ACKNOWLEDGED_BY_USER_KEY,
+                VOICE_SELECTED_AT_KEY,
+                VOICE_SELECTED_SESSION_ID_KEY,
+                VOICE_SELECTED_MESSAGE_ID_KEY,
+                VOICE_PLAYED_AT_KEY,
+                VOICE_PLAYED_SESSION_ID_KEY,
+                VOICE_PLAYED_MESSAGE_ID_KEY,
+            ):
+                updated_metadata.pop(key, None)
+            event.metadata_json = updated_metadata
+            db.add(event)
+            await db.flush()
+            return
+
     event = await automation_events.record_or_update_automation_event(
         db,
         project_id=job.project_id,

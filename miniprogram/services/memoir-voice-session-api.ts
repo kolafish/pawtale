@@ -121,6 +121,17 @@ export function acknowledgeMemoirAutomationEvent(
   );
 }
 
+export function acknowledgeDismissibleMemoirAutomationEvents(
+  projectId: string,
+): Promise<{ updated_count: number }> {
+  return memoirRequest<{ updated_count: number }>(
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events/acknowledge-dismissible`,
+    {
+      method: "POST",
+    },
+  );
+}
+
 export function markMemoirAutomationEventsVoicePlayed(
   projectId: string,
   data: {

@@ -17,12 +17,21 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.models.projects import Project
-from app.schemas.memoir_book import MemoirBookOutputEditorialCopyRegenerateRequest
+from app.schemas.memoir_book import (
+    MemoirBookChapterSourceRefreshRequest,
+    MemoirBookOutputEditorialCopyRegenerateRequest,
+)
 from app.schemas.memoir_voice import MemoirAutomationEventResponse
 from app.services.memoir import automation_events
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_outputs import regenerate_book_output_editorial_copy
+from app.services.memoir.book_plan_sources import pending_source_ids
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
+from app.services.memoir.narrative import draft_generation_jobs
+from app.services.memoir.narrative.gap_rules import (
+    chapter_completion_content_signature,
+    load_chapter_audit_context,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +119,36 @@ async def _enqueue_generation_job(
     )
 
 
+async def _generation_event_for_job(
+    db: AsyncSession,
+    *,
+    job: MemoirEditingJob,
+    event_type: MemoirAutomationEventType,
+) -> MemoirAutomationEvent | None:
+    payload = dict(job.payload_json or {})
+    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
+    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
+    if (
+        event
+        and event.project_id == job.project_id
+        and event.event_type == event_type.value
+    ):
+        return event
+    return await db.scalar(
+        select(MemoirAutomationEvent)
+        .where(
+            MemoirAutomationEvent.project_id == job.project_id,
+            MemoirAutomationEvent.editing_job_id == job.id,
+            MemoirAutomationEvent.event_type == event_type.value,
+        )
+        .order_by(
+            MemoirAutomationEvent.created_at.desc(),
+            MemoirAutomationEvent.id.desc(),
+        )
+        .limit(1)
+    )
+
+
 async def _ensure_generation_event(
     db: AsyncSession,
     *,
@@ -126,9 +165,12 @@ async def _ensure_generation_event(
         "job_type": job.job_type,
         **(metadata_json or {}),
     }
-    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
-    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
-    if event and event.project_id == job.project_id:
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=event_type,
+    )
+    if event:
         event.event_type = event_type.value
         event.status = MemoirAutomationEventStatus.PENDING.value
         event.chapter_id = chapter_id
@@ -139,6 +181,10 @@ async def _ensure_generation_event(
             **metadata,
         }
         db.add(event)
+        if payload.get(AUTOMATION_EVENT_ID_KEY) != event.id:
+            payload[AUTOMATION_EVENT_ID_KEY] = event.id
+            job.payload_json = payload
+            db.add(job)
         await db.flush()
     else:
         event = await automation_events.record_automation_event(
@@ -175,9 +221,12 @@ async def _update_generation_event(
         "job_type": job.job_type,
         **(metadata_json or {}),
     }
-    event_id = _safe_str(payload.get(AUTOMATION_EVENT_ID_KEY))
-    event = await db.get(MemoirAutomationEvent, event_id) if event_id else None
-    if event and event.project_id == job.project_id:
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=event_type,
+    )
+    if event:
         event.event_type = event_type.value
         event.status = status.value
         event.chapter_id = chapter_id
@@ -242,9 +291,114 @@ async def enqueue_book_editorial_copy_generation_job(
     return automation_events.event_response(event)
 
 
+async def enqueue_chapter_source_refresh_job(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterSourceRefreshRequest,
+) -> MemoirAutomationEventResponse:
+    await load_memoir_project(db, project_id, user_id)
+    context = await load_chapter_audit_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    pending_ids = pending_source_ids(context.chapter.metadata_json)
+    if not pending_ids:
+        raise HTTPException(status_code=409, detail="本章没有待补写的新增讲述")
+    job = await draft_generation_jobs.enqueue_chapter_draft_generation(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        content_signature=chapter_completion_content_signature(context),
+        ai_model=req.ai_model,
+        source="book_pending_sources",
+    )
+    job.payload_json = {
+        **(job.payload_json or {}),
+        "chapter_title": context.chapter.title,
+        "pending_source_count": len(pending_ids),
+    }
+    db.add(job)
+    await db.flush()
+    event = await _ensure_generation_event(
+        db,
+        job=job,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+        chapter_id=chapter_id,
+        summary_text=f"正在把 {len(pending_ids)} 条新增讲述补入「{context.chapter.title}」。",
+        metadata_json={
+            "chapter_title": context.chapter.title,
+            "pending_source_count": len(pending_ids),
+            "pending_source_utterance_ids": sorted(pending_ids),
+            "generation_intent": "refresh_pending_sources",
+        },
+    )
+    await db.commit()
+    return automation_events.event_response(event)
+
+
 def _job_request_payload(job: MemoirEditingJob) -> dict:
     request = (job.payload_json or {}).get("request")
     return request if isinstance(request, dict) else {}
+
+
+async def run_chapter_draft_generation_job(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+) -> EditingJobResult:
+    result = await draft_generation_jobs.run_chapter_draft_generation_job(db, job)
+    payload = dict(job.payload_json or {})
+    event = await _generation_event_for_job(
+        db,
+        job=job,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+    )
+    if event is None:
+        return result
+    event_metadata = dict(event.metadata_json or {})
+    chapter_title = (
+        _safe_str(payload.get("chapter_title"))
+        or _safe_str(event_metadata.get("chapter_title"))
+        or "本章"
+    )
+    pending_count = int(
+        payload.get("pending_source_count")
+        or event_metadata.get("pending_source_count")
+        or 0
+    )
+    if result.status == MemoirEditingJobStatus.SUCCEEDED:
+        await _update_generation_event(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+            status=MemoirAutomationEventStatus.COMPLETED,
+            chapter_id=job.chapter_id,
+            summary_text=(
+                f"「{chapter_title}」已补写 {pending_count} 条新增讲述，请查看正文。"
+            ),
+            metadata_json={
+                **result.result_json,
+                "generation_intent": "refresh_pending_sources",
+            },
+        )
+    else:
+        await _update_generation_event(
+            db,
+            job=job,
+            event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+            status=MemoirAutomationEventStatus.FAILED,
+            chapter_id=job.chapter_id,
+            summary_text=f"「{chapter_title}」补写时发现素材已变化，请重新操作。",
+            metadata_json={
+                **result.result_json,
+                "error_message": result.error_message,
+                "generation_intent": "refresh_pending_sources",
+            },
+        )
+    return result
 
 
 async def _failed_result(

@@ -10,7 +10,6 @@ from app.services.memoir import voice_transcript_correction
 from app.services.memoir.editing_jobs import register_editing_job_handler
 from app.services.memoir.narrative import book_consistency_audit
 from app.services.memoir.narrative import completion_refresh
-from app.services.memoir.narrative import draft_generation_jobs
 from app.services.memoir.narrative import framework_matching
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.narrative import interview_policy_outcomes
@@ -48,7 +47,7 @@ def register_memoir_editing_job_handlers() -> None:
     )
     register_editing_job_handler(
         MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
-        draft_generation_jobs.run_chapter_draft_generation_job,
+        book_generation_jobs.run_chapter_draft_generation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY,

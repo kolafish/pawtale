@@ -13,6 +13,7 @@ from app.schemas.memoir_book import (
     MemoirBookAudioResponse,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftRevisionRequest,
+    MemoirBookChapterSourceRefreshRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookChapterTitleGenerateRequest,
@@ -486,6 +487,27 @@ async def get_mobile_memoir_book_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/source-refresh/jobs",
+    response_model=MemoirAutomationEventResponse,
+    status_code=202,
+)
+async def enqueue_mobile_memoir_book_chapter_source_refresh(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirBookChapterSourceRefreshRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_generation_jobs.enqueue_chapter_source_refresh_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
     )
 
 

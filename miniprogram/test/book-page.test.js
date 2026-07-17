@@ -446,6 +446,10 @@ function loadBookPage({
     getMemoirBookSourceCoverage: async () => null,
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
+    acknowledgeDismissibleMemoirAutomationEvents: async () => ({ updated_count: 0 }),
+    enqueueMemoirBookChapterSourceRefresh: async () => {
+      throw new Error("enqueueMemoirBookChapterSourceRefresh was not mocked");
+    },
     bookVoiceCommandGatewayUrl: (projectId) => `wss://api.example.test/book/${encodeURIComponent(projectId)}/gateway`,
     bookVoiceAssistantTurnStreamUrl: (projectId) => (
       `wss://api.example.test/book/${encodeURIComponent(projectId)}/assistant-turn`
@@ -594,6 +598,53 @@ test("book page routes chapter card actions to the chapter workspace", () => {
   assert.deepEqual(navigations, [
     "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter%2F1",
   ]);
+  delete global.wx;
+});
+
+test("book page directly refreshes a chapter when new narration is waiting", async () => {
+  const calls = [];
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+    showToast() {},
+  };
+  const generationEvent = sampleAutomationEvent({
+    id: "event-source-refresh",
+    status: "pending",
+    chapter_id: "chapter-1",
+    summary_text: "正在把 2 条新增讲述补入「外婆家的童年」。",
+  });
+  const { mod, page } = loadBookPage({
+    voiceApiExports: {
+      enqueueMemoirBookChapterSourceRefresh: async (projectId, chapterId) => {
+        calls.push({ projectId, chapterId });
+        return generationEvent;
+      },
+    },
+  });
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].pending_source_count = 2;
+  const chapters = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "confirmed"),
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    stage: "drafting",
+    plan,
+    chapters,
+  });
+
+  await page.runChapterPrimaryAction.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+
+  assert.deepEqual(calls, [{ projectId: "project/1", chapterId: "chapter-1" }]);
+  assert.deepEqual(navigations, []);
+  assert.equal(context.data.chapters[0].draftBusy, true);
+  assert.equal(context.data.automationEventItems[0].id, "event-source-refresh");
+  assert.equal(context.data.automationEventItems[0].statusText, "处理中");
   delete global.wx;
 });
 
@@ -983,6 +1034,47 @@ test("book page shows and acknowledges automation events", async () => {
 
   assert.deepEqual(acknowledged, [{ projectId: "project/1", eventId: "event-1" }]);
   assert.deepEqual(context.data.automationEventItems, []);
+});
+
+test("book page clears all dismissible automation history but keeps actionable items", async () => {
+  const cleared = [];
+  const completedEvent = sampleAutomationEvent({
+    id: "event-completed",
+    status: "completed",
+    event_type: "chapter_auto_revised",
+  });
+  const pendingEvent = sampleAutomationEvent({
+    id: "event-pending",
+    status: "pending",
+  });
+  const failedEvent = sampleAutomationEvent({
+    id: "event-failed",
+    status: "failed",
+  });
+  global.wx = { showToast() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      acknowledgeDismissibleMemoirAutomationEvents: async (projectId) => {
+        cleared.push(projectId);
+        return { updated_count: 12 };
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+  });
+  page.applyAutomationEvents.call(context, [completedEvent, failedEvent, pendingEvent]);
+
+  assert.equal(context.data.automationDismissibleCount, 2);
+  await page.acknowledgeDismissibleAutomationEvents.call(context);
+
+  assert.deepEqual(cleared, ["project/1"]);
+  assert.equal(context.data.automationDismissibleCount, 0);
+  assert.deepEqual(
+    context.data.automationEventItems.map((item) => item.id),
+    ["event-pending"],
+  );
+  delete global.wx;
 });
 
 test("book page groups source assignment automation events with expandable details", async () => {

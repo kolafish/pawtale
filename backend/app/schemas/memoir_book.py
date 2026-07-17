@@ -291,6 +291,12 @@ class MemoirBookChapterTitleGenerateRequest(BaseModel):
     ai_model: str | None = None
 
 
+class MemoirBookChapterSourceRefreshRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ai_model: str | None = None
+
+
 class MemoirBookPlanChapterResponse(BaseModel):
     id: str
     plan_id: str

@@ -350,6 +350,8 @@ export interface BookData {
   bookVoiceCommandUndoSnapshot: BookVoiceCommandUndoSnapshot | null;
   automationEventItems: BookAutomationEventView[];
   automationEventBusyTarget: string;
+  automationDismissibleCount: number;
+  automationEventClearing: boolean;
   automationEventExpandedTargets: Record<string, boolean>;
   automationEventLoading: boolean;
   automationEventError: string;
@@ -456,24 +458,21 @@ export function sourceChangeNotice(pendingCount: number, removedCount: number): 
   return "";
 }
 
-export function draftActionText(draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
-  if (removedCount) {
-    return "整理本章";
-  }
-  if (pendingCount) {
+export function draftActionText(_draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
+  if (pendingCount && !removedCount) {
     return "补写新增";
   }
-  return draft?.latest_version ? "生成新版本" : "生成本章";
+  return "编辑正文";
 }
 
-function draftActionHintText(draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
+function draftActionHintText(_draft: MemoirBookChapterDraft | null, pendingCount: number, removedCount = 0): string {
   if (removedCount) {
     return "会保留剩余讲述并更新正文";
   }
   if (pendingCount) {
-    return "只补入新增讲述";
+    return "直接把新增讲述写入正文";
   }
-  return draft?.latest_version ? "不覆盖当前版本" : "";
+  return "";
 }
 
 export function draftVersionText(draft: MemoirBookChapterDraft | null): string {
@@ -1449,6 +1448,8 @@ export function guestBookData(): Partial<BookHomeData> {
     bookVoiceCommandUndoSnapshot: null,
     automationEventItems: [],
     automationEventBusyTarget: "",
+    automationDismissibleCount: 0,
+    automationEventClearing: false,
     automationEventExpandedTargets: {},
     automationEventLoading: false,
     automationEventError: "",
