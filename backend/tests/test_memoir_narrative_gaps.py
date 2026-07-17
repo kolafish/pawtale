@@ -23,7 +23,6 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStoryType,
@@ -564,10 +563,8 @@ def _semantic_context() -> ChapterAuditContext:
         summary="十八岁时离开家乡。",
         time_precision=MemoirClaimTimePrecision.YEAR.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         version=1,
         created_by=MemoirNarrativeActorType.AI.value,
         updated_by=MemoirNarrativeActorType.AI.value,
@@ -609,7 +606,6 @@ def _semantic_context() -> ChapterAuditContext:
         story_claims={story.id: [story_claim]},
         claims={claim.id: claim},
         evidence_counts={claim.id: 1},
-        slots={},
     )
 
 

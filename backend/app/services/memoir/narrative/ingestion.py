@@ -24,8 +24,6 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
-    MemoirStory,
-    MemoirStoryClaim,
 )
 from app.models.projects import Project
 from app.repositories.memoir_narrative import MemoirClaimRepository
@@ -36,7 +34,6 @@ from app.schemas.memoir_narrative import (
     MemoirStoryClaimInput,
 )
 from app.schemas.memoir_narrative.extraction import MemoirNarrativeExtractedClaim
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.ai_types import AITextClient
 from app.services.memoir.narrative import (
     chapter_contracts,
@@ -78,17 +75,6 @@ class NarrativeIngestionResult:
 
 def transcript_text_hash(content: str) -> str:
     return sha256(content.encode("utf-8")).hexdigest()
-
-
-def _extraction_followup_target_slot(
-    *,
-    story_type: str,
-    target_slot: str,
-) -> str | None:
-    if not story_type:
-        return None
-    schema = story_slot_schema(story_type)
-    return target_slot if target_slot in schema.slot_keys else None
 
 
 def _speaker_role(utterance: MemoirVoiceUtterance) -> MemoirClaimEvidenceSpeakerRole:
@@ -210,14 +196,6 @@ async def ingest_transcript_version(
         project_id=project.id,
         utterance=utterance,
     )
-    extraction_target_slot = (
-        _extraction_followup_target_slot(
-            story_type=active_followup.story_type,
-            target_slot=active_followup.target_slot,
-        )
-        if active_followup
-        else None
-    )
     extraction_text = (
         active_followup.direct_narrative_text
         if active_followup
@@ -240,7 +218,6 @@ async def ingest_transcript_version(
                 "task_id": active_followup.task_id,
                 "question": active_followup.question,
                 "answer_kind": active_followup.answer_kind,
-                "target_slot": extraction_target_slot,
                 "story_id": active_followup.story_id,
                 "story_title": active_followup.story_title,
                 "story_type": active_followup.story_type,
@@ -367,7 +344,6 @@ async def ingest_transcript_version(
             )
         ).all()
     )
-    affected_prior_story_ids: set[str] = set()
     for claim in prior_claims:
         if claim.id in touched_claim_ids:
             continue
@@ -376,16 +352,6 @@ async def ingest_transcript_version(
             claim=claim,
             reason="effective transcript version changed and no longer supports this claim",
             idempotency_key=f"transcript-review:{claim.id}:{version.id}",
-        )
-        affected_prior_story_ids.update(
-            (
-                await db.scalars(
-                    select(MemoirStoryClaim.story_id).where(
-                        MemoirStoryClaim.project_id == project.id,
-                        MemoirStoryClaim.claim_id == claim.id,
-                    )
-                )
-            ).all()
         )
 
     created_story_ids: list[str] = []
@@ -400,9 +366,8 @@ async def ingest_transcript_version(
         answers_active_followup = bool(
             active_followup
             and active_followup.story_id
-            and active_followup.target_slot
+            and candidate.existing_story_id == active_followup.story_id
             and candidate.story_type.value == active_followup.story_type
-            and any(active_followup.target_slot in link.slot_keys for link in valid_links)
         )
         story, review_candidates, created = await story_matching.resolve_extracted_story(
             db,
@@ -440,8 +405,6 @@ async def ingest_transcript_version(
                     narrative_role=link.narrative_role,
                     sort_order=index,
                     is_core=link.is_core,
-                    slot_keys=link.slot_keys,
-                    evidence_role=link.evidence_role,
                 )
                 for index, link in enumerate(valid_links)
             ],
@@ -450,20 +413,6 @@ async def ingest_transcript_version(
             reason=f"narrative ingestion from transcript version {version.id}",
         )
         if changed:
-            changed_story_ids.add(story.id)
-
-    for story_id in sorted(affected_prior_story_ids - changed_story_ids):
-        story = await db.scalar(
-            select(MemoirStory).where(
-                MemoirStory.project_id == project.id,
-                MemoirStory.id == story_id,
-            )
-        )
-        if story and await stories.recompute_story_with_revision(
-            db,
-            story=story,
-            reason=f"claim support changed with transcript version {version.id}",
-        ):
             changed_story_ids.add(story.id)
 
     task_completion = await followup_completion.evaluate_after_narrative_ingestion(

@@ -20,14 +20,12 @@ from app.models.memoir_narrative import (
     MemoirNarrativeDecision,
     MemoirNarrativeEntity,
     MemoirStory,
-    MemoirStoryClaim,
 )
 from app.services.memoir.narrative import (
     decision_log,
     draft_blocks,
     frameworks,
     story_revisions,
-    stories as story_service,
 )
 
 
@@ -316,7 +314,6 @@ async def merge_entities(
         )
     return decision
 
-
 async def decide_claim_verification(
     db: AsyncSession,
     *,
@@ -399,11 +396,6 @@ async def decide_claim_verification(
         project_id=project_id,
         claim_id=claim.id,
     )
-    await _recompute_stories_for_claim(
-        db,
-        claim=claim,
-        reason=f"claim verification changed by user decision {decision.id}",
-    )
     await frameworks.recompute_framework_items_for_claim(
         db,
         claim_id=claim.id,
@@ -472,11 +464,6 @@ async def decide_claim_publication(
         project_id=project_id,
         claim_id=claim.id,
     )
-    await _recompute_stories_for_claim(
-        db,
-        claim=claim,
-        reason=f"claim publication changed by user decision {decision.id}",
-    )
     return decision
 
 
@@ -535,35 +522,3 @@ async def mark_claim_needs_review(
         claim_id=claim.id,
     )
     return decision
-
-
-async def _recompute_stories_for_claim(
-    db: AsyncSession,
-    *,
-    claim: MemoirClaim,
-    reason: str,
-) -> None:
-    story_ids = set(
-        (
-            await db.scalars(
-                select(MemoirStoryClaim.story_id).where(
-                    MemoirStoryClaim.project_id == claim.project_id,
-                    MemoirStoryClaim.claim_id == claim.id,
-                )
-            )
-        ).all()
-    )
-    if not story_ids:
-        return
-    linked_stories = list(
-        (
-            await db.scalars(
-                select(MemoirStory).where(
-                    MemoirStory.project_id == claim.project_id,
-                    MemoirStory.id.in_(story_ids),
-                )
-            )
-        ).all()
-    )
-    for story in linked_stories:
-        await story_service.recompute_story_with_revision(db, story=story, reason=reason)

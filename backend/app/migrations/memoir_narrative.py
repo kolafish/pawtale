@@ -19,8 +19,6 @@ MEMOIR_NARRATIVE_TABLES = (
     "memoir_stories",
     "memoir_story_revisions",
     "memoir_story_claims",
-    "memoir_story_slots",
-    "memoir_story_slot_claims",
     "memoir_chapter_contracts",
     "memoir_chapter_nodes",
     "memoir_chapter_node_stories",
@@ -1052,23 +1050,6 @@ async def _table_sql(conn, table_name: str) -> str:
     return str(result.scalar_one_or_none() or "")
 
 
-async def _remove_derived_empty_story_slots(conn) -> None:
-    if not await _table_exists(conn, "memoir_story_slots"):
-        return
-    await conn.execute(
-        text(
-            "DELETE FROM memoir_story_slots "
-            "WHERE status = 'missing' "
-            "AND resolution_actor_type IS NULL "
-            "AND NOT EXISTS ("
-            "SELECT 1 FROM memoir_story_slot_claims AS relation "
-            "WHERE relation.project_id = memoir_story_slots.project_id "
-            "AND relation.story_slot_id = memoir_story_slots.id"
-            ")"
-        )
-    )
-
-
 async def _ensure_decision_schema(conn) -> bool:
     table_name = "memoir_narrative_decisions"
     table_sql = await _table_sql(conn, table_name)
@@ -1599,7 +1580,6 @@ async def migrate_memoir_narrative_schema(engine: AsyncEngine) -> dict[str, obje
         changed_columns.extend(await _ensure_book_plan_chapter_include_column(conn))
         changed_columns.extend(await _ensure_followup_task_answer_use_column(conn))
         await _backfill_semantic_followup_task_target_slots(conn)
-        await _remove_derived_empty_story_slots(conn)
         changed_triggers.extend(await _ensure_decision_triggers(conn))
         changed_triggers.extend(await _ensure_interview_policy_triggers(conn))
         changed_triggers.extend(await _ensure_chapter_structure_triggers(conn))

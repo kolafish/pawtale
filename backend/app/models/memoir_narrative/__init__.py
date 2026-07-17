@@ -37,8 +37,6 @@ from .stories import (
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
 )
 
 __all__ = [
@@ -69,6 +67,4 @@ __all__ = [
     "MemoirStory",
     "MemoirStoryClaim",
     "MemoirStoryRevision",
-    "MemoirStorySlot",
-    "MemoirStorySlotClaim",
 ]

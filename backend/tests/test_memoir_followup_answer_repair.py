@@ -16,7 +16,6 @@ from app.domain.memoir.narrative_types import (
     MemoirFollowupAnswerKind,
     MemoirNarrativeActorType,
     MemoirNarrativeEntityType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryPublicationStatus,
     MemoirStoryType,
@@ -44,8 +43,6 @@ from app.models.memoir_narrative import (
     MemoirNarrativeGapClaim,
     MemoirStory,
     MemoirStoryClaim,
-    MemoirStorySlot,
-    MemoirStorySlotClaim,
     MemoirUtteranceInterviewAssignment,
 )
 from app.repositories.memoir_narrative import (
@@ -159,10 +156,8 @@ async def _repair_fixture(client, test_db):
         summary="想发消息但没有发出去。",
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         created_by=MemoirNarrativeActorType.AI.value,
         updated_by=MemoirNarrativeActorType.AI.value,
     )
@@ -201,25 +196,7 @@ async def _repair_fixture(client, test_db):
         is_core=True,
         created_by=MemoirNarrativeActorType.AI.value,
     )
-    slot = MemoirStorySlot(
-        project_id=project_id,
-        story_id=story.id,
-        schema_version="1",
-        slot_key="outcome",
-        status="partial",
-        assessment_summary="supports=1",
-    )
-    test_db.add_all([evidence, story_claim, slot])
-    await test_db.flush()
-    test_db.add(
-        MemoirStorySlotClaim(
-            project_id=project_id,
-            story_slot_id=slot.id,
-            claim_id=claim.id,
-            evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
-            created_by=MemoirNarrativeActorType.AI.value,
-        )
-    )
+    test_db.add_all([evidence, story_claim])
     event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -363,10 +340,8 @@ async def test_context_only_followup_repair_rejects_story_used_as_merge_target(
         summary="依赖待删除 Story 的合并记录。",
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.MERGED.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.NEEDS_VERIFICATION.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         merged_into_story_id=story.id,
         created_by=MemoirNarrativeActorType.AI.value,
         updated_by=MemoirNarrativeActorType.AI.value,

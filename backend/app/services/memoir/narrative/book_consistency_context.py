@@ -309,12 +309,7 @@ def book_consistency_signature(context: BookConsistencyContext) -> str:
                     [story.id, story.version, story.updated_at.isoformat()]
                     for story in sorted(chapter.stories.values(), key=lambda item: item.id)
                 ],
-                "slots": [
-                    [slot.id, slot.story_id, slot.slot_key, slot.status, slot.updated_at.isoformat()]
-                    for slots in chapter.slots.values()
-                    for slot in sorted(slots.values(), key=lambda item: item.slot_key)
-                ],
-            }
+                }
             for chapter in context.chapters
         ],
         "claims": [

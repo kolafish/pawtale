@@ -155,11 +155,6 @@ def chapter_completion_content_signature(context: ChapterAuditContext) -> str:
             ]
             for claim in sorted(context.claims.values(), key=lambda item: item.id)
         ],
-        "slots": [
-            [story_id, slot.slot_key, slot.status, slot.updated_at.isoformat()]
-            for story_id, slots in sorted(context.slots.items())
-            for slot in sorted(slots.values(), key=lambda item: item.slot_key)
-        ],
         "draft_blocks": [
             [
                 block.id,

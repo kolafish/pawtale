@@ -31,12 +31,10 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeGapSeverity,
     MemoirNarrativeGapStatus,
     MemoirNarrativeGapType,
-    MemoirStoryCompletionStatus,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
     MemoirStoryPublicationStatus,
     MemoirStoryRevisionChangeType,
-    MemoirStorySlotStatus,
     MemoirStoryType,
     MemoirStoryVerificationStatus,
 )
@@ -60,13 +58,11 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
-    MemoirStorySlot,
 )
 from app.schemas.memoir_narrative import (
     MemoirDraftBlockClaimSource,
     MemoirDraftBlockStorySource,
 )
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.narrative import chapter_contracts, draft_blocks, gaps
 from app.services.memoir.narrative.book_consistency_semantic import (
@@ -236,11 +232,9 @@ async def _create_ready_structured_book(
         time_end=datetime(1978, 9, 2),
         time_precision=MemoirClaimTimePrecision.DAY.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.SUFFICIENT.value,
         verification_status=MemoirStoryVerificationStatus.CONFIRMED.value,
         verification_decided_by_user_id=user_id,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         created_by=MemoirNarrativeActorType.USER.value,
         created_by_user_id=user_id,
         updated_by=MemoirNarrativeActorType.USER.value,
@@ -307,17 +301,6 @@ async def _create_ready_structured_book(
                 created_by_user_id=user_id,
             ),
             revision,
-            *[
-                MemoirStorySlot(
-                    project_id=project_id,
-                    story_id=story.id,
-                    schema_version="1",
-                    slot_key=slot_key,
-                    status=MemoirStorySlotStatus.SUFFICIENT.value,
-                    assessment_summary="已有事实支持。",
-                )
-                for slot_key in story_slot_schema(MemoirStoryType.EVENT).required_slot_keys
-            ],
         ]
     )
     await test_db.flush()
@@ -406,12 +389,6 @@ async def test_current_full_audit_is_required_before_formalizing_and_edits_reope
     )
     assert chapter_story is not None
     chapter_story.verification_status = MemoirStoryVerificationStatus.UNREVIEWED.value
-    for slot in (
-        await test_db.scalars(
-            select(MemoirStorySlot).where(MemoirStorySlot.story_id == chapter_story.id)
-        )
-    ).all():
-        slot.status = MemoirStorySlotStatus.MISSING.value
     await test_db.commit()
     unrelated_story = MemoirStory(
         project_id=project_id,
@@ -421,10 +398,8 @@ async def test_current_full_audit_is_required_before_formalizing_and_edits_reope
         summary="这条故事没有关联当前章节结构。",
         time_precision=MemoirClaimTimePrecision.UNKNOWN.value,
         lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        completion_status=MemoirStoryCompletionStatus.INCOMPLETE.value,
         verification_status=MemoirStoryVerificationStatus.UNREVIEWED.value,
         publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        slot_schema_version="1",
         created_by=MemoirNarrativeActorType.USER.value,
         created_by_user_id=user_id,
         updated_by=MemoirNarrativeActorType.USER.value,
@@ -471,10 +446,6 @@ async def test_current_full_audit_is_required_before_formalizing_and_edits_reope
     body = readiness.json()
     assert body["ready_for_formal"] is True
     assert body["audit_is_current"] is True
-    assert any(
-        item["code"].startswith("gap:")
-        for item in body["groups"]["suggested"]
-    )
 
     legacy_high_detail_gap = MemoirNarrativeGap(
         project_id=project_id,

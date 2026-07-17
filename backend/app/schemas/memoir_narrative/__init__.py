@@ -84,9 +84,6 @@ from .stories import (
     MemoirStoryMergeRequest,
     MemoirStoryResponse,
     MemoirStoryRevisionResponse,
-    MemoirStorySlotClaimResponse,
-    MemoirStorySlotResolutionRequest,
-    MemoirStorySlotResponse,
     MemoirStorySummaryResponse,
 )
 
@@ -159,8 +156,5 @@ __all__ = [
     "MemoirStoryMergeRequest",
     "MemoirStoryResponse",
     "MemoirStoryRevisionResponse",
-    "MemoirStorySlotClaimResponse",
-    "MemoirStorySlotResolutionRequest",
-    "MemoirStorySlotResponse",
     "MemoirStorySummaryResponse",
 ]

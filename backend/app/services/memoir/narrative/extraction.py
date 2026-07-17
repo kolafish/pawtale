@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter
-from copy import deepcopy
 import json
 import logging
 import re
@@ -11,7 +10,6 @@ from pydantic import ValidationError
 from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimType,
-    MemoirStoryType,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeExtraction
 from app.schemas.memoir_narrative.extraction import (
@@ -19,7 +17,6 @@ from app.schemas.memoir_narrative.extraction import (
     MemoirNarrativeExtractedEntity,
     MemoirNarrativeExtractedStory,
 )
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
@@ -174,18 +171,13 @@ def build_narrative_extraction_repair_prompt(
 必须遵守：
 - 输出完整 JSON，且只能输出 JSON。
 - narrative_role 只能是 background、trigger、action、turning_point、outcome、reflection、context。
-- narrative_role 和 slot_keys 是两个不同维度，禁止把任何槽位 key 填进 narrative_role。
-- event slot_keys：background、trigger、people、difficulty、actions、turning_point、outcome、reflection。
-- relationship slot_keys：meeting、person_portrait、shared_experience、relationship_change、representative_scene、reflection。
-- life_stage slot_keys：entry_reason、responsibilities、representative_events、ability_and_character、transition、reflection。
-- theme slot_keys：theme_definition、supporting_cases、contrast_or_failure、continuity、reflection。
 - time_start/time_end 必须同时为 null，或同时为完整 ISO 8601 datetime（例如 1982-01-01T00:00:00）。
 - relationship claim 必须同时引用已声明的 subject 和 object person entity。
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
 - Story 必须是可独立讲述的事件、持续关系、人生阶段或贯穿主题；孤立的时间、身份、属性、症状或背景事实只保留为 Claim。
 - 同一段经历的多条 Claim 应归入同一个 Story，不得拆成一批只有单个事实片段的微型 Story。
 - validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
-- active_followup 非空且原文确实回答该问题时，保留对 active_followup.story_id 和 active_followup.target_slot 的关联；原文无关时不得强行关联。
+- active_followup 非空且原文确实回答该问题时，保留对 active_followup.story_id 的关联；原文无关时不得强行关联。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
 
 active_followup:
@@ -204,33 +196,6 @@ invalid_response:
 
 def _validate_extraction(content: str) -> MemoirNarrativeExtraction:
     return MemoirNarrativeExtraction.model_validate(extract_json_payload(content))
-
-
-def _filter_story_slot_keys(raw_story: object) -> tuple[object, int]:
-    if not isinstance(raw_story, dict):
-        return raw_story, 0
-    try:
-        story_type = MemoirStoryType(raw_story.get("story_type"))
-    except (TypeError, ValueError):
-        return raw_story, 0
-    allowed_slots = set(story_slot_schema(story_type).slot_keys)
-    normalized_story = deepcopy(raw_story)
-    removed_count = 0
-    links = normalized_story.get("claims")
-    if not isinstance(links, list):
-        return normalized_story, 0
-    for link in links:
-        if not isinstance(link, dict) or not isinstance(link.get("slot_keys"), list):
-            continue
-        slot_keys = link["slot_keys"]
-        filtered = [
-            slot
-            for slot in slot_keys
-            if isinstance(slot, str) and slot in allowed_slots
-        ]
-        removed_count += len(slot_keys) - len(filtered)
-        link["slot_keys"] = filtered
-    return normalized_story, removed_count
 
 
 def _duplicate_item_keys(raw_items: list[object]) -> set[str]:
@@ -298,13 +263,11 @@ def _salvage_valid_extraction_items(
     stories: list[MemoirNarrativeExtractedStory] = []
     duplicate_story_keys = _duplicate_item_keys(raw_stories)
     story_keys: set[str] = set()
-    discarded_story_slot_key_count = 0
     for raw_story in raw_stories:
         if isinstance(raw_story, dict) and raw_story.get("key") in duplicate_story_keys:
             continue
-        normalized_story, removed_slot_count = _filter_story_slot_keys(raw_story)
         try:
-            story = MemoirNarrativeExtractedStory.model_validate(normalized_story)
+            story = MemoirNarrativeExtractedStory.model_validate(raw_story)
             MemoirNarrativeExtraction(
                 schema_version="1",
                 entities=entities,
@@ -317,7 +280,6 @@ def _salvage_valid_extraction_items(
             continue
         story_keys.add(story.key)
         stories.append(story)
-        discarded_story_slot_key_count += removed_slot_count
 
     extraction = MemoirNarrativeExtraction(
         schema_version="1",
@@ -329,7 +291,6 @@ def _salvage_valid_extraction_items(
         "discarded_entity_count": len(raw_entities) - len(entities),
         "discarded_claim_count": len(raw_claims) - len(claims),
         "discarded_story_count": len(raw_stories) - len(stories),
-        "discarded_story_slot_key_count": discarded_story_slot_key_count,
     }
 
 
@@ -443,8 +404,6 @@ source_text:
         {{
           "claim_key": "claim_1",
           "narrative_role": "background|trigger|action|turning_point|outcome|reflection|context",
-          "slot_keys": ["必须来自对应 story_type 的槽位 key"],
-          "evidence_role": "supports|contradicts",
           "is_core": true
         }}
       ]
@@ -465,13 +424,8 @@ source_text:
 - event 必须包含明确发生的行动、变化或转折；relationship 表达持续的人物关系；life_stage 表达一段人生阶段及其职责或转变；theme 用多个具体事例共同支撑一个贯穿主题。
 - 同一段经历的背景、行动、结果和感受应尽量归入同一个 Story；不要为了覆盖每条 Claim 而拆成多个只有一个事实片段的微型 Story。
 - 同一条 source_text 中多条可证实 Claim 共享同一非叙述者人物或地点锚点时，不得把这个候选簇留在 Story 之外；应按真实事件、关系或人生阶段分成一个或多个 Story，不得机械地按素材数量创建 Story。
-- narrative_role 描述叙事作用，slot_keys 描述结构槽位，两者不能混用。
-- event 槽位：background, trigger, people, difficulty, actions, turning_point, outcome, reflection。
-- relationship 槽位：meeting, person_portrait, shared_experience, relationship_change, representative_scene, reflection。
-- life_stage 槽位：entry_reason, responsibilities, representative_events, ability_and_character, transition, reflection。
-- theme 槽位：theme_definition, supporting_cases, contrast_or_failure, continuity, reflection。
 - 只有明确是同一件事时才填写 existing_story_id；它只是候选提示，不会绕过服务端校验。
-- active_followup 非空时，source_text 是用户对该问题的直接回答。若内容确实属于其中的目标故事，必须复用 active_followup.story_id，并优先标注 active_followup.target_slot；若内容无关，不得强行归入。
+- active_followup 非空时，source_text 是用户对该问题的直接回答。若内容确实属于其中的目标故事，必须复用 active_followup.story_id；若内容无关，不得强行归入。
 """
 
 
@@ -506,7 +460,6 @@ async def extract_narrative_state(
                 "discarded_entity_count": 0,
                 "discarded_claim_count": 0,
                 "discarded_story_count": 0,
-                "discarded_story_slot_key_count": 0,
                 "used_initial_response_after_repair": False,
                 "control_only_source": True,
             },
@@ -532,7 +485,6 @@ async def extract_narrative_state(
         "discarded_entity_count": 0,
         "discarded_claim_count": 0,
         "discarded_story_count": 0,
-        "discarded_story_slot_key_count": 0,
         "used_initial_response_after_repair": False,
     }
     try:
@@ -571,7 +523,6 @@ async def extract_narrative_state(
                     "discarded_entity_count": 0,
                     "discarded_claim_count": 0,
                     "discarded_story_count": 0,
-                    "discarded_story_slot_key_count": 0,
                 },
             )
         except (TypeError, ValueError, ValidationError) as repair_error:
@@ -602,13 +553,11 @@ async def extract_narrative_state(
         if any(discarded_counts.values()):
             logger.warning(
                 "AI narrative extraction retained valid items after repair; "
-                "source=%s discarded_entities=%s discarded_claims=%s discarded_stories=%s "
-                "discarded_story_slot_keys=%s",
+                "source=%s discarded_entities=%s discarded_claims=%s discarded_stories=%s",
                 source,
                 discarded_counts["discarded_entity_count"],
                 discarded_counts["discarded_claim_count"],
                 discarded_counts["discarded_story_count"],
-                discarded_counts["discarded_story_slot_key_count"],
             )
     return (
         extraction,

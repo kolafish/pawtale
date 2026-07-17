@@ -4,7 +4,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.domain.memoir.narrative_types import (
     MemoirClaimCertainty,
-    MemoirClaimEvidenceRole,
     MemoirClaimPredicate,
     MemoirClaimTimePrecision,
     MemoirClaimType,
@@ -12,7 +11,6 @@ from app.domain.memoir.narrative_types import (
     MemoirStoryNarrativeRole,
     MemoirStoryType,
 )
-from app.schemas.memoir_narrative.story_slots import story_slot_schema
 
 
 class MemoirNarrativeExtractedEntity(BaseModel):
@@ -101,20 +99,12 @@ class MemoirNarrativeExtractedStoryClaim(BaseModel):
 
     claim_key: str = Field(min_length=1, max_length=80)
     narrative_role: MemoirStoryNarrativeRole
-    slot_keys: list[str] = Field(default_factory=list, max_length=8)
-    evidence_role: MemoirClaimEvidenceRole = MemoirClaimEvidenceRole.SUPPORTS
     is_core: bool = False
 
     @field_validator("claim_key")
     @classmethod
     def strip_claim_key(cls, value: str) -> str:
         return value.strip()
-
-    @field_validator("slot_keys")
-    @classmethod
-    def normalize_slot_keys(cls, values: list[str]) -> list[str]:
-        return list(dict.fromkeys(value.strip() for value in values if value.strip()))
-
 
 class MemoirNarrativeExtractedStory(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -142,13 +132,9 @@ class MemoirNarrativeExtractedStory(BaseModel):
             raise ValueError("story normalized time requires both time_start and time_end")
         if self.time_start and self.time_end and self.time_end < self.time_start:
             raise ValueError("story time_end must not precede time_start")
-        schema = story_slot_schema(self.story_type)
         claim_keys = [claim.claim_key for claim in self.claims]
         if len(claim_keys) != len(set(claim_keys)):
             raise ValueError("story claim references must be unique")
-        referenced_slots = {slot_key for claim in self.claims for slot_key in claim.slot_keys}
-        if not referenced_slots.issubset(set(schema.slot_keys)):
-            raise ValueError("story claim references a slot outside the story schema")
         return self
 
 
