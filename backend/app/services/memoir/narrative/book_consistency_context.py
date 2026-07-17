@@ -29,7 +29,6 @@ from app.models.memoir_narrative import (
     MemoirNarrativeEntity,
     MemoirNarrativeDecision,
 )
-from app.services.memoir.narrative import completion_planner
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
     load_chapter_audit_context,
@@ -274,7 +273,6 @@ async def load_book_consistency_context(
 def book_consistency_signature(context: BookConsistencyContext) -> str:
     payload = {
         "engine_version": BOOK_CONSISTENCY_ENGINE_VERSION,
-        "gap_action_policy_version": completion_planner.GAP_ACTION_POLICY_VERSION,
         "plan": (
             [context.plan.id, context.plan.status, context.plan.updated_at.isoformat()]
             if context.plan

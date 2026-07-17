@@ -11,7 +11,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimEvidenceSourceType,
     MemoirClaimEvidenceSpeakerRole,
     MemoirClaimVerificationStatus,
-    MemoirFollowupAnswerInterpretationStatus,
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import (
@@ -24,6 +23,7 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirClaim,
     MemoirClaimEvidence,
+    MemoirStory,
 )
 from app.models.projects import Project
 from app.repositories.memoir_narrative import MemoirClaimRepository
@@ -39,7 +39,7 @@ from app.services.memoir.narrative import (
     chapter_contracts,
     decisions,
     entities,
-    followup_completion,
+    completion_items,
     stories,
     story_decisions,
     story_matching,
@@ -65,9 +65,9 @@ class NarrativeIngestionResult:
     reused_story_ids: tuple[str, ...]
     story_review_candidates: dict[str, tuple[str, ...]]
     changed_story_ids: tuple[str, ...]
-    followup_task_id: str | None
-    followup_task_status: str | None
-    answered_followup_task_ids: tuple[str, ...]
+    completion_item_id: str | None
+    completion_item_status: str | None
+    answered_completion_item_ids: tuple[str, ...]
     provider: str | None
     model: str | None
     extraction_diagnostics: dict[str, int | bool]
@@ -191,18 +191,21 @@ async def ingest_transcript_version(
     source_text = version.content
     speaker_role = _speaker_role(utterance)
     profile = entities.memoir_profile(project)
-    active_followup = await followup_completion.ingestion_context_for_utterance(
-        db,
-        project_id=project.id,
-        utterance=utterance,
+    active_item = (
+        await completion_items.get_item(
+            db,
+            project_id=project.id,
+            item_id=utterance.completion_item_id,
+        )
+        if utterance.completion_item_id
+        else None
     )
-    extraction_text = (
-        active_followup.direct_narrative_text
-        if active_followup
-        and active_followup.interpretation_status
-        == MemoirFollowupAnswerInterpretationStatus.RESOLVED.value
-        else source_text
+    active_story = (
+        await db.get(MemoirStory, active_item.story_id)
+        if active_item is not None and active_item.story_id
+        else None
     )
+    extraction_text = source_text
     existing_story_candidates = await story_matching.story_extraction_candidates(
         db,
         project_id=project.id,
@@ -213,17 +216,16 @@ async def ingest_transcript_version(
         narrator_name=str(profile.get("narrator_name") or "").strip(),
         narrator_origin=str(profile.get("narrator_origin") or "").strip(),
         existing_story_candidates=existing_story_candidates,
-        active_followup_context=(
+        active_completion_context=(
             {
-                "task_id": active_followup.task_id,
-                "question": active_followup.question,
-                "answer_kind": active_followup.answer_kind,
-                "story_id": active_followup.story_id,
-                "story_title": active_followup.story_title,
-                "story_type": active_followup.story_type,
-                "story_summary": active_followup.story_summary,
+                "completion_item_id": active_item.id,
+                "question": active_item.question,
+                "story_id": active_item.story_id,
+                "story_title": active_story.title if active_story else "",
+                "story_type": active_story.story_type if active_story else None,
+                "story_summary": active_story.summary if active_story else "",
             }
-            if active_followup
+            if active_item
             else None
         ),
         ai_model=ai_model,
@@ -363,11 +365,11 @@ async def ingest_transcript_version(
         if not valid_links:
             continue
         linked_claim_ids = {claims_by_key[link.claim_key].id for link in valid_links}
-        answers_active_followup = bool(
-            active_followup
-            and active_followup.story_id
-            and candidate.existing_story_id == active_followup.story_id
-            and candidate.story_type.value == active_followup.story_type
+        answers_active_item = bool(
+            active_item
+            and active_story
+            and candidate.existing_story_id == active_story.id
+            and candidate.story_type.value == active_story.story_type
         )
         story, review_candidates, created = await story_matching.resolve_extracted_story(
             db,
@@ -377,7 +379,7 @@ async def ingest_transcript_version(
             primary_place_entity_id=entity_ids.get(candidate.primary_place_entity_key or ""),
             claim_ids=linked_claim_ids,
             preferred_story_id=(
-                active_followup.story_id if answers_active_followup and active_followup else None
+                active_story.id if answers_active_item and active_story else None
             ),
             force_needs_verification=(
                 speaker_role == MemoirClaimEvidenceSpeakerRole.INTERVIEWER
@@ -415,11 +417,10 @@ async def ingest_transcript_version(
         if changed:
             changed_story_ids.add(story.id)
 
-    task_completion = await followup_completion.evaluate_after_narrative_ingestion(
+    completed_item = await completion_items.link_utterance_answer(
         db,
         project_id=project.id,
         utterance=utterance,
-        transcript_version=version,
     )
     if created_story_ids or changed_story_ids:
         await chapter_contracts.sync_system_drafts_for_utterance(
@@ -438,11 +439,15 @@ async def ingest_transcript_version(
         reused_story_ids=tuple(dict.fromkeys(reused_story_ids)),
         story_review_candidates=story_review_candidates,
         changed_story_ids=tuple(sorted(changed_story_ids)),
-        followup_task_id=task_completion.task_id,
-        followup_task_status=(
-            task_completion.status.value if task_completion.status else None
+        completion_item_id=completed_item.id if completed_item else None,
+        completion_item_status=completed_item.status if completed_item else None,
+        answered_completion_item_ids=(
+            (completed_item.id,)
+            if completed_item is not None
+            and utterance.completion_item_id == completed_item.id
+            and completed_item.status == MemoirCompletionItemStatus.RESOLVED.value
+            else ()
         ),
-        answered_followup_task_ids=task_completion.answered_task_ids,
         provider=provider,
         model=model,
         extraction_diagnostics=extraction_diagnostics,

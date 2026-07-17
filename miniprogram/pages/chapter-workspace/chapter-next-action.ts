@@ -12,7 +12,7 @@ export interface ChapterNextAction {
   detail: string;
   actionText: string;
   disabled: boolean;
-  taskId?: string;
+  itemId?: string;
 }
 
 export const LOADING_NEXT_ACTION: ChapterNextAction = {
@@ -32,6 +32,6 @@ export function chapterNextAction(
     detail: summary.next_action.detail,
     actionText: summary.next_action.action_text,
     disabled: summary.next_action.disabled,
-    taskId: summary.next_action.task_id || undefined,
+    itemId: summary.next_action.item_id || undefined,
   };
 }

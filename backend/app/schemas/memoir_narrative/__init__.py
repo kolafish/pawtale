@@ -1,9 +1,8 @@
 from .book_completion import (
     MemoirBookCompletionOverviewResponse,
-    MemoirChapterCompletionConfirmation,
+    MemoirChapterCompletionItem,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
-    MemoirChapterCompletionTask,
     MemoirChapterPreparationJobResponse,
 )
 from .book_consistency import (
@@ -18,6 +17,13 @@ from .book_consistency import (
     MemoirBookSemanticGapCandidate,
 )
 from .claims import MemoirClaimCreate, MemoirClaimEvidenceCreate
+from .completion_items import (
+    MemoirCompletionItemActionRequest,
+    MemoirCompletionItemDeferRequest,
+    MemoirCompletionOutcomeResponse,
+    MemoirCompletionItemResponse,
+    MemoirCompletionItemSwitchRequest,
+)
 from .chapter_structures import (
     MemoirChapterContractConstraints,
     MemoirChapterContractResponse,
@@ -45,29 +51,10 @@ from .draft_blocks import (
 )
 from .entities import MemoirNarrativeEntityCreate
 from .extraction import MemoirNarrativeExtraction
-from .fact_resolution import (
-    MemoirClaimConfirmationResolution,
-    MemoirClaimRejectionResolution,
-    MemoirEntityMergeResolution,
-    MemoirFactResolutionOperation,
-    MemoirFactResolutionPlan,
-)
 from .gaps import (
     MemoirChapterWorkspaceResponse,
     MemoirNarrativeGapCandidate,
-    MemoirNarrativeGapResolutionRequest,
-    MemoirNarrativeGapResponse,
     MemoirSemanticGapAuditOutput,
-)
-from .followup_tasks import (
-    MemoirCompletionOutcomeResponse,
-    MemoirFollowupTaskActionRequest,
-    MemoirFollowupTaskClaimResponse,
-    MemoirFollowupTaskDeferRequest,
-    MemoirFollowupTaskOutcomeRequest,
-    MemoirFollowupTaskResponse,
-    MemoirFollowupTaskSwitchRequest,
-    MemoirFollowupTaskAnswerResponse,
 )
 from .responses import (
     MemoirClaimResponse,
@@ -89,10 +76,9 @@ from .stories import (
 
 __all__ = [
     "MemoirBookCompletionOverviewResponse",
-    "MemoirChapterCompletionConfirmation",
+    "MemoirChapterCompletionItem",
     "MemoirChapterCompletionNextAction",
     "MemoirChapterCompletionSummary",
-    "MemoirChapterCompletionTask",
     "MemoirChapterPreparationJobResponse",
     "MemoirBookConsistencyAuditJobResponse",
     "MemoirBookConsistencyAuditRequest",
@@ -105,6 +91,10 @@ __all__ = [
     "MemoirBookSemanticGapCandidate",
     "MemoirClaimCreate",
     "MemoirClaimEvidenceCreate",
+    "MemoirCompletionItemActionRequest",
+    "MemoirCompletionItemDeferRequest",
+    "MemoirCompletionItemResponse",
+    "MemoirCompletionItemSwitchRequest",
     "MemoirChapterContractConstraints",
     "MemoirChapterContractResponse",
     "MemoirChapterContractSuggestionRequest",
@@ -130,24 +120,10 @@ __all__ = [
     "MemoirNarrativeEntityMergeRequest",
     "MemoirNarrativeEntityResponse",
     "MemoirNarrativeExtraction",
-    "MemoirClaimConfirmationResolution",
-    "MemoirClaimRejectionResolution",
-    "MemoirEntityMergeResolution",
-    "MemoirFactResolutionOperation",
-    "MemoirFactResolutionPlan",
     "MemoirChapterWorkspaceResponse",
     "MemoirNarrativeGapCandidate",
-    "MemoirNarrativeGapResolutionRequest",
-    "MemoirNarrativeGapResponse",
     "MemoirSemanticGapAuditOutput",
     "MemoirCompletionOutcomeResponse",
-    "MemoirFollowupTaskActionRequest",
-    "MemoirFollowupTaskClaimResponse",
-    "MemoirFollowupTaskDeferRequest",
-    "MemoirFollowupTaskOutcomeRequest",
-    "MemoirFollowupTaskResponse",
-    "MemoirFollowupTaskSwitchRequest",
-    "MemoirFollowupTaskAnswerResponse",
     "MemoirStoryClaimInput",
     "MemoirStoryClaimLinkResponse",
     "MemoirStoryClaimsAttachRequest",

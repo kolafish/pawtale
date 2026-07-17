@@ -3,12 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.domain.memoir.narrative_types import (
-    MemoirFollowupAnswerInterpretationStatus,
-    MemoirFollowupAnswerKind,
-)
 from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
@@ -343,23 +338,10 @@ class MemoirBookSourceRouteEvidence(BaseModel):
     reason: str = ""
 
 
-class MemoirFollowupAnswerInterpretationResponse(BaseModel):
-    task_id: str
-    status: MemoirFollowupAnswerInterpretationStatus
-    confirmation_type: Literal["answer_usage", "fact_resolution"] = "answer_usage"
-    answer_kind: MemoirFollowupAnswerKind | None = None
-    direct_narrative_text: str = ""
-    clarification_text: str = ""
-    fact_resolution_text: str = ""
-    confirmation_question: str = ""
-    reason: str
-
-
 class MemoirBookSourceRouteResponse(BaseModel):
     material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
     action: Literal[
         "assign_to_chapter",
-        "record_as_context",
         "suggest_new_chapter",
         "hold_for_review",
         "ignore",
@@ -371,108 +353,8 @@ class MemoirBookSourceRouteResponse(BaseModel):
     suggested_title: str | None = None
     confidence: float = Field(ge=0, le=1)
     reason: str
-    assignment_basis: Literal["ai", "completion_task"] = "ai"
-    followup_answer: MemoirFollowupAnswerInterpretationResponse | None = None
+    assignment_basis: Literal["ai", "completion_item"] = "ai"
     evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
-
-
-class MemoirBookSourceReviewCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    utterance_id: str
-
-    @field_validator("utterance_id")
-    @classmethod
-    def _valid_utterance_id(cls, value: str) -> str:
-        utterance_id = value.strip()
-        if not utterance_id:
-            raise ValueError("讲述记录不能为空")
-        return utterance_id
-
-
-class MemoirBookSourceReviewConfirmRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    chapter_id: str | None = None
-    create_new_chapter_title: str | None = None
-    ai_model: str | None = None
-    followup_answer_kind: MemoirFollowupAnswerKind | None = None
-    direct_narrative_text: str = ""
-    clarification_text: str = ""
-    fact_resolution_text: str = ""
-
-    @field_validator("chapter_id", "create_new_chapter_title", "ai_model")
-    @classmethod
-    def _valid_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
-    @field_validator(
-        "direct_narrative_text",
-        "clarification_text",
-        "fact_resolution_text",
-    )
-    @classmethod
-    def _normalize_answer_text(cls, value: str) -> str:
-        return value.strip()
-
-    @model_validator(mode="after")
-    def _valid_followup_answer_shape(self):
-        populated = {
-            MemoirFollowupAnswerKind.DIRECT_NARRATIVE: bool(self.direct_narrative_text),
-            MemoirFollowupAnswerKind.CLARIFICATION: bool(self.clarification_text),
-            MemoirFollowupAnswerKind.FACT_RESOLUTION: bool(self.fact_resolution_text),
-        }
-        if self.followup_answer_kind is None:
-            if any(populated.values()):
-                raise ValueError("确认补全回答文本时必须选择回答用途")
-            return self
-        if self.followup_answer_kind == MemoirFollowupAnswerKind.MIXED:
-            if sum(populated.values()) < 2:
-                raise ValueError("混合回答必须至少拆分出两种用途")
-        elif not populated[self.followup_answer_kind] or sum(populated.values()) != 1:
-            raise ValueError("回答用途与确认文本不一致")
-        return self
-
-
-class MemoirBookSourceReviewItemResponse(BaseModel):
-    id: str
-    project_id: str
-    status: MemoirAutomationEventStatus
-    utterance_id: str
-    source_index: int
-    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
-    route_action: Literal[
-        "assign_to_chapter",
-        "record_as_context",
-        "suggest_new_chapter",
-        "hold_for_review",
-        "ignore",
-    ]
-    target_chapter_id: str | None = None
-    target_chapter_title: str | None = None
-    suggested_title: str | None = None
-    confidence: float | None = None
-    reason: str
-    summary_text: str
-    source_text: str = ""
-    followup_answer: MemoirFollowupAnswerInterpretationResponse | None = None
-    evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
-    metadata_json: dict[str, object] = Field(default_factory=dict)
-    created_at: datetime
-    updated_at: datetime
-
-
-class MemoirBookSourceReviewListResponse(BaseModel):
-    items: list[MemoirBookSourceReviewItemResponse] = Field(default_factory=list)
-    total: int
-
-
-class MemoirBookSourceReviewConfirmResponse(BaseModel):
-    item: MemoirBookSourceReviewItemResponse
-    plan: MemoirBookPlanResponse
 
 
 class MemoirBookSourceAutoAssignmentRunRequest(BaseModel):
@@ -497,7 +379,6 @@ class MemoirBookSourceAutoAssignmentItemResponse(BaseModel):
     material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
     action: Literal[
         "assign_to_chapter",
-        "record_as_context",
         "suggest_new_chapter",
         "hold_for_review",
         "ignore",

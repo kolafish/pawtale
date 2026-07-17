@@ -16,7 +16,6 @@ class MemoirNarrativeDecisionCreate(BaseModel):
     action: MemoirNarrativeDecisionAction
     actor_type: MemoirNarrativeActorType
     actor_user_id: str | None = Field(default=None, max_length=36)
-    source_followup_task_answer_id: str | None = Field(default=None, max_length=36)
     source_transcript_version_id: str | None = Field(default=None, max_length=36)
     before_state: dict
     after_state: dict
@@ -27,7 +26,6 @@ class MemoirNarrativeDecisionCreate(BaseModel):
         "project_id",
         "target_id",
         "actor_user_id",
-        "source_followup_task_answer_id",
         "source_transcript_version_id",
         "reason",
         "idempotency_key",
@@ -40,12 +38,6 @@ class MemoirNarrativeDecisionCreate(BaseModel):
     def validate_actor(self):
         if self.actor_type == MemoirNarrativeActorType.USER and not self.actor_user_id:
             raise ValueError("user decision requires actor_user_id")
-        if bool(self.source_followup_task_answer_id) != bool(
-            self.source_transcript_version_id
-        ):
-            raise ValueError(
-                "follow-up decision source requires both task answer and transcript version"
-            )
         return self
 
 

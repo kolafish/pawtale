@@ -3,7 +3,6 @@ from __future__ import annotations
 from hashlib import sha256
 
 import pytest
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.memoir.interview_policy import (
@@ -22,15 +21,13 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirFollowupTask,
+    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
-    MemoirNarrativeGap,
-    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
 from app.services.memoir.project_deletion import delete_project
-from app.services.memoir.narrative import followup_tasks, interview_policy
+from app.services.memoir.narrative import interview_policy
 
 
 def test_open_narration_candidate_builder_respects_safety_constraints():
@@ -85,7 +82,7 @@ def test_interview_brief_fingerprint_is_stable_and_contains_only_references():
         current_story_state=MemoirInterviewStoryState.ACTIVE,
         conversation_momentum=MemoirConversationMomentum.STEADY,
         existing_material_refs=("story-2", "story-1"),
-        unresolved_gap_ids=("gap-2", "gap-1"),
+        unresolved_item_ids=("item-2", "item-1"),
         user_preferences={
             "pace": "slow",
             "private_note": "不要把这段原话写进日志",
@@ -96,7 +93,7 @@ def test_interview_brief_fingerprint_is_stable_and_contains_only_references():
 
     assert first == second
     assert first["existing_material_refs"] == ["story-1", "story-2"]
-    assert first["unresolved_gap_ids"] == ["gap-1", "gap-2"]
+    assert first["unresolved_item_ids"] == ["item-1", "item-2"]
     assert first["user_preference_snapshot"] == {"pace": "slow"}
     assert len(str(first["brief_fingerprint"])) == 64
     assert "opening_question" not in first
@@ -174,7 +171,7 @@ async def test_policy_decision_message_and_user_response_are_traceable(test_db):
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        followup_task=None,
+        completion_item=None,
     )
     await interview_policy.record_response_outcome(
         test_db,
@@ -189,14 +186,9 @@ async def test_policy_decision_message_and_user_response_are_traceable(test_db):
     )
     await test_db.commit()
 
-    persisted_assignment = await test_db.scalar(
-        select(MemoirUtteranceInterviewAssignment).where(
-            MemoirUtteranceInterviewAssignment.utterance_id == utterance.id,
-        )
-    )
+    persisted_assignment = await test_db.get(MemoirVoiceUtterance, assignment.id)
     assert persisted_assignment is not None
-    assert persisted_assignment.id == assignment.id
-    assert persisted_assignment.followup_task_id is None
+    assert persisted_assignment.completion_item_id is None
     assert persisted_assignment.policy_decision_id == decision.id
     persisted_decision = await test_db.get(MemoirInterviewPolicyDecision, decision.id)
     assert persisted_decision is not None
@@ -252,7 +244,7 @@ async def test_policy_selection_and_assignment_target_are_immutable(test_db):
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        followup_task=None,
+        completion_item=None,
     )
     await test_db.commit()
     assignment_id = assignment.id
@@ -264,17 +256,9 @@ async def test_policy_selection_and_assignment_target_are_immutable(test_db):
     except IntegrityError:
         await test_db.rollback()
 
-    assignment = await test_db.get(
-        MemoirUtteranceInterviewAssignment,
-        assignment_id,
-    )
+    assignment = await test_db.get(MemoirVoiceUtterance, assignment_id)
     assert assignment is not None
-    assignment.followup_task_id = "not-a-real-task"
-    try:
-        await test_db.commit()
-        raise AssertionError("assignment target update should be rejected")
-    except IntegrityError:
-        await test_db.rollback()
+    assert assignment.completion_item_id is None
 
 
 async def test_policy_decision_rejects_action_outside_persisted_candidates(test_db):
@@ -311,7 +295,7 @@ async def test_policy_decision_rejects_action_outside_persisted_candidates(test_
         await test_db.rollback()
 
 
-async def test_project_deletion_removes_policy_and_assignment_before_followup_task(
+async def test_project_deletion_removes_policy_and_completion_item(
     test_db,
 ):
     project = Project(type="memoir", title="删除策略数据")
@@ -324,40 +308,26 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
     )
     test_db.add(session)
     await test_db.flush()
-    gap = MemoirNarrativeGap(
+    item = MemoirCompletionItem(
         project_id=project.id,
         scope_type="book",
-        gap_type="relationship",
+        item_type="relationship",
         severity="medium",
+        dimension="relationship_clarity",
         title="人物关系",
+        description="补充人物关系",
         fingerprint=sha256(b"project-delete-policy").hexdigest(),
-        status="open",
-        detected_by="rules",
-    )
-    test_db.add(gap)
-    await test_db.flush()
-    task = MemoirFollowupTask(
-        project_id=project.id,
-        gap_id=gap.id,
+        action="interview",
         question="当时是什么关系？",
-        purpose="补充人物关系",
         priority=1,
         status="in_progress",
-        assigned_session_id=session.id,
-        started_at=session.created_at,
-        created_by="system",
+        detected_by="rules",
     )
-    test_db.add(task)
+    test_db.add(item)
     await test_db.flush()
-    session.current_followup_task_id = task.id
-    task = await followup_tasks.get_task(
-        test_db,
-        project_id=project.id,
-        task_id=task.id,
-    )
-    assert task is not None
-    brief = interview_policy.followup_task_brief(
-        task=task,
+    session.current_completion_item_id = item.id
+    brief = interview_policy.completion_item_brief(
+        item=item,
         current_story_state=MemoirInterviewStoryState.ACTIVE,
         conversation_momentum=MemoirConversationMomentum.STEADY,
     )
@@ -380,7 +350,7 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        followup_task=task,
+        completion_item=item,
         policy_decision=decision,
     )
     evaluation = await interview_policy.record_human_evaluation(
@@ -394,6 +364,7 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
     decision_id = decision.id
     evaluation_id = evaluation.id
     assignment_id = assignment.id
+    item_id = item.id
     project_id = project.id
 
     await delete_project(test_db, project)
@@ -402,4 +373,5 @@ async def test_project_deletion_removes_policy_and_assignment_before_followup_ta
     assert await test_db.get(Project, project_id) is None
     assert await test_db.get(MemoirInterviewPolicyDecision, decision_id) is None
     assert await test_db.get(MemoirInterviewPolicyEvaluation, evaluation_id) is None
-    assert await test_db.get(MemoirUtteranceInterviewAssignment, assignment_id) is None
+    assert await test_db.get(MemoirVoiceUtterance, assignment_id) is None
+    assert await test_db.get(MemoirCompletionItem, item_id) is None

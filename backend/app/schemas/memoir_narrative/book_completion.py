@@ -16,13 +16,12 @@ MemoirBookCompletionState = Literal[
     "confirmed",
     "failed",
 ]
-MemoirChapterCompletionTaskStatus = Literal["pending", "in_progress", "deferred"]
+MemoirChapterCompletionItemStatus = Literal["pending", "in_progress", "deferred"]
 MemoirChapterCompletionNextActionKind = Literal[
     "prepare",
     "wait",
-    "continue_confirmation",
     "start_interview",
-    "confirm_fact",
+    "confirm",
     "review_draft",
     "complete",
 ]
@@ -43,21 +42,14 @@ class MemoirChapterCompletionNextAction(BaseModel):
     detail: str
     action_text: str = ""
     disabled: bool = False
-    task_id: str | None = None
-    confirmation_id: str | None = None
+    item_id: str | None = None
 
 
-class MemoirChapterCompletionTask(BaseModel):
+class MemoirChapterCompletionItem(BaseModel):
     id: str
     question: str
-    status: MemoirChapterCompletionTaskStatus
+    status: MemoirChapterCompletionItemStatus
     active_session_id: str | None = None
-
-
-class MemoirChapterCompletionConfirmation(BaseModel):
-    id: str
-    question: str
-    detail: str
 
 
 class MemoirChapterCompletionSummary(BaseModel):
@@ -66,8 +58,7 @@ class MemoirChapterCompletionSummary(BaseModel):
     sort_order: int
     state: MemoirBookCompletionState
     next_action: MemoirChapterCompletionNextAction
-    active_task: MemoirChapterCompletionTask | None = None
-    confirmation: MemoirChapterCompletionConfirmation | None = None
+    active_item: MemoirChapterCompletionItem | None = None
     headline: str
     detail: str
 

@@ -46,13 +46,12 @@ class MemoirBookReadinessBlocker(BaseModel):
     story_id: str | None = None
     claim_id: str | None = None
     draft_block_id: str | None = None
-    gap_id: str | None = None
+    completion_item_id: str | None = None
 
 
 class MemoirBookReadinessGroups(BaseModel):
     must_handle: list[MemoirBookReadinessBlocker] = Field(default_factory=list)
     suggested: list[MemoirBookReadinessBlocker] = Field(default_factory=list)
-    accepted_incomplete: list[MemoirBookReadinessBlocker] = Field(default_factory=list)
 
 
 class MemoirBookReadinessResponse(BaseModel):

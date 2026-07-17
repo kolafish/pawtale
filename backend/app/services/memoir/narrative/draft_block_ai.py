@@ -6,10 +6,7 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.domain.memoir.narrative_types import (
-    MemoirDraftBlockRole,
-    MemoirFollowupAnswerKind,
-)
+from app.domain.memoir.narrative_types import MemoirDraftBlockRole
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 
@@ -73,21 +70,6 @@ class DraftBlockStoryInput(BaseModel):
     claims: list[DraftBlockClaimInput] = Field(default_factory=list)
 
 
-class DraftBlockEditorialContextInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    relation_id: str
-    task_id: str
-    utterance_id: str
-    transcript_version_id: str | None = None
-    story_id: str | None = None
-    question: str
-    purpose: str
-    answer_kind: MemoirFollowupAnswerKind
-    clarification_text: str = ""
-    fact_resolution_text: str = ""
-
-
 class DraftBlockGenerationInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -102,9 +84,6 @@ class DraftBlockGenerationInput(BaseModel):
     node_purpose: str
     block_role: MemoirDraftBlockRole
     stories: list[DraftBlockStoryInput] = Field(default_factory=list)
-    editorial_contexts: list[DraftBlockEditorialContextInput] = Field(
-        default_factory=list
-    )
     previous_block_context: str = ""
     next_block_context: str = ""
     feedback: str = ""
@@ -174,8 +153,6 @@ def _prompt(context: DraftBlockGenerationInput) -> str:
 - closing 最多一句，只使用 outcome/reflection Claim，不重复 reflection 或 factual 块。
 - transition 块只衔接相邻短上下文，不新增事实，used_claim_ids 必须为空。
 - previous_block_context 和 next_block_context 只用于避免断裂，不得据此创造新事实。
-- editorial_contexts 是对已有内容的编辑解释或事实判定，不是正文事实来源：只能帮助理解、删改和组织已有 Claim，绝不能照抄、转述或作为新事件写入正文。
-- clarification_text 只解释原文或章节关系；fact_resolution_text 只解释用户作出的事实判断。事实表述仍以当前允许使用的 Claim 为唯一依据。
 - feedback 只控制当前块的表达，不能改变事实。
 """
 
@@ -198,40 +175,6 @@ def validate_generation_output(
     ]
     if embedded_unsupported:
         raise ValueError("draft block contains unsupported fact candidates")
-    normalized_claim_statements = {
-        _normalized_for_comparison(claim.statement)
-        for story in context.stories
-        for claim in story.claims
-        if claim.claim_id in output.used_claim_ids
-    }
-    for editorial_context in context.editorial_contexts:
-        for editorial_text in (
-            editorial_context.clarification_text,
-            editorial_context.fact_resolution_text,
-        ):
-            fragments = {
-                normalized
-                for normalized in (
-                    _normalized_for_comparison(editorial_text),
-                    *_normalized_sentences(editorial_text),
-                )
-                if len(normalized) >= 8
-            }
-            unsupported_fragments = {
-                fragment
-                for fragment in fragments
-                if not any(
-                    fragment in statement
-                    for statement in normalized_claim_statements
-                )
-            }
-            if any(
-                fragment in normalized_content
-                for fragment in unsupported_fragments
-            ):
-                raise ValueError(
-                    "draft block copied non-narrative editorial context into content"
-                )
     if context.block_role == MemoirDraftBlockRole.FACTUAL and not output.used_claim_ids:
         raise ValueError("factual draft block must cite at least one allowed claim")
     if (

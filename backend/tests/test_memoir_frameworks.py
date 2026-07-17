@@ -27,15 +27,12 @@ from app.domain.memoir.narrative_types import (
     MemoirNarrativeActorType,
 )
 from app.domain.memoir.types import MemoirEditingJobType
-from app.migrations.memoir_narrative import _ensure_assignment_framework_schema
 from app.models.memoir import MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_narrative import (
     MemoirClaim,
+    MemoirCompletionItem,
     MemoirFrameworkItem,
     MemoirFrameworkItemClaim,
-    MemoirFollowupTask,
-    MemoirNarrativeGap,
-    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
 from app.models.users import User
@@ -149,13 +146,8 @@ async def test_framework_initialization_is_idempotent_and_saves_snapshot(test_db
         for item in first.items
     )
     assert await test_db.scalar(
-        select(MemoirNarrativeGap.id).where(
-            MemoirNarrativeGap.project_id == project.id
-        )
-    ) is None
-    assert await test_db.scalar(
-        select(MemoirFollowupTask.id).where(
-            MemoirFollowupTask.project_id == project.id
+        select(MemoirCompletionItem.id).where(
+            MemoirCompletionItem.project_id == project.id
         )
     ) is None
 
@@ -462,9 +454,9 @@ async def test_successful_ingestion_schedules_passive_topic_matching(
             reused_story_ids=(),
             story_review_candidates={},
             changed_story_ids=(),
-            followup_task_id=None,
-            followup_task_status=None,
-            answered_followup_task_ids=(),
+            completion_item_id=None,
+            completion_item_status=None,
+            answered_completion_item_ids=(),
             provider="test",
             model="test",
             extraction_diagnostics={},
@@ -519,128 +511,23 @@ async def test_framework_assignment_validates_project_and_is_immutable(test_db):
         await interview_policy.assign_utterance(
             test_db,
             utterance=utterance,
-            followup_task=None,
+            completion_item=None,
             framework_item=second_framework.items[0],
         )
 
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        followup_task=None,
+        completion_item=None,
         framework_item=first_framework.items[0],
     )
     repeated = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        followup_task=None,
+        completion_item=None,
         framework_item=first_framework.items[0],
     )
 
     assert repeated.id == assignment.id
     assert assignment.framework_item_id == first_framework.items[0].id
-    assert assignment.followup_task_id is None
-
-
-async def test_assignment_framework_migration_preserves_existing_targets():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    session_maker = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                text(
-                    "DROP TABLE memoir_utterance_interview_assignments"
-                )
-            )
-            await conn.execute(
-                text(
-                    "CREATE TABLE memoir_utterance_interview_assignments ("
-                    "id VARCHAR(36) NOT NULL PRIMARY KEY, "
-                    "utterance_id VARCHAR(36) NOT NULL UNIQUE, "
-                    "followup_task_id VARCHAR(36), "
-                    "policy_decision_id VARCHAR(36), "
-                    "created_at DATETIME NOT NULL, "
-                    "FOREIGN KEY(utterance_id) "
-                    "REFERENCES memoir_voice_utterances(id) ON DELETE CASCADE, "
-                    "FOREIGN KEY(followup_task_id) "
-                    "REFERENCES memoir_followup_tasks(id), "
-                    "FOREIGN KEY(policy_decision_id) "
-                    "REFERENCES memoir_interview_policy_decisions(id)"
-                    ")"
-                )
-            )
-        async with session_maker() as db:
-            project = Project(type="memoir", title="迁移")
-            db.add(project)
-            await db.flush()
-            session = MemoirVoiceSession(project_id=project.id)
-            db.add(session)
-            await db.flush()
-            utterance = MemoirVoiceUtterance(
-                voice_session_id=session.id,
-                transcript_raw="迁移前回答",
-            )
-            db.add(utterance)
-            await db.flush()
-            await db.execute(
-                text(
-                    "INSERT INTO memoir_utterance_interview_assignments "
-                    "(id, utterance_id, followup_task_id, policy_decision_id, created_at) "
-                    "VALUES ('assignment-1', :utterance_id, NULL, NULL, CURRENT_TIMESTAMP)"
-                ),
-                {"utterance_id": utterance.id},
-            )
-            await db.commit()
-
-        assert await _ensure_assignment_framework_schema(engine) is True
-        async with engine.begin() as conn:
-            columns = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text(
-                            "PRAGMA table_info("
-                            "memoir_utterance_interview_assignments)"
-                        )
-                    )
-                ).all()
-            }
-            row = (
-                await conn.execute(
-                    text(
-                        "SELECT id, framework_item_id, followup_task_id "
-                        "FROM memoir_utterance_interview_assignments"
-                    )
-                )
-            ).one()
-            table_sql = str(
-                (
-                    await conn.execute(
-                        text(
-                            "SELECT sql FROM sqlite_master "
-                            "WHERE type='table' AND "
-                            "name='memoir_utterance_interview_assignments'"
-                        )
-                    )
-                ).scalar_one()
-            )
-        assert "framework_item_id" in columns
-        assert tuple(row) == ("assignment-1", None, None)
-        assert "ck_memoir_utterance_interview_assignments_one_target" in table_sql
-
-        async with session_maker() as db:
-            assignment = await db.get(
-                MemoirUtteranceInterviewAssignment,
-                "assignment-1",
-            )
-            assignment.framework_item_id = "framework-item"
-            assignment.followup_task_id = "followup-task"
-            with pytest.raises(IntegrityError):
-                await db.flush()
-    finally:
-        await engine.dispose()
+    assert assignment.completion_item_id is None

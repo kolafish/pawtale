@@ -59,7 +59,7 @@ class InterviewBrief:
     user_preferences: Mapping[str, object]
     safety_constraints: tuple[str, ...]
     existing_material: tuple[str, ...]
-    unresolved_gaps: tuple[str, ...]
+    unresolved_items: tuple[str, ...]
     known_claims: tuple[str, ...]
     do_not_repeat_claims: tuple[str, ...]
     candidate_topic_ids: tuple[str, ...]
@@ -150,7 +150,7 @@ def brief_context_snapshot(brief: InterviewBrief) -> dict[str, object]:
             if brief.source_kind == MemoirInterviewBriefSourceKind.FRAMEWORK
             else None
         ),
-        "followup_task_id": (
+        "completion_item_id": (
             brief.target_id
             if brief.source_kind == MemoirInterviewBriefSourceKind.BOOK_COMPLETION
             else None
@@ -167,7 +167,7 @@ def brief_context_snapshot(brief: InterviewBrief) -> dict[str, object]:
             brief.safety_constraints
         ),
         "existing_material_refs": sorted(set(brief.existing_material)),
-        "unresolved_gap_ids": sorted(set(brief.unresolved_gaps)),
+        "unresolved_item_ids": sorted(set(brief.unresolved_items)),
         "known_claim_ids": sorted(set(brief.known_claims)),
         "do_not_repeat_claim_ids": sorted(set(brief.do_not_repeat_claims)),
         "candidate_framework_item_ids": sorted(

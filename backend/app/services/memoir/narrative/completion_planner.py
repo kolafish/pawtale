@@ -1,26 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from app.domain.memoir.narrative_types import (
-    MemoirNarrativeGapActionDecisionSource,
     MemoirNarrativeGapActionReasonCode,
     MemoirNarrativeGapRecommendedAction,
     MemoirNarrativeGapScopeType,
     MemoirNarrativeGapType,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
-
-
-GAP_ACTION_POLICY_VERSION = "1"
-
-
-@dataclass(frozen=True)
-class GapActionPlan:
-    recommended_action: MemoirNarrativeGapRecommendedAction
-    reason_code: MemoirNarrativeGapActionReasonCode
-    decision_source: MemoirNarrativeGapActionDecisionSource
-    policy_version: str
 
 
 _ACTION_BY_REASON = {
@@ -37,9 +23,6 @@ _ACTION_BY_REASON = {
         MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW
     ),
     MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED: (
-        MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW
-    ),
-    MemoirNarrativeGapActionReasonCode.MIGRATION_REVIEW_REQUIRED: (
         MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW
     ),
 }
@@ -86,14 +69,10 @@ def _reason_for_candidate(
         MemoirNarrativeGapType.UNCLEAR_REFERENCE,
     }:
         return MemoirNarrativeGapActionReasonCode.MISSING_NEW_EVIDENCE
-    return MemoirNarrativeGapActionReasonCode.MIGRATION_REVIEW_REQUIRED
+    return MemoirNarrativeGapActionReasonCode.PUBLICATION_DECISION_REQUIRED
 
 
-def plan_gap_action(candidate: MemoirNarrativeGapCandidate) -> GapActionPlan:
-    reason_code = _reason_for_candidate(candidate)
-    return GapActionPlan(
-        recommended_action=_ACTION_BY_REASON[reason_code],
-        reason_code=reason_code,
-        decision_source=MemoirNarrativeGapActionDecisionSource.DETERMINISTIC_POLICY,
-        policy_version=GAP_ACTION_POLICY_VERSION,
-    )
+def action_for_candidate(
+    candidate: MemoirNarrativeGapCandidate,
+) -> MemoirNarrativeGapRecommendedAction:
+    return _ACTION_BY_REASON[_reason_for_candidate(candidate)]

@@ -4,15 +4,14 @@ from datetime import UTC, datetime
 from hashlib import sha256
 import json
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
-    MemoirFollowupTaskStatus,
-    MemoirNarrativeActorType,
+    MemoirCompletionItemStatus,
+    MemoirNarrativeGapDetectedBy,
     MemoirNarrativeGapRecommendedAction,
-    MemoirNarrativeGapStatus,
 )
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -22,8 +21,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirEditingJob
 from app.models.memoir_narrative import (
-    MemoirFollowupTask,
-    MemoirNarrativeGap,
+    MemoirCompletionItem,
 )
 from app.schemas.memoir_narrative import MemoirNarrativeGapCandidate
 from app.services.ai_types import AITextClient
@@ -31,11 +29,10 @@ from app.services.memoir import automation_events
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import (
     completion_planner,
+    completion_items,
     draft_blocks,
     draft_generation_jobs,
-    followup_planner,
     gap_semantic,
-    gaps,
 )
 from app.services.memoir.narrative.gap_rules import (
     ChapterAuditContext,
@@ -53,7 +50,7 @@ def _persistent_candidates(
     return [
         candidate
         for candidate in candidates
-        if completion_planner.plan_gap_action(candidate).recommended_action
+        if completion_planner.action_for_candidate(candidate)
         != MemoirNarrativeGapRecommendedAction.EDITORIAL
     ]
 
@@ -69,7 +66,7 @@ def _editorial_guidance(
                 if part
             )
             for candidate in candidates
-            if completion_planner.plan_gap_action(candidate).recommended_action
+            if completion_planner.action_for_candidate(candidate)
             == MemoirNarrativeGapRecommendedAction.EDITORIAL
         )
     )[:12]
@@ -81,40 +78,34 @@ async def _user_confirmation_guidance(
     project_id: str,
     chapter_id: str,
 ) -> list[str]:
-    confirmed_gaps = list(
+    confirmed_items = list(
         (
             await db.scalars(
-                select(MemoirNarrativeGap)
+                select(MemoirCompletionItem)
                 .where(
-                    MemoirNarrativeGap.project_id == project_id,
-                    MemoirNarrativeGap.status == MemoirNarrativeGapStatus.RESOLVED.value,
-                    MemoirNarrativeGap.resolved_by
-                    == MemoirNarrativeActorType.USER.value,
-                    MemoirNarrativeGap.recommended_action
+                    MemoirCompletionItem.project_id == project_id,
+                    MemoirCompletionItem.chapter_id == chapter_id,
+                    MemoirCompletionItem.status
+                    == MemoirCompletionItemStatus.RESOLVED.value,
+                    MemoirCompletionItem.action
                     == MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW.value,
-                    MemoirNarrativeGap.resolution_note != "",
-                    or_(
-                        MemoirNarrativeGap.primary_chapter_id == chapter_id,
-                        MemoirNarrativeGap.chapters.any(chapter_id=chapter_id),
-                    ),
+                    MemoirCompletionItem.outcome_note != "",
                 )
-                .order_by(MemoirNarrativeGap.resolved_at.desc())
+                .order_by(MemoirCompletionItem.completed_at.desc())
                 .limit(12)
             )
         ).all()
     )
     return [
-        f"用户确认“{gap.title}”的准确说法：{gap.resolution_note.strip()}"
-        for gap in confirmed_gaps
-        if gap.resolution_note.strip()
+        f"用户确认“{item.title}”的准确说法：{item.outcome_note.strip()}"
+        for item in confirmed_items
+        if item.outcome_note.strip()
     ]
 
 
 def chapter_completion_content_signature(context: ChapterAuditContext) -> str:
     payload = {
         "engine_version": COMPLETION_REFRESH_ENGINE_VERSION,
-        "gap_action_policy_version": completion_planner.GAP_ACTION_POLICY_VERSION,
-        "followup_planner_version": followup_planner.FOLLOWUP_PLANNER_VERSION,
         "chapter_id": context.chapter.id,
         "chapter_title": context.chapter.title,
         "contract": (
@@ -339,7 +330,7 @@ async def run_chapter_completion_refresh_job(
         )
 
     # End the analysis transaction before validating and atomically publishing
-    # the planned Gap/Task revision.
+    # the planned completion revision.
     await db.rollback()
     db.expire_all()
     await db.refresh(job)
@@ -372,10 +363,10 @@ async def run_chapter_completion_refresh_job(
             error_message="chapter content changed during refresh analysis",
         )
 
-    # Establish the database write transaction before Gap upserts open their
-    # uniqueness savepoints. SQLite otherwise treats the first SAVEPOINT as the
-    # outer transaction and releasing it can make partial Gap writes survive a
-    # later rollback. The job row is already owned by this worker lease.
+    # Establish the database write transaction before completion upserts open
+    # their uniqueness savepoints. SQLite otherwise treats the first SAVEPOINT
+    # as the outer transaction, and releasing it can make partial writes survive
+    # a later rollback. The job row is already owned by this worker lease.
     job.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(job)
     await db.flush()
@@ -397,71 +388,53 @@ async def run_chapter_completion_refresh_job(
         )
     )[:12]
 
-    _, deterministic_created = await gaps.upsert_gaps(
+    _, deterministic_created = await completion_items.upsert_candidates(
         db,
         project_id=project_id,
         candidates=persistent_deterministic,
     )
-    deterministic_resolved = await gaps.reconcile_chapter_rule_gaps(
+    deterministic_resolved = await completion_items.reconcile_candidates(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
-        complete_candidates=persistent_deterministic,
+        candidates=persistent_deterministic,
+        detected_by=MemoirNarrativeGapDetectedBy.RULES,
     )
     semantic_created = 0
     semantic_resolved = 0
     if persistent_semantic:
-        _, semantic_created = await gaps.upsert_gaps(
+        _, semantic_created = await completion_items.upsert_candidates(
             db,
             project_id=project_id,
             candidates=persistent_semantic,
         )
     if include_semantic:
-        semantic_resolved = await gaps.reconcile_chapter_semantic_gaps(
+        semantic_resolved = await completion_items.reconcile_candidates(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
-            complete_candidates=persistent_semantic,
+            candidates=persistent_semantic,
+            detected_by=MemoirNarrativeGapDetectedBy.AI,
         )
 
-    task_result = await followup_planner.generate_followup_tasks(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    active_task_exists = await db.scalar(
-        select(MemoirFollowupTask.id)
+    active_item_exists = await db.scalar(
+        select(MemoirCompletionItem.id)
         .where(
-            MemoirFollowupTask.project_id == project_id,
-            MemoirFollowupTask.chapter_id == chapter_id,
-            MemoirFollowupTask.status.in_(
+            MemoirCompletionItem.project_id == project_id,
+            MemoirCompletionItem.chapter_id == chapter_id,
+            MemoirCompletionItem.status.in_(
                 {
-                    MemoirFollowupTaskStatus.PENDING.value,
-                    MemoirFollowupTaskStatus.IN_PROGRESS.value,
-                    MemoirFollowupTaskStatus.DEFERRED.value,
+                    MemoirCompletionItemStatus.OPEN.value,
+                    MemoirCompletionItemStatus.IN_PROGRESS.value,
+                    MemoirCompletionItemStatus.DEFERRED.value,
                 }
-            ),
-        )
-        .limit(1)
-    )
-    manual_review_exists = await db.scalar(
-        select(MemoirNarrativeGap.id)
-        .where(
-            MemoirNarrativeGap.project_id == project_id,
-            MemoirNarrativeGap.status == MemoirNarrativeGapStatus.OPEN.value,
-            MemoirNarrativeGap.recommended_action
-            == MemoirNarrativeGapRecommendedAction.MANUAL_REVIEW.value,
-            or_(
-                MemoirNarrativeGap.primary_chapter_id == chapter_id,
-                MemoirNarrativeGap.chapters.any(chapter_id=chapter_id),
             ),
         )
         .limit(1)
     )
     draft_job = None
     if (
-        active_task_exists is None
-        and manual_review_exists is None
+        active_item_exists is None
         and any(
             node.status == MemoirChapterNodeStatus.READY.value
             for node in current_context.nodes
@@ -488,16 +461,13 @@ async def run_chapter_completion_refresh_job(
         "semantic_gap_count": len(semantic_candidates),
         "semantic_created_count": semantic_created,
         "semantic_resolved_count": semantic_resolved,
-        "created_task_ids": list(task_result.created_task_ids),
-        "updated_task_ids": list(task_result.updated_task_ids),
-        "skipped_gap_ids": list(task_result.skipped_gap_ids),
+        "active_completion_item": active_item_exists,
         "editorial_guidance_count": len(editorial_guidance),
         "draft_generation_job_id": draft_job.id if draft_job is not None else None,
         "published": True,
         "provider": provider,
         "model": model,
         "engine_version": COMPLETION_REFRESH_ENGINE_VERSION,
-        "planner_version": followup_planner.FOLLOWUP_PLANNER_VERSION,
     }
     await automation_events.record_or_update_automation_event(
         db,

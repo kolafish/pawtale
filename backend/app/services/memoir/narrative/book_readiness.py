@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.narrative_types import (
     MemoirChapterNodeStatus,
@@ -12,8 +11,8 @@ from app.domain.memoir.narrative_types import (
     MemoirDraftBlockEditorialStatus,
     MemoirDraftBlockFreshnessStatus,
     MemoirDraftBlockRole,
+    MemoirCompletionItemStatus,
     MemoirNarrativeGapScopeType,
-    MemoirNarrativeGapStatus,
 )
 from app.domain.memoir.types import (
     MemoirEditingJobStatus,
@@ -21,7 +20,7 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
 )
 from app.models.memoir import MemoirBookOutput, MemoirEditingJob
-from app.models.memoir_narrative import MemoirNarrativeGap
+from app.models.memoir_narrative import MemoirCompletionItem
 from app.schemas.memoir_narrative import (
     MemoirBookConsistencyAuditJobResponse,
     MemoirBookFormalizeResponse,
@@ -240,32 +239,27 @@ async def _gap_groups(
     *,
     project_id: str,
     context: BookConsistencyContext,
-) -> tuple[list[MemoirBookReadinessBlocker], list[MemoirBookReadinessBlocker], list[MemoirBookReadinessBlocker]]:
-    gap_items = list(
+) -> tuple[list[MemoirBookReadinessBlocker], list[MemoirBookReadinessBlocker]]:
+    completion_items = list(
         (
             await db.scalars(
-                select(MemoirNarrativeGap)
-                .options(
-                    selectinload(MemoirNarrativeGap.chapters),
-                    selectinload(MemoirNarrativeGap.stories),
-                    selectinload(MemoirNarrativeGap.claims),
-                )
+                select(MemoirCompletionItem)
                 .where(
-                    MemoirNarrativeGap.project_id == project_id,
-                    MemoirNarrativeGap.status.in_(
+                    MemoirCompletionItem.project_id == project_id,
+                    MemoirCompletionItem.status.in_(
                         [
-                            MemoirNarrativeGapStatus.OPEN.value,
-                            MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value,
+                            MemoirCompletionItemStatus.OPEN.value,
+                            MemoirCompletionItemStatus.IN_PROGRESS.value,
+                            MemoirCompletionItemStatus.DEFERRED.value,
                         ]
                     ),
                 )
-                .order_by(MemoirNarrativeGap.last_detected_at.desc())
+                .order_by(MemoirCompletionItem.last_detected_at.desc())
             )
-        ).unique().all()
+        ).all()
     )
     must: list[MemoirBookReadinessBlocker] = []
     suggested: list[MemoirBookReadinessBlocker] = []
-    accepted: list[MemoirBookReadinessBlocker] = []
     current_chapter_ids = {chapter.chapter.id for chapter in context.chapters}
     current_story_ids = {
         story.id
@@ -273,55 +267,38 @@ async def _gap_groups(
         for story in chapter.stories.values()
     }
     current_claim_ids = set(context.claims)
-    for gap in gap_items:
-        if gap.scope_type == MemoirNarrativeGapScopeType.CHAPTER.value:
-            relevant = gap.primary_chapter_id in current_chapter_ids
-        elif gap.scope_type == MemoirNarrativeGapScopeType.STORY.value:
-            relevant = gap.primary_story_id in current_story_ids
+    for item in completion_items:
+        if item.scope_type == MemoirNarrativeGapScopeType.CHAPTER.value:
+            relevant = item.chapter_id in current_chapter_ids
+        elif item.scope_type == MemoirNarrativeGapScopeType.STORY.value:
+            relevant = item.story_id in current_story_ids
         else:
-            has_relations = bool(
-                gap.primary_chapter_id
-                or gap.primary_story_id
-                or gap.chapters
-                or gap.stories
-                or gap.claims
-            )
-            relevant = not has_relations or bool(
-                (
-                    {item.chapter_id for item in gap.chapters}
-                    | ({gap.primary_chapter_id} if gap.primary_chapter_id else set())
-                )
-                & current_chapter_ids
-                or (
-                    {item.story_id for item in gap.stories}
-                    | ({gap.primary_story_id} if gap.primary_story_id else set())
-                )
-                & current_story_ids
-                or {item.claim_id for item in gap.claims} & current_claim_ids
+            relevant = not any(
+                (item.chapter_id, item.story_id, item.claim_id)
+            ) or bool(
+                item.chapter_id in current_chapter_ids
+                or item.story_id in current_story_ids
+                or item.claim_id in current_claim_ids
             )
         if not relevant:
             continue
-        item = _blocker(
-            f"gap:{gap.id}",
-            gap.title,
-            gap.description,
-            chapter_id=gap.primary_chapter_id
-            or (gap.chapters[0].chapter_id if gap.chapters else None),
-            story_id=gap.primary_story_id
-            or (gap.stories[0].story_id if gap.stories else None),
-            claim_id=gap.claims[0].claim_id if gap.claims else None,
-            gap_id=gap.id,
+        blocker = _blocker(
+            f"completion_item:{item.id}",
+            item.title,
+            item.description,
+            chapter_id=item.chapter_id,
+            story_id=item.story_id,
+            claim_id=item.claim_id,
+            completion_item_id=item.id,
         )
-        if gap.status == MemoirNarrativeGapStatus.ACCEPTED_INCOMPLETE.value:
-            accepted.append(item)
-        elif gap_blocks_formalization(
-            gap_type=gap.gap_type,
-            severity=gap.severity,
+        if gap_blocks_formalization(
+            gap_type=item.item_type,
+            severity=item.severity,
         ):
-            must.append(item)
+            must.append(blocker)
         else:
-            suggested.append(item)
-    return must, suggested, accepted
+            suggested.append(blocker)
+    return must, suggested
 
 
 def _deduplicate(items: list[MemoirBookReadinessBlocker]) -> list[MemoirBookReadinessBlocker]:
@@ -352,7 +329,7 @@ async def get_book_readiness(
                 "需要对当前书稿运行一次完整的全书一致性检查",
             )
         )
-    gap_must, suggested, accepted = await _gap_groups(
+    gap_must, suggested = await _gap_groups(
         db,
         project_id=project_id,
         context=context,
@@ -375,7 +352,6 @@ async def get_book_readiness(
         groups=MemoirBookReadinessGroups(
             must_handle=_deduplicate(must),
             suggested=_deduplicate(suggested),
-            accepted_incomplete=_deduplicate(accepted),
         ),
     )
 

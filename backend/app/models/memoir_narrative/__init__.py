@@ -12,17 +12,7 @@ from .draft_blocks import (
     MemoirDraftBlockVersion,
 )
 from .entities import MemoirNarrativeEntity
-from .gaps import (
-    MemoirNarrativeGap,
-    MemoirNarrativeGapChapter,
-    MemoirNarrativeGapClaim,
-    MemoirNarrativeGapStory,
-)
-from .followup_tasks import (
-    MemoirFollowupTask,
-    MemoirFollowupTaskAnswer,
-    MemoirFollowupTaskClaim,
-)
+from .completion_items import MemoirCompletionItem
 from .frameworks import (
     MemoirFrameworkItem,
     MemoirFrameworkItemClaim,
@@ -31,7 +21,6 @@ from .frameworks import (
 from .interview_policy import (
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
-    MemoirUtteranceInterviewAssignment,
 )
 from .stories import (
     MemoirStory,
@@ -51,19 +40,12 @@ __all__ = [
     "MemoirDraftBlockStory",
     "MemoirDraftBlockVersion",
     "MemoirNarrativeEntity",
-    "MemoirNarrativeGap",
-    "MemoirNarrativeGapChapter",
-    "MemoirNarrativeGapClaim",
-    "MemoirNarrativeGapStory",
-    "MemoirFollowupTask",
-    "MemoirFollowupTaskAnswer",
-    "MemoirFollowupTaskClaim",
+    "MemoirCompletionItem",
     "MemoirProjectFramework",
     "MemoirFrameworkItem",
     "MemoirFrameworkItemClaim",
     "MemoirInterviewPolicyDecision",
     "MemoirInterviewPolicyEvaluation",
-    "MemoirUtteranceInterviewAssignment",
     "MemoirStory",
     "MemoirStoryClaim",
     "MemoirStoryRevision",

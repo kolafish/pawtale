@@ -18,18 +18,11 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import draft_blocks
-from app.services.memoir.narrative.draft_block_ai import (
-    DraftBlockEditorialContextInput,
-    generate_draft_block_text,
-)
+from app.services.memoir.narrative.draft_block_ai import generate_draft_block_text
 from app.services.memoir.narrative.draft_generation_context import (
     build_node_generation_context,
     load_current_contract_nodes,
     select_generation_nodes,
-)
-from app.services.memoir.narrative.draft_editorial_contexts import (
-    editorial_context_signature,
-    load_chapter_editorial_contexts,
 )
 
 
@@ -54,26 +47,6 @@ def _string_list(value: object) -> list[str]:
     return list(dict.fromkeys(item.strip() for item in value if isinstance(item, str) and item.strip()))
 
 
-async def _load_verified_editorial_contexts(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-    payload: dict[str, object],
-) -> list[DraftBlockEditorialContextInput]:
-    contexts = await load_chapter_editorial_contexts(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    current_signature = editorial_context_signature(contexts)
-    if payload.get("editorial_context_signature") != current_signature:
-        raise ValueError(
-            "chapter editorial context changed after the generation job was queued"
-        )
-    return contexts
-
-
 async def enqueue_chapter_block_generation(
     db: AsyncSession,
     *,
@@ -88,12 +61,6 @@ async def enqueue_chapter_block_generation(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    editorial_contexts = await load_chapter_editorial_contexts(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    context_signature = editorial_context_signature(editorial_contexts)
     guidance = list(
         dict.fromkeys(
             item.strip()
@@ -104,7 +71,6 @@ async def enqueue_chapter_block_generation(
     signature_payload = {
         "contract_id": contract.id,
         "ai_model": ai_model or "default",
-        "editorial_context_signature": context_signature,
         "editorial_guidance": guidance,
     }
     return await enqueue_editing_job(
@@ -116,7 +82,6 @@ async def enqueue_chapter_block_generation(
             "chapter_id": chapter_id,
             "contract_id": contract.id,
             "ai_model": ai_model,
-            "editorial_context_signature": context_signature,
             "editorial_guidance": guidance,
             "input_signature": _signature(signature_payload),
             "source": source,
@@ -145,12 +110,6 @@ async def run_draft_block_generation_job(
     )
     if payload.get("contract_id") != contract.id:
         raise ValueError("chapter contract changed after the generation job was queued")
-    editorial_contexts = await _load_verified_editorial_contexts(
-        db,
-        project_id=job.project_id,
-        chapter_id=chapter_id,
-        payload=payload,
-    )
     editorial_guidance = _string_list(payload.get("editorial_guidance"))
     editorial_feedback = "\n".join(
         f"- {item}" for item in editorial_guidance
@@ -242,7 +201,6 @@ async def run_draft_block_generation_job(
             contract=contract,
             nodes=nodes,
             node=node,
-            editorial_contexts=editorial_contexts,
             feedback=editorial_feedback,
         )
         generated = await generate_draft_block_text(client, context=context.ai_input)

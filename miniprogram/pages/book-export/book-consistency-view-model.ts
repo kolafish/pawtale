@@ -16,13 +16,12 @@ export interface BookConsistencyData {
   bookConsistencyMetaText: string;
   bookConsistencyMustItems: BookConsistencyItemView[];
   bookConsistencySuggestedItems: BookConsistencyItemView[];
-  bookConsistencyAcceptedItems: BookConsistencyItemView[];
   bookConsistencyCanFormalize: boolean;
 }
 
 function blockerView(item: MemoirBookReadinessBlocker): BookConsistencyItemView {
   return {
-    id: item.gap_id || item.code,
+    id: item.completion_item_id || item.code,
     title: item.title,
     detail: item.detail || "",
   };
@@ -35,7 +34,6 @@ export function bookConsistencyData(
 ): BookConsistencyData {
   const must = readiness?.groups.must_handle || [];
   const suggested = readiness?.groups.suggested || [];
-  const accepted = readiness?.groups.accepted_incomplete || [];
   let statusText = "待检查";
   let metaText = "检查全书时间、人物关系、事实来源和跨章重复。";
   if (auditRunning) {
@@ -61,7 +59,6 @@ export function bookConsistencyData(
     bookConsistencyMetaText: metaText,
     bookConsistencyMustItems: must.map(blockerView),
     bookConsistencySuggestedItems: suggested.map(blockerView),
-    bookConsistencyAcceptedItems: accepted.map(blockerView),
     bookConsistencyCanFormalize: Boolean(
       readiness?.ready_for_formal
       && readiness.latest_audit_job

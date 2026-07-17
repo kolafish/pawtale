@@ -23,10 +23,10 @@ from app.models.memoir import (
 )
 from app.models.memoir_common import AudioFile
 from app.models.memoir_narrative import (
+    MemoirCompletionItem,
     MemoirDraftBlock,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
-    MemoirUtteranceInterviewAssignment,
 )
 from app.models.projects import Project
 import app.services.project_documents as project_documents
@@ -155,16 +155,6 @@ async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
     project_session_ids = select(MemoirVoiceSession.id).where(
         MemoirVoiceSession.project_id == project_id
     )
-    project_utterance_ids = select(MemoirVoiceUtterance.id).where(
-        MemoirVoiceUtterance.voice_session_id.in_(project_session_ids)
-    )
-    await db.execute(
-        delete(MemoirUtteranceInterviewAssignment).where(
-            MemoirUtteranceInterviewAssignment.utterance_id.in_(
-                project_utterance_ids
-            )
-        )
-    )
     project_policy_decision_ids = select(MemoirInterviewPolicyDecision.id).where(
         MemoirInterviewPolicyDecision.session_id.in_(project_session_ids)
     )
@@ -178,6 +168,11 @@ async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
     await db.execute(
         delete(MemoirInterviewPolicyDecision).where(
             MemoirInterviewPolicyDecision.session_id.in_(project_session_ids)
+        )
+    )
+    await db.execute(
+        delete(MemoirCompletionItem).where(
+            MemoirCompletionItem.project_id == project_id
         )
     )
     await db.execute(

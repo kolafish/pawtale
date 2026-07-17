@@ -8,11 +8,12 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
+from app.domain.memoir.narrative_types import MemoirNarrativeGapDetectedBy
 from app.models.memoir import MemoirEditingJob
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
-from app.services.memoir.narrative import book_consistency_semantic, gaps
+from app.services.memoir.narrative import book_consistency_semantic, completion_items
 from app.services.memoir.narrative.book_consistency_context import (
     BOOK_CONSISTENCY_ENGINE_VERSION,
     book_consistency_signature,
@@ -64,21 +65,22 @@ async def run_book_consistency_audit_job(
         for chapter in context.chapters
         for candidate in evaluate_deterministic_gaps(chapter)
     ]
-    _, chapter_created = await gaps.upsert_gaps(
+    _, chapter_created = await completion_items.upsert_candidates(
         db,
         project_id=job.project_id,
         candidates=chapter_candidates,
     )
     book_candidates = evaluate_book_consistency_rules(context)
-    _, book_created = await gaps.upsert_gaps(
+    _, book_created = await completion_items.upsert_candidates(
         db,
         project_id=job.project_id,
         candidates=book_candidates,
     )
-    obsolete_rule_count = await gaps.reconcile_project_rule_gaps(
+    obsolete_rule_count = await completion_items.reconcile_candidates(
         db,
         project_id=job.project_id,
-        complete_candidates=[*chapter_candidates, *book_candidates],
+        candidates=[*chapter_candidates, *book_candidates],
+        detected_by=MemoirNarrativeGapDetectedBy.RULES,
     )
     semantic_candidates = []
     semantic_created = 0
@@ -94,7 +96,7 @@ async def run_book_consistency_audit_job(
                     ai_client=semantic_ai_client,
                 )
             )
-            _, semantic_created = await gaps.upsert_gaps(
+            _, semantic_created = await completion_items.upsert_candidates(
                 db,
                 project_id=job.project_id,
                 candidates=semantic_candidates,

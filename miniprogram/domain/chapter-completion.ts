@@ -9,9 +9,8 @@ export type MemoirChapterCompletionState =
 export type MemoirChapterCompletionNextActionKind =
   | "prepare"
   | "wait"
-  | "continue_confirmation"
   | "start_interview"
-  | "confirm_fact"
+  | "confirm"
   | "review_draft"
   | "complete";
 
@@ -21,21 +20,14 @@ export interface MemoirChapterCompletionNextAction {
   detail: string;
   action_text: string;
   disabled: boolean;
-  task_id?: string | null;
-  confirmation_id?: string | null;
+  item_id?: string | null;
 }
 
-export interface MemoirChapterCompletionTask {
+export interface MemoirChapterCompletionItem {
   id: string;
   question: string;
   status: "pending" | "in_progress" | "deferred";
   active_session_id?: string | null;
-}
-
-export interface MemoirChapterCompletionConfirmation {
-  id: string;
-  question: string;
-  detail: string;
 }
 
 export interface MemoirChapterCompletionSummary {
@@ -44,8 +36,7 @@ export interface MemoirChapterCompletionSummary {
   sort_order: number;
   state: MemoirChapterCompletionState;
   next_action: MemoirChapterCompletionNextAction;
-  active_task?: MemoirChapterCompletionTask | null;
-  confirmation?: MemoirChapterCompletionConfirmation | null;
+  active_item?: MemoirChapterCompletionItem | null;
   headline: string;
   detail: string;
 }

@@ -22,7 +22,6 @@ from app.models.memoir import (
 )
 from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
-    MemoirUtteranceInterviewAssignment,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
@@ -45,20 +44,20 @@ async def schedule_policy_outcome_evaluation(
     db: AsyncSession,
     *,
     project_id: str,
-    assignment: MemoirUtteranceInterviewAssignment,
+    utterance: MemoirVoiceUtterance,
 ) -> MemoirEditingJob | None:
-    if not assignment.policy_decision_id:
+    if not utterance.policy_decision_id:
         return None
     return await enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME,
         payload_json={
-            "decision_id": assignment.policy_decision_id,
+            "decision_id": utterance.policy_decision_id,
             "outcome_policy_version": OUTCOME_POLICY_VERSION,
         },
         dedupe_key=(
-            f"interview_policy_outcome:{assignment.policy_decision_id}:"
+            f"interview_policy_outcome:{utterance.policy_decision_id}:"
             f"{OUTCOME_POLICY_VERSION}"
         ),
         run_after=(
@@ -177,14 +176,8 @@ async def run_policy_outcome_evaluation_job(
         (
             await db.scalars(
                 select(MemoirVoiceUtterance)
-                .join(
-                    MemoirUtteranceInterviewAssignment,
-                    MemoirUtteranceInterviewAssignment.utterance_id
-                    == MemoirVoiceUtterance.id,
-                )
                 .where(
-                    MemoirUtteranceInterviewAssignment.policy_decision_id
-                    == decision.id,
+                    MemoirVoiceUtterance.policy_decision_id == decision.id,
                     MemoirVoiceUtterance.voice_session_id == decision.session_id,
                 )
                 .order_by(

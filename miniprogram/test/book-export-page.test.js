@@ -66,7 +66,6 @@ function sampleBookReadiness(overrides = {}) {
         },
       ],
       suggested: [],
-      accepted_incomplete: [],
     },
     ...overrides,
   };
@@ -155,7 +154,7 @@ test("book export page runs consistency audit in background and then enables for
     ready_for_formal: true,
     audit_is_current: true,
     latest_audit_job: { id: "audit-job-1", status: "succeeded" },
-    groups: { must_handle: [], suggested: [], accepted_incomplete: [] },
+    groups: { must_handle: [], suggested: [] },
   });
   const { page } = loadBookExportPage({
     enqueueMemoirBookConsistencyAudit: async (projectId, payload) => {
@@ -247,7 +246,7 @@ test("book export page formalizes only the audited current output version", asyn
     ready_for_formal: true,
     audit_is_current: true,
     latest_audit_job: { id: "audit-job-1", status: "succeeded" },
-    groups: { must_handle: [], suggested: [], accepted_incomplete: [] },
+    groups: { must_handle: [], suggested: [] },
   });
   const acceptedOutput = { ...sampleBookOutput(), status: "accepted" };
   const { page } = loadBookExportPage({

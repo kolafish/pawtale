@@ -20,10 +20,6 @@ from app.domain.memoir.narrative_types import (
     MemoirClaimTimePrecision,
     MemoirClaimType,
     MemoirClaimVerificationStatus,
-    MemoirFollowupAnswerInterpretationStatus,
-    MemoirFollowupAnswerKind,
-    MemoirFollowupTaskStatus,
-    MemoirFollowupTaskAnswerRole,
     MemoirNarrativeActorType,
     MemoirStoryLifecycleStatus,
     MemoirStoryNarrativeRole,
@@ -46,10 +42,6 @@ from app.models.memoir_narrative import (
     MemoirClaimEvidence,
     MemoirDraftBlock,
     MemoirDraftBlockVersion,
-    MemoirFollowupTask,
-    MemoirFollowupTaskAnswer,
-    MemoirUtteranceInterviewAssignment,
-    MemoirNarrativeGap,
     MemoirStory,
     MemoirStoryClaim,
     MemoirStoryRevision,
@@ -58,10 +50,8 @@ from app.services.memoir.narrative import (
     draft_assembly,
     draft_blocks,
     draft_generation_jobs,
-    followup_completion,
 )
 from app.services.memoir.narrative.draft_block_ai import (
-    DraftBlockEditorialContextInput,
     DraftBlockGenerationInput,
     DraftBlockLLMOutput,
     validate_generation_output,
@@ -312,93 +302,6 @@ def _ai_output(content: str, claim_id: str) -> dict[str, object]:
     }
 
 
-async def _create_editorial_answer(
-    client,
-    test_db,
-    *,
-    created,
-    answer_text: str,
-    answer_kind: MemoirFollowupAnswerKind,
-    direct_narrative_text: str = "",
-    clarification_text: str = "",
-    fact_resolution_text: str = "",
-    answer_use: str = "clarification",
-    story_id: str | None = None,
-    answered: bool = True,
-):
-    transcript = await create_test_voice_transcript(
-        client,
-        test_db,
-        answer_text,
-        project_id=created["project_id"],
-    )
-    now = datetime.now(UTC).replace(tzinfo=None)
-    gap = MemoirNarrativeGap(
-        project_id=created["project_id"],
-        scope_type="chapter",
-        primary_chapter_id=created["chapter"].id,
-        gap_type="causality",
-        severity="medium",
-        title="解释现有内容与章节主线的关系",
-        description="需要区分正文事实和编辑解释。",
-        fingerprint=sha256(
-            f"editorial:{transcript['utterance_id']}".encode("utf-8")
-        ).hexdigest(),
-        status="resolved" if answered else "open",
-        detected_by="ai",
-        resolved_by="system" if answered else None,
-        resolved_at=now if answered else None,
-        resolution_note="回答用途已确认。" if answered else "",
-    )
-    test_db.add(gap)
-    await test_db.flush()
-    task = MemoirFollowupTask(
-        project_id=created["project_id"],
-        gap_id=gap.id,
-        chapter_id=created["chapter"].id,
-        story_id=story_id,
-        answer_use=answer_use,
-        question="这段话是在补充事实，还是解释原文？",
-        purpose="避免把编辑解释写入章节正文。",
-        priority=100,
-        status=(
-            MemoirFollowupTaskStatus.ANSWERED.value
-            if answered
-            else MemoirFollowupTaskStatus.PENDING.value
-        ),
-        completed_at=now if answered else None,
-        created_by="system",
-    )
-    test_db.add(task)
-    await test_db.flush()
-    relation = MemoirFollowupTaskAnswer(
-        project_id=created["project_id"],
-        task_id=task.id,
-        utterance_id=transcript["utterance_id"],
-        result_role=(
-            MemoirFollowupTaskAnswerRole.TARGET_ANSWER.value
-            if answered
-            else MemoirFollowupTaskAnswerRole.RELATED_CONTEXT.value
-        ),
-        interpretation_status=MemoirFollowupAnswerInterpretationStatus.RESOLVED.value,
-        answer_kind=answer_kind.value,
-        direct_narrative_text=direct_narrative_text,
-        clarification_text=clarification_text,
-        fact_resolution_text=fact_resolution_text,
-    )
-    test_db.add_all(
-        [
-            relation,
-            MemoirUtteranceInterviewAssignment(
-                utterance_id=transcript["utterance_id"],
-                followup_task_id=task.id,
-            ),
-        ]
-    )
-    await test_db.commit()
-    return transcript, gap, task, relation
-
-
 def test_generation_validation_enforces_sources_and_adjacent_sentence_boundary():
     claim_id = "f07e2888-183a-4a58-9442-d4374cf0e6d7"
     context = DraftBlockGenerationInput.model_validate(
@@ -470,44 +373,6 @@ def test_generation_validation_enforces_sources_and_adjacent_sentence_boundary()
                 unsupported_fact_candidates=[],
             ),
         )
-
-    editorial_context = DraftBlockEditorialContextInput(
-        relation_id="relation",
-        task_id="task",
-        utterance_id="utterance",
-        question="这段话是什么意思？",
-        purpose="解释原文，不新增正文。",
-        answer_kind=MemoirFollowupAnswerKind.CLARIFICATION,
-        clarification_text="这只是我原本想发给爷爷、但最后没有发出的消息。",
-    )
-    with pytest.raises(ValueError, match="copied non-narrative editorial context"):
-        validate_generation_output(
-            context.model_copy(update={"editorial_contexts": [editorial_context]}),
-            DraftBlockLLMOutput(
-                content="这只是我原本想发给爷爷、但最后没有发出的消息。",
-                used_claim_ids=[claim_id],
-                unsupported_fact_candidates=[],
-            ),
-        )
-    validate_generation_output(
-        context.model_copy(
-            update={
-                "editorial_contexts": [
-                    editorial_context.model_copy(
-                        update={
-                            "clarification_text": "储备粮食后成为先进乡，随后调回县任职。"
-                        }
-                    )
-                ]
-            }
-        ),
-        DraftBlockLLMOutput(
-            content="储备粮食后成为先进乡，随后调回县任职。",
-            used_claim_ids=[claim_id],
-            unsupported_fact_candidates=[],
-        ),
-    )
-
 
 def test_factual_generation_requires_known_claims_and_narrator_voice():
     action_claim_id = "action-claim"
@@ -672,170 +537,6 @@ async def test_node_generation_uses_claim_allowlists_and_skips_current_blocks(
     assert repeated.result_json["created_block_ids"] == []
     assert repeated.result_json["skipped_node_ids"] == [node.id for node in created["nodes"]]
     assert [block.current_version_id for block in blocks] == original_version_ids
-
-
-async def test_structured_generation_separates_narrative_and_editorial_answer_parts(
-    client,
-    test_db,
-):
-    created = await _create_generation_fixture(client, test_db)
-    direct_text = "我还想补充一次回成都后的探望。"
-    clarification_text = "买西瓜是我原本想发给爷爷、但最后没有发出的消息背景。"
-    transcript, _gap, _task, _relation = await _create_editorial_answer(
-        client,
-        test_db,
-        created=created,
-        answer_text=direct_text + clarification_text,
-        answer_kind=MemoirFollowupAnswerKind.MIXED,
-        direct_narrative_text=direct_text,
-        clarification_text=clarification_text,
-        story_id=created["stories"][0].id,
-    )
-    fact_text = "这里确认正确的年份是1982年，而不是1983年。"
-    await _create_editorial_answer(
-        client,
-        test_db,
-        created=created,
-        answer_text=fact_text,
-        answer_kind=MemoirFollowupAnswerKind.FACT_RESOLUTION,
-        fact_resolution_text=fact_text,
-        answer_use="fact_resolution",
-        story_id=created["stories"][0].id,
-    )
-
-    contract, nodes = await load_current_contract_nodes(
-        test_db,
-        project_id=created["project_id"],
-        chapter_id=created["chapter"].id,
-    )
-    context = await build_node_generation_context(
-        test_db,
-        project_id=created["project_id"],
-        contract=contract,
-        nodes=nodes,
-        node=nodes[0],
-    )
-
-    assert len(context.ai_input.editorial_contexts) == 2
-    assert context.ai_input.editorial_contexts[0].clarification_text == clarification_text
-    assert context.ai_input.editorial_contexts[0].transcript_version_id == transcript[
-        "transcript_version_id"
-    ]
-    assert context.ai_input.editorial_contexts[1].fact_resolution_text == fact_text
-    serialized = context.ai_input.model_dump_json()
-    assert direct_text not in serialized
-    assert clarification_text in serialized
-    assert fact_text in serialized
-
-
-async def test_clarification_marks_blocks_stale_and_regenerates_only_unlocked_blocks(
-    client,
-    test_db,
-):
-    created = await _create_generation_fixture(client, test_db)
-    initial_job = await draft_generation_jobs.enqueue_chapter_block_generation(
-        test_db,
-        project_id=created["project_id"],
-        chapter_id=created["chapter"].id,
-    )
-    await draft_generation_jobs.run_draft_block_generation_job(
-        test_db,
-        initial_job,
-        ai_client=FakeDraftAI(
-            [
-                _ai_output("十八岁那年，我离开家乡。", created["claims"][0].id),
-                _ai_output("到成都后，我住进了学校宿舍。", created["claims"][1].id),
-            ]
-        ),
-    )
-    blocks = list(
-        (
-            await test_db.scalars(
-                select(MemoirDraftBlock).order_by(MemoirDraftBlock.sort_order)
-            )
-        ).all()
-    )
-    original_version_ids = [block.current_version_id for block in blocks]
-    blocks[1].locked = True
-    await test_db.flush()
-    clarification_text = "这段话只是在解释章节为什么写到离家，不是新的经历。"
-    _transcript, _gap, _task, relation = await _create_editorial_answer(
-        client,
-        test_db,
-        created=created,
-        answer_text=clarification_text,
-        answer_kind=MemoirFollowupAnswerKind.CLARIFICATION,
-        clarification_text=clarification_text,
-        answered=False,
-    )
-
-    completed = await followup_completion.complete_task_from_semantic_interpretation(
-        test_db,
-        project_id=created["project_id"],
-        relation=relation,
-    )
-    assert completed is True
-    await test_db.commit()
-    for block in blocks:
-        await test_db.refresh(block)
-        assert block.freshness_status == "stale"
-
-    regeneration_job = await draft_generation_jobs.enqueue_chapter_block_generation(
-        test_db,
-        project_id=created["project_id"],
-        chapter_id=created["chapter"].id,
-    )
-    ai = FakeDraftAI(
-        [_ai_output("十八岁那年，我从家乡动身去成都。", created["claims"][0].id)]
-    )
-    result = await draft_generation_jobs.run_draft_block_generation_job(
-        test_db,
-        regeneration_job,
-        ai_client=ai,
-    )
-
-    assert result.result_json["created_block_ids"] == []
-    assert result.result_json["updated_block_ids"] == [blocks[0].id]
-    assert result.result_json["skipped_locked_node_ids"] == [created["nodes"][1].id]
-    assert clarification_text in ai.prompts[0]
-    await test_db.refresh(blocks[0])
-    await test_db.refresh(blocks[1])
-    assert blocks[0].current_version_id != original_version_ids[0]
-    assert blocks[0].freshness_status == "current"
-    assert blocks[1].current_version_id == original_version_ids[1]
-    assert blocks[1].freshness_status == "stale"
-
-
-async def test_generation_rejects_changed_editorial_context_before_calling_ai(
-    client,
-    test_db,
-):
-    created = await _create_generation_fixture(client, test_db)
-    answer_text = "第一种解释是原文背景。第二种解释是章节关系。"
-    _transcript, _gap, _task, relation = await _create_editorial_answer(
-        client,
-        test_db,
-        created=created,
-        answer_text=answer_text,
-        answer_kind=MemoirFollowupAnswerKind.CLARIFICATION,
-        clarification_text="第一种解释是原文背景。",
-        story_id=created["stories"][0].id,
-    )
-    job = await draft_generation_jobs.enqueue_chapter_block_generation(
-        test_db,
-        project_id=created["project_id"],
-        chapter_id=created["chapter"].id,
-    )
-    relation.clarification_text = "第二种解释是章节关系。"
-    test_db.add(relation)
-    await test_db.commit()
-
-    with pytest.raises(ValueError, match="editorial context changed"):
-        await draft_generation_jobs.run_draft_block_generation_job(
-            test_db,
-            job,
-            ai_client=FakeDraftAI([]),
-        )
 
 
 async def test_initial_generation_builds_source_backed_opening_before_facts(

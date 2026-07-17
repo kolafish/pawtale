@@ -7,7 +7,6 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
-    ForeignKeyConstraint,
     Index,
     JSON,
     String,
@@ -33,14 +32,6 @@ class MemoirNarrativeDecision(Base):
             "idempotency_key",
             name="uq_memoir_narrative_decisions_project_idempotency",
         ),
-        ForeignKeyConstraint(
-            ["project_id", "source_followup_task_answer_id"],
-            [
-                "memoir_followup_task_answers.project_id",
-                "memoir_followup_task_answers.id",
-            ],
-            name="fk_memoir_narrative_decisions_followup_source_project",
-        ),
         CheckConstraint(
             f"target_type IN ({_enum_values(MemoirNarrativeDecisionTargetType)})",
             name="ck_memoir_narrative_decisions_target_type",
@@ -65,23 +56,12 @@ class MemoirNarrativeDecision(Base):
             "length(trim(idempotency_key)) > 0",
             name="ck_memoir_narrative_decisions_idempotency_key",
         ),
-        CheckConstraint(
-            "(source_followup_task_answer_id IS NULL "
-            "AND source_transcript_version_id IS NULL) OR "
-            "(source_followup_task_answer_id IS NOT NULL "
-            "AND source_transcript_version_id IS NOT NULL)",
-            name="ck_memoir_narrative_decisions_followup_source_shape",
-        ),
         Index(
             "ix_memoir_narrative_decisions_project_target_created",
             "project_id",
             "target_type",
             "target_id",
             "created_at",
-        ),
-        Index(
-            "ix_memoir_narrative_decisions_followup_source",
-            "source_followup_task_answer_id",
         ),
         Index(
             "ix_memoir_narrative_decisions_transcript_source",
@@ -102,10 +82,6 @@ class MemoirNarrativeDecision(Base):
     actor_user_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("users.id"),
-        nullable=True,
-    )
-    source_followup_task_answer_id: Mapped[str | None] = mapped_column(
-        String(36),
         nullable=True,
     )
     source_transcript_version_id: Mapped[str | None] = mapped_column(
