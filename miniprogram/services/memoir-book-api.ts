@@ -251,6 +251,20 @@ export function getMemoirBookChapterDraft(
   return memoirRequest<MemoirBookChapterDraft>(bookPlanChapterPath(projectId, chapterId, "/draft"));
 }
 
+export function enqueueMemoirBookChapterSourceRefresh(
+  projectId: string,
+  chapterId: string,
+  data: { ai_model?: string | null } = {},
+): Promise<MemoirAutomationEvent> {
+  return memoirRequest<MemoirAutomationEvent>(
+    bookPlanChapterPath(projectId, chapterId, "/draft/source-refresh/jobs"),
+    {
+      method: "POST",
+      data: withSelectedAIModel(data),
+    },
+  );
+}
+
 export function confirmMemoirBookChapterDraft(
   projectId: string,
   chapterId: string,

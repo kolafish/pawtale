@@ -637,6 +637,67 @@ async def test_mobile_memoir_automation_events_prioritize_action_required_items(
     ]
 
 
+async def test_mobile_memoir_automation_events_acknowledge_all_dismissible_backlog(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(client, test_db, "我小时候住在外婆家。")
+    project_id = created["session"]["project_id"]
+    for index in range(12):
+        await automation_events.record_automation_event(
+            test_db,
+            project_id=project_id,
+            event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            status=MemoirAutomationEventStatus.COMPLETED,
+            summary_text=f"历史完成记录 {index}",
+        )
+    await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        status=MemoirAutomationEventStatus.FAILED,
+        summary_text="历史失败记录",
+    )
+    pending = await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+        status=MemoirAutomationEventStatus.PENDING,
+        summary_text="章节仍在生成。",
+    )
+    needs_review = await automation_events.record_automation_event(
+        test_db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.SOURCE_HELD,
+        status=MemoirAutomationEventStatus.NEEDS_REVIEW,
+        review_utterance_id=created["utterance_id"],
+        summary_text="讲述仍需确认归属。",
+    )
+    await test_db.commit()
+
+    first_page = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events?limit=8"
+    )
+    assert first_page.status_code == 200
+    assert first_page.json()["total"] == 15
+
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events/acknowledge-dismissible"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"updated_count": 13}
+    visible = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events?limit=8"
+    )
+    assert visible.status_code == 200
+    assert visible.json()["total"] == 2
+    assert {item["id"] for item in visible.json()["items"]} == {
+        pending.id,
+        needs_review.id,
+    }
+
+
 async def test_mobile_memoir_assistant_tts_generates_audio_for_follow_up_message(
     client,
     test_db,

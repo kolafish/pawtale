@@ -230,7 +230,18 @@
         <text class="automation-title">整理进度</text>
         <text class="automation-meta">书稿整理状态会在这里汇总</text>
       </view>
-      <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
+      <view class="automation-head-actions">
+        <button
+          wx:if="{{automationDismissibleCount}}"
+          class="automation-clear"
+          loading="{{automationEventClearing}}"
+          disabled="{{automationEventClearing}}"
+          bindtap="acknowledgeDismissibleAutomationEvents"
+        >
+          全部收起
+        </button>
+        <text class="automation-count">{{automationEventLoading ? "同步中" : automationEventItems.length + " 条"}}</text>
+      </view>
     </view>
     <text wx:if="{{automationEventError}}" class="automation-error">{{automationEventError}}</text>
     <view wx:for="{{automationEventItems}}" wx:key="id" class="automation-item {{item.eventType}}">
@@ -602,10 +613,11 @@
             <button
               class="primary-button small"
               data-id="{{item.id}}"
-              bindtap="openChapterEditor"
+              bindtap="runChapterPrimaryAction"
+              loading="{{item.draftBusy}}"
               disabled="{{updatingPlanStructure || item.draftBusy}}"
             >
-              编辑正文
+              {{item.draftActionText}}
             </button>
             <button
               class="ghost-button small"

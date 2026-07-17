@@ -165,39 +165,42 @@ test("project automation event APIs encode routes and payloads", async () => {
         return;
       }
       if (options.url.includes("/automation-events")) {
-        options.success({
-          statusCode: 200,
-          data: options.url.includes("/voice-played")
+        const data = options.url.includes("/acknowledge-dismissible")
+          ? { updated_count: 9 }
+          : options.url.includes("/voice-played")
             ? { updated_count: 1 }
             : options.url.includes("/acknowledge")
-            ? {
-              id: "event-1",
-              project_id: "project/1",
-              event_type: "source_assigned",
-              status: "completed",
-              utterance_ids: ["utterance-1"],
-              summary_text: "已整理 1 条讲述。",
-              metadata_json: { acknowledged_by_user: true },
-              created_at: "2026-06-23T12:00:00",
-              updated_at: "2026-06-23T12:00:00",
-            }
-            : {
-              items: [
-                {
-                  id: "event-1",
-                  project_id: "project/1",
-                  event_type: "source_assigned",
-                  status: "completed",
-                  utterance_ids: ["utterance-1"],
-                  summary_text: "已整理 1 条讲述。",
-                  metadata_json: {},
-                  created_at: "2026-06-23T12:00:00",
-                  updated_at: "2026-06-23T12:00:00",
-                },
-              ],
-              total: 1,
-              limit: 5,
-            },
+              ? {
+                id: "event-1",
+                project_id: "project/1",
+                event_type: "source_assigned",
+                status: "completed",
+                utterance_ids: ["utterance-1"],
+                summary_text: "已整理 1 条讲述。",
+                metadata_json: { acknowledged_by_user: true },
+                created_at: "2026-06-23T12:00:00",
+                updated_at: "2026-06-23T12:00:00",
+              }
+              : {
+                items: [
+                  {
+                    id: "event-1",
+                    project_id: "project/1",
+                    event_type: "source_assigned",
+                    status: "completed",
+                    utterance_ids: ["utterance-1"],
+                    summary_text: "已整理 1 条讲述。",
+                    metadata_json: {},
+                    created_at: "2026-06-23T12:00:00",
+                    updated_at: "2026-06-23T12:00:00",
+                  },
+                ],
+                total: 1,
+                limit: 5,
+              };
+        options.success({
+          statusCode: 200,
+          data,
           cookies: [],
           header: {},
         });
@@ -209,12 +212,14 @@ test("project automation event APIs encode routes and payloads", async () => {
   resetMemoirVoiceApiModules();
   const {
     acknowledgeMemoirAutomationEvent,
+    acknowledgeDismissibleMemoirAutomationEvents,
     listMemoirAutomationEvents,
     markMemoirAutomationEventsVoicePlayed,
   } = require("../services/memoir-voice-api.ts");
 
   const events = await listMemoirAutomationEvents("project/1", 5);
   const acknowledged = await acknowledgeMemoirAutomationEvent("project/1", "event/1");
+  const dismissed = await acknowledgeDismissibleMemoirAutomationEvents("project/1");
   const voicePlayed = await markMemoirAutomationEventsVoicePlayed("project/1", {
     event_ids: ["event/1"],
     voice_session_id: "voice/1",
@@ -233,16 +238,22 @@ test("project automation event APIs encode routes and payloads", async () => {
   assert.equal(apiRequests[1].method, "POST");
   assert.equal(
     apiRequests[2].url,
-    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/voice-played",
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/acknowledge-dismissible",
   );
   assert.equal(apiRequests[2].method, "POST");
-  assert.deepEqual(apiRequests[2].data, {
+  assert.equal(
+    apiRequests[3].url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/voice-played",
+  );
+  assert.equal(apiRequests[3].method, "POST");
+  assert.deepEqual(apiRequests[3].data, {
     event_ids: ["event/1"],
     voice_session_id: "voice/1",
     message_id: "message/1",
   });
   assert.equal(events.items[0].summary_text, "已整理 1 条讲述。");
   assert.equal(acknowledged.metadata_json.acknowledged_by_user, true);
+  assert.equal(dismissed.updated_count, 9);
   assert.equal(voicePlayed.updated_count, 1);
   delete global.wx;
 });
@@ -674,6 +685,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },
+    { call: () => api.enqueueMemoirBookChapterSourceRefresh("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/source-refresh/jobs`, data: { ai_model: selectedModel } },
     { call: () => api.reviseMemoirBookChapterDraft("project/1", "chapter/1", { expected_version_id: "version/1", content: "修改后的正文" }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/revise`, data: { expected_version_id: "version/1", content: "修改后的正文" } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.assembleMemoirBookOutput("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble`, data: {} },

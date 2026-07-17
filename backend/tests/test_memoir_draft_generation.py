@@ -1,15 +1,28 @@
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 
 import pytest
 from sqlalchemy import func, select
 
+from app.domain.memoir.narrative_types import (
+    MemoirCompletionItemStatus,
+    MemoirNarrativeGapDetectedBy,
+    MemoirNarrativeGapRecommendedAction,
+    MemoirNarrativeGapScopeType,
+    MemoirNarrativeGapSeverity,
+    MemoirNarrativeGapType,
+)
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirChapterSourceLink,
+    MemoirEditingJob,
 )
+from app.models.memoir_narrative import MemoirCompletionItem
+from app.services.memoir import book_generation_jobs
 from app.services.memoir.narrative.chapter_draft_ai import (
     ChapterDraftClaimInput,
     ChapterDraftGenerationInput,
@@ -216,6 +229,112 @@ async def test_generation_job_writes_one_whole_draft_and_acknowledges_sources(
             MemoirBookChapterDraftVersion.draft_id == draft.id
         )
     ) == 1
+
+
+async def test_source_refresh_endpoint_bypasses_open_completion_question_and_updates_event(
+    client,
+    test_db,
+    monkeypatch,
+):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我回成都后开始重新安排自己的生活。",
+    )
+    added = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来我常去青城山散步，也慢慢学会和那段经历保持距离。",
+    )
+    project_id = first["session"]["project_id"]
+    _, chapters = await create_test_book_plan_with_chapters(
+        test_db,
+        project_id=project_id,
+        chapter_titles=["回成都后的疏离与克制"],
+        source_refs_by_chapter=[[
+            memoir_source_ref(first),
+            memoir_source_ref(added),
+        ]],
+        draft_contents=["我回成都后开始重新安排自己的生活。"],
+    )
+    chapter = chapters[0]
+    chapter.metadata_json = {
+        "pending_source_utterance_ids": [added["utterance_id"]],
+    }
+    _, claim = await create_test_source_backed_story(
+        test_db,
+        project_id=project_id,
+        user_id=added["user_id"],
+        source=added,
+        title="去青城山散步",
+        statement="后来我常去青城山散步，也慢慢学会和那段经历保持距离。",
+    )
+    completion_item = MemoirCompletionItem(
+        project_id=project_id,
+        scope_type=MemoirNarrativeGapScopeType.CHAPTER.value,
+        chapter_id=chapter.id,
+        item_type=MemoirNarrativeGapType.CAUSALITY.value,
+        severity=MemoirNarrativeGapSeverity.MEDIUM.value,
+        dimension="causality",
+        title="去青城山的前因尚不清楚",
+        description="可选的质量追问，不应阻断新增讲述补写。",
+        fingerprint=sha256(b"source-refresh-open-gap").hexdigest(),
+        action=MemoirNarrativeGapRecommendedAction.INTERVIEW.value,
+        question="当时为什么会去青城山？",
+        priority=20,
+        status=MemoirCompletionItemStatus.OPEN.value,
+        detected_by=MemoirNarrativeGapDetectedBy.AI.value,
+    )
+    test_db.add_all([chapter, completion_item])
+    await test_db.commit()
+
+    response = await client.post(
+        (
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/"
+            f"{chapter.id}/draft/source-refresh/jobs"
+        ),
+        json={},
+    )
+
+    assert response.status_code == 202
+    event_data = response.json()
+    assert event_data["event_type"] == "chapter_draft_generated"
+    assert event_data["status"] == "pending"
+    job = await test_db.get(MemoirEditingJob, event_data["editing_job_id"])
+    assert job is not None
+    assert job.payload_json["source"] == "book_pending_sources"
+    assert job.payload_json["automation_event_id"] == event_data["id"]
+    assert completion_item.status == MemoirCompletionItemStatus.OPEN.value
+
+    ai = FakeChapterDraftAI(
+        {
+            "content": (
+                "我回成都后开始重新安排自己的生活。后来我常去青城山散步，"
+                "也慢慢学会和那段经历保持距离。"
+            ),
+            "used_claim_ids": [claim.id],
+            "unsupported_fact_candidates": [],
+        }
+    )
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.draft_generation_jobs.get_ai_service",
+        lambda _model=None: ai,
+    )
+    result = await book_generation_jobs.run_chapter_draft_generation_job(
+        test_db,
+        job,
+    )
+    await test_db.commit()
+
+    assert result.status.value == "succeeded"
+    event = await test_db.get(MemoirAutomationEvent, event_data["id"])
+    assert event is not None
+    assert event.status == "completed"
+    assert "已补写 1 条新增讲述" in event.summary_text
+    await test_db.refresh(chapter)
+    assert "pending_source_utterance_ids" not in chapter.metadata_json
+    await test_db.refresh(completion_item)
+    assert completion_item.status == MemoirCompletionItemStatus.OPEN.value
 
 
 async def test_generation_job_skips_stale_input_and_requeues_chapter_refresh(

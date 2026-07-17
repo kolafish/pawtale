@@ -479,3 +479,40 @@ async def acknowledge_automation_event(
     await db.commit()
     await db.refresh(event)
     return event_response(event)
+
+
+async def acknowledge_dismissible_automation_events(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+) -> int:
+    await load_memoir_project(db, project_id, user_id)
+    events = (
+        await db.scalars(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.project_id == project_id,
+                MemoirAutomationEvent.status.in_(
+                    {
+                        MemoirAutomationEventStatus.COMPLETED.value,
+                        MemoirAutomationEventStatus.FAILED.value,
+                    }
+                ),
+            )
+        )
+    ).all()
+    now_iso = _utcnow_iso()
+    updated_count = 0
+    for event in events:
+        metadata = event.metadata_json or {}
+        if metadata.get(ACKNOWLEDGED_AT_KEY):
+            continue
+        event.metadata_json = {
+            **metadata,
+            ACKNOWLEDGED_AT_KEY: now_iso,
+            ACKNOWLEDGED_BY_USER_KEY: True,
+        }
+        db.add(event)
+        updated_count += 1
+    await db.commit()
+    return updated_count

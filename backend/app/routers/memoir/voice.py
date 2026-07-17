@@ -18,6 +18,7 @@ from app.schemas.memoir_voice import (
     MemoirAssistantTTSResponse,
     MemoirMaterialOfflineASRRequest,
     MemoirMaterialOfflineASRStateResponse,
+    MemoirAutomationEventAcknowledgeDismissibleResponse,
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
     MemoirAutomationEventVoicePlaybackRequest,
@@ -178,6 +179,25 @@ async def list_mobile_memoir_automation_events(
         user_id=current_user.id,
         project_id=project_id,
         limit=limit,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/automation-events/acknowledge-dismissible",
+    response_model=MemoirAutomationEventAcknowledgeDismissibleResponse,
+)
+async def acknowledge_dismissible_mobile_memoir_automation_events(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    updated_count = await memoir_automation_events.acknowledge_dismissible_automation_events(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+    )
+    return MemoirAutomationEventAcknowledgeDismissibleResponse(
+        updated_count=updated_count
     )
 
 
