@@ -16,7 +16,6 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterDigest,
     MemoirCompletionIssue,
     MemoirSection,
     MemoirVoiceSession,
@@ -28,7 +27,7 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionSummary,
     MemoirChapterWorkspaceResponse,
 )
-from app.services.memoir import chapter_generation, completion_issues
+from app.services.memoir import chapter_digests, chapter_generation, completion_issues
 
 
 async def _plan_chapters(
@@ -177,25 +176,47 @@ async def chapter_summary(
         and version.input_signature
         and version.input_signature == current_signature
     )
-    if (
-        draft is not None
-        and version is not None
-        and draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value
-        and draft_current
-    ):
+    digest = await chapter_digests.get_current_chapter_digest(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    digest_ready = bool(
+        digest
+        and digest.status == MemoirSemanticCacheStatus.READY.value
+    )
+    if not digest_ready:
+        if (
+            digest is not None
+            and digest.status == MemoirSemanticCacheStatus.FAILED.value
+        ):
+            return MemoirChapterCompletionSummary(
+                chapter_id=chapter.id,
+                title=chapter.title,
+                sort_order=chapter.sort_order,
+                state="failed",
+                next_action=MemoirChapterCompletionNextAction(
+                    kind="prepare",
+                    title="上次检查没有完成",
+                    detail="原始素材没有丢失，可以重新检查。",
+                    action_text="重新检查",
+                ),
+                headline="上次检查没有完成",
+                detail="原始素材没有丢失。",
+            )
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
             title=chapter.title,
             sort_order=chapter.sort_order,
-            state="confirmed",
+            state="not_started",
             next_action=MemoirChapterCompletionNextAction(
-                kind="complete",
-                title="本章已确认",
-                detail="正文已经收录进书稿，仍可继续修改。",
-                action_text="查看正文",
+                kind="prepare",
+                title="检查本章是否需要补充",
+                detail="系统会根据当前素材判断本章最需要处理的一步。",
+                action_text="检查本章",
             ),
-            headline="本章已确认",
-            detail="正文已经收录进书稿。",
+            headline="尚未检查是否需要补充",
+            detail="检查后只会给出一个明确的下一步。",
         )
     if issue is not None:
         manual = (
@@ -231,6 +252,26 @@ async def chapter_summary(
             headline="需要确认" if manual else "还需要补充一点",
             detail=issue.reason,
         )
+    if (
+        draft is not None
+        and version is not None
+        and draft.status == MemoirBookChapterDraftStatus.CONFIRMED.value
+        and draft_current
+    ):
+        return MemoirChapterCompletionSummary(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="confirmed",
+            next_action=MemoirChapterCompletionNextAction(
+                kind="complete",
+                title="本章已确认",
+                detail="正文已经收录进书稿，仍可继续修改。",
+                action_text="查看正文",
+            ),
+            headline="本章已确认",
+            detail="正文已经收录进书稿。",
+        )
     if draft is not None and version is not None and draft_current:
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
@@ -241,36 +282,10 @@ async def chapter_summary(
                 kind="review_draft",
                 title="正文已经整理好",
                 detail="请通读、修改并确认本章。",
-                action_text="查看正文",
+                action_text="通读并确认",
             ),
             headline="正文可以通读",
             detail="现有素材已经整理成完整章节。",
-        )
-    failed_digest = await db.scalar(
-        select(MemoirChapterDigest.id)
-        .where(
-            MemoirChapterDigest.project_id == project_id,
-            MemoirChapterDigest.chapter_id == chapter.id,
-            MemoirChapterDigest.status
-            == MemoirSemanticCacheStatus.FAILED.value,
-        )
-        .order_by(MemoirChapterDigest.updated_at.desc())
-        .limit(1)
-    )
-    if failed_digest is not None:
-        return MemoirChapterCompletionSummary(
-            chapter_id=chapter.id,
-            title=chapter.title,
-            sort_order=chapter.sort_order,
-            state="failed",
-            next_action=MemoirChapterCompletionNextAction(
-                kind="prepare",
-                title="上次整理没有完成",
-                detail="原始素材没有丢失，可以重新整理。",
-                action_text="重新整理",
-            ),
-            headline="上次整理没有完成",
-            detail="原始素材没有丢失。",
         )
     return MemoirChapterCompletionSummary(
         chapter_id=chapter.id,
@@ -279,14 +294,11 @@ async def chapter_summary(
         state="not_started",
         next_action=MemoirChapterCompletionNextAction(
             kind="prepare",
-            title="开始整理本章",
-            detail=(
-                "系统会先判断是否真的需要补充；"
-                "素材足够时直接生成完整正文。"
-            ),
-            action_text="开始整理",
+            title="根据检查结果整理正文",
+            detail="当前检查已经完成，正文需要按现有素材更新。",
+            action_text="整理正文",
         ),
-        headline="等待整理" if section_exists else "素材尚未归入小章节",
+        headline="正文需要更新" if section_exists else "素材尚未归入小章节",
         detail="点击后只给出一个明确的下一步。",
     )
 
@@ -315,10 +327,29 @@ async def book_overview(
         for chapter in chapters
     ]
     completed = sum(item.state == "confirmed" for item in items)
+    needs_input = sum(item.state == "needs_input" for item in items)
+    needs_check = sum(
+        item.state in {"not_started", "failed"} for item in items
+    )
+    ready_to_review = sum(item.state == "draft_ready" for item in items)
+    unfinished = len(items) - completed
+    if unfinished:
+        progress = []
+        if needs_check:
+            progress.append(f"{needs_check} 章待检查")
+        if needs_input:
+            progress.append(f"{needs_input} 章待补充或确认")
+        if ready_to_review:
+            progress.append(f"{ready_to_review} 章待通读")
+        headline = f"还有 {unfinished} 章未完成"
+        detail = "，".join(progress) + "。每章只显示当前最重要的一步。"
+    else:
+        headline = "全书正文已经确认"
+        detail = "需要时仍可按当前素材重新检查。"
     return MemoirBookCompletionOverviewResponse(
         project_id=project_id,
-        headline="逐章整理这本书",
-        detail="每章只显示一个下一步，不再经过多层审计页面。",
+        headline=headline,
+        detail=detail,
         total_chapters=len(items),
         completed_chapters=completed,
         chapters=items,

@@ -7,7 +7,11 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueStatus,
     MemoirSemanticCacheStatus,
 )
-from app.models.memoir import MemoirBookPlanChapter, MemoirSection
+from app.models.memoir import (
+    MemoirBookChapterDraftVersion,
+    MemoirBookPlanChapter,
+    MemoirSection,
+)
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
     MemoirChapterWorkspaceResponse,
@@ -87,14 +91,33 @@ async def prepare_chapter(
         None,
     )
     if active_issue is None:
-        await chapter_generation.generate_and_save_chapter_draft(
+        context = await chapter_generation.load_chapter_generation_context(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
-            editorial_guidance=list(
-                digest.digest_json.get("structure_guidance", [])
-            ),
         )
+        latest = await db.scalar(
+            select(MemoirBookChapterDraftVersion)
+            .where(
+                MemoirBookChapterDraftVersion.project_id == project_id,
+                MemoirBookChapterDraftVersion.chapter_id == chapter_id,
+            )
+            .order_by(
+                MemoirBookChapterDraftVersion.version.desc(),
+                MemoirBookChapterDraftVersion.created_at.desc(),
+                MemoirBookChapterDraftVersion.id.desc(),
+            )
+            .limit(1)
+        )
+        if latest is None or latest.input_signature != context.input_signature:
+            await chapter_generation.generate_and_save_chapter_draft(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                editorial_guidance=list(
+                    digest.digest_json.get("structure_guidance", [])
+                ),
+            )
     return await completion_read_model.chapter_workspace(
         db,
         project_id=project_id,

@@ -44,6 +44,10 @@ interface BookCompletionData {
   progressText: string;
   chapters: ChapterView[];
   allChaptersConfirmed: boolean;
+  bulkCheckVisible: boolean;
+  bulkCheckActionText: string;
+  bulkCheckTitle: string;
+  bulkCheckDetail: string;
   preparingChapterId: string;
   recheckingAll: boolean;
   startingIssueId: string;
@@ -61,12 +65,12 @@ function chapterView(
   recheckingAll = false,
 ): ChapterView {
   const stateText = {
-    not_started: "等待整理",
-    preparing: "正在整理",
+    not_started: "待检查",
+    preparing: "正在检查",
     needs_input: "需要您补充",
     draft_ready: "等待通读",
     confirmed: "已经确认",
-    failed: "整理未完成",
+    failed: "检查未完成",
   }[item.state];
   const busy = (
     recheckingAll
@@ -75,9 +79,9 @@ function chapterView(
   );
   return {
     ...item,
-    stateText: busy ? "正在整理" : stateText,
+    stateText: busy ? "正在检查" : stateText,
     actionText: busy
-      ? "正在整理"
+      ? "正在检查"
       : (item.state === "confirmed"
         ? "查看正文"
         : (item.next_action.action_text || "查看本章")),
@@ -92,8 +96,23 @@ export function bookCompletionViewPatch(
   recheckingAll = false,
 ): Pick<
   BookCompletionData,
-  "headline" | "detail" | "progressText" | "chapters" | "allChaptersConfirmed"
+  | "headline"
+  | "detail"
+  | "progressText"
+  | "chapters"
+  | "allChaptersConfirmed"
+  | "bulkCheckVisible"
+  | "bulkCheckActionText"
+  | "bulkCheckTitle"
+  | "bulkCheckDetail"
 > {
+  const allChaptersConfirmed = (
+    overview.chapters.length > 0
+    && overview.chapters.every((item) => item.state === "confirmed")
+  );
+  const hasCheckableChapters = overview.chapters.some(
+    (item) => item.next_action.kind === "prepare",
+  );
   return {
     headline: overview.headline,
     detail: overview.detail,
@@ -103,10 +122,17 @@ export function bookCompletionViewPatch(
     chapters: overview.chapters.map(
       (item) => chapterView(item, preparingChapterId, recheckingAll),
     ),
-    allChaptersConfirmed: (
-      overview.chapters.length > 0
-      && overview.chapters.every((item) => item.state === "confirmed")
-    ),
+    allChaptersConfirmed,
+    bulkCheckVisible: allChaptersConfirmed || hasCheckableChapters,
+    bulkCheckActionText: allChaptersConfirmed
+      ? "重新检查全书"
+      : "检查待检查章节",
+    bulkCheckTitle: allChaptersConfirmed
+      ? "当前没有待处理的补充"
+      : "先检查是否真的需要补充",
+    bulkCheckDetail: allChaptersConfirmed
+      ? "所有章节正文都已确认。需要时可以按当前素材重新检查。"
+      : "系统会逐章判断，只展示每章当前最重要的一步。",
   };
 }
 
@@ -124,6 +150,10 @@ definePage<BookCompletionData>()({
     progressText: "",
     chapters: [],
     allChaptersConfirmed: false,
+    bulkCheckVisible: false,
+    bulkCheckActionText: "",
+    bulkCheckTitle: "",
+    bulkCheckDetail: "",
     preparingChapterId: "",
     recheckingAll: false,
     startingIssueId: "",
@@ -204,7 +234,7 @@ definePage<BookCompletionData>()({
       }
       this.setData({
         loading: false,
-        error: error instanceof Error ? error.message : "全书整理情况加载失败",
+        error: error instanceof Error ? error.message : "全书检查情况加载失败",
       });
       if (this.data.preparingChapterId || this.data.recheckingAll) {
         this.schedulePolling();
@@ -264,7 +294,7 @@ definePage<BookCompletionData>()({
       }
       this.setData({
         preparingChapterId: "",
-        error: error instanceof Error ? error.message : "本章整理失败",
+        error: error instanceof Error ? error.message : "本章检查失败",
         chapters: this.data.chapters.map((item) => chapterView(item, "")),
       });
     }
@@ -272,11 +302,19 @@ definePage<BookCompletionData>()({
 
   async recheckAllChapters() {
     if (
-      !this.data.allChaptersConfirmed
+      !this.data.bulkCheckVisible
       || this.data.recheckingAll
       || this.data.preparingChapterId
       || !this.data.chapters.length
     ) {
+      return;
+    }
+    const targets = this.data.allChaptersConfirmed
+      ? this.data.chapters
+      : this.data.chapters.filter(
+        (chapter) => chapter.next_action.kind === "prepare",
+      );
+    if (!targets.length) {
       return;
     }
     this.setData({
@@ -285,7 +323,7 @@ definePage<BookCompletionData>()({
       chapters: this.data.chapters.map((item) => chapterView(item, "", true)),
     });
     try {
-      for (const chapter of this.data.chapters) {
+      for (const chapter of targets) {
         await prepareMemoirBookChapter(this.data.projectId, chapter.chapter_id);
       }
       await this.loadOverview(true);
@@ -295,7 +333,7 @@ definePage<BookCompletionData>()({
       }
       this.setData({
         recheckingAll: false,
-        error: error instanceof Error ? error.message : "全书检查没有完成",
+        error: error instanceof Error ? error.message : "章节检查没有完成",
         chapters: this.data.chapters.map((item) => chapterView(item, "")),
       });
     }

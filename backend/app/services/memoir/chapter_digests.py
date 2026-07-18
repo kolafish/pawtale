@@ -15,8 +15,6 @@ from app.domain.memoir.types import (
     MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
-    MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
     MemoirBookPlanChapter,
     MemoirChapterDigest,
     MemoirSection,
@@ -25,10 +23,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir import completion_issues, section_digests
-from app.services.memoir.semantic_state import (
-    semantic_json_signature,
-    semantic_text_hash,
-)
+from app.services.memoir.semantic_state import semantic_json_signature
 
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
@@ -59,8 +54,6 @@ class ChapterDigestContext:
     include_in_book: bool
     sections: tuple[ChapterDigestSection, ...]
     allowed_material_ids: frozenset[str]
-    latest_draft_id: str | None
-    latest_draft_hash: str
     input_signature: str
 
 
@@ -79,27 +72,6 @@ def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
         if len(result) >= limit:
             break
     return result
-
-
-async def _latest_draft(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> MemoirBookChapterDraftVersion | None:
-    return await db.scalar(
-        select(MemoirBookChapterDraftVersion)
-        .where(
-            MemoirBookChapterDraftVersion.project_id == project_id,
-            MemoirBookChapterDraftVersion.chapter_id == chapter_id,
-        )
-        .order_by(
-            MemoirBookChapterDraftVersion.version.desc(),
-            MemoirBookChapterDraftVersion.created_at.desc(),
-            MemoirBookChapterDraftVersion.id.desc(),
-        )
-        .limit(1)
-    )
 
 
 async def _load_chapter(
@@ -222,11 +194,6 @@ async def load_chapter_digest_context(
             for material in section.materials
             if material.include_in_book
         )
-    latest = await _latest_draft(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
     payload = {
         "chapter": {
             "id": chapter.id,
@@ -246,10 +213,6 @@ async def load_chapter_digest_context(
             }
             for item in sections
         ],
-        "latest_draft": {
-            "id": latest.id if latest else None,
-            "content_hash": semantic_text_hash(latest.content) if latest else "",
-        },
         "engine": CHAPTER_DIGEST_ENGINE,
     }
     return ChapterDigestContext(
@@ -260,9 +223,40 @@ async def load_chapter_digest_context(
         include_in_book=chapter.include_in_book,
         sections=tuple(sections),
         allowed_material_ids=frozenset(material_ids),
-        latest_draft_id=latest.id if latest else None,
-        latest_draft_hash=semantic_text_hash(latest.content) if latest else "",
         input_signature=semantic_json_signature(payload),
+    )
+
+
+async def get_current_chapter_digest(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirChapterDigest | None:
+    """Return the digest for the current section state without invoking AI."""
+    try:
+        context = await load_chapter_digest_context(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code in {409, 422}:
+            return None
+        raise
+    return await db.scalar(
+        select(MemoirChapterDigest)
+        .where(
+            MemoirChapterDigest.project_id == project_id,
+            MemoirChapterDigest.chapter_id == chapter_id,
+            MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
+            MemoirChapterDigest.input_signature == context.input_signature,
+        )
+        .order_by(
+            MemoirChapterDigest.updated_at.desc(),
+            MemoirChapterDigest.id.desc(),
+        )
+        .limit(1)
     )
 
 
