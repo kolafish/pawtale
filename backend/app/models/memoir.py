@@ -3,7 +3,20 @@ from __future__ import annotations
 from datetime import datetime
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    JSON,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
 from app.database import Base
@@ -26,6 +39,9 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirSessionGoal,
     MemoirOutputStatus,
+    MemoirSectionMaterialAssignedBy,
+    MemoirSectionStatus,
+    MemoirSectionType,
     MemoirSemanticCacheStatus,
     MemoirShareVideoJobStatus,
     MemoirTranscriptVersionType,
@@ -591,6 +607,185 @@ class MemoirBookPlanChapter(Base):
         back_populates="chapter",
         cascade="all, delete-orphan",
         uselist=False,
+    )
+    sections: Mapped[list["MemoirSection"]] = orm_relationship(
+        "MemoirSection",
+        back_populates="chapter",
+        cascade="all, delete-orphan",
+        order_by="MemoirSection.sort_order",
+    )
+
+
+class MemoirSection(Base):
+    __tablename__ = "memoir_sections"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "id",
+            name="uq_memoir_sections_project_id",
+        ),
+        UniqueConstraint(
+            "chapter_id",
+            "sort_order",
+            name="uq_memoir_sections_chapter_order",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "chapter_id"],
+            [
+                "memoir_book_plan_chapters.project_id",
+                "memoir_book_plan_chapters.id",
+            ],
+            name="fk_memoir_sections_project_chapter",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            f"section_type IN ({_enum_values(MemoirSectionType)})",
+            name="ck_memoir_sections_type",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirSectionStatus)})",
+            name="ck_memoir_sections_status",
+        ),
+        CheckConstraint(
+            "version > 0",
+            name="ck_memoir_sections_positive_version",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chapter_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    section_type: Mapped[str] = mapped_column(
+        String(40),
+        default=MemoirSectionType.EVENT.value,
+        nullable=False,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSectionStatus.ACTIVE.value,
+        nullable=False,
+        index=True,
+    )
+    include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship(
+        "MemoirBookPlanChapter",
+        back_populates="sections",
+    )
+    materials: Mapped[list["MemoirSectionMaterial"]] = orm_relationship(
+        "MemoirSectionMaterial",
+        back_populates="section",
+        cascade="all, delete-orphan",
+        order_by="MemoirSectionMaterial.sort_order",
+    )
+
+
+class MemoirSectionMaterial(Base):
+    __tablename__ = "memoir_section_materials"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "utterance_id",
+            name="uq_memoir_section_materials_project_utterance",
+        ),
+        UniqueConstraint(
+            "section_id",
+            "sort_order",
+            name="uq_memoir_section_materials_section_order",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "section_id"],
+            ["memoir_sections.project_id", "memoir_sections.id"],
+            name="fk_memoir_section_materials_project_section",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            f"assigned_by IN ({_enum_values(MemoirSectionMaterialAssignedBy)})",
+            name="ck_memoir_section_materials_assigned_by",
+        ),
+        CheckConstraint(
+            "assignment_confidence IS NULL "
+            "OR (assignment_confidence >= 0 AND assignment_confidence <= 1)",
+            name="ck_memoir_section_materials_confidence",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    section_id: Mapped[str] = mapped_column(
+        String(36),
+        nullable=False,
+        index=True,
+    )
+    utterance_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    transcript_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_transcript_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    assigned_by: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSectionMaterialAssignedBy.SYSTEM.value,
+        nullable=False,
+        index=True,
+    )
+    assignment_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    assignment_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    section: Mapped[MemoirSection] = orm_relationship(
+        "MemoirSection",
+        back_populates="materials",
+    )
+    utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
+    transcript_version: Mapped[MemoirTranscriptVersion | None] = orm_relationship(
+        "MemoirTranscriptVersion"
     )
 
 

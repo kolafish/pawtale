@@ -2,254 +2,267 @@
 
 ## 文档状态
 
-本文是回忆录“主题讲述 + 成书补全”的当前开发基线。历史上的精细章节结构、逐块正文和多层任务设计已退出运行时；如需追溯，请查看 Git 历史，不在当前文档保留兼容路径。
+本文是回忆录“主题讲述 + 成书补全”的目标开发基线。系统以原始讲述为事实来源，以小章节为核心叙事单元，通过分层语义摘要支持访谈和成书，不维护人物、事件和关系的完整知识图谱。
 
-- 事实与成书不变量见 `MEMOIR_NARRATIVE_ARCHITECTURE.md`。
+- 事实来源、正文生成和用户决定不变量见 `MEMOIR_NARRATIVE_ARCHITECTURE.md`。
 - 实时语音状态机见 `MEMOIR_VOICE_CHAT_REDESIGN.md`。
-- 当前原则：事实底座共享，访谈策略和章节补全各自负责，不维护重复的完整度真相。
+- 当前原则：共享素材和小章节，分别维护访谈策略与成书问题，不建立第二套完整度真相。
+
+重构按独立 PR 逐步切换运行时；完成清理后，历史实现只通过 Git 追溯。
 
 ## 一、产品边界
 
-系统有两条相互协作但目标不同的链路。
-
 ### 1.1 主题讲述
 
-主题讲述帮助用户继续说下去。它不要求用户按固定人生目录逐项完成，也不把“没有讲过”解释为“必须补齐”。
+主题讲述帮助用户自然地继续说下去。系统读取当前对话、最近素材、小章节摘要、话题地图和用户偏好，让 LLM 从受控动作中选择下一步。
 
-```text
-当前对话 + Story / Claim + 话题地图 + 用户偏好
-                    ↓
-             LLM 选择受控动作
-                    ↓
-          自然回应、追问或提供新话题
-```
-
-允许的策略动作由系统提供候选集，例如：
+允许动作包括：
 
 - 继续倾听；
-- 顺着当前故事追问；
-- 询问人物关系；
-- 询问原因或结果；
+- 顺着当前内容追问；
+- 询问人物关系、原因或结果；
 - 总结确认；
-- 回到旧故事；
+- 回到已有小章节；
 - 提供一个新话题；
 - 暂停或结束。
 
-LLM 可以选择动作和组织表达，但不能确认事实、改变隐私、决定内容入书或覆盖用户决定。
-
-话题地图只记录：
-
-- 这个方面是否出现过素材；
-- 相关 Claim / Story；
-- 用户是否不愿讨论或认为不适用。
-
-它不是固定覆盖状态机，也不产生“全部讲完”的结论。
+话题地图只记录某个方面是否出现过素材、相关 Material / Section，以及用户是否不愿讨论。它不要求用户完成固定人生目录，也不产生“全部讲完”的结论。
 
 ### 1.2 成书补全
 
-成书补全只回答一个问题：当前章节下一步做什么，才能得到一份用户可以通读和确认的正文？
+成书补全回答一个问题：当前内容下一步做什么，才能形成用户可以通读和确认的正文？
 
-页面永远只展示一个下一步：
+系统在三个层级审阅：
 
-```text
-尚未整理
-  → 正在检查
-  → 需要补讲或确认一件事
-  → 正在生成整章正文
-  → 通读、可选修改
-  → 确认本章
-```
+- Section：一个小故事、人物片段、人生阶段或观点是否能够被理解；
+- Chapter：小章节之间的顺序、重点、过渡、开头和结尾是否成立；
+- Book：人生阶段、主要人物、主题、篇幅和跨章衔接是否存在明显问题。
 
-不是所有问题都要采访：
+不是所有问题都需要采访：
 
-- 缺少用户掌握的新事实：补讲；
-- 事实冲突、隐私或收录决定：用户确认；
-- 素材已经足够，仅需组织、开头、结尾、转场或去重：编辑处理；
-- 次要事件简短但不影响理解：不产生任务。
+- 缺少用户掌握且明显影响理解的内容：补讲；
+- 是否收录、是否私密、内容冲突：用户确认；
+- 已有素材足够，只需调整结构、去重或改写：编辑处理；
+- 不影响理解的次要细节：不产生问题。
 
-## 二、共享数据与独立状态
+## 二、共享数据
 
-两条链共享以下事实：
+两条链共享同一条主干：
 
 ```text
 AudioFile
-  → VoiceUtterance
-  → TranscriptVersion
-  → ClaimEvidence
-  → Claim
-  → Story
+  → VoiceSession
+  → VoiceUtterance（Material）
+  → SectionMaterial
+  → Section
+  → Chapter
+  → Book
 ```
 
-它们也共享人物实体、章节素材关联和用户决定。
+`VoiceUtterance` 直接承担 Material 角色，不再复制一张只保存相同讲述内容的表。原始音频、ASR、校正文和 TranscriptVersion 始终可追溯。
 
-两条链不共享：
+主题讲述额外维护：
 
-- 同一套完成百分比；
-- 同一套持久任务；
-- “话题没出现就必须采访”的规则；
-- 由 LLM 直接写入的事实状态。
+- 话题地图；
+- InterviewBrief；
+- 策略决策与评价日志；
+- 用户偏好和拒答记录。
 
-主题讲述的长期状态是话题地图和策略决策日志；成书补全的长期状态是 `MemoirCompletionItem` 和整章草稿版本。
+成书补全额外维护：
 
-## 三、当前最小数据模型
+- SectionDigest；
+- ChapterDigest；
+- BookReview；
+- 少量当前 CompletionIssue；
+- 完整章节草稿和全书版本。
 
-### 3.1 事实层
+## 三、小章节
 
-- `MemoirNarrativeEntity`：人物、地点、组织等稳定实体。
-- `MemoirClaim`：可确认、可排除、可标私密的事实命题。
-- `MemoirClaimEvidence`：Claim 到转写、音频片段、图片或人工证据的来源。
-- `MemoirStory`：跨多次访谈持续补充的故事单元。
-- `MemoirStoryClaim`：Story 的 Claim 顺序和叙事作用。
-- `MemoirNarrativeDecision`：事实确认、排除、隐私及人工审阅决定。
+### 3.1 Section 是核心叙事单元
 
-### 3.2 主题讲述
+一个 Section 应能被相对独立地理解。支持的初始类型：
 
-- `MemoirProjectFramework`：项目使用的话题地图版本。
-- `MemoirFrameworkItem`：候选话题及用户 resolution。
-- `MemoirFrameworkItemClaim`：话题和已有 Claim 的被动匹配。
-- `MemoirInterviewPolicyDecision`：当时状态、候选动作、选中动作、原因和生成问题。
-- `MemoirInterviewPolicyEvaluation`：shadow 或人工评价结果。
+- `event`：有过程或转折的具体事件；
+- `life_fragment`：生活片段；
+- `person_portrait`：围绕一个人的描写；
+- `life_stage_summary`：人生阶段概述；
+- `viewpoint_reflection`：观点、感受或反思。
 
-语音层只消费经过整理的 InterviewBrief，不直接理解全部数据库表。
+类型只影响审阅重点，不是强制写作模板。
 
-### 3.3 成书补全
+### 3.2 素材归属不变量
 
-- `MemoirChapterSourceLink`：Utterance 到章节的当前归属，是章节素材真相。
-- `MemoirCompletionItem`：当前需要补讲或人工确认的一件事。
-- `MemoirEditingJob`：章节检查或整章生成的一次异步执行。
-- `MemoirBookChapterDraft`：某章当前草稿状态。
-- `MemoirBookChapterDraftVersion`：完整整章正文的不可变版本。
-- `MemoirBookOutputVersion`：由已确认章节版本组装出的整书版本。
+- 一条 Material 同一时刻只归属于一个 Section；
+- 一次回答不能被拆开后穿插到多个位置；
+- Material 的章节归属由所属 Section 推导；
+- 调整归属时移动 SectionMaterial，不复制原始讲述；
+- Section 可以移动、排序、合并、拆分、隐藏或归档；
+- 任何结构调整都不能改写原始讲述。
 
-不再维护：
+### 3.3 初始整理
 
-- 另一套 Gap 表；
-- FollowupTask / Answer 表；
-- Story 槽位完成度；
-- 章节契约和章节节点；
-- 正文分块、分块锁定和分块拼装；
-- StoryRevision 和 Story 合并状态。
+新素材到达后，整理器可以：
 
-## 四、成书补全端到端链路
+- 放入已有 Section；
+- 新建 Section；
+- 标记需要用户选择归属；
+- 识别明显重复，但不能自行删除用户内容。
 
-### 4.1 准备章节
+已有项目迁移时，先按每个现有 Chapter 建立一个初始 Section，并把当前章节素材确定性归入；后续再由用户或整理器拆分。
 
-用户点击“开始整理”后：
+## 四、分层语义摘要
 
-1. 读取当前章节的有效 SourceLink。
-2. 通过证据找到相关 Claim 和 Story。
-3. 运行少量确定性规则。
-4. 可选运行章节语义审计。
-5. 把可持久问题收敛为最多一个当前 `MemoirCompletionItem`。
-6. 没有待处理 Item 时，排队生成完整章节正文。
+### 4.1 SectionDigest
 
-审计输入签名包含章节、Story、Claim、证据计数和当前草稿版本。运行过程中输入变化时，本次结果作废并重新排队，不能发布过期判断。
+SectionDigest 读取有序 Material 和必要的当前正文，输出：
 
-### 4.2 需要补讲
+- 简短摘要；
+- 当前表达重点；
+- 已经讲清的内容；
+- 最值得处理的少量问题；
+- 对应 Material ID；
+- 输入签名。
 
-`MemoirCompletionItem` 记录问题、解决通道和状态。用户开始回答时，VoiceSession 绑定当前 Item；新 Utterance 仍按普通素材进入转写、Claim、Story 和 SourceLink 链路。
+不同 Section 类型使用不同审阅维度。事件关注背景、过程、转折和影响；人物关注关系、特点和意义；观点关注触发背景和个人理解。
 
-回答完成后：
+### 4.2 ChapterDigest
 
-1. 关联 Item 与本次素材；
-2. 重新评估章节；
-3. Item 已被事实解决则关闭；
-4. 没有其他 Item 时生成整章正文。
+ChapterDigest 主要读取有序 SectionDigest，并按需读取原文，判断：
 
-回答不是“特殊记录”。是否入章由 SourceLink、Claim 可发表性和 Story 关系决定。
+- 顺序和时间线；
+- 重复与重点分散；
+- 小章节之间的过渡；
+- 开头和结尾；
+- 背景、人物和指代是否清楚；
+- 是否需要合并、拆分或移动 Section。
 
-### 4.3 生成整章
+### 4.3 BookReview
 
-生成器只接收：
+BookReview 主要读取 ChapterDigest，并对具体疑点按需读取章节或素材，判断：
 
-- 章节标题；
-- 相关 Story；
-- 可发表 Claim；
-- Claim 的原始证据摘录；
-- 当前整章正文；
-- 仅控制组织方式的编辑建议。
+- 人生阶段是否存在明显空白；
+- 跨章内容是否重复或断裂；
+- 重要人物是否突然出现或消失；
+- 各阶段和主题篇幅是否失衡；
+- 全书开头、结尾和主题线是否成立。
 
-LLM 输出完整正文和实际使用的 Claim ID。系统校验：
+Digest 和 Review 都是可重新生成的派生数据，不是事实来源。
 
-- Claim ID 必须在本次允许集合内；
-- 无依据候选不能出现在正文；
-- 正文使用第一人称；
-- 不把不确定事实改成确定事实。
+## 五、增量问题
 
-生成成功后创建一个 `MemoirBookChapterDraftVersion`，并把当前章节 SourceLink 标记为已被该版本吸收。
+审阅可以返回一到三个候选问题，但系统只向用户展示一个当前问题。问题优先级综合考虑：
 
-### 4.4 通读、修改与确认
+- 是否影响读者理解；
+- 是否关系到重要内容；
+- 回答后能否明显改善章节；
+- 当前是否适合询问；
+- 是否已经问过、解决、跳过或拒绝。
 
-章节工作台只加载一次 workspace 请求，直接得到：
+CompletionIssue 只保存真正进入处理流程的问题，不保存庞大的潜在问题池。至少记录：
 
-- 当前下一步；
-- 完整章节正文；
-- 草稿版本 ID；
-- 草稿状态。
+- scope：section / chapter / book；
+- 对应对象；
+- 自然语言问题；
+- 内部原因和优先级；
+- 处理方式：interview / manual_review；
+- fingerprint；
+- 状态和处理结果；
+- 相关 Material；
+- 创建时的输入签名。
 
-用户可以整章修改。保存时提交 `expected_version_id` 做乐观并发检查，并创建新的完整版本。修改后的版本继承同一批已吸收素材关系，不需要再次拼装。
+用户回答后：
 
-确认只执行一次整章确认，不存在逐段确认或解除保护。
+```text
+回答成为普通 Material
+  → 归入当前或新 Section
+  → 更新 SectionDigest
+  → 更新 ChapterDigest
+  → 关闭已解决 Issue
+  → 再选择下一个最有价值的问题
+```
 
-### 4.5 组装全书
+“不记得”“以后再说”“不愿讨论”和“已有其他素材回答”都是明确结果，不能通过换一种问法持续追问。
 
-全书组装只接受：
+## 六、用户可见流程
 
-- 已确认的章节规划；
-- `include_in_book = true` 的章节；
-- 每章最新且已确认的完整草稿版本。
+小程序保持简单路径：
 
-输出快照直接记录 `chapter_id + draft_version_id`。相同输入重复组装复用当前输出版本；任一章节版本变化都会使全书输出失效。
+```text
+补全本书
+  → 每章一个下一步
+  → 章节工作台
+  → 必要时进入一次语音补讲
+  → 生成或更新完整章节正文
+  → 通读、修改、确认
+```
 
-## 五、用户可见状态
+Section 在章节工作台内展示和调整，不额外增加必须经过的页面。
 
-`ChapterCompletionSummary` 是唯一章节状态读模型：
+章节状态使用一个读模型推导：
 
-- `not_started`：可以开始整理；
-- `preparing`：审计或整章生成正在运行；
-- `needs_input`：当前只显示一个补讲或确认项；
+- `not_started`：尚未整理；
+- `preparing`：正在整理或生成；
+- `needs_input`：需要补讲或确认一件事；
 - `draft_ready`：正文可通读、修改和确认；
-- `confirmed`：本章已收入书稿；
-- `failed`：本次后台处理失败，可重试，原始素材未丢失。
+- `confirmed`：本章已确认；
+- `failed`：本次处理失败，原始素材未丢失。
 
-这些状态由事实、Item、Job 和草稿推导，不单独持久化，不允许前端自行拼装第二套状态机。
+前台不展示 Digest、fingerprint、scope、置信度等后台术语。
 
-## 六、LLM 与确定性逻辑边界
+## 七、LLM 与领域逻辑边界
 
 LLM 可以：
 
-- 识别高层章节问题；
-- 判断继续听还是切换话题；
-- 生成自然问题；
-- 根据已有事实整理正文；
-- 提供编辑性组织建议。
+- 决定素材适合哪个 Section；
+- 建议新建、合并、拆分、移动 Section；
+- 生成摘要和编辑建议；
+- 判断下一步最值得问什么；
+- 选择访谈策略动作；
+- 根据允许素材生成候选正文。
 
-LLM 不可以：
+确定性领域逻辑负责：
 
-- 确认 Claim 真实；
-- 修改隐私和收录决定；
+- project 和用户权限隔离；
+- 原始素材不可变；
+- 一条 Material 只有一个当前 Section；
+- 用户收录、隐私、拒答和删除决定；
+- 输入签名、过期结果和并发发布；
+- 正文 Material allowlist；
+- 章节确认和全书组装条件。
+
+LLM 不能：
+
+- 创造用户没有讲过的事实；
+- 把模糊记忆写成确定事实；
+- 自动解决内容冲突；
+- 覆盖用户排除或隐私决定；
 - 删除素材；
-- 解决事实冲突；
-- 覆盖人工决定；
-- 用旧草稿内容反向创造事实。
+- 因固定模板缺项而强制追问。
 
-所有 LLM 输出必须经过显式 schema 和 ID allowlist 校验。
+## 八、最终数据结构
 
-## 七、开发与验收顺序
+```text
+memoir_voice_sessions
+memoir_voice_utterances
+memoir_transcript_versions
 
-当前收敛按以下顺序交付：
+memoir_sections
+memoir_section_materials
+memoir_section_digests
+memoir_chapter_digests
+memoir_book_reviews
+memoir_completion_issues
 
-1. 删除重复完成度状态和旧任务链。
-2. 统一为一个 `MemoirCompletionItem`。
-3. 用整章草稿替代章节契约、节点和正文分块。
-4. 执行不向前兼容的数据库破坏性迁移。
-5. 跑端到端测试后统一部署。
+memoir_book_plans
+memoir_book_plan_chapters
+memoir_book_chapter_drafts
+memoir_book_chapter_draft_versions
+memoir_book_outputs
+memoir_book_output_versions
 
-验收至少覆盖：
+memoir_interview_policy_decisions
+memoir_interview_policy_evaluations
+memoir_editing_jobs
+```
 
-- 有素材时自动生成一份整章正文；
-- 缺素材时只出现一个补讲问题；
-- 人工修改后可直接确认，不要求再次组装；
-- 已确认章节可稳定组装全书；
-- 旧 API、旧表、旧枚举和旧测试不再存在；
-- 小程序只走 workspace → 整章修改/确认链路。
+只保留一套素材归属、一套分层摘要、一套当前问题和一套章节正文。
