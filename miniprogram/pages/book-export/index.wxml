@@ -64,10 +64,10 @@
                 class="chapter-small-section"
               >
                 <text class="chapter-small-section-title">{{section.title}}</text>
-                <text class="chapter-excerpt">{{section.content}}</text>
+                <text class="chapter-excerpt">{{section.excerpt}}</text>
               </view>
             </view>
-            <text wx:else class="chapter-excerpt">{{chapter.content}}</text>
+            <text wx:else class="chapter-excerpt">{{chapter.excerpt}}</text>
           </view>
         </view>
         <text wx:if="{{!bookPreviewChapters.length}}" class="book-output-text" selectable>{{bookContent}}</text>

@@ -96,6 +96,11 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookContent, "全书第二版正文");
   assert.equal(context.data.bookPreviewChapters.length, 1);
+  assert.equal(context.data.bookPreviewChapters[0].sections.length, 2);
+  assert.equal(
+    context.data.bookPreviewChapters[0].sections[0].excerpt,
+    "我小时候常在院子里晒太阳。",
+  );
   assert.equal(context.data.bookManuscriptAvailable, true);
   assert.equal(context.data.bookManuscriptTemplateLabel, "素雅书籍版");
   assert.equal(context.data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);

@@ -120,6 +120,7 @@ export interface BookOutputSectionView {
   indexText: string;
   title: string;
   content: string;
+  excerpt: string;
   metaText: string;
 }
 
@@ -130,6 +131,7 @@ export interface BookOutputChapterPreviewView {
   indexText: string;
   title: string;
   content: string;
+  excerpt: string;
   metaText: string;
   sections: BookOutputSectionView[];
 }
@@ -587,6 +589,7 @@ export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVers
             indexText: `${chapterIndex}.${sectionIndex}`,
             title: trimText(section.title),
             content: "",
+            excerpt: "",
             metaText: [
               `${sectionCharCount} 字`,
               bookOralSourceCountText(sectionSourceCount),
@@ -628,6 +631,7 @@ export function bookOutputChapterPreviews(
             indexText: `${chapterIndex}.${sectionIndex}`,
             title: trimText(section.title),
             content: sectionContent,
+            excerpt: previewText(sectionContent, 72),
             metaText: [
               `${responseCount(section.char_count) || sectionContent.length} 字`,
               bookOralSourceCountText(sectionSourceCount),
@@ -642,6 +646,7 @@ export function bookOutputChapterPreviews(
         indexText: `第 ${chapterIndex} 章`,
         title: trimText(chapter.title),
         content: trimText(chapter.content),
+        excerpt: previewText(chapter.content, 96),
         metaText: [`${charCount} 字`, bookSourceCountText(sourceCount), versionText].filter(Boolean).join(" · "),
         sections,
       };
