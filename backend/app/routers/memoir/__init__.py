@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from . import book
+from . import book_reviews
 from . import book_editor
 from . import chapter_source_editor
 from . import chapter_pipeline
@@ -29,6 +30,7 @@ router.include_router(narrative.router, prefix="/api/memoir")
 router.include_router(sections.router, prefix="/api/memoir")
 router.include_router(section_digests.router, prefix="/api/memoir")
 router.include_router(book.router, prefix="/api/mobile/memoir")
+router.include_router(book_reviews.router, prefix="/api/memoir")
 router.include_router(mobile.router, prefix="/api/mobile/memoir")
 router.include_router(voice.router, prefix="/api/mobile/memoir")
 router.include_router(voice_gateway.router, prefix="/api/mobile/memoir")

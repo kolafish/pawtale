@@ -219,7 +219,7 @@ async def test_closed_issue_is_not_reopened_or_rephrased(client, test_db):
     assert current.current_issue.id != declined.id
 
 
-async def test_stale_open_issue_is_closed_as_superseded(client, test_db):
+async def test_stale_active_issues_are_closed_as_superseded(client, test_db):
     project_id, section, materials = await _section(client, test_db)
     fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))
     issues = await completion_issues.refresh_section_issues(
@@ -227,6 +227,11 @@ async def test_stale_open_issue_is_closed_as_superseded(client, test_db):
         project_id=project_id,
         section_id=section["id"],
         ai_client=fake,
+    )
+    await completion_issues.start_issue(
+        test_db,
+        project_id=project_id,
+        issue_id=issues[0].id,
     )
     await test_db.commit()
 

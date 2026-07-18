@@ -2,146 +2,211 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirEditingJob
-from app.models.memoir_narrative import MemoirCompletionItem
-from app.services.memoir.editing_job_handlers import (
-    register_memoir_editing_job_handlers,
+from app.database import Base, register_models
+from app.domain.memoir.types import (
+    MemoirCompletionIssueScope,
+    MemoirEditingJobType,
 )
-from app.services.memoir.editing_jobs import register_editing_job_handler
-from app.services.memoir.narrative import completion_refresh, draft_generation_jobs
+from app.migrations.memoir_books import (
+    assert_memoir_book_schema,
+    migrate_memoir_book_schema,
+)
+from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookChapterDraftVersion,
+    MemoirBookReview,
+    MemoirCompletionIssue,
+    MemoirEditingJob,
+)
+from app.services.memoir import (
+    book_reviews,
+    chapter_digests,
+    chapter_generation,
+    section_digests,
+)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
-    create_test_source_backed_story,
     create_test_voice_transcript,
+    ensure_mobile_memoir_project,
     memoir_source_ref,
-    run_test_editing_job,
 )
 
 
-class EmptyChapterAuditAI:
+class LayeredBookAI:
     provider_name = "test"
-    model_name = "test-chapter-audit"
+    model_name = "test-layered-book"
 
-    async def _call_llm(self, *_args, **_kwargs):
-        return '{"schema_version":"2","gaps":[]}'
+    def __init__(
+        self,
+        *,
+        section_issue: bool = False,
+        chapter_manual_issue: bool = False,
+        book_issue: bool = False,
+    ):
+        self.section_issue = section_issue
+        self.chapter_manual_issue = chapter_manual_issue
+        self.book_issue = book_issue
+        self.prompts: list[str] = []
 
-
-class MismatchedPersonIdentityAuditAI:
-    provider_name = "test"
-    model_name = "test-person-identity-audit"
-
-    def __init__(self, story_id: str):
-        self.story_id = story_id
-
-    async def _call_llm(self, *_args, **_kwargs):
-        return json.dumps(
-            {
-                "schema_version": "2",
-                "gaps": [
+    async def _call_llm(
+        self,
+        system_prompt,
+        user_prompt,
+        temperature=0.7,
+        max_tokens=4000,
+        timeout=60.0,
+        return_raw=False,
+    ):
+        self.prompts.append(user_prompt)
+        material_ids = _prompt_ids(user_prompt, "material_id")
+        section_ids = _prompt_ids(user_prompt, "section_id")
+        chapter_ids = _prompt_ids(user_prompt, "chapter_id")
+        if "请审阅下面这个回忆录小章节" in user_prompt:
+            candidates = []
+            if self.section_issue:
+                candidates = [
                     {
-                        # The provider sometimes chooses a plausible semantic
-                        # type that conflicts with the controlled dimension.
-                        "gap_type": "unclear_reference",
-                        "severity": "medium",
-                        "dimension": "person_introduction",
-                        "reason_signal": "draft_usage_problem",
-                        "title": "主要朋友没有明确身份",
-                        "description": "正文只称呼“她”，现有事实没有说明姓名。",
-                        "story_ids": [self.story_id],
-                        "claim_ids": [],
+                        "issue_type": "meaning",
+                        "question": "这件事后来对你有什么影响？",
+                        "reason": "个人影响会让这一段的重点更清楚。",
+                        "priority": "high",
+                        "material_ids": material_ids[:1],
                     }
-                ],
-            },
-            ensure_ascii=False,
+                ]
+            payload = {
+                "summary": "讲述者回忆了一次学校比赛。",
+                "focus": "这次比赛留下的记忆。",
+                "covered_points": ["事情经过"],
+                "candidate_issues": candidates,
+            }
+        elif "请审阅回忆录章节" in user_prompt:
+            candidates = []
+            if self.chapter_manual_issue:
+                candidates = [
+                    {
+                        "issue_type": "privacy",
+                        "channel": "manual_review",
+                        "question": "这一章是否愿意保留真实学校名称？",
+                        "reason": "这是用户需要决定的隐私边界。",
+                        "priority": "high",
+                        "section_ids": section_ids[:1],
+                        "material_ids": material_ids[:1],
+                    }
+                ]
+            payload = {
+                "summary": "本章围绕一次学校比赛展开。",
+                "focus": "比赛经历和它留下的记忆。",
+                "structure_guidance": ["从比赛现场开始。"],
+                "candidate_issues": candidates,
+            }
+        elif "请审阅回忆录“" in user_prompt:
+            candidates = []
+            if self.book_issue:
+                candidates = [
+                    {
+                        "issue_type": "structure",
+                        "channel": "manual_review",
+                        "question": "是否保留两章相近的学校经历？",
+                        "reason": "两章主题接近，需要用户决定取舍。",
+                        "priority": "medium",
+                        "chapter_ids": chapter_ids[:2],
+                        "material_ids": [],
+                    }
+                ]
+            payload = {
+                "summary": "全书记录了几段重要成长经历。",
+                "strengths": ["人生阶段清楚"],
+                "structure_guidance": ["统一章节之间的过渡。"],
+                "candidate_issues": candidates,
+            }
+        else:
+            payload = {
+                "content": "那年，我参加了学校比赛。"
+                "这段经历让我一直记得，也让我第一次认真看待输赢。",
+                "used_material_ids": material_ids,
+                "missing_source_candidates": [],
+                "editor_notes": [],
+            }
+        return json.dumps(payload, ensure_ascii=False)
+
+
+async def test_book_review_migration_creates_only_the_review_cache():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_book_reviews"))
+
+        first = await migrate_memoir_book_schema(engine)
+        second = await migrate_memoir_book_schema(engine)
+
+        assert first == {
+            "changed_tables": ["memoir_book_reviews"],
+            "changed_columns": [],
+        }
+        assert second == {
+            "changed_tables": [],
+            "changed_columns": [],
+        }
+        await assert_memoir_book_schema(engine)
+    finally:
+        await engine.dispose()
+
+
+def _prompt_ids(prompt: str, key: str) -> list[str]:
+    prefix = f"{key}: "
+    return [
+        line.removeprefix(prefix).strip()
+        for line in prompt.splitlines()
+        if line.startswith(prefix)
+    ]
+
+
+def _install_ai(monkeypatch, fake: LayeredBookAI) -> None:
+    factory = lambda _model=None: fake
+    monkeypatch.setattr(section_digests, "get_ai_service", factory)
+    monkeypatch.setattr(chapter_digests, "get_ai_service", factory)
+    monkeypatch.setattr(chapter_generation, "get_ai_service", factory)
+    monkeypatch.setattr(book_reviews, "get_ai_service", factory)
+
+
+async def _book(client, test_db, *, chapter_count: int = 1):
+    project_id = await ensure_mobile_memoir_project(client)
+    sources = [
+        await create_test_voice_transcript(
+            client,
+            test_db,
+            f"那年，我参加了第{index + 1}次学校比赛。",
+            project_id=project_id,
         )
-
-
-class WholeChapterDraftAI:
-    provider_name = "test"
-    model_name = "test-whole-chapter"
-
-    def __init__(self, claim_id: str):
-        self.claim_id = claim_id
-
-    async def _call_llm(self, *_args, **_kwargs):
-        return json.dumps(
-            {
-                "content": "那年，我参加了学校比赛。这段经历让我一直记得。",
-                "used_claim_ids": [self.claim_id],
-                "unsupported_fact_candidates": [],
-            },
-            ensure_ascii=False,
-        )
-
-
-async def _run_refresh(
-    test_db,
-    job: MemoirEditingJob,
-    *,
-    semantic_ai_client=None,
-):
-    async def handler(db, queued_job):
-        return await completion_refresh.run_chapter_completion_refresh_job(
-            db,
-            queued_job,
-            semantic_ai_client=semantic_ai_client or EmptyChapterAuditAI(),
-        )
-
-    register_memoir_editing_job_handlers()
-    register_editing_job_handler(
-        MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION,
-        handler,
-    )
-    assert await run_test_editing_job(test_db, job.id) is True
-    await test_db.refresh(job)
-
-
-async def _run_generation(
-    test_db,
-    job: MemoirEditingJob,
-    *,
-    claim_id: str,
-):
-    async def handler(db, queued_job):
-        return await draft_generation_jobs.run_chapter_draft_generation_job(
-            db,
-            queued_job,
-            ai_client=WholeChapterDraftAI(claim_id),
-        )
-
-    register_editing_job_handler(
-        MemoirEditingJobType.GENERATE_CHAPTER_DRAFT,
-        handler,
-    )
-    assert await run_test_editing_job(test_db, job.id) is True
-    await test_db.refresh(job)
-
-
-async def test_chapter_completion_runs_from_source_material_to_one_confirmed_draft(
-    client,
-    test_db,
-):
-    source_text = "那年，我参加了学校比赛。"
-    source = await create_test_voice_transcript(client, test_db, source_text)
-    project_id = source["session"]["project_id"]
+        for index in range(chapter_count)
+    ]
     _, chapters = await create_test_book_plan_with_chapters(
         test_db,
         project_id=project_id,
-        chapter_titles=["学校里的比赛"],
-        source_refs_by_chapter=[[memoir_source_ref(source)]],
+        chapter_titles=[
+            f"学校里的比赛{index + 1}" for index in range(chapter_count)
+        ],
+        source_refs_by_chapter=[
+            [memoir_source_ref(source)] for source in sources
+        ],
     )
+    return project_id, chapters, sources
+
+
+async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
-    _, claim = await create_test_source_backed_story(
-        test_db,
-        project_id=project_id,
-        user_id=source["user_id"],
-        source=source,
-        title="学校里的比赛",
-        statement=source_text,
-    )
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
 
     initial = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
@@ -150,220 +215,150 @@ async def test_chapter_completion_runs_from_source_material_to_one_confirmed_dra
     assert initial.json()["chapters"][0]["state"] == "not_started"
 
     prepared = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter.id}/prepare"
-        ),
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
         json={},
     )
-    assert prepared.status_code == 202, prepared.text
-    refresh_job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
-    assert refresh_job is not None
-    await _run_refresh(test_db, refresh_job)
-
-    draft_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
+    assert prepared.status_code == 200, prepared.text
+    body = prepared.json()
+    assert body["completion_summary"]["state"] == "draft_ready"
+    assert body["draft_content"].startswith("那年，我参加了学校比赛")
+    original_version_id = body["draft_version_id"]
+    assert await test_db.scalar(
+        select(MemoirEditingJob.id).where(
             MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.chapter_id == chapter.id,
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
-        )
-    )
-    assert draft_job is not None
-    await _run_generation(test_db, draft_job, claim_id=claim.id)
-
-    workspace = await client.get(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
-    )
-    assert workspace.status_code == 200, workspace.text
-    workspace_body = workspace.json()
-    assert workspace_body["completion_summary"]["state"] == "draft_ready"
-    assert workspace_body["draft_content"].startswith("那年，我参加了学校比赛")
-    original_version_id = workspace_body["draft_version_id"]
-
-    revised = await client.post(
-        (
-            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
-            f"chapters/{chapter.id}/draft/revise"
-        ),
-        json={
-            "expected_version_id": original_version_id,
-            "content": "那年，我参加了学校比赛。这件事至今仍留在我的记忆里。",
-        },
-    )
-    assert revised.status_code == 200, revised.text
-    assert revised.json()["latest_version"]["version"] == 2
-    assert revised.json()["status"] == "draft"
-
-    confirmed = await client.post(
-        (
-            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
-            f"chapters/{chapter.id}/draft/confirm"
-        )
-    )
-    assert confirmed.status_code == 200, confirmed.text
-    assert confirmed.json()["status"] == "confirmed"
-
-    no_op_revision = await client.post(
-        (
-            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
-            f"chapters/{chapter.id}/draft/revise"
-        ),
-        json={
-            "expected_version_id": confirmed.json()["latest_version"]["id"],
-            "content": confirmed.json()["latest_version"]["content"],
-        },
-    )
-    assert no_op_revision.status_code == 200, no_op_revision.text
-    assert no_op_revision.json()["status"] == "confirmed"
-    assert no_op_revision.json()["latest_version"]["version"] == 2
-
-    final_overview = await client.get(
-        f"/api/memoir/projects/{project_id}/book-completion/overview"
-    )
-    assert final_overview.json()["chapters"][0]["state"] == "confirmed"
-
-    recheck = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter.id}/prepare"
-        ),
-        json={},
-    )
-    assert recheck.status_code == 202, recheck.text
-    recheck_job = await test_db.get(MemoirEditingJob, recheck.json()["id"])
-    assert recheck_job is not None
-    await _run_refresh(test_db, recheck_job)
-    assert recheck_job.result_json["draft_generation_job_id"] is None
-
-    checked_overview = await client.get(
-        f"/api/memoir/projects/{project_id}/book-completion/overview"
-    )
-    checked_chapter = checked_overview.json()["chapters"][0]
-    assert checked_chapter["state"] == "confirmed"
-    assert checked_chapter["headline"] == "本次检查未发现待补内容"
-
-
-async def test_chapter_completion_exposes_one_interview_item_when_material_is_missing(
-    client,
-    test_db,
-):
-    source = await create_test_voice_transcript(client, test_db, "这段以后再讲。")
-    project_id = source["session"]["project_id"]
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db,
-        project_id=project_id,
-        chapter_titles=["第一次离家"],
-    )
-    chapter = chapters[0]
-
-    prepared = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter.id}/prepare"
-        ),
-        json={},
-    )
-    assert prepared.status_code == 202
-    job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
-    assert job is not None
-    await _run_refresh(test_db, job)
-
-    overview = await client.get(
-        f"/api/memoir/projects/{project_id}/book-completion/overview"
-    )
-    chapter_summary = overview.json()["chapters"][0]
-    assert chapter_summary["state"] == "needs_input"
-    assert chapter_summary["next_action"]["kind"] == "start_interview"
-    assert chapter_summary["active_item"]["id"]
-    assert await test_db.scalar(
-        select(MemoirCompletionItem).where(
-            MemoirCompletionItem.chapter_id == chapter.id
-        )
-    ) is not None
-    assert await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.chapter_id == chapter.id,
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
+            MemoirEditingJob.job_type.in_(
+                {
+                    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
+                    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
+                }
+            ),
         )
     ) is None
 
+    revised = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+        f"chapters/{chapter.id}/draft/revise",
+        json={
+            "expected_version_id": original_version_id,
+            "content": "那年，我参加了学校比赛。这件事至今仍留在记忆里。",
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    revised_version = await test_db.get(
+        MemoirBookChapterDraftVersion,
+        revised.json()["latest_version"]["id"],
+    )
+    assert revised_version is not None
+    assert revised_version.input_signature
+    assert revised_version.used_material_ids_json
 
-async def test_chapter_completion_interviews_for_unsupported_person_identity(
-    client,
-    test_db,
-):
-    source = await create_test_voice_transcript(
-        client,
-        test_db,
-        "我有一个从小学认识到现在的好朋友。",
+    confirmed = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+        f"chapters/{chapter.id}/draft/confirm"
     )
-    project_id = source["session"]["project_id"]
-    _, chapters = await create_test_book_plan_with_chapters(
-        test_db,
-        project_id=project_id,
-        chapter_titles=["一生的朋友"],
-        source_refs_by_chapter=[[memoir_source_ref(source)]],
-    )
-    chapter = chapters[0]
-    story, _ = await create_test_source_backed_story(
-        test_db,
-        project_id=project_id,
-        user_id=source["user_id"],
-        source=source,
-        title="从小学认识的朋友",
-        statement="讲述者有一个从小学认识到现在的好朋友。",
-    )
-
-    prepared = await client.post(
-        (
-            f"/api/memoir/projects/{project_id}/book-completion/"
-            f"chapters/{chapter.id}/prepare"
-        ),
-        json={},
-    )
-    assert prepared.status_code == 202
-    job = await test_db.get(MemoirEditingJob, prepared.json()["id"])
-    assert job is not None
-    await _run_refresh(
-        test_db,
-        job,
-        semantic_ai_client=MismatchedPersonIdentityAuditAI(story.id),
-    )
-
-    item = await test_db.scalar(
-        select(MemoirCompletionItem).where(
-            MemoirCompletionItem.chapter_id == chapter.id
-        )
-    )
-    assert item is not None
-    assert item.action == "interview"
-    assert item.dimension == "person_introduction"
-    assert item.question == "这里提到的关键人物分别是谁？他们彼此是什么关系？"
-    assert job.result_json["semantic_created_count"] == 1
-    assert job.result_json["editorial_guidance_count"] == 0
-    assert job.result_json["draft_generation_job_id"] is None
-
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
     overview = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
     )
-    chapter_summary = overview.json()["chapters"][0]
-    assert chapter_summary["state"] == "needs_input"
-    assert chapter_summary["next_action"]["kind"] == "start_interview"
-    assert chapter_summary["next_action"]["item_id"] == item.id
+    assert overview.json()["chapters"][0]["state"] == "confirmed"
 
 
-async def test_openapi_exposes_only_whole_chapter_completion_actions(client):
-    schema = (await client.get("/openapi.json")).json()
-    paths = schema["paths"]
-    schemas = schema["components"]["schemas"]
+async def test_closed_section_issue_is_not_reopened_on_prepare(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    fake = LayeredBookAI(section_issue=True)
+    _install_ai(monkeypatch, fake)
 
-    assert any(path.endswith("/draft/revise") for path in paths)
-    assert any(path.endswith("/draft/confirm") for path in paths)
-    assert any(path.endswith("/book-output/assemble") for path in paths)
-    assert not any("contract" in path for path in paths)
-    assert not any("chapter-nodes" in path for path in paths)
-    assert not any("draft-blocks" in path for path in paths)
-    assert "MemoirBookChapterDraftRevisionRequest" in schemas
-    assert not any("DraftBlock" in name for name in schemas)
+    first = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+    assert first.status_code == 200
+    summary = first.json()["completion_summary"]
+    assert summary["state"] == "needs_input"
+    assert summary["next_action"]["kind"] == "start_interview"
+    issue_id = summary["active_item"]["id"]
+
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
+        json={"outcome": "not_remembered", "note": "确实想不起来"},
+    )
+    assert closed.status_code == 200
+    second = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+    assert second.status_code == 200
+    assert second.json()["completion_summary"]["state"] == "draft_ready"
+    issue = await test_db.get(MemoirCompletionIssue, issue_id)
+    assert issue is not None
+    assert issue.status == "closed"
+    assert issue.outcome == "not_remembered"
+
+
+async def test_chapter_manual_issue_is_one_explicit_next_action(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    fake = LayeredBookAI(chapter_manual_issue=True)
+    _install_ai(monkeypatch, fake)
+
+    prepared = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+    assert prepared.status_code == 200
+    summary = prepared.json()["completion_summary"]
+    assert summary["state"] == "needs_input"
+    assert summary["next_action"]["kind"] == "confirm"
+    assert summary["active_item"]["question"] == "这一章是否愿意保留真实学校名称？"
+
+
+async def test_book_review_uses_chapter_digests_and_creates_book_issue(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, _, _ = await _book(client, test_db, chapter_count=2)
+    fake = LayeredBookAI(book_issue=True)
+    _install_ai(monkeypatch, fake)
+    bootstrapped = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/bootstrap"
+    )
+    assert bootstrapped.status_code == 200
+
+    generated = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/generate",
+        json={"force_regenerate": False},
+    )
+    assert generated.status_code == 200
+    review = generated.json()
+
+    assert review["status"] == "ready"
+    assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
+    issue = await test_db.scalar(
+        select(MemoirCompletionIssue).where(
+            MemoirCompletionIssue.project_id == project_id,
+            MemoirCompletionIssue.scope
+            == MemoirCompletionIssueScope.BOOK.value,
+        )
+    )
+    assert issue is not None
+    assert issue.channel == "manual_review"
+    assert await test_db.scalar(
+        select(MemoirBookReview.id).where(
+            MemoirBookReview.project_id == project_id
+        )
+    ) == review["id"]
