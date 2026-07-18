@@ -301,6 +301,11 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
     context.data.rewriteNoticeTitle,
     "2 条补充回答尚未写入正文",
   );
+  context.data.processBusy = true;
+  page.rewriteChapter.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, []);
+  context.data.processBusy = false;
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
 

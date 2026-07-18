@@ -41,7 +41,7 @@
         <button
           class="rewrite-action"
           loading="{{rewritingDraft}}"
-          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || editingDraft}}"
+          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingDraft}}"
           bindtap="rewriteChapter"
         >按现有素材重写</button>
       </view>

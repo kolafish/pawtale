@@ -392,6 +392,11 @@ definePage<ChapterWorkspacePageData>()({
       !workspace?.draft_needs_rewrite
       || !workspace.can_rewrite_draft
       || this.data.rewritingDraft
+      || this.data.processBusy
+      || Boolean(this.data.startingIssueId)
+      || this.data.confirmingChapter
+      || this.data.savingDraft
+      || this.data.editingDraft
     ) {
       return;
     }
