@@ -35,6 +35,7 @@ from app.schemas.memoir_sections import (
     MemoirSectionUpdateRequest,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.section_digests import mark_section_digests_stale
 
 
 def _utcnow() -> datetime:
@@ -264,13 +265,21 @@ async def _set_section_order(
         db.add(section)
     await db.flush()
     now = _utcnow()
+    changed_ids: set[str] = set()
     for index, section in enumerate(sections):
         if original_orders[section.id] != index:
             section.version += 1
+            changed_ids.add(section.id)
         section.sort_order = index
         section.updated_at = now
         db.add(section)
     await db.flush()
+    if sections:
+        await mark_section_digests_stale(
+            db,
+            project_id=sections[0].project_id,
+            section_ids=changed_ids,
+        )
 
 
 async def _set_material_order(
@@ -279,7 +288,7 @@ async def _set_material_order(
     materials: list[MemoirSectionMaterial],
 ) -> None:
     for index, material in enumerate(materials):
-        material.sort_order = -(index + 1)
+        material.sort_order = 1_000_000 + index
         db.add(material)
     await db.flush()
     now = _utcnow()
@@ -370,6 +379,11 @@ async def update_section(
         section.version += 1
         section.updated_at = _utcnow()
         db.add(section)
+        await mark_section_digests_stale(
+            db,
+            project_id=project_id,
+            section_ids={section.id},
+        )
         await db.commit()
     return await _collection_response(db, project_id=project_id)
 
@@ -574,6 +588,11 @@ async def _move_materials(
         section.updated_at = now
         db.add(section)
     await db.flush()
+    await mark_section_digests_stale(
+        db,
+        project_id=project_id,
+        section_ids=affected_section_ids,
+    )
     return affected_section_ids
 
 

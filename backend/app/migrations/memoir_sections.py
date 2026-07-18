@@ -9,6 +9,7 @@ from app.database import Base, register_models
 MEMOIR_SECTION_TABLES = (
     "memoir_sections",
     "memoir_section_materials",
+    "memoir_section_digests",
 )
 
 _REQUIRED_COLUMNS = {
@@ -37,6 +38,18 @@ _REQUIRED_COLUMNS = {
         "assignment_confidence",
         "assignment_reason",
         "include_in_book",
+        "created_at",
+        "updated_at",
+    },
+    "memoir_section_digests": {
+        "id",
+        "project_id",
+        "section_id",
+        "input_signature",
+        "engine",
+        "status",
+        "digest_json",
+        "error_message",
         "created_at",
         "updated_at",
     },
