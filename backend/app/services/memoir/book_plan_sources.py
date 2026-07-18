@@ -274,9 +274,15 @@ def chapter_response(
     source_created_at = created_at_by_utterance or {}
     if source_change_state:
         pending_source_count = source_change_state.pending_source_count
+        pending_completion_source_count = (
+            source_change_state.pending_completion_source_count
+        )
+        pending_new_source_count = source_change_state.pending_new_source_count
         removed_source_count = source_change_state.removed_source_count
     else:
         pending_source_count, removed_source_count = source_change_counts(chapter.metadata_json)
+        pending_completion_source_count = 0
+        pending_new_source_count = pending_source_count
     refs = source_refs or []
     return MemoirBookPlanChapterResponse(
         id=chapter.id,
@@ -292,6 +298,8 @@ def chapter_response(
         ],
         metadata_json=chapter.metadata_json or {},
         pending_source_count=pending_source_count,
+        pending_completion_source_count=pending_completion_source_count,
+        pending_new_source_count=pending_new_source_count,
         removed_source_count=removed_source_count,
         created_at=chapter.created_at,
         updated_at=chapter.updated_at,

@@ -31,6 +31,10 @@ function workspace(overrides = {}) {
     chapter_id: "chapter-1",
     chapter_title: "第一次离家",
     completion_summary: summary(),
+    draft_needs_rewrite: false,
+    can_rewrite_draft: false,
+    pending_completion_source_count: 0,
+    pending_new_source_count: 0,
     draft_id: "draft-1",
     draft_version_id: "version-1",
     draft_version: 1,
@@ -48,6 +52,7 @@ function loadWorkspacePage({
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
+    rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
@@ -252,5 +257,59 @@ test("open completion work keeps an existing draft from being confirmed", async 
 
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.canConfirmChapter, false);
+  delete global.wx;
+});
+
+test("chapter workspace can rewrite with completion answers instead of forcing another interview", async () => {
+  const { toasts } = installWx();
+  const calls = [];
+  const staleWorkspace = workspace({
+    draft_needs_rewrite: true,
+    can_rewrite_draft: true,
+    pending_completion_source_count: 2,
+    completion_summary: summary({
+      state: "needs_input",
+      next_action: {
+        kind: "start_interview",
+        title: "还可以继续补充",
+        detail: "也可以先按现有素材整理。",
+        action_text: "继续补充",
+        disabled: false,
+        issue_id: "issue-3",
+      },
+      active_issue: {
+        id: "issue-3",
+        question: "还记得更多细节吗？",
+        status: "pending",
+        active_session_id: null,
+      },
+    }),
+  });
+  const { page } = loadWorkspacePage({
+    currentWorkspace: staleWorkspace,
+    voiceApiExports: {
+      rewriteMemoirBookChapter: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(
+    context.data.rewriteNoticeTitle,
+    "2 条补充回答尚未写入正文",
+  );
+  context.data.processBusy = true;
+  page.rewriteChapter.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, []);
+  context.data.processBusy = false;
+  page.rewriteChapter.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
+  assert.equal(toasts.at(-1).title, "本章正文已更新");
   delete global.wx;
 });

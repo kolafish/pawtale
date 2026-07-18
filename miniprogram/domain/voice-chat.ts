@@ -233,6 +233,8 @@ export interface MemoirProjectProgressChapter {
   include_in_book: boolean;
   source_count: number;
   pending_source_count: number;
+  pending_completion_source_count: number;
+  pending_new_source_count: number;
   removed_source_count: number;
   draft_status?: MemoirBookChapterDraftStatus | string | null;
   draft_word_count: number;
@@ -710,6 +712,8 @@ export interface MemoirBookPlanChapter {
   source_refs: MemoirBookChapterSourceRef[];
   metadata_json: Record<string, unknown>;
   pending_source_count: number;
+  pending_completion_source_count: number;
+  pending_new_source_count: number;
   removed_source_count: number;
   created_at: string;
   updated_at: string;

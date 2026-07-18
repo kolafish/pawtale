@@ -21,11 +21,22 @@ from app.schemas.memoir_book import MemoirBookSourceIncludedChapter
 @dataclass(frozen=True)
 class ChapterSourceChangeState:
     pending_source_ids: set[str]
+    pending_completion_source_ids: set[str]
     removed_source_ids: set[str]
 
     @property
     def pending_source_count(self) -> int:
         return len(self.pending_source_ids)
+
+    @property
+    def pending_completion_source_count(self) -> int:
+        return len(self.pending_completion_source_ids)
+
+    @property
+    def pending_new_source_count(self) -> int:
+        return len(
+            self.pending_source_ids - self.pending_completion_source_ids
+        )
 
     @property
     def removed_source_count(self) -> int:
@@ -72,6 +83,8 @@ def _material_ref(
         ref["start_ms"] = utterance.start_ms
     if utterance.end_ms is not None:
         ref["end_ms"] = utterance.end_ms
+    if utterance.completion_issue_id:
+        ref["completion_issue_id"] = utterance.completion_issue_id
     return ref
 
 
@@ -241,16 +254,28 @@ async def chapter_source_change_states_by_chapter(
     versions = await _latest_draft_versions(db, project_id=plan.project_id)
     result: dict[str, ChapterSourceChangeState] = {}
     for chapter in await _plan_chapters(db, plan):
-        current = set(source_ref_utterance_ids(refs.get(chapter.id, [])))
+        chapter_refs = refs.get(chapter.id, [])
+        current = set(source_ref_utterance_ids(chapter_refs))
         if valid_utterance_ids is not None:
             current &= valid_utterance_ids
         version = versions.get(chapter.id)
         if version is None:
-            result[chapter.id] = ChapterSourceChangeState(set(), set())
+            result[chapter.id] = ChapterSourceChangeState(
+                pending_source_ids=set(),
+                pending_completion_source_ids=set(),
+                removed_source_ids=set(),
+            )
             continue
         snapshot = _snapshot_material_ids(version)
+        pending = current - snapshot
+        completion_ids = {
+            source_ref_utterance_id(ref)
+            for ref in chapter_refs
+            if ref.get("completion_issue_id")
+        }
         result[chapter.id] = ChapterSourceChangeState(
-            pending_source_ids=current - snapshot,
+            pending_source_ids=pending,
+            pending_completion_source_ids=pending & completion_ids,
             removed_source_ids=snapshot - current,
         )
     return result
@@ -269,4 +294,11 @@ async def chapter_source_change_state(
             plan,
             valid_utterance_ids=valid_utterance_ids,
         )
-    ).get(chapter.id, ChapterSourceChangeState(set(), set()))
+    ).get(
+        chapter.id,
+        ChapterSourceChangeState(
+            pending_source_ids=set(),
+            pending_completion_source_ids=set(),
+            removed_source_ids=set(),
+        ),
+    )

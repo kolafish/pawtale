@@ -74,3 +74,28 @@ async def prepare_memoir_book_completion_chapter(
     except ValueError as exc:
         await db.rollback()
         raise decision_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/book-completion/chapters/{chapter_id}/rewrite",
+    response_model=MemoirChapterWorkspaceResponse,
+)
+async def rewrite_memoir_book_completion_chapter(
+    project_id: str,
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        workspace = await book_completion.rewrite_chapter(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            user_id=current_user.id,
+        )
+        await db.commit()
+        return workspace
+    except ValueError as exc:
+        await db.rollback()
+        raise decision_error(exc) from exc

@@ -77,6 +77,10 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     chapter_id: str
     chapter_title: str
     completion_summary: MemoirChapterCompletionSummary
+    draft_needs_rewrite: bool = False
+    can_rewrite_draft: bool = False
+    pending_completion_source_count: int = 0
+    pending_new_source_count: int = 0
     draft_id: str | None = None
     draft_version_id: str | None = None
     draft_version: int | None = None

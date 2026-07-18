@@ -186,6 +186,8 @@ class MemoirBookPlanChapterResponse(BaseModel):
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)
     pending_source_count: int = 0
+    pending_completion_source_count: int = 0
+    pending_new_source_count: int = 0
     removed_source_count: int = 0
     created_at: datetime
     updated_at: datetime

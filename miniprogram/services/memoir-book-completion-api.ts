@@ -31,3 +31,19 @@ export function prepareMemoirBookChapter(
     },
   );
 }
+
+export function rewriteMemoirBookChapter(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirChapterWorkspace> {
+  return memoirRequest<MemoirChapterWorkspace>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/book-completion/chapters/${encodeURIComponent(chapterId)}/rewrite`,
+    ),
+    {
+      method: "POST",
+      data: {},
+    },
+  );
+}
