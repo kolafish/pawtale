@@ -1,12 +1,31 @@
+import json
+
 from sqlalchemy import select
 
-from app.models.memoir import MemoirSection, MemoirSectionMaterial
+from app.domain.memoir.types import MemoirChatMessageRole
+from app.models.memoir import (
+    MemoirChatMessage,
+    MemoirSection,
+    MemoirSectionMaterial,
+)
+from app.services.memoir.material_organization import organize_material
+from app.services.memoir.utterance_editing_pipeline import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
 )
+
+
+class FakeMaterialOrganizationAI:
+    def __init__(self, payload: dict[str, object]):
+        self.payload = payload
+        self.calls = 0
+
+    async def _call_llm(self, *_args, **_kwargs):
+        self.calls += 1
+        return json.dumps(self.payload, ensure_ascii=False)
 
 
 async def _bootstrap_two_chapters(client, test_db):
@@ -222,6 +241,118 @@ async def test_section_api_rejects_cross_project_material(client, test_db):
         ).scalars().all()
     )
     assert memberships == []
+
+
+async def test_section_api_excludes_and_rejects_interviewer_material(
+    client,
+    test_db,
+):
+    project_id, _, _, data = await _bootstrap_two_chapters(client, test_db)
+    interviewer = await create_test_voice_transcript(
+        client,
+        test_db,
+        "接下来可以讲讲你在工作里的变化吗？",
+        project_id=project_id,
+    )
+    message = await test_db.get(MemoirChatMessage, interviewer["message_id"])
+    assert message is not None
+    message.role = MemoirChatMessageRole.INTERVIEWER.value
+    test_db.add(message)
+    await test_db.commit()
+
+    listed = await client.get(f"/api/memoir/projects/{project_id}/sections")
+    assert listed.status_code == 200
+    assert listed.json()["unassigned_material_count"] == 0
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/{data['sections'][0]['id']}/materials",
+        json={"utterance_ids": [interviewer["utterance_id"]]},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == "只有已有文字的叙述者素材可以归入小章节"
+
+
+async def test_material_organization_appends_after_highest_section_order(
+    client,
+    test_db,
+):
+    project_id, chapters, _, data = await _bootstrap_two_chapters(client, test_db)
+    existing = await test_db.get(MemoirSection, data["sections"][0]["id"])
+    assert existing is not None
+    existing.sort_order = 4
+    test_db.add(existing)
+    await test_db.commit()
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来我又和朋友去走了另一条山路。",
+        project_id=project_id,
+    )
+    ai = FakeMaterialOrganizationAI(
+        {
+            "action": "create_section",
+            "chapter_id": chapters[0].id,
+            "title": "再次同行",
+            "section_type": "event",
+            "confidence": 0.9,
+            "reason": "新的独立经历",
+        }
+    )
+
+    result = await organize_material(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+        expected_text_hash=source_text_hash("后来我又和朋友去走了另一条山路。"),
+        expected_transcript_version_id=created["transcript_version_id"],
+        ai_client=ai,
+    )
+
+    section = await test_db.scalar(
+        select(MemoirSection).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.title == "再次同行",
+        )
+    )
+    assert result.result_json["section_id"] == section.id
+    assert section.sort_order == 5
+    assert ai.calls == 1
+
+
+async def test_material_organization_skips_interviewer_material(
+    client,
+    test_db,
+):
+    project_id, _, _, _ = await _bootstrap_two_chapters(client, test_db)
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        "你还记得当时有哪些人在场吗？",
+        project_id=project_id,
+    )
+    message = await test_db.get(MemoirChatMessage, created["message_id"])
+    assert message is not None
+    message.role = MemoirChatMessageRole.INTERVIEWER.value
+    test_db.add(message)
+    await test_db.commit()
+    ai = FakeMaterialOrganizationAI(
+        {
+            "action": "assign_existing",
+            "section_id": "should-not-be-used",
+        }
+    )
+
+    result = await organize_material(
+        test_db,
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+        expected_text_hash=source_text_hash("你还记得当时有哪些人在场吗？"),
+        expected_transcript_version_id=created["transcript_version_id"],
+        ai_client=ai,
+    )
+
+    assert result.result_json["reason"] == "not_narrator_material"
+    assert ai.calls == 0
 
 
 async def test_section_update_rejects_stale_version(client, test_db):

@@ -11,7 +11,6 @@ from app.database import Base, register_models
 from app.models.audit import AuditEvent
 from app.models.git_sync import ProjectGitSync
 from app.models.memoir import (
-    MemoirBookOutput,
     MemoirChatMessage,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
@@ -23,7 +22,6 @@ from app.models.memoir import (
 )
 from app.models.memoir_common import AudioFile
 from app.models.memoir_narrative import (
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
 )
@@ -168,16 +166,6 @@ async def _purge_project_tables(db: AsyncSession, project_id: str) -> None:
         delete(MemoirInterviewPolicyDecision).where(
             MemoirInterviewPolicyDecision.session_id.in_(project_session_ids)
         )
-    )
-    await db.execute(
-        delete(MemoirCompletionItem).where(
-            MemoirCompletionItem.project_id == project_id
-        )
-    )
-    await db.execute(
-        update(MemoirBookOutput)
-        .where(MemoirBookOutput.project_id == project_id)
-        .values(formal_version_id=None, formal_audit_job_id=None)
     )
     for table in reversed(Base.metadata.sorted_tables):
         if (

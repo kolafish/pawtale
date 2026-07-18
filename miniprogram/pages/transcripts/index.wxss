@@ -365,23 +365,6 @@
   flex: 1 1 148rpx;
 }
 
-.chapter-move-picker {
-  flex: 1 1 148rpx;
-  min-width: 0;
-}
-
-.picker-action {
-  width: 100%;
-  min-height: 80rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.picker-action.disabled {
-  opacity: 0.5;
-}
-
 .small-primary::after,
 .load-more::after {
   border: 0;
@@ -468,7 +451,6 @@
 
 .transcripts-page.large-text .small-primary,
 .transcripts-page.large-text .load-more,
-.transcripts-page.large-text .picker-action,
 .transcripts-page.large-text .login-button {
   min-height: 48px;
   font-size: 30rpx;

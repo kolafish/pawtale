@@ -24,7 +24,7 @@ from app.schemas.memoir_voice import MemoirVoiceTranscriptItemResponse
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.audio_files import audio_file_path
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
-from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE
+from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.voice_transcripts import (
     get_voice_transcript,
     prune_transcript_versions_for_utterance,
@@ -369,15 +369,19 @@ async def _apply_recovered_transcript(
 
 
 def _chat_role_for_utterance(utterance: MemoirVoiceUtterance) -> str:
-    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
-        return MemoirChatMessageRole.INTERVIEWER.value
-    return MemoirChatMessageRole.USER.value
+    return (
+        MemoirChatMessageRole.USER.value
+        if is_narrator_material(utterance)
+        else MemoirChatMessageRole.INTERVIEWER.value
+    )
 
 
 def _speaker_role_for_utterance(utterance: MemoirVoiceUtterance) -> str:
-    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
-        return MemoirSpeakerRole.INTERVIEWER.value
-    return MemoirSpeakerRole.NARRATOR.value
+    return (
+        MemoirSpeakerRole.NARRATOR.value
+        if is_narrator_material(utterance)
+        else MemoirSpeakerRole.INTERVIEWER.value
+    )
 
 
 async def _next_turn_index(db: AsyncSession, voice_session_id: str) -> int:

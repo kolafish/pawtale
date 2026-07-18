@@ -1,31 +1,15 @@
 from pathlib import Path
-from hashlib import sha256
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.domain.memoir.narrative_types import (
-    MemoirClaimCertainty,
-    MemoirClaimEvidenceRole,
-    MemoirClaimEvidenceSourceType,
-    MemoirClaimPredicate,
-    MemoirClaimPublicationStatus,
-    MemoirClaimTimePrecision,
-    MemoirClaimType,
-    MemoirClaimVerificationStatus,
-    MemoirNarrativeActorType,
-    MemoirStoryLifecycleStatus,
-    MemoirStoryNarrativeRole,
-    MemoirStoryPublicationStatus,
-    MemoirStoryType,
-    MemoirStoryVerificationStatus,
-)
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirSectionMaterialAssignedBy,
+    MemoirSectionType,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -34,16 +18,11 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterSourceLink,
     MemoirChatMessage,
+    MemoirSection,
+    MemoirSectionMaterial,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
-)
-from app.models.memoir_narrative import (
-    MemoirClaim,
-    MemoirClaimEvidence,
-    MemoirStory,
-    MemoirStoryClaim,
 )
 
 
@@ -227,40 +206,58 @@ def _int_ref_value(ref: dict, key: str) -> int | None:
     return value if isinstance(value, int) else None
 
 
-async def add_test_chapter_source_links(
+async def add_test_section_materials(
     test_db,
     *,
     project_id: str,
-    plan_id: str,
     chapter_id: str,
     source_refs: list[dict],
-    status: MemoirChapterSourceLinkStatus = MemoirChapterSourceLinkStatus.ACTIVE,
-    merged_draft_version_id: str | None = None,
-) -> list[MemoirChapterSourceLink]:
-    links: list[MemoirChapterSourceLink] = []
+) -> list[MemoirSectionMaterial]:
+    section = await test_db.scalar(
+        select(MemoirSection).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == chapter_id,
+        )
+    )
+    if section is None:
+        section = MemoirSection(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            title="本章",
+            section_type=MemoirSectionType.LIFE_FRAGMENT.value,
+            sort_order=0,
+        )
+        test_db.add(section)
+        await test_db.flush()
+    current_max_sort_order = await test_db.scalar(
+        select(func.max(MemoirSectionMaterial.sort_order)).where(
+            MemoirSectionMaterial.section_id == section.id
+        )
+    )
+    next_sort_order = (
+        int(current_max_sort_order) + 1
+        if current_max_sort_order is not None
+        else 0
+    )
+    materials: list[MemoirSectionMaterial] = []
     for ref in source_refs:
         utterance_id = _string_ref_value(ref, "utterance_id")
         if not utterance_id:
             continue
-        link = MemoirChapterSourceLink(
+        material = MemoirSectionMaterial(
             project_id=project_id,
-            plan_id=plan_id,
-            chapter_id=chapter_id,
+            section_id=section.id,
             utterance_id=utterance_id,
             transcript_version_id=_string_ref_value(ref, "transcript_version_id"),
-            audio_file_id=_string_ref_value(ref, "audio_file_id"),
-            start_ms=_int_ref_value(ref, "start_ms"),
-            end_ms=_int_ref_value(ref, "end_ms"),
-            quote=_string_ref_value(ref, "quote") or "",
-            status=status.value,
+            sort_order=next_sort_order + len(materials),
+            assigned_by=MemoirSectionMaterialAssignedBy.SYSTEM.value,
             assignment_reason="sync_existing_source_ref",
-            merged_draft_version_id=merged_draft_version_id,
         )
-        test_db.add(link)
-        links.append(link)
-    if links:
+        test_db.add(material)
+        materials.append(material)
+    if materials:
         await test_db.flush()
-    return links
+    return materials
 
 
 async def create_test_book_plan_with_chapters(
@@ -290,17 +287,27 @@ async def create_test_book_plan_with_chapters(
             project_id=project_id,
             title=chapter_title,
             sort_order=index,
-            source_refs_json=[],
         )
         test_db.add(chapter)
         chapters.append(chapter)
     await test_db.flush()
 
+    for chapter in chapters:
+        test_db.add(
+            MemoirSection(
+                project_id=project_id,
+                chapter_id=chapter.id,
+                title=chapter.title,
+                section_type=MemoirSectionType.LIFE_FRAGMENT.value,
+                sort_order=0,
+            )
+        )
+    await test_db.flush()
+
     for chapter, refs in zip(chapters, source_refs_by_chapter or [], strict=False):
-        await add_test_chapter_source_links(
+        await add_test_section_materials(
             test_db,
             project_id=project_id,
-            plan_id=plan.id,
             chapter_id=chapter.id,
             source_refs=refs,
         )
@@ -361,6 +368,23 @@ async def create_test_chapter_draft(
     )
     test_db.add(draft)
     await test_db.flush()
+    material_rows = list(
+        (
+            await test_db.execute(
+                select(
+                    MemoirSectionMaterial.utterance_id,
+                    MemoirSectionMaterial.transcript_version_id,
+                )
+                .join(
+                    MemoirSection,
+                    MemoirSection.id
+                    == MemoirSectionMaterial.section_id,
+                )
+                .where(MemoirSection.chapter_id == chapter_id)
+                .order_by(MemoirSectionMaterial.sort_order)
+            )
+        ).all()
+    )
     version = MemoirBookChapterDraftVersion(
         draft_id=draft.id,
         project_id=project_id,
@@ -369,107 +393,16 @@ async def create_test_chapter_draft(
         content=content,
         created_by=MemoirCreatedBy.USER.value,
         prompt_snapshot="",
+        used_material_ids_json=[row.utterance_id for row in material_rows],
+        material_snapshot_json=[
+            {
+                "material_id": row.utterance_id,
+                "transcript_version_id": row.transcript_version_id,
+            }
+            for row in material_rows
+        ],
     )
     test_db.add(version)
     await test_db.flush()
-    if status == MemoirBookChapterDraftStatus.CONFIRMED:
-        links = (
-            await test_db.execute(
-                select(MemoirChapterSourceLink).where(
-                    MemoirChapterSourceLink.project_id == project_id,
-                    MemoirChapterSourceLink.chapter_id == chapter_id,
-                    MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
-                )
-            )
-        ).scalars().all()
-        for link in links:
-            link.merged_draft_version_id = version.id
-            test_db.add(link)
     await test_db.commit()
     return draft
-
-
-async def create_test_source_backed_story(
-    test_db,
-    *,
-    project_id: str,
-    user_id: str,
-    source: dict,
-    title: str,
-    statement: str,
-    summary: str | None = None,
-    time_start=None,
-    time_end=None,
-    time_precision: MemoirClaimTimePrecision = MemoirClaimTimePrecision.UNKNOWN,
-) -> tuple[MemoirStory, MemoirClaim]:
-    transcript = await test_db.get(
-        MemoirTranscriptVersion,
-        source["transcript_version_id"],
-    )
-    assert transcript is not None
-    quote = statement if statement in transcript.content else transcript.content
-    story = MemoirStory(
-        project_id=project_id,
-        title=title,
-        title_normalized=title,
-        story_type=MemoirStoryType.EVENT.value,
-        summary=summary or statement,
-        time_start=time_start,
-        time_end=time_end,
-        time_precision=time_precision.value,
-        lifecycle_status=MemoirStoryLifecycleStatus.ACTIVE.value,
-        verification_status=MemoirStoryVerificationStatus.CONFIRMED.value,
-        verification_decided_by_user_id=user_id,
-        publication_status=MemoirStoryPublicationStatus.ELIGIBLE.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=user_id,
-    )
-    claim = MemoirClaim(
-        project_id=project_id,
-        claim_type=MemoirClaimType.EVENT.value,
-        statement=statement,
-        predicate_code=MemoirClaimPredicate.NARRATIVE_FACT.value,
-        time_start=time_start,
-        time_end=time_end,
-        time_precision=time_precision.value,
-        certainty=MemoirClaimCertainty.EXACT.value,
-        verification_status=MemoirClaimVerificationStatus.CONFIRMED.value,
-        publication_status=MemoirClaimPublicationStatus.ELIGIBLE.value,
-        created_by=MemoirNarrativeActorType.USER.value,
-        created_by_user_id=user_id,
-        updated_by=MemoirNarrativeActorType.USER.value,
-        updated_by_user_id=user_id,
-    )
-    test_db.add_all([story, claim])
-    await test_db.flush()
-    test_db.add_all(
-        [
-            MemoirStoryClaim(
-                project_id=project_id,
-                story_id=story.id,
-                claim_id=claim.id,
-                narrative_role=MemoirStoryNarrativeRole.ACTION.value,
-                sort_order=0,
-                is_core=True,
-                created_by=MemoirNarrativeActorType.USER.value,
-                created_by_user_id=user_id,
-            ),
-            MemoirClaimEvidence(
-                project_id=project_id,
-                claim_id=claim.id,
-                evidence_role=MemoirClaimEvidenceRole.SUPPORTS.value,
-                evidence_source_type=MemoirClaimEvidenceSourceType.TRANSCRIPT.value,
-                utterance_id=source["utterance_id"],
-                transcript_version_id=source["transcript_version_id"],
-                audio_file_id=source["audio_file_id"],
-                quote=quote,
-                source_text_hash=sha256(transcript.content.encode("utf-8")).hexdigest(),
-                created_by=MemoirNarrativeActorType.USER.value,
-                created_by_user_id=user_id,
-            ),
-        ]
-    )
-    await test_db.commit()
-    return story, claim

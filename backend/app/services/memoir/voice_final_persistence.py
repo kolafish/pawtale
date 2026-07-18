@@ -23,10 +23,6 @@ from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
-from app.services.memoir.source_disposition import (
-    IGNORED_SOURCE_ROUTE_ACTION,
-    INTERVIEWER_SOURCE_MATERIAL_TYPE,
-)
 from app.services.memoir.voice_transcripts import (
     prune_transcript_versions_for_utterance,
 )
@@ -184,21 +180,6 @@ class VoiceFinalPersistenceService:
                 end_ms=event.end_ms,
                 provider=self.provider,
                 provider_payload_json=event.raw,
-                source_material_type=(
-                    INTERVIEWER_SOURCE_MATERIAL_TYPE
-                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
-                source_route_action=(
-                    IGNORED_SOURCE_ROUTE_ACTION
-                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
-                source_route_reason=(
-                    "真人采访者问题只作为上下文，不作为回忆录正文素材。"
-                    if normalized_speaker_role == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
             )
             self.db.add(utterance)
             await self.db.flush()
@@ -281,31 +262,8 @@ class VoiceFinalPersistenceService:
                 provider=self.provider,
                 provider_payload_json={
                     "source": "unfinalized_audio",
-                    **(
-                        {"speaker_role": normalized_speaker_role}
-                        if normalized_speaker_role
-                        == MemoirSpeakerRole.INTERVIEWER.value
-                        else {}
-                    ),
+                    "speaker_role": normalized_speaker_role,
                 },
-                source_material_type=(
-                    INTERVIEWER_SOURCE_MATERIAL_TYPE
-                    if normalized_speaker_role
-                    == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
-                source_route_action=(
-                    IGNORED_SOURCE_ROUTE_ACTION
-                    if normalized_speaker_role
-                    == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
-                source_route_reason=(
-                    "真人采访者问题只作为上下文，不作为回忆录正文素材。"
-                    if normalized_speaker_role
-                    == MemoirSpeakerRole.INTERVIEWER.value
-                    else ""
-                ),
             )
             self.db.add(utterance)
             await self.db.flush()

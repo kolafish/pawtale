@@ -216,11 +216,11 @@ async def test_runtime_cutover_preserves_legacy_draft_rows():
                 text(
                     "INSERT INTO memoir_book_plan_chapters ("
                     "id, plan_id, project_id, title, sort_order, "
-                    "include_in_book, source_refs_json, metadata_json, "
+                    "include_in_book, metadata_json, "
                     "created_at, updated_at"
                     ") VALUES ("
                     "'chapter-1', 'plan-1', 'project-1', '旧章节', 0, "
-                    "1, '[]', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                    "1, '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
                 )
             )
             await conn.execute(

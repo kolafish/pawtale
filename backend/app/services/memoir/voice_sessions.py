@@ -31,9 +31,9 @@ from app.services.memoir import (
     progress_snapshot,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.source_disposition import (
-    IGNORED_SOURCE_MATERIAL_TYPES,
-    is_countable_source_utterance,
+from app.services.memoir.material_roles import (
+    is_countable_material,
+    narrator_material_clause,
 )
 
 
@@ -173,7 +173,7 @@ def _visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUt
     return [
         utterance
         for utterance in voice_session.utterances
-        if is_countable_source_utterance(utterance, _utterance_text(utterance))
+        if is_countable_material(utterance, _utterance_text(utterance))
     ]
 
 
@@ -189,10 +189,7 @@ def _visible_utterance_exists_clause():
                 func.trim(MemoirVoiceUtterance.transcript_raw) != "",
                 func.trim(MemoirVoiceUtterance.transcript_edited) != "",
             )
-            & ~(
-                (MemoirVoiceUtterance.source_route_action == "ignore")
-                & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
-            )
+            & narrator_material_clause()
         )
     )
 

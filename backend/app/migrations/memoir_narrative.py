@@ -7,22 +7,13 @@ from app.database import Base, register_models
 
 
 MEMOIR_NARRATIVE_TABLES = (
-    "memoir_narrative_entities",
-    "memoir_claims",
-    "memoir_claim_evidence",
-    "memoir_stories",
-    "memoir_story_claims",
-    "memoir_completion_items",
     "memoir_project_frameworks",
     "memoir_framework_items",
-    "memoir_framework_item_claims",
+    "memoir_framework_item_materials",
     "memoir_interview_policy_decisions",
     "memoir_interview_policy_evaluations",
-    "memoir_narrative_decisions",
 )
 MEMOIR_NARRATIVE_TRIGGERS = (
-    "memoir_narrative_decisions_no_update",
-    "memoir_narrative_decisions_no_delete",
     "memoir_interview_policy_decisions_immutable_selection",
     "memoir_interview_policy_decisions_candidate_membership",
     "memoir_interview_policy_decisions_append_only_evaluation",
@@ -75,28 +66,6 @@ async def _ensure_narrative_triggers(conn) -> list[str]:
         f"'{value}'" for value in INTERVIEW_POLICY_FAILURE_CODES
     )
     statements = {
-        "memoir_narrative_decisions_no_update": """
-            CREATE TRIGGER memoir_narrative_decisions_no_update
-            BEFORE UPDATE ON memoir_narrative_decisions
-            BEGIN
-                SELECT RAISE(ABORT, 'memoir narrative decisions are append-only');
-            END
-        """,
-        "memoir_narrative_decisions_no_delete": """
-            CREATE TRIGGER memoir_narrative_decisions_no_delete
-            BEFORE DELETE ON memoir_narrative_decisions
-            WHEN EXISTS (
-                SELECT 1 FROM projects
-                WHERE id = OLD.project_id
-                  AND COALESCE(
-                    json_extract(metadata_json, '$.__delete_in_progress'),
-                    0
-                  ) != 1
-            )
-            BEGIN
-                SELECT RAISE(ABORT, 'memoir narrative decisions are append-only');
-            END
-        """,
         "memoir_interview_policy_decisions_immutable_selection": """
             CREATE TRIGGER memoir_interview_policy_decisions_immutable_selection
             BEFORE UPDATE ON memoir_interview_policy_decisions

@@ -13,7 +13,6 @@ from app.schemas.memoir_book import (
     MemoirBookAudioResponse,
     MemoirBookChapterDraftResponse,
     MemoirBookChapterDraftRevisionRequest,
-    MemoirBookChapterSourceRefreshRequest,
     MemoirBookOutputChapterEditorialCopyUpdateRequest,
     MemoirBookOutputEditorialCopyRegenerateRequest,
     MemoirBookChapterTitleGenerateRequest,
@@ -25,23 +24,9 @@ from app.schemas.memoir_book import (
     MemoirBookPlanResponse,
     MemoirBookPlanStructureCommandRequest,
     MemoirBookPlanUpdateRequest,
-    MemoirBookQualityAuditRunRequest,
-    MemoirBookQualityAuditRunResponse,
-    MemoirBookSourceAssignmentRequest,
-    MemoirBookSourceAutoAssignmentRunRequest,
-    MemoirBookSourceAutoAssignmentRunResponse,
-    MemoirBookSourceCoverageResponse,
-    MemoirBookSourceMoveRequest,
-    MemoirBookSourceRouteRequest,
-    MemoirBookSourceRouteResponse,
     MemoirBookTitleSuggestionRequest,
     MemoirBookTitleSuggestionResponse,
-    MemoirBookVoiceCommandExecuteRequest,
-    MemoirBookVoiceCommandExecuteResponse,
-    MemoirBookVoiceCommandParseRequest,
-    MemoirBookVoiceCommandParseResponse,
     MemoirAutomationEventResponse,
-    MemoirSemanticStateResponse,
 )
 from app.schemas.memoir_images import (
     MemoirBookImagePlacementCreateRequest,
@@ -55,12 +40,6 @@ from app.services.memoir import book_generation_jobs as memoir_book_generation_j
 from app.services.memoir import book_outputs as memoir_book_outputs
 from app.services.memoir import book_plans as memoir_book_plans
 from app.services.memoir import book_plan_write_workflow as memoir_book_plan_write_workflow
-from app.services.memoir import book_quality_audit as memoir_book_quality_audit
-from app.services.memoir import book_source_workflow as memoir_book_source_workflow
-from app.services.memoir import source_auto_assignment as memoir_source_auto_assignment
-from app.services.memoir import source_router as memoir_source_router
-from app.services.memoir import book_voice_commands as memoir_book_voice_commands
-from app.services.memoir import semantic_inspector as memoir_semantic_inspector
 from app.services.memoir import image_assets as memoir_image_assets
 
 
@@ -152,134 +131,6 @@ async def create_mobile_memoir_book_plan_outline_tts(
         user_id=current_user.id,
         project_id=project_id,
         req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-voice-command/parse",
-    response_model=MemoirBookVoiceCommandParseResponse,
-)
-async def parse_mobile_memoir_book_voice_command(
-    project_id: str,
-    req: MemoirBookVoiceCommandParseRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_voice_commands.parse_book_voice_command(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-voice-command/execute",
-    response_model=MemoirBookVoiceCommandExecuteResponse,
-)
-async def execute_mobile_memoir_book_voice_command(
-    project_id: str,
-    req: MemoirBookVoiceCommandExecuteRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_voice_commands.execute_book_voice_command(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.get("/projects/{project_id}/book-source-coverage", response_model=MemoirBookSourceCoverageResponse)
-async def get_mobile_memoir_book_source_coverage(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_source_workflow.get_book_source_coverage(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-    )
-
-
-@router.post("/projects/{project_id}/book-source-routing/dry-run", response_model=MemoirBookSourceRouteResponse)
-async def dry_run_mobile_memoir_book_source_routing(
-    project_id: str,
-    req: MemoirBookSourceRouteRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_source_router.route_book_source(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        utterance_id=req.utterance_id,
-    )
-
-
-@router.post("/projects/{project_id}/book-source-assignments", response_model=MemoirBookPlanResponse)
-async def assign_mobile_memoir_book_sources(
-    project_id: str,
-    req: MemoirBookSourceAssignmentRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_source_workflow.assign_book_sources_to_chapters(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-source-auto-assignments/run",
-    response_model=MemoirBookSourceAutoAssignmentRunResponse,
-)
-async def run_mobile_memoir_book_source_auto_assignments(
-    project_id: str,
-    req: MemoirBookSourceAutoAssignmentRunRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_source_auto_assignment.run_source_auto_assignment(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-quality-audit/run",
-    response_model=MemoirBookQualityAuditRunResponse,
-)
-async def run_mobile_memoir_book_quality_audit(
-    project_id: str,
-    req: MemoirBookQualityAuditRunRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_quality_audit.run_book_quality_audit(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
-@router.get("/projects/{project_id}/semantic-state", response_model=MemoirSemanticStateResponse)
-async def get_mobile_memoir_semantic_state(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_semantic_inspector.get_project_semantic_state(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
     )
 
 
@@ -417,21 +268,6 @@ async def delete_mobile_memoir_image_placement(
     )
 
 
-@router.post("/projects/{project_id}/book-source-moves", response_model=MemoirBookPlanResponse)
-async def move_mobile_memoir_book_source(
-    project_id: str,
-    req: MemoirBookSourceMoveRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_source_workflow.move_book_source_between_chapters(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        req=req,
-    )
-
-
 @router.patch(
     "/projects/{project_id}/book-plan/chapters/{chapter_id}/title",
     response_model=MemoirBookPlanResponse,
@@ -487,27 +323,6 @@ async def get_mobile_memoir_book_chapter_draft(
         user_id=current_user.id,
         project_id=project_id,
         chapter_id=chapter_id,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/source-refresh/jobs",
-    response_model=MemoirAutomationEventResponse,
-    status_code=202,
-)
-async def enqueue_mobile_memoir_book_chapter_source_refresh(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirBookChapterSourceRefreshRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await memoir_book_generation_jobs.enqueue_chapter_source_refresh_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        req=req,
     )
 
 

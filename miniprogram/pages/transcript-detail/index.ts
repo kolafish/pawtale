@@ -1,25 +1,20 @@
 import type {
-  MemoirBookPlan,
   MemoirMaterialOfflineASRState,
   MemoirShareVideoCustomBackgroundAsset,
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  assignMemoirBookSources,
   convertMemoirInterviewQuestionToAnswer,
   createMemoirTranscriptShareVideoJob,
   deleteMemoirVoiceTranscript,
   downloadMemoirShareVideoCustomBackgroundPreview,
   downloadMemoirShareVideoJob,
-  getMemoirBookPlan,
   getMemoirShareVideoJob,
   getMemoirTranscriptShareVideoContext,
   getMemoirVoiceTranscript,
-  moveMemoirBookSource,
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
   startMemoirMaterialOfflineASR,
@@ -31,17 +26,8 @@ import {
   shareLocalFileMessage,
 } from "../../services/share";
 import {
-  sourceAssignmentRequest,
-  transcriptChapterAssignOptions,
-  transcriptChapterMoveOptions,
-  transcriptNeedsBookPlanConfirmation,
-  transcriptSourceMoveRequest,
-} from "../../services/memoir-book-source-actions";
-import { ApiError } from "../../services/request";
-import {
   isAuthError,
   routeAuthError,
-  switchToBook,
   switchToMe,
 } from "../../services/navigation";
 import {
@@ -63,10 +49,8 @@ import {
 import {
   datasetNumber,
   datasetString,
-  pickerIndex,
   type PageDatasetEvent,
   queryParam,
-  type PagePickerEvent,
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
@@ -82,7 +66,6 @@ import {
 import { materialOfflineASRView } from "../../services/material-offline-asr-view";
 
 type TextAreaEvent = PageTextInputEvent;
-type PickerEvent = PagePickerEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
 type ShareVideoBackgroundEvent = PageDatasetEvent<{
   backgroundMode?: string;
@@ -104,11 +87,6 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canRecoverTranscription: boolean;
   bookInclusionText: string;
   isIncludedInBook: boolean;
-  needsBookPlanConfirmation: boolean;
-  canAssignChapterSource: boolean;
-  chapterAssignOptions: ChapterPickerOption[];
-  canMoveChapterSource: boolean;
-  chapterMoveOptions: ChapterPickerOption[];
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
   canPlayQuestionAudio: boolean;
@@ -140,8 +118,6 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   convertingQuestionToAnswer: boolean;
   recovering: boolean;
   offlineAsrStarting: boolean;
-  assigning: boolean;
-  moving: boolean;
   playing: boolean;
   playingAudioKind: TranscriptDetailAudioKind | "";
   answerPlaybackVisible: boolean;
@@ -156,7 +132,6 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   error: string;
   utteranceId: string;
   item: TranscriptDetailItemView | null;
-  bookPlan: MemoirBookPlan | null;
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
   voiceEditRecording: boolean;
@@ -274,20 +249,8 @@ function shareVideoFileName(item: TranscriptDetailItemView | null): string {
   return `${shortTitle || "回忆录片段"}.mp4`;
 }
 
-async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
-  try {
-    return await getMemoirBookPlan(projectId);
-  } catch (error) {
-    if (error instanceof ApiError && error.statusCode === 404) {
-      return null;
-    }
-    throw error;
-  }
-}
-
 function toViewItem(
   item: MemoirVoiceTranscriptItem,
-  bookPlan: MemoirBookPlan | null,
   previous?: TranscriptDetailItemView | null,
 ): TranscriptDetailItemView {
   const canRecoverTranscription = Boolean(
@@ -295,10 +258,6 @@ function toViewItem(
   );
   const editingText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
-  const needsBookPlanConfirmation = !canRecoverTranscription
-    && transcriptNeedsBookPlanConfirmation(item, bookPlan);
-  const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
-  const chapterMoveOptions = canRecoverTranscription ? [] : transcriptChapterMoveOptions(item, bookPlan);
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
   const questionText = item.question_text.trim();
@@ -323,13 +282,8 @@ function toViewItem(
     canRecoverTranscription,
     bookInclusionText: canRecoverTranscription
       ? "等待转写后再入章"
-      : (needsBookPlanConfirmation ? "先确认章节结构，再归入章节" : transcriptBookInclusionText(item)),
+      : transcriptBookInclusionText(item),
     isIncludedInBook,
-    needsBookPlanConfirmation,
-    canAssignChapterSource: chapterAssignOptions.length > 0,
-    chapterAssignOptions,
-    canMoveChapterSource: chapterMoveOptions.length > 0,
-    chapterMoveOptions,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
     canPlayQuestionAudio: Boolean(item.question_audio_file_id),
@@ -441,8 +395,6 @@ definePage<TranscriptDetailData>()({
     convertingQuestionToAnswer: false,
     recovering: false,
     offlineAsrStarting: false,
-    assigning: false,
-    moving: false,
     playing: false,
     playingAudioKind: "",
     answerPlaybackVisible: false,
@@ -457,7 +409,6 @@ definePage<TranscriptDetailData>()({
     error: "",
     utteranceId: "",
     item: null,
-    bookPlan: null,
     questionExpanded: false,
     moreActionsExpanded: false,
     voiceEditRecording: false,
@@ -495,14 +446,12 @@ definePage<TranscriptDetailData>()({
     this.setData({ loading: true, error: "" });
     try {
       const transcript = await getMemoirVoiceTranscript(this.data.utteranceId);
-      const bookPlan = await loadTranscriptBookPlan(transcript.project_id);
       if (requestToken !== this.loadToken) {
         return;
       }
       this.setData({
         needsLogin: false,
-        item: toViewItem(transcript, bookPlan, this.data.item),
-        bookPlan,
+        item: toViewItem(transcript, this.data.item),
       });
       this.startOfflineAsrPollingIfNeeded();
       trackAuditAction("transcript.detail_view", {}, { projectId: transcript.project_id });
@@ -511,7 +460,7 @@ definePage<TranscriptDetailData>()({
         return;
       }
       if (isAuthError(error)) {
-        this.setData({ needsLogin: true, item: null, bookPlan: null, error: "" });
+        this.setData({ needsLogin: true, item: null, error: "" });
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "讲述记录加载失败" });
@@ -564,7 +513,7 @@ definePage<TranscriptDetailData>()({
       if (token !== this.offlineAsrPollToken) {
         return;
       }
-      const next = toViewItem(transcript, this.data.bookPlan, current);
+      const next = toViewItem(transcript, current);
       this.setData({ item: next });
       if (next.offline_asr.status === "succeeded") {
         this.stopOfflineAsrPolling();
@@ -609,7 +558,7 @@ definePage<TranscriptDetailData>()({
     this.setData({ offlineAsrStarting: true, error: "" });
     try {
       const state = await startMemoirMaterialOfflineASR(item.id);
-      const next = toViewItem({ ...item, offline_asr: state }, this.data.bookPlan);
+      const next = toViewItem({ ...item, offline_asr: state }, item);
       this.setData({ item: next });
       trackAuditAction(
         "transcript.detail_offline_asr_start",
@@ -1016,7 +965,7 @@ definePage<TranscriptDetailData>()({
     if (!item || this.data.saving || this.data.deleting) {
       return;
     }
-    this.setData({ item: toViewItem(item, this.data.bookPlan), error: "" });
+    this.setData({ item: toViewItem(item), error: "" });
   },
 
   async saveTranscript() {
@@ -1032,7 +981,7 @@ definePage<TranscriptDetailData>()({
     this.setData({ saving: true, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
-      this.setData({ item: toViewItem(updated, this.data.bookPlan) });
+      this.setData({ item: toViewItem(updated) });
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存", icon: "success" });
@@ -1058,7 +1007,7 @@ definePage<TranscriptDetailData>()({
     this.setData({ recovering: true, error: "" });
     try {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
-      this.setData({ item: toViewItem(recovered, this.data.bookPlan) });
+      this.setData({ item: toViewItem(recovered) });
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
       wx.showToast({ title: "已恢复转写", icon: "success" });
@@ -1203,7 +1152,7 @@ definePage<TranscriptDetailData>()({
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
       this.setData({
-        item: toViewItem(updated, this.data.bookPlan),
+        item: toViewItem(updated),
         voiceEditInstructionText: "",
         voiceEditPreview: null,
         ...voiceEditStateData("idle"),
@@ -1216,67 +1165,6 @@ definePage<TranscriptDetailData>()({
       this.setData({ error: message, ...voiceEditStateData("error", message) });
     } finally {
       this.setData({ voiceEditSaving: false, saving: false });
-    }
-  },
-
-  async assignTranscriptChapter(event: PickerEvent) {
-    const item = this.data.item;
-    const optionIndex = pickerIndex(event);
-    const option = item?.chapterAssignOptions[optionIndex];
-    if (!item || !option || this.data.assigning || this.data.moving || this.data.convertingQuestionToAnswer) {
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ assigning: true, error: "" });
-    try {
-      const updatedPlan = await assignMemoirBookSources(
-        item.project_id,
-        sourceAssignmentRequest(option.value, item.id),
-      );
-      this.setData({
-        bookPlan: updatedPlan,
-        item: toViewItem(await getMemoirVoiceTranscript(item.id), updatedPlan),
-      });
-      wx.showToast({ title: "已归入章节", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "归入章节失败" });
-    } finally {
-      this.setData({ assigning: false });
-    }
-  },
-
-  async moveTranscriptChapter(event: PickerEvent) {
-    const item = this.data.item;
-    const optionIndex = pickerIndex(event);
-    const option = item?.chapterMoveOptions[optionIndex];
-    if (!item || !option || this.data.assigning || this.data.moving || this.data.convertingQuestionToAnswer) {
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ moving: true, error: "" });
-    try {
-      const plan = this.data.bookPlan || await loadTranscriptBookPlan(item.project_id);
-      const moveRequest = transcriptSourceMoveRequest(item, plan, option.value);
-      if (!moveRequest.request) {
-        this.setData({ error: moveRequest.error });
-        return;
-      }
-      const updatedPlan = await moveMemoirBookSource(item.project_id, moveRequest.request);
-      this.setData({
-        bookPlan: updatedPlan,
-        item: toViewItem(await getMemoirVoiceTranscript(item.id), updatedPlan),
-      });
-      wx.showToast({ title: "素材已移动", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "素材移动失败" });
-    } finally {
-      this.setData({ moving: false });
     }
   },
 
@@ -1494,10 +1382,6 @@ definePage<TranscriptDetailData>()({
 
   openLogin() {
     switchToMe();
-  },
-
-  openBook() {
-    switchToBook();
   },
 
   onShow() {

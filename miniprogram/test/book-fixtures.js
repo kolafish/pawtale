@@ -109,7 +109,6 @@ function sampleAutomationEvent(overrides = {}) {
     summary_text: overrides.summary_text || "「外婆家的童年」已提交后台生成。",
     confidence: Object.prototype.hasOwnProperty.call(overrides, "confidence") ? overrides.confidence : null,
     metadata_json: overrides.metadata_json || {},
-    utterance_details: overrides.utterance_details || [],
     created_at: overrides.created_at || CREATED_AT,
     updated_at: overrides.updated_at || CREATED_AT,
   };
@@ -279,60 +278,6 @@ function sampleBookOutput(
   };
 }
 
-function sampleSourceCoverage(count = 1) {
-  const uncoveredSources = Array.from({ length: count }, (_, index) => ({
-    source_index: index + 3,
-    voice_session_id: "voice-1",
-    message_id: `message-new-${index + 1}`,
-    utterance_id: `utterance-new-${index + 1}`,
-    transcript_version_id: `version-new-${index + 1}`,
-    audio_file_id: `audio-new-${index + 1}`,
-    start_ms: 0,
-    end_ms: 8000,
-    text: "新增转写",
-    created_at: CREATED_AT,
-  }));
-  return {
-    project_id: "project/1",
-    plan_id: "plan-1",
-    total_source_count: count + 2,
-    covered_source_count: 2,
-    uncovered_source_count: count,
-    sources: [
-      {
-        source_index: 1,
-        voice_session_id: "voice-1",
-        message_id: "message-utterance-1",
-        utterance_id: "utterance-1",
-        transcript_version_id: "version-utterance-1",
-        audio_file_id: "audio-utterance-1",
-        start_ms: 0,
-        end_ms: 8000,
-        text: "外婆家的院子",
-        created_at: CREATED_AT,
-        is_included: true,
-        included_in_chapters: [{ chapter_id: "chapter-1", title: "外婆家的童年", sort_order: 0 }],
-      },
-      {
-        source_index: 2,
-        voice_session_id: "voice-1",
-        message_id: "message-utterance-2",
-        utterance_id: "utterance-2",
-        transcript_version_id: "version-utterance-2",
-        audio_file_id: "audio-utterance-2",
-        start_ms: 0,
-        end_ms: 8000,
-        text: "第一次离家",
-        created_at: CREATED_AT,
-        is_included: true,
-        included_in_chapters: [{ chapter_id: "chapter-2", title: "第一次离家", sort_order: 1 }],
-      },
-      ...uncoveredSources,
-    ],
-    uncovered_sources: uncoveredSources,
-  };
-}
-
 function sampleAudioResponse() {
   return {
     audio_file_ids: ["audio-book-1", "audio-book-2"],
@@ -363,50 +308,15 @@ function sampleAudioResponse() {
   };
 }
 
-function sampleBookVoiceCommandPreview(overrides = {}) {
-  return {
-    original_text: "把第一章改名为童年往事",
-    intent: "rename_chapter",
-    intent_label: "修改章名",
-    response_kind: "action_preview",
-    summary: "准备把「外婆家的童年」改名为「童年往事」。",
-    operations: [
-      {
-        type: "rename_chapter",
-        chapter_id: "chapter-1",
-        chapter_title: "外婆家的童年",
-        new_title: "童年往事",
-      },
-    ],
-    requires_confirmation: true,
-    used_ai: true,
-    provider: "fake",
-    model: "fake-model",
-    ...overrides,
-  };
-}
-
-function sampleBookVoiceCommandExecuteResponse(intent, plan, coverage = sampleSourceCoverage(0)) {
-  return {
-    intent,
-    summary: "已执行语音修改。",
-    plan,
-    source_coverage: coverage,
-  };
-}
-
 module.exports = {
   sampleAudioResponse,
   sampleAutomationEvent,
   sampleBookManuscript,
   sampleBookOutput,
   sampleBookOutputVersion,
-  sampleBookVoiceCommandExecuteResponse,
-  sampleBookVoiceCommandPreview,
   sampleDraft,
   sampleDraftWithContent,
   samplePlan,
   sampleRef,
-  sampleSourceCoverage,
   sampleStructuredBookContent,
 };

@@ -33,9 +33,7 @@ from app.schemas.memoir_chapter_pipeline import (
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
-from app.services.memoir.narrative.book_readiness import (
-    invalidate_formal_book_output,
-)
+from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -455,7 +453,7 @@ async def generate_and_save_chapter_draft(
         )
     )
     if output is not None:
-        invalidate_formal_book_output(output)
+        invalidate_book_output(output)
         db.add(output)
     await db.flush()
     return draft, version

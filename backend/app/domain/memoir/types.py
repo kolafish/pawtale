@@ -94,16 +94,10 @@ class MemoirSectionMaterialAssignedBy(str, Enum):
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
-    INGEST_NARRATIVE_STATE = "ingest_narrative_state"
     EVALUATE_INTERVIEW_POLICY_SHADOW = "evaluate_interview_policy_shadow"
     EVALUATE_INTERVIEW_POLICY_OUTCOME = "evaluate_interview_policy_outcome"
-    EVALUATE_TOPIC_MAP_CLAIMS = "evaluate_topic_map_claims"
-    REFRESH_CHAPTER_COMPLETION = "recompute_chapter_structure_audit"
-    GENERATE_CHAPTER_DRAFT = "generate_chapter_draft"
-    AUDIT_BOOK_CONSISTENCY = "audit_book_consistency"
-    ROUTE_SOURCES = "route_sources"
-    GENERATE_SOURCE_CARD = "generate_source_card"
-    QUALITY_AUDIT = "quality_audit"
+    ORGANIZE_MATERIAL = "organize_material"
+    UPDATE_TOPIC_MAP = "update_topic_map"
     GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"
 
 
@@ -147,11 +141,6 @@ class MemoirBookImagePlacementType(str, Enum):
 
 
 class MemoirAutomationEventType(str, Enum):
-    SOURCE_ASSIGNED = "source_assigned"
-    SOURCE_HELD = "source_held"
-    NARRATIVE_INGESTED = "narrative_ingested"
-    CHAPTER_AUTO_REVISED = "chapter_auto_revised"
-    AUDIT_COMPLETED = "audit_completed"
     CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"
     BOOK_OUTPUT_GENERATED = "book_output_generated"
     BOOK_EDITORIAL_COPY_GENERATED = "book_editorial_copy_generated"
@@ -214,14 +203,3 @@ class MemoirCompletionIssueOutcome(str, Enum):
     DEFERRED = "deferred"
     DECLINED = "declined"
     SUPERSEDED = "superseded"
-
-
-class MemoirChapterSourceLinkStatus(str, Enum):
-    ACTIVE = "active"
-    REMOVED = "removed"
-
-
-class MemoirChapterSourceAssignedBy(str, Enum):
-    AI = "ai"
-    USER = "user"
-    SYSTEM = "system"

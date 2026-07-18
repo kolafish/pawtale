@@ -1,5 +1,5 @@
 import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
-import type { MemoirChapterPreparationJob } from "../domain/chapter-workspace";
+import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
@@ -19,8 +19,8 @@ export function getMemoirBookCompletionOverview(
 export function prepareMemoirBookChapter(
   projectId: string,
   chapterId: string,
-): Promise<MemoirChapterPreparationJob> {
-  return memoirRequest<MemoirChapterPreparationJob>(
+): Promise<MemoirChapterWorkspace> {
+  return memoirRequest<MemoirChapterWorkspace>(
     memoirNarrativeProjectPath(
       projectId,
       `/book-completion/chapters/${encodeURIComponent(chapterId)}/prepare`,

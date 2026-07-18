@@ -115,11 +115,6 @@ def _compact_text(value: str) -> str:
     return re.sub(r"\s+", "", value.strip())
 
 
-def _quoted_title(text: str) -> str:
-    match = re.search(r"「([^」]+)」", text)
-    return match.group(1).strip() if match else ""
-
-
 def _latest_user_text(messages: list[MemoirChatMessage]) -> str:
     for message in reversed(_ordered_messages(messages)):
         if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip():
@@ -198,10 +193,6 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     has_speech_prefix = isinstance(speech_prefix, str) and bool(speech_prefix.strip())
     if has_speech_prefix:
         lines.append(f"- 本轮语音开头会先播报：{speech_prefix.strip()}")
-    assignment_lines = selected_update.get("assignment_lines")
-    if isinstance(assignment_lines, list):
-        for line in [str(item).strip() for item in assignment_lines if str(item).strip()][:4]:
-            lines.append(f"- 自动归章明细：{line}")
     snapshot_line = selected_update.get("snapshot_line")
     if isinstance(snapshot_line, str) and snapshot_line.strip():
         lines.append(f"- 当前项目进度：{snapshot_line.strip()}")
@@ -209,35 +200,7 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
     if isinstance(chapter_lines, list):
         for line in [str(item).strip() for item in chapter_lines if str(item).strip()][:3]:
             lines.append(f"- 章节状态：{line}")
-    if selected_update.get("kind") == "book_quality_audit":
-        hint = selected_update.get("audit_hint")
-        next_actions = selected_update.get("next_actions")
-        semantic_questions = selected_update.get("audit_next_questions")
-        semantic_gaps = selected_update.get("audit_gap_hints")
-        if isinstance(semantic_questions, list):
-            questions = [str(item).strip() for item in semantic_questions if str(item).strip()]
-            if questions:
-                lines.append(f"- 语义追问候选（可改写，不要照读）：{'；'.join(questions[:3])}")
-        if isinstance(semantic_gaps, list):
-            gaps = [str(item).strip() for item in semantic_gaps if str(item).strip()]
-            if gaps:
-                lines.append(f"- 章节缺口提示：{'；'.join(gaps[:3])}")
-        if isinstance(hint, str) and hint.strip():
-            lines.append(f"- 可选访谈引导方向：{hint.strip()[:120]}")
-        if isinstance(next_actions, list) and not (
-            isinstance(semantic_questions, list)
-            and any(str(item).strip() for item in semantic_questions)
-        ):
-            actions = [str(item).strip() for item in next_actions if str(item).strip()]
-            if actions:
-                lines.append(f"- 审计建议下一步：{'；'.join(actions[:2])}")
-        lines.append(
-            "使用规则：审计建议只是方向，不是硬性脚本；优先顺着叙述者最新内容，"
-            "调试阶段可以更主动带一句进度或后台整理结果，但不要替代追问。"
-        )
-        if has_speech_prefix:
-            lines.append("如果系统已先播报审计进度，你不要重复同一条进度，直接接到访谈问题。")
-    elif has_speech_prefix:
+    if has_speech_prefix:
         lines.append(
             "使用规则：上面的语音开头会由系统先播放；你不要重复同一条进度、数字或章节名，"
             "只需要自然承接，然后继续访谈。"
@@ -253,10 +216,6 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
 def _automation_event_progress_update(
     events: list[MemoirAutomationEventResponse],
 ) -> dict[str, object] | None:
-    source_assignment_update = _source_assignment_progress_update(events)
-    if source_assignment_update is not None:
-        return source_assignment_update
-
     for event in events:
         summary = event.summary_text.strip()
         if not summary:
@@ -279,99 +238,17 @@ def _automation_event_progress_update(
             MemoirAutomationEventStatus.NEEDS_REVIEW.value,
         }:
             continue
-        if event_type == MemoirAutomationEventType.AUDIT_COMPLETED.value:
-            return _audit_event_progress_update(event, summary=summary, status=status)
-        if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value and (
-            status == MemoirAutomationEventStatus.COMPLETED.value
-        ):
-            return {
-                "kind": "automation_event",
-                "source": "automation_event",
-                "text": summary[:120],
-                "event_ids": [event.id],
-                "event_type": event_type,
-                "event_status": status,
-                "chapter_id": event.chapter_id,
-                "utterance_ids": list(event.utterance_ids),
-            }
+        return {
+            "kind": "automation_event",
+            "source": "automation_event",
+            "text": summary[:120],
+            "event_ids": [event.id],
+            "event_type": event_type,
+            "event_status": status,
+            "chapter_id": event.chapter_id,
+            "utterance_ids": list(event.utterance_ids),
+        }
     return None
-
-
-def _event_type_value(event: MemoirAutomationEventResponse) -> str:
-    return event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type)
-
-
-def _event_status_value(event: MemoirAutomationEventResponse) -> str:
-    return event.status.value if hasattr(event.status, "value") else str(event.status)
-
-
-def _source_assignment_progress_update(
-    events: list[MemoirAutomationEventResponse],
-) -> dict[str, object] | None:
-    source_events = [
-        event for event in events
-        if _event_type_value(event) == MemoirAutomationEventType.SOURCE_ASSIGNED.value
-        and _event_status_value(event) == MemoirAutomationEventStatus.COMPLETED.value
-    ]
-    if not source_events:
-        return None
-
-    event_ids = [event.id for event in source_events]
-    utterance_ids = list(dict.fromkeys(
-        utterance_id
-        for event in source_events
-        for utterance_id in event.utterance_ids
-    ))
-    detail_utterance_ids = list(dict.fromkeys(
-        detail.utterance_id
-        for event in source_events
-        for detail in event.utterance_details
-    ))
-    chapter_titles = list(dict.fromkeys(
-        detail.chapter_title.strip()
-        for event in source_events
-        for detail in event.utterance_details
-        if detail.chapter_title and detail.chapter_title.strip()
-    ))
-    if not chapter_titles:
-        chapter_titles = list(dict.fromkeys(
-            _quoted_title(event.summary_text)
-            for event in source_events
-            if _quoted_title(event.summary_text)
-        ))
-
-    assignment_lines = []
-    for event in source_events:
-        for detail in event.utterance_details:
-            chapter = f"「{detail.chapter_title}」" if detail.chapter_title else "对应章节"
-            title = detail.record_title or "讲述记录"
-            assignment_lines.append(f"{title} -> {chapter}")
-
-    assigned_count = len(utterance_ids) or len(detail_utterance_ids) or sum(
-        len(event.utterance_ids) for event in source_events
-    )
-    if assigned_count <= 0:
-        return None
-    if chapter_titles:
-        chapter_text = "、".join(f"「{title}」" for title in chapter_titles[:2])
-        if len(chapter_titles) > 2:
-            chapter_text += "等章节"
-        text = f"刚才有 {assigned_count} 条讲述已自动整理进 {len(chapter_titles)} 个章节：{chapter_text}。"
-    else:
-        text = f"刚才有 {assigned_count} 条讲述已自动整理进章节。"
-
-    return {
-        "kind": "source_assignment_batch",
-        "source": "automation_event",
-        "text": text,
-        "event_ids": event_ids,
-        "event_type": MemoirAutomationEventType.SOURCE_ASSIGNED.value,
-        "event_status": MemoirAutomationEventStatus.COMPLETED.value,
-        "utterance_ids": utterance_ids or detail_utterance_ids,
-        "assigned_utterance_count": assigned_count,
-        "chapter_titles": chapter_titles,
-        "assignment_lines": assignment_lines,
-    }
 
 
 def _sentence_text(text: str, limit: int = 90) -> str:
@@ -395,128 +272,11 @@ def _progress_speech_prefix(update: dict[str, object]) -> str:
     if not text:
         return ""
 
-    if kind == "source_assignment_batch":
-        return _sentence_text(text)
     if kind == "automation_event_failure":
         return _sentence_text(text)
-    if event_type == MemoirAutomationEventType.CHAPTER_AUTO_REVISED.value:
-        return _sentence_text(text)
-    if kind == "book_quality_audit":
+    if event_type in {item.value for item in MemoirAutomationEventType}:
         return _sentence_text(text)
     return ""
-
-
-def _audit_event_progress_update(
-    event: MemoirAutomationEventResponse,
-    *,
-    summary: str,
-    status: str,
-) -> dict[str, object]:
-    metadata = event.metadata_json if isinstance(event.metadata_json, dict) else {}
-    next_actions = metadata.get("next_actions")
-    chapter = _first_audit_snapshot_chapter(metadata)
-    return {
-        "kind": "book_quality_audit",
-        "source": "automation_event",
-        "text": summary[:120],
-        "event_ids": [event.id],
-        "event_type": MemoirAutomationEventType.AUDIT_COMPLETED.value,
-        "event_status": status,
-        "audit_overall_status": metadata.get("overall_status", ""),
-        "next_actions": next_actions if isinstance(next_actions, list) else [],
-        "audit_hint": _audit_hint(metadata, chapter),
-        "audit_next_questions": _audit_next_questions(metadata),
-        "audit_question_source": _audit_question_source(metadata),
-        "audit_gap_hints": _audit_gap_hints(metadata),
-        "audit_chapter_title": _clean_hint_text(chapter.get("chapter_title"), limit=120)
-        or _clean_hint_text(chapter.get("title"), limit=120),
-    }
-
-
-def _object_dict(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def _object_items(value: object) -> list[dict[str, object]]:
-    return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
-
-
-def _clean_hint_text(value: object, *, limit: int = 120) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
-    return text[:limit].rstrip() if len(text) > limit else text
-
-
-def _audit_snapshot(metadata: dict[str, object]) -> dict[str, object]:
-    return _object_dict(metadata.get("audit_snapshot"))
-
-
-def _audit_snapshot_chapter_cards(metadata: dict[str, object]) -> list[dict[str, object]]:
-    return _object_items(_audit_snapshot(metadata).get("chapter_cards"))
-
-
-def _audit_snapshot_chapter_audits(metadata: dict[str, object]) -> list[dict[str, object]]:
-    return _object_items(_audit_snapshot(metadata).get("chapter_audits"))
-
-
-def _audit_questions_from_items(items: list[dict[str, object]]) -> list[str]:
-    questions: list[str] = []
-    for item in items:
-        for question in item.get("next_questions", []) if isinstance(item.get("next_questions"), list) else []:
-            text = _clean_hint_text(question, limit=100)
-            if text and text not in questions:
-                questions.append(text)
-            if len(questions) >= 4:
-                return questions
-    return questions
-
-
-def _audit_next_questions(metadata: dict[str, object]) -> list[str]:
-    return (
-        _audit_questions_from_items(_audit_snapshot_chapter_cards(metadata))
-        or _audit_questions_from_items(_audit_snapshot_chapter_audits(metadata))
-        or _audit_questions_from_items([_audit_snapshot(metadata)])
-    )
-
-
-def _audit_question_source(metadata: dict[str, object]) -> str:
-    if _audit_questions_from_items(_audit_snapshot_chapter_cards(metadata)):
-        return "chapter_card"
-    if _audit_questions_from_items(_audit_snapshot_chapter_audits(metadata)):
-        return "audit_snapshot"
-    if _audit_questions_from_items([_audit_snapshot(metadata)]):
-        return "audit_snapshot"
-    return ""
-
-
-def _audit_gap_hints(metadata: dict[str, object]) -> list[str]:
-    hints: list[str] = []
-    for item in _audit_snapshot_chapter_cards(metadata) + _audit_snapshot_chapter_audits(metadata):
-        for gap in item.get("gaps", []) if isinstance(item.get("gaps"), list) else []:
-            if not isinstance(gap, dict):
-                continue
-            message = _clean_hint_text(gap.get("message"), limit=120)
-            if message and message not in hints:
-                hints.append(message)
-            if len(hints) >= 4:
-                return hints
-    return hints
-
-
-def _first_audit_snapshot_chapter(metadata: dict[str, object]) -> dict[str, object]:
-    for item in _audit_snapshot_chapter_cards(metadata) + _audit_snapshot_chapter_audits(metadata):
-        if item.get("chapter_id"):
-            return item
-    return {}
-
-
-def _audit_hint(metadata: dict[str, object], snapshot_chapter: dict[str, object]) -> str:
-    questions = _audit_next_questions(metadata)
-    if questions:
-        return ""
-    gaps = _audit_gap_hints(metadata)
-    if gaps:
-        return gaps[0]
-    return _clean_hint_text(snapshot_chapter.get("summary"), limit=120)
 
 
 def _snapshot_milestone_progress_update(

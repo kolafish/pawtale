@@ -11,7 +11,6 @@ from app.database import Base, create_database_engine, get_db, register_models, 
 from app.migrations.audit import migrate_audit_schema
 from app.migrations.memoir_images import migrate_memoir_image_schema
 from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
-from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 
 
@@ -34,7 +33,6 @@ async def test_db():
         assert foreign_keys.scalar_one() == 1
         await conn.run_sync(Base.metadata.create_all)
     await migrate_memoir_voice_schema(engine)
-    await migrate_memoir_semantic_schema(engine)
     await migrate_memoir_image_schema(engine)
     await migrate_memoir_narrative_schema(engine)
     await migrate_audit_schema(engine)

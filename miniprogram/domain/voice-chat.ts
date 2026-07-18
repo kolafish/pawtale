@@ -200,10 +200,6 @@ export interface MemoirVoiceModuleProgress {
 }
 
 export type MemoirAutomationEventType =
-  | "source_assigned"
-  | "source_held"
-  | "chapter_auto_revised"
-  | "audit_completed"
   | "chapter_draft_generated"
   | "book_output_generated"
   | "book_editorial_copy_generated";
@@ -215,26 +211,13 @@ export interface MemoirAutomationEvent {
   event_type: MemoirAutomationEventType;
   status: MemoirAutomationEventStatus;
   chapter_id?: string | null;
-  review_utterance_id?: string | null;
-  completion_item_id?: string | null;
   editing_job_id?: string | null;
   utterance_ids: string[];
   summary_text: string;
   confidence?: number | null;
   metadata_json: Record<string, unknown>;
-  utterance_details?: MemoirAutomationEventUtteranceDetail[];
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirAutomationEventUtteranceDetail {
-  utterance_id: string;
-  source_index?: number | null;
-  record_title: string;
-  preview_text: string;
-  chapter_id?: string | null;
-  chapter_title?: string | null;
-  created_at?: string | null;
 }
 
 export interface MemoirAutomationEventListResponse {
@@ -745,48 +728,6 @@ export interface MemoirBookPlan {
   updated_at: string;
 }
 
-export interface MemoirBookSourceCoverageItem {
-  source_index: number;
-  voice_session_id: string;
-  message_id: string;
-  utterance_id: string;
-  transcript_version_id?: string | null;
-  audio_file_id?: string | null;
-  start_ms?: number | null;
-  end_ms?: number | null;
-  text: string;
-  created_at: string;
-  is_included?: boolean;
-  included_in_chapters?: MemoirBookSourceIncludedChapter[];
-}
-
-export interface MemoirBookSourceCoverage {
-  project_id: string;
-  plan_id?: string | null;
-  total_source_count: number;
-  covered_source_count: number;
-  uncovered_source_count: number;
-  sources?: MemoirBookSourceCoverageItem[];
-  uncovered_sources: MemoirBookSourceCoverageItem[];
-}
-
-export interface MemoirBookSourceAssignmentInput {
-  chapter_id: string;
-  utterance_ids: string[];
-}
-
-export interface MemoirBookSourceAssignmentRequest {
-  ai_model?: string;
-  assignments: MemoirBookSourceAssignmentInput[];
-}
-
-export interface MemoirBookSourceMoveRequest {
-  ai_model?: string;
-  source_chapter_id: string;
-  target_chapter_id: string;
-  utterance_id: string;
-}
-
 export interface MemoirBookPlanGenerateRequest {
   ai_model?: string;
   max_chapters?: number;
@@ -811,7 +752,6 @@ export interface MemoirBookPlanUpdateRequest {
 }
 
 export type MemoirBookPlanStructureCommandType =
-  | "create_chapter_from_source"
   | "delete_chapter"
   | "merge_chapters"
   | "move_chapter"
@@ -830,7 +770,6 @@ export interface MemoirBookPlanStructureCommandRequest {
   relative_position?: "before" | "after";
   title?: string;
   include_in_book?: boolean;
-  utterance_id?: string;
   utterance_ids?: string[];
 }
 
@@ -894,100 +833,6 @@ export interface MemoirBookAudioResponse {
   duration_seconds?: number | null;
   alignment_provider?: string | null;
   alignment?: TTSAlignmentSegment[];
-}
-
-export type MemoirBookVoiceCommandIntent =
-  | "read_outline"
-  | "read_chapter"
-  | "read_uncovered_source"
-  | "rename_chapter"
-  | "merge_chapters"
-  | "move_chapter"
-  | "assign_source"
-  | "split_chapter"
-  | "rewrite_chapter"
-  | "polish_chapter"
-  | "confirm_chapter"
-  | "review_chapter_title"
-  | "review_chapter_length"
-  | "review_chapter_structure"
-  | "answer_book_question"
-  | "capability_help"
-  | "clarify_previous"
-  | "unknown";
-
-export type MemoirBookVoiceCommandResponseKind = "action_preview" | "consultation" | "answer" | "clarification";
-
-export interface MemoirBookVoiceCommandContextMessage {
-  role: "user" | "assistant";
-  text: string;
-  intent?: string | null;
-  summary?: string | null;
-}
-
-export interface MemoirBookVoiceCommandBookContext {
-  source_coverage?: {
-    total_source_count: number;
-    covered_source_count: number;
-    uncovered_source_count: number;
-  };
-  uncovered_sources?: Array<{
-    source_index: number;
-    utterance_id: string;
-    text: string;
-  }>;
-}
-
-export interface MemoirBookVoiceCommandParseRequest {
-  text: string;
-  current_chapter_id?: string;
-  conversation_context?: MemoirBookVoiceCommandContextMessage[];
-  book_context?: MemoirBookVoiceCommandBookContext;
-  ai_model?: string;
-}
-
-export interface MemoirBookVoiceCommandOperation {
-  type: MemoirBookVoiceCommandIntent;
-  chapter_id?: string | null;
-  chapter_title?: string | null;
-  target_chapter_id?: string | null;
-  target_chapter_title?: string | null;
-  new_title?: string | null;
-  direction?: "up" | "down" | string | null;
-  target_position?: "first" | "last" | string | null;
-  target_index?: number | null;
-  relative_chapter_id?: string | null;
-  relative_chapter_title?: string | null;
-  relative_position?: "before" | "after" | string | null;
-  source_position?: number | null;
-  source_index?: number | null;
-  utterance_id?: string | null;
-}
-
-export interface MemoirBookVoiceCommandParseResponse {
-  original_text: string;
-  intent: MemoirBookVoiceCommandIntent;
-  intent_label: string;
-  response_kind: MemoirBookVoiceCommandResponseKind;
-  summary: string;
-  reply_text?: string | null;
-  operations: MemoirBookVoiceCommandOperation[];
-  requires_confirmation: boolean;
-  used_ai: boolean;
-  provider?: string | null;
-  model?: string | null;
-}
-
-export interface MemoirBookVoiceCommandExecuteRequest {
-  intent: MemoirBookVoiceCommandIntent;
-  operation: MemoirBookVoiceCommandOperation;
-}
-
-export interface MemoirBookVoiceCommandExecuteResponse {
-  intent: MemoirBookVoiceCommandIntent;
-  summary: string;
-  plan: MemoirBookPlan;
-  source_coverage?: MemoirBookSourceCoverage | null;
 }
 
 export type MemoirBookCoverStyle = "classic_plain" | "warm_gray" | "dark_album" | "moonlit_courtyard" | "navy_gilt";
@@ -1180,10 +1025,6 @@ export interface MemoirBookOutput {
   plan_id: string;
   title: string;
   status: MemoirOutputStatus;
-  formal_version_id?: string | null;
-  formal_audit_job_id?: string | null;
-  formalized_by_user_id?: string | null;
-  formalized_at?: string | null;
   metadata_json: Record<string, unknown>;
   is_stale: boolean;
   stale_chapter_titles: string[];
@@ -1191,55 +1032,4 @@ export interface MemoirBookOutput {
   versions: MemoirBookOutputVersion[];
   created_at: string;
   updated_at: string;
-}
-
-export interface MemoirBookConsistencyAuditRequest {
-  include_semantic_audit?: boolean;
-  ai_model?: string | null;
-}
-
-export type MemoirEditingJobStatus = "pending" | "running" | "succeeded" | "failed" | "skipped";
-
-export interface MemoirBookConsistencyAuditJob {
-  id: string;
-  project_id: string;
-  status: MemoirEditingJobStatus;
-  payload_json: Record<string, unknown>;
-  result_json: Record<string, unknown>;
-  error_message: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface MemoirBookReadinessBlocker {
-  code: string;
-  title: string;
-  detail: string;
-  chapter_id?: string | null;
-  story_id?: string | null;
-  claim_id?: string | null;
-  completion_item_id?: string | null;
-}
-
-export interface MemoirBookReadiness {
-  project_id: string;
-  ready_for_formal: boolean;
-  current_signature: string;
-  output_status?: MemoirOutputStatus | null;
-  output_version_id?: string | null;
-  latest_audit_job?: MemoirBookConsistencyAuditJob | null;
-  audit_is_current: boolean;
-  groups: {
-    must_handle: MemoirBookReadinessBlocker[];
-    suggested: MemoirBookReadinessBlocker[];
-  };
-}
-
-export interface MemoirBookFormalizeResponse {
-  project_id: string;
-  output_id: string;
-  output_version_id: string;
-  audit_job_id: string;
-  status: MemoirOutputStatus;
-  formalized_at: string;
 }

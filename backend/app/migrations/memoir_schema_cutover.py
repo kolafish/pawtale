@@ -6,10 +6,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.database import Base, register_models
-from app.domain.memoir.narrative_types import (
-    MemoirNarrativeDecisionAction,
-    MemoirNarrativeDecisionTargetType,
-)
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -18,10 +14,22 @@ from app.domain.memoir.types import (
 )
 
 
-# These tables belonged to the superseded Story Slot, Gap/Follow-up Task and
-# structured chapter draft implementations. Their data is intentionally not
-# migrated into the current CompletionItem and whole-chapter draft models.
+# These tables belong to superseded knowledge-graph, semantic-card and
+# parallel chapter-source runtimes. Development data is intentionally not
+# migrated: VoiceUtterance + SectionMaterial is the only material chain.
 OBSOLETE_MEMOIR_TABLES = (
+    "memoir_framework_item_claims",
+    "memoir_narrative_decisions",
+    "memoir_story_claims",
+    "memoir_claim_evidence",
+    "memoir_claims",
+    "memoir_stories",
+    "memoir_narrative_entities",
+    "memoir_completion_items",
+    "memoir_book_quality_audit_snapshots",
+    "memoir_chapter_cards",
+    "memoir_source_cards",
+    "memoir_chapter_source_links",
     "memoir_draft_block_claims",
     "memoir_draft_block_stories",
     "memoir_draft_block_versions",
@@ -72,51 +80,70 @@ OBSOLETE_MEMOIR_TRIGGERS = (
 # place. Only tables whose retained shape changed are rebuilt.
 REBUILD_ORDER = (
     "memoir_book_plan_chapters",
-    "memoir_stories",
     "memoir_voice_sessions",
     "memoir_voice_utterances",
     "memoir_editing_jobs",
     "memoir_automation_events",
-    "memoir_narrative_decisions",
+    "memoir_book_outputs",
     "memoir_book_chapter_draft_versions",
 )
 
 OBSOLETE_COLUMNS = {
-    "memoir_stories": {
-        "completion_status",
-        "slot_schema_version",
-        "merged_into_story_id",
+    "memoir_book_plan_chapters": {"source_refs_json"},
+    "memoir_voice_sessions": {
+        "current_followup_task_id",
+        "current_completion_item_id",
     },
-    "memoir_voice_sessions": {"current_followup_task_id"},
-    "memoir_automation_events": {"followup_task_id"},
-    "memoir_narrative_decisions": {"source_followup_task_answer_id"},
+    "memoir_voice_utterances": {
+        "completion_item_id",
+        "source_material_type",
+        "source_route_action",
+        "source_route_confidence",
+        "source_route_reason",
+        "source_route_updated_at",
+    },
+    "memoir_automation_events": {
+        "followup_task_id",
+        "review_utterance_id",
+        "completion_item_id",
+    },
+    "memoir_book_outputs": {
+        "formal_version_id",
+        "formal_audit_job_id",
+        "formalized_by_user_id",
+        "formalized_at",
+    },
     "memoir_book_chapter_draft_versions": {"block_snapshot_json"},
 }
 
 LEGACY_SQL_MARKERS = {
-    "memoir_stories": (
-        "completion_status",
-        "slot_schema_version",
-        "merged_into_story_id",
+    "memoir_book_plan_chapters": ("source_refs_json",),
+    "memoir_voice_sessions": (
+        "current_followup_task_id",
+        "current_completion_item_id",
     ),
-    "memoir_voice_sessions": ("current_followup_task_id",),
+    "memoir_voice_utterances": (
+        "completion_item_id",
+        "source_route_action",
+    ),
     "memoir_editing_jobs": (
+        "ingest_narrative_state",
+        "evaluate_topic_map_claims",
+        "route_sources",
+        "generate_source_card",
+        "quality_audit",
         "generate_followup_tasks",
         "generate_draft_blocks",
     ),
     "memoir_automation_events": (
         "followup_task_id",
+        "completion_item_id",
+        "review_utterance_id",
+        "source_assigned",
+        "source_held",
+        "narrative_ingested",
+        "audit_completed",
         "followup_tasks_generated",
-    ),
-    "memoir_narrative_decisions": (
-        "source_followup_task_answer_id",
-        "'story_slot'",
-        "'followup_task'",
-        "'chapter_contract'",
-        "'draft_block'",
-        "'accept_incomplete'",
-        "'lock'",
-        "'unlock'",
     ),
     "memoir_book_chapter_draft_versions": ("block_snapshot_json",),
 }
@@ -140,14 +167,6 @@ CURRENT_AUTOMATION_EVENT_TYPES = _sql_values(
 CURRENT_AUTOMATION_EVENT_STATUSES = _sql_values(
     item.value for item in MemoirAutomationEventStatus
 )
-CURRENT_DECISION_TARGETS = _sql_values(
-    item.value for item in MemoirNarrativeDecisionTargetType
-)
-CURRENT_DECISION_ACTIONS = _sql_values(
-    item.value for item in MemoirNarrativeDecisionAction
-)
-
-
 async def _object_names(conn: AsyncConnection, object_type: str) -> set[str]:
     rows = (
         await conn.execute(
@@ -208,11 +227,6 @@ def _copy_filter(table_name: str) -> str:
             f'legacy."job_type" IN ({CURRENT_JOB_TYPES}) '
             f'AND legacy."status" IN ({CURRENT_JOB_STATUSES})'
         )
-    if table_name == "memoir_narrative_decisions":
-        return (
-            f'legacy."target_type" IN ({CURRENT_DECISION_TARGETS}) '
-            f'AND legacy."action" IN ({CURRENT_DECISION_ACTIONS})'
-        )
     if table_name == "memoir_automation_events":
         return (
             f'legacy."event_type" IN ({CURRENT_AUTOMATION_EVENT_TYPES}) '
@@ -222,11 +236,6 @@ def _copy_filter(table_name: str) -> str:
 
 
 def _copy_expression(table_name: str, column_name: str) -> str:
-    if table_name == "memoir_stories" and column_name == "lifecycle_status":
-        return (
-            "CASE WHEN legacy.\"lifecycle_status\" = 'merged' "
-            "THEN 'archived' ELSE legacy.\"lifecycle_status\" END"
-        )
     if table_name == "memoir_automation_events" and column_name == "editing_job_id":
         return (
             'CASE WHEN legacy."editing_job_id" IS NULL OR EXISTS ('
@@ -307,31 +316,6 @@ async def _rebuild_table(
     return before_count - after_count
 
 
-async def _clear_discarded_job_references(
-    conn: AsyncConnection,
-) -> dict[str, int]:
-    table_names = await _object_names(conn, "table")
-    if "memoir_book_outputs" not in table_names:
-        return {}
-    result = await conn.execute(
-        text(
-            "UPDATE memoir_book_outputs "
-            "SET formal_audit_job_id = NULL "
-            "WHERE formal_audit_job_id IS NOT NULL "
-            "AND NOT EXISTS ("
-            "SELECT 1 FROM memoir_editing_jobs AS job "
-            "WHERE job.id = memoir_book_outputs.formal_audit_job_id"
-            ")"
-        )
-    )
-    changed = max(0, int(result.rowcount or 0))
-    return (
-        {"memoir_book_outputs.formal_audit_job_id": changed}
-        if changed
-        else {}
-    )
-
-
 async def migrate_memoir_schema_cutover(
     engine: AsyncEngine,
 ) -> dict[str, object]:
@@ -344,7 +328,6 @@ async def migrate_memoir_schema_cutover(
     dropped_triggers: list[str] = []
     rebuilt_tables: list[str] = []
     discarded_rows: dict[str, int] = {}
-    cleared_references: dict[str, int] = {}
 
     async with engine.connect() as conn:
         foreign_keys_enabled = int(
@@ -381,9 +364,6 @@ async def migrate_memoir_schema_cutover(
                     rebuilt_tables.append(table_name)
                     if discarded_count:
                         discarded_rows[table_name] = discarded_count
-                cleared_references = await _clear_discarded_job_references(
-                    conn
-                )
         finally:
             await conn.execute(text("PRAGMA legacy_alter_table = OFF"))
             await conn.execute(
@@ -399,5 +379,4 @@ async def migrate_memoir_schema_cutover(
         "dropped_triggers": dropped_triggers,
         "rebuilt_tables": rebuilt_tables,
         "discarded_rows": discarded_rows,
-        "cleared_references": cleared_references,
     }

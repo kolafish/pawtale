@@ -12,10 +12,6 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
-    assignMemoirBookSources: async () => {
-      throw new Error("assignMemoirBookSources was not mocked");
-    },
-    getMemoirBookPlan: async () => null,
     listMemoirVoiceTranscripts: async () => {
       throw new Error("listMemoirVoiceTranscripts was not mocked");
     },
@@ -69,57 +65,6 @@ function sampleTranscript(id, createdAt = "2026-06-17T00:00:00.000Z") {
     included_chapters: [],
     created_at: createdAt,
     session_created_at: "2026-06-17T00:00:00.000Z",
-  };
-}
-
-function sampleSourceRef(id, quote = `原文 ${id}`) {
-  return {
-    voice_session_id: "voice-1",
-    message_id: `message-${id}`,
-    utterance_id: id,
-    transcript_version_id: `version-${id}`,
-    audio_file_id: `audio-${id}`,
-    start_ms: 0,
-    end_ms: 8000,
-    quote,
-  };
-}
-
-function sampleBookPlan() {
-  return {
-    id: "plan-1",
-    project_id: "project-1",
-    title: "我的回忆录章节规划",
-    status: "confirmed",
-    created_by: "ai",
-    model: "fake",
-    metadata_json: {},
-    created_at: "2026-06-17T00:00:00.000Z",
-    updated_at: "2026-06-17T00:00:00.000Z",
-    chapters: [
-      {
-        id: "chapter-1",
-        plan_id: "plan-1",
-        project_id: "project-1",
-        title: "岁首欢聚记",
-        sort_order: 0,
-        source_refs: [sampleSourceRef("utterance-1"), sampleSourceRef("utterance-2")],
-        metadata_json: {},
-        created_at: "2026-06-17T00:00:00.000Z",
-        updated_at: "2026-06-17T00:00:00.000Z",
-      },
-      {
-        id: "chapter-2",
-        plan_id: "plan-1",
-        project_id: "project-1",
-        title: "童年友情",
-        sort_order: 1,
-        source_refs: [sampleSourceRef("utterance-3")],
-        metadata_json: {},
-        created_at: "2026-06-17T00:00:00.000Z",
-        updated_at: "2026-06-17T00:00:00.000Z",
-      },
-    ],
   };
 }
 
@@ -235,7 +180,7 @@ test("transcripts page uses summary fields for browse cards", async () => {
             ...sampleTranscript("utterance-summary", "2026-07-01T07:38:00.000Z"),
             summary_title: "爷爷退休后仍帮公司做事",
             summary_text: "讲述者提到爷爷退休后仍继续帮公司处理事务，大家都很信任他。",
-            summary_source: "source_card",
+            summary_source: "fallback",
             audio_duration_seconds: 32,
           },
         ],
@@ -304,7 +249,7 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
           display_text: "爷爷退休后还在帮公司做事。",
           summary_title: "爷爷退休后仍帮公司做事",
           summary_text: "讲述者提到爷爷退休后还在帮公司做事。",
-          summary_source: "source_card",
+          summary_source: "fallback",
           raw_char_count: 14,
           display_char_count: 14,
           transcription_status: "ready",
@@ -326,7 +271,6 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(item.bookInclusionText, "等待转写后再入章");
   assert.equal(item.bookStatusClass, "book-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
-  assert.equal(item.canAssignChapterSource, false);
   global.wx = {
     showToast(options) {
       toasts.push(options);
@@ -429,113 +373,6 @@ test("transcripts page preserves loaded records after returning from detail", as
     "utterance-4",
   ]);
   assert.equal(context.data.showLoadMore, true);
-  delete global.wx;
-});
-
-test("transcripts page assigns an uncovered source to a chapter", async () => {
-  const assignments = [];
-  const toasts = [];
-  global.wx = {
-    showToast(options) {
-      toasts.push(options);
-    },
-    switchTab() {},
-  };
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      getMemoirBookPlan: async () => sampleBookPlan(),
-      listMemoirVoiceTranscripts: async () => ({
-        items: [sampleTranscript("utterance-new")],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-      assignMemoirBookSources: async (projectId, data) => {
-        assignments.push({ projectId, data });
-        return sampleBookPlan();
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-  assert.equal(context.data.items[0].canAssignChapterSource, true);
-  assert.deepEqual(context.data.items[0].chapterAssignOptions, [
-    { label: "第 1 章 岁首欢聚记", value: "chapter-1" },
-    { label: "第 2 章 童年友情", value: "chapter-2" },
-  ]);
-
-  await page.assignTranscriptChapter.call(context, {
-    currentTarget: { dataset: { id: "utterance-new" } },
-    detail: { value: 0 },
-  });
-
-  assert.deepEqual(assignments, [
-    {
-      projectId: "project-1",
-      data: { assignments: [{ chapter_id: "chapter-1", utterance_ids: ["utterance-new"] }] },
-    },
-  ]);
-  assert.deepEqual(toasts, [{ title: "已归入章节", icon: "success" }]);
-  delete global.wx;
-});
-
-test("transcripts page routes draft plan assignments to book confirmation", async () => {
-  const assignments = [];
-  const navigations = [];
-  global.wx = {
-    switchTab(options) {
-      navigations.push(options);
-    },
-  };
-  const { page } = loadTranscriptsPage({
-    authExports: {
-      getMemoirIdentity: async () => ({
-        id: "user-1",
-        active_project_id: "project-1",
-        active_project: { id: "project-1", title: "我的回忆录" },
-        projects: [],
-      }),
-    },
-    voiceApiExports: {
-      getMemoirBookPlan: async () => ({ ...sampleBookPlan(), status: "draft" }),
-      listMemoirVoiceTranscripts: async () => ({
-        items: [sampleTranscript("utterance-new")],
-        total: 1,
-        limit: 30,
-        offset: 0,
-      }),
-      assignMemoirBookSources: async (projectId, data) => {
-        assignments.push({ projectId, data });
-        return sampleBookPlan();
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.loadTranscripts.call(context, true);
-
-  assert.equal(context.data.items[0].canAssignChapterSource, false);
-  assert.equal(context.data.items[0].needsBookPlanConfirmation, true);
-  assert.equal(context.data.items[0].bookInclusionText, "先确认章节结构，再归入章节");
-  assert.deepEqual(context.data.items[0].chapterAssignOptions, []);
-
-  await page.assignTranscriptChapter.call(context, {
-    currentTarget: { dataset: { id: "utterance-new" } },
-    detail: { value: 0 },
-  });
-  page.openBook.call(context);
-
-  assert.deepEqual(assignments, []);
-  assert.deepEqual(navigations, [{ url: "/pages/book/index" }]);
   delete global.wx;
 });
 

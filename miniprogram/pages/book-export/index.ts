@@ -1,6 +1,5 @@
 import type {
   MemoirBookOutput,
-  MemoirBookReadiness,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookPlan,
@@ -9,14 +8,10 @@ import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
   assembleMemoirBookOutput,
-  enqueueMemoirBookConsistencyAudit,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
-  getMemoirBookConsistencyAudit,
-  getMemoirBookReadiness,
   getMemoirBookPlan,
   suggestMemoirBookOutputTitles,
-  formalizeMemoirBookOutput,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
@@ -50,11 +45,6 @@ import {
   latestBookCoverStyle,
   latestBookTitle,
 } from "../book/book-design-model";
-import {
-  bookConsistencyData,
-  type BookConsistencyData,
-} from "./book-consistency-view-model";
-
 interface BookExportDataset {
   action?: string;
   format?: string;
@@ -144,15 +134,9 @@ type BookExportData = Pick<
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;
-  bookConsistencyLoading: boolean;
-  bookConsistencyAuditRunning: boolean;
-  bookConsistencyFormalizing: boolean;
-  bookConsistencyJobId: string;
-  bookConsistencyError: string;
-} & BookConsistencyData;
+};
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
-const BOOK_CONSISTENCY_POLL_INTERVAL_MS = 1600;
 const BOOK_EXPORT_FORMATS: readonly MemoirBookOutputExportFormat[] = ["pdf", "txt"];
 const BOOK_EXPORT_LAYOUTS: readonly MemoirBookOutputExportLayout[] = ["standard", "large_print"];
 
@@ -188,7 +172,6 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 
 definePage<BookExportData>()({
   bookDesignAutosaveTimer: null as number | null,
-  bookConsistencyPollTimer: null as number | null,
 
   data: {
     loading: false,
@@ -211,12 +194,6 @@ definePage<BookExportData>()({
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     exportActionHintText: exportActionHint("reading_pdf"),
-    bookConsistencyLoading: false,
-    bookConsistencyAuditRunning: false,
-    bookConsistencyFormalizing: false,
-    bookConsistencyJobId: "",
-    bookConsistencyError: "",
-    ...bookConsistencyData(null, null),
     ...bookOutputData(null),
   },
 
@@ -238,13 +215,12 @@ definePage<BookExportData>()({
 
   onUnload() {
     this.flushBookDesignAutosave();
-    this.clearBookConsistencyPoll();
   },
 
   async loadBookExportPage(projectId: string) {
-    this.setData({ loading: true, error: "", bookConsistencyError: "" });
+    this.setData({ loading: true, error: "" });
     try {
-      const [plan, output, readiness] = await Promise.all([
+      const [plan, output] = await Promise.all([
         getMemoirBookPlan(projectId).catch((error) => {
           if (error instanceof ApiError && error.statusCode === 404) {
             return null;
@@ -252,18 +228,8 @@ definePage<BookExportData>()({
           throw error;
         }),
         this.loadBookOutput(projectId),
-        this.loadBookReadiness(projectId).catch((error) => {
-          this.setData({
-            bookConsistencyError: error instanceof Error
-              ? error.message
-              : "全书审校状态加载失败",
-          });
-          return null;
-        }),
       ]);
       this.applyBookExportData(plan, output);
-      this.applyBookReadiness(readiness, output);
-      this.resumeBookConsistencyAudit(readiness);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -285,193 +251,8 @@ definePage<BookExportData>()({
     }
   },
 
-  async loadBookReadiness(projectId: string): Promise<MemoirBookReadiness | null> {
-    try {
-      return await getMemoirBookReadiness(projectId);
-    } catch (error) {
-      if (error instanceof ApiError && error.statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  },
-
-  applyBookReadiness(
-    readiness: MemoirBookReadiness | null,
-    output?: MemoirBookOutput | null,
-  ) {
-    this.setData(bookConsistencyData(
-      readiness,
-      output === undefined ? this.data.bookOutput : output,
-      this.data.bookConsistencyAuditRunning,
-    ));
-  },
-
-  resumeBookConsistencyAudit(readiness: MemoirBookReadiness | null) {
-    const job = readiness?.latest_audit_job;
-    if (!job || (job.status !== "pending" && job.status !== "running")) {
-      return;
-    }
-    this.setData({
-      bookConsistencyAuditRunning: true,
-      bookConsistencyJobId: job.id,
-      bookConsistencyError: "",
-    });
-    this.applyBookReadiness(readiness);
-    this.scheduleBookConsistencyPoll();
-  },
-
-  async refreshBookReadiness() {
-    if (!this.data.projectId) {
-      return null;
-    }
-    this.setData({ bookConsistencyLoading: true });
-    try {
-      const readiness = await this.loadBookReadiness(this.data.projectId);
-      this.applyBookReadiness(readiness);
-      this.setData({ bookConsistencyError: "" });
-      return readiness;
-    } catch (error) {
-      if (!routeAuthError(error, "login")) {
-        this.setData({
-          bookConsistencyError: error instanceof Error
-            ? error.message
-            : "全书审校状态加载失败",
-        });
-      }
-      return null;
-    } finally {
-      this.setData({ bookConsistencyLoading: false });
-    }
-  },
-
-  clearBookConsistencyPoll() {
-    if (this.bookConsistencyPollTimer !== null) {
-      clearTimeout(this.bookConsistencyPollTimer);
-      this.bookConsistencyPollTimer = null;
-    }
-  },
-
-  scheduleBookConsistencyPoll() {
-    this.clearBookConsistencyPoll();
-    if (!this.data.projectId || !this.data.bookConsistencyJobId) {
-      return;
-    }
-    this.bookConsistencyPollTimer = setTimeout(() => {
-      this.bookConsistencyPollTimer = null;
-      void this.pollBookConsistencyAudit();
-    }, BOOK_CONSISTENCY_POLL_INTERVAL_MS);
-  },
-
-  async pollBookConsistencyAudit() {
-    const { projectId, bookConsistencyJobId } = this.data;
-    if (!projectId || !bookConsistencyJobId) {
-      return;
-    }
-    try {
-      const job = await getMemoirBookConsistencyAudit(projectId, bookConsistencyJobId);
-      if (job.status === "pending" || job.status === "running") {
-        this.scheduleBookConsistencyPoll();
-        return;
-      }
-      this.setData({
-        bookConsistencyAuditRunning: false,
-        bookConsistencyJobId: "",
-      });
-      if (job.status === "succeeded") {
-        await this.refreshBookReadiness();
-        wx.showToast({ title: "全书审校已完成", icon: "success" });
-        return;
-      }
-      this.applyBookReadiness(this.data.bookReadiness);
-      this.setData({
-        bookConsistencyError: job.error_message || "全书审校失败，请稍后重试",
-      });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({
-        bookConsistencyError: error instanceof Error
-          ? error.message
-          : "全书审校状态刷新失败",
-      });
-      this.scheduleBookConsistencyPoll();
-    }
-  },
-
-  async startBookConsistencyAudit() {
-    if (
-      !this.data.projectId
-      || !this.data.bookContent
-      || this.data.bookConsistencyAuditRunning
-      || this.data.bookConsistencyFormalizing
-    ) {
-      return;
-    }
-    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
-      return;
-    }
-    this.setData({ bookConsistencyAuditRunning: true, bookConsistencyError: "" });
-    this.applyBookReadiness(this.data.bookReadiness);
-    try {
-      const job = await enqueueMemoirBookConsistencyAudit(this.data.projectId, {
-        include_semantic_audit: true,
-      });
-      this.setData({ bookConsistencyJobId: job.id });
-      this.scheduleBookConsistencyPoll();
-    } catch (error) {
-      this.setData({ bookConsistencyAuditRunning: false });
-      this.applyBookReadiness(this.data.bookReadiness);
-      if (!routeAuthError(error, "login")) {
-        this.setData({
-          bookConsistencyError: error instanceof Error ? error.message : "全书审校提交失败",
-        });
-      }
-    }
-  },
-
-  async formalizeBookOutput() {
-    if (
-      !this.data.projectId
-      || this.data.bookConsistencyFormalizing
-      || this.data.bookConsistencyAuditRunning
-    ) {
-      return;
-    }
-    if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
-      return;
-    }
-    const readiness = await this.refreshBookReadiness();
-    const auditJobId = readiness?.latest_audit_job?.id || "";
-    const outputVersionId = readiness?.output_version_id || "";
-    if (!readiness?.ready_for_formal || !auditJobId || !outputVersionId) {
-      this.setData({ bookConsistencyError: "当前书稿尚未通过正式成书门禁" });
-      return;
-    }
-    this.setData({ bookConsistencyFormalizing: true, bookConsistencyError: "" });
-    try {
-      await formalizeMemoirBookOutput(this.data.projectId, {
-        audit_job_id: auditJobId,
-        output_version_id: outputVersionId,
-      });
-      const output = await this.loadBookOutput(this.data.projectId);
-      this.applyBookExportData(this.data.plan, output);
-      await this.refreshBookReadiness();
-      wx.showToast({ title: "已标记为正式书稿", icon: "success" });
-    } catch (error) {
-      if (!routeAuthError(error, "login")) {
-        this.setData({
-          bookConsistencyError: error instanceof Error ? error.message : "正式成书失败",
-        });
-      }
-    } finally {
-      this.setData({ bookConsistencyFormalizing: false });
-    }
-  },
-
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
-    const chapters = plan ? buildChapterViews(plan, {}, null, {}) : [];
+    const chapters = plan ? buildChapterViews(plan) : [];
     const includedChapterCount = chapters.filter((chapter) => chapter.include_in_book !== false).length;
     const stage = planStage(plan);
     const outputData = bookOutputData(output);
@@ -663,7 +444,6 @@ definePage<BookExportData>()({
         cover_style: coverStyle,
       });
       this.applyBookExportData(this.data.plan, output);
-      await this.refreshBookReadiness();
       const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
         || this.data.bookCoverStyleOptions[0];
       this.setData({

@@ -19,14 +19,11 @@ from app.models.projects import Project
 from app.schemas.memoir_voice import (
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
-    MemoirAutomationEventUtteranceDetailResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.automation_event_audit_snapshots import audit_snapshot_metadata_by_event
 from app.services.memoir.automation_event_metadata import (
     ACKNOWLEDGED_AT_KEY,
     ACKNOWLEDGED_BY_USER_KEY,
-    AUDIT_SNAPSHOT_KEY,
     EDITING_JOB_FAILURE_SOURCE,
     EVENT_SIGNATURE_KEY,
     VOICE_PLAYED_AT_KEY,
@@ -42,7 +39,6 @@ from app.services.memoir.automation_event_metadata import (
     _event_signature,
     _preserved_metadata,
 )
-from app.services.memoir.automation_event_sources import utterance_details_by_event
 
 
 def _utcnow_iso() -> str:
@@ -160,26 +156,19 @@ async def _without_recovered_job_failures(
 
 def event_response(
     event: MemoirAutomationEvent,
-    utterance_details: list[MemoirAutomationEventUtteranceDetailResponse] | None = None,
-    audit_snapshot: dict[str, object] | None = None,
 ) -> MemoirAutomationEventResponse:
     metadata = dict(event.metadata_json or {})
-    if audit_snapshot:
-        metadata[AUDIT_SNAPSHOT_KEY] = audit_snapshot
     return MemoirAutomationEventResponse(
         id=event.id,
         project_id=event.project_id,
         event_type=MemoirAutomationEventType(event.event_type),
         status=MemoirAutomationEventStatus(event.status),
         chapter_id=event.chapter_id,
-        review_utterance_id=event.review_utterance_id,
-        completion_item_id=event.completion_item_id,
         editing_job_id=event.editing_job_id,
         utterance_ids=_event_utterance_ids(event),
         summary_text=event.summary_text,
         confidence=event.confidence,
         metadata_json=metadata,
-        utterance_details=utterance_details or [],
         created_at=event.created_at,
         updated_at=event.updated_at,
     )
@@ -194,30 +183,14 @@ async def record_automation_event(
     status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
-    review_utterance_id: str | None = None,
-    completion_item_id: str | None = None,
     editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
 ) -> MemoirAutomationEvent:
     clean_utterance_ids = _clean_utterance_ids(utterance_ids)
-    review_id = (review_utterance_id or "").strip() or None
-    if (
-        event_type == MemoirAutomationEventType.SOURCE_HELD
-        and status == MemoirAutomationEventStatus.NEEDS_REVIEW
-    ):
-        if review_id is None and len(clean_utterance_ids) == 1:
-            review_id = clean_utterance_ids[0]
-        if review_id is None:
-            raise ValueError(
-                "source review event requires one review utterance"
-            )
-        clean_utterance_ids = []
     event = MemoirAutomationEvent(
         project_id=project_id,
         chapter_id=chapter_id,
-        review_utterance_id=review_id,
-        completion_item_id=(completion_item_id or "").strip() or None,
         editing_job_id=(editing_job_id or "").strip() or None,
         event_type=event_type.value,
         status=status.value,
@@ -241,8 +214,6 @@ async def record_or_update_automation_event(
     status: MemoirAutomationEventStatus = MemoirAutomationEventStatus.COMPLETED,
     chapter_id: str | None = None,
     utterance_ids: list[str] | None = None,
-    review_utterance_id: str | None = None,
-    completion_item_id: str | None = None,
     editing_job_id: str | None = None,
     confidence: float | None = None,
     metadata_json: dict | None = None,
@@ -268,8 +239,6 @@ async def record_or_update_automation_event(
             status=status,
             chapter_id=chapter_id,
             utterance_ids=utterance_ids,
-            review_utterance_id=review_utterance_id,
-            completion_item_id=completion_item_id,
             editing_job_id=editing_job_id,
             summary_text=summary_text,
             confidence=confidence,
@@ -277,27 +246,9 @@ async def record_or_update_automation_event(
         )
 
     existing.chapter_id = chapter_id
-    existing.review_utterance_id = (
-        (review_utterance_id or "").strip() or None
-    )
-    existing.completion_item_id = (completion_item_id or "").strip() or None
     existing.editing_job_id = (editing_job_id or "").strip() or None
     existing.status = status.value
     existing.utterance_ids_json = _clean_utterance_ids(utterance_ids)
-    if (
-        event_type == MemoirAutomationEventType.SOURCE_HELD
-        and status == MemoirAutomationEventStatus.NEEDS_REVIEW
-    ):
-        if (
-            existing.review_utterance_id is None
-            and len(existing.utterance_ids_json) == 1
-        ):
-            existing.review_utterance_id = existing.utterance_ids_json[0]
-        if existing.review_utterance_id is None:
-            raise ValueError(
-                "source review event requires one review utterance"
-            )
-        existing.utterance_ids_json = []
     existing.summary_text = summary_text.strip()
     existing.confidence = confidence
     existing.metadata_json = {
@@ -335,15 +286,9 @@ async def list_automation_events(
     )
     events = _prioritized_events(events)
     items = events[:limit]
-    details_by_event = await utterance_details_by_event(db, items)
-    audit_snapshots_by_event = await audit_snapshot_metadata_by_event(db, items)
     return MemoirAutomationEventListResponse(
         items=[
-            event_response(
-                event,
-                details_by_event.get(event.id, []),
-                audit_snapshots_by_event.get(event.id),
-            )
+            event_response(event)
             for event in items
         ],
         total=len(events),

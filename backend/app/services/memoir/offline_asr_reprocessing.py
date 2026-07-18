@@ -37,9 +37,12 @@ from app.services.memoir.offline_asr import (
     offline_asr_provider_name,
     run_offline_asr,
 )
-from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE, clear_source_route_disposition
+from app.services.memoir.material_roles import (
+    is_narrator_material,
+    narrator_material_clause,
+)
 from app.services.memoir.utterance_editing_pipeline import (
-    schedule_source_processing_for_ready_utterance,
+    schedule_material_organization_for_ready_utterance,
 )
 from app.services.memoir.voice_transcripts import (
     _sync_included_transcript_edit,
@@ -97,7 +100,7 @@ async def candidate_utterances(
             Project.type == ProjectType.MEMOIR.value,
             MemoirVoiceUtterance.created_at <= cutoff_created_at_utc,
             MemoirVoiceUtterance.audio_file_id.is_not(None),
-            MemoirVoiceUtterance.source_material_type != INTERVIEWER_SOURCE_MATERIAL_TYPE,
+            narrator_material_clause(),
             ~user_edited_exists,
         )
         .options(
@@ -108,7 +111,11 @@ async def candidate_utterances(
         )
         .order_by(MemoirVoiceUtterance.created_at.desc(), MemoirVoiceUtterance.id.desc())
     )
-    rows = list((await db.execute(statement)).scalars().all())
+    rows = [
+        utterance
+        for utterance in (await db.execute(statement)).scalars().all()
+        if is_narrator_material(utterance)
+    ]
     if force_reprocess:
         return rows[: max(0, limit)] if limit is not None else rows
 
@@ -202,18 +209,7 @@ async def _latest_question_context(db: AsyncSession, utterance: MemoirVoiceUtter
         if text:
             return text.strip()
 
-    text = await db.scalar(
-        select(MemoirVoiceUtterance.transcript_raw)
-        .where(
-            MemoirVoiceUtterance.voice_session_id == utterance.voice_session_id,
-            MemoirVoiceUtterance.created_at < utterance.created_at,
-            MemoirVoiceUtterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE,
-            func.trim(MemoirVoiceUtterance.transcript_raw) != "",
-        )
-        .order_by(MemoirVoiceUtterance.created_at.desc())
-        .limit(1)
-    )
-    return (text or "").strip()
+    return ""
 
 
 def _primary_asr_result(results: Sequence[OfflineASRResult]) -> OfflineASRResult:
@@ -319,7 +315,6 @@ async def _apply_corrected_reprocess_text(
     await db.flush()
 
     utterance.transcript_edited = cleaned_content
-    clear_source_route_disposition(utterance)
     if utterance.chat_message:
         utterance.chat_message.content_text = cleaned_content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -330,20 +325,19 @@ async def _apply_corrected_reprocess_text(
         utterance_id=utterance.id,
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
     )
-    changed_chapter_ids = await _sync_included_transcript_edit(
+    await _sync_included_transcript_edit(
         db,
         utterance=utterance,
         content=cleaned_content,
         transcript_version_id=version.id,
     )
     project_id = utterance.voice_session.project_id
-    await schedule_source_processing_for_ready_utterance(
+    await schedule_material_organization_for_ready_utterance(
         db,
         project_id=project_id,
         utterance=utterance,
         source=f"transcript_{MemoirTranscriptVersionType.DIALECT_CORRECTED.value}",
         ai_model=ai_model,
-        include_routing=not changed_chapter_ids,
     )
 
 
@@ -433,7 +427,7 @@ async def reprocess_offline_asr_utterance(
     utterance = await load_reprocess_utterance(db, utterance_id)
     if utterance is None:
         raise ValueError("material utterance no longer exists")
-    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
+    if not is_narrator_material(utterance):
         raise ValueError("interviewer prompt is not a reprocessable material")
     if utterance.audio_file_id is None or utterance.audio_file is None:
         raise ValueError("material audio file is missing")

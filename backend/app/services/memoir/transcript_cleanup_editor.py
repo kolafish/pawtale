@@ -20,7 +20,7 @@ from app.schemas.memoir_interview_editor import (
 )
 from app.services.memoir import voice_transcripts
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.source_disposition import is_countable_source_utterance
+from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.utterance_editing_pipeline import (
     TranscriptMutationGuard,
     claim_transcript_mutation_guard,
@@ -135,7 +135,7 @@ def _ensure_cleanup_source(utterance: MemoirVoiceUtterance) -> str:
         raise HTTPException(status_code=400, detail="讲述内容为空，无法整理")
     if not utterance.chat_message or utterance.chat_message.role != MemoirChatMessageRole.USER.value:
         raise HTTPException(status_code=400, detail="只能批量整理被访者回答")
-    if not is_countable_source_utterance(utterance, source_text):
+    if not is_countable_material(utterance, source_text):
         raise HTTPException(status_code=400, detail="非正文素材不支持批量整理")
     return source_text
 

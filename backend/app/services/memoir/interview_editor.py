@@ -38,13 +38,13 @@ from app.schemas.memoir_interview_editor import (
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import included_chapters_by_utterance
 from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
-from app.services.memoir.source_disposition import (
-    IGNORED_SOURCE_MATERIAL_TYPES,
-    INTERVIEWER_SOURCE_MATERIAL_TYPE,
-    clear_source_route_disposition,
-    is_countable_source_utterance,
+from app.services.memoir.material_roles import (
+    is_countable_material,
+    narrator_material_clause,
 )
-from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import (
+    schedule_material_organization_for_ready_utterance,
+)
 
 
 QUESTION_ROLES = {
@@ -87,7 +87,7 @@ def _answer_pairs(session: MemoirVoiceSession) -> list[tuple[MemoirChatMessage, 
             continue
         for utterance in sorted(list(message.utterances), key=_utterance_order_key):
             text = _utterance_text(utterance)
-            if text and is_countable_source_utterance(utterance, text):
+            if text and is_countable_material(utterance, text):
                 pairs.append((message, utterance))
     return pairs
 
@@ -197,10 +197,7 @@ def _visible_utterance_exists_clause():
                 func.trim(MemoirVoiceUtterance.transcript_raw) != "",
                 func.trim(MemoirVoiceUtterance.transcript_edited) != "",
             )
-            & ~(
-                (MemoirVoiceUtterance.source_route_action == "ignore")
-                & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
-            )
+            & narrator_material_clause()
         )
     )
 
@@ -358,11 +355,6 @@ def _answer_response(
         start_ms=utterance.start_ms,
         end_ms=utterance.end_ms,
         provider=utterance.provider,
-        source_material_type=utterance.source_material_type or "",
-        source_route_action=utterance.source_route_action or "",
-        source_route_confidence=utterance.source_route_confidence,
-        source_route_reason=utterance.source_route_reason or "",
-        source_route_updated_at=utterance.source_route_updated_at,
         is_included_in_book=bool(included_chapters),
         included_chapters=included_chapters,
         turn_index=message.turn_index,
@@ -395,7 +387,6 @@ def _question_response(
 
 def _timeline_item(message: MemoirChatMessage) -> MemoirInterviewEditorTimelineItemResponse:
     utterances = sorted(list(message.utterances), key=_utterance_order_key)
-    primary = utterances[0] if utterances else None
     return MemoirInterviewEditorTimelineItemResponse(
         message_id=message.id,
         voice_session_id=message.voice_session_id,
@@ -406,8 +397,6 @@ def _timeline_item(message: MemoirChatMessage) -> MemoirInterviewEditorTimelineI
         audio_file_id=message.audio_file_id,
         transcript_version_id=message.transcript_version_id,
         utterance_ids=[utterance.id for utterance in utterances],
-        source_material_type=primary.source_material_type if primary else "",
-        source_route_action=primary.source_route_action if primary else "",
         turn_index=message.turn_index,
         created_at=message.created_at,
         updated_at=message.updated_at,
@@ -488,7 +477,7 @@ async def get_interview_session_detail(
         _answer_pairs(session),
         key=lambda item: (_message_order_key(item[0]), item[1].created_at, item[1].id),
     ):
-        if not is_countable_source_utterance(utterance, _utterance_text(utterance)):
+        if not is_countable_material(utterance, _utterance_text(utterance)):
             continue
         answer = _answer_response(message, utterance, included_by_utterance=included_by_utterance)
         parent_id = answer.parent_question_message_id
@@ -667,14 +656,6 @@ async def update_interview_question_text(
         db.add(version)
         await db.flush()
         utterance.transcript_edited = req.text
-        utterance.source_material_type = (
-            INTERVIEWER_SOURCE_MATERIAL_TYPE
-            if message.role == MemoirChatMessageRole.INTERVIEWER.value
-            else "ai_interaction"
-        )
-        utterance.source_route_action = "ignore"
-        if not utterance.source_route_reason:
-            utterance.source_route_reason = "访谈问题只作为上下文，不作为回忆录正文素材。"
         message.transcript_version_id = version.id
         await prune_transcript_versions_for_utterance(
             db,
@@ -768,7 +749,6 @@ async def convert_interview_question_to_answer(
     message.metadata_json = metadata
 
     for utterance in utterances:
-        clear_source_route_disposition(utterance)
         if text_for_answer and not (utterance.transcript_edited or "").strip():
             version = MemoirTranscriptVersion(
                 voice_session_id=message.voice_session_id,
@@ -789,7 +769,7 @@ async def convert_interview_question_to_answer(
             )
 
     for utterance in utterances:
-        await schedule_source_processing_for_ready_utterance(
+        await schedule_material_organization_for_ready_utterance(
             db,
             project_id=project_id,
             utterance=utterance,

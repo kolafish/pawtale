@@ -203,7 +203,7 @@
   padding: 28rpx;
 }
 
-.evidence-card {
+.raw-material-card {
   background: #f8f5f1;
   border-color: #e4d9cf;
 }
@@ -422,8 +422,7 @@
 .primary-button[disabled],
 .ghost-button[disabled],
 .repair-button[disabled],
-.danger-button[disabled],
-.picker-action.disabled {
+.danger-button[disabled] {
   opacity: 0.62;
 }
 
@@ -463,10 +462,6 @@
 
 .text-action-button:active {
   transform: scale(0.96);
-}
-
-.picker-action {
-  width: 100%;
 }
 
 .edit-tools-card {

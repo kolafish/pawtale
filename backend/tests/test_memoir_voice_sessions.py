@@ -6,14 +6,13 @@ from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
-    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
 )
 from app.models.memoir import (
     AudioFile,
-    MemoirChapterSourceLink,
     MemoirChatMessage,
+    MemoirSectionMaterial,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -24,7 +23,7 @@ from app.services.memoir.narrative import frameworks
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
-    add_test_chapter_source_links,
+    add_test_section_materials,
     create_test_book_plan,
     create_test_chapter_draft,
     create_test_voice_transcript,
@@ -443,46 +442,31 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
         content="外婆家的院子里有一棵树。",
     )
-    await add_test_chapter_source_links(
+    await add_test_section_materials(
         test_db,
         project_id=first["session"]["project_id"],
-        plan_id=plan.id,
         chapter_id=chapter.id,
         source_refs=[memoir_source_ref(second, "后来我去县城读书。")],
     )
-    removed_at = datetime.utcnow()
-    links = (
-        await test_db.execute(
-            select(MemoirChapterSourceLink).where(MemoirChapterSourceLink.chapter_id == chapter.id)
+    first_membership = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.utterance_id == first["utterance_id"]
         )
-    ).scalars().all()
-    for link in links:
-        if link.utterance_id == first["utterance_id"]:
-            link.merged_draft_version_id = None
-        if link.utterance_id == second["utterance_id"]:
-            link.status = MemoirChapterSourceLinkStatus.REMOVED.value
-            link.removed_at = removed_at
-        test_db.add(link)
+    )
+    assert first_membership is not None
+    await test_db.delete(first_membership)
     event = await automation_events.record_automation_event(
         test_db,
         project_id=first["session"]["project_id"],
-        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         chapter_id=chapter.id,
-        utterance_ids=[first["utterance_id"]],
-        summary_text="1 条讲述已整理进外婆家的童年。",
+        utterance_ids=[second["utterance_id"]],
+        summary_text="《外婆家的童年》已生成新版本。",
         confidence=0.9,
     )
     event.metadata_json = {
         automation_event_metadata.VOICE_PLAYED_AT_KEY: "2026-06-23T12:00:00+00:00",
         automation_event_metadata.VOICE_PLAYED_SESSION_ID_KEY: "voice-session-1",
-        automation_event_metadata.ROUTES_KEY: [
-            {
-                "utterance_id": first["utterance_id"],
-                "source_index": 1,
-                "target_chapter_id": chapter.id,
-                "target_chapter_title": "外婆家的童年",
-            }
-        ],
     }
     await test_db.commit()
 
@@ -513,9 +497,9 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
             "draft_word_count": len("外婆家的院子里有一棵树。"),
         }
     ]
-    assert snapshot["recent_automation_events"][0]["event_type"] == "source_assigned"
-    assert snapshot["recent_automation_events"][0]["utterance_ids"] == [first["utterance_id"]]
-    assert snapshot["recent_automation_events"][0]["summary_text"] == "1 条讲述已整理进外婆家的童年。"
+    assert snapshot["recent_automation_events"][0]["event_type"] == "chapter_draft_generated"
+    assert snapshot["recent_automation_events"][0]["utterance_ids"] == [second["utterance_id"]]
+    assert snapshot["recent_automation_events"][0]["summary_text"] == "《外婆家的童年》已生成新版本。"
     assert snapshot["recent_automation_events"][0]["metadata_json"]["voice_played_session_id"] == "voice-session-1"
 
     progress_response = await client.get(
@@ -534,17 +518,7 @@ async def test_mobile_memoir_project_progress_snapshot_counts_book_state(client,
     assert events_response.json()["total"] == 1
     event_item = events_response.json()["items"][0]
     event_id = event_item["id"]
-    assert event_item["utterance_details"] == [
-        {
-            "utterance_id": first["utterance_id"],
-            "source_index": 1,
-            "record_title": "语音记录 1",
-            "preview_text": "我小时候住在外婆家。",
-            "chapter_id": chapter.id,
-            "chapter_title": "外婆家的童年",
-            "created_at": event_item["utterance_details"][0]["created_at"],
-        }
-    ]
+    assert event_item["utterance_ids"] == [second["utterance_id"]]
 
     voice_played_response = await client.post(
         f"/api/mobile/memoir/projects/{first['session']['project_id']}/automation-events/voice-played",
@@ -589,13 +563,13 @@ async def test_mobile_memoir_automation_events_prioritize_action_required_items(
         ),
         (
             MemoirAutomationEventStatus.NEEDS_REVIEW,
-            MemoirAutomationEventType.SOURCE_HELD,
-            "1 条讲述需要确认归属。",
+            MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
+            "成书内容需要确认。",
         ),
         (
             MemoirAutomationEventStatus.FAILED,
-            MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
-            "章节自动补写失败，稍后可重试。",
+            MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
+            "成书文案生成失败，稍后可重试。",
         ),
     ]
     for index, (status, event_type, summary) in enumerate(action_events):
@@ -614,7 +588,7 @@ async def test_mobile_memoir_automation_events_prioritize_action_required_items(
         event = await automation_events.record_automation_event(
             test_db,
             project_id=project_id,
-            event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
             status=MemoirAutomationEventStatus.COMPLETED,
             utterance_ids=[created["utterance_id"]],
             summary_text=f"较新的完成事件 {index}",
@@ -631,8 +605,8 @@ async def test_mobile_memoir_automation_events_prioritize_action_required_items(
     assert data["total"] == 8
     assert [item["status"] for item in data["items"]] == ["failed", "needs_review", "pending"]
     assert [item["summary_text"] for item in data["items"]] == [
-        "章节自动补写失败，稍后可重试。",
-        "1 条讲述需要确认归属。",
+        "成书文案生成失败，稍后可重试。",
+        "成书内容需要确认。",
         "章节初稿正在生成。",
     ]
 
@@ -647,14 +621,14 @@ async def test_mobile_memoir_automation_events_acknowledge_all_dismissible_backl
         await automation_events.record_automation_event(
             test_db,
             project_id=project_id,
-            event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+            event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
             status=MemoirAutomationEventStatus.COMPLETED,
             summary_text=f"历史完成记录 {index}",
         )
     await automation_events.record_automation_event(
         test_db,
         project_id=project_id,
-        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
         status=MemoirAutomationEventStatus.FAILED,
         summary_text="历史失败记录",
     )
@@ -668,10 +642,10 @@ async def test_mobile_memoir_automation_events_acknowledge_all_dismissible_backl
     needs_review = await automation_events.record_automation_event(
         test_db,
         project_id=project_id,
-        event_type=MemoirAutomationEventType.SOURCE_HELD,
+        event_type=MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
         status=MemoirAutomationEventStatus.NEEDS_REVIEW,
-        review_utterance_id=created["utterance_id"],
-        summary_text="讲述仍需确认归属。",
+        utterance_ids=[created["utterance_id"]],
+        summary_text="成书内容仍需确认。",
     )
     await test_db.commit()
 

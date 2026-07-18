@@ -12,11 +12,7 @@ import type {
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
   MemoirBookPlanChapterUpdateInput,
-  MemoirBookSourceCoverage,
-  MemoirBookVoiceCommandParseResponse,
-  MemoirBookVoiceCommandResponseKind,
   TTSAlignmentSegment,
-  VoiceChatTranscriptLine,
 } from "../../domain/voice-chat";
 import {
   sourceRefKey,
@@ -45,7 +41,6 @@ export { trimText } from "./book-view-model-utils";
 
 export type BookStage = "empty" | "plan_draft" | "drafting";
 
-export const NEW_CHAPTER_PICKER_VALUE = "__new_chapter__";
 export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
   {
     label: "阅读版",
@@ -62,15 +57,6 @@ export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
 export interface ChapterPickerOption {
   label: string;
   value: string;
-}
-
-export interface BookUncoveredSourceView {
-  utterance_id: string;
-  recordNumber: number;
-  previewText: string;
-  created_at: string;
-  createdAtText: string;
-  sourceRef: MemoirBookChapterSourceRef;
 }
 
 export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
@@ -215,11 +201,6 @@ export const BOOK_COVER_STYLE_OPTIONS: BookCoverStyleOptionView[] = [
   },
 ];
 
-export interface BookVoiceCommandUndoSnapshot {
-  planTitle: string;
-  chapters: MemoirBookPlanChapterUpdateInput[];
-}
-
 export interface BookData {
   loading: boolean;
   needsLogin: boolean;
@@ -243,13 +224,6 @@ export interface BookData {
   allChaptersConfirmed: boolean;
   canGenerateBook: boolean;
   progressText: string;
-  sourceCoverage: MemoirBookSourceCoverage | null;
-  sourceCoverageNotice: string;
-  uncoveredSourceCount: number;
-  uncoveredSourceDisplayText: string;
-  uncoveredSources: BookUncoveredSourceView[];
-  chapterPickerOptions: ChapterPickerOption[];
-  assigningSourceId: string;
   titleBusyTarget: string;
   bookOutput: MemoirBookOutput | null;
   bookContent: string;
@@ -322,32 +296,6 @@ export interface BookData {
   bookTTSProgressPercent: number;
   bookTTSDurationSeconds: number;
   bookTTSAlignment: TTSAlignmentSegment[];
-  bookVoiceAssistantExpanded: boolean;
-  bookVoiceAssistantHint: string;
-  bookVoiceAssistantStatusText: string;
-  bookVoiceAssistantListening: boolean;
-  bookVoiceAssistantBusy: boolean;
-  bookVoiceAssistantConversationActive: boolean;
-  bookVoiceAssistantReplyText: string;
-  bookVoiceAssistantSpeakingLineId: string;
-  bookVoiceLiveText: string;
-  bookVoiceTranscriptLines: VoiceChatTranscriptLine[];
-  bookVoiceAudioLevelPercent: number;
-  bookVoiceCaptureStateText: string;
-  bookVoiceCommandText: string;
-  bookVoiceCommandIntentLabel: string;
-  bookVoiceCommandResponseKind: MemoirBookVoiceCommandResponseKind | "";
-  bookVoiceCommandPanelTitle: string;
-  bookVoiceCommandStateText: string;
-  bookVoiceCommandDetailText: string;
-  bookVoiceCommandSummary: string;
-  bookVoiceCommandRequiresConfirmation: boolean;
-  bookVoiceCommandPreview: MemoirBookVoiceCommandParseResponse | null;
-  bookVoiceCommandCanExecute: boolean;
-  bookVoiceCommandActionText: string;
-  bookVoiceCommandExecuting: boolean;
-  bookVoiceCommandUndoText: string;
-  bookVoiceCommandUndoSnapshot: BookVoiceCommandUndoSnapshot | null;
   automationEventItems: BookAutomationEventView[];
   automationEventBusyTarget: string;
   automationDismissibleCount: number;
@@ -1028,86 +976,8 @@ export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
   };
 }
 
-export function bookSourceCoverageNotice(
-  plan: MemoirBookPlan | null,
-  coverage: MemoirBookSourceCoverage | null,
-): string {
-  const count = coverage?.uncovered_source_count || 0;
-  if (!count) {
-    return "";
-  }
-  if (!plan) {
-    return `有 ${count} 条讲述记录可用于生成章节`;
-  }
-  return `有 ${count} 条新讲述尚未收录到书中`;
-}
-
-export function sourceCoverageData(
-  plan: MemoirBookPlan | null,
-  coverage: MemoirBookSourceCoverage | null,
-): Pick<
-  BookData,
-  "sourceCoverage" | "sourceCoverageNotice" | "uncoveredSourceCount" | "uncoveredSourceDisplayText" | "uncoveredSources"
-> {
-  const uncoveredSources = buildUncoveredSourceViews(coverage);
-  const uncoveredSourceCount = coverage?.uncovered_source_count || 0;
-  return {
-    sourceCoverage: coverage,
-    sourceCoverageNotice: bookSourceCoverageNotice(plan, coverage),
-    uncoveredSourceCount,
-    uncoveredSourceDisplayText: uncoveredSourceCount > uncoveredSources.length
-      ? `最近 ${uncoveredSources.length}/${uncoveredSourceCount} 条`
-      : `${uncoveredSourceCount} 条待收录`,
-    uncoveredSources,
-  };
-}
-
-export function buildUncoveredSourceViews(
-  coverage: MemoirBookSourceCoverage | null,
-  limit = 12,
-): BookUncoveredSourceView[] {
-  return [...(coverage?.uncovered_sources || [])]
-    .sort((left, right) => createdAtTime(right.created_at) - createdAtTime(left.created_at))
-    .slice(0, limit)
-    .map((source) => {
-      const text = trimText(source.text);
-      return {
-        utterance_id: source.utterance_id,
-        recordNumber: source.source_index,
-        previewText: text.length > 96 ? `${text.slice(0, 96)}...` : text,
-        created_at: source.created_at,
-        createdAtText: formatBeijingDateTimeShort(source.created_at) || "讲述记录",
-        sourceRef: {
-          voice_session_id: source.voice_session_id,
-          message_id: source.message_id,
-          utterance_id: source.utterance_id,
-          transcript_version_id: source.transcript_version_id,
-          audio_file_id: source.audio_file_id,
-          start_ms: source.start_ms,
-          end_ms: source.end_ms,
-          created_at: source.created_at,
-          quote: text.slice(0, 180),
-        },
-      };
-    });
-}
-
 export function buildChapterPickerOptions(chapters: BookChapterView[]): ChapterPickerOption[] {
   return chapters.map(chapterOption);
-}
-
-export function buildSourceActionPickerOptions(
-  chapters: BookChapterView[],
-  includeNewChapter = false,
-): ChapterPickerOption[] {
-  const options = buildChapterPickerOptions(chapters);
-  if (includeNewChapter) {
-    options.push({
-      label: "作为新章",
-      value: NEW_CHAPTER_PICKER_VALUE,
-    });
-  }
-  return options;
 }
 
 function chapterOption(chapter: Pick<BookChapterView, "id" | "title" | "editingTitle">, index: number): ChapterPickerOption {
@@ -1158,18 +1028,10 @@ function planSourceRecordNumbers(chapters: Pick<MemoirBookPlanChapter, "source_r
     }, {});
 }
 
-function coverageSourceRecordNumbers(coverage: MemoirBookSourceCoverage | null): Record<string, number> {
-  return [...(coverage?.sources || [])].reduce<Record<string, number>>((memo, source) => {
-    memo[source.utterance_id] = source.source_index;
-    return memo;
-  }, {});
-}
-
 function chapterSourceView(
   ref: MemoirBookChapterSourceRef,
   index: number,
   recordNumbers: Record<string, number>,
-  fallbackRecordNumbers: Record<string, number>,
   selectedSourceIds: Set<string>,
 ): BookChapterSourceView {
   const previewText = sourcePreviewText(ref);
@@ -1177,7 +1039,7 @@ function chapterSourceView(
   const rawCharCount = trimText(ref.quote || "").length;
   const charCount = rawCharCount || previewText.length;
   const key = sourceRefKey(ref);
-  const recordNumber = recordNumbers[key] || fallbackRecordNumbers[key] || index + 1;
+  const recordNumber = recordNumbers[key] || index + 1;
   return {
     ...ref,
     sourceIndex: index + 1,
@@ -1192,12 +1054,10 @@ function chapterSourceView(
 
 function decorateChapterStructureOptions(
   chapters: BookChapterView[],
-  coverage: MemoirBookSourceCoverage | null = null,
   splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
   const options = chapters.map(chapterOption);
-  const recordNumbers = coverageSourceRecordNumbers(coverage);
-  const fallbackRecordNumbers = planSourceRecordNumbers(chapters);
+  const recordNumbers = planSourceRecordNumbers(chapters);
   return chapters.map((chapter, index) => {
     const targetOptions = options.filter((option) => option.value !== chapter.id);
     const selectedSourceIds = new Set(splitSelections[chapter.id] || []);
@@ -1206,7 +1066,7 @@ function decorateChapterStructureOptions(
       ...chapter,
       chapterSummaryMetaText: chapterSummaryMetaText(chapter),
       sourceViews: chapter.source_refs.map((ref, sourceIndex) => (
-        chapterSourceView(ref, sourceIndex, recordNumbers, fallbackRecordNumbers, selectedSourceIds)
+        chapterSourceView(ref, sourceIndex, recordNumbers, selectedSourceIds)
       )),
       sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${chapter.source_refs.length} 条`,
       mergeTargetOptions: targetOptions,
@@ -1238,8 +1098,6 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
 
 export function chapterCollectionData(
   chapters: BookChapterView[],
-  stage: BookStage,
-  coverage: MemoirBookSourceCoverage | null = null,
   splitSelections: Record<string, string[]> = {},
 ): Pick<
   BookData,
@@ -1249,15 +1107,11 @@ export function chapterCollectionData(
   | "allChaptersConfirmed"
   | "canGenerateBook"
   | "progressText"
-  | "chapterPickerOptions"
 > {
-  const decorated = decorateChapterStructureOptions(chapters, coverage, splitSelections);
+  const decorated = decorateChapterStructureOptions(chapters, splitSelections);
   return {
     chapters: decorated,
     ...chapterStateData(decorated),
-    chapterPickerOptions: stage === "drafting"
-      ? buildSourceActionPickerOptions(decorated, true)
-      : [],
   };
 }
 
@@ -1296,7 +1150,6 @@ export function bookOutlineNarrationText(
 export function buildChapterViews(
   plan: MemoirBookPlan,
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
-  coverage: MemoirBookSourceCoverage | null = null,
   splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
   const chapters = [...plan.chapters]
@@ -1348,7 +1201,7 @@ export function buildChapterViews(
         draftError: "",
       };
     });
-  return decorateChapterStructureOptions(chapters, coverage, splitSelections);
+  return decorateChapterStructureOptions(chapters, splitSelections);
 }
 
 export function bookProgressText(chapters: BookChapterView[]): string {
@@ -1396,13 +1249,6 @@ export function guestBookData(): Partial<BookHomeData> {
     canGenerateBook: false,
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},
-    sourceCoverage: null,
-    sourceCoverageNotice: "",
-    uncoveredSourceCount: 0,
-    uncoveredSourceDisplayText: "",
-    uncoveredSources: [],
-    chapterPickerOptions: [],
-    assigningSourceId: "",
     titleBusyTarget: "",
     bookOutput: null,
     bookContent: "",
@@ -1420,32 +1266,6 @@ export function guestBookData(): Partial<BookHomeData> {
     bookTTSProgressPercent: 0,
     bookTTSDurationSeconds: 0,
     bookTTSAlignment: [],
-    bookVoiceAssistantExpanded: false,
-    bookVoiceAssistantHint: "生成章节后，可以听目录或说修改",
-    bookVoiceAssistantStatusText: "等待章节",
-    bookVoiceAssistantListening: false,
-    bookVoiceAssistantBusy: false,
-    bookVoiceAssistantConversationActive: false,
-    bookVoiceAssistantReplyText: "",
-    bookVoiceAssistantSpeakingLineId: "",
-    bookVoiceLiveText: "",
-    bookVoiceTranscriptLines: [],
-    bookVoiceAudioLevelPercent: 0,
-    bookVoiceCaptureStateText: "麦克风未开始",
-    bookVoiceCommandText: "",
-    bookVoiceCommandIntentLabel: "",
-    bookVoiceCommandResponseKind: "",
-    bookVoiceCommandPanelTitle: "",
-    bookVoiceCommandStateText: "",
-    bookVoiceCommandDetailText: "",
-    bookVoiceCommandSummary: "",
-    bookVoiceCommandRequiresConfirmation: false,
-    bookVoiceCommandPreview: null,
-    bookVoiceCommandCanExecute: false,
-    bookVoiceCommandActionText: "确认执行",
-    bookVoiceCommandExecuting: false,
-    bookVoiceCommandUndoText: "",
-    bookVoiceCommandUndoSnapshot: null,
     automationEventItems: [],
     automationEventBusyTarget: "",
     automationDismissibleCount: 0,

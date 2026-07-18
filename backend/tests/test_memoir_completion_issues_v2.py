@@ -589,20 +589,11 @@ async def test_completion_answer_correction_refreshes_layered_material_version(
             created_by=MemoirCreatedBy.AI,
         )
 
-    async def reject_legacy_source_processing(*_args, **_kwargs):
-        raise AssertionError("分层素材不应再进入旧素材卡或知识图谱链路")
-
     monkeypatch.setattr(
         voice_transcript_correction,
         "generate_cleaned_transcript_text",
         fake_clean,
     )
-    monkeypatch.setattr(
-        voice_transcript_correction,
-        "schedule_source_processing_for_ready_utterance",
-        reject_legacy_source_processing,
-    )
-
     result = await voice_transcript_correction.run_transcript_correction_job(
         test_db,
         correction_job,
@@ -626,6 +617,7 @@ async def test_completion_answer_correction_refreshes_layered_material_version(
     assert material.section_id == section["id"]
     assert corrected is not None
     assert material.transcript_version_id == corrected.id
+    assert result.result_json["organization_job_id"] is None
     with pytest.raises(
         HTTPException,
         match="正文文本版本不属于当前讲述素材",

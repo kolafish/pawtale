@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -114,7 +114,6 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: Literal[
-        "create_chapter_from_source",
         "delete_chapter",
         "merge_chapters",
         "move_chapter",
@@ -131,10 +130,9 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
     relative_position: Literal["before", "after"] | None = None
     title: str | None = None
     include_in_book: bool | None = None
-    utterance_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
 
-    @field_validator("chapter_id", "target_chapter_id", "relative_chapter_id", "utterance_id")
+    @field_validator("chapter_id", "target_chapter_id", "relative_chapter_id")
     @classmethod
     def _valid_optional_id(cls, value: str | None) -> str | None:
         if value is None:
@@ -160,119 +158,6 @@ class MemoirBookPlanStructureCommandRequest(BaseModel):
         return list(dict.fromkeys(item.strip() for item in value if item.strip()))
 
 
-class MemoirBookVoiceCommandContextMessage(BaseModel):
-    role: Literal["user", "assistant"]
-    text: str = Field(min_length=1, max_length=240)
-    intent: str | None = None
-    summary: str | None = None
-
-    @field_validator("text")
-    @classmethod
-    def _valid_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("对话上下文不能为空")
-        return text
-
-    @field_validator("intent", "summary")
-    @classmethod
-    def _valid_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
-
-class MemoirBookVoiceCommandSourceCoverageContext(BaseModel):
-    total_source_count: int = Field(default=0, ge=0)
-    covered_source_count: int = Field(default=0, ge=0)
-    uncovered_source_count: int = Field(default=0, ge=0)
-
-
-class MemoirBookVoiceCommandUncoveredSourceContext(BaseModel):
-    source_index: int = Field(ge=1)
-    utterance_id: str
-    text: str = Field(default="", max_length=180)
-
-    @field_validator("utterance_id", "text")
-    @classmethod
-    def _valid_text(cls, value: str) -> str:
-        return value.strip()
-
-
-class MemoirBookVoiceCommandBookContext(BaseModel):
-    source_coverage: MemoirBookVoiceCommandSourceCoverageContext | None = None
-    uncovered_sources: list[MemoirBookVoiceCommandUncoveredSourceContext] = Field(default_factory=list, max_length=12)
-
-
-class MemoirBookVoiceCommandParseRequest(BaseModel):
-    text: str = Field(min_length=1, max_length=240)
-    current_chapter_id: str | None = None
-    conversation_context: list[MemoirBookVoiceCommandContextMessage] = Field(default_factory=list, max_length=8)
-    book_context: MemoirBookVoiceCommandBookContext | None = None
-    ai_model: str | None = None
-
-    @field_validator("text")
-    @classmethod
-    def _valid_text(cls, value: str) -> str:
-        text = value.strip()
-        if not text:
-            raise ValueError("语音指令不能为空")
-        return text
-
-    @field_validator("current_chapter_id", "ai_model")
-    @classmethod
-    def _valid_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
-
-class MemoirBookVoiceCommandOperationResponse(BaseModel):
-    type: str
-    chapter_id: str | None = None
-    chapter_title: str | None = None
-    target_chapter_id: str | None = None
-    target_chapter_title: str | None = None
-    new_title: str | None = None
-    direction: str | None = None
-    target_position: str | None = None
-    target_index: int | None = None
-    relative_chapter_id: str | None = None
-    relative_chapter_title: str | None = None
-    relative_position: str | None = None
-    source_position: int | None = None
-    source_index: int | None = None
-    utterance_id: str | None = None
-
-
-class MemoirBookVoiceCommandParseResponse(BaseModel):
-    original_text: str
-    intent: str
-    intent_label: str
-    response_kind: Literal["action_preview", "consultation", "answer", "clarification"] = "action_preview"
-    summary: str
-    reply_text: str | None = None
-    operations: list[MemoirBookVoiceCommandOperationResponse] = Field(default_factory=list)
-    requires_confirmation: bool = True
-    used_ai: bool = False
-    provider: str | None = None
-    model: str | None = None
-
-
-class MemoirBookVoiceCommandExecuteRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    intent: str
-    operation: MemoirBookVoiceCommandOperationResponse
-
-    @field_validator("intent")
-    @classmethod
-    def _valid_intent(cls, value: str) -> str:
-        return value.strip()
-
-
 class MemoirBookChapterTitleUpdateRequest(BaseModel):
     title: str
 
@@ -288,12 +173,6 @@ class MemoirBookChapterTitleUpdateRequest(BaseModel):
 
 
 class MemoirBookChapterTitleGenerateRequest(BaseModel):
-    ai_model: str | None = None
-
-
-class MemoirBookChapterSourceRefreshRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
     ai_model: str | None = None
 
 
@@ -325,234 +204,6 @@ class MemoirBookPlanResponse(BaseModel):
     updated_at: datetime
 
 
-class MemoirBookSourceRouteRequest(BaseModel):
-    utterance_id: str
-
-    @field_validator("utterance_id")
-    @classmethod
-    def _valid_utterance_id(cls, value: str) -> str:
-        utterance_id = value.strip()
-        if not utterance_id:
-            raise ValueError("讲述记录不能为空")
-        return utterance_id
-
-
-class MemoirBookSourceRouteEvidence(BaseModel):
-    chapter_id: str | None = None
-    utterance_id: str | None = None
-    quote: str
-    reason: str = ""
-
-
-class MemoirBookSourceRouteResponse(BaseModel):
-    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
-    action: Literal[
-        "assign_to_chapter",
-        "suggest_new_chapter",
-        "hold_for_review",
-        "ignore",
-    ]
-    utterance_id: str
-    source_index: int
-    target_chapter_id: str | None = None
-    target_chapter_title: str | None = None
-    suggested_title: str | None = None
-    confidence: float = Field(ge=0, le=1)
-    reason: str
-    assignment_basis: Literal["ai", "completion_item"] = "ai"
-    evidence: list[MemoirBookSourceRouteEvidence] = Field(default_factory=list)
-
-
-class MemoirBookSourceAutoAssignmentRunRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    confidence_threshold: float = Field(default=0.53, ge=0.52, le=0.95)
-    max_sources: int = Field(default=20, ge=1, le=100)
-    ai_model: str | None = None
-
-    @field_validator("ai_model")
-    @classmethod
-    def _valid_ai_model(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = value.strip()
-        return normalized or None
-
-
-class MemoirBookSourceAutoAssignmentItemResponse(BaseModel):
-    utterance_id: str
-    source_index: int
-    material_type: Literal["memoir_content", "ai_interaction", "meta_instruction", "noise", "too_short"]
-    action: Literal[
-        "assign_to_chapter",
-        "suggest_new_chapter",
-        "hold_for_review",
-        "ignore",
-    ]
-    target_chapter_id: str | None = None
-    target_chapter_title: str | None = None
-    confidence: float | None = None
-    reason: str
-    assigned: bool = False
-    skip_reason: str = ""
-
-
-class MemoirBookSourceAutoAssignmentRunResponse(BaseModel):
-    project_id: str
-    confidence_threshold: float
-    evaluated_source_count: int
-    assigned_source_count: int
-    skipped_source_count: int
-    items: list[MemoirBookSourceAutoAssignmentItemResponse] = Field(default_factory=list)
-    events: list[MemoirAutomationEventResponse] = Field(default_factory=list)
-    narrative_ingestion_job_ids: list[str] = Field(default_factory=list)
-    plan: MemoirBookPlanResponse
-
-
-class MemoirBookQualityAuditRunRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    record_event: bool = True
-    semantic_audit: bool = False
-    ai_model: str | None = None
-
-
-class MemoirBookQualityAuditChapterResponse(BaseModel):
-    chapter_id: str
-    title: str
-    sort_order: int
-    source_count: int
-    pending_source_count: int
-    draft_word_count: int
-    status: Literal[
-        "needs_sources",
-        "needs_draft",
-        "needs_update",
-        "thin_sources",
-        "thin_draft",
-        "healthy",
-    ]
-    attention: Literal["high", "medium", "low"]
-    reason: str
-    interview_hint: str
-
-
-class MemoirBookQualityAuditDisplayResponse(BaseModel):
-    title: str
-    summary: str
-    detail: str = ""
-
-
-class MemoirBookQualityAuditPrimaryActionResponse(BaseModel):
-    type: Literal[
-        "generate_plan",
-        "assign_sources",
-        "continue_interview",
-        "open_chapter_workspace",
-        "review_book",
-        "none",
-    ]
-    cta_text: str
-    chapter_id: str | None = None
-    utterance_count: int = 0
-
-
-class MemoirBookQualityAuditPrimaryChapterResponse(BaseModel):
-    chapter_id: str
-    title: str
-    status: Literal[
-        "needs_sources",
-        "needs_draft",
-        "needs_update",
-        "thin_sources",
-        "thin_draft",
-        "healthy",
-    ]
-    attention: Literal["high", "medium", "low"]
-    reason: str
-
-
-class MemoirBookQualityAuditRunResponse(BaseModel):
-    project_id: str
-    overall_status: Literal[
-        "needs_plan",
-        "needs_sources",
-        "needs_drafts",
-        "needs_updates",
-        "collecting",
-        "healthy",
-    ]
-    summary_text: str
-    next_actions: list[str] = Field(default_factory=list)
-    chapter_items: list[MemoirBookQualityAuditChapterResponse] = Field(default_factory=list)
-    display: MemoirBookQualityAuditDisplayResponse
-    primary_action: MemoirBookQualityAuditPrimaryActionResponse
-    primary_chapter: MemoirBookQualityAuditPrimaryChapterResponse | None = None
-    event: MemoirAutomationEventResponse | None = None
-
-
-class MemoirSemanticCacheStatusCountsResponse(BaseModel):
-    ready: int = 0
-    stale: int = 0
-    failed: int = 0
-    missing_current_ready: int = 0
-
-
-class MemoirSemanticChapterSourceStateResponse(BaseModel):
-    chapter_count: int = 0
-    active_link_count: int = 0
-    removed_link_count: int = 0
-
-
-class MemoirSemanticAuditSnapshotLatestResponse(BaseModel):
-    snapshot_id: str
-    engine: str
-    overall_status: str = ""
-    summary_text: str = ""
-    error_message: str = ""
-    updated_at: datetime
-
-
-class MemoirSemanticAuditSnapshotStateResponse(BaseModel):
-    ready: int = 0
-    stale: int = 0
-    failed: int = 0
-    by_engine_status: dict[str, int] = Field(default_factory=dict)
-    latest: list[MemoirSemanticAuditSnapshotLatestResponse] = Field(default_factory=list)
-
-
-class MemoirSemanticFollowUpSuggestionResponse(BaseModel):
-    source: Literal["chapter_card", "audit_snapshot"]
-    chapter_id: str | None = None
-    chapter_title: str = ""
-    question: str
-    reason: str = ""
-    priority: Literal["high", "medium", "low"] = "medium"
-    card_id: str | None = None
-    snapshot_id: str | None = None
-
-
-class MemoirSemanticStateFailureResponse(BaseModel):
-    chapter_id: str | None = None
-    error: str
-
-
-class MemoirSemanticStateResponse(BaseModel):
-    project_id: str
-    title: str
-    inspected_at: datetime
-    voice_utterance_count: int = 0
-    nonempty_utterance_count: int = 0
-    source_cards: MemoirSemanticCacheStatusCountsResponse
-    chapter_sources: MemoirSemanticChapterSourceStateResponse
-    chapter_cards: MemoirSemanticCacheStatusCountsResponse
-    audit_snapshots: MemoirSemanticAuditSnapshotStateResponse
-    latest_audit_event_ids: list[str] = Field(default_factory=list)
-    follow_up_suggestions: list[MemoirSemanticFollowUpSuggestionResponse] = Field(default_factory=list)
-    failure_count: int = 0
-    failures: list[MemoirSemanticStateFailureResponse] = Field(default_factory=list)
-
-
 class MemoirBookSourceCoverageItem(BaseModel):
     source_index: int
     voice_session_id: str
@@ -564,11 +215,6 @@ class MemoirBookSourceCoverageItem(BaseModel):
     end_ms: int | None = None
     text: str
     created_at: datetime
-    source_material_type: str = ""
-    source_route_action: str = ""
-    source_route_confidence: float | None = None
-    source_route_reason: str = ""
-    source_route_updated_at: datetime | None = None
     is_included: bool = False
     included_in_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
 
@@ -581,89 +227,6 @@ class MemoirBookSourceCoverageResponse(BaseModel):
     uncovered_source_count: int
     sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
     uncovered_sources: list[MemoirBookSourceCoverageItem] = Field(default_factory=list)
-
-
-class MemoirBookVoiceCommandExecuteResponse(BaseModel):
-    intent: str
-    summary: str
-    plan: MemoirBookPlanResponse
-    source_coverage: MemoirBookSourceCoverageResponse | None = None
-
-
-class MemoirBookSourceAssignmentInput(BaseModel):
-    chapter_id: str
-    utterance_ids: list[str]
-
-    @field_validator("chapter_id")
-    @classmethod
-    def _valid_chapter_id(cls, value: str) -> str:
-        chapter_id = value.strip()
-        if not chapter_id:
-            raise ValueError("章节不能为空")
-        return chapter_id
-
-    @field_validator("utterance_ids")
-    @classmethod
-    def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
-        utterance_ids = [item.strip() for item in value if item.strip()]
-        if not utterance_ids:
-            raise ValueError("至少选择一条讲述记录")
-        return list(dict.fromkeys(utterance_ids))
-
-
-class MemoirBookSourceAssignmentRequest(BaseModel):
-    ai_model: str | None = None
-    assignments: list[MemoirBookSourceAssignmentInput]
-
-    @field_validator("assignments")
-    @classmethod
-    def _valid_assignments(cls, value: list[MemoirBookSourceAssignmentInput]) -> list[MemoirBookSourceAssignmentInput]:
-        if not value:
-            raise ValueError("至少需要一条归入操作")
-        return value
-
-
-class MemoirBookSourceMoveRequest(BaseModel):
-    ai_model: str | None = None
-    source_chapter_id: str
-    target_chapter_id: str
-    utterance_id: str
-
-    @field_validator("source_chapter_id", "target_chapter_id", "utterance_id")
-    @classmethod
-    def _valid_id(cls, value: str) -> str:
-        item_id = value.strip()
-        if not item_id:
-            raise ValueError("移动素材参数不能为空")
-        return item_id
-
-    @model_validator(mode="after")
-    def _valid_distinct_chapters(self) -> "MemoirBookSourceMoveRequest":
-        if self.source_chapter_id == self.target_chapter_id:
-            raise ValueError("目标章节不能与原章节相同")
-        return self
-
-
-class MemoirBookSourceRemoveRequest(BaseModel):
-    ai_model: str | None = None
-    chapter_id: str
-    utterance_ids: list[str]
-
-    @field_validator("chapter_id")
-    @classmethod
-    def _valid_chapter_id(cls, value: str) -> str:
-        chapter_id = value.strip()
-        if not chapter_id:
-            raise ValueError("章节不能为空")
-        return chapter_id
-
-    @field_validator("utterance_ids")
-    @classmethod
-    def _valid_utterance_ids(cls, value: list[str]) -> list[str]:
-        utterance_ids = [item.strip() for item in value if item.strip()]
-        if not utterance_ids:
-            raise ValueError("至少选择一条讲述记录")
-        return list(dict.fromkeys(utterance_ids))
 
 
 class MemoirBookChapterDraftVersionResponse(BaseModel):
@@ -1004,10 +567,6 @@ class MemoirBookOutputResponse(BaseModel):
     plan_id: str
     title: str
     status: MemoirOutputStatus
-    formal_version_id: str | None = None
-    formal_audit_job_id: str | None = None
-    formalized_by_user_id: str | None = None
-    formalized_at: datetime | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
     is_stale: bool = False
     stale_chapter_titles: list[str] = Field(default_factory=list)

@@ -16,29 +16,24 @@ from app.domain.memoir.framework_templates import (
     load_framework_template,
 )
 from app.domain.memoir.narrative_types import (
-    MemoirClaimEvidenceRole,
     MemoirFrameworkEvidenceState,
     MemoirFrameworkMatchSource,
     MemoirFrameworkUserResolution,
 )
 from app.domain.projects.types import ProjectType
+from app.models.memoir import MemoirVoiceUtterance
 from app.models.memoir_narrative import (
-    MemoirClaim,
     MemoirFrameworkItem,
-    MemoirFrameworkItemClaim,
+    MemoirFrameworkItemMaterial,
     MemoirProjectFramework,
 )
 from app.models.projects import Project
-from app.services.memoir.narrative.claim_usage_policy import (
-    known_for_conversation_filters,
-)
 
 
 @dataclass(frozen=True, slots=True)
-class FrameworkClaimMatch:
-    claim_id: str
+class FrameworkMaterialMatch:
+    utterance_id: str
     item_key: str
-    evidence_role: MemoirClaimEvidenceRole
     confidence: float
 
 
@@ -84,6 +79,14 @@ def template_for_framework(
     return _validate_stored_framework(framework)
 
 
+def _framework_load_options():
+    return (
+        selectinload(MemoirProjectFramework.items).selectinload(
+            MemoirFrameworkItem.materials
+        ),
+    )
+
+
 async def initialize_project_framework(
     db: AsyncSession,
     *,
@@ -93,7 +96,7 @@ async def initialize_project_framework(
     existing = await db.scalar(
         select(MemoirProjectFramework)
         .where(MemoirProjectFramework.project_id == project_id)
-        .options(selectinload(MemoirProjectFramework.items))
+        .options(*_framework_load_options())
     )
     if existing is not None:
         _validate_stored_framework(existing)
@@ -130,7 +133,7 @@ async def initialize_project_framework(
     loaded = await db.scalar(
         select(MemoirProjectFramework)
         .where(MemoirProjectFramework.id == framework.id)
-        .options(selectinload(MemoirProjectFramework.items))
+        .options(*_framework_load_options())
     )
     if loaded is None:
         raise RuntimeError("topic map initialization did not persist its framework")
@@ -145,7 +148,7 @@ async def framework_for_project(
     framework = await db.scalar(
         select(MemoirProjectFramework)
         .where(MemoirProjectFramework.project_id == project_id)
-        .options(selectinload(MemoirProjectFramework.items))
+        .options(*_framework_load_options())
     )
     if framework is not None:
         _validate_stored_framework(framework)
@@ -164,7 +167,8 @@ async def set_framework_user_resolution(
         select(MemoirFrameworkItem)
         .join(
             MemoirProjectFramework,
-            MemoirProjectFramework.id == MemoirFrameworkItem.project_framework_id,
+            MemoirProjectFramework.id
+            == MemoirFrameworkItem.project_framework_id,
         )
         .where(
             MemoirProjectFramework.project_id == project_id,
@@ -209,14 +213,14 @@ async def recompute_framework_items(
     for item in items:
         material_count = int(
             await db.scalar(
-                select(func.count(MemoirFrameworkItemClaim.claim_id))
+                select(func.count(MemoirFrameworkItemMaterial.utterance_id))
                 .join(
-                    MemoirClaim,
-                    MemoirClaim.id == MemoirFrameworkItemClaim.claim_id,
+                    MemoirVoiceUtterance,
+                    MemoirVoiceUtterance.id
+                    == MemoirFrameworkItemMaterial.utterance_id,
                 )
                 .where(
-                    MemoirFrameworkItemClaim.framework_item_id == item.id,
-                    *known_for_conversation_filters(MemoirClaim),
+                    MemoirFrameworkItemMaterial.framework_item_id == item.id,
                 )
             )
             or 0
@@ -227,7 +231,7 @@ async def recompute_framework_items(
             else MemoirFrameworkEvidenceState.NONE.value
         )
         item.assessment_summary = (
-            f"已关联 {material_count} 条可用于访谈防重复的素材。"
+            f"已关联 {material_count} 段讲述素材。"
             if material_count
             else ""
         )
@@ -236,49 +240,25 @@ async def recompute_framework_items(
     await db.flush()
 
 
-async def recompute_framework_items_for_claim(
-    db: AsyncSession,
-    *,
-    claim_id: str,
-    assessment_version: str,
-) -> None:
-    item_ids = set(
-        (
-            await db.scalars(
-                select(MemoirFrameworkItemClaim.framework_item_id).where(
-                    MemoirFrameworkItemClaim.claim_id == claim_id
-                )
-            )
-        ).all()
-    )
-    await recompute_framework_items(
-        db,
-        item_ids=item_ids,
-        assessment_version=assessment_version,
-    )
-
-
-async def reconcile_automatic_claim_matches(
+async def reconcile_automatic_material_matches(
     db: AsyncSession,
     *,
     project_framework: MemoirProjectFramework,
-    claims: list[MemoirClaim],
-    matches: tuple[FrameworkClaimMatch, ...],
+    materials: list[MemoirVoiceUtterance],
+    matches: tuple[FrameworkMaterialMatch, ...],
     match_source: MemoirFrameworkMatchSource,
     matcher_version: str,
 ) -> FrameworkReconcileResult:
     if match_source == MemoirFrameworkMatchSource.MANUAL:
         raise ValueError("automatic reconcile cannot write manual matches")
-    claim_ids = {claim.id for claim in claims}
-    if any(claim.project_id != project_framework.project_id for claim in claims):
-        raise ValueError("topic map claims must belong to the framework project")
+    utterance_ids = {material.id for material in materials}
     items_by_key = {item.item_key: item for item in project_framework.items}
     desired = {
-        (match.claim_id, match.item_key): match
+        (match.utterance_id, match.item_key): match
         for match in matches
     }
     if any(
-        match.claim_id not in claim_ids
+        match.utterance_id not in utterance_ids
         or match.item_key not in items_by_key
         or not 0 <= match.confidence <= 1
         for match in matches
@@ -287,37 +267,36 @@ async def reconcile_automatic_claim_matches(
     existing = list(
         (
             await db.scalars(
-                select(MemoirFrameworkItemClaim)
+                select(MemoirFrameworkItemMaterial)
                 .join(
                     MemoirFrameworkItem,
                     MemoirFrameworkItem.id
-                    == MemoirFrameworkItemClaim.framework_item_id,
+                    == MemoirFrameworkItemMaterial.framework_item_id,
                 )
                 .where(
                     MemoirFrameworkItem.project_framework_id
                     == project_framework.id,
-                    MemoirFrameworkItemClaim.claim_id.in_(claim_ids),
+                    MemoirFrameworkItemMaterial.utterance_id.in_(
+                        utterance_ids
+                    ),
                 )
             )
         ).all()
     )
+    item_keys_by_id = {
+        item.id: item.item_key for item in project_framework.items
+    }
     existing_by_key = {
         (
-            relation.claim_id,
-            next(
-                item.item_key
-                for item in project_framework.items
-                if item.id == relation.framework_item_id
-            ),
+            relation.utterance_id,
+            item_keys_by_id[relation.framework_item_id],
         ): relation
         for relation in existing
     }
     affected_item_ids = {
         relation.framework_item_id for relation in existing
     }
-    created = 0
-    updated = 0
-    removed = 0
+    created = updated = removed = 0
     for key, relation in existing_by_key.items():
         match = desired.get(key)
         if relation.match_source == MemoirFrameworkMatchSource.MANUAL.value:
@@ -326,7 +305,6 @@ async def reconcile_automatic_claim_matches(
             await db.delete(relation)
             removed += 1
             continue
-        relation.evidence_role = match.evidence_role.value
         relation.match_source = match_source.value
         relation.matcher_version = matcher_version
         relation.confidence = match.confidence
@@ -336,15 +314,15 @@ async def reconcile_automatic_claim_matches(
         if key in existing_by_key:
             continue
         item = items_by_key[match.item_key]
-        relation = MemoirFrameworkItemClaim(
-            framework_item_id=item.id,
-            claim_id=match.claim_id,
-            evidence_role=match.evidence_role.value,
-            match_source=match_source.value,
-            matcher_version=matcher_version,
-            confidence=match.confidence,
+        db.add(
+            MemoirFrameworkItemMaterial(
+                framework_item_id=item.id,
+                utterance_id=match.utterance_id,
+                match_source=match_source.value,
+                matcher_version=matcher_version,
+                confidence=match.confidence,
+            )
         )
-        db.add(relation)
         affected_item_ids.add(item.id)
         created += 1
     await db.flush()

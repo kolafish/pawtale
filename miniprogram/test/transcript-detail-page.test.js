@@ -25,7 +25,7 @@ function sampleTranscript(id, overrides = {}) {
     display_text: "爷爷退休后还在帮公司做事。",
     summary_title: "爷爷退休后仍帮公司做事",
     summary_text: "讲述者提到爷爷退休后仍继续帮公司处理事务。",
-    summary_source: "source_card",
+    summary_source: "fallback",
     raw_char_count: 14,
     edited_char_count: 0,
     display_char_count: 14,
@@ -55,57 +55,6 @@ function sampleTranscript(id, overrides = {}) {
     created_at: "2026-07-01T07:38:00.000Z",
     session_created_at: "2026-07-01T07:00:00.000Z",
     ...overrides,
-  };
-}
-
-function sampleSourceRef(id, quote = "爷爷退休后还在帮公司做事。") {
-  return {
-    voice_session_id: "voice-1",
-    message_id: `message-${id}`,
-    utterance_id: id,
-    transcript_version_id: `version-${id}`,
-    audio_file_id: `audio-${id}`,
-    start_ms: 0,
-    end_ms: 32000,
-    quote,
-  };
-}
-
-function sampleBookPlan() {
-  return {
-    id: "plan-1",
-    project_id: "project-1",
-    title: "章节规划",
-    status: "confirmed",
-    created_by: "ai",
-    model: "fake",
-    metadata_json: {},
-    created_at: "2026-07-01T00:00:00.000Z",
-    updated_at: "2026-07-01T00:00:00.000Z",
-    chapters: [
-      {
-        id: "chapter-1",
-        plan_id: "plan-1",
-        project_id: "project-1",
-        title: "退休后的日子",
-        sort_order: 0,
-        source_refs: [sampleSourceRef("utterance-included"), sampleSourceRef("utterance-other")],
-        metadata_json: {},
-        created_at: "2026-07-01T00:00:00.000Z",
-        updated_at: "2026-07-01T00:00:00.000Z",
-      },
-      {
-        id: "chapter-2",
-        plan_id: "plan-1",
-        project_id: "project-1",
-        title: "家庭记忆",
-        sort_order: 1,
-        source_refs: [],
-        metadata_json: {},
-        created_at: "2026-07-01T00:00:00.000Z",
-        updated_at: "2026-07-01T00:00:00.000Z",
-      },
-    ],
   };
 }
 
@@ -240,9 +189,6 @@ function sampleShareVideoJob(overrides = {}) {
 
 function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
-    assignMemoirBookSources: async () => {
-      throw new Error("assignMemoirBookSources was not mocked");
-    },
     convertMemoirInterviewQuestionToAnswer: async () => {
       throw new Error("convertMemoirInterviewQuestionToAnswer was not mocked");
     },
@@ -258,7 +204,6 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     downloadMemoirShareVideoJob: async () => {
       throw new Error("downloadMemoirShareVideoJob was not mocked");
     },
-    getMemoirBookPlan: async () => null,
     getMemoirShareVideoJob: async () => {
       throw new Error("getMemoirShareVideoJob was not mocked");
     },
@@ -267,9 +212,6 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     },
     getMemoirVoiceTranscript: async () => {
       throw new Error("getMemoirVoiceTranscript was not mocked");
-    },
-    moveMemoirBookSource: async () => {
-      throw new Error("moveMemoirBookSource was not mocked");
     },
     previewMemoirVoiceTranscriptVoiceEdit: async () => {
       throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
@@ -298,7 +240,7 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
   return loadPageModule("../pages/transcript-detail/index.ts");
 }
 
-test("transcript detail page loads a single transcript and chapter options", async () => {
+test("transcript detail page loads a single transcript", async () => {
   const calls = [];
   const { page } = loadTranscriptDetailPage({
     voiceApiExports: {
@@ -306,7 +248,6 @@ test("transcript detail page loads a single transcript and chapter options", asy
         calls.push(id);
         return sampleTranscript(id);
       },
-      getMemoirBookPlan: async () => sampleBookPlan(),
     },
   });
   const context = pageContext(page);
@@ -323,45 +264,6 @@ test("transcript detail page loads a single transcript and chapter options", asy
   assert.equal(context.data.item.questionCanExpand, false);
   assert.equal(context.data.questionExpanded, false);
   assert.equal(context.data.moreActionsExpanded, false);
-  assert.deepEqual(context.data.item.chapterAssignOptions, [
-    { label: "第 1 章 退休后的日子", value: "chapter-1" },
-    { label: "第 2 章 家庭记忆", value: "chapter-2" },
-  ]);
-});
-
-test("transcript detail page routes draft plan assignments to book confirmation", async () => {
-  const assignments = [];
-  const navigations = [];
-  global.wx = {
-    switchTab(options) {
-      navigations.push(options);
-    },
-  };
-  const { page } = loadTranscriptDetailPage({
-    voiceApiExports: {
-      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-      getMemoirBookPlan: async () => ({ ...sampleBookPlan(), status: "draft" }),
-      assignMemoirBookSources: async (projectId, data) => {
-        assignments.push({ projectId, data });
-        return sampleBookPlan();
-      },
-    },
-  });
-  const context = pageContext(page);
-
-  await page.onLoad.call(context, { id: "utterance-new" });
-
-  assert.equal(context.data.item.canAssignChapterSource, false);
-  assert.equal(context.data.item.needsBookPlanConfirmation, true);
-  assert.equal(context.data.item.bookInclusionText, "先确认章节结构，再归入章节");
-  assert.deepEqual(context.data.item.chapterAssignOptions, []);
-
-  await page.assignTranscriptChapter.call(context, { detail: { value: 0 } });
-  page.openBook.call(context);
-
-  assert.deepEqual(assignments, []);
-  assert.deepEqual(navigations, [{ url: "/pages/book/index" }]);
-  delete global.wx;
 });
 
 test("transcript detail page shows saved audio awaiting transcription", async () => {
@@ -389,14 +291,13 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
           display_text: "爷爷退休后还在帮公司做事。",
           summary_title: "爷爷退休后仍帮公司做事",
           summary_text: "讲述者提到爷爷退休后还在帮公司做事。",
-          summary_source: "source_card",
+          summary_source: "fallback",
           raw_char_count: 14,
           display_char_count: 14,
           transcription_status: "ready",
           can_recover_transcription: false,
         });
       },
-      getMemoirBookPlan: async () => sampleBookPlan(),
     },
   });
   const context = pageContext(page);
@@ -414,8 +315,6 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(context.data.item.rawCountText, "待转写");
   assert.equal(context.data.item.bookInclusionText, "等待转写后再入章");
   assert.equal(context.data.item.bookStatusClass, "pending");
-  assert.equal(context.data.item.canAssignChapterSource, false);
-  assert.equal(context.data.item.canMoveChapterSource, false);
   assert.equal(context.data.item.canPlayAnswerAudio, true);
   assert.equal(context.data.item.canRecoverTranscription, true);
   assert.deepEqual(context.data.item.displaySegments, [
@@ -684,7 +583,6 @@ test("transcript detail page uses content-first inclusion labels", async () => {
           { chapter_id: "chapter-1", title: "退休后的日子", sort_order: 0 },
         ],
       }),
-      getMemoirBookPlan: async () => sampleBookPlan(),
     },
   });
   const context = pageContext(page);
@@ -693,9 +591,6 @@ test("transcript detail page uses content-first inclusion labels", async () => {
 
   assert.equal(context.data.item.bookInclusionText, "已放入第 1 章：退休后的日子等 2 章");
   assert.equal(context.data.item.isIncludedInBook, true);
-  assert.deepEqual(context.data.item.chapterMoveOptions, [
-    { label: "第 2 章 家庭记忆", value: "chapter-2" },
-  ]);
 });
 
 test("transcript detail page creates share video from selected corrected segments", async () => {

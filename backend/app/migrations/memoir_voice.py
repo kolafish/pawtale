@@ -32,8 +32,8 @@ VOICE_INTEGRITY_TRIGGERS = (
     "memoir_voice_sessions_targets_update",
     "memoir_voice_utterances_targets_insert",
     "memoir_voice_utterances_targets_update",
-    "memoir_automation_events_links_insert",
-    "memoir_automation_events_links_update",
+    "memoir_automation_events_job_insert",
+    "memoir_automation_events_job_update",
 )
 VOICE_TARGET_TRIGGERS = VOICE_INTEGRITY_TRIGGERS[:4]
 VOICE_COMPLETION_COLUMNS = {
@@ -257,25 +257,6 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
     """
     event_validation = """
         (
-            NEW.review_utterance_id IS NOT NULL
-            AND NOT EXISTS (
-                SELECT 1
-                FROM memoir_voice_utterances AS utterance
-                JOIN memoir_voice_sessions AS session
-                  ON session.id = utterance.voice_session_id
-                WHERE utterance.id = NEW.review_utterance_id
-                  AND session.project_id = NEW.project_id
-            )
-        )
-        OR (
-            NEW.completion_item_id IS NOT NULL
-            AND NOT EXISTS (
-                SELECT 1 FROM memoir_completion_items AS item
-                WHERE item.id = NEW.completion_item_id
-                  AND item.project_id = NEW.project_id
-            )
-        )
-        OR (
             NEW.editing_job_id IS NOT NULL
             AND NOT EXISTS (
                 SELECT 1 FROM memoir_editing_jobs AS job
@@ -327,30 +308,28 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
                 SELECT RAISE(ABORT, 'invalid memoir voice utterance target');
             END
         """,
-        "memoir_automation_events_links_insert": f"""
-            CREATE TRIGGER memoir_automation_events_links_insert
+        "memoir_automation_events_job_insert": f"""
+            CREATE TRIGGER memoir_automation_events_job_insert
             BEFORE INSERT ON memoir_automation_events
             WHEN {event_validation}
             BEGIN
                 SELECT RAISE(
                     ABORT,
-                    'invalid memoir automation event direct links'
+                    'invalid memoir automation event job'
                 );
             END
         """,
-        "memoir_automation_events_links_update": f"""
-            CREATE TRIGGER memoir_automation_events_links_update
+        "memoir_automation_events_job_update": f"""
+            CREATE TRIGGER memoir_automation_events_job_update
             BEFORE UPDATE OF
                 project_id,
-                review_utterance_id,
-                completion_item_id,
                 editing_job_id
             ON memoir_automation_events
             WHEN {event_validation}
             BEGIN
                 SELECT RAISE(
                     ABORT,
-                    'invalid memoir automation event direct links'
+                    'invalid memoir automation event job'
                 );
             END
         """,

@@ -7,7 +7,6 @@ import {
   VoiceAssistantTurnStreamClient,
   type PreparedAssistantStreamAudioFrame,
   type VoiceAssistantTurnAudioDoneEvent,
-  type VoiceAssistantTurnCommandPreviewEvent,
   type VoiceAssistantTurnCompletedEvent,
   type VoiceAssistantTurnStartedEvent,
   type VoiceAssistantTurnStreamStartOptions,
@@ -35,7 +34,6 @@ export interface VoiceAssistantTurnRuntimeCallbacks {
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioFrameScheduled?(event: StreamingSpeechPlaybackFrameEvent): void;
   onAudioDrained?(event: VoiceAssistantTurnAudioDoneEvent): void;
-  onCommandPreview?(event: VoiceAssistantTurnCommandPreviewEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onPlaybackError?(error: Error): void;
 }
@@ -144,11 +142,6 @@ export class VoiceAssistantTurnRuntime {
       onAudioDone: (event) => {
         if (this.callbacksActive()) {
           this.finishAudioFrames(event);
-        }
-      },
-      onCommandPreview: (event) => {
-        if (this.callbacksActive()) {
-          this.callbacks.onCommandPreview?.(event);
         }
       },
       onCompleted: (event) => {

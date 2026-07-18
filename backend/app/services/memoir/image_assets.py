@@ -34,7 +34,7 @@ from app.schemas.memoir_images import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.branding import branded_image_derivative
-from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 
 
@@ -526,7 +526,7 @@ async def sync_latest_book_output_image_snapshots(
             settings["photo_mode"] = "none"
     latest.manuscript_json = manuscript
     flag_modified(latest, "manuscript_json")
-    invalidate_formal_book_output(output)
+    invalidate_book_output(output)
 
 
 async def register_share_video_background_asset(

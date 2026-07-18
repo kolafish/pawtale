@@ -36,7 +36,7 @@ from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_tts_types import TTSResult
 from tests.memoir_helpers import (
-    add_test_chapter_source_links,
+    add_test_section_materials,
     create_test_book_plan_with_chapters,
     ensure_mobile_memoir_project,
     run_test_editing_job,
@@ -369,10 +369,9 @@ async def _add_output_source_link(
     )
     test_db.add(utterance)
     await test_db.flush()
-    await add_test_chapter_source_links(
+    await add_test_section_materials(
         test_db,
         project_id=project_id,
-        plan_id=plan_id,
         chapter_id=chapter_id,
         source_refs=[
             {
@@ -525,7 +524,9 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert manuscript["back_matter"]["version_note"]["title"] == "版本与修订"
     assert manuscript["back_matter"]["source_appendix"]["title"] == "口述片段"
     assert "第1章「外婆家的童年」：1 条口述片段" in manuscript["back_matter"]["source_appendix"]["content"]
-    assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert manuscript["render_settings"]["back_cover_quote"] == (
+        "我小时候常在外婆家的院子里晒太阳。"
+    )
     assert manuscript["render_settings"]["page_size"] == "a5"
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
@@ -629,12 +630,14 @@ async def test_mobile_memoir_book_output_regenerates_editorial_copy_targets(clie
     assert response.status_code == 200
     manuscript = response.json()["latest_version"]["manuscript"]
     assert manuscript["back_matter"]["afterword"]["content"].startswith("这一次先把已经讲出来的童年")
-    assert manuscript["render_settings"]["back_cover_quote"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert manuscript["render_settings"]["back_cover_quote"] == (
+        "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。"
+    )
     first_chapter = manuscript["chapters"][0]
     assert first_chapter["intro"] == "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。"
     assert first_chapter["pull_quotes"] == [
         {
-            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "text": "讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。",
             "source_ref_ids": ["u1"],
             "source": "original_quote",
         }
@@ -708,7 +711,7 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     assert event.metadata_json["result_version_id"] == version.id
     assert version.manuscript_json["chapters"][0]["pull_quotes"] == [
         {
-            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "text": "讲述小时候在院子里晒太阳。",
             "source_ref_ids": ["u1"],
             "source": "original_quote",
         }
