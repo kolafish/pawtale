@@ -1,5 +1,22 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import type {
+  MemoirChapterSectionMaterialSummary,
+  MemoirChapterSectionSummary,
+  MemoirSectionType,
+} from "../../domain/voice-chat";
 import { chapterNextAction, type ChapterNextAction } from "./chapter-next-action";
+
+export interface ChapterSectionMaterialView extends MemoirChapterSectionMaterialSummary {
+  indexText: string;
+}
+
+export interface ChapterSectionView extends MemoirChapterSectionSummary {
+  indexText: string;
+  typeText: string;
+  metaText: string;
+  expanded: boolean;
+  visibleMaterials: ChapterSectionMaterialView[];
+}
 
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
@@ -7,7 +24,46 @@ export interface ChapterWorkspaceViewPatch {
   readinessDetail: string;
   rewriteNoticeTitle: string;
   rewriteNoticeDetail: string;
+  sectionStructureSummary: string;
+  sectionViews: ChapterSectionView[];
   canConfirmChapter: boolean;
+}
+
+const SECTION_TYPE_TEXT: Record<MemoirSectionType, string> = {
+  event: "一段经历",
+  life_fragment: "生活片段",
+  person_portrait: "人物小记",
+  life_stage_summary: "阶段回顾",
+  viewpoint_reflection: "感想与思考",
+};
+
+function visibleSectionViews(
+  workspace: MemoirChapterWorkspace,
+  expandedSectionIds: Record<string, boolean>,
+): ChapterSectionView[] {
+  return [...(workspace.sections || [])]
+    .filter((section) => (
+      section.status === "active"
+      && section.include_in_book !== false
+    ))
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map((section, sectionIndex) => {
+      const visibleMaterials = [...(section.materials || [])]
+        .filter((material) => material.include_in_book !== false)
+        .sort((left, right) => left.sort_order - right.sort_order)
+        .map((material, materialIndex) => ({
+          ...material,
+          indexText: `讲述 ${materialIndex + 1}`,
+        }));
+      return {
+        ...section,
+        indexText: `${sectionIndex + 1}`,
+        typeText: SECTION_TYPE_TEXT[section.section_type] || "内容小节",
+        metaText: `${visibleMaterials.length} 条讲述`,
+        expanded: Boolean(expandedSectionIds[section.id]),
+        visibleMaterials,
+      };
+    });
 }
 
 function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
@@ -27,8 +83,14 @@ function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
 
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
+  expandedSectionIds: Record<string, boolean> = {},
 ): ChapterWorkspaceViewPatch {
   const summary = workspace.completion_summary;
+  const sectionViews = visibleSectionViews(workspace, expandedSectionIds);
+  const materialCount = sectionViews.reduce(
+    (total, section) => total + section.visibleMaterials.length,
+    0,
+  );
   return {
     nextAction: chapterNextAction(summary),
     readinessTitle: summary.headline,
@@ -37,6 +99,8 @@ export function chapterWorkspaceViewPatch(
     rewriteNoticeDetail: workspace.can_rewrite_draft
       ? "可以继续补充，也可以先用本章全部现有素材重新生成完整正文；旧版本仍会保留。"
       : "请先完成上方必须确认的事项，再重新生成正文。",
+    sectionStructureSummary: `${sectionViews.length} 个小节 · ${materialCount} 条讲述`,
+    sectionViews,
     canConfirmChapter:
       summary.state === "draft_ready"
       && Boolean(workspace.draft_version_id)

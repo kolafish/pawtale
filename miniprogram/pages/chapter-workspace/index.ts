@@ -13,7 +13,9 @@ import {
 import { routeAuthError } from "../../services/navigation";
 import {
   pageUrl,
+  datasetString,
   queryParam,
+  type PageDatasetEvent,
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
@@ -28,6 +30,7 @@ import {
 } from "./chapter-next-action";
 import {
   chapterWorkspaceViewPatch,
+  type ChapterSectionView,
 } from "./chapter-workspace-view";
 
 export { chapterWorkspaceViewPatch };
@@ -56,6 +59,9 @@ interface ChapterWorkspacePageData {
   readinessDetail: string;
   rewriteNoticeTitle: string;
   rewriteNoticeDetail: string;
+  sectionStructureSummary: string;
+  sectionViews: ChapterSectionView[];
+  expandedSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
   processBusy: boolean;
   rewritingDraft: boolean;
@@ -82,6 +88,9 @@ definePage<ChapterWorkspacePageData>()({
     readinessDetail: "",
     rewriteNoticeTitle: "",
     rewriteNoticeDetail: "",
+    sectionStructureSummary: "",
+    sectionViews: [],
+    expandedSectionIds: {},
     canConfirmChapter: false,
     processBusy: false,
     rewritingDraft: false,
@@ -141,7 +150,7 @@ definePage<ChapterWorkspacePageData>()({
       );
       this.setData({
         workspace,
-        ...chapterWorkspaceViewPatch(workspace),
+        ...chapterWorkspaceViewPatch(workspace, this.data.expandedSectionIds),
         loading: false,
         error: "",
       });
@@ -159,6 +168,22 @@ definePage<ChapterWorkspacePageData>()({
         error: error instanceof Error ? error.message : "本章内容加载失败",
       });
     }
+  },
+
+  toggleSection(event: PageDatasetEvent<{ id?: string }>) {
+    const sectionId = datasetString(event, "id");
+    const workspace = this.data.workspace;
+    if (!sectionId || !workspace) {
+      return;
+    }
+    const expandedSectionIds = {
+      ...this.data.expandedSectionIds,
+      [sectionId]: !this.data.expandedSectionIds[sectionId],
+    };
+    this.setData({
+      expandedSectionIds,
+      ...chapterWorkspaceViewPatch(workspace, expandedSectionIds),
+    });
   },
 
   async runNextAction() {

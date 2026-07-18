@@ -685,6 +685,35 @@ export interface MemoirBookChapterSourceRef {
   quote: string;
 }
 
+export type MemoirSectionType =
+  | "event"
+  | "life_fragment"
+  | "person_portrait"
+  | "life_stage_summary"
+  | "viewpoint_reflection";
+
+export type MemoirSectionStatus = "active" | "archived";
+
+export interface MemoirChapterSectionMaterialSummary {
+  utterance_id: string;
+  sort_order: number;
+  text: string;
+  include_in_book: boolean;
+}
+
+export interface MemoirChapterSectionSummary {
+  id: string;
+  title: string;
+  section_type: MemoirSectionType;
+  sort_order: number;
+  status: MemoirSectionStatus;
+  include_in_book: boolean;
+  version: number;
+  material_count: number;
+  included_material_count: number;
+  materials: MemoirChapterSectionMaterialSummary[];
+}
+
 export interface MemoirBookSourceIncludedChapter {
   chapter_id: string;
   title: string;
@@ -710,6 +739,7 @@ export interface MemoirBookPlanChapter {
   sort_order: number;
   include_in_book: boolean;
   source_refs: MemoirBookChapterSourceRef[];
+  sections: MemoirChapterSectionSummary[];
   metadata_json: Record<string, unknown>;
   pending_source_count: number;
   pending_completion_source_count: number;

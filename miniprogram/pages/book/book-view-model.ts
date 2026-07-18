@@ -74,6 +74,7 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   titleChanged: boolean;
   ttsTarget: string;
   sourceCount: number;
+  sectionCount: number;
   sourceSummary: string;
   chapterSummaryMetaText: string;
   sourceViews: BookChapterSourceView[];
@@ -1162,14 +1163,23 @@ export function bookChapterSourceSummary(chapter: Pick<MemoirBookPlanChapter, "s
 }
 
 function chapterSummaryMetaText(
-  chapter: Pick<BookChapterView, "include_in_book" | "sourceCount" | "draftCharCount" | "draft" | "draftStatusText">,
+  chapter: Pick<
+    BookChapterView,
+    | "include_in_book"
+    | "sectionCount"
+    | "sourceCount"
+    | "draftCharCount"
+    | "draft"
+    | "draftStatusText"
+  >,
 ): string {
   const sourceText = bookOralSourceCountText(chapter.sourceCount);
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
+  const sectionText = chapter.sectionCount ? `${chapter.sectionCount} 个小节 · ` : "";
   if (!chapter.draft?.latest_version) {
-    return `${inclusionText}${sourceText} · 尚未生成正文`;
+    return `${inclusionText}${sectionText}${sourceText} · 尚未生成正文`;
   }
-  return `${inclusionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
+  return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
 }
 
 export function bookOutlineNarrationText(
@@ -1205,6 +1215,9 @@ export function buildChapterViews(
       );
       const assignedNewCount = responseCount(chapter.pending_new_source_count);
       const assignedRemovedCount = responseCount(chapter.removed_source_count);
+      const sectionCount = (chapter.sections || []).filter(
+        (section) => section.status === "active" && section.include_in_book !== false,
+      ).length;
       const draftCharCount = trimText(content).length;
       const statusText = (
         assignedPendingCount || assignedRemovedCount
@@ -1213,6 +1226,7 @@ export function buildChapterViews(
       );
       const viewBase = {
         include_in_book: chapter.include_in_book !== false,
+        sectionCount,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
         draft,
@@ -1224,6 +1238,7 @@ export function buildChapterViews(
         titleChanged: false,
         ttsTarget: `chapter:${chapter.id}`,
         sourceCount: chapter.source_refs.length,
+        sectionCount,
         sourceSummary: bookChapterSourceSummary(chapter),
         chapterSummaryMetaText: chapterSummaryMetaText(viewBase),
         sourceViews: [],

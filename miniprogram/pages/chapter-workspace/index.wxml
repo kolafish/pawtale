@@ -26,6 +26,41 @@
       >{{nextAction.actionText}}</button>
     </view>
 
+    <view wx:if="{{sectionViews.length}}" class="content-card structure-card">
+      <view class="structure-heading">
+        <view>
+          <text class="section-kicker">本章结构</text>
+          <text class="section-title">小节与对应讲述</text>
+        </view>
+        <text class="section-structure-summary">{{sectionStructureSummary}}</text>
+      </view>
+
+      <view class="section-list">
+        <view wx:for="{{sectionViews}}" wx:key="id" class="section-item">
+          <button
+            class="section-toggle"
+            data-id="{{item.id}}"
+            aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}"
+            bindtap="toggleSection"
+          >
+            <text class="section-index">{{item.indexText}}</text>
+            <view class="section-copy">
+              <text class="section-name">{{item.title}}</text>
+              <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
+            </view>
+            <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
+          </button>
+
+          <view wx:if="{{item.expanded}}" class="section-material-list">
+            <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
+              <text class="section-material-index">{{material.indexText}}</text>
+              <text class="section-material-text" selectable>{{material.text}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
     <view class="content-card draft-card" id="chapter-draft">
       <view class="draft-heading">
         <view>

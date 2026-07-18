@@ -617,6 +617,16 @@ test("book page labels completion answers separately from new narration", () => 
   assert.equal(chapters[0].draftStatusText, "需更新");
 });
 
+test("book page shows the number of visible sections in each chapter", () => {
+  const { mod } = loadBookPage();
+  const chapters = mod.buildChapterViews(samplePlan("confirmed"), {
+    "chapter-1": sampleDraft(1, "confirmed", "第一版正文"),
+  });
+
+  assert.equal(chapters[0].sectionCount, 1);
+  assert.match(chapters[0].chapterSummaryMetaText, /^1 个小节 · 1 条口述/);
+});
+
 test("book page marks deleted chapter sources for review", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
