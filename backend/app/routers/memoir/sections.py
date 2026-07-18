@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
@@ -10,11 +10,14 @@ from app.schemas.memoir_sections import (
     MemoirSectionMaterialAssignmentRequest,
     MemoirSectionMaterialMoveRequest,
     MemoirSectionMergeRequest,
+    MemoirSectionRegenerateRequest,
+    MemoirSectionRegenerateResponse,
     MemoirSectionReorderRequest,
     MemoirSectionSplitRequest,
     MemoirSectionUpdateRequest,
 )
 from app.services.memoir import sections as memoir_sections
+from app.services.memoir import section_regeneration
 
 
 router = APIRouter(tags=["memoir-sections"])
@@ -114,6 +117,37 @@ async def reorder_memoir_sections(
         chapter_id=chapter_id,
         req=req,
         allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+    response_model=MemoirSectionRegenerateResponse,
+)
+async def regenerate_memoir_chapter_sections(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirSectionRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        result = await section_regeneration.regenerate_chapter_sections(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            req=req,
+            allow_admin=is_admin_user(current_user),
+        )
+        await db.commit()
+    except ValueError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return MemoirSectionRegenerateResponse(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        **result,
     )
 
 

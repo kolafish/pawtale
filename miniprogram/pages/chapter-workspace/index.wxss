@@ -149,6 +149,50 @@
   font-variant-numeric: tabular-nums;
 }
 
+.structure-tools {
+  margin-top: 24rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 18rpx;
+  background: #faf7f2;
+  box-shadow:
+    0 0 0 1rpx rgba(77, 56, 47, 0.05),
+    0 4rpx 12rpx rgba(77, 56, 47, 0.04);
+}
+
+.structure-tools-detail {
+  display: block;
+  color: #675d58;
+  font-size: 24rpx;
+  line-height: 38rpx;
+  text-wrap: pretty;
+}
+
+.structure-regenerate-action {
+  width: 100%;
+  min-height: 88rpx;
+  margin: 18rpx 0 0;
+  padding: 16rpx 24rpx;
+  box-sizing: border-box;
+  border-radius: 12rpx;
+  background: #fffaf6;
+  color: #8f4439;
+  box-shadow: 0 0 0 1rpx rgba(143, 68, 57, 0.16);
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+  transition-property: transform, opacity, box-shadow;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.structure-regenerate-action::after {
+  border: 0;
+}
+
+.structure-regenerate-action:active {
+  transform: scale(0.96);
+}
+
 .section-list {
   margin-top: 24rpx;
   border-top: 1rpx solid #e8e1d9;

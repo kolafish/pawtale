@@ -1,5 +1,7 @@
 import json
+import re
 
+import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirChatMessageRole
@@ -9,6 +11,7 @@ from app.models.memoir import (
     MemoirSectionMaterial,
 )
 from app.services.memoir.material_organization import organize_material
+from app.services.memoir import section_regeneration
 from app.services.memoir.utterance_editing_pipeline import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
@@ -26,6 +29,61 @@ class FakeMaterialOrganizationAI:
     async def _call_llm(self, *_args, **_kwargs):
         self.calls += 1
         return json.dumps(self.payload, ensure_ascii=False)
+
+
+class ReplayMaterialOrganizationAI:
+    provider_name = "fake"
+    model_name = "fake-section-organizer"
+
+    def __init__(self, *, leave_unassigned: bool = False):
+        self.leave_unassigned = leave_unassigned
+        self.prompts: list[str] = []
+
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.prompts.append(user_prompt)
+        if self.leave_unassigned:
+            return json.dumps(
+                {
+                    "action": "leave_unassigned",
+                    "reason": "暂不归章",
+                },
+                ensure_ascii=False,
+            )
+        existing = re.search(r'"section_id": "([^"]+)"', user_prompt)
+        if existing:
+            return json.dumps(
+                {
+                    "action": "assign_existing",
+                    "section_id": existing.group(1),
+                    "confidence": 0.86,
+                    "reason": "延续同一次山桃花爬山经历",
+                },
+                ensure_ascii=False,
+            )
+        chapter = re.search(r'"chapter_id": "([^"]+)"', user_prompt)
+        assert chapter is not None
+        return json.dumps(
+            {
+                "action": "create_section",
+                "chapter_id": chapter.group(1),
+                "title": "山桃花里的重逢",
+                "section_type": "event",
+                "confidence": 0.9,
+                "reason": "围绕重新联系和第一次同行",
+            },
+            ensure_ascii=False,
+        )
+
+
+class FailingReplayMaterialOrganizationAI(ReplayMaterialOrganizationAI):
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        if self.prompts:
+            raise RuntimeError("provider unavailable")
+        return await super()._call_llm(
+            _system_prompt,
+            user_prompt,
+            **_kwargs,
+        )
 
 
 async def _bootstrap_two_chapters(client, test_db):
@@ -317,6 +375,206 @@ async def test_material_organization_appends_after_highest_section_order(
     assert result.result_json["section_id"] == section.id
     assert section.sort_order == 5
     assert ai.calls == 1
+
+
+async def test_regenerate_chapter_sections_replays_current_material_organizer(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    original_section = data["sections"][0]
+    fake = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+        json={
+            "expected_sections": [
+                {
+                    "id": original_section["id"],
+                    "version": original_section["version"],
+                }
+            ],
+            "ai_model": "deepseek-v4-flash",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "project_id": project_id,
+        "chapter_id": chapters[0].id,
+        "material_count": 2,
+        "assigned_count": 2,
+        "unassigned_count": 0,
+        "section_count": 1,
+    }
+    listed = await client.get(f"/api/memoir/projects/{project_id}/sections")
+    assert listed.status_code == 200
+    chapter_sections = [
+        section
+        for section in listed.json()["sections"]
+        if section["chapter_id"] == chapters[0].id
+    ]
+    assert len(chapter_sections) == 1
+    assert chapter_sections[0]["id"] != original_section["id"]
+    assert chapter_sections[0]["title"] == "山桃花里的重逢"
+    assert [
+        material["utterance_id"]
+        for material in chapter_sections[0]["materials"]
+    ] == [created[0]["utterance_id"], created[1]["utterance_id"]]
+    assert all(
+        material["assigned_by"] == "ai"
+        for material in chapter_sections[0]["materials"]
+    )
+    assert len(fake.prompts) == 2
+    assert "朋友发来山桃花的照片" in fake.prompts[0]
+    assert "山桃花里的重逢" in fake.prompts[1]
+    untouched = [
+        section
+        for section in listed.json()["sections"]
+        if section["chapter_id"] == chapters[1].id
+    ]
+    assert [section["title"] for section in untouched] == ["工作这些年"]
+    assert "工作这些年" not in fake.prompts[0]
+
+
+async def test_regenerate_chapter_sections_rolls_back_when_no_section_is_generated(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    original_section = data["sections"][0]
+    fake = ReplayMaterialOrganizationAI(leave_unassigned=True)
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+        json={
+            "expected_sections": [
+                {
+                    "id": original_section["id"],
+                    "version": original_section["version"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "AI 未能为本章生成任何小节，请重试"
+    await test_db.rollback()
+    persisted = await test_db.get(MemoirSection, original_section["id"])
+    assert persisted is not None
+    memberships = list(
+        (
+            await test_db.execute(
+                select(MemoirSectionMaterial).where(
+                    MemoirSectionMaterial.section_id == original_section["id"]
+                )
+            )
+        ).scalars().all()
+    )
+    assert {
+        material.utterance_id
+        for material in memberships
+    } == {created[0]["utterance_id"], created[1]["utterance_id"]}
+
+
+async def test_regenerate_chapter_sections_preserves_structure_when_ai_fails(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    original_section = data["sections"][0]
+    fake = FailingReplayMaterialOrganizationAI()
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await client.post(
+            f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+            json={
+                "expected_sections": [
+                    {
+                        "id": original_section["id"],
+                        "version": original_section["version"],
+                    }
+                ],
+            },
+        )
+
+    await test_db.rollback()
+    persisted = await test_db.get(MemoirSection, original_section["id"])
+    assert persisted is not None
+    memberships = list(
+        (
+            await test_db.execute(
+                select(MemoirSectionMaterial).where(
+                    MemoirSectionMaterial.section_id == original_section["id"]
+                )
+            )
+        ).scalars().all()
+    )
+    assert {
+        material.utterance_id
+        for material in memberships
+    } == {created[0]["utterance_id"], created[1]["utterance_id"]}
+
+
+async def test_regenerate_chapter_sections_rejects_stale_structure_before_ai(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    original_section = data["sections"][0]
+    fake = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+        json={
+            "expected_sections": [
+                {
+                    "id": original_section["id"],
+                    "version": original_section["version"] + 1,
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "本章小节已经变化，请刷新后重试"
+    assert fake.prompts == []
 
 
 async def test_material_organization_skips_interviewer_material(

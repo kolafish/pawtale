@@ -84,6 +84,7 @@ function loadWorkspacePage({
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
+    regenerateMemoirChapterSections: async () => {},
     rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
@@ -164,6 +165,44 @@ test("chapter workspace expands materials under their section", async () => {
     context.data.sectionViews[0].visibleMaterials[0].text,
     "十八岁那年，我第一次离开家。",
   );
+  delete global.wx;
+});
+
+test("chapter workspace regenerates the current section structure after confirmation", async () => {
+  const { toasts } = installWx();
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      regenerateMemoirChapterSections: async (...args) => {
+        calls.push(args);
+        return {
+          project_id: "project-1",
+          chapter_id: "chapter-1",
+          material_count: 1,
+          assigned_count: 1,
+          unassigned_count: 0,
+          section_count: 2,
+        };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  page.regenerateSections.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "chapter-1",
+    [{ id: "section-1", version: 1 }],
+  ]]);
+  assert.equal(toasts.at(-1).title, "已生成2个小节");
+  assert.equal(context.data.regeneratingSections, false);
   delete global.wx;
 });
 
@@ -296,6 +335,25 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
   installWx();
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({ draft_sections: [] }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.canConfirmChapter, false);
+  delete global.wx;
+});
+
+test("chapter workspace does not confirm a draft after its section structure changes", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+    }),
   });
   const context = pageContext(page);
 

@@ -35,6 +35,16 @@
         <text class="section-structure-summary">{{sectionStructureSummary}}</text>
       </view>
 
+      <view class="structure-tools">
+        <text class="structure-tools-detail">如果当前分组不合适，可以按新讲述进入系统时的相同方式重新整理，可能需要几分钟。</text>
+        <button
+          class="structure-regenerate-action"
+          loading="{{regeneratingSections}}"
+          disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+          bindtap="regenerateSections"
+        >重新生成小节</button>
+      </view>
+
       <view class="section-list">
         <view wx:for="{{sectionViews}}" wx:key="id" class="section-item">
           <button
