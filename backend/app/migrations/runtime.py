@@ -6,6 +6,10 @@ from app.database import Base, register_models
 from app.migrations.audit import migrate_audit_schema
 from app.migrations.auth import migrate_auth_schema
 from app.migrations.git_sync import migrate_git_sync_schema
+from app.migrations.memoir_completion import (
+    assert_memoir_completion_schema,
+    migrate_memoir_completion_schema,
+)
 from app.migrations.memoir_images import assert_memoir_image_schema, migrate_memoir_image_schema
 from app.migrations.memoir_narrative import (
     assert_memoir_narrative_schema,
@@ -34,6 +38,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     git_sync = await migrate_git_sync_schema(engine)
     memoir_voice = await migrate_memoir_voice_schema(engine)
     memoir_sections = await migrate_memoir_section_schema(engine)
+    memoir_completion = await migrate_memoir_completion_schema(engine)
     memoir_semantic = await migrate_memoir_semantic_schema(engine)
     memoir_images = await migrate_memoir_image_schema(engine)
     memoir_narrative = await migrate_memoir_narrative_schema(engine)
@@ -45,6 +50,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
         "git_sync": git_sync,
         "memoir_voice": memoir_voice,
         "memoir_sections": memoir_sections,
+        "memoir_completion": memoir_completion,
         "memoir_semantic": memoir_semantic,
         "memoir_images": memoir_images,
         "memoir_narrative": memoir_narrative,
@@ -61,6 +67,7 @@ async def assert_runtime_schema(
     await assert_memoir_voice_schema(engine)
     await assert_memoir_image_schema(engine)
     await assert_memoir_section_schema(engine)
+    await assert_memoir_completion_schema(engine)
     await assert_memoir_narrative_schema(engine)
     await assert_sqlite_foreign_key_integrity(
         engine,
