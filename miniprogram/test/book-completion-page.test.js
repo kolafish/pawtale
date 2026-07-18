@@ -17,6 +17,9 @@ function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
     },
+    closeMemoirCompletionIssue: async () => {
+      throw new Error("closeMemoirCompletionIssue was not mocked");
+    },
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
@@ -41,10 +44,10 @@ function completionChapter(overrides = {}) {
       detail: "讲完后会自动继续整理。",
       action_text: "开始讲",
       disabled: false,
-      item_id: "item-1",
+      issue_id: "issue-1",
     },
-    active_item: {
-      id: "item-1",
+    active_issue: {
+      id: "issue-1",
       question: "这段回忆为什么重要？",
       status: "pending",
       active_session_id: null,
@@ -75,9 +78,9 @@ function readyOverview() {
           detail: "正文已经收入书稿。",
           action_text: "",
           disabled: true,
-          item_id: null,
+          issue_id: null,
         },
-        active_item: null,
+        active_issue: null,
         headline: "本章已确认",
         detail: "正文已经收入书稿。",
       }),
@@ -101,7 +104,7 @@ test("book completion overview exposes confirmed chapter progress and one action
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
 });
 
-test("book completion makes confirmed chapters explicitly recheckable", async () => {
+test("book completion offers one whole-book recheck after all chapters are confirmed", async () => {
   const prepared = [];
   const toasts = [];
   const overview = readyOverview();
@@ -115,7 +118,7 @@ test("book completion makes confirmed chapters explicitly recheckable", async ()
       action_text: "",
       disabled: true,
     },
-    active_item: null,
+    active_issue: null,
     headline: "本章已确认",
     detail: "正文已经收入书稿。",
   });
@@ -135,20 +138,19 @@ test("book completion makes confirmed chapters explicitly recheckable", async ()
   });
   const patch = mod.bookCompletionViewPatch(overview);
   assert.equal(patch.allChaptersConfirmed, true);
-  assert.equal(patch.chapters.every((chapter) => chapter.canRecheck), true);
+  assert.equal(
+    patch.chapters.every((chapter) => !Object.hasOwn(chapter, "canRecheck")),
+    true,
+  );
 
   const context = pageContext(page, {
     projectId: "project-1",
     chapters: patch.chapters,
     allChaptersConfirmed: true,
   });
-  await page.recheckChapter.call(context, {
-    currentTarget: { dataset: { chapterId: "chapter-1" } },
-  });
   await page.recheckAllChapters.call(context);
 
   assert.deepEqual(prepared, [
-    ["project-1", "chapter-1"],
     ["project-1", "chapter-1"],
     ["project-1", "chapter-2"],
   ]);
@@ -233,7 +235,7 @@ test("book completion prepares an untouched chapter in place", async () => {
       action_text: "开始整理",
       disabled: false,
     },
-    active_item: null,
+    active_issue: null,
   });
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {

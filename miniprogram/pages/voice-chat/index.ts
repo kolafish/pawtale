@@ -1,6 +1,4 @@
 import type {
-  MemoirCompletionOutcome,
-  MemoirCompletionUnableToAnswerResolution,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
@@ -38,7 +36,6 @@ import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
   createMemoirAssistantTTS,
   createMemoirVoiceNoAnswerPrompt,
-  getMemoirCompletionOutcome,
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
@@ -112,8 +109,7 @@ import {
   voiceRecordingStoppedPatch,
   voiceRecordingUnavailablePatch,
 } from "./voice-chat-recording-flow";
-import { VoiceChatCompletionItemRuntime } from "./voice-chat-completion-item-runtime";
-import { completionOutcomeDialog } from "./voice-chat-completion-outcome";
+import { VoiceChatCompletionIssueRuntime } from "./voice-chat-completion-issue-runtime";
 import {
   datasetString,
   queryChoice,
@@ -123,12 +119,6 @@ import {
 } from "../../services/page-input";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
-const COMPLETION_OUTCOME_POLL_ATTEMPTS = 8;
-const COMPLETION_OUTCOME_POLL_INTERVAL_MS = 1000;
-
-function wait(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
 
 interface CheckboxChangeEvent {
   detail: {
@@ -187,23 +177,20 @@ definePage<VoiceChatData>()({
   gatewayConnectPromise: null as Promise<boolean> | null,
   recordingStartPromise: null as Promise<boolean> | null,
   recordingStartGeneration: 0,
-  completionItemRuntime: null as VoiceChatCompletionItemRuntime | null,
+  completionIssueRuntime: null as VoiceChatCompletionIssueRuntime | null,
 
   data: initialVoiceChatData(),
 
-  completionItems() {
-    if (!this.completionItemRuntime) {
-      this.completionItemRuntime = new VoiceChatCompletionItemRuntime({
+  completionIssues() {
+    if (!this.completionIssueRuntime) {
+      this.completionIssueRuntime = new VoiceChatCompletionIssueRuntime({
         readState: () => this.data,
         applyPatch: (patch) => setVoiceChatData(this, patch),
         isSuspended: () => this.pageSuspended,
         cancelAssistant: (reason) => this.cancelFollowUpTTS(reason),
-        requestAssistant: () => {
-          void this.generateFollowUp(true);
-        },
       });
     }
-    return this.completionItemRuntime;
+    return this.completionIssueRuntime;
   },
 
   autoListenGateSnapshot() {
@@ -299,7 +286,7 @@ definePage<VoiceChatData>()({
 
   suspendVoiceChat(reason: "hide" | "unload") {
     this.pageSuspended = true;
-    this.stopCompletionItemRefresh();
+    this.stopCompletionIssueRefresh();
     this.recordingStartGeneration += 1;
     followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
@@ -420,7 +407,7 @@ definePage<VoiceChatData>()({
       const detail = await getMemoirVoiceSession(this.data.voiceSessionId);
       writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { detail });
       this.applyVoiceSessionDetail(detail);
-      await this.refreshCompletionItem();
+      await this.refreshCompletionIssue();
       this.reconcilePendingClose(detail);
       if (detail.session.status !== "stopped" && detail.session.status !== "failed") {
         this.maybeGenerateOpeningFollowUp();
@@ -506,51 +493,49 @@ definePage<VoiceChatData>()({
     setVoiceChatData(this, voiceSessionDetailPatch(detail, this.data));
   },
 
-  async refreshCompletionItem(silent = false) {
-    return this.completionItems().refresh(silent);
+  async refreshCompletionIssue(silent = false) {
+    return this.completionIssues().refresh(silent);
   },
 
-  stopCompletionItemRefresh() {
-    this.completionItemRuntime?.stop();
+  stopCompletionIssueRefresh() {
+    this.completionIssueRuntime?.stop();
   },
 
-  startCompletionItemVerification() {
-    this.completionItems().startVerification();
+  startCompletionIssueVerification() {
+    this.completionIssues().startVerification();
   },
 
-  async switchCompletionItem(note = "用户选择换一个补全问题") {
-    await this.completionItems().switchItem(note);
-  },
-
-  async deferCompletionItem() {
-    await this.completionItems().deferItem();
-  },
-
-  chooseUnableToAnswerResolution() {
-    if (this.data.completionItemAction) {
+  chooseCompletionIssueResolution() {
+    if (this.data.completionIssueAction) {
       return;
     }
     wx.showActionSheet({
-      itemList: ["这个问题暂时答不上来", "问过家人以后再补"],
+      itemList: ["暂时想不起来", "以后再补", "不想继续讨论"],
       success: (result) => {
-        const resolution: MemoirCompletionUnableToAnswerResolution = result.tapIndex === 0
-          ? "unable_to_answer"
-          : "ask_family_later";
-        void this.applyUnableToAnswerResolution(resolution);
+        const outcome = ([
+          "not_remembered",
+          "deferred",
+          "declined",
+        ] as const)[result.tapIndex];
+        if (outcome) {
+          void this.closeCompletionIssue(outcome);
+        }
       },
     });
   },
 
-  async applyUnableToAnswerResolution(resolution: MemoirCompletionUnableToAnswerResolution) {
-    await this.completionItems().applyUnableToAnswer(resolution);
+  async closeCompletionIssue(
+    outcome: "not_remembered" | "deferred" | "declined",
+  ) {
+    await this.completionIssues().close(outcome);
   },
 
-  async continueToNextCompletionItem() {
+  async finishCompletionRound() {
     if (this.data.finishingSession || this.data.recording) {
       return;
     }
     this.recordingStartGeneration += 1;
-    this.stopCompletionItemRefresh();
+    this.stopCompletionIssueRefresh();
     this.cancelFollowUpTTS();
     setVoiceChatData(this, finishSessionStartPatch(false));
     try {
@@ -631,8 +616,8 @@ definePage<VoiceChatData>()({
       || this.data.followUpLoading
       || (
         this.data.sessionGoal === "book_completion"
-        && this.data.completionItem?.status !== "in_progress"
-        && this.data.completionItem?.status !== "open"
+        && this.data.completionIssue?.status !== "in_progress"
+        && this.data.completionIssue?.status !== "open"
       )
     ) {
       return;
@@ -651,8 +636,8 @@ definePage<VoiceChatData>()({
       || this.data.followUpLoading
       || (
         this.data.sessionGoal === "book_completion"
-        && this.data.completionItem?.status !== "in_progress"
-        && this.data.completionItem?.status !== "open"
+        && this.data.completionIssue?.status !== "in_progress"
+        && this.data.completionIssue?.status !== "open"
       )
     ) {
       return;
@@ -1815,7 +1800,7 @@ definePage<VoiceChatData>()({
       return;
     }
     this.recordingStartGeneration += 1;
-    this.stopCompletionItemRefresh();
+    this.stopCompletionIssueRefresh();
     this.cancelFollowUpTTS();
     setVoiceChatData(this, finishSessionStartPatch(this.data.recording));
     if (!this.voiceStreaming.hasClient()) {
@@ -1830,8 +1815,15 @@ definePage<VoiceChatData>()({
       await this.refreshVoiceSessionSnapshot();
       setVoiceChatData(this, { persistenceStateText: "已保存" });
       if (this.data.sessionGoal === "book_completion") {
-        const outcome = await this.waitForCompletionOutcome();
-        this.showCompletionOutcome(outcome);
+        wx.showModal({
+          title: "本次补充已保存",
+          content: "回答已经直接放回相关小章节。返回后重新整理本章，就能生成更新后的正文。",
+          confirmText: "返回本章",
+          showCancel: false,
+          success: () => {
+            wx.navigateBack({ delta: 1 });
+          },
+        });
         return;
       }
       wx.showModal({
@@ -1851,61 +1843,6 @@ definePage<VoiceChatData>()({
     } finally {
       setVoiceChatData(this, { finishingSession: false });
     }
-  },
-
-  async waitForCompletionOutcome(): Promise<MemoirCompletionOutcome | null> {
-    if (!this.data.projectId || !this.data.voiceSessionId) {
-      return null;
-    }
-    let latest: MemoirCompletionOutcome | null = null;
-    for (let attempt = 0; attempt < COMPLETION_OUTCOME_POLL_ATTEMPTS; attempt += 1) {
-      try {
-        latest = await getMemoirCompletionOutcome(
-          this.data.projectId,
-          this.data.voiceSessionId,
-        );
-      } catch (error) {
-        console.warn("load completion outcome failed", error);
-        return latest;
-      }
-      if (latest.status !== "processing") {
-        return latest;
-      }
-      if (attempt < COMPLETION_OUTCOME_POLL_ATTEMPTS - 1) {
-        await wait(COMPLETION_OUTCOME_POLL_INTERVAL_MS);
-      }
-    }
-    return latest;
-  },
-
-  showCompletionOutcome(outcome: MemoirCompletionOutcome | null) {
-    if (!outcome) {
-      wx.showModal({
-        title: "回答已经保存",
-        content: "处理结果暂时没有返回，请回到章节后刷新查看。",
-        confirmText: "返回章节",
-        cancelText: "留在本页",
-        success: (result) => {
-          if (result.confirm) {
-            wx.navigateBack({ delta: 1 });
-          }
-        },
-      });
-      return;
-    }
-    const dialog = completionOutcomeDialog(outcome);
-    wx.showModal({
-      title: dialog.title,
-      content: dialog.content,
-      confirmText: dialog.confirmText,
-      cancelText: "留在本页",
-      success: (result) => {
-        if (!result.confirm) {
-          return;
-        }
-        wx.navigateBack({ delta: 1 });
-      },
-    });
   },
 
   handleStatus(status: VoiceChatConnectionStatus) {
@@ -1999,7 +1936,7 @@ definePage<VoiceChatData>()({
     const finalSpeakerRole = event.speaker_role
       || (this.data.interviewType === "human_interview" ? this.data.speakerRole : "narrator");
     if (finalSpeakerRole !== "interviewer") {
-      this.startCompletionItemVerification();
+      this.startCompletionIssueVerification();
     }
     if (
       this.data.interviewType !== "human_interview"

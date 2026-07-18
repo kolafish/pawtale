@@ -1,6 +1,6 @@
 from .book_completion import (
     MemoirBookCompletionOverviewResponse,
-    MemoirChapterCompletionItem,
+    MemoirChapterCompletionIssue,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
     MemoirChapterPreparationJobResponse,
@@ -54,7 +54,7 @@ from .stories import (
 
 __all__ = [
     "MemoirBookCompletionOverviewResponse",
-    "MemoirChapterCompletionItem",
+    "MemoirChapterCompletionIssue",
     "MemoirChapterCompletionNextAction",
     "MemoirChapterCompletionSummary",
     "MemoirChapterPreparationJobResponse",

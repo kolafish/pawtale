@@ -146,7 +146,7 @@
     0 10rpx 26rpx rgba(93, 61, 42, 0.07);
 }
 
-.completion-item-panel {
+.completion-issue-panel {
   margin-top: 24rpx;
   padding: 30rpx;
   border-radius: 16rpx;
@@ -156,53 +156,53 @@
     0 10rpx 26rpx rgba(93, 61, 42, 0.07);
 }
 
-.completion-item-panel.complete-state {
+.completion-issue-panel.complete-state {
   background: #f2f8f4;
   box-shadow:
     0 0 0 1rpx rgba(57, 112, 90, 0.10),
     0 10rpx 26rpx rgba(57, 112, 90, 0.06);
 }
 
-.completion-item-panel.error-state {
+.completion-issue-panel.error-state {
   background: #fff1f3;
   box-shadow:
     0 0 0 1rpx rgba(184, 74, 90, 0.12),
     0 10rpx 26rpx rgba(184, 74, 90, 0.06);
 }
 
-.completion-item-head {
+.completion-issue-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18rpx;
 }
 
-.completion-item-label,
-.completion-item-status {
+.completion-issue-label,
+.completion-issue-status {
   line-height: 38rpx;
 }
 
-.completion-item-label {
+.completion-issue-label {
   color: #7b4a40;
   font-size: 28rpx;
   font-weight: 700;
 }
 
-.completion-item-status {
+.completion-issue-status {
   flex: 0 1 auto;
   color: #7b6f68;
   font-size: 24rpx;
   text-align: right;
 }
 
-.completion-item-question,
-.completion-item-error,
-.completion-item-action-state {
+.completion-issue-question,
+.completion-issue-error,
+.completion-issue-action-state {
   display: block;
   overflow-wrap: anywhere;
 }
 
-.completion-item-question {
+.completion-issue-question {
   margin-top: 18rpx;
   color: #2b1713;
   font-size: 42rpx;
@@ -211,29 +211,28 @@
   text-wrap: balance;
 }
 
-.completion-item-error {
+.completion-issue-error {
   margin-top: 14rpx;
   color: #b84a5a;
   font-size: 26rpx;
   line-height: 40rpx;
 }
 
-.completion-item-action-state {
+.completion-issue-action-state {
   margin-top: 14rpx;
   color: #7b4a40;
   font-size: 26rpx;
   line-height: 40rpx;
 }
 
-.completion-item-actions {
+.completion-issue-actions {
   margin-top: 24rpx;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12rpx;
+  display: flex;
+  justify-content: flex-end;
 }
 
-.completion-item-actions button,
-.completion-item-continue {
+.completion-issue-actions button,
+.completion-issue-continue {
   min-height: 80rpx;
   margin: 0;
   padding: 12rpx 16rpx;
@@ -254,7 +253,7 @@
   transition-timing-function: ease-out;
 }
 
-.voice-chat-page.book-completion .completion-item-panel {
+.voice-chat-page.book-completion .completion-issue-panel {
   padding: 22rpx 24rpx;
   border-left: 6rpx solid #bd7b6f;
   border-radius: 8rpx;
@@ -262,39 +261,38 @@
   box-shadow: none;
 }
 
-.voice-chat-page.book-completion .completion-item-question {
+.voice-chat-page.book-completion .completion-issue-question {
   margin-top: 12rpx;
   font-size: 30rpx;
   font-weight: 600;
   line-height: 44rpx;
 }
 
-.voice-chat-page.book-completion .completion-item-actions {
+.voice-chat-page.book-completion .completion-issue-actions {
   margin-top: 18rpx;
 }
 
-.completion-item-actions button::after,
-.completion-item-continue::after {
+.completion-issue-actions button::after,
+.completion-issue-continue::after {
   border: 0;
 }
 
-.completion-item-actions button:active,
-.completion-item-continue:active {
+.completion-issue-actions button:active,
+.completion-issue-continue:active {
   transform: scale(0.96);
 }
 
-.completion-item-actions button[disabled],
-.completion-item-continue[disabled] {
+.completion-issue-actions button[disabled],
+.completion-issue-continue[disabled] {
   opacity: 0.58;
   transform: none;
 }
 
-.completion-item-actions button.danger {
-  color: #a53e50;
-  background: #fff5f6;
+.completion-issue-actions button {
+  min-width: 220rpx;
 }
 
-.completion-item-continue {
+.completion-issue-continue {
   width: 100%;
   margin-top: 22rpx;
   background: #a64b3e;
@@ -1159,30 +1157,30 @@
   border-radius: 36rpx;
 }
 
-.voice-chat-page.large-text .completion-item-panel {
+.voice-chat-page.large-text .completion-issue-panel {
   padding: 36rpx 32rpx;
   border-radius: 16rpx;
 }
 
-.voice-chat-page.large-text .completion-item-label,
-.voice-chat-page.large-text .completion-item-status {
+.voice-chat-page.large-text .completion-issue-label,
+.voice-chat-page.large-text .completion-issue-status {
   font-size: 34rpx;
   line-height: 52rpx;
 }
 
-.voice-chat-page.large-text .completion-item-question {
+.voice-chat-page.large-text .completion-issue-question {
   font-size: 58rpx;
   line-height: 82rpx;
 }
 
-.voice-chat-page.large-text .completion-item-error,
-.voice-chat-page.large-text .completion-item-action-state {
+.voice-chat-page.large-text .completion-issue-error,
+.voice-chat-page.large-text .completion-issue-action-state {
   font-size: 36rpx;
   line-height: 56rpx;
 }
 
-.voice-chat-page.large-text .completion-item-actions button,
-.voice-chat-page.large-text .completion-item-continue {
+.voice-chat-page.large-text .completion-issue-actions button,
+.voice-chat-page.large-text .completion-issue-continue {
   min-height: 104rpx;
   font-size: 36rpx;
   line-height: 50rpx;

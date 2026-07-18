@@ -16,9 +16,9 @@ function summary(overrides = {}) {
       detail: "需要时可以修改。",
       action_text: "查看正文",
       disabled: false,
-      item_id: null,
+      issue_id: null,
     },
-    active_item: null,
+    active_issue: null,
     headline: "正文已经整理好",
     detail: "请通读整章；需要时可以修改。",
     ...overrides,
@@ -48,7 +48,7 @@ function loadWorkspacePage({
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
-    resolveMemoirCompletionItem: async () => {},
+    closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
     confirmMemoirBookChapterDraft: async () => ({}),
@@ -73,6 +73,9 @@ function installWx() {
     pageScrollTo() {},
     stopPullDownRefresh() {},
     showToast(options) { toasts.push(options); },
+    showModal(options) {
+      options.success?.({ confirm: true, cancel: false });
+    },
   };
   return { navigations, toasts };
 }
@@ -102,7 +105,7 @@ test("chapter workspace loads one whole chapter draft", async () => {
   delete global.wx;
 });
 
-test("chapter workspace confirms the current completion item then prepares again", async () => {
+test("chapter workspace confirms the current completion issue then prepares again", async () => {
   installWx();
   const calls = [];
   const confirmationSummary = summary({
@@ -113,10 +116,10 @@ test("chapter workspace confirms the current completion item then prepares again
       detail: "请确认准确说法。",
       action_text: "确认正确说法",
       disabled: false,
-      item_id: "item-1",
+      issue_id: "issue-1",
     },
-    active_item: {
-      id: "item-1",
+    active_issue: {
+      id: "issue-1",
       question: "离家年龄有两个说法",
       status: "pending",
     },
@@ -124,17 +127,21 @@ test("chapter workspace confirms the current completion item then prepares again
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({ completion_summary: confirmationSummary }),
     voiceApiExports: {
-      resolveMemoirCompletionItem: async (...args) => calls.push(["confirm", ...args]),
+      closeMemoirCompletionIssue: async (...args) => calls.push(["confirm", ...args]),
       prepareMemoirBookChapter: async (...args) => calls.push(["prepare", ...args]),
     },
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  await page.confirmCurrentItem.call(context);
+  page.confirmCurrentIssue.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [
-    ["confirm", "project-1", "item-1", { note: "用户已确认按当前建议处理" }],
+    ["confirm", "project-1", "issue-1", {
+      outcome: "confirmed",
+      note: "用户已确认按当前建议处理",
+    }],
     ["prepare", "project-1", "chapter-1"],
   ]);
   delete global.wx;
@@ -150,10 +157,10 @@ test("chapter workspace starts completion interview in the existing voice chat",
       detail: "讲完后会自动继续整理。",
       action_text: "开始讲",
       disabled: false,
-      item_id: "item-1",
+      issue_id: "issue-1",
     },
-    active_item: {
-      id: "item-1",
+    active_issue: {
+      id: "issue-1",
       question: "离家后的第一晚是什么感受？",
       status: "pending",
       active_session_id: null,
@@ -227,10 +234,10 @@ test("open completion work keeps an existing draft from being confirmed", async 
       detail: "讲完后会自动继续整理。",
       action_text: "开始讲",
       disabled: false,
-      item_id: "item-1",
+      issue_id: "issue-1",
     },
-    active_item: {
-      id: "item-1",
+    active_issue: {
+      id: "issue-1",
       question: "离家后的第一晚是什么感受？",
       status: "pending",
       active_session_id: null,

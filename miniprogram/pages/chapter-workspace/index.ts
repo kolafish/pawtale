@@ -2,11 +2,11 @@ import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
+  closeMemoirCompletionIssue,
   confirmMemoirBookChapterDraft,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
   prepareMemoirBookChapter,
-  resolveMemoirCompletionItem,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
@@ -55,7 +55,7 @@ interface ChapterWorkspacePageData {
   readinessDetail: string;
   canConfirmChapter: boolean;
   processBusy: boolean;
-  startingTaskId: string;
+  startingIssueId: string;
   confirmingChapter: boolean;
   savingDraft: boolean;
   editingDraft: boolean;
@@ -78,7 +78,7 @@ definePage<ChapterWorkspacePageData>()({
     readinessDetail: "",
     canConfirmChapter: false,
     processBusy: false,
-    startingTaskId: "",
+    startingIssueId: "",
     confirmingChapter: false,
     savingDraft: false,
     editingDraft: false,
@@ -168,7 +168,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (action.kind === "confirm") {
-      await this.confirmCurrentItem();
+      this.confirmCurrentIssue();
       return;
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
@@ -197,33 +197,33 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async beginCompletionInterview() {
-    const task = this.data.workspace?.completion_summary.active_item;
-    if (!task) {
+    const issue = this.data.workspace?.completion_summary.active_issue;
+    if (!issue) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
       return;
     }
-    if (task.status === "in_progress" && task.active_session_id) {
-      this.openVoiceChat(task.active_session_id);
+    if (issue.status === "in_progress" && issue.active_session_id) {
+      this.openVoiceChat(issue.active_session_id);
       return;
     }
     if (!readVoiceAuthorizationConsent()) {
       wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
       return;
     }
-    this.setData({ startingTaskId: task.id, error: "" });
+    this.setData({ startingIssueId: issue.id, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
         guidance_mode: "guided_interview",
         interview_type: "ai_interview",
         session_goal: "book_completion",
-        current_completion_item_id: task.id,
+        current_completion_issue_id: issue.id,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: "miniprogram_chapter_workspace",
           chapter_id: this.data.chapterId,
-          completion_item_id: task.id,
+          completion_issue_id: issue.id,
         },
       }, { projectId: this.data.projectId });
       trackAuditAction(
@@ -243,7 +243,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "AI 访谈创建失败" });
     } finally {
-      this.setData({ startingTaskId: "" });
+      this.setData({ startingIssueId: "" });
     }
   },
 
@@ -259,14 +259,32 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
-  async confirmCurrentItem() {
-    const itemId = this.data.nextAction.itemId;
-    if (!itemId || this.data.processBusy) {
+  confirmCurrentIssue() {
+    const issue = this.data.workspace?.completion_summary.active_issue;
+    if (!issue || !this.data.nextAction.issueId || this.data.processBusy) {
+      return;
+    }
+    wx.showModal({
+      title: "请确认这一点",
+      content: issue.question,
+      confirmText: "确认",
+      cancelText: "先不处理",
+      success: (result) => {
+        if (result.confirm) {
+          void this.applyCurrentIssueConfirmation(issue.id);
+        }
+      },
+    });
+  },
+
+  async applyCurrentIssueConfirmation(issueId: string) {
+    if (!issueId || this.data.processBusy) {
       return;
     }
     this.setData({ processBusy: true, error: "" });
     try {
-      await resolveMemoirCompletionItem(this.data.projectId, itemId, {
+      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
+        outcome: "confirmed",
         note: "用户已确认按当前建议处理",
       });
       await prepareMemoirBookChapter(this.data.projectId, this.data.chapterId);

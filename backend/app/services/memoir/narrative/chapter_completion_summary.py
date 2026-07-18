@@ -20,7 +20,7 @@ from app.models.memoir import (
 )
 from app.models.memoir_narrative import MemoirCompletionItem
 from app.schemas.memoir_narrative import (
-    MemoirChapterCompletionItem,
+    MemoirChapterCompletionIssue,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
 )
@@ -50,7 +50,7 @@ def _next_action(
     *,
     action_text: str = "",
     disabled: bool = False,
-    item_id: str | None = None,
+    issue_id: str | None = None,
 ) -> MemoirChapterCompletionNextAction:
     return MemoirChapterCompletionNextAction(
         kind=kind,
@@ -58,15 +58,15 @@ def _next_action(
         detail=detail,
         action_text=action_text,
         disabled=disabled,
-        item_id=item_id,
+        issue_id=issue_id,
     )
 
 
-def _active_item_response(
+def _active_issue_response(
     item: MemoirCompletionItem | None,
     *,
     active_session_id: str | None,
-) -> MemoirChapterCompletionItem | None:
+) -> MemoirChapterCompletionIssue | None:
     if item is None:
         return None
     public_status = (
@@ -74,7 +74,7 @@ def _active_item_response(
         if item.status == MemoirCompletionItemStatus.OPEN.value
         else item.status
     )
-    return MemoirChapterCompletionItem(
+    return MemoirChapterCompletionIssue(
         id=item.id,
         question=item.question or item.title,
         status=public_status,
@@ -136,7 +136,7 @@ def _summary(
                 active_item.title,
                 detail,
                 action_text="确认",
-                item_id=active_item.id,
+                issue_id=active_item.id,
             )
         else:
             headline = "还需要讲一件事"
@@ -151,7 +151,7 @@ def _summary(
                     == MemoirCompletionItemStatus.IN_PROGRESS.value
                     else "开始讲"
                 ),
-                item_id=active_item.id,
+                issue_id=active_item.id,
             )
     elif draft_job is not None and draft_job.status in _ACTIVE_JOB_STATUSES:
         state = "preparing"
@@ -205,7 +205,7 @@ def _summary(
         sort_order=chapter.sort_order,
         state=state,
         next_action=action,
-        active_item=_active_item_response(
+        active_issue=_active_issue_response(
             active_item,
             active_session_id=active_session_id,
         ),

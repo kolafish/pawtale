@@ -5,6 +5,7 @@ import type {
 import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
+  closeMemoirCompletionIssue,
   createMemoirVoiceSession,
   getMemoirBookCompletionOverview,
   prepareMemoirBookChapter,
@@ -31,7 +32,6 @@ interface ChapterView extends MemoirChapterCompletionSummary {
   actionText: string;
   chapterClass: string;
   disabled: boolean;
-  canRecheck: boolean;
 }
 
 interface BookCompletionData {
@@ -46,7 +46,7 @@ interface BookCompletionData {
   allChaptersConfirmed: boolean;
   preparingChapterId: string;
   recheckingAll: boolean;
-  startingTaskId: string;
+  startingIssueId: string;
 }
 
 interface ChapterDataset {
@@ -83,7 +83,6 @@ function chapterView(
         : (item.next_action.action_text || "查看本章")),
     chapterClass: `chapter-item ${item.state}`,
     disabled: busy,
-    canRecheck: item.state === "confirmed" && !busy,
   };
 }
 
@@ -127,7 +126,7 @@ definePage<BookCompletionData>()({
     allChaptersConfirmed: false,
     preparingChapterId: "",
     recheckingAll: false,
-    startingTaskId: "",
+    startingIssueId: "",
   },
 
   onLoad(options: PageQuery) {
@@ -221,7 +220,7 @@ definePage<BookCompletionData>()({
       || chapter.disabled
       || this.data.preparingChapterId
       || this.data.recheckingAll
-      || this.data.startingTaskId
+      || this.data.startingIssueId
     ) {
       return;
     }
@@ -233,6 +232,10 @@ definePage<BookCompletionData>()({
       chapter.next_action.kind === "start_interview"
     ) {
       await this.beginCompletionInterview(chapter);
+      return;
+    }
+    if (chapter.next_action.kind === "confirm") {
+      this.confirmCompletionIssue(chapter);
       return;
     }
     wx.navigateTo({
@@ -267,15 +270,6 @@ definePage<BookCompletionData>()({
     }
   },
 
-  async recheckChapter(event: ChapterTapEvent) {
-    const chapterId = datasetString(event, "chapterId");
-    const chapter = this.data.chapters.find((item) => item.chapter_id === chapterId);
-    if (!chapter?.canRecheck) {
-      return;
-    }
-    await this.prepareChapter(chapterId);
-  },
-
   async recheckAllChapters() {
     if (
       !this.data.allChaptersConfirmed
@@ -308,33 +302,33 @@ definePage<BookCompletionData>()({
   },
 
   async beginCompletionInterview(chapter: ChapterView) {
-    const task = chapter.active_item;
-    if (!task) {
+    const issue = chapter.active_issue;
+    if (!issue) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
       return;
     }
-    if (task.status === "in_progress" && task.active_session_id) {
-      this.openVoiceChat(task.active_session_id, chapter.title);
+    if (issue.status === "in_progress" && issue.active_session_id) {
+      this.openVoiceChat(issue.active_session_id, chapter.title);
       return;
     }
     if (!readVoiceAuthorizationConsent()) {
       wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
       return;
     }
-    this.setData({ startingTaskId: task.id, error: "" });
+    this.setData({ startingIssueId: issue.id, error: "" });
     try {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
         guidance_mode: "guided_interview",
         interview_type: "ai_interview",
         session_goal: "book_completion",
-        current_completion_item_id: task.id,
+        current_completion_issue_id: issue.id,
         provider: "volc_streaming_asr",
         input_format: "pcm_s16le_16000_mono",
         metadata_json: {
           entry: "miniprogram_book_completion",
           chapter_id: chapter.chapter_id,
-          completion_item_id: task.id,
+          completion_issue_id: issue.id,
         },
       }, { projectId: this.data.projectId });
       trackAuditAction(
@@ -356,7 +350,49 @@ definePage<BookCompletionData>()({
         error: error instanceof Error ? error.message : "AI 访谈创建失败",
       });
     } finally {
-      this.setData({ startingTaskId: "" });
+      this.setData({ startingIssueId: "" });
+    }
+  },
+
+  confirmCompletionIssue(chapter: ChapterView) {
+    const issue = chapter.active_issue;
+    if (!issue || this.data.startingIssueId) {
+      return;
+    }
+    wx.showModal({
+      title: "请确认这一点",
+      content: issue.question,
+      confirmText: "确认",
+      cancelText: "先不处理",
+      success: (result) => {
+        if (result.confirm) {
+          void this.applyCompletionIssueConfirmation(chapter, issue.id);
+        }
+      },
+    });
+  },
+
+  async applyCompletionIssueConfirmation(chapter: ChapterView, issueId: string) {
+    if (this.data.startingIssueId) {
+      return;
+    }
+    this.setData({ startingIssueId: issueId, error: "" });
+    try {
+      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
+        outcome: "confirmed",
+        note: "用户已确认当前处理方向",
+      });
+      await prepareMemoirBookChapter(this.data.projectId, chapter.chapter_id);
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "确认失败",
+      });
+    } finally {
+      this.setData({ startingIssueId: "" });
     }
   },
 

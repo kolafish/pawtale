@@ -20,8 +20,8 @@
       <button
         wx:if="{{nextAction.actionText}}"
         class="primary-action"
-        loading="{{processBusy || startingTaskId !== ''}}"
-        disabled="{{nextAction.disabled || processBusy || startingTaskId !== ''}}"
+        loading="{{processBusy || startingIssueId !== ''}}"
+        disabled="{{nextAction.disabled || processBusy || startingIssueId !== ''}}"
         bindtap="runNextAction"
       >{{nextAction.actionText}}</button>
     </view>

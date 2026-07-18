@@ -76,24 +76,25 @@
     </checkbox-group>
   </view>
 
-  <view wx:if="{{showCompletionItemPanel}}" class="{{completionItemPanelClass}}">
-    <view class="completion-item-head">
-      <text class="completion-item-label">本次补充</text>
-      <text class="completion-item-status">{{completionItemStatusText}}</text>
+  <view wx:if="{{showCompletionIssuePanel}}" class="{{completionIssuePanelClass}}">
+    <view class="completion-issue-head">
+      <text class="completion-issue-label">本次只补这一点</text>
+      <text class="completion-issue-status">{{completionIssueStatusText}}</text>
     </view>
-    <text class="completion-item-question">{{completionItemQuestionText}}</text>
-    <text wx:if="{{completionItemError}}" class="completion-item-error">{{completionItemError}}</text>
-    <text wx:if="{{completionItemActionText}}" class="completion-item-action-state">{{completionItemActionText}}</text>
-    <view wx:if="{{showCompletionItemActions}}" class="completion-item-actions">
-      <button disabled="{{completionItemControlsDisabled}}" bindtap="switchCompletionItem">换一个</button>
-      <button disabled="{{completionItemControlsDisabled}}" bindtap="chooseUnableToAnswerResolution">想不起来</button>
-      <button disabled="{{completionItemControlsDisabled}}" bindtap="deferCompletionItem">以后再说</button>
+    <text class="completion-issue-question">{{completionIssueQuestionText}}</text>
+    <text wx:if="{{completionIssueError}}" class="completion-issue-error">{{completionIssueError}}</text>
+    <text wx:if="{{completionIssueActionText}}" class="completion-issue-action-state">{{completionIssueActionText}}</text>
+    <view wx:if="{{showCompletionIssueActions}}" class="completion-issue-actions">
+      <button
+        disabled="{{completionIssueControlsDisabled}}"
+        bindtap="chooseCompletionIssueResolution"
+      >暂时不补</button>
     </view>
     <button
-      wx:if="{{showCompletionItemContinue}}"
-      class="completion-item-continue"
-      disabled="{{completionItemControlsDisabled}}"
-      bindtap="continueToNextCompletionItem"
+      wx:if="{{showCompletionIssueContinue}}"
+      class="completion-issue-continue"
+      disabled="{{completionIssueControlsDisabled}}"
+      bindtap="finishCompletionRound"
     >
       返回全书概览
     </button>
