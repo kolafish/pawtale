@@ -117,6 +117,19 @@ async def test_generate_plan_creates_single_section_material_ownership(
         "外婆家的童年",
         "离家求学",
     ]
+    first_section = payload["chapters"][0]["sections"][0]
+    assert first_section["title"] == "外婆家的童年"
+    assert first_section["section_type"] == "life_fragment"
+    assert first_section["material_count"] == 1
+    assert first_section["included_material_count"] == 1
+    assert first_section["materials"] == [
+        {
+            "utterance_id": first["utterance_id"],
+            "sort_order": 0,
+            "text": "我小时候常在外婆家的院子里晒太阳。",
+            "include_in_book": True,
+        }
+    ]
     materials = list(
         (
             await test_db.scalars(

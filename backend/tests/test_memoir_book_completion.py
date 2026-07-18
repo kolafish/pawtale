@@ -308,6 +308,31 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
     assert version_count == 1
 
 
+async def test_chapter_workspace_exposes_section_structure(
+    client,
+    test_db,
+):
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter = chapters[0]
+
+    response = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace"
+    )
+
+    assert response.status_code == 200, response.text
+    section = response.json()["sections"][0]
+    assert section["title"] == chapter.title
+    assert section["section_type"] == "life_fragment"
+    assert section["material_count"] == 1
+    assert section["included_material_count"] == 1
+    assert section["materials"][0] == {
+        "utterance_id": sources[0]["utterance_id"],
+        "sort_order": 0,
+        "text": "那年，我参加了第1次学校比赛。",
+        "include_in_book": True,
+    }
+
+
 async def test_current_completion_issue_overrides_confirmed_draft(
     client,
     test_db,

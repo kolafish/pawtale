@@ -32,6 +32,7 @@ from app.services.memoir import (
     chapter_digests,
     chapter_generation,
     completion_issues,
+    sections,
 )
 
 
@@ -420,6 +421,11 @@ async def chapter_workspace(
         issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
         for issue in active_issues
     )
+    sections_by_chapter = await sections.section_summaries_by_chapter(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     return MemoirChapterWorkspaceResponse(
         project_id=project_id,
         chapter_id=chapter_id,
@@ -431,6 +437,7 @@ async def chapter_workspace(
             source_changes.pending_completion_source_count
         ),
         pending_new_source_count=source_changes.pending_new_source_count,
+        sections=sections_by_chapter.get(chapter_id, []),
         draft_id=draft.id if draft else None,
         draft_version_id=version.id if version else None,
         draft_version=version.version if version else None,

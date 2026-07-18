@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.memoir.types import MemoirEditingJobStatus
+from app.schemas.memoir_sections import MemoirChapterSectionSummary
 
 
 MemoirBookCompletionState = Literal[
@@ -81,6 +82,7 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     can_rewrite_draft: bool = False
     pending_completion_source_count: int = 0
     pending_new_source_count: int = 0
+    sections: list[MemoirChapterSectionSummary] = Field(default_factory=list)
     draft_id: str | None = None
     draft_version_id: str | None = None
     draft_version: int | None = None

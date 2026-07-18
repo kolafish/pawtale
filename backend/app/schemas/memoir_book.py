@@ -13,6 +13,7 @@ from app.schemas.memoir_voice import (
     MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
 )
+from app.schemas.memoir_sections import MemoirChapterSectionSummary
 
 
 class MemoirBookChapterSourceRef(BaseModel):
@@ -184,6 +185,7 @@ class MemoirBookPlanChapterResponse(BaseModel):
     sort_order: int
     include_in_book: bool = True
     source_refs: list[MemoirBookChapterSourceRef] = Field(default_factory=list)
+    sections: list[MemoirChapterSectionSummary] = Field(default_factory=list)
     metadata_json: dict[str, object] = Field(default_factory=dict)
     pending_source_count: int = 0
     pending_completion_source_count: int = 0

@@ -21,6 +21,28 @@ class MemoirSectionMaterialResponse(BaseModel):
     updated_at: datetime
 
 
+class MemoirChapterSectionMaterialSummary(BaseModel):
+    utterance_id: str
+    sort_order: int
+    text: str
+    include_in_book: bool
+
+
+class MemoirChapterSectionSummary(BaseModel):
+    id: str
+    title: str
+    section_type: MemoirSectionType
+    sort_order: int
+    status: MemoirSectionStatus
+    include_in_book: bool
+    version: int
+    material_count: int
+    included_material_count: int
+    materials: list[MemoirChapterSectionMaterialSummary] = Field(
+        default_factory=list
+    )
+
+
 class MemoirSectionResponse(BaseModel):
     id: str
     project_id: str
