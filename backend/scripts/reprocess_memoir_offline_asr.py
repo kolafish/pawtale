@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import async_session_maker, engine, init_db
 from app.domain.projects.types import ProjectType
-from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 from app.models.projects import Project
 from app.services.memoir.offline_asr import DEFAULT_OFFLINE_ASR_PROVIDERS
@@ -90,7 +89,6 @@ async def _main() -> None:
     try:
         await init_db()
         await migrate_memoir_voice_schema(engine)
-        await migrate_memoir_semantic_schema(engine)
         async with async_session_maker() as db:
             project_id = await _resolve_project_id(
                 db,
