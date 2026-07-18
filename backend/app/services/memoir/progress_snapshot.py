@@ -215,6 +215,16 @@ def _chapter_items(
                 include_in_book=chapter.include_in_book,
                 source_count=len(source_ids),
                 pending_source_count=source_change_state.pending_source_count if source_change_state else 0,
+                pending_completion_source_count=(
+                    source_change_state.pending_completion_source_count
+                    if source_change_state
+                    else 0
+                ),
+                pending_new_source_count=(
+                    source_change_state.pending_new_source_count
+                    if source_change_state
+                    else 0
+                ),
                 removed_source_count=source_change_state.removed_source_count if source_change_state else 0,
                 draft_status=draft.status if draft else None,
                 draft_word_count=draft_word_counts.get(chapter.id, 0),

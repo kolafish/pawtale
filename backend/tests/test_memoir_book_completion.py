@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
     MemoirEditingJobType,
 )
@@ -34,6 +35,7 @@ from app.services.memoir import (
     section_digests,
 )
 from tests.memoir_helpers import (
+    add_test_section_materials,
     create_test_book_plan_with_chapters,
     create_test_chapter_draft,
     create_test_voice_transcript,
@@ -313,10 +315,11 @@ async def test_current_completion_issue_overrides_confirmed_draft(
 ):
     project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
+    chapter_id = chapter.id
     await _create_current_draft(
         test_db,
         project_id=project_id,
-        chapter_id=chapter.id,
+        chapter_id=chapter_id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
     fake = LayeredBookAI(chapter_manual_issue=True)
@@ -333,6 +336,79 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
     assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+    rewritten = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/rewrite",
+        json={},
+    )
+    assert rewritten.status_code == 409
+    assert rewritten.json()["detail"] == "本章还有一项需要您先确认"
+
+
+async def test_rewrite_uses_current_material_without_forcing_more_interviews(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    chapter_id = chapter.id
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    supplemental = await create_test_voice_transcript(
+        client,
+        test_db,
+        "这是后来补充的一段背景。",
+        project_id=project_id,
+    )
+    await add_test_section_materials(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        source_refs=[memoir_source_ref(supplemental)],
+    )
+    await test_db.commit()
+    test_db.expire_all()
+    fake = LayeredBookAI(section_issue=True)
+    _install_ai(monkeypatch, fake)
+
+    prepared = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter_id}/prepare",
+        json={},
+    )
+
+    assert prepared.status_code == 200, prepared.text
+    before = prepared.json()
+    assert before["completion_summary"]["state"] == "needs_input"
+    assert before["draft_needs_rewrite"] is True
+    assert before["can_rewrite_draft"] is True
+    assert before["pending_new_source_count"] == 1
+
+    rewritten = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter_id}/rewrite",
+        json={},
+    )
+
+    assert rewritten.status_code == 200, rewritten.text
+    after = rewritten.json()
+    assert after["completion_summary"]["state"] == "draft_ready"
+    assert after["draft_needs_rewrite"] is False
+    assert after["draft_content"].startswith("那年，我参加了学校比赛")
+    issue = await test_db.scalar(
+        select(MemoirCompletionIssue).where(
+            MemoirCompletionIssue.project_id == project_id,
+            MemoirCompletionIssue.chapter_id == chapter_id,
+        )
+    )
+    assert issue is not None
+    assert issue.outcome == MemoirCompletionIssueOutcome.DEFERRED.value
+    assert issue.outcome_note == "用户选择先按现有素材重新生成正文"
 
 
 async def test_book_overview_counts_all_unfinished_chapter_states(

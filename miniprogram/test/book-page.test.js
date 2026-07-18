@@ -588,6 +588,7 @@ test("book page marks assigned sources as supplemental chapter work", () => {
   const { mod } = loadBookPage();
   const plan = samplePlan("confirmed");
   plan.chapters[0].pending_source_count = 1;
+  plan.chapters[0].pending_new_source_count = 1;
 
   const chapters = mod.buildChapterViews(plan, {
     "chapter-1": sampleDraft(1, "draft", "第一版正文"),
@@ -595,6 +596,25 @@ test("book page marks assigned sources as supplemental chapter work", () => {
 
   assert.equal(chapters[0].pendingSourceCount, 1);
   assert.equal(chapters[0].sourceChangeNotice, "1 条新增讲述待补写");
+  assert.equal(chapters[0].draftActionText, "补写新增");
+  assert.equal(chapters[0].draftStatusText, "需更新");
+});
+
+test("book page labels completion answers separately from new narration", () => {
+  const { mod } = loadBookPage();
+  const plan = samplePlan("confirmed");
+  plan.chapters[0].pending_source_count = 2;
+  plan.chapters[0].pending_completion_source_count = 2;
+
+  const chapters = mod.buildChapterViews(plan, {
+    "chapter-1": sampleDraft(1, "confirmed", "第一版正文"),
+  });
+
+  assert.equal(chapters[0].pendingCompletionSourceCount, 2);
+  assert.equal(chapters[0].pendingNewSourceCount, 0);
+  assert.equal(chapters[0].sourceChangeNotice, "2 条补充回答待写入正文");
+  assert.equal(chapters[0].draftActionText, "更新本章正文");
+  assert.equal(chapters[0].draftStatusText, "需更新");
 });
 
 test("book page marks deleted chapter sources for review", () => {

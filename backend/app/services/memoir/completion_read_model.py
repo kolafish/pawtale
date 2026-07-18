@@ -27,7 +27,12 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionSummary,
     MemoirChapterWorkspaceResponse,
 )
-from app.services.memoir import chapter_digests, chapter_generation, completion_issues
+from app.services.memoir import (
+    book_source_links,
+    chapter_digests,
+    chapter_generation,
+    completion_issues,
+)
 
 
 async def _plan_chapters(
@@ -380,11 +385,52 @@ async def chapter_workspace(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    source_changes = await book_source_links.chapter_source_change_state(
+        db,
+        chapter=chapter,
+    )
+    signature_changed = False
+    if version is not None:
+        try:
+            context = await chapter_generation.load_chapter_generation_context(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+            )
+            signature_changed = (
+                bool(version.input_signature)
+                and version.input_signature != context.input_signature
+            )
+        except HTTPException:
+            signature_changed = False
+    draft_needs_rewrite = bool(
+        version is not None
+        and (
+            signature_changed
+            or source_changes.pending_source_count
+            or source_changes.removed_source_count
+        )
+    )
+    active_issues = await completion_issues.list_issues(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    has_manual_review = any(
+        issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+        for issue in active_issues
+    )
     return MemoirChapterWorkspaceResponse(
         project_id=project_id,
         chapter_id=chapter_id,
         chapter_title=chapter.title,
         completion_summary=summary,
+        draft_needs_rewrite=draft_needs_rewrite,
+        can_rewrite_draft=draft_needs_rewrite and not has_manual_review,
+        pending_completion_source_count=(
+            source_changes.pending_completion_source_count
+        ),
+        pending_new_source_count=source_changes.pending_new_source_count,
         draft_id=draft.id if draft else None,
         draft_version_id=version.id if version else None,
         draft_version=version.version if version else None,

@@ -7,6 +7,7 @@ import {
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
   prepareMemoirBookChapter,
+  rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
@@ -53,8 +54,11 @@ interface ChapterWorkspacePageData {
   nextAction: ChapterNextAction;
   readinessTitle: string;
   readinessDetail: string;
+  rewriteNoticeTitle: string;
+  rewriteNoticeDetail: string;
   canConfirmChapter: boolean;
   processBusy: boolean;
+  rewritingDraft: boolean;
   startingIssueId: string;
   confirmingChapter: boolean;
   savingDraft: boolean;
@@ -76,8 +80,11 @@ definePage<ChapterWorkspacePageData>()({
     nextAction: LOADING_NEXT_ACTION,
     readinessTitle: "正在读取本章",
     readinessDetail: "",
+    rewriteNoticeTitle: "",
+    rewriteNoticeDetail: "",
     canConfirmChapter: false,
     processBusy: false,
+    rewritingDraft: false,
     startingIssueId: "",
     confirmingChapter: false,
     savingDraft: false,
@@ -376,6 +383,52 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
     } finally {
       this.setData({ confirmingChapter: false });
+    }
+  },
+
+  rewriteChapter() {
+    const workspace = this.data.workspace;
+    if (
+      !workspace?.draft_needs_rewrite
+      || !workspace.can_rewrite_draft
+      || this.data.rewritingDraft
+    ) {
+      return;
+    }
+    wx.showModal({
+      title: "按现有素材重写",
+      content: "会重新生成一版完整章节，当前正文会保留在历史版本中。",
+      confirmText: "开始重写",
+      cancelText: "先不重写",
+      success: (result) => {
+        if (result.confirm) {
+          void this.performChapterRewrite();
+        }
+      },
+    });
+  },
+
+  async performChapterRewrite() {
+    if (this.data.rewritingDraft) {
+      return;
+    }
+    this.setData({ rewritingDraft: true, error: "" });
+    try {
+      await rewriteMemoirBookChapter(
+        this.data.projectId,
+        this.data.chapterId,
+      );
+      await this.loadPageData(true);
+      wx.showToast({ title: "本章正文已更新", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "本章重新生成失败",
+      });
+    } finally {
+      this.setData({ rewritingDraft: false });
     }
   },
 

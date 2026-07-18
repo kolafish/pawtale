@@ -35,6 +35,17 @@
         <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
       </view>
 
+      <view wx:if="{{workspace.draft_needs_rewrite}}" class="rewrite-notice">
+        <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
+        <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
+        <button
+          class="rewrite-action"
+          loading="{{rewritingDraft}}"
+          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || editingDraft}}"
+          bindtap="rewriteChapter"
+        >按现有素材重写</button>
+      </view>
+
       <view wx:if="{{workspace.draft_content}}" class="draft-body">
         <block wx:if="{{editingDraft}}">
           <textarea
@@ -63,7 +74,7 @@
           <text class="draft-content">{{workspace.draft_content}}</text>
           <button
             class="text-action"
-            disabled="{{confirmingChapter}}"
+            disabled="{{confirmingChapter || rewritingDraft}}"
             bindtap="startDraftEdit"
           >修改本章正文</button>
         </block>

@@ -426,9 +426,9 @@
               <text class="chapter-summary-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
               <text class="chapter-summary-meta">{{item.chapterSummaryMetaText}}</text>
             </view>
-            <view class="chapter-summary-status {{item.draft && item.draft.status === 'confirmed' ? 'confirmed' : ''}}">
+            <view class="chapter-summary-status {{item.draftStatusText === '已确认' ? 'confirmed' : ''}}">
               <text>{{item.draftStatusText}}</text>
-              <text wx:if="{{item.draft && item.draft.status === 'confirmed'}}" class="chapter-summary-status-hint">可继续修改</text>
+              <text wx:if="{{item.draftStatusText === '已确认'}}" class="chapter-summary-status-hint">可继续修改</text>
             </view>
           </view>
           <text wx:if="{{item.sourceChangeNotice}}" class="draft-pending compact">{{item.sourceChangeNotice}}</text>

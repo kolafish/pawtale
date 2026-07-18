@@ -1,10 +1,20 @@
 from sqlalchemy import select
 
-from app.domain.memoir.types import MemoirSectionStatus
+from app.domain.memoir.types import (
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueOutcome,
+    MemoirCompletionIssuePriority,
+    MemoirCompletionIssueScope,
+    MemoirCompletionIssueStatus,
+    MemoirCompletionIssueType,
+    MemoirSectionStatus,
+)
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
+    MemoirCompletionIssue,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirVoiceUtterance,
 )
 from app.services.memoir.book_source_links import (
     chapter_source_change_state,
@@ -13,6 +23,7 @@ from app.services.memoir.book_source_links import (
 )
 from tests.memoir_helpers import (
     create_test_book_plan,
+    create_test_chapter_draft,
     create_test_voice_transcript,
     memoir_source_ref,
 )
@@ -145,9 +156,6 @@ async def test_draft_change_state_compares_material_snapshot(client, test_db):
             {"material_id": "removed-material"},
         ],
     )
-    # The draft FK is required, so use the existing helper-created draft shell.
-    from tests.memoir_helpers import create_test_chapter_draft
-
     draft = await create_test_chapter_draft(
         test_db,
         project_id=plan.project_id,
@@ -166,4 +174,70 @@ async def test_draft_change_state_compares_material_snapshot(client, test_db):
 
     state = await chapter_source_change_state(test_db, chapter=chapter)
     assert state.pending_source_ids == {second["utterance_id"]}
+    assert state.pending_completion_source_count == 0
+    assert state.pending_new_source_count == 1
     assert state.removed_source_ids == {"removed-material"}
+
+
+async def test_draft_change_state_distinguishes_completion_answers(
+    client,
+    test_db,
+):
+    first = await create_test_voice_transcript(client, test_db, "第一段。")
+    answer = await create_test_voice_transcript(
+        client,
+        test_db,
+        "这是针对补全问题的回答。",
+        project_id=first["session"]["project_id"],
+    )
+    plan, chapter = await create_test_book_plan(
+        test_db,
+        project_id=first["session"]["project_id"],
+        source_refs=[memoir_source_ref(first), memoir_source_ref(answer)],
+    )
+    issue = MemoirCompletionIssue(
+        project_id=plan.project_id,
+        scope=MemoirCompletionIssueScope.CHAPTER.value,
+        chapter_id=chapter.id,
+        issue_type=MemoirCompletionIssueType.CONTEXT.value,
+        channel=MemoirCompletionIssueChannel.INTERVIEW.value,
+        question="当时为什么会做这个决定？",
+        reason="补充背景。",
+        priority=MemoirCompletionIssuePriority.HIGH.value,
+        fingerprint="a" * 64,
+        related_material_ids_json=[first["utterance_id"]],
+        input_signature="test-signature",
+        status=MemoirCompletionIssueStatus.CLOSED.value,
+        outcome=MemoirCompletionIssueOutcome.ANSWERED.value,
+        answered_material_id=answer["utterance_id"],
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    utterance = await test_db.get(MemoirVoiceUtterance, answer["utterance_id"])
+    assert utterance is not None
+    utterance.completion_issue_id = issue.id
+    test_db.add(utterance)
+    draft = await create_test_chapter_draft(
+        test_db,
+        project_id=plan.project_id,
+        chapter_id=chapter.id,
+        content="第一版正文",
+    )
+    stored = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert stored is not None
+    stored.material_snapshot_json = [
+        {"material_id": first["utterance_id"]},
+    ]
+    test_db.add(stored)
+    await test_db.commit()
+
+    state = await chapter_source_change_state(test_db, chapter=chapter)
+
+    assert state.pending_source_ids == {answer["utterance_id"]}
+    assert state.pending_completion_source_ids == {answer["utterance_id"]}
+    assert state.pending_completion_source_count == 1
+    assert state.pending_new_source_count == 0

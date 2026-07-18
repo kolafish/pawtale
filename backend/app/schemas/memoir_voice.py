@@ -246,6 +246,8 @@ class MemoirProjectProgressChapterResponse(BaseModel):
     include_in_book: bool = True
     source_count: int
     pending_source_count: int
+    pending_completion_source_count: int
+    pending_new_source_count: int
     removed_source_count: int
     draft_status: str | None = None
     draft_word_count: int = 0

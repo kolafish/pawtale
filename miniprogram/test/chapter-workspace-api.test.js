@@ -49,22 +49,26 @@ function installWx(requests) {
   };
 }
 
-test("chapter completion API exposes only workspace and prepare actions", async () => {
+test("chapter completion API exposes workspace, prepare, and rewrite actions", async () => {
   const requests = [];
   installWx(requests);
   resetModules();
   const { getMemoirChapterWorkspace } = require("../services/memoir-chapter-workspace-api.ts");
   const {
     prepareMemoirBookChapter,
+    rewriteMemoirBookChapter,
   } = require("../services/memoir-book-completion-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
   await prepareMemoirBookChapter("project/1", "chapter/1");
+  await rewriteMemoirBookChapter("project/1", "chapter/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
   assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
   assert.deepEqual(apiRequests[1].data, {});
-  assert.equal(apiRequests.length, 2);
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.deepEqual(apiRequests[2].data, {});
+  assert.equal(apiRequests.length, 3);
   delete global.wx;
 });
