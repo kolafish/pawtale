@@ -37,7 +37,7 @@ from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids,
 )
-from app.services.memoir.source_disposition import is_countable_source_utterance
+from app.services.memoir.material_roles import is_countable_material
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,7 @@ def visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtt
     return [
         utterance
         for utterance in voice_session.utterances
-        if is_countable_source_utterance(utterance, utterance_text(utterance))
+        if is_countable_material(utterance, utterance_text(utterance))
     ]
 
 

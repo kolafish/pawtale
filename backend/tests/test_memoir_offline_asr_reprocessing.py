@@ -131,7 +131,7 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
         voice_session_id=voice_session.id,
         audio_file_id=audio_file.id,
         transcript_raw="采访者问题",
-        source_material_type="interviewer_prompt",
+        provider_payload_json={"speaker_role": "interviewer"},
         created_at=datetime(2026, 7, 8, 8, 0, 0),
     )
     test_db.add_all([candidate, edited, interviewer])

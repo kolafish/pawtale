@@ -14,10 +14,8 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
-    MemoirChapterSourceLinkStatus,
     MemoirCreatedBy,
     MemoirInterviewType,
-    MemoirSemanticCacheStatus,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -25,16 +23,15 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirChatMessage,
-    MemoirChapterSourceLink,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
-    MemoirSourceCard,
+    MemoirSection,
+    MemoirSectionMaterial,
     MemoirTranscriptVersion,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.projects import Project
-from app.models.memoir_narrative import MemoirClaimEvidence
 from app.schemas.memoir_voice import (
     MemoirMaterialOfflineASRStateResponse,
     MemoirVoiceTranscriptIncludedChapterResponse,
@@ -45,36 +42,17 @@ from app.schemas.memoir_voice import (
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
-from app.services.memoir import automation_event_resolution
-from app.services.memoir import source_cards
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.source_disposition import (
-    IGNORED_SOURCE_MATERIAL_TYPES,
-    IGNORED_SOURCE_ROUTE_ACTION,
-    INTERVIEWER_SOURCE_MATERIAL_TYPE,
-    clear_source_route_disposition,
-)
-from app.services.memoir.book_plan_sources import (
-    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
-    SOURCES_CHANGED_STATUS_REASON,
-    SOURCES_DELETED_STATUS_REASON,
-    draft_status_metadata as _draft_status_metadata,
-    pending_source_ids as _pending_source_ids,
-    removed_source_ids as _removed_source_ids,
-    safe_quote as _safe_quote,
-    set_deleted_source_metadata as _set_deleted_source_metadata,
-    set_source_change_metadata as _set_source_change_metadata,
-)
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
-from app.services.memoir.chapter_source_links import (
-    mark_utterance_links_removed as _mark_utterance_links_removed,
-    update_utterance_link_ref_fields as _update_utterance_link_ref_fields,
+from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.sections import refresh_material_transcript_version
+from app.services.memoir.utterance_editing_pipeline import (
+    schedule_material_organization_for_ready_utterance,
 )
-from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
@@ -163,26 +141,7 @@ def _preview_sentence(value: str, *, limit: int) -> str:
     return text[:limit].rstrip()
 
 
-def _trim_card_text(value: object, *, limit: int) -> str:
-    if not isinstance(value, str):
-        return ""
-    return _compact_display_text(value)[:limit]
-
-
-def _summary_fields(display_text: str, source_card: MemoirSourceCard | None) -> tuple[str, str, str]:
-    if source_card:
-        card_json = source_card.card_json or {}
-        card_title = _trim_card_text(card_json.get("short_title"), limit=40)
-        card_summary = _trim_card_text(card_json.get("summary"), limit=260)
-        if card_title or card_summary:
-            fallback_title = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TITLE_LIMIT)
-            fallback_summary = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TEXT_LIMIT)
-            return (
-                card_title or fallback_title or "讲述记录",
-                card_summary or fallback_summary or card_title or "这条讲述记录暂无摘要。",
-                "source_card",
-            )
-
+def _summary_fields(display_text: str) -> tuple[str, str, str]:
     title = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TITLE_LIMIT) or "讲述记录"
     summary = _preview_sentence(display_text, limit=FALLBACK_SUMMARY_TEXT_LIMIT) or title
     return title, summary, "fallback"
@@ -405,14 +364,8 @@ def _transcript_filter(
 
 
 def _narrator_material_clause():
-    return (
-        MemoirVoiceUtterance.chat_message.has(
-            MemoirChatMessage.role == MemoirChatMessageRole.USER.value
-        )
-        & ~(
-            (MemoirVoiceUtterance.source_route_action == IGNORED_SOURCE_ROUTE_ACTION)
-            & MemoirVoiceUtterance.source_material_type.in_(IGNORED_SOURCE_MATERIAL_TYPES)
-        )
+    return MemoirVoiceUtterance.chat_message.has(
+        MemoirChatMessage.role == MemoirChatMessageRole.USER.value
     )
 
 
@@ -440,8 +393,6 @@ def _paired_human_interviewer_prompt_exists():
             MemoirVoiceSession.interview_type == MemoirInterviewType.HUMAN_INTERVIEW.value,
             interviewer_message.id == MemoirVoiceUtterance.chat_message_id,
             interviewer_message.role == MemoirChatMessageRole.INTERVIEWER.value,
-            MemoirVoiceUtterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE,
-            MemoirVoiceUtterance.source_route_action == IGNORED_SOURCE_ROUTE_ACTION,
             answer_message.role == MemoirChatMessageRole.USER.value,
             _has_transcript_text_clause(answer_utterance),
         )
@@ -565,8 +516,8 @@ async def prune_transcript_versions_for_utterance(
                 MemoirTranscriptVersion.source_artifact_id == utterance_id,
                 MemoirTranscriptVersion.version_type == version_value,
                 ~MemoirTranscriptVersion.id.in_(
-                    select(MemoirClaimEvidence.transcript_version_id).where(
-                        MemoirClaimEvidence.transcript_version_id.is_not(None)
+                    select(MemoirSectionMaterial.transcript_version_id).where(
+                        MemoirSectionMaterial.transcript_version_id.is_not(None)
                     )
                 ),
             )
@@ -608,7 +559,6 @@ async def _included_utterance_ids_for_filter(
 def _item_response(
     utterance: MemoirVoiceUtterance,
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
-    source_card: MemoirSourceCard | None = None,
     offline_asr: MemoirMaterialOfflineASRStateResponse | None = None,
 ) -> MemoirVoiceTranscriptItemResponse:
     voice_session = utterance.voice_session
@@ -628,7 +578,7 @@ def _item_response(
             "pending_transcription",
         )
     else:
-        summary_title, summary_text, summary_source = _summary_fields(display_text, source_card)
+        summary_title, summary_text, summary_source = _summary_fields(display_text)
     return MemoirVoiceTranscriptItemResponse(
         id=utterance.id,
         voice_session_id=utterance.voice_session_id,
@@ -743,31 +693,6 @@ async def _book_inclusions_by_utterance_ids(
                 if utterance_id in utterance_id_set:
                     inclusions.setdefault(utterance_id, []).append(included_chapter)
     return inclusions
-
-
-async def _source_cards_by_utterance(
-    db: AsyncSession,
-    utterances: list[MemoirVoiceUtterance],
-) -> dict[str, MemoirSourceCard]:
-    source_hashes = {
-        utterance.id: source_cards.source_text_hash(source_cards.source_text_for_utterance(utterance))
-        for utterance in utterances
-    }
-    utterance_ids = list(source_hashes)
-    if not utterance_ids:
-        return {}
-    result = await db.execute(
-        select(MemoirSourceCard).where(
-            MemoirSourceCard.utterance_id.in_(utterance_ids),
-            MemoirSourceCard.engine == source_cards.SOURCE_CARD_ENGINE,
-            MemoirSourceCard.status == MemoirSemanticCacheStatus.READY.value,
-        )
-    )
-    cards: dict[str, MemoirSourceCard] = {}
-    for card in result.scalars().all():
-        if card.source_text_hash == source_hashes.get(card.utterance_id):
-            cards[card.utterance_id] = card
-    return cards
 
 
 async def manual_corrections_by_utterance_ids(
@@ -914,13 +839,11 @@ async def list_voice_transcripts(
         [utterance.id for utterance in utterances],
         project_ids=[utterance.voice_session.project_id for utterance in utterances],
     )
-    cards = await _source_cards_by_utterance(db, list(utterances))
     offline_asr_states = await material_offline_asr_states(db, utterances)
     items = [
         _item_response(
             utterance,
             inclusions.get(utterance.id, []),
-            cards.get(utterance.id),
             offline_asr_states.get(utterance.id),
         )
         for utterance in utterances
@@ -955,12 +878,10 @@ async def get_voice_transcript(
         [utterance.id],
         project_ids=[utterance.voice_session.project_id],
     )
-    cards = await _source_cards_by_utterance(db, [utterance])
     offline_asr_states = await material_offline_asr_states(db, [utterance])
     return _item_response(
         utterance,
         inclusions.get(utterance.id, []),
-        cards.get(utterance.id),
         offline_asr_states.get(utterance.id),
     )
 
@@ -973,60 +894,39 @@ async def _sync_included_transcript_edit(
     transcript_version_id: str,
 ) -> set[str]:
     project_id = utterance.voice_session.project_id
-    links = (
-        await db.execute(
-            select(MemoirChapterSourceLink).where(
-                MemoirChapterSourceLink.project_id == project_id,
-                MemoirChapterSourceLink.utterance_id == utterance.id,
-                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
-            )
-        )
-    ).scalars().all()
-    if not links:
-        return set()
-    changed_count = await _update_utterance_link_ref_fields(
+    material = await refresh_material_transcript_version(
         db,
         project_id=project_id,
         utterance_id=utterance.id,
         transcript_version_id=transcript_version_id,
-        quote=_safe_quote(content),
     )
-    if not changed_count:
+    if material is None:
         return set()
-    changed_chapter_ids = {link.chapter_id for link in links}
-    chapters = (
-        await db.execute(
-            select(MemoirBookPlanChapter).where(
-                MemoirBookPlanChapter.project_id == project_id,
-                MemoirBookPlanChapter.id.in_(changed_chapter_ids),
-            )
+    chapter_id = await db.scalar(
+        select(MemoirSection.chapter_id).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.id == material.section_id,
         )
-    ).scalars().all()
-    for chapter in chapters:
-        pending_ids = _pending_source_ids(chapter.metadata_json)
-        pending_ids.add(utterance.id)
-        removed_ids = _removed_source_ids(chapter.metadata_json)
-        removed_ids.discard(utterance.id)
-        chapter.metadata_json = _set_source_change_metadata(
-            chapter.metadata_json,
-            added_ids=pending_ids,
-            removed_ids=removed_ids,
-        )
-        db.add(chapter)
+    )
+    if chapter_id is None:
+        return set()
 
     drafts = (
         await db.execute(
             select(MemoirBookChapterDraft).where(
                 MemoirBookChapterDraft.project_id == project_id,
-                MemoirBookChapterDraft.chapter_id.in_(changed_chapter_ids),
+                MemoirBookChapterDraft.chapter_id == chapter_id,
             )
         )
     ).scalars().all()
     for draft in drafts:
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-        draft.metadata_json = _draft_status_metadata(draft.metadata_json, SOURCES_CHANGED_STATUS_REASON)
+        draft.metadata_json = {
+            **(draft.metadata_json or {}),
+            "status_reason": "materials_changed",
+        }
         db.add(draft)
-    return changed_chapter_ids
+    return {chapter_id}
 
 
 async def _apply_edited_text(
@@ -1051,7 +951,6 @@ async def _apply_edited_text(
     db.add(version)
     await db.flush()
     utterance.transcript_edited = content
-    clear_source_route_disposition(utterance)
     if utterance.chat_message:
         utterance.chat_message.content_text = content
         utterance.chat_message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -1061,19 +960,18 @@ async def _apply_edited_text(
         utterance_id=utterance.id,
         version_type=version_type,
     )
-    changed_chapter_ids = await _sync_included_transcript_edit(
+    await _sync_included_transcript_edit(
         db,
         utterance=utterance,
         content=content,
         transcript_version_id=version.id,
     )
-    await schedule_source_processing_for_ready_utterance(
+    await schedule_material_organization_for_ready_utterance(
         db,
         project_id=utterance.voice_session.project_id,
         utterance=utterance,
         ai_model=ai_model,
         source=f"transcript_{version_type.value}",
-        include_routing=not changed_chapter_ids,
     )
     if commit:
         await db.commit()
@@ -1199,60 +1097,47 @@ async def _mark_book_sources_deleted(
     project_id: str,
     utterance_id: str,
 ) -> None:
-    links = (
+    rows = (
         await db.execute(
-            select(MemoirChapterSourceLink).where(
-                MemoirChapterSourceLink.project_id == project_id,
-                MemoirChapterSourceLink.utterance_id == utterance_id,
-                MemoirChapterSourceLink.status == MemoirChapterSourceLinkStatus.ACTIVE.value,
+            select(MemoirSectionMaterial, MemoirSection)
+            .join(
+                MemoirSection,
+                MemoirSection.id == MemoirSectionMaterial.section_id,
+            )
+            .where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSectionMaterial.utterance_id == utterance_id,
             )
         )
-    ).scalars().all()
-    affected_chapter_ids = {link.chapter_id for link in links}
+    ).all()
+    affected_section_ids = {section.id for _, section in rows}
+    affected_chapter_ids = {section.chapter_id for _, section in rows}
     if not affected_chapter_ids:
         return
-    chapters = (
-        await db.execute(
-            select(MemoirBookPlanChapter)
-            .where(
-                MemoirBookPlanChapter.project_id == project_id,
-                MemoirBookPlanChapter.id.in_(affected_chapter_ids),
-            )
-            .options(selectinload(MemoirBookPlanChapter.draft))
-        )
-    ).scalars().all()
-    removed_at_dt = datetime.utcnow()
-    removed_at = removed_at_dt.replace(tzinfo=timezone.utc).isoformat()
-    for chapter in chapters:
-        pending_ids = _pending_source_ids(chapter.metadata_json)
-        removed_ids = _removed_source_ids(chapter.metadata_json)
-        pending_ids.discard(utterance_id)
-        removed_ids.add(utterance_id)
-        chapter.metadata_json = _set_deleted_source_metadata(
-            chapter.metadata_json,
-            pending_ids=pending_ids,
-            removed_ids=removed_ids,
-            removed_at=removed_at,
-        )
-        db.add(chapter)
-
-        if chapter.draft:
-            chapter.draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-            draft_metadata = _draft_status_metadata(
-                chapter.draft.metadata_json,
-                SOURCES_DELETED_STATUS_REASON,
-            )
-            draft_removed_ids = _removed_source_ids(draft_metadata)
-            draft_removed_ids.add(utterance_id)
-            draft_metadata[REMOVED_SOURCE_UTTERANCE_IDS_KEY] = sorted(draft_removed_ids)
-            chapter.draft.metadata_json = draft_metadata
-            db.add(chapter.draft)
-    await _mark_utterance_links_removed(
+    for material, section in rows:
+        await db.delete(material)
+        section.version += 1
+        db.add(section)
+    await mark_section_digests_stale(
         db,
         project_id=project_id,
-        utterance_id=utterance_id,
-        removed_at=removed_at_dt,
+        section_ids=affected_section_ids,
     )
+    drafts = (
+        await db.execute(
+            select(MemoirBookChapterDraft).where(
+                MemoirBookChapterDraft.project_id == project_id,
+                MemoirBookChapterDraft.chapter_id.in_(affected_chapter_ids),
+            )
+        )
+    ).scalars().all()
+    for draft in drafts:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = {
+            **(draft.metadata_json or {}),
+            "status_reason": "materials_deleted",
+        }
+        db.add(draft)
 
 
 async def _ensure_voice_transcript_can_be_deleted(
@@ -1261,7 +1146,6 @@ async def _ensure_voice_transcript_can_be_deleted(
     utterance_id: str,
 ) -> None:
     protected_references = (
-        (MemoirClaimEvidence.id, MemoirClaimEvidence.utterance_id),
         (MemoirMaterialShareVideo.id, MemoirMaterialShareVideo.utterance_id),
         (MemoirImageAsset.id, MemoirImageAsset.source_utterance_id),
     )
@@ -1292,15 +1176,7 @@ async def delete_voice_transcript(
         delete_message = other_utterances == 0 and child_messages == 0
         clear_message = other_utterances == 0 and child_messages > 0
 
-    await automation_event_resolution.cleanup_automation_events_for_deleted_utterances(
-        db,
-        project_id=project_id,
-        utterance_ids=[utterance.id],
-    )
     await _mark_book_sources_deleted(db, project_id=project_id, utterance_id=utterance.id)
-    await db.execute(
-        delete(MemoirSourceCard).where(MemoirSourceCard.utterance_id == utterance.id)
-    )
     await db.delete(utterance)
     await db.flush()
 

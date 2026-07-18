@@ -16,8 +16,6 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
 from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir.access import load_memoir_project
-from app.services.memoir.book_voice_assistant_turn_stream import BookVoiceAssistantTurnStreamSession
 from app.services.memoir.streaming_asr import create_realtime_volc_streaming_asr_client
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_gateway import VoiceGatewaySession, VoiceGatewayStopReason
@@ -148,92 +146,6 @@ async def mobile_memoir_voice_gateway(
             logger.exception("Failed to discard pending memoir voice gateway audio")
         finally:
             await capacity_lease.release()
-
-
-@router.websocket("/projects/{project_id}/book-voice-command/gateway")
-async def mobile_memoir_book_voice_command_gateway(
-    websocket: WebSocket,
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    current_user = await _authenticate_websocket(websocket, db)
-    if current_user is None:
-        await _reject_websocket(websocket, "voice_gateway_auth_failed")
-        return
-    current_user_id = current_user.id
-
-    try:
-        await load_memoir_project(db, project_id, current_user_id)
-    except HTTPException:
-        await _reject_websocket(websocket, "memoir_project_unavailable")
-        return
-
-    transient_session_id = f"book-voice-command-{project_id}-{uuid.uuid4().hex}"
-    capacity_user_id = f"{current_user_id}:book-voice-command"
-    try:
-        capacity_lease = await voice_gateway_capacity_manager.acquire(capacity_user_id, transient_session_id)
-    except VoiceGatewayCapacityError as exc:
-        await _reject_websocket(websocket, exc.code)
-        return
-
-    try:
-        await websocket.accept()
-        connection_id = str(uuid.uuid4())
-        gateway_session = VoiceGatewaySession(
-            client=websocket,
-            asr_client_factory=lambda: create_realtime_volc_streaming_asr_client(
-                current_user_id,
-                transient_session_id,
-            ),
-            connection_id=connection_id,
-            diagnostics_context={
-                "gateway": "book_voice_command",
-                "project_id": project_id,
-                "voice_session_id": transient_session_id,
-            },
-        )
-        await gateway_session.run()
-    finally:
-        await capacity_lease.release()
-
-
-@router.websocket("/projects/{project_id}/book-voice-assistant/turn-stream")
-async def mobile_memoir_book_voice_assistant_turn_stream(
-    websocket: WebSocket,
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    current_user = await _authenticate_websocket(websocket, db)
-    if current_user is None:
-        await _reject_websocket(websocket, "voice_gateway_auth_failed")
-        return
-    current_user_id = current_user.id
-
-    try:
-        await load_memoir_project(db, project_id, current_user_id)
-    except HTTPException:
-        await _reject_websocket(websocket, "memoir_project_unavailable")
-        return
-
-    capacity_user_id = f"{current_user_id}:book-voice-assistant-turn"
-    capacity_session_id = f"book-voice-assistant-turn-{project_id}-{uuid.uuid4().hex}"
-    try:
-        capacity_lease = await voice_gateway_capacity_manager.acquire(capacity_user_id, capacity_session_id)
-    except VoiceGatewayCapacityError as exc:
-        await _reject_websocket(websocket, exc.code)
-        return
-
-    try:
-        await websocket.accept()
-        stream_session = BookVoiceAssistantTurnStreamSession(
-            db=db,
-            client=websocket,
-            project_id=project_id,
-            user_id=current_user_id,
-        )
-        await stream_session.run()
-    finally:
-        await capacity_lease.release()
 
 
 @router.websocket("/voice-sessions/{voice_session_id}/assistant-turn-stream")

@@ -3,7 +3,6 @@ from sqlalchemy import select
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.projects import Project
-from app.services.memoir.utterance_editing_pipeline import ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY
 from tests.memoir_helpers import create_test_voice_transcript
 
 
@@ -139,26 +138,25 @@ async def test_memoir_transcript_cleanup_confirm_writes_corrected_versions_and_j
     assert version.provider == "fake-ai"
     assert version.content == "我小时候住在外婆家。"
 
-    route_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
-    )
-    assert route_job is not None
-    assert route_job.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
-    assert route_job.payload_json["source"] == "transcript_dialect_corrected"
-    assert route_job.payload_json["ai_model"] == "deepseek"
-    assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
-        created["utterance_id"]: version.id,
-    }
-
-    source_card_job = await test_db.scalar(
+    organization_job = await test_db.scalar(
         select(MemoirEditingJob).where(
-            MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
+            MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
         )
     )
-    assert source_card_job is not None
-    assert source_card_job.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
-    assert source_card_job.payload_json["reason"] == "transcript_dialect_corrected"
-    assert source_card_job.payload_json["ai_model"] == "deepseek"
+    assert organization_job is not None
+    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
+    assert organization_job.payload_json["source"] == "transcript_dialect_corrected"
+    assert organization_job.payload_json["ai_model"] == "deepseek"
+    assert organization_job.payload_json["transcript_version_id"] == version.id
+
+    topic_map_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_TOPIC_MAP.value
+        )
+    )
+    assert topic_map_job is not None
+    assert topic_map_job.payload_json["material_ids"] == [created["utterance_id"]]
+    assert topic_map_job.payload_json["ai_model"] == "deepseek"
 
 
 async def test_memoir_transcript_cleanup_confirm_rejects_stale_preview(client, test_db, monkeypatch):

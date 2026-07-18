@@ -33,11 +33,6 @@ class MemoirInterviewEditorAnswerResponse(BaseModel):
     start_ms: int | None = None
     end_ms: int | None = None
     provider: str | None = None
-    source_material_type: str = ""
-    source_route_action: str = ""
-    source_route_confidence: float | None = None
-    source_route_reason: str = ""
-    source_route_updated_at: datetime | None = None
     is_included_in_book: bool = False
     included_chapters: list[MemoirBookSourceIncludedChapter] = Field(default_factory=list)
     turn_index: int
@@ -70,8 +65,6 @@ class MemoirInterviewEditorTimelineItemResponse(BaseModel):
     audio_file_id: str | None = None
     transcript_version_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
-    source_material_type: str = ""
-    source_route_action: str = ""
     turn_index: int
     created_at: datetime
     updated_at: datetime

@@ -26,8 +26,6 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChapterSourceAssignedBy,
-    MemoirChapterSourceLinkStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssuePriority,
@@ -119,11 +117,6 @@ class MemoirVoiceSession(Base):
     current_completion_issue_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("memoir_completion_issues.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    current_completion_item_id: Mapped[str | None] = mapped_column(
-        String(36),
         nullable=True,
         index=True,
     )
@@ -261,11 +254,6 @@ class MemoirVoiceUtterance(Base):
     end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
     provider_payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    source_material_type: Mapped[str] = mapped_column(String(40), default="", nullable=False)
-    source_route_action: Mapped[str] = mapped_column(String(40), default="", nullable=False)
-    source_route_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    source_route_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    source_route_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     framework_item_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("memoir_framework_items.id", ondelete="SET NULL"),
@@ -275,12 +263,6 @@ class MemoirVoiceUtterance(Base):
     completion_issue_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("memoir_completion_issues.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-    completion_item_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_completion_items.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -615,7 +597,6 @@ class MemoirBookPlanChapter(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    source_refs_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1238,22 +1219,6 @@ class MemoirBookOutput(Base):
     plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=MemoirOutputStatus.DRAFT.value, nullable=False)
-    formal_version_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey(
-            "memoir_book_output_versions.id",
-            name="fk_memoir_book_outputs_formal_version",
-            use_alter=True,
-        ),
-        nullable=True,
-    )
-    formal_audit_job_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_editing_jobs.id"), nullable=True
-    )
-    formalized_by_user_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("users.id"), nullable=True
-    )
-    formalized_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -1291,185 +1256,6 @@ class MemoirBookOutputVersion(Base):
         back_populates="versions",
         foreign_keys=[output_id],
     )
-
-
-class MemoirSourceCard(Base):
-    __tablename__ = "memoir_source_cards"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "utterance_id",
-            "engine",
-            "source_text_hash",
-            name="uq_memoir_source_cards_signature",
-        ),
-        CheckConstraint(
-            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
-            name="ck_memoir_source_cards_status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    utterance_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("memoir_voice_utterances.id"),
-        nullable=False,
-        index=True,
-    )
-    transcript_version_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_transcript_versions.id"),
-        nullable=True,
-        index=True,
-    )
-    source_text_hash: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default=MemoirSemanticCacheStatus.READY.value,
-        nullable=False,
-        index=True,
-    )
-    card_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    project: Mapped["Project"] = orm_relationship("Project")
-    utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
-    transcript_version: Mapped[MemoirTranscriptVersion | None] = orm_relationship("MemoirTranscriptVersion")
-
-
-class MemoirChapterCard(Base):
-    __tablename__ = "memoir_chapter_cards"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "chapter_id",
-            "engine",
-            "input_signature",
-            name="uq_memoir_chapter_cards_signature",
-        ),
-        CheckConstraint(
-            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
-            name="ck_memoir_chapter_cards_status",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    plan_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_plans.id"), nullable=False, index=True)
-    chapter_id: Mapped[str] = mapped_column(
-        String(36),
-        ForeignKey("memoir_book_plan_chapters.id"),
-        nullable=False,
-        index=True,
-    )
-    draft_version_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_book_chapter_draft_versions.id"),
-        nullable=True,
-        index=True,
-    )
-    input_signature: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default=MemoirSemanticCacheStatus.READY.value,
-        nullable=False,
-        index=True,
-    )
-    card_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    project: Mapped["Project"] = orm_relationship("Project")
-    plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan")
-    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter")
-    draft_version: Mapped[MemoirBookChapterDraftVersion | None] = orm_relationship("MemoirBookChapterDraftVersion")
-
-
-class MemoirBookQualityAuditSnapshot(Base):
-    __tablename__ = "memoir_book_quality_audit_snapshots"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "engine",
-            "input_signature",
-            name="uq_memoir_book_quality_audit_snapshots_signature",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
-    input_signature: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    overall_status: Mapped[str] = mapped_column(String(40), default="", nullable=False, index=True)
-    summary_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    display_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    primary_action_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    chapter_audits_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    source_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    chapter_card_ids_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    project: Mapped["Project"] = orm_relationship("Project")
-
-
-class MemoirChapterSourceLink(Base):
-    __tablename__ = "memoir_chapter_source_links"
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "chapter_id",
-            "utterance_id",
-            name="uq_memoir_chapter_source_links_chapter_utterance",
-        ),
-        CheckConstraint(
-            f"status IN ({_enum_values(MemoirChapterSourceLinkStatus)})",
-            name="ck_memoir_chapter_source_links_status",
-        ),
-        CheckConstraint(
-            f"assigned_by IN ({_enum_values(MemoirChapterSourceAssignedBy)})",
-            name="ck_memoir_chapter_source_links_assigned_by",
-        ),
-    )
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
-    plan_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    chapter_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    utterance_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
-    transcript_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    audio_file_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    start_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    end_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    status: Mapped[str] = mapped_column(
-        String(20),
-        default=MemoirChapterSourceLinkStatus.ACTIVE.value,
-        nullable=False,
-        index=True,
-    )
-    assigned_by: Mapped[str] = mapped_column(
-        String(20),
-        default=MemoirChapterSourceAssignedBy.SYSTEM.value,
-        nullable=False,
-        index=True,
-    )
-    assignment_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
-    assignment_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    source_card_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    merged_draft_version_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    project: Mapped["Project"] = orm_relationship("Project")
 
 
 class MemoirEditingJob(Base):
@@ -1545,40 +1331,12 @@ class MemoirAutomationEvent(Base):
             f"status IN ({_enum_values(MemoirAutomationEventStatus)})",
             name="ck_memoir_automation_events_status",
         ),
-        CheckConstraint(
-            "event_type != 'source_held' OR status != 'needs_review' "
-            "OR review_utterance_id IS NOT NULL",
-            name="ck_memoir_automation_events_review_utterance",
-        ),
-        CheckConstraint(
-            "(review_utterance_id IS NULL AND completion_item_id IS NULL) "
-            "OR event_type = 'source_held'",
-            name="ck_memoir_automation_events_review_links",
-        ),
-        CheckConstraint(
-            "completion_item_id IS NULL OR review_utterance_id IS NOT NULL",
-            name="ck_memoir_automation_events_completion_review",
-        ),
         Index(
             "ix_memoir_automation_events_project_timeline",
             "project_id",
             "event_type",
             "status",
             "created_at",
-        ),
-        Index(
-            "ix_memoir_automation_events_review_utterance",
-            "project_id",
-            "event_type",
-            "status",
-            "review_utterance_id",
-        ),
-        Index(
-            "ix_memoir_automation_events_review_completion_item",
-            "project_id",
-            "event_type",
-            "status",
-            "completion_item_id",
         ),
         Index(
             "ix_memoir_automation_events_editing_job",
@@ -1593,16 +1351,6 @@ class MemoirAutomationEvent(Base):
         ForeignKey("memoir_book_plan_chapters.id"),
         nullable=True,
         index=True,
-    )
-    review_utterance_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
-        nullable=True,
-    )
-    completion_item_id: Mapped[str | None] = mapped_column(
-        String(36),
-        ForeignKey("memoir_completion_items.id", ondelete="SET NULL"),
-        nullable=True,
     )
     editing_job_id: Mapped[str | None] = mapped_column(
         String(36),

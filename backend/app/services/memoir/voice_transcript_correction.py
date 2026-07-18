@@ -18,7 +18,9 @@ from app.models.memoir import (
 )
 from app.services.memoir import completion_interviews, editing_jobs, sections
 from app.services.memoir.editing_jobs import EditingJobResult
-from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
+from app.services.memoir.utterance_editing_pipeline import (
+    schedule_material_organization_for_ready_utterance,
+)
 from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
     load_voice_transcript_cleanup_context,
@@ -126,10 +128,10 @@ async def run_transcript_correction_job(
                 message.transcript_version_id if message else None
             ),
         )
-        processing_jobs = (
+        organization_job = (
             None
             if is_layered
-            else await schedule_source_processing_for_ready_utterance(
+            else await schedule_material_organization_for_ready_utterance(
                 db,
                 project_id=job.project_id,
                 utterance=utterance,
@@ -140,21 +142,7 @@ async def run_transcript_correction_job(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": (
-                    processing_jobs.route_job.id
-                    if processing_jobs and processing_jobs.route_job
-                    else None
-                ),
-                "source_card_job_id": (
-                    processing_jobs.source_card_job.id
-                    if processing_jobs and processing_jobs.source_card_job
-                    else None
-                ),
-                "narrative_ingestion_job_id": (
-                    processing_jobs.narrative_job.id
-                    if processing_jobs and processing_jobs.narrative_job
-                    else None
-                ),
+                "organization_job_id": organization_job.id if organization_job else None,
             },
             error_message="transcript already edited",
         )
@@ -165,10 +153,10 @@ async def run_transcript_correction_job(
             utterance=utterance,
             transcript_version_id=message.transcript_version_id,
         )
-        processing_jobs = (
+        organization_job = (
             None
             if is_layered
-            else await schedule_source_processing_for_ready_utterance(
+            else await schedule_material_organization_for_ready_utterance(
                 db,
                 project_id=job.project_id,
                 utterance=utterance,
@@ -179,21 +167,7 @@ async def run_transcript_correction_job(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": (
-                    processing_jobs.route_job.id
-                    if processing_jobs and processing_jobs.route_job
-                    else None
-                ),
-                "source_card_job_id": (
-                    processing_jobs.source_card_job.id
-                    if processing_jobs and processing_jobs.source_card_job
-                    else None
-                ),
-                "narrative_ingestion_job_id": (
-                    processing_jobs.narrative_job.id
-                    if processing_jobs and processing_jobs.narrative_job
-                    else None
-                ),
+                "organization_job_id": organization_job.id if organization_job else None,
             },
             error_message="transcript version changed",
         )
@@ -245,10 +219,10 @@ async def run_transcript_correction_job(
         utterance=utterance,
         transcript_version_id=corrected_version.id,
     )
-    processing_jobs = (
+    organization_job = (
         None
         if is_layered
-        else await schedule_source_processing_for_ready_utterance(
+        else await schedule_material_organization_for_ready_utterance(
             db,
             project_id=job.project_id,
             utterance=utterance,
@@ -261,20 +235,6 @@ async def run_transcript_correction_job(
             "transcript_version_id": corrected_version.id,
             "provider": cleaned.provider,
             "created_by": cleaned.created_by.value,
-            "route_source_job_id": (
-                processing_jobs.route_job.id
-                if processing_jobs and processing_jobs.route_job
-                else None
-            ),
-            "source_card_job_id": (
-                processing_jobs.source_card_job.id
-                if processing_jobs and processing_jobs.source_card_job
-                else None
-            ),
-            "narrative_ingestion_job_id": (
-                processing_jobs.narrative_job.id
-                if processing_jobs and processing_jobs.narrative_job
-                else None
-            ),
+            "organization_job_id": organization_job.id if organization_job else None,
         }
     )

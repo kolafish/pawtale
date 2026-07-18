@@ -38,7 +38,7 @@ export function chapterMoveCommand(
 }
 
 export function removeLocalChapterPatch(
-  data: Pick<BookData, "chapters" | "stage" | "sourceCoverage" | "splitSourceSelections">,
+  data: Pick<BookData, "chapters" | "splitSourceSelections">,
   chapterId: string,
 ): Partial<BookData> | null {
   const chapters = data.chapters.filter((chapter) => chapter.id !== chapterId);
@@ -46,13 +46,13 @@ export function removeLocalChapterPatch(
     return null;
   }
   return {
-    ...chapterCollectionData(chapters, data.stage, data.sourceCoverage, data.splitSourceSelections),
+    ...chapterCollectionData(chapters, data.splitSourceSelections),
     error: "",
   };
 }
 
 export function toggleBookSplitSourcePatch(
-  data: Pick<BookData, "chapters" | "stage" | "sourceCoverage" | "splitSourceSelections">,
+  data: Pick<BookData, "chapters" | "splitSourceSelections">,
   chapterId: string,
   utteranceId: string,
 ): Partial<BookData> | null {
@@ -74,7 +74,7 @@ export function toggleBookSplitSourcePatch(
   }
   return {
     splitSourceSelections,
-    ...chapterCollectionData(data.chapters, data.stage, data.sourceCoverage, splitSourceSelections),
+    ...chapterCollectionData(data.chapters, splitSourceSelections),
     error: "",
   };
 }
@@ -112,7 +112,7 @@ export function splitSelectedChapterSourcesPlan(
 }
 
 export function toggleBookChapterSourcesPatch(
-  data: Pick<BookData, "chapters" | "stage" | "sourceCoverage" | "splitSourceSelections">,
+  data: Pick<BookData, "chapters" | "splitSourceSelections">,
   chapterId: string,
 ): Partial<BookData> {
   const chapters = data.chapters.map((chapter) => (
@@ -120,5 +120,5 @@ export function toggleBookChapterSourcesPatch(
       ? { ...chapter, sourceListExpanded: !chapter.sourceListExpanded }
       : chapter
   ));
-  return chapterCollectionData(chapters, data.stage, data.sourceCoverage, data.splitSourceSelections);
+  return chapterCollectionData(chapters, data.splitSourceSelections);
 }

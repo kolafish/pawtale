@@ -34,7 +34,7 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
-from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir import chapter_generation
 from app.services.memoir.voice_tts_types import TTSClient
 
@@ -245,7 +245,7 @@ async def revise_chapter_draft(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     if output is not None:
-        invalidate_formal_book_output(output)
+        invalidate_book_output(output)
         db.add(output)
     await db.commit()
     refreshed = await _load_draft(

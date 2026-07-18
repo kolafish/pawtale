@@ -6,11 +6,8 @@ const {
   sampleAudioResponse,
   sampleAutomationEvent,
   sampleBookOutput,
-  sampleBookVoiceCommandExecuteResponse,
-  sampleBookVoiceCommandPreview,
   sampleDraft,
   samplePlan,
-  sampleSourceCoverage,
 } = require("./book-fixtures");
 
 function resetMemoirVoiceApiModules() {
@@ -53,10 +50,6 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
       let data = samplePlan("confirmed");
       if (options.url.endsWith("/draft/tts") || options.url.endsWith("/outline/tts") || options.url.endsWith("/book-output/tts")) {
         data = sampleAudioResponse();
-      } else if (options.url.endsWith("/book-voice-command/parse")) {
-        data = sampleBookVoiceCommandPreview();
-      } else if (options.url.endsWith("/book-voice-command/execute")) {
-        data = sampleBookVoiceCommandExecuteResponse("rename_chapter", samplePlan("confirmed"));
       } else if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         data = sampleDraft();
       } else if (options.url.endsWith("/book-output/title-suggestions")) {
@@ -69,8 +62,6 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         || options.url.includes("/book-output/chapters/")
       ) {
         data = sampleBookOutput();
-      } else if (options.url.endsWith("/book-source-coverage")) {
-        data = sampleSourceCoverage();
       }
       options.success({ statusCode: 200, data, cookies: [], header: {} });
     },
@@ -173,7 +164,7 @@ test("project automation event APIs encode routes and payloads", async () => {
               ? {
                 id: "event-1",
                 project_id: "project/1",
-                event_type: "source_assigned",
+                event_type: "chapter_draft_generated",
                 status: "completed",
                 utterance_ids: ["utterance-1"],
                 summary_text: "已整理 1 条讲述。",
@@ -186,7 +177,7 @@ test("project automation event APIs encode routes and payloads", async () => {
                   {
                     id: "event-1",
                     project_id: "project/1",
-                    event_type: "source_assigned",
+                    event_type: "chapter_draft_generated",
                     status: "completed",
                     utterance_ids: ["utterance-1"],
                     summary_text: "已整理 1 条讲述。",
@@ -679,30 +670,21 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.generateMemoirBookPlan("project/1", { max_chapters: 6 }), method: "POST", url: `${base}/book-plan/generate`, data: { max_chapters: 6, ai_model: selectedModel } },
     { call: () => api.confirmMemoirBookPlan("project/1", { title: "目录", chapters: [] }), method: "PUT", url: `${base}/book-plan`, data: { title: "目录", chapters: [] } },
     { call: () => api.updateMemoirBookPlan("project/1", { title: "目录", chapters: [] }), method: "PATCH", url: `${base}/book-plan`, data: { title: "目录", chapters: [] } },
-    { call: () => api.getMemoirBookSourceCoverage("project/1"), method: "GET", url: `${base}/book-source-coverage` },
-    { call: () => api.assignMemoirBookSources("project/1", { assignments: [{ chapter_id: "chapter/1", utterance_ids: ["utterance/1"] }] }), method: "POST", url: `${base}/book-source-assignments`, data: { assignments: [{ chapter_id: "chapter/1", utterance_ids: ["utterance/1"] }], ai_model: selectedModel } },
-    { call: () => api.moveMemoirBookSource("project/1", { source_chapter_id: "chapter/1", target_chapter_id: "chapter/2", utterance_id: "utterance/1" }), method: "POST", url: `${base}/book-source-moves`, data: { source_chapter_id: "chapter/1", target_chapter_id: "chapter/2", utterance_id: "utterance/1", ai_model: selectedModel } },
     { call: () => api.updateMemoirBookChapterTitle("project/1", "chapter/1", { title: "新章名" }), method: "PATCH", url: `${base}/book-plan/chapters/chapter%2F1/title`, data: { title: "新章名" } },
     { call: () => api.generateMemoirBookChapterTitle("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/title/generate`, data: { ai_model: selectedModel } },
     { call: () => api.getMemoirBookChapterDraft("project/1", "chapter/1"), method: "GET", url: `${base}/book-plan/chapters/chapter%2F1/draft` },
-    { call: () => api.enqueueMemoirBookChapterSourceRefresh("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/source-refresh/jobs`, data: { ai_model: selectedModel } },
     { call: () => api.reviseMemoirBookChapterDraft("project/1", "chapter/1", { expected_version_id: "version/1", content: "修改后的正文" }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/revise`, data: { expected_version_id: "version/1", content: "修改后的正文" } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.assembleMemoirBookOutput("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble`, data: {} },
     { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 180000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 180000 },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
-    { call: () => api.executeMemoirBookVoiceCommand("project/1", { intent: "rename_chapter", operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" } }), method: "POST", url: `${base}/book-voice-command/execute`, data: { intent: "rename_chapter", operation: { type: "rename_chapter", chapter_id: "chapter/1", new_title: "童年往事" } } },
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },
   ];
 
-  assert.equal(
-    api.bookVoiceAssistantTurnStreamUrl("project/1"),
-    "ws://backend.local:8000/api/mobile/memoir/projects/project%2F1/book-voice-assistant/turn-stream",
-  );
   for (const apiCase of cases) {
     await apiCase.call();
   }

@@ -28,7 +28,6 @@ from app.migrations.memoir_sections import (
     assert_memoir_section_schema,
     migrate_memoir_section_schema,
 )
-from app.migrations.memoir_semantic import migrate_memoir_semantic_schema
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
 from app.migrations.sqlite_integrity import assert_sqlite_foreign_key_integrity
@@ -49,7 +48,6 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     memoir_completion = await migrate_memoir_completion_schema(engine)
     memoir_chapters = await migrate_memoir_chapter_schema(engine)
     memoir_books = await migrate_memoir_book_schema(engine)
-    memoir_semantic = await migrate_memoir_semantic_schema(engine)
     memoir_images = await migrate_memoir_image_schema(engine)
     memoir_narrative = await migrate_memoir_narrative_schema(engine)
     await assert_runtime_schema(engine, require_sqlite_foreign_keys=False)
@@ -63,7 +61,6 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
         "memoir_completion": memoir_completion,
         "memoir_chapters": memoir_chapters,
         "memoir_books": memoir_books,
-        "memoir_semantic": memoir_semantic,
         "memoir_images": memoir_images,
         "memoir_narrative": memoir_narrative,
     }

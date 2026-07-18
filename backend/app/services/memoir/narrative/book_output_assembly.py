@@ -32,9 +32,7 @@ from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.image_assets import manuscript_image_snapshots
-from app.services.memoir.narrative.book_readiness import (
-    invalidate_formal_book_output,
-)
+from app.services.memoir.book_output_state import invalidate_book_output
 
 
 def _utcnow() -> datetime:
@@ -186,7 +184,7 @@ async def assemble_book_output(
             )
         output.plan_id = plan.id
         output.title = title
-        invalidate_formal_book_output(output)
+        invalidate_book_output(output)
         output.metadata_json = {
             **(
                 output.metadata_json

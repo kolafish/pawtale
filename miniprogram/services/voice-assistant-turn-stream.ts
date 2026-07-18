@@ -1,9 +1,5 @@
 import { readSelectedAIModel } from "./ai-model-settings";
 import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
-import type {
-  MemoirBookVoiceCommandExecuteResponse,
-  MemoirBookVoiceCommandParseResponse,
-} from "../domain/voice-chat";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import { readChatTTSSettings } from "./tts-settings";
 
@@ -101,18 +97,7 @@ export interface VoiceAssistantTurnCompletedEvent {
   progress_update?: Record<string, unknown> | null;
   progress_update_used?: boolean;
   progress_voice_selected_event_ids?: string[];
-  command_preview?: MemoirBookVoiceCommandParseResponse | null;
-  execution_result?: MemoirBookVoiceCommandExecuteResponse | null;
   turn_pipeline?: string;
-}
-
-export interface VoiceAssistantTurnCommandPreviewEvent {
-  type: "command.preview";
-  turn_id: string;
-  voice_session_id: string;
-  project_id: string;
-  command_preview: MemoirBookVoiceCommandParseResponse;
-  execute_after_reply?: boolean;
 }
 
 export interface VoiceAssistantTurnTerminalEvent {
@@ -135,7 +120,6 @@ export interface VoiceAssistantTurnStreamCallbacks {
   onAudioFormat?(event: VoiceAssistantTurnAudioFormatEvent): void;
   onAudioFrame?(frame: PreparedAssistantStreamAudioFrame): void;
   onAudioDone?(event: VoiceAssistantTurnAudioDoneEvent): void;
-  onCommandPreview?(event: VoiceAssistantTurnCommandPreviewEvent): void;
   onCompleted?(event: VoiceAssistantTurnCompletedEvent): void;
   onCancelled?(event: VoiceAssistantTurnTerminalEvent): void;
   onFailed?(event: VoiceAssistantTurnTerminalEvent): void;
@@ -334,10 +318,6 @@ export class VoiceAssistantTurnStreamClient {
     }
     if (event.type === "audio.done") {
       this.callbacks.onAudioDone?.(event as unknown as VoiceAssistantTurnAudioDoneEvent);
-      return;
-    }
-    if (event.type === "command.preview") {
-      this.callbacks.onCommandPreview?.(event as unknown as VoiceAssistantTurnCommandPreviewEvent);
       return;
     }
     if (event.type === "turn.completed") {

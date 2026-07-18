@@ -8,10 +8,6 @@ import type {
   MemoirBookChapterTitleUpdateRequest,
   MemoirBookImagePlacementCreateRequest,
   MemoirBookOutput,
-  MemoirBookConsistencyAuditJob,
-  MemoirBookConsistencyAuditRequest,
-  MemoirBookFormalizeResponse,
-  MemoirBookReadiness,
   MemoirBookOutputEditorialCopyRegenerateRequest,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -21,13 +17,8 @@ import type {
   MemoirBookPlanGenerateRequest,
   MemoirBookPlanStructureCommandRequest,
   MemoirBookPlanUpdateRequest,
-  MemoirBookSourceAssignmentRequest,
-  MemoirBookSourceCoverage,
-  MemoirBookSourceMoveRequest,
   MemoirBookTitleSuggestionRequest,
   MemoirBookTitleSuggestionResponse,
-  MemoirBookVoiceCommandExecuteRequest,
-  MemoirBookVoiceCommandExecuteResponse,
   MemoirAutomationEvent,
   MemoirImageAsset,
   MemoirImageAssetListResponse,
@@ -114,10 +105,6 @@ export function applyMemoirBookPlanStructureCommand(
   );
 }
 
-export function getMemoirBookSourceCoverage(projectId: string): Promise<MemoirBookSourceCoverage> {
-  return memoirRequest<MemoirBookSourceCoverage>(memoirProjectPath(projectId, "/book-source-coverage"));
-}
-
 export function listMemoirImageAssets(projectId: string): Promise<MemoirImageAssetListResponse> {
   return memoirRequest<MemoirImageAssetListResponse>(imageAssetPath(projectId));
 }
@@ -190,32 +177,6 @@ export function downloadMemoirImageAssetFile(
   });
 }
 
-export function assignMemoirBookSources(
-  projectId: string,
-  data: MemoirBookSourceAssignmentRequest,
-): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
-    memoirProjectPath(projectId, "/book-source-assignments"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
-export function moveMemoirBookSource(
-  projectId: string,
-  data: MemoirBookSourceMoveRequest,
-): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
-    memoirProjectPath(projectId, "/book-source-moves"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
 export function updateMemoirBookChapterTitle(
   projectId: string,
   chapterId: string,
@@ -249,20 +210,6 @@ export function getMemoirBookChapterDraft(
   chapterId: string,
 ): Promise<MemoirBookChapterDraft> {
   return memoirRequest<MemoirBookChapterDraft>(bookPlanChapterPath(projectId, chapterId, "/draft"));
-}
-
-export function enqueueMemoirBookChapterSourceRefresh(
-  projectId: string,
-  chapterId: string,
-  data: { ai_model?: string | null } = {},
-): Promise<MemoirAutomationEvent> {
-  return memoirRequest<MemoirAutomationEvent>(
-    bookPlanChapterPath(projectId, chapterId, "/draft/source-refresh/jobs"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
 }
 
 export function confirmMemoirBookChapterDraft(
@@ -332,78 +279,8 @@ export function createMemoirBookPlanOutlineTTS(
   );
 }
 
-export function executeMemoirBookVoiceCommand(
-  projectId: string,
-  data: MemoirBookVoiceCommandExecuteRequest,
-): Promise<MemoirBookVoiceCommandExecuteResponse> {
-  return memoirRequest<MemoirBookVoiceCommandExecuteResponse>(
-    memoirProjectPath(projectId, "/book-voice-command/execute"),
-    {
-      method: "POST",
-      data,
-    },
-  );
-}
-
-export function bookVoiceCommandGatewayUrl(projectId: string): string {
-  const config = readBackendConfig();
-  if (!config.wsBaseUrl) {
-    throw new Error("未配置后端 WebSocket 地址");
-  }
-  return `${cleanBaseUrl(config.wsBaseUrl)}${memoirProjectPath(projectId, "/book-voice-command/gateway")}`;
-}
-
-export function bookVoiceAssistantTurnStreamUrl(projectId: string): string {
-  const config = readBackendConfig();
-  if (!config.wsBaseUrl) {
-    throw new Error("未配置后端 WebSocket 地址");
-  }
-  return `${cleanBaseUrl(config.wsBaseUrl)}${memoirProjectPath(projectId, "/book-voice-assistant/turn-stream")}`;
-}
-
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
-}
-
-export function getMemoirBookReadiness(projectId: string): Promise<MemoirBookReadiness> {
-  return memoirRequest<MemoirBookReadiness>(
-    memoirNarrativeProjectPath(projectId, "/book-readiness"),
-  );
-}
-
-export function enqueueMemoirBookConsistencyAudit(
-  projectId: string,
-  data: MemoirBookConsistencyAuditRequest = {},
-): Promise<MemoirBookConsistencyAuditJob> {
-  return memoirRequest<MemoirBookConsistencyAuditJob>(
-    memoirNarrativeProjectPath(projectId, "/book-consistency-audits"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
-  );
-}
-
-export function getMemoirBookConsistencyAudit(
-  projectId: string,
-  jobId: string,
-): Promise<MemoirBookConsistencyAuditJob> {
-  return memoirRequest<MemoirBookConsistencyAuditJob>(
-    memoirNarrativeProjectPath(
-      projectId,
-      `/book-consistency-audits/${encodeURIComponent(jobId)}`,
-    ),
-  );
-}
-
-export function formalizeMemoirBookOutput(
-  projectId: string,
-  data: { audit_job_id: string; output_version_id: string },
-): Promise<MemoirBookFormalizeResponse> {
-  return memoirRequest<MemoirBookFormalizeResponse>(
-    memoirNarrativeProjectPath(projectId, "/book-output/formalize"),
-    { method: "POST", data },
-  );
 }
 
 export function updateMemoirBookOutput(

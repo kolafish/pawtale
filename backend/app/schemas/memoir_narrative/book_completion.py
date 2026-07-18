@@ -70,3 +70,15 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
     total_chapters: int
     completed_chapters: int
     chapters: list[MemoirChapterCompletionSummary]
+
+
+class MemoirChapterWorkspaceResponse(BaseModel):
+    project_id: str
+    chapter_id: str
+    chapter_title: str
+    completion_summary: MemoirChapterCompletionSummary
+    draft_id: str | None = None
+    draft_version_id: str | None = None
+    draft_version: int | None = None
+    draft_status: str | None = None
+    draft_content: str = ""

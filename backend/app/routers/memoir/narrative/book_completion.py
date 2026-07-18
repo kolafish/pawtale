@@ -9,11 +9,33 @@ from app.schemas.memoir_narrative import (
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir.narrative import book_completion
+from app.services.memoir import completion_read_model
 
 from .common import authorize_project, decision_error
 
 
 router = APIRouter()
+
+
+@router.get(
+    "/projects/{project_id}/chapters/{chapter_id}/workspace",
+    response_model=MemoirChapterWorkspaceResponse,
+)
+async def get_memoir_chapter_workspace(
+    project_id: str,
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        return await completion_read_model.chapter_workspace(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+    except ValueError as exc:
+        raise decision_error(exc) from exc
 
 
 @router.get(

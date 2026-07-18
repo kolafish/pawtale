@@ -15,7 +15,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.schemas.memoir_voice import MemoirMaterialOfflineASRStateResponse
 from app.services.memoir.dialect_profile import MemoirDialectProfile, resolve_memoir_dialect_profile
-from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE
+from app.services.memoir.material_roles import is_narrator_material
 
 
 MATERIAL_OFFLINE_ASR_METADATA_KEY = "material_offline_asr"
@@ -158,7 +158,7 @@ def _blocked_reason(
 ) -> str:
     if status in {MemoirEditingJobStatus.PENDING.value, MemoirEditingJobStatus.RUNNING.value}:
         return "离线识别正在处理中"
-    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
+    if not is_narrator_material(utterance):
         return "采访者提问不是正文素材"
     if utterance.audio_file_id is None or utterance.audio_file is None:
         return "这条素材没有可重新识别的音频"

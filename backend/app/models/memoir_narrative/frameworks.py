@@ -19,7 +19,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 from app.domain.memoir.narrative_types import (
-    MemoirClaimEvidenceRole,
     MemoirFrameworkEvidenceState,
     MemoirFrameworkMatchSource,
     MemoirFrameworkUserResolution,
@@ -176,41 +175,37 @@ class MemoirFrameworkItem(Base):
         "MemoirProjectFramework",
         back_populates="items",
     )
-    claims: Mapped[list["MemoirFrameworkItemClaim"]] = relationship(
-        "MemoirFrameworkItemClaim",
+    materials: Mapped[list["MemoirFrameworkItemMaterial"]] = relationship(
+        "MemoirFrameworkItemMaterial",
         back_populates="framework_item",
         cascade="all, delete-orphan",
     )
 
 
-class MemoirFrameworkItemClaim(Base):
-    __tablename__ = "memoir_framework_item_claims"
+class MemoirFrameworkItemMaterial(Base):
+    __tablename__ = "memoir_framework_item_materials"
     __table_args__ = (
         CheckConstraint(
-            f"evidence_role IN ({_enum_values(MemoirClaimEvidenceRole)})",
-            name="ck_memoir_framework_item_claims_evidence_role",
-        ),
-        CheckConstraint(
             f"match_source IN ({_enum_values(MemoirFrameworkMatchSource)})",
-            name="ck_memoir_framework_item_claims_match_source",
+            name="ck_memoir_framework_item_materials_match_source",
         ),
         CheckConstraint(
             "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)",
-            name="ck_memoir_framework_item_claims_confidence",
+            name="ck_memoir_framework_item_materials_confidence",
         ),
         CheckConstraint(
             "(match_source = 'manual' AND matcher_version IS NULL "
             "AND confidence IS NULL) OR "
             "(match_source != 'manual' AND matcher_version IS NOT NULL "
             "AND length(trim(matcher_version)) > 0 AND confidence IS NOT NULL)",
-            name="ck_memoir_framework_item_claims_match_shape",
+            name="ck_memoir_framework_item_materials_match_shape",
         ),
         Index(
-            "ix_memoir_framework_item_claims_claim",
-            "claim_id",
+            "ix_memoir_framework_item_materials_utterance",
+            "utterance_id",
         ),
         Index(
-            "ix_memoir_framework_item_claims_matcher",
+            "ix_memoir_framework_item_materials_matcher",
             "match_source",
             "matcher_version",
         ),
@@ -221,15 +216,10 @@ class MemoirFrameworkItemClaim(Base):
         ForeignKey("memoir_framework_items.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    claim_id: Mapped[str] = mapped_column(
+    utterance_id: Mapped[str] = mapped_column(
         String(36),
-        ForeignKey("memoir_claims.id", ondelete="CASCADE"),
+        ForeignKey("memoir_voice_utterances.id", ondelete="CASCADE"),
         primary_key=True,
-    )
-    evidence_role: Mapped[str] = mapped_column(
-        String(16),
-        default=MemoirClaimEvidenceRole.SUPPORTS.value,
-        nullable=False,
     )
     match_source: Mapped[str] = mapped_column(String(16), nullable=False)
     matcher_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
@@ -243,5 +233,8 @@ class MemoirFrameworkItemClaim(Base):
 
     framework_item: Mapped[MemoirFrameworkItem] = relationship(
         "MemoirFrameworkItem",
-        back_populates="claims",
+        back_populates="materials",
+    )
+    utterance: Mapped["MemoirVoiceUtterance"] = relationship(
+        "MemoirVoiceUtterance",
     )

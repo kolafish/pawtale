@@ -119,22 +119,6 @@ async def _add_turn(
         end_ms=end_ms,
         provider="volc_streaming_asr",
         provider_payload_json={"source": "test"},
-        source_material_type=(
-            "interviewer_prompt"
-            if role == MemoirChatMessageRole.INTERVIEWER.value
-            else "ai_interaction"
-            if role == MemoirChatMessageRole.ASSISTANT.value
-            else ""
-        ),
-        source_route_action="ignore" if role in {
-            MemoirChatMessageRole.INTERVIEWER.value,
-            MemoirChatMessageRole.ASSISTANT.value,
-        } else "",
-        source_route_reason=(
-            "访谈问题只作为上下文，不作为回忆录正文素材。"
-            if role in {MemoirChatMessageRole.INTERVIEWER.value, MemoirChatMessageRole.ASSISTANT.value}
-            else ""
-        ),
     )
     test_db.add(utterance)
     await test_db.flush()
@@ -372,8 +356,6 @@ async def test_interview_editor_updates_interviewer_question_without_promoting_i
     assert message.metadata_json["text_updated_from"] == "web_interview_editor"
     assert utterance is not None
     assert utterance.transcript_edited == "你小时候家里一共有几口人？"
-    assert utterance.source_material_type == "interviewer_prompt"
-    assert utterance.source_route_action == "ignore"
     assert len(versions) == 1
     assert versions[0].content == "你小时候家里一共有几口人？"
 
@@ -417,8 +399,6 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     assert detail["questions"][0]["id"] == target_question["message_id"]
     assert detail["questions"][0]["answers"][0]["id"] == misclassified_answer["utterance_id"]
     assert detail["questions"][0]["answers"][0]["message_id"] == misclassified_answer["message_id"]
-    assert detail["questions"][0]["answers"][0]["source_material_type"] == ""
-    assert detail["questions"][0]["answers"][0]["source_route_action"] == ""
     assert [item["role"] for item in detail["raw_timeline"]] == ["user", "interviewer"]
 
     message = await test_db.scalar(
@@ -447,33 +427,22 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     assert message.metadata_json["speaker_role"] == "narrator"
     assert utterance is not None
     assert utterance.transcript_edited == "我们家那时候有六口人。"
-    assert utterance.source_material_type == ""
-    assert utterance.source_route_action == ""
-    assert utterance.source_route_reason == ""
     assert len(versions) == 1
     assert versions[0].content == "我们家那时候有六口人。"
 
     jobs = (
         await test_db.execute(
             select(MemoirEditingJob).where(
-                MemoirEditingJob.dedupe_key.in_(
-                    [
-                        f"route_source:{misclassified_answer['utterance_id']}",
-                        f"generate_source_card:{misclassified_answer['utterance_id']}",
-                    ]
-                )
+                MemoirEditingJob.project_id == session["project_id"]
             )
         )
     ).scalars().all()
     jobs_by_type = {job.job_type: job for job in jobs}
     assert set(jobs_by_type) == {
-        MemoirEditingJobType.ROUTE_SOURCES.value,
-        MemoirEditingJobType.GENERATE_SOURCE_CARD.value,
+        MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+        MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
     }
-    assert jobs_by_type[MemoirEditingJobType.ROUTE_SOURCES.value].payload_json["source"] == (
-        "interview_question_converted_to_answer"
-    )
-    assert jobs_by_type[MemoirEditingJobType.GENERATE_SOURCE_CARD.value].payload_json["reason"] == (
+    assert jobs_by_type[MemoirEditingJobType.ORGANIZE_MATERIAL.value].payload_json["source"] == (
         "interview_question_converted_to_answer"
     )
 

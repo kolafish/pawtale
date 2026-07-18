@@ -227,12 +227,6 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     assert await test_db.scalar(
         select(MemoirEditingJob.id).where(
             MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.job_type.in_(
-                {
-                    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION.value,
-                    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT.value,
-                }
-            ),
         )
     ) is None
 

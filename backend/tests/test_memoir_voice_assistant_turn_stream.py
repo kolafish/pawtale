@@ -1,6 +1,5 @@
 import asyncio
 import base64
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +16,6 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
-    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -29,15 +27,12 @@ from app.models.memoir_narrative import (
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
-from app.services.memoir.semantic_state import upsert_book_quality_audit_snapshot, upsert_chapter_card
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
 from tests.memoir_helpers import (
-    add_test_chapter_source_links,
     create_test_book_plan,
     create_test_voice_transcript,
-    memoir_source_ref,
     post_mobile_memoir_voice_session,
 )
 
@@ -193,7 +188,7 @@ async def test_book_completion_acknowledgement_suppresses_global_progress_and_en
     await automation_events.record_automation_event(
         test_db,
         project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
+        event_type=MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
         summary_text="另有5条讲述未归入章节。",
         metadata_json={"source": "book_quality_audit"},
     )
@@ -617,7 +612,7 @@ async def test_voice_assistant_turn_progress_prompt_uses_recent_automation_event
     event = await automation_events.record_automation_event(
         test_db,
         project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         utterance_ids=[created["utterance_id"]],
         summary_text="刚才新增的 1 条讲述已补进《外婆家的院子》。",
         confidence=0.92,
@@ -668,7 +663,7 @@ async def test_voice_assistant_turn_strips_host_label_after_progress_prefix(
     await automation_events.record_automation_event(
         test_db,
         project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         utterance_ids=[created["utterance_id"]],
         summary_text="「职场浮沉与升职加薪」已自动补写 4 条新增讲述。",
         confidence=0.92,
@@ -716,7 +711,7 @@ async def test_voice_assistant_turn_progress_prompt_uses_failed_automation_event
     event = await automation_events.record_automation_event(
         test_db,
         project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         status=MemoirAutomationEventStatus.FAILED,
         utterance_ids=[created["utterance_id"]],
         summary_text="章节自动补写失败，稍后可重试。",
@@ -740,105 +735,6 @@ async def test_voice_assistant_turn_progress_prompt_uses_failed_automation_event
     assert completed["text"].startswith("章节自动补写失败，稍后可重试。")
 
 
-async def test_voice_assistant_turn_speaks_grouped_source_assignment_progress(
-    client,
-    test_db,
-):
-    first = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我小时候常在外婆家院子里摘菜。",
-        guidance_mode="guided_interview",
-        current_guidance_module="family",
-    )
-    second = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="春节那几天厨房里总是特别热闹。",
-        guidance_mode="guided_interview",
-        current_guidance_module="family",
-    )
-    _, first_chapter = await create_test_book_plan(
-        test_db,
-        project_id=first["session"]["project_id"],
-        source_ref=memoir_source_ref(first),
-        chapter_title="外婆家的童年",
-    )
-    second_chapter = MemoirBookPlanChapter(
-        plan_id=first_chapter.plan_id,
-        project_id=first["session"]["project_id"],
-        title="春节厨房",
-        sort_order=1,
-    )
-    test_db.add(second_chapter)
-    await test_db.flush()
-    await add_test_chapter_source_links(
-        test_db,
-        project_id=first["session"]["project_id"],
-        plan_id=first_chapter.plan_id,
-        chapter_id=second_chapter.id,
-        source_refs=[memoir_source_ref(second)],
-    )
-    first_event = await automation_events.record_automation_event(
-        test_db,
-        project_id=first["session"]["project_id"],
-        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
-        chapter_id=first_chapter.id,
-        utterance_ids=[first["utterance_id"]],
-        summary_text="1 条讲述已自动整理进「外婆家的童年」。",
-        metadata_json={
-            "routes": [
-                {
-                    "utterance_id": first["utterance_id"],
-                    "source_index": 1,
-                    "target_chapter_title": "外婆家的童年",
-                }
-            ]
-        },
-    )
-    second_event = await automation_events.record_automation_event(
-        test_db,
-        project_id=first["session"]["project_id"],
-        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED,
-        chapter_id=second_chapter.id,
-        utterance_ids=[second["utterance_id"]],
-        summary_text="1 条讲述已自动整理进「春节厨房」。",
-        metadata_json={
-            "routes": [
-                {
-                    "utterance_id": second["utterance_id"],
-                    "source_index": 2,
-                    "target_chapter_title": "春节厨房",
-                }
-            ]
-        },
-    )
-    await test_db.commit()
-
-    _, ai_client, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=second["session"]["id"],
-        user_id=second["user_id"],
-        chunks=["那春节厨房里，谁通常最先开始忙？"],
-    )
-
-    prompt = ai_client.calls[0]["user_prompt"]
-    assert "本轮可选进度鼓励：刚才有 2 条讲述已自动整理进 2 个章节" in prompt
-    assert "自动归章明细：语音记录 2 -> 「春节厨房」" in prompt
-    assert "自动归章明细：语音记录 1 -> 「外婆家的童年」" in prompt
-    assert completed["progress_update"]["kind"] == "source_assignment_batch"
-    assert set(completed["progress_update"]["event_ids"]) == {first_event.id, second_event.id}
-    assert completed["progress_spoken_text"].startswith("刚才有2条讲述已自动整理进2个章节")
-    assert completed["text"].startswith(completed["progress_spoken_text"])
-
-    await test_db.refresh(first_event)
-    await test_db.refresh(second_event)
-    assert first_event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert second_event.metadata_json[automation_event_metadata.VOICE_SELECTED_MESSAGE_ID_KEY] == completed["message_id"]
-    assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in first_event.metadata_json
-    assert automation_event_metadata.VOICE_PLAYED_AT_KEY not in second_event.metadata_json
-
-
 async def test_voice_assistant_turn_skips_voice_played_automation_event(
     client,
     test_db,
@@ -853,7 +749,7 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
     await automation_events.record_automation_event(
         test_db,
         project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.CHAPTER_AUTO_REVISED,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
         utterance_ids=[created["utterance_id"]],
         summary_text="这条自动补写记录不应该重复播报。",
         metadata_json={
@@ -873,245 +769,6 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
     prompt = ai_client.calls[0]["user_prompt"]
     assert "这条自动补写记录不应该重复播报" not in prompt
     assert completed["progress_update"]["kind"] != "automation_event"
-
-
-async def test_voice_assistant_turn_progress_prompt_prefers_semantic_chapter_card_questions(
-    client,
-    test_db,
-):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我小时候常在外婆家院子里摘菜。",
-        guidance_mode="guided_interview",
-        current_guidance_module="family",
-    )
-    plan, chapter = await create_test_book_plan(
-        test_db,
-        project_id=created["session"]["project_id"],
-        chapter_title="院子里的童年",
-    )
-    chapter_card = await upsert_chapter_card(
-        test_db,
-        project_id=created["session"]["project_id"],
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        input_signature="chapter-card-signature-1",
-        engine="llm_chapter_card_v1",
-        card_json={
-            "summary": "本章围绕院子里的童年生活。",
-            "gaps": [
-                {"type": "event_sequence", "severity": "medium", "message": "剥青豆的前后经过还不连贯"}
-            ],
-            "next_questions": ["外婆在院子里最常做哪件事？"],
-            "evidence_refs": [{"utterance_id": created["utterance_id"], "quote": "外婆家院子里摘菜"}],
-        },
-    )
-    audit_snapshot = await upsert_book_quality_audit_snapshot(
-        test_db,
-        project_id=created["session"]["project_id"],
-        engine="llm_semantic_v1",
-        input_signature="audit-signature-1",
-        overall_status="needs_updates",
-        summary_text="语义审计认为「院子里的童年」可以继续补充。",
-        display_json={
-            "title": "院子里的童年可以继续补问",
-            "summary": "章节已有素材，但人物动作和事件经过还可以更具体。",
-            "detail": "优先顺着院子、外婆和摘菜继续追问。",
-        },
-        primary_action_json={
-            "type": "continue_interview",
-            "cta_text": "继续补问",
-            "chapter_id": chapter.id,
-        },
-        chapter_audits_json=[
-            {
-                "chapter_id": chapter.id,
-                "summary": "审计认为可以补充剥青豆的起因。",
-                "gaps": [
-                    {"type": "event_sequence", "severity": "medium", "message": "剥青豆事件缺少起因和经过"}
-                ],
-                "next_questions": ["那天为什么会一起剥青豆？"],
-                "evidence_refs": [{"utterance_id": created["utterance_id"], "quote": "外婆家院子里摘菜"}],
-            }
-        ],
-        chapter_card_ids_json=[chapter_card.id],
-    )
-    event = await automation_events.record_automation_event(
-        test_db,
-        project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
-        summary_text="语义审计认为「院子里的童年」可以继续补充。",
-        metadata_json={
-            "source": "book_quality_audit",
-            "snapshot_id": audit_snapshot.id,
-            "snapshot_engine": "llm_semantic_v1",
-            "overall_status": "needs_updates",
-            "display": audit_snapshot.display_json,
-            "primary_action": audit_snapshot.primary_action_json,
-        },
-    )
-    await test_db.commit()
-
-    _, ai_client, _, completed = await _run_stream_turn(
-        test_db,
-        voice_session_id=created["session"]["id"],
-        user_id=created["user_id"],
-        chunks=["那院子里和外婆有关的细节，您还记得哪一件？"],
-    )
-
-    prompt = ai_client.calls[0]["user_prompt"]
-    assert "语义追问候选（可改写，不要照读）：外婆在院子里最常做哪件事？" in prompt
-    assert "章节缺口提示：剥青豆的前后经过还不连贯" in prompt
-    assert "那天为什么会一起剥青豆？" not in prompt
-    assert completed["progress_update"]["kind"] == "book_quality_audit"
-    assert completed["progress_update"]["event_ids"] == [event.id]
-    assert completed["progress_update"]["audit_question_source"] == "chapter_card"
-    assert completed["progress_update"]["audit_chapter_title"] == "院子里的童年"
-
-
-async def test_automation_event_response_does_not_expand_other_project_audit_snapshot(
-    client,
-    test_db,
-):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我小时候常在外婆家院子里摘菜。",
-    )
-    other_project_response = await client.post("/api/mobile/memoir/projects", json={"title": "另一本回忆录"})
-    assert other_project_response.status_code == 201
-    other_project_id = other_project_response.json()["id"]
-    other_snapshot = await upsert_book_quality_audit_snapshot(
-        test_db,
-        project_id=other_project_id,
-        engine="llm_semantic_v1",
-        input_signature="other-project-audit-signature",
-        overall_status="needs_updates",
-        summary_text="另一个项目的审计摘要。",
-        display_json={
-            "title": "不应该出现在当前项目",
-            "summary": "跨项目 snapshot 不应展开。",
-            "detail": "这是一条隔离测试。",
-        },
-    )
-    await automation_events.record_automation_event(
-        test_db,
-        project_id=created["session"]["project_id"],
-        event_type=MemoirAutomationEventType.AUDIT_COMPLETED,
-        summary_text="当前项目的事件摘要。",
-        metadata_json={
-            "source": "book_quality_audit",
-            "snapshot_id": other_snapshot.id,
-            "snapshot_engine": "llm_semantic_v1",
-        },
-    )
-    await test_db.commit()
-
-    response = await automation_events.list_automation_events(
-        test_db,
-        user_id=created["user_id"],
-        project_id=created["session"]["project_id"],
-    )
-
-    assert len(response.items) == 1
-    assert "audit_snapshot" not in response.items[0].metadata_json
-
-
-async def test_automation_events_hide_historical_failure_after_job_recovered(client, test_db):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="这条素材后来已经整理成功。",
-    )
-    project_id = created["session"]["project_id"]
-    job = MemoirEditingJob(
-        project_id=project_id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE.value,
-        status=MemoirEditingJobStatus.SUCCEEDED.value,
-        run_after=datetime.now(UTC).replace(tzinfo=None),
-        payload_json={"utterance_ids": [created["utterance_id"]]},
-        result_json={"recovered": True},
-    )
-    test_db.add(job)
-    await test_db.flush()
-    await automation_events.record_automation_event(
-        test_db,
-        project_id=project_id,
-        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
-        status=MemoirAutomationEventStatus.FAILED,
-        editing_job_id=job.id,
-        summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
-        metadata_json={
-            "source": "editing_job_failure",
-            "editing_job_id": job.id,
-            "event_signature": f"editing_job_failed:{job.id}",
-        },
-    )
-    await test_db.commit()
-
-    response = await automation_events.list_automation_events(
-        test_db,
-        user_id=created["user_id"],
-        project_id=project_id,
-    )
-    audit_history = await automation_events.list_automation_events(
-        test_db,
-        user_id=created["user_id"],
-        project_id=project_id,
-        include_acknowledged=True,
-    )
-
-    assert response.items == []
-    assert len(audit_history.items) == 1
-
-
-async def test_internal_editing_failure_is_not_announced_during_interview(client, test_db):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="原始转写仍然已经保存。",
-    )
-    project_id = created["session"]["project_id"]
-    job = MemoirEditingJob(
-        project_id=project_id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE.value,
-        status=MemoirEditingJobStatus.FAILED.value,
-        run_after=datetime.now(UTC).replace(tzinfo=None),
-        payload_json={"utterance_ids": [created["utterance_id"]]},
-        error_message="AI narrative extraction did not match schema",
-    )
-    test_db.add(job)
-    await test_db.flush()
-    await automation_events.record_automation_event(
-        test_db,
-        project_id=project_id,
-        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED,
-        status=MemoirAutomationEventStatus.FAILED,
-        editing_job_id=job.id,
-        summary_text="素材事实整理失败，原始转写未受影响，可稍后重试。",
-        metadata_json={
-            "source": "editing_job_failure",
-            "editing_job_id": job.id,
-            "event_signature": f"editing_job_failed:{job.id}",
-        },
-    )
-    await test_db.commit()
-
-    visible = await automation_events.list_automation_events(
-        test_db,
-        user_id=created["user_id"],
-        project_id=project_id,
-    )
-    voice_updates = await automation_events.list_automation_events(
-        test_db,
-        user_id=created["user_id"],
-        project_id=project_id,
-        voice_unannounced_only=True,
-    )
-
-    assert len(visible.items) == 1
-    assert voice_updates.items == []
 
 
 async def test_voice_assistant_turn_guided_opening_references_previous_session(

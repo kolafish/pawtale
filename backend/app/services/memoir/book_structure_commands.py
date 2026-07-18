@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from dataclasses import dataclass, field
 
@@ -9,15 +8,12 @@ from fastapi import HTTPException
 from app.models.memoir import MemoirBookPlan, MemoirBookPlanChapter
 from app.schemas.memoir_book import MemoirBookPlanStructureCommandRequest
 from app.services.memoir.book_plan_sources import (
-    SourceSegment,
-    as_dict,
     find_chapter_by_id,
     pending_source_ids,
     removed_source_ids,
     set_source_change_metadata,
     source_ref_utterance_id,
     source_ref_utterance_ids,
-    text_or_empty,
     unique_source_ref_dicts,
 )
 
@@ -42,29 +38,11 @@ def target_chapter_id(req: MemoirBookPlanStructureCommandRequest) -> str:
     return req.target_chapter_id
 
 
-def source_utterance_id(req: MemoirBookPlanStructureCommandRequest) -> str:
-    if not req.utterance_id:
-        raise HTTPException(status_code=400, detail="讲述记录不能为空")
-    return req.utterance_id
-
-
 def chapter_by_id(plan: MemoirBookPlan, chapter_id: str) -> MemoirBookPlanChapter:
     chapter = find_chapter_by_id(plan.chapters, chapter_id)
     if chapter:
         return chapter
     raise HTTPException(status_code=404, detail="章节不存在")
-
-
-def chapter_title_from_source(source: SourceSegment) -> str:
-    text = "".join(text_or_empty(source.text).split())
-    for prefix in ("新增讲述", "新收录讲述", "讲述记录", "新增转写", "新收录转写", "转写记录"):
-        if text.startswith(prefix):
-            text = text[len(prefix):].lstrip(":：，,。")
-            break
-    first_clause = next((part for part in re.split(r"[，。！？、,.!?;；:：]", text) if part), text)
-    if not first_clause or len(first_clause) < 3:
-        return "补记往事"
-    return first_clause[:16]
 
 
 def apply_book_structure_command(
@@ -75,7 +53,6 @@ def apply_book_structure_command(
     project_id: str,
     now: str,
     source_refs_by_chapter: dict[str, list[dict[str, object]]],
-    source: SourceSegment | None = None,
 ) -> BookStructureCommandMutation:
     if req.type == "move_chapter":
         return _move_chapter(chapters, req, source_refs_by_chapter=source_refs_by_chapter)
@@ -91,18 +68,6 @@ def apply_book_structure_command(
             project_id=project_id,
             now=now,
             source_refs_by_chapter=source_refs_by_chapter,
-        )
-    if req.type == "create_chapter_from_source":
-        if source is None:
-            raise HTTPException(status_code=400, detail="讲述记录不属于当前回忆录")
-        return _create_chapter_from_source(
-            plan,
-            chapters,
-            req,
-            project_id=project_id,
-            now=now,
-            source_refs_by_chapter=source_refs_by_chapter,
-            source=source,
         )
     raise HTTPException(status_code=400, detail="不支持的章节结构操作")
 
@@ -289,30 +254,4 @@ def _split_chapter(
         chapters=[*chapters[:source_index + 1], new_chapter, *chapters[source_index + 1:]],
         source_refs_by_chapter=next_refs_by_chapter,
         changed_chapter_ids={chapter.id},
-    )
-
-
-def _create_chapter_from_source(
-    plan: MemoirBookPlan,
-    chapters: list[MemoirBookPlanChapter],
-    req: MemoirBookPlanStructureCommandRequest,
-    *,
-    project_id: str,
-    now: str,
-    source_refs_by_chapter: dict[str, list[dict[str, object]]],
-    source: SourceSegment,
-) -> BookStructureCommandMutation:
-    new_chapter = MemoirBookPlanChapter(
-        id=str(uuid.uuid4()),
-        plan_id=plan.id,
-        project_id=project_id,
-        title=(req.title or chapter_title_from_source(source)).strip()[:200],
-        sort_order=10000 + len(chapters),
-        metadata_json={"created_from_source_at": now},
-    )
-    next_refs_by_chapter = dict(source_refs_by_chapter)
-    next_refs_by_chapter[new_chapter.id] = [as_dict(source.ref())]
-    return BookStructureCommandMutation(
-        chapters=[*chapters, new_chapter],
-        source_refs_by_chapter=next_refs_by_chapter,
     )

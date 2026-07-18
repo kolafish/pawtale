@@ -7,8 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.database import Base, register_models
 from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
-    MemoirAutomationEventType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
@@ -50,14 +48,14 @@ async def test_enqueue_editing_job_deduplicates_pending_job(test_db):
     first = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"]},
         dedupe_key="route:u1",
     )
     second = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"], "source": "updated"},
         dedupe_key="route:u1",
     )
@@ -85,7 +83,7 @@ async def test_enqueue_editing_job_deduplicates_concurrent_insert(tmp_path):
                 job = await enqueue_editing_job(
                     db,
                     project_id=project_id,
-                    job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+                    job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
                     dedupe_key="ingest:concurrent",
                 )
                 await db.commit()
@@ -106,7 +104,7 @@ async def test_enqueue_editing_job_does_not_reset_running_job(test_db):
     job = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"]},
         run_after=_utcnow() - timedelta(seconds=1),
         dedupe_key="route:u1",
@@ -118,7 +116,7 @@ async def test_enqueue_editing_job_does_not_reset_running_job(test_db):
     duplicate = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"], "source": "new"},
         dedupe_key="route:u1",
     )
@@ -134,19 +132,19 @@ async def test_claim_due_editing_jobs_can_filter_by_job_type_and_project(test_db
     ingestion = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
         run_after=_utcnow() - timedelta(seconds=1),
     )
     routing = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         run_after=_utcnow() - timedelta(seconds=1),
     )
     other_ingestion = await enqueue_editing_job(
         test_db,
         project_id=other_project.id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
         run_after=_utcnow() - timedelta(seconds=1),
     )
     await test_db.commit()
@@ -155,7 +153,7 @@ async def test_claim_due_editing_jobs_can_filter_by_job_type_and_project(test_db
         test_db,
         now=_utcnow(),
         limit=5,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
+        job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
         project_id=project.id,
     )
 
@@ -183,7 +181,7 @@ async def test_claim_due_editing_jobs_deprioritizes_policy_evaluations(test_db):
     routing = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         run_after=_utcnow() - timedelta(seconds=1),
     )
     await test_db.commit()
@@ -206,7 +204,7 @@ async def test_claim_and_run_editing_job_with_registered_handler(test_db):
     job = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"]},
         run_after=_utcnow() - timedelta(seconds=1),
         dedupe_key="route:u1",
@@ -216,7 +214,7 @@ async def test_claim_and_run_editing_job_with_registered_handler(test_db):
     async def handler(db, current_job):
         return EditingJobResult(result_json={"handled": current_job.payload_json["utterance_ids"]})
 
-    register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, handler)
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
     claimed = await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1)
 
     assert [lease.job_id for lease in claimed] == [job.id]
@@ -235,7 +233,7 @@ async def test_run_editing_job_skips_when_handler_missing(test_db):
     job = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.QUALITY_AUDIT,
+        job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
         payload_json={},
     )
     await test_db.commit()
@@ -244,18 +242,18 @@ async def test_run_editing_job_skips_when_handler_missing(test_db):
     assert await run_editing_job(test_db, lease) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SKIPPED.value
-    assert job.error_message == "no handler registered for quality_audit"
+    assert job.error_message == "no handler registered for generate_book_editorial_copy"
     event = await test_db.scalar(select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project.id))
     assert event is None
 
 
-async def test_run_editing_job_records_failed_automation_event(test_db):
+async def test_run_editing_job_records_failure_without_legacy_business_event(test_db):
     project = await _create_project(test_db)
     project_id = project.id
     job = await enqueue_editing_job(
         test_db,
         project_id=project_id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"], "source": "test_failure"},
         dedupe_key="route:u1",
     )
@@ -264,7 +262,7 @@ async def test_run_editing_job_records_failed_automation_event(test_db):
     async def handler(db, current_job):
         raise RuntimeError("provider down")
 
-    register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, handler)
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
 
     lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
     assert await run_editing_job(test_db, lease) is False
@@ -275,122 +273,7 @@ async def test_run_editing_job_records_failed_automation_event(test_db):
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
     )
-    assert event is not None
-    assert event.event_type == MemoirAutomationEventType.SOURCE_HELD.value
-    assert event.status == MemoirAutomationEventStatus.FAILED.value
-    assert event.utterance_ids_json == ["u1"]
-    assert event.summary_text == "自动判断讲述归属失败，稍后会继续重试或可手动整理。"
-    assert event.metadata_json["source"] == "editing_job_failure"
-    assert event.metadata_json["event_signature"] == f"editing_job_failed:{job.id}"
-    assert event.metadata_json["editing_job_id"] == job.id
-    assert event.metadata_json["job_type"] == "route_sources"
-    assert event.metadata_json["dedupe_key"] == "route:u1"
-    assert event.metadata_json["attempts"] == 1
-    assert event.metadata_json["pipeline_source"] == "test_failure"
-    assert event.metadata_json["error_message"] == "provider down"
-    event.metadata_json = {
-        **event.metadata_json,
-        "acknowledged_at": "2026-07-01T00:00:00+00:00",
-        "acknowledged_by_user": True,
-        "voice_played_at": "2026-07-01T00:00:00+00:00",
-        "voice_played_session_id": "voice-1",
-    }
-    test_db.add(event)
-    await test_db.commit()
-
-    await enqueue_editing_job(
-        test_db,
-        project_id=project_id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
-        payload_json={"utterance_ids": ["u1"], "source": "test_failure_retry"},
-        dedupe_key="route:u1",
-        replace_completed=True,
-    )
-    await test_db.commit()
-
-    retry_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
-    assert await run_editing_job(test_db, retry_lease) is False
-    events = (
-        await test_db.execute(
-            select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
-        )
-    ).scalars().all()
-    assert len(events) == 1
-    assert events[0].metadata_json["attempts"] == 1
-    assert events[0].metadata_json["pipeline_source"] == "test_failure_retry"
-    assert "acknowledged_at" not in events[0].metadata_json
-    assert "acknowledged_by_user" not in events[0].metadata_json
-    assert "voice_played_at" not in events[0].metadata_json
-    assert "voice_played_session_id" not in events[0].metadata_json
-
-
-async def test_successful_retry_resolves_prior_failure_event(test_db):
-    project = await _create_project(test_db)
-    project_id = project.id
-    job = await enqueue_editing_job(
-        test_db,
-        project_id=project_id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
-        payload_json={"utterance_ids": ["u-recovered"]},
-        dedupe_key="ingest:u-recovered",
-    )
-    await test_db.commit()
-
-    async def failing_handler(db, current_job):
-        raise RuntimeError("invalid provider payload")
-
-    register_editing_job_handler(MemoirEditingJobType.INGEST_NARRATIVE_STATE, failing_handler)
-    first_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
-    assert await run_editing_job(test_db, first_lease) is False
-    successful_event = MemoirAutomationEvent(
-        project_id=project_id,
-        event_type=MemoirAutomationEventType.NARRATIVE_INGESTED.value,
-        status=MemoirAutomationEventStatus.COMPLETED.value,
-        editing_job_id=job.id,
-        summary_text="素材事实已经整理完成。",
-        metadata_json={"source": "narrative_ingestion"},
-    )
-    test_db.add(successful_event)
-    await test_db.commit()
-
-    await enqueue_editing_job(
-        test_db,
-        project_id=project_id,
-        job_type=MemoirEditingJobType.INGEST_NARRATIVE_STATE,
-        payload_json={"utterance_ids": ["u-recovered"]},
-        dedupe_key="ingest:u-recovered",
-        retry_failed=True,
-    )
-    await test_db.commit()
-
-    async def successful_handler(db, current_job):
-        return EditingJobResult(result_json={"recovered": True})
-
-    register_editing_job_handler(MemoirEditingJobType.INGEST_NARRATIVE_STATE, successful_handler)
-    retry_lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
-    assert await run_editing_job(test_db, retry_lease) is True
-
-    events = list(
-        (
-            await test_db.scalars(
-                select(MemoirAutomationEvent).where(
-                    MemoirAutomationEvent.project_id == project_id
-                )
-            )
-        ).all()
-    )
-    failure_event = next(
-        event
-        for event in events
-        if event.status == MemoirAutomationEventStatus.FAILED.value
-    )
-    assert failure_event.metadata_json["resolution"] == "confirmed"
-    assert (
-        failure_event.metadata_json["resolution_reason"]
-        == "editing_job_succeeded"
-    )
-    assert failure_event.metadata_json["resolved_at"]
-    assert "resolution" not in successful_event.metadata_json
+    assert event is None
 
 
 async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test_db):
@@ -399,7 +282,7 @@ async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test
     job = await enqueue_editing_job(
         test_db,
         project_id=project.id,
-        job_type=MemoirEditingJobType.ROUTE_SOURCES,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"utterance_ids": ["u1"]},
         run_after=claimed_at - timedelta(seconds=1),
     )
@@ -451,7 +334,7 @@ async def test_editing_job_claim_is_atomic_across_workers(tmp_path):
             job = await enqueue_editing_job(
                 db,
                 project_id=project.id,
-                job_type=MemoirEditingJobType.ROUTE_SOURCES,
+                job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
                 payload_json={"utterance_ids": ["u1"]},
                 run_after=due_at - timedelta(seconds=1),
             )
@@ -508,13 +391,13 @@ async def test_sqlite_editing_worker_serializes_claimed_job_writes(tmp_path):
                 await enqueue_editing_job(
                     db,
                     project_id=project.id,
-                    job_type=MemoirEditingJobType.ROUTE_SOURCES,
+                    job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
                     run_after=_utcnow() - timedelta(seconds=1),
                     dedupe_key=f"route:serial:{index}",
                 )
             await db.commit()
 
-        register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, handler)
+        register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
         assert await run_available_editing_jobs(session_maker) == 2
         assert peak_handlers == 1
     finally:
@@ -530,7 +413,7 @@ async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(tmp_path):
         await enqueue_editing_job(
             db,
             project_id=current_job.project_id,
-            job_type=MemoirEditingJobType.QUALITY_AUDIT,
+            job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
             run_after=_utcnow() - timedelta(seconds=1),
             dedupe_key=f"quality:after:{current_job.id}",
         )
@@ -549,14 +432,14 @@ async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(tmp_path):
             await enqueue_editing_job(
                 db,
                 project_id=project.id,
-                job_type=MemoirEditingJobType.ROUTE_SOURCES,
+                job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
                 run_after=_utcnow() - timedelta(seconds=1),
                 dedupe_key="route:drain",
             )
             await db.commit()
 
-        register_editing_job_handler(MemoirEditingJobType.ROUTE_SOURCES, first_handler)
-        register_editing_job_handler(MemoirEditingJobType.QUALITY_AUDIT, second_handler)
+        register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, first_handler)
+        register_editing_job_handler(MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY, second_handler)
         assert await run_available_editing_jobs(session_maker) == 2
         async with session_maker() as db:
             statuses = (await db.scalars(select(MemoirEditingJob.status))).all()

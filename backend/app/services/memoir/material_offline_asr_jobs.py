@@ -24,7 +24,7 @@ from app.services.memoir.offline_asr_reprocessing import (
     load_reprocess_utterance,
     reprocess_offline_asr_utterance,
 )
-from app.services.memoir.source_disposition import INTERVIEWER_SOURCE_MATERIAL_TYPE
+from app.services.memoir.material_roles import is_narrator_material
 
 
 async def _load_owned_material(
@@ -40,7 +40,7 @@ async def _load_owned_material(
     project = utterance.voice_session.project
     if not allow_admin and project.user_id != user_id:
         raise HTTPException(status_code=404, detail="素材不存在")
-    if utterance.source_material_type == INTERVIEWER_SOURCE_MATERIAL_TYPE:
+    if not is_narrator_material(utterance):
         raise HTTPException(status_code=400, detail="采访者提问不支持离线增强识别")
     if utterance.audio_file_id is None or utterance.audio_file is None:
         raise HTTPException(status_code=400, detail="这条素材没有可重新识别的音频")

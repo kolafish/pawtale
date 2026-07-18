@@ -15,12 +15,10 @@ from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChapterSourceLinkStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirEditingJobType,
-    MemoirSemanticCacheStatus,
     MemoirShareVideoJobStatus,
     MemoirTranscriptVersionType,
 )
@@ -31,17 +29,16 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterSourceLink,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
-    MemoirSourceCard,
+    MemoirSection,
+    MemoirSectionMaterial,
     MemoirTranscriptAlignment,
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
-from app.services.memoir import source_cards
 from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
 from app.services.memoir import share_video_custom_backgrounds
@@ -57,13 +54,14 @@ from app.services.memoir.voice_transcripts import (
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.utterance_editing_pipeline import (
-    ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY,
-    ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY,
     source_text_hash,
 )
 from tests.memoir_helpers import (
+    add_test_section_materials,
+    create_test_book_plan,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
+    memoir_source_ref,
     post_mobile_memoir_voice_session,
 )
 
@@ -87,26 +85,6 @@ async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
         lease_seconds=60,
         max_attempts=3,
         retry_seconds=1,
-    )
-
-
-def _chapter_source_link(
-    *,
-    project_id: str,
-    plan_id: str,
-    chapter_id: str,
-    created: dict,
-    quote: str,
-) -> MemoirChapterSourceLink:
-    return MemoirChapterSourceLink(
-        project_id=project_id,
-        plan_id=plan_id,
-        chapter_id=chapter_id,
-        utterance_id=created["utterance_id"],
-        transcript_version_id=created.get("transcript_version_id"),
-        audio_file_id=created.get("audio_file_id"),
-        quote=quote,
-        status=MemoirChapterSourceLinkStatus.ACTIVE.value,
     )
 
 
@@ -173,44 +151,6 @@ class FakeRecoveryASRClient:
 
     async def close(self) -> None:
         self.closed = True
-
-
-async def add_ready_source_card(
-    test_db,
-    created: dict,
-    *,
-    short_title: str = "外婆家院子里的童年",
-    summary: str = "讲述者回忆小时候住在外婆家，在院子里生活的片段。",
-    source_text: str | None = None,
-) -> MemoirSourceCard:
-    if source_text is None:
-        utterance = await test_db.scalar(
-            select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
-        )
-        assert utterance is not None
-        source_text = source_cards.source_text_for_utterance(utterance)
-    card = MemoirSourceCard(
-        project_id=created["session"]["project_id"],
-        utterance_id=created["utterance_id"],
-        transcript_version_id=created["transcript_version_id"],
-        source_text_hash=source_cards.source_text_hash(source_text),
-        engine=source_cards.SOURCE_CARD_ENGINE,
-        status=MemoirSemanticCacheStatus.READY.value,
-        card_json={
-            "short_title": short_title,
-            "summary": summary,
-            "people": [],
-            "places": [],
-            "time_hints": [],
-            "event_tags": [],
-            "emotion_tags": [],
-            "key_facts": [],
-            "open_questions": [],
-        },
-    )
-    test_db.add(card)
-    await test_db.commit()
-    return card
 
 
 async def _append_voice_turn(
@@ -332,8 +272,6 @@ async def _append_human_interview_turn(
         end_ms=4000,
         provider="volc_streaming_asr",
         provider_payload_json={"source": "test"},
-        source_material_type="interviewer_prompt",
-        source_route_action="ignore",
     )
     test_db.add(interviewer_utterance)
     await test_db.flush()
@@ -381,8 +319,6 @@ async def _append_human_interview_turn(
             end_ms=8100,
             provider="volc_streaming_asr",
             provider_payload_json={"source": "test"},
-            source_material_type="interviewer_prompt",
-            source_route_action="ignore",
         )
         test_db.add(later_interviewer_utterance)
         await test_db.flush()
@@ -1953,59 +1889,6 @@ async def test_mobile_memoir_searches_explicit_parent_question_for_human_pair(cl
     assert later_response.json()["items"][0]["question_text"] == ""
 
 
-async def test_mobile_memoir_voice_transcripts_use_source_card_summary(client, test_db):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="爷爷退休后还在帮公司做事，大家都很信任他。",
-    )
-    await add_ready_source_card(
-        test_db,
-        created,
-        short_title="爷爷退休后仍帮公司做事",
-        summary="讲述者提到爷爷退休后仍继续帮公司处理事务，说明大家信任他。",
-    )
-
-    list_response = await client.get("/api/mobile/memoir/voice-transcripts")
-    detail_response = await client.get(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
-
-    assert list_response.status_code == 200
-    item = list_response.json()["items"][0]
-    assert item["summary_title"] == "爷爷退休后仍帮公司做事"
-    assert item["summary_text"] == "讲述者提到爷爷退休后仍继续帮公司处理事务，说明大家信任他。"
-    assert item["summary_source"] == "source_card"
-
-    assert detail_response.status_code == 200
-    detail = detail_response.json()
-    assert detail["id"] == created["utterance_id"]
-    assert detail["summary_title"] == item["summary_title"]
-    assert detail["summary_text"] == item["summary_text"]
-    assert detail["summary_source"] == "source_card"
-
-
-async def test_mobile_memoir_voice_transcripts_ignore_stale_source_card_summary(client, test_db):
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="小时候院子里的葡萄架夏天会遮出一大片阴凉。",
-    )
-    await add_ready_source_card(
-        test_db,
-        created,
-        short_title="过期标题不应显示",
-        summary="这条摘要来自旧文本。",
-        source_text="这是一段已经过期的旧文本。",
-    )
-
-    response = await client.get("/api/mobile/memoir/voice-transcripts")
-
-    assert response.status_code == 200
-    item = response.json()["items"][0]
-    assert item["summary_title"] == "小时候院子里的葡萄架夏天会遮出一大片阴凉。"
-    assert item["summary_text"] == "小时候院子里的葡萄架夏天会遮出一大片阴凉。"
-    assert item["summary_source"] == "fallback"
-
-
 async def test_mobile_memoir_searches_voice_transcripts_by_text_and_question(client, test_db):
     first = await create_test_voice_transcript(
         client,
@@ -2165,47 +2048,28 @@ async def test_mobile_memoir_updates_voice_transcript_without_overwriting_raw(cl
     assert versions[-1].created_by == "user"
     assert message.transcript_version_id == versions[-1].id
 
-    route_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
+    organization_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
+        )
     )
-    assert route_job is not None
-    assert route_job.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
-    assert route_job.payload_json["source"] == "transcript_user_edited"
-    assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
-        created["utterance_id"]: versions[-1].id,
-    }
-    assert route_job.payload_json[ROUTE_PAYLOAD_SOURCE_TEXT_HASHES_KEY] == {
-        created["utterance_id"]: source_text_hash("我小时候住在外婆家。"),
-    }
+    assert organization_job is not None
+    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
+    assert organization_job.payload_json["source"] == "transcript_user_edited"
+    assert organization_job.payload_json["transcript_version_id"] == versions[-1].id
+    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
+        "我小时候住在外婆家。"
+    )
 
 
 async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revision(client, test_db):
     created = await create_test_voice_transcript(client, test_db)
     project_id = created["session"]["project_id"]
-    plan = MemoirBookPlan(
+    _, chapter = await create_test_book_plan(
+        test_db,
         project_id=project_id,
-        title="外婆回忆录",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
+        source_ref=memoir_source_ref(created),
     )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title="外婆家的童年",
-        sort_order=0,
-    )
-    test_db.add(chapter)
-    await test_db.flush()
-    source_link = _chapter_source_link(
-        project_id=project_id,
-        plan_id=plan.id,
-        chapter_id=chapter.id,
-        created=created,
-        quote="嗯，我小时候就是住在外婆家。",
-    )
-    test_db.add(source_link)
     draft = MemoirBookChapterDraft(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -2220,12 +2084,9 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
         version=1,
         content="我小时候住在外婆家。",
         created_by=MemoirCreatedBy.AI.value,
+        used_material_ids_json=[created["utterance_id"]],
     )
     test_db.add(draft_version)
-    await test_db.flush()
-    draft_version_id = draft_version.id
-    source_link.merged_draft_version_id = draft_version_id
-    test_db.add(source_link)
     await test_db.commit()
 
     response = await client.patch(
@@ -2242,40 +2103,21 @@ async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revis
         )
         .order_by(MemoirTranscriptVersion.created_at.desc(), MemoirTranscriptVersion.id.desc())
     )
-    await test_db.refresh(chapter)
     await test_db.refresh(draft)
-    link = await test_db.scalar(
-        select(MemoirChapterSourceLink).where(
-            MemoirChapterSourceLink.project_id == project_id,
-            MemoirChapterSourceLink.chapter_id == chapter.id,
-            MemoirChapterSourceLink.utterance_id == created["utterance_id"],
+    material = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == created["utterance_id"],
         )
     )
-    assert link is not None
-    assert link.transcript_version_id == version.id
-    assert link.quote == "我小时候住在外婆家的院子里。"
-    assert chapter.metadata_json["pending_source_utterance_ids"] == [created["utterance_id"]]
+    assert material is not None
+    assert material.transcript_version_id == version.id
     assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-    assert draft.metadata_json["status_reason"] == "sources_changed"
-
-    route_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
-    )
-    assert route_job is None
-    source_card_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
-        )
-    )
-    assert source_card_job is not None
-    assert source_card_job.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
-    assert source_card_job.payload_json["utterance_id"] == created["utterance_id"]
-    assert source_card_job.payload_json["reason"] == "transcript_user_edited"
+    assert draft.metadata_json["status_reason"] == "materials_changed"
 
 
 async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, test_db):
     created = await create_test_voice_transcript(client, test_db)
-    source_card = await add_ready_source_card(test_db, created)
 
     response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
 
@@ -2290,7 +2132,6 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     )
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
     audio_file = await test_db.scalar(select(AudioFile).where(AudioFile.id == created["audio_file_id"]))
-    deleted_source_card = await test_db.get(MemoirSourceCard, source_card.id)
     versions = (
         await test_db.execute(
             select(MemoirTranscriptVersion).where(
@@ -2302,7 +2143,6 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert utterance is None
     assert message is None
     assert audio_file is not None
-    assert deleted_source_card is None
     assert len(versions) == 1
     assert versions[0].content == "嗯，我小时候就是住在外婆家。"
 
@@ -2317,93 +2157,15 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
     assert progress["modules"] == []
 
 
-async def test_mobile_memoir_delete_transcript_hides_related_automation_events(client, test_db):
-    deleted_source = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="我小时候常在外婆家的院子里晒太阳。",
-    )
-    kept_source = await create_test_voice_transcript(
-        client,
-        test_db,
-        text="后来我第一次离家去县城读书。",
-    )
-    project_id = deleted_source["session"]["project_id"]
-    held_event = MemoirAutomationEvent(
-        project_id=project_id,
-        review_utterance_id=deleted_source["utterance_id"],
-        event_type=MemoirAutomationEventType.SOURCE_HELD.value,
-        status=MemoirAutomationEventStatus.NEEDS_REVIEW.value,
-        utterance_ids_json=[],
-        summary_text="1 条讲述需要确认归属。",
-        metadata_json={
-            "route": {
-                "utterance_id": deleted_source["utterance_id"],
-                "action": "hold_for_review",
-                "reason": "需要人工确认",
-            }
-        },
-    )
-    assigned_event = MemoirAutomationEvent(
-        project_id=project_id,
-        event_type=MemoirAutomationEventType.SOURCE_ASSIGNED.value,
-        status=MemoirAutomationEventStatus.COMPLETED.value,
-        utterance_ids_json=[kept_source["utterance_id"]],
-        summary_text="1 条讲述已自动整理进「离家读书」。",
-        metadata_json={"routes": [{"utterance_id": kept_source["utterance_id"]}]},
-    )
-    test_db.add_all([held_event, assigned_event])
-    await test_db.commit()
-
-    response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{deleted_source['utterance_id']}")
-
-    assert response.status_code == 204
-    refreshed_held = await test_db.scalar(
-        select(MemoirAutomationEvent).where(MemoirAutomationEvent.id == held_event.id)
-    )
-    assert refreshed_held.status == MemoirAutomationEventStatus.COMPLETED.value
-    assert refreshed_held.review_utterance_id is None
-    assert refreshed_held.utterance_ids_json == []
-    assert refreshed_held.metadata_json["resolution"] == "ignored"
-    assert refreshed_held.metadata_json["resolution_reason"] == "source_deleted"
-    assert refreshed_held.metadata_json["deleted_utterance_ids"] == [deleted_source["utterance_id"]]
-
-    events_response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events")
-    assert events_response.status_code == 200
-    event_data = events_response.json()
-    assert event_data["total"] == 1
-    assert event_data["items"][0]["id"] == assigned_event.id
-
-
 async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    plan = MemoirBookPlan(
+    await create_test_book_plan(
+        test_db,
         project_id=project_id,
-        title="外婆回忆录章节规划",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
+        source_ref=memoir_source_ref(created),
+        chapter_title="院子里的童年",
     )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title="院子里的童年",
-        sort_order=0,
-    )
-    test_db.add(chapter)
-    await test_db.flush()
-    test_db.add(
-        _chapter_source_link(
-            project_id=project_id,
-            plan_id=plan.id,
-            chapter_id=chapter.id,
-            created=created,
-            quote="外婆家的院子",
-        )
-    )
-    await test_db.commit()
 
     response = await client.get(f"/api/mobile/memoir/voice-transcripts?project_id={project_id}")
 
@@ -2420,32 +2182,12 @@ async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client,
     included = await create_test_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
     not_included = await create_test_voice_transcript(client, test_db, text="后来我第一次离家去县城读书。")
     project_id = included["session"]["project_id"]
-    plan = MemoirBookPlan(
+    await create_test_book_plan(
+        test_db,
         project_id=project_id,
-        title="外婆回忆录章节规划",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
+        source_ref=memoir_source_ref(included),
+        chapter_title="院子里的童年",
     )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title="院子里的童年",
-        sort_order=0,
-    )
-    test_db.add(chapter)
-    await test_db.flush()
-    test_db.add(
-        _chapter_source_link(
-            project_id=project_id,
-            plan_id=plan.id,
-            chapter_id=chapter.id,
-            created=included,
-            quote="外婆家的院子",
-        )
-    )
-    await test_db.commit()
 
     included_response = await client.get(
         "/api/mobile/memoir/voice-transcripts",
@@ -2465,42 +2207,16 @@ async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client,
     assert not_included_response.json()["items"][0]["id"] == not_included["utterance_id"]
 
 
-async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_marks_draft_stale(client, test_db):
+async def test_mobile_memoir_delete_transcript_removes_section_material_and_marks_draft_stale(client, test_db):
     first = await create_test_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
     second = await create_test_voice_transcript(client, test_db, text="后来我第一次离家去县城读书。")
     project_id = first["session"]["project_id"]
-    plan = MemoirBookPlan(
+    _, chapter = await create_test_book_plan(
+        test_db,
         project_id=project_id,
-        title="外婆回忆录章节规划",
-        status=MemoirBookPlanStatus.CONFIRMED.value,
-        created_by=MemoirCreatedBy.USER.value,
+        source_refs=[memoir_source_ref(first), memoir_source_ref(second)],
+        chapter_title="童年和离家",
     )
-    test_db.add(plan)
-    await test_db.flush()
-    chapter = MemoirBookPlanChapter(
-        plan_id=plan.id,
-        project_id=project_id,
-        title="童年和离家",
-        sort_order=0,
-    )
-    test_db.add(chapter)
-    await test_db.flush()
-    test_db.add_all([
-        _chapter_source_link(
-            project_id=project_id,
-            plan_id=plan.id,
-            chapter_id=chapter.id,
-            created=first,
-            quote="外婆家的院子",
-        ),
-        _chapter_source_link(
-            project_id=project_id,
-            plan_id=plan.id,
-            chapter_id=chapter.id,
-            created=second,
-            quote="第一次离家",
-        ),
-    ])
     draft = MemoirBookChapterDraft(
         project_id=project_id,
         chapter_id=chapter.id,
@@ -2517,34 +2233,29 @@ async def test_mobile_memoir_delete_transcript_removes_book_source_refs_and_mark
             content="我小时候常在外婆家的院子里晒太阳。后来我第一次离家去县城读书。",
             created_by=MemoirCreatedBy.USER.value,
             prompt_snapshot="",
+            used_material_ids_json=[first["utterance_id"], second["utterance_id"]],
         )
     )
     await test_db.commit()
     response = await client.delete(f"/api/mobile/memoir/voice-transcripts/{second['utterance_id']}")
 
     assert response.status_code == 204
-    refreshed_chapter = await test_db.scalar(
-        select(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapter.id)
+    remaining_material_ids = set(
+        (
+            await test_db.scalars(
+                select(MemoirSectionMaterial.utterance_id)
+                .join(MemoirSection, MemoirSection.id == MemoirSectionMaterial.section_id)
+                .where(MemoirSection.chapter_id == chapter.id)
+            )
+        ).all()
     )
-    assert refreshed_chapter.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
-    assert "source_refs_removed_at" in refreshed_chapter.metadata_json
-    removed_link = await test_db.scalar(
-        select(MemoirChapterSourceLink).where(
-            MemoirChapterSourceLink.project_id == project_id,
-            MemoirChapterSourceLink.chapter_id == chapter.id,
-            MemoirChapterSourceLink.utterance_id == second["utterance_id"],
-        )
-    )
-    assert removed_link is not None
-    assert removed_link.status == MemoirChapterSourceLinkStatus.REMOVED.value
-    assert removed_link.removed_at is not None
+    assert remaining_material_ids == {first["utterance_id"]}
 
     refreshed_draft = await test_db.scalar(
         select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.id == draft.id)
     )
     assert refreshed_draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-    assert refreshed_draft.metadata_json["status_reason"] == "sources_deleted"
-    assert refreshed_draft.metadata_json["removed_source_utterance_ids"] == [second["utterance_id"]]
+    assert refreshed_draft.metadata_json["status_reason"] == "materials_deleted"
 
 async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_db, monkeypatch):
     created = await create_test_voice_transcript(client, test_db)
@@ -2572,25 +2283,24 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
     assert version.provider == "fake-ai"
     assert version.content == "我小时候住在外婆家。"
 
-    route_job = await test_db.scalar(
-        select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == f"route_source:{created['utterance_id']}")
-    )
-    assert route_job is not None
-    assert route_job.payload_json["source"] == "transcript_dialect_corrected"
-    assert route_job.payload_json["ai_model"] == "deepseek"
-    assert route_job.payload_json[ROUTE_PAYLOAD_TRANSCRIPT_VERSION_IDS_KEY] == {
-        created["utterance_id"]: version.id,
-    }
-    source_card_job = await test_db.scalar(
+    organization_job = await test_db.scalar(
         select(MemoirEditingJob).where(
-            MemoirEditingJob.dedupe_key == f"generate_source_card:{created['utterance_id']}"
+            MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
         )
     )
-    assert source_card_job is not None
-    assert source_card_job.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
-    assert source_card_job.payload_json["utterance_id"] == created["utterance_id"]
-    assert source_card_job.payload_json["reason"] == "transcript_dialect_corrected"
-    assert source_card_job.payload_json["ai_model"] == "deepseek"
+    assert organization_job is not None
+    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
+    assert organization_job.payload_json["source"] == "transcript_dialect_corrected"
+    assert organization_job.payload_json["ai_model"] == "deepseek"
+    assert organization_job.payload_json["transcript_version_id"] == version.id
+    topic_map_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_TOPIC_MAP.value
+        )
+    )
+    assert topic_map_job is not None
+    assert topic_map_job.payload_json["material_ids"] == [created["utterance_id"]]
+    assert topic_map_job.payload_json["ai_model"] == "deepseek"
 
 
 async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, test_db, monkeypatch):

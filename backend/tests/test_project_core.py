@@ -1,8 +1,7 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import delete, func, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import func, select
 
 from app.models.audit import AuditDailyFeatureUsage, AuditEvent, AuditSession
 from app.models.memoir import (
@@ -13,7 +12,6 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.models.memoir_common import AudioFile
-from app.models.memoir_narrative import MemoirNarrativeDecision
 from app.models.users import User
 from project_helpers import create_project, project_payload
 
@@ -224,17 +222,6 @@ class TestProjectAPI:
                     client_session_id="delete-project-client-session",
                     platform="web",
                 ),
-                MemoirNarrativeDecision(
-                    project_id=project["id"],
-                    target_type="story",
-                    target_id="story-1",
-                    action="confirm",
-                    actor_type="system",
-                    before_state_json={},
-                    after_state_json={"confirmed": True},
-                    reason="deletion regression",
-                    idempotency_key="delete-project-decision",
-                ),
                 MemoirImageAsset(
                     project_id=project["id"],
                     user_id=user.id,
@@ -301,23 +288,9 @@ class TestProjectAPI:
         )
         await test_db.commit()
 
-        with pytest.raises(IntegrityError, match="append-only"):
-            await test_db.execute(
-                delete(MemoirNarrativeDecision).where(
-                    MemoirNarrativeDecision.project_id == project["id"]
-                )
-            )
-            await test_db.commit()
-        await test_db.rollback()
-
         response = await client.delete(f"/api/projects/{project['id']}")
 
         assert response.status_code == 204
-        assert await test_db.scalar(
-            select(func.count(MemoirNarrativeDecision.id)).where(
-                MemoirNarrativeDecision.project_id == project["id"]
-            )
-        ) == 0
         assert await test_db.scalar(
             select(func.count(MemoirImageAsset.id)).where(
                 MemoirImageAsset.project_id == project["id"]

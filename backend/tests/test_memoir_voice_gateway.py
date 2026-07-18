@@ -737,88 +737,6 @@ async def test_voice_gateway_masks_final_persistence_errors():
     assert stopped_with == ["asr_final_persistence_failed"]
 
 
-async def test_book_voice_command_gateway_uses_transient_realtime_session(monkeypatch):
-    from app.routers.memoir import voice_gateway as voice_gateway_router
-
-    calls: dict[str, Any] = {}
-
-    class FakeUser:
-        id = "user-1"
-
-    class FakeWebSocket:
-        def __init__(self) -> None:
-            self.accepted = False
-
-        async def accept(self) -> None:
-            self.accepted = True
-
-    async def fake_authenticate(websocket: Any, db: Any) -> FakeUser:
-        calls["auth"] = (websocket, db)
-        return FakeUser()
-
-    async def fake_load_project(db: Any, project_id: str, user_id: str) -> object:
-        calls["load_project"] = (db, project_id, user_id)
-        return object()
-
-    class FakeLease:
-        def __init__(self) -> None:
-            self.released = False
-
-        async def release(self) -> None:
-            self.released = True
-
-    lease = FakeLease()
-
-    class FakeCapacityManager:
-        async def acquire(self, user_id: str, session_id: str) -> FakeLease:
-            calls["capacity"] = (user_id, session_id)
-            return lease
-
-    class FakeBookGatewaySession:
-        def __init__(self, **kwargs: Any) -> None:
-            calls["gateway_kwargs"] = kwargs
-
-        async def run(self) -> None:
-            calls["asr_client"] = calls["gateway_kwargs"]["asr_client_factory"]()
-
-    def fake_create_asr_client(user_id: str, session_id: str) -> FakeStreamingASRClient:
-        calls["asr_factory"] = (user_id, session_id)
-        return FakeStreamingASRClient()
-
-    websocket = FakeWebSocket()
-    db = object()
-    monkeypatch.setattr(voice_gateway_router, "_authenticate_websocket", fake_authenticate)
-    monkeypatch.setattr(voice_gateway_router, "load_memoir_project", fake_load_project)
-    monkeypatch.setattr(voice_gateway_router, "voice_gateway_capacity_manager", FakeCapacityManager())
-    monkeypatch.setattr(voice_gateway_router, "VoiceGatewaySession", FakeBookGatewaySession)
-    monkeypatch.setattr(voice_gateway_router, "create_realtime_volc_streaming_asr_client", fake_create_asr_client)
-
-    await voice_gateway_router.mobile_memoir_book_voice_command_gateway(websocket, "project-1", db)
-
-    transient_session_id = calls["capacity"][1]
-    assert websocket.accepted
-    assert calls["auth"] == (websocket, db)
-    assert calls["load_project"] == (db, "project-1", "user-1")
-    assert transient_session_id.startswith("book-voice-command-project-1-")
-    assert calls["capacity"] == ("user-1:book-voice-command", transient_session_id)
-    assert calls["asr_factory"] == ("user-1", transient_session_id)
-    assert set(calls["gateway_kwargs"]) == {
-        "client",
-        "asr_client_factory",
-        "connection_id",
-        "diagnostics_context",
-    }
-    assert calls["gateway_kwargs"]["client"] is websocket
-    assert calls["gateway_kwargs"]["connection_id"]
-    assert calls["gateway_kwargs"]["diagnostics_context"] == {
-        "gateway": "book_voice_command",
-        "project_id": "project-1",
-        "voice_session_id": transient_session_id,
-    }
-    assert isinstance(calls["asr_client"], FakeStreamingASRClient)
-    assert lease.released
-
-
 async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_without_failing_session(monkeypatch):
     from app.routers.memoir import voice_gateway as voice_gateway_router
 
@@ -1015,8 +933,8 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert correction_job.dedupe_key == f"correct_transcript:{utterance.id}"
     assert correction_job.payload_json["utterance_id"] == utterance.id
     assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
-    assert MemoirEditingJobType.ROUTE_SOURCES.value not in jobs_by_type
-    assert MemoirEditingJobType.QUALITY_AUDIT.value not in jobs_by_type
+    assert MemoirEditingJobType.ORGANIZE_MATERIAL.value not in jobs_by_type
+    assert MemoirEditingJobType.UPDATE_TOPIC_MAP.value not in jobs_by_type
 
 
 async def test_voice_gateway_persistence_saves_human_interviewer_turn_as_ignored_context(
@@ -1082,8 +1000,6 @@ async def test_voice_gateway_persistence_saves_human_interviewer_turn_as_ignored
     assert interviewer_message.metadata_json["interview_type"] == "human_interview"
     assert interviewer_message.metadata_json["correction_status"] == "skipped"
     assert interviewer_utterance is not None
-    assert interviewer_utterance.source_material_type == "interviewer_prompt"
-    assert interviewer_utterance.source_route_action == "ignore"
     assert narrator_message is not None
     assert narrator_message.role == "user"
     assert narrator_message.parent_message_id == interviewer_message.id
@@ -1206,36 +1122,21 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     assert corrected_versions[0].content == "我小时候住在外婆家。"
     assert corrected_versions[0].provider == "fake-ai"
     assert message.transcript_version_id == corrected_versions[0].id
-    route_job = await test_db.scalar(
+    organization_job = await test_db.scalar(
         select(MemoirEditingJob).where(
-            MemoirEditingJob.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+            MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert route_job is not None
-    assert route_job.status == MemoirEditingJobStatus.PENDING.value
-    assert route_job.dedupe_key == f"route_source:{utterance.id}"
-    assert route_job.payload_json["utterance_ids"] == [utterance.id]
-    assert route_job.payload_json["source"] == "transcript_correction_succeeded"
-    assert route_job.payload_json["transcript_version_ids"] == {
-        utterance.id: corrected_versions[0].id,
-    }
-    assert route_job.payload_json["source_text_hashes"] == {
-        utterance.id: source_text_hash("我小时候住在外婆家。"),
-    }
-    assert route_job.payload_json["source_text_lengths"] == {
-        utterance.id: len("我小时候住在外婆家。"),
-    }
-    assert result.result_json["route_source_job_id"] == route_job.id
-    source_card_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
-        )
+    assert organization_job is not None
+    assert organization_job.status == MemoirEditingJobStatus.PENDING.value
+    assert organization_job.dedupe_key == f"organize_material:{utterance.id}"
+    assert organization_job.payload_json["utterance_id"] == utterance.id
+    assert organization_job.payload_json["source"] == "transcript_correction_succeeded"
+    assert organization_job.payload_json["transcript_version_id"] == corrected_versions[0].id
+    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
+        "我小时候住在外婆家。"
     )
-    assert source_card_job is not None
-    assert source_card_job.dedupe_key == f"generate_source_card:{utterance.id}"
-    assert source_card_job.payload_json["utterance_id"] == utterance.id
-    assert source_card_job.payload_json["reason"] == "transcript_correction_succeeded"
-    assert result.result_json["source_card_job_id"] == source_card_job.id
+    assert result.result_json["organization_job_id"] == organization_job.id
 
 
 async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
@@ -1301,26 +1202,18 @@ async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
     assert message.content_text == "用户自己整理后的文字。"
     assert message.transcript_version_id == user_version.id
     assert utterance.transcript_edited == "用户自己整理后的文字。"
-    route_job = await test_db.scalar(
+    organization_job = await test_db.scalar(
         select(MemoirEditingJob).where(
-            MemoirEditingJob.job_type == MemoirEditingJobType.ROUTE_SOURCES.value
+            MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert route_job is not None
-    assert route_job.payload_json["source"] == "transcript_already_edited"
-    assert route_job.payload_json["transcript_version_ids"] == {utterance.id: user_version.id}
-    assert route_job.payload_json["source_text_hashes"] == {
-        utterance.id: source_text_hash("用户自己整理后的文字。"),
-    }
-    source_card_job = await test_db.scalar(
-        select(MemoirEditingJob).where(
-            MemoirEditingJob.job_type == MemoirEditingJobType.GENERATE_SOURCE_CARD.value
-        )
+    assert organization_job is not None
+    assert organization_job.payload_json["source"] == "transcript_already_edited"
+    assert organization_job.payload_json["transcript_version_id"] == user_version.id
+    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
+        "用户自己整理后的文字。"
     )
-    assert source_card_job is not None
-    assert source_card_job.dedupe_key == f"generate_source_card:{utterance.id}"
-    assert source_card_job.payload_json["reason"] == "transcript_already_edited"
-    assert result.result_json["source_card_job_id"] == source_card_job.id
+    assert result.result_json["organization_job_id"] == organization_job.id
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):
@@ -1377,7 +1270,10 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert (tmp_path / "audio" / audio_file.user_id / f"{audio_file.id}.pcm").read_bytes() == b"partial-pcm"
     assert utterance is not None
     assert utterance.transcript_raw == ""
-    assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
+    assert utterance.provider_payload_json == {
+        "source": "unfinalized_audio",
+        "speaker_role": "narrator",
+    }
     assert utterance.completion_issue_id is None
     assert utterance.framework_item_id is None
     assert not pending_path.exists()
@@ -1424,8 +1320,6 @@ async def test_voice_gateway_persistence_keeps_unfinalized_interviewer_as_contex
         "source": "unfinalized_audio",
         "speaker_role": "interviewer",
     }
-    assert utterance.source_material_type == "interviewer_prompt"
-    assert utterance.source_route_action == "ignore"
     assert utterance.completion_issue_id is None
     assert utterance.framework_item_id is None
 

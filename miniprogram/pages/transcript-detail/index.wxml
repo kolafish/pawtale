@@ -463,41 +463,9 @@
         </view>
         <text class="section-count">{{item.isIncludedInBook ? "已入章" : "未入章"}}</text>
       </view>
-      <view class="actions-row">
-        <button
-          wx:if="{{item.needsBookPlanConfirmation}}"
-          class="primary-button"
-          bindtap="openBook"
-          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
-        >
-          先确认章节
-        </button>
-        <picker
-          wx:if="{{item.canAssignChapterSource}}"
-          range="{{item.chapterAssignOptions}}"
-          range-key="label"
-          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
-          bindchange="assignTranscriptChapter"
-        >
-          <view class="primary-button picker-action {{assigning || moving || saving || deleting || convertingQuestionToAnswer ? 'disabled' : ''}}">
-            {{assigning ? "归入中" : "放入章节"}}
-          </view>
-        </picker>
-        <picker
-          wx:if="{{item.canMoveChapterSource}}"
-          range="{{item.chapterMoveOptions}}"
-          range-key="label"
-          disabled="{{assigning || moving || saving || deleting || convertingQuestionToAnswer}}"
-          bindchange="moveTranscriptChapter"
-        >
-          <view class="ghost-button picker-action {{assigning || moving || saving || deleting || convertingQuestionToAnswer ? 'disabled' : ''}}">
-            {{moving ? "移动中" : "移动章节"}}
-          </view>
-        </picker>
-      </view>
     </view>
 
-    <view class="section-card evidence-card">
+    <view class="section-card raw-material-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">原始讲述</text>

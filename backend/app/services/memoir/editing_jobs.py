@@ -13,27 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
-    MemoirAutomationEventType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
-from app.services.memoir import automation_events
-from app.services.memoir.automation_event_metadata import (
-    ACKNOWLEDGED_AT_KEY,
-    ACKNOWLEDGED_BY_USER_KEY,
-    EDITING_JOB_FAILURE_SOURCE,
-    RESOLUTION_KEY,
-    RESOLUTION_REASON_KEY,
-    RESOLVED_AT_KEY,
-    VOICE_PLAYED_AT_KEY,
-    VOICE_PLAYED_MESSAGE_ID_KEY,
-    VOICE_PLAYED_SESSION_ID_KEY,
-    VOICE_SELECTED_AT_KEY,
-    VOICE_SELECTED_MESSAGE_ID_KEY,
-    VOICE_SELECTED_SESSION_ID_KEY,
-)
+from app.models.memoir import MemoirEditingJob
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -56,164 +39,10 @@ class EditingJobResult:
 
 
 _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
-EDITING_JOB_RECOVERY_REASON = "editing_job_succeeded"
-
-_FAILURE_EVENT_TYPES: dict[MemoirEditingJobType, MemoirAutomationEventType] = {
-    MemoirEditingJobType.INGEST_NARRATIVE_STATE: MemoirAutomationEventType.NARRATIVE_INGESTED,
-    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
-    MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.ROUTE_SOURCES: MemoirAutomationEventType.SOURCE_HELD,
-    MemoirEditingJobType.QUALITY_AUDIT: MemoirAutomationEventType.AUDIT_COMPLETED,
-    MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED,
-}
-
-_FAILURE_SUMMARIES: dict[MemoirEditingJobType, str] = {
-    MemoirEditingJobType.INGEST_NARRATIVE_STATE: "素材事实整理失败，原始转写未受影响，可稍后重试。",
-    MemoirEditingJobType.REFRESH_CHAPTER_COMPLETION: "章节补全状态更新失败，已有事实、录音和正文未受影响，可稍后重试。",
-    MemoirEditingJobType.GENERATE_CHAPTER_DRAFT: "章节正文生成失败，已有讲述和正文未受影响，可稍后重试。",
-    MemoirEditingJobType.AUDIT_BOOK_CONSISTENCY: "全书一致性检查失败，已有事实和正文未受影响，可稍后重试。",
-    MemoirEditingJobType.ROUTE_SOURCES: "自动判断讲述归属失败，稍后会继续重试或可手动整理。",
-    MemoirEditingJobType.QUALITY_AUDIT: "章节整理检查失败，稍后可重试。",
-    MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY: "成书文案生成失败，稍后可重试。",
-}
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
-
-
-def _compact_error_message(message: str) -> str:
-    return " ".join(str(message or "").split())[:500]
-
-
-def _payload_utterance_ids(payload: dict) -> list[str]:
-    ids: list[str] = []
-    for key in ("utterance_ids", "pending_source_utterance_ids", "removed_source_utterance_ids"):
-        value = payload.get(key)
-        if isinstance(value, list):
-            ids.extend(item for item in value if isinstance(item, str))
-    return list(dict.fromkeys(item.strip() for item in ids if item.strip()))
-
-
-async def _record_job_failure_event(
-    db: AsyncSession,
-    job: MemoirEditingJob,
-    *,
-    error_message: str,
-) -> None:
-    try:
-        job_type = MemoirEditingJobType(job.job_type)
-    except ValueError:
-        return
-    event_type = _FAILURE_EVENT_TYPES.get(job_type)
-    if event_type is None:
-        return
-
-    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
-    error = _compact_error_message(error_message)
-    metadata: dict[str, object] = {
-        "source": EDITING_JOB_FAILURE_SOURCE,
-        "editing_job_id": job.id,
-        "job_type": job_type.value,
-        "dedupe_key": job.dedupe_key or "",
-        "attempts": job.attempts,
-        "error_message": error,
-    }
-    payload_source = payload.get("source")
-    if isinstance(payload_source, str) and payload_source.strip():
-        metadata["pipeline_source"] = payload_source.strip()
-
-    automation_event_id = payload.get("automation_event_id")
-    if isinstance(automation_event_id, str) and automation_event_id.strip():
-        event = await db.get(MemoirAutomationEvent, automation_event_id.strip())
-        if event is not None and event.project_id == job.project_id:
-            was_failed = event.status == MemoirAutomationEventStatus.FAILED.value
-            event.status = MemoirAutomationEventStatus.FAILED.value
-            event.editing_job_id = job.id
-            if not was_failed:
-                event.summary_text = _FAILURE_SUMMARIES[job_type]
-            event.metadata_json = {
-                **(event.metadata_json or {}),
-                **metadata,
-            }
-            updated_metadata = dict(event.metadata_json or {})
-            for key in (
-                ACKNOWLEDGED_AT_KEY,
-                ACKNOWLEDGED_BY_USER_KEY,
-                VOICE_SELECTED_AT_KEY,
-                VOICE_SELECTED_SESSION_ID_KEY,
-                VOICE_SELECTED_MESSAGE_ID_KEY,
-                VOICE_PLAYED_AT_KEY,
-                VOICE_PLAYED_SESSION_ID_KEY,
-                VOICE_PLAYED_MESSAGE_ID_KEY,
-            ):
-                updated_metadata.pop(key, None)
-            event.metadata_json = updated_metadata
-            db.add(event)
-            await db.flush()
-            return
-
-    event = await automation_events.record_or_update_automation_event(
-        db,
-        project_id=job.project_id,
-        event_type=event_type,
-        status=MemoirAutomationEventStatus.FAILED,
-        chapter_id=job.chapter_id,
-        utterance_ids=_payload_utterance_ids(payload),
-        editing_job_id=job.id,
-        summary_text=_FAILURE_SUMMARIES[job_type],
-        event_signature=f"editing_job_failed:{job.id}",
-        metadata_json=metadata,
-    )
-    updated_metadata = dict(event.metadata_json or {})
-    for key in (
-        ACKNOWLEDGED_AT_KEY,
-        ACKNOWLEDGED_BY_USER_KEY,
-        VOICE_SELECTED_AT_KEY,
-        VOICE_SELECTED_SESSION_ID_KEY,
-        VOICE_SELECTED_MESSAGE_ID_KEY,
-        VOICE_PLAYED_AT_KEY,
-        VOICE_PLAYED_SESSION_ID_KEY,
-        VOICE_PLAYED_MESSAGE_ID_KEY,
-    ):
-        updated_metadata.pop(key, None)
-    event.metadata_json = updated_metadata
-    db.add(event)
-    await db.flush()
-
-
-async def _resolve_job_failure_event(db: AsyncSession, job: MemoirEditingJob) -> None:
-    try:
-        job_type = MemoirEditingJobType(job.job_type)
-    except ValueError:
-        return
-    event_type = _FAILURE_EVENT_TYPES.get(job_type)
-    if event_type is None:
-        return
-    events = (
-        await db.scalars(
-            select(MemoirAutomationEvent).where(
-                MemoirAutomationEvent.project_id == job.project_id,
-                MemoirAutomationEvent.event_type == event_type.value,
-                MemoirAutomationEvent.editing_job_id == job.id,
-            )
-        )
-    ).all()
-    for event in events:
-        if (
-            (event.metadata_json or {}).get("source")
-            != EDITING_JOB_FAILURE_SOURCE
-        ):
-            continue
-        event.metadata_json = {
-            **(event.metadata_json or {}),
-            RESOLUTION_KEY: "confirmed",
-            RESOLUTION_REASON_KEY: EDITING_JOB_RECOVERY_REASON,
-            RESOLVED_AT_KEY: datetime.now(UTC).isoformat(),
-        }
-        db.add(event)
-        await db.flush()
 
 
 def register_editing_job_handler(
@@ -394,7 +223,7 @@ async def claim_due_editing_jobs(
                             (
                                 MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
                                 MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
-                                MemoirEditingJobType.EVALUATE_TOPIC_MAP_CLAIMS.value,
+                                MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
                             )
                         ),
                         1,
@@ -496,10 +325,6 @@ async def _mark_job(
     if result.rowcount != 1:
         await db.rollback()
         return False
-    if status == MemoirEditingJobStatus.FAILED:
-        await _record_job_failure_event(db, job, error_message=error_message)
-    elif status == MemoirEditingJobStatus.SUCCEEDED:
-        await _resolve_job_failure_event(db, job)
     await db.commit()
     return True
 

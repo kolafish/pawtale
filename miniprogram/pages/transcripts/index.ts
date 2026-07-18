@@ -1,5 +1,4 @@
 import type {
-  MemoirBookPlan,
   MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
@@ -8,26 +7,15 @@ import type {
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import type { ChapterPickerOption } from "../../services/memoir-book-source-actions";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  assignMemoirBookSources,
-  getMemoirBookPlan,
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
   recoverMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
 import { getMemoirIdentity } from "../../services/auth";
 import {
-  sourceAssignmentRequest,
-  transcriptChapterAssignOptions,
-  transcriptNeedsBookPlanConfirmation,
-} from "../../services/memoir-book-source-actions";
-import { ApiError } from "../../services/request";
-import {
   isAuthError,
-  routeAuthError,
-  switchToBook,
   switchToMe,
 } from "../../services/navigation";
 import {
@@ -48,9 +36,7 @@ import {
 import {
   datasetString,
   pageUrl,
-  pickerIndex,
   type PageDatasetEvent,
-  type PagePickerEvent,
 } from "../../services/page-input";
 
 interface TranscriptDataset {
@@ -64,8 +50,6 @@ interface SearchInputEvent {
     value: string;
   };
 }
-
-type PickerEvent = PagePickerEvent<TranscriptDataset>;
 
 interface TranscriptSearchFilters {
   included: MemoirVoiceTranscriptIncludedFilter;
@@ -93,14 +77,8 @@ interface TranscriptItemView {
   recoverButtonText: string;
   bookInclusionText: string;
   isIncludedInBook: boolean;
-  needsBookPlanConfirmation: boolean;
-  canAssignChapterSource: boolean;
-  chapterAssignOptions: ChapterPickerOption[];
   cardClass: string;
   bookStatusClass: string;
-  assignPickerDisabled: boolean;
-  assignPickerActionClass: string;
-  assignPickerText: string;
 }
 
 interface TranscriptsData {
@@ -108,7 +86,6 @@ interface TranscriptsData {
   loading: boolean;
   needsLogin: boolean;
   recoveringId: string;
-  assigningSourceId: string;
   error: string;
   items: TranscriptItemView[];
   total: number;
@@ -126,8 +103,6 @@ interface TranscriptsData {
   voiceSearchStatusText: string;
   activeProjectId: string;
   projectTitle: string;
-  bookPlan: MemoirBookPlan | null;
-  bookPlanProjectId: string;
   highlightedId: string;
   pageMetaText: string;
   showSearchClear: boolean;
@@ -208,11 +183,10 @@ function withTranscriptRuntimeState(
   item: TranscriptItemView,
   state: Pick<
     TranscriptsData,
-    "assigningSourceId" | "highlightedId" | "recoveringId"
+    "highlightedId" | "recoveringId"
   >,
 ): TranscriptItemView {
   const transcriptBusy = Boolean(state.recoveringId);
-  const chapterBusy = Boolean(transcriptBusy || state.assigningSourceId);
   const baseCardClass = item.canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card";
   return {
     ...item,
@@ -220,9 +194,6 @@ function withTranscriptRuntimeState(
     bookStatusClass: item.canRecoverTranscription
       ? "book-status pending"
       : (item.isIncludedInBook ? "book-status included" : "book-status"),
-    assignPickerDisabled: chapterBusy,
-    assignPickerActionClass: chapterBusy ? "small-primary picker-action disabled" : "small-primary picker-action",
-    assignPickerText: state.assigningSourceId === item.id ? "放入中" : "放入章节",
     recoverButtonLoading: state.recoveringId === item.id,
     recoverButtonDisabled: transcriptBusy,
     recoverButtonText: state.recoveringId === item.id ? "转写中" : "恢复转写",
@@ -377,17 +348,6 @@ function transcriptAnchorId(id: string): string {
   return `transcript-${id.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
-async function loadTranscriptBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
-  try {
-    return await getMemoirBookPlan(projectId);
-  } catch (error) {
-    if (error instanceof ApiError && error.statusCode === 404) {
-      return null;
-    }
-    throw error;
-  }
-}
-
 function transcriptSummaryPreview(item: MemoirVoiceTranscriptItem): string {
   const summary = (item.summary_text || "").trim();
   const fallback = (item.display_text || item.transcript_edited || item.transcript_raw || "").trim();
@@ -405,20 +365,16 @@ function isPendingTranscription(item: MemoirVoiceTranscriptItem): boolean {
 function toViewItem(
   item: MemoirVoiceTranscriptItem,
   searchQuery = "",
-  bookPlan: MemoirBookPlan | null = null,
 ): TranscriptItemView {
   const canRecoverTranscription = isPendingTranscription(item);
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
-  const needsBookPlanConfirmation = !canRecoverTranscription
-    && transcriptNeedsBookPlanConfirmation(item, bookPlan);
-  const chapterAssignOptions = canRecoverTranscription ? [] : transcriptChapterAssignOptions(item, bookPlan);
   const summaryTitleText = transcriptTitleText(item);
   const summaryPreviewText = transcriptSummaryPreview(item);
   const createdAtText = transcriptCreatedAtText(item);
   const durationText = transcriptDurationText(item);
   const bookInclusionText = canRecoverTranscription
     ? "等待转写后再入章"
-    : (needsBookPlanConfirmation ? "先确认章节结构，再归入章节" : transcriptBookInclusionText(item));
+    : transcriptBookInclusionText(item);
   const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
   return {
     id: item.id,
@@ -436,16 +392,10 @@ function toViewItem(
     recoverButtonText: "恢复转写",
     bookInclusionText,
     isIncludedInBook,
-    needsBookPlanConfirmation,
-    canAssignChapterSource: chapterAssignOptions.length > 0,
-    chapterAssignOptions,
     cardClass: canRecoverTranscription ? "transcript-card recovery-pending" : "transcript-card",
     bookStatusClass: canRecoverTranscription
       ? "book-status pending"
       : (isIncludedInBook ? "book-status included" : "book-status"),
-    assignPickerDisabled: false,
-    assignPickerActionClass: "small-primary picker-action",
-    assignPickerText: "放入章节",
   };
 }
 
@@ -453,11 +403,10 @@ function replaceItem(
   items: TranscriptItemView[],
   next: MemoirVoiceTranscriptItem,
   searchQuery = "",
-  bookPlan: MemoirBookPlan | null = null,
 ): TranscriptItemView[] {
   return items.map((item) => (
     item.id === next.id
-      ? toViewItem(next, searchQuery, bookPlan)
+      ? toViewItem(next, searchQuery)
       : item
   ));
 }
@@ -471,7 +420,6 @@ definePage<TranscriptsData>()({
     loading: false,
     needsLogin: false,
     recoveringId: "",
-    assigningSourceId: "",
     error: "",
     items: [],
     total: 0,
@@ -489,8 +437,6 @@ definePage<TranscriptsData>()({
     voiceSearchStatusText: "",
     activeProjectId: "",
     projectTitle: "",
-    bookPlan: null,
-    bookPlanProjectId: "",
     highlightedId: "",
     pageMetaText: "当前回忆录 · 0 条讲述",
     showSearchClear: false,
@@ -539,8 +485,6 @@ definePage<TranscriptsData>()({
         setTranscriptsData(this, {
           activeProjectId: "",
           projectTitle: projectTitle || "尚未创建回忆录",
-          bookPlan: null,
-          bookPlanProjectId: "",
           items: [],
           total: 0,
           offset: 0,
@@ -550,11 +494,7 @@ definePage<TranscriptsData>()({
         });
         return;
       }
-      let bookPlan = this.data.bookPlan;
-      const shouldRefreshPlan = reset || this.data.bookPlanProjectId !== activeProjectId;
-      const [nextBookPlan, response] = await Promise.all([
-        shouldRefreshPlan ? loadTranscriptBookPlan(activeProjectId) : Promise.resolve(bookPlan),
-        listMemoirVoiceTranscripts({
+      const response = await listMemoirVoiceTranscripts({
           projectId: activeProjectId,
           query: searchQuery || undefined,
           included: searchFilters.included,
@@ -562,10 +502,8 @@ definePage<TranscriptsData>()({
           module: searchFilters.module || undefined,
           limit: requestLimit,
           offset,
-        }),
-      ]);
-      bookPlan = nextBookPlan;
-      const nextItems = response.items.map((item) => toViewItem(item, searchQuery, bookPlan));
+        });
+      const nextItems = response.items.map((item) => toViewItem(item, searchQuery));
       if (requestToken !== this.loadToken) {
         return;
       }
@@ -573,8 +511,6 @@ definePage<TranscriptsData>()({
         needsLogin: false,
         activeProjectId,
         projectTitle,
-        bookPlan,
-        bookPlanProjectId: activeProjectId,
         items: reset ? nextItems : [...this.data.items, ...nextItems],
         total: response.total,
         offset: offset + nextItems.length,
@@ -598,8 +534,6 @@ definePage<TranscriptsData>()({
           needsLogin: true,
           activeProjectId: "",
           projectTitle: "我的回忆录",
-          bookPlan: null,
-          bookPlanProjectId: "",
           items: [],
           total: 0,
           offset: 0,
@@ -732,40 +666,6 @@ definePage<TranscriptsData>()({
     }
   },
 
-  async assignTranscriptChapter(event: PickerEvent) {
-    const utteranceId = datasetString(event, "id");
-    const item = this.data.items.find((candidate) => candidate.id === utteranceId);
-    const optionIndex = pickerIndex(event);
-    const option = item?.chapterAssignOptions[optionIndex];
-    if (
-      !utteranceId
-      || !item
-      || !option
-      || item.canRecoverTranscription
-      || !this.data.activeProjectId
-      || this.data.assigningSourceId
-    ) {
-      return;
-    }
-    setTranscriptsData(this, { assigningSourceId: utteranceId, error: "" });
-    try {
-      const updatedPlan = await assignMemoirBookSources(
-        this.data.activeProjectId,
-        sourceAssignmentRequest(option.value, utteranceId),
-      );
-      setTranscriptsData(this, { bookPlan: updatedPlan, bookPlanProjectId: this.data.activeProjectId });
-      await this.loadTranscripts(true);
-      wx.showToast({ title: "已归入章节", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "me")) {
-        return;
-      }
-      setTranscriptsData(this, { error: error instanceof Error ? error.message : "归入章节失败" });
-    } finally {
-      setTranscriptsData(this, { assigningSourceId: "" });
-    }
-  },
-
   async recoverTranscript(event: DatasetEvent) {
     const id = datasetString(event, "id");
     const item = this.data.items.find((candidate) => candidate.id === id);
@@ -781,7 +681,7 @@ definePage<TranscriptsData>()({
     try {
       const recovered = await recoverMemoirVoiceTranscript(id);
       setTranscriptsData(this, {
-        items: replaceItem(this.data.items, recovered, this.data.searchQuery, this.data.bookPlan),
+        items: replaceItem(this.data.items, recovered, this.data.searchQuery),
       });
       trackAuditAction("transcript.recover_transcription", {}, { projectId: recovered.project_id });
       wx.showToast({ title: "已恢复转写", icon: "success" });
@@ -800,10 +700,6 @@ definePage<TranscriptsData>()({
     if (this.data.voiceSearchRecording) {
       stopMemoirVoiceSearchRecording();
     }
-  },
-
-  openBook() {
-    switchToBook();
   },
 
   openLogin() {

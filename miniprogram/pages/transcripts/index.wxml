@@ -98,34 +98,11 @@
     </text>
 
     <view
-      wx:if="{{item.needsBookPlanConfirmation || item.canAssignChapterSource || item.canRecoverTranscription}}"
+      wx:if="{{item.canRecoverTranscription}}"
       class="actions-row list-actions"
       catchtap="stopCardTap"
     >
       <button
-        wx:if="{{item.needsBookPlanConfirmation}}"
-        class="small-primary"
-        catchtap="openBook"
-        disabled="{{item.assignPickerDisabled}}"
-      >
-        先确认章节
-      </button>
-      <picker
-        wx:if="{{!item.canRecoverTranscription && item.canAssignChapterSource}}"
-        class="chapter-move-picker"
-        range="{{item.chapterAssignOptions}}"
-        range-key="label"
-        data-id="{{item.id}}"
-        disabled="{{item.assignPickerDisabled}}"
-        bindchange="assignTranscriptChapter"
-        catchtap="stopCardTap"
-      >
-        <view class="{{item.assignPickerActionClass}}">
-          {{item.assignPickerText}}
-        </view>
-      </picker>
-      <button
-        wx:if="{{item.canRecoverTranscription}}"
         class="small-primary"
         data-id="{{item.id}}"
         catchtap="recoverTranscript"

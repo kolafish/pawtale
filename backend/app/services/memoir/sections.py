@@ -8,14 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
-    MemoirChapterSourceLinkStatus,
     MemoirSectionMaterialAssignedBy,
     MemoirSectionStatus,
+    MemoirSectionType,
 )
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterSourceLink,
     MemoirSection,
     MemoirSectionMaterial,
     MemoirTranscriptVersion,
@@ -35,6 +34,10 @@ from app.schemas.memoir_sections import (
     MemoirSectionUpdateRequest,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.material_roles import (
+    is_countable_material,
+    narrator_material_clause,
+)
 from app.services.memoir.section_digests import mark_section_digests_stale
 
 
@@ -209,6 +212,7 @@ async def _unassigned_material_count(
             .where(
                 MemoirVoiceSession.project_id == project_id,
                 ~MemoirVoiceUtterance.id.in_(assigned),
+                narrator_material_clause(),
             )
         )
         or 0
@@ -440,12 +444,18 @@ async def _load_project_utterances(
                     MemoirVoiceSession.project_id == project_id,
                     MemoirVoiceUtterance.id.in_(utterance_ids),
                 )
+                .options(selectinload(MemoirVoiceUtterance.chat_message))
             )
         ).scalars().all()
     )
     by_id = {utterance.id: utterance for utterance in utterances}
     if set(by_id) != set(utterance_ids):
         raise HTTPException(status_code=404, detail="讲述素材不存在")
+    if any(not is_countable_material(utterance) for utterance in utterances):
+        raise HTTPException(
+            status_code=409,
+            detail="只有已有文字的叙述者素材可以归入小章节",
+        )
     return by_id
 
 
@@ -923,58 +933,96 @@ async def bootstrap_sections(
         await db.flush()
         first_section_by_chapter[chapter.id] = section
 
-    links = list(
+    await db.commit()
+    return await _collection_response(db, project_id=project_id)
+
+
+async def sync_materials_to_chapters(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_ids_by_chapter: dict[str, list[str]],
+    assigned_by: MemoirSectionMaterialAssignedBy,
+    assignment_reason: str,
+) -> set[str]:
+    """Apply a chapter plan to the single SectionMaterial ownership table."""
+    chapter_ids = set(utterance_ids_by_chapter)
+    chapters = list(
         (
-            await db.execute(
-                select(MemoirChapterSourceLink)
-                .join(
-                    MemoirBookPlanChapter,
-                    MemoirChapterSourceLink.chapter_id
-                    == MemoirBookPlanChapter.id,
-                )
+            await db.scalars(
+                select(MemoirBookPlanChapter)
                 .where(
-                    MemoirChapterSourceLink.project_id == project_id,
-                    MemoirChapterSourceLink.plan_id == plan.id,
-                    MemoirChapterSourceLink.status
-                    == MemoirChapterSourceLinkStatus.ACTIVE.value,
+                    MemoirBookPlanChapter.project_id == project_id,
+                    MemoirBookPlanChapter.id.in_(chapter_ids),
                 )
                 .order_by(
                     MemoirBookPlanChapter.sort_order,
-                    MemoirChapterSourceLink.created_at,
-                    MemoirChapterSourceLink.id,
+                    MemoirBookPlanChapter.id,
                 )
             )
-        ).scalars().all()
+        ).all()
     )
-    existing_membership_ids = set(
+    if {chapter.id for chapter in chapters} != chapter_ids:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    sections = await _load_sections(db, project_id=project_id)
+    first_by_chapter: dict[str, MemoirSection] = {}
+    for section in sections:
+        first_by_chapter.setdefault(section.chapter_id, section)
+    for chapter in chapters:
+        if chapter.id in first_by_chapter:
+            continue
+        section = MemoirSection(
+            project_id=project_id,
+            chapter_id=chapter.id,
+            title=chapter.title,
+            section_type=MemoirSectionType.LIFE_FRAGMENT.value,
+            sort_order=0,
+        )
+        db.add(section)
+        await db.flush()
+        first_by_chapter[chapter.id] = section
+
+    desired_ids = {
+        utterance_id
+        for utterance_ids in utterance_ids_by_chapter.values()
+        for utterance_id in utterance_ids
+    }
+    existing = list(
         (
-            await db.execute(
-                select(MemoirSectionMaterial.utterance_id).where(
+            await db.scalars(
+                select(MemoirSectionMaterial).where(
                     MemoirSectionMaterial.project_id == project_id
                 )
             )
-        ).scalars().all()
+        ).all()
     )
-    links_by_section: dict[str, list[MemoirChapterSourceLink]] = {}
-    for link in links:
-        section = first_section_by_chapter.get(link.chapter_id)
-        if section is None or link.utterance_id in existing_membership_ids:
-            continue
-        links_by_section.setdefault(section.id, []).append(link)
-        existing_membership_ids.add(link.utterance_id)
-
-    sections_by_id = {
-        section.id: section for section in first_section_by_chapter.values()
+    affected = {
+        material.section_id
+        for material in existing
+        if material.utterance_id not in desired_ids
     }
-    for section_id, section_links in links_by_section.items():
-        section = sections_by_id[section_id]
-        await _move_materials(
+    for material in existing:
+        if material.utterance_id not in desired_ids:
+            await db.delete(material)
+    await db.flush()
+
+    for chapter in chapters:
+        utterance_ids = list(dict.fromkeys(utterance_ids_by_chapter[chapter.id]))
+        if not utterance_ids:
+            continue
+        affected |= await _move_materials(
             db,
             project_id=project_id,
-            target=section,
-            utterance_ids=[link.utterance_id for link in section_links],
-            assigned_by=MemoirSectionMaterialAssignedBy.SYSTEM,
-            assignment_reason="bootstrap_from_chapter_source",
+            target=first_by_chapter[chapter.id],
+            utterance_ids=utterance_ids,
+            assigned_by=assigned_by,
+            assignment_reason=assignment_reason,
         )
-    await db.commit()
-    return await _collection_response(db, project_id=project_id)
+    if affected:
+        await mark_section_digests_stale(
+            db,
+            project_id=project_id,
+            section_ids=affected,
+        )
+    return affected

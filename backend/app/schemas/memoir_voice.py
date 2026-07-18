@@ -156,11 +156,6 @@ class MemoirVoiceUtteranceResponse(BaseModel):
     end_ms: int | None = None
     provider: str | None = None
     provider_payload_json: dict[str, object] = Field(default_factory=dict)
-    source_material_type: str = ""
-    source_route_action: str = ""
-    source_route_confidence: float | None = None
-    source_route_reason: str = ""
-    source_route_updated_at: datetime | None = None
     framework_item_id: str | None = None
     completion_issue_id: str | None = None
     policy_decision_id: str | None = None
@@ -209,30 +204,17 @@ class MemoirVoiceModuleProgressResponse(BaseModel):
     user_char_count: int
 
 
-class MemoirAutomationEventUtteranceDetailResponse(BaseModel):
-    utterance_id: str
-    source_index: int | None = None
-    record_title: str
-    preview_text: str
-    chapter_id: str | None = None
-    chapter_title: str | None = None
-    created_at: datetime | None = None
-
-
 class MemoirAutomationEventResponse(BaseModel):
     id: str
     project_id: str
     event_type: MemoirAutomationEventType
     status: MemoirAutomationEventStatus
     chapter_id: str | None = None
-    review_utterance_id: str | None = None
-    completion_item_id: str | None = None
     editing_job_id: str | None = None
     utterance_ids: list[str] = Field(default_factory=list)
     summary_text: str
     confidence: float | None = None
     metadata_json: dict[str, object] = Field(default_factory=dict)
-    utterance_details: list[MemoirAutomationEventUtteranceDetailResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 

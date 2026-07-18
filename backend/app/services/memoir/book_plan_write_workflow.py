@@ -11,9 +11,9 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
-    MemoirChapterSourceAssignedBy,
     MemoirCreatedBy,
     MemoirEditingJobStatus,
+    MemoirSectionMaterialAssignedBy,
 )
 from app.models.memoir import (
     MemoirAutomationEvent,
@@ -22,7 +22,6 @@ from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirChapterCard,
     MemoirEditingJob,
     MemoirImageAsset,
 )
@@ -38,7 +37,6 @@ from app.schemas.memoir_book import (
     MemoirBookPlanUpdateRequest,
 )
 from app.services.ai_types import AITextClient
-from app.services.memoir import automation_event_resolution as _automation_event_resolution
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_plan_ai import (
     ChapterTitleSourceDigest,
@@ -54,7 +52,6 @@ from app.services.memoir.book_plan_sources import (
     merge_metadata as _merge_metadata,
     plan_response as _plan_response,
     renumber_chapters as _renumber_chapters,
-    set_source_change_metadata as _set_source_change_metadata,
     set_temporary_chapter_orders as _set_temporary_chapter_orders,
     source_ref_utterance_ids as _source_ref_utterance_ids,
     source_segments as _source_segments,
@@ -62,22 +59,15 @@ from app.services.memoir.book_plan_sources import (
     text_or_empty as _text_or_empty,
 )
 from app.services.memoir.book_source_links import (
-    covered_utterance_ids as _covered_utterance_ids,
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
-)
-from app.services.memoir.book_source_workflow import (
-    schedule_uncovered_source_routing_after_plan_confirmation as _schedule_uncovered_source_routing_after_plan_confirmation,
 )
 from app.services.memoir.book_structure_commands import (
     apply_book_structure_command as _apply_book_structure_command,
     chapter_by_id as _chapter_by_id,
     command_chapter_id as _require_command_chapter_id,
-    source_utterance_id as _require_source_utterance_id,
 )
-from app.services.memoir.chapter_source_links import (
-    sync_plan_chapter_source_links as _sync_plan_chapter_source_links,
-)
-from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.sections import sync_materials_to_chapters
 
 
 @dataclass(frozen=True)
@@ -143,9 +133,6 @@ async def _detach_chapter_operational_references(
         db.add(job)
 
     await db.execute(
-        delete(MemoirChapterCard).where(MemoirChapterCard.chapter_id.in_(chapter_ids))
-    )
-    await db.execute(
         delete(MemoirBookImagePlacement).where(
             MemoirBookImagePlacement.chapter_id.in_(chapter_ids)
         )
@@ -158,12 +145,14 @@ async def _detach_chapter_operational_references(
     await db.flush()
 
 
-def _link_assigned_by_for_created_by(created_by: MemoirCreatedBy) -> MemoirChapterSourceAssignedBy:
+def _material_assigned_by_for_created_by(
+    created_by: MemoirCreatedBy,
+) -> MemoirSectionMaterialAssignedBy:
     if created_by == MemoirCreatedBy.AI:
-        return MemoirChapterSourceAssignedBy.AI
+        return MemoirSectionMaterialAssignedBy.AI
     if created_by == MemoirCreatedBy.USER:
-        return MemoirChapterSourceAssignedBy.USER
-    return MemoirChapterSourceAssignedBy.SYSTEM
+        return MemoirSectionMaterialAssignedBy.USER
+    return MemoirSectionMaterialAssignedBy.SYSTEM
 
 
 async def _mark_chapter_drafts_sources_changed(
@@ -266,15 +255,16 @@ async def _replace_plan(
         pending_source_refs.append((plan_chapter, [_as_dict(ref) for ref in chapter.source_refs]))
     await db.flush()
     source_refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
-    await _sync_plan_chapter_source_links(
+    await sync_materials_to_chapters(
         db,
-        plan=plan,
-        source_refs_by_chapter=source_refs_by_chapter,
-        assigned_by=_link_assigned_by_for_created_by(created_by),
+        project_id=project_id,
+        utterance_ids_by_chapter={
+            chapter_id: _source_ref_utterance_ids(refs)
+            for chapter_id, refs in source_refs_by_chapter.items()
+        },
+        assigned_by=_material_assigned_by_for_created_by(created_by),
         assignment_reason="replace_book_plan",
     )
-    if created_by == MemoirCreatedBy.USER:
-        await _automation_event_resolution.resolve_assigned_source_review_events(db, project_id=project_id)
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -432,7 +422,7 @@ async def _set_chapter_book_inclusion(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     if output is not None:
-        invalidate_formal_book_output(output)
+        invalidate_book_output(output)
         db.add(output)
     db.add(chapter)
     db.add(plan)
@@ -536,7 +526,7 @@ async def confirm_book_plan(
         allow_admin=allow_admin,
     )
     chapters = _validated_chapters(req, sources)
-    response = await _replace_plan(
+    return await _replace_plan(
         db,
         project_id=project_id,
         title=req.title or f"{project.title}章节规划",
@@ -550,13 +540,6 @@ async def confirm_book_plan(
             "confirmed_by": "user",
         },
     )
-    await _schedule_uncovered_source_routing_after_plan_confirmation(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        allow_admin=allow_admin,
-    )
-    return response
 
 
 async def update_book_plan(
@@ -616,11 +599,6 @@ async def update_book_plan(
             chapter.sort_order = index
             pending_source_refs.append((chapter, [_as_dict(ref) for ref in chapter_update.source_refs]))
             if added_ids or removed_ids:
-                chapter.metadata_json = _set_source_change_metadata(
-                    chapter.metadata_json,
-                    added_ids=added_ids,
-                    removed_ids=removed_ids,
-                )
                 changed_chapter_ids.add(chapter.id)
                 newly_assigned_utterance_ids.update(added_ids)
             db.add(chapter)
@@ -648,17 +626,15 @@ async def update_book_plan(
     if changed_chapter_ids or newly_assigned_utterance_ids or removed_chapters:
         await db.flush()
         refs_by_chapter = {chapter.id: refs for chapter, refs in pending_source_refs}
-        await _sync_plan_chapter_source_links(
-            db,
-            plan=plan,
-            source_refs_by_chapter=refs_by_chapter,
-            assigned_by=MemoirChapterSourceAssignedBy.USER,
-            assignment_reason="book_plan_update",
-        )
-        await _automation_event_resolution.resolve_assigned_source_review_events(
+        await sync_materials_to_chapters(
             db,
             project_id=project_id,
-            utterance_ids=sorted(newly_assigned_utterance_ids) if newly_assigned_utterance_ids else None,
+            utterance_ids_by_chapter={
+                chapter_id: _source_ref_utterance_ids(refs)
+                for chapter_id, refs in refs_by_chapter.items()
+            },
+            assigned_by=MemoirSectionMaterialAssignedBy.USER,
+            assignment_reason="book_plan_update",
         )
     await _handle_chapter_source_changes(
         db,
@@ -725,21 +701,7 @@ async def apply_book_plan_structure_command(
     await db.flush()
 
     now = datetime.now(UTC).isoformat()
-    source: SourceSegment | None = None
     refs_by_chapter = await _plan_source_ref_dicts_by_chapter(db, plan)
-    if req.type == "create_chapter_from_source":
-        utterance_id = _require_source_utterance_id(req)
-        if utterance_id in await _covered_utterance_ids(db, plan):
-            raise HTTPException(status_code=400, detail="讲述记录已收录到章节")
-        sources = await _source_segments(
-            db,
-            user_id=user_id,
-            project_id=project_id,
-            allow_admin=allow_admin,
-        )
-        source = next((item for item in sources if item.utterance_id == utterance_id), None)
-        if not source:
-            raise HTTPException(status_code=400, detail="讲述记录不属于当前回忆录")
 
     mutation = _apply_book_structure_command(
         plan=plan,
@@ -748,7 +710,6 @@ async def apply_book_plan_structure_command(
         project_id=project_id,
         now=now,
         source_refs_by_chapter=refs_by_chapter,
-        source=source,
     )
     chapters = mutation.chapters
     await _detach_chapter_operational_references(db, mutation.deleted_chapters)
@@ -761,19 +722,17 @@ async def apply_book_plan_structure_command(
     _renumber_chapters(chapters)
     for chapter in chapters:
         db.add(chapter)
-    if mutation.changed_chapter_ids or source or mutation.deleted_chapters:
+    if mutation.changed_chapter_ids or mutation.deleted_chapters:
         await db.flush()
-        await _sync_plan_chapter_source_links(
-            db,
-            plan=plan,
-            source_refs_by_chapter=mutation.source_refs_by_chapter,
-            assigned_by=MemoirChapterSourceAssignedBy.USER,
-            assignment_reason=req.type,
-        )
-        await _automation_event_resolution.resolve_assigned_source_review_events(
+        await sync_materials_to_chapters(
             db,
             project_id=project_id,
-            utterance_ids=[source.utterance_id] if source else None,
+            utterance_ids_by_chapter={
+                chapter_id: _source_ref_utterance_ids(refs)
+                for chapter_id, refs in mutation.source_refs_by_chapter.items()
+            },
+            assigned_by=MemoirSectionMaterialAssignedBy.USER,
+            assignment_reason=req.type,
         )
     if mutation.changed_chapter_ids:
         await _handle_chapter_source_changes(
