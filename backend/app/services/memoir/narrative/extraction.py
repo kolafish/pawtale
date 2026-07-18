@@ -184,6 +184,12 @@ def build_narrative_extraction_repair_prompt(
 - time_start/time_end 必须同时为 null，或同时为完整 ISO 8601 datetime（例如 1982-01-01T00:00:00）。
 - relationship claim 必须同时引用已声明的 subject 和 object person entity。
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
+- stories 中每个对象只能使用 key、title、story_type、summary、time_start、time_end、
+  time_precision、primary_place_entity_key、existing_story_id、match_confidence、claims。
+- stories[].claims 必须是对象数组，每项结构为
+  {{"claim_key": "claim_1", "narrative_role": "background|trigger|action|turning_point|outcome|reflection|context", "is_core": true}}。
+  不得使用旧字段 claim_keys，也不得把 narrative_role、subject_entity_key、
+  object_entity_key 或 place_entity_key 放在 Story 对象顶层。
 - Story 必须是可独立讲述的事件、持续关系、人生阶段或贯穿主题；孤立的时间、身份、属性、症状或背景事实只保留为 Claim。
 - 同一段经历的多条 Claim 应归入同一个 Story，不得拆成一批只有单个事实片段的微型 Story。
 {NARRATIVE_CLAIM_STORY_BOUNDARY_GUIDANCE}
