@@ -91,6 +91,13 @@ function readyOverview() {
 test("book completion overview page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-completion/index"));
+  const pageJson = JSON.parse(
+    fs.readFileSync(
+      path.join(__dirname, "../pages/book-completion/index.json"),
+      "utf8",
+    ),
+  );
+  assert.equal(pageJson.navigationBarTitleText, "整理这本书");
 });
 
 test("book completion overview exposes confirmed chapter progress and one action per chapter", () => {
@@ -147,6 +154,7 @@ test("book completion offers one whole-book recheck after all chapters are confi
     projectId: "project-1",
     chapters: patch.chapters,
     allChaptersConfirmed: true,
+    bulkCheckVisible: true,
   });
   await page.recheckAllChapters.call(context);
 
@@ -155,6 +163,49 @@ test("book completion offers one whole-book recheck after all chapters are confi
     ["project-1", "chapter-2"],
   ]);
   assert.ok(toasts.every((title) => title === "暂未发现待补内容"));
+  delete global.wx;
+});
+
+test("book completion can check only chapters that have not been checked", async () => {
+  const prepared = [];
+  const overview = readyOverview();
+  overview.completed_chapters = 1;
+  overview.chapters[0] = completionChapter({
+    state: "not_started",
+    next_action: {
+      kind: "prepare",
+      title: "检查本章是否需要补充",
+      detail: "系统会根据当前素材判断下一步。",
+      action_text: "检查本章",
+      disabled: false,
+    },
+    active_issue: null,
+    headline: "尚未检查是否需要补充",
+    detail: "检查后只会给出一个明确的下一步。",
+  });
+  global.wx = { showToast() {} };
+  const { page, mod } = loadBookCompletionPage({
+    voiceApiExports: {
+      prepareMemoirBookChapter: async (projectId, chapterId) => {
+        prepared.push([projectId, chapterId]);
+      },
+      getMemoirBookCompletionOverview: async () => overview,
+    },
+  });
+  const patch = mod.bookCompletionViewPatch(overview);
+  assert.equal(patch.chapters[0].stateText, "待检查");
+  assert.equal(patch.bulkCheckVisible, true);
+  assert.equal(patch.bulkCheckActionText, "检查待检查章节");
+
+  const context = pageContext(page, {
+    projectId: "project-1",
+    chapters: patch.chapters,
+    allChaptersConfirmed: false,
+    bulkCheckVisible: true,
+  });
+  await page.recheckAllChapters.call(context);
+
+  assert.deepEqual(prepared, [["project-1", "chapter-1"]]);
   delete global.wx;
 });
 
@@ -230,9 +281,9 @@ test("book completion prepares an untouched chapter in place", async () => {
     state: "not_started",
     next_action: {
       kind: "prepare",
-      title: "整理这一章",
+      title: "检查本章是否需要补充",
       detail: "系统会先检查现有讲述。",
-      action_text: "开始整理",
+      action_text: "检查本章",
       disabled: false,
     },
     active_issue: null,

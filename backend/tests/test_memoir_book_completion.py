@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.database import Base, register_models
 from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
     MemoirCompletionIssueScope,
     MemoirEditingJobType,
 )
@@ -29,6 +30,7 @@ from app.services.memoir import (
 )
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
+    create_test_chapter_draft,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
@@ -196,6 +198,136 @@ async def _book(client, test_db, *, chapter_count: int = 1):
         ],
     )
     return project_id, chapters, sources
+
+
+async def _create_current_draft(
+    test_db,
+    *,
+    project_id: str,
+    chapter_id: str,
+    status: MemoirBookChapterDraftStatus,
+) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    draft = await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        status=status,
+        content="这是已经存在的完整章节正文。",
+    )
+    context = await chapter_generation.load_chapter_generation_context(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.draft_id == draft.id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert version is not None
+    used_ids = {item.material_id for item in context.materials}
+    version.input_signature = context.input_signature
+    version.used_material_ids_json = [
+        item.material_id for item in context.materials
+    ]
+    version.material_snapshot_json = chapter_generation._snapshot(
+        context,
+        used_material_ids=used_ids,
+    )
+    test_db.add(version)
+    await test_db.commit()
+    return draft, version
+
+
+async def test_existing_current_draft_still_requires_a_real_completion_check(
+    client,
+    test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+
+    assert overview.status_code == 200
+    summary = overview.json()["chapters"][0]
+    assert summary["state"] == "not_started"
+    assert summary["headline"] == "尚未检查是否需要补充"
+    assert summary["next_action"]["action_text"] == "检查本章"
+
+
+async def test_prepare_keeps_a_current_existing_draft_unchanged(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    _, version = await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.DRAFT,
+    )
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
+
+    prepared = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+
+    assert prepared.status_code == 200, prepared.text
+    body = prepared.json()
+    assert body["completion_summary"]["state"] == "draft_ready"
+    assert body["draft_version_id"] == version.id
+    assert body["draft_content"] == "这是已经存在的完整章节正文。"
+    assert not any(
+        "请把下面的原始讲述整理为回忆录章节" in prompt
+        for prompt in fake.prompts
+    )
+    version_count = await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.chapter_id == chapter.id)
+    )
+    assert version_count == 1
+
+
+async def test_current_completion_issue_overrides_confirmed_draft(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    fake = LayeredBookAI(chapter_manual_issue=True)
+    _install_ai(monkeypatch, fake)
+
+    prepared = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+
+    assert prepared.status_code == 200, prepared.text
+    summary = prepared.json()["completion_summary"]
+    assert summary["state"] == "needs_input"
+    assert summary["next_action"]["kind"] == "confirm"
+    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
 
 
 async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
