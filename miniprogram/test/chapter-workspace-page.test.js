@@ -61,6 +61,17 @@ function workspace(overrides = {}) {
     draft_version: 1,
     draft_status: "draft",
     draft_content: "十八岁那年，我第一次离开家。",
+    draft_sections: [
+      {
+        section_id: "section-1",
+        title: "离家前的准备",
+        section_type: "event",
+        section_version: 1,
+        sort_order: 0,
+        content: "十八岁那年，我第一次离开家。",
+        used_material_ids: ["utterance-1"],
+      },
+    ],
     ...overrides,
   };
 }
@@ -106,7 +117,7 @@ function installWx() {
   return { navigations, toasts };
 }
 
-test("chapter workspace loads one whole chapter draft", async () => {
+test("chapter workspace loads a chapter draft with visible small sections", async () => {
   installWx();
   let loadCount = 0;
   const { page } = loadWorkspacePage({
@@ -123,6 +134,7 @@ test("chapter workspace loads one whole chapter draft", async () => {
 
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
   assert.equal(context.data.sectionStructureSummary, "1 个小节 · 1 条讲述");
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
@@ -229,10 +241,21 @@ test("chapter workspace starts completion interview in the existing voice chat",
   delete global.wx;
 });
 
-test("chapter workspace edits the whole draft with optimistic version control", async () => {
+test("chapter workspace edits one small section with optimistic version control", async () => {
   const { toasts } = installWx();
   const calls = [];
+  const currentWorkspace = workspace();
+  currentWorkspace.draft_sections.push({
+    section_id: "section-2",
+    title: "抵达后的第一晚",
+    section_type: "life_fragment",
+    section_version: 1,
+    sort_order: 1,
+    content: "抵达以后，我很久没有睡着。",
+    used_material_ids: ["utterance-2"],
+  });
   const { page } = loadWorkspacePage({
+    currentWorkspace,
     voiceApiExports: {
       reviseMemoirBookChapterDraft: async (...args) => calls.push(args),
     },
@@ -240,23 +263,52 @@ test("chapter workspace edits the whole draft with optimistic version control", 
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  page.startDraftEdit.call(context);
-  page.changeDraftContent.call(context, { detail: { value: "修改后的整章正文" } });
-  await page.saveDraftEdit.call(context);
+  page.startDraftSectionEdit.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  page.changeDraftSectionContent.call(context, {
+    detail: { value: "修改后的第一小节正文" },
+  });
+  await page.saveDraftSectionEdit.call(context);
 
   assert.deepEqual(calls, [[
     "project-1",
     "chapter-1",
     {
       expected_version_id: "version-1",
-      content: "修改后的整章正文",
+      sections: [
+        {
+          section_id: "section-1",
+          content: "修改后的第一小节正文",
+        },
+        {
+          section_id: "section-2",
+          content: "抵达以后，我很久没有睡着。",
+        },
+      ],
     },
   ]]);
-  assert.equal(toasts[0].title, "正文已保存");
+  assert.equal(toasts[0].title, "小节已保存");
   delete global.wx;
 });
 
-test("chapter workspace confirms the current whole draft without an assembly step", async () => {
+test("chapter workspace does not confirm a legacy flat draft without section boundaries", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({ draft_sections: [] }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.canConfirmChapter, false);
+  delete global.wx;
+});
+
+test("chapter workspace confirms the current structured draft without an assembly step", async () => {
   const { toasts } = installWx();
   const calls = [];
   const { page } = loadWorkspacePage({

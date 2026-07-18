@@ -266,6 +266,20 @@ async def _create_current_draft(
         context,
         used_material_ids=used_ids,
     )
+    version.section_snapshot_json = [
+        {
+            "section_id": section.section_id,
+            "title": section.title,
+            "section_type": section.section_type,
+            "section_version": section.section_version,
+            "sort_order": section.sort_order,
+            "content": version.content,
+            "used_material_ids": [
+                material.material_id for material in section.materials
+            ],
+        }
+        for section in context.sections
+    ]
     test_db.add(version)
     await test_db.commit()
     return draft, version
@@ -543,7 +557,15 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
         f"chapters/{chapter.id}/draft/revise",
         json={
             "expected_version_id": original_version_id,
-            "content": "那年，我参加了学校比赛。这件事至今仍留在记忆里。",
+            "sections": [
+                {
+                    "section_id": body["draft_sections"][0]["section_id"],
+                    "content": (
+                        "那年，我参加了学校比赛。"
+                        "这件事至今仍留在记忆里。"
+                    ),
+                }
+            ],
         },
     )
     assert revised.status_code == 200, revised.text
@@ -552,7 +574,9 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
         revised.json()["latest_version"]["id"],
     )
     assert revised_version is not None
-    assert revised.json()["latest_version"]["sections"] == []
+    assert revised.json()["latest_version"]["sections"][0]["content"].endswith(
+        "这件事至今仍留在记忆里。"
+    )
     assert revised_version.input_signature
     assert revised_version.used_material_ids_json
 
@@ -566,6 +590,74 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
     )
     assert overview.json()["chapters"][0]["state"] == "confirmed"
+
+
+async def test_section_revision_rejects_changed_section_boundary(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    _install_ai(monkeypatch, LayeredBookAI())
+    prepared = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={},
+    )
+    assert prepared.status_code == 200, prepared.text
+    body = prepared.json()
+
+    revised = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+        f"chapters/{chapter.id}/draft/revise",
+        json={
+            "expected_version_id": body["draft_version_id"],
+            "sections": [
+                {
+                    "section_id": "another-section",
+                    "content": "不应保存的正文",
+                }
+            ],
+        },
+    )
+
+    assert revised.status_code == 409
+    assert "小节已经变化" in revised.json()["detail"]
+
+
+async def test_legacy_flat_draft_requires_rewrite_before_confirmation(
+    client,
+    test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    draft, version = await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.DRAFT,
+    )
+    version.section_snapshot_json = []
+    test_db.add(version)
+    await test_db.commit()
+
+    workspace_response = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/"
+        f"{chapters[0].id}/workspace"
+    )
+    assert workspace_response.status_code == 200
+    workspace = workspace_response.json()
+    assert workspace["draft_needs_rewrite"] is True
+    assert workspace["can_rewrite_draft"] is True
+    assert workspace["draft_sections"] == []
+
+    confirmed = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+        f"chapters/{chapters[0].id}/draft/confirm"
+    )
+    assert confirmed.status_code == 409
+    assert "没有小节结构" in confirmed.json()["detail"]
+    assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
 
 
 async def test_closed_section_issue_is_not_reopened_on_prepare(

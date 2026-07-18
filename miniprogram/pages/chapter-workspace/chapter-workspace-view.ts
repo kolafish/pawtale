@@ -104,6 +104,9 @@ export function chapterWorkspaceViewPatch(
     canConfirmChapter:
       summary.state === "draft_ready"
       && Boolean(workspace.draft_version_id)
-      && Boolean(workspace.draft_content.trim()),
+      && workspace.draft_sections.length > 0
+      && workspace.draft_sections.every(
+        (section) => Boolean(section.content.trim()),
+      ),
   };
 }

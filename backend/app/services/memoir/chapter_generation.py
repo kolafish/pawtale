@@ -621,6 +621,11 @@ async def confirm_chapter_draft(
         raise HTTPException(status_code=409, detail="章节正文尚未生成")
     if latest.input_signature != context.input_signature:
         raise HTTPException(status_code=409, detail="章节素材已变化，请重新生成正文")
+    if not latest.section_snapshot_json:
+        raise HTTPException(
+            status_code=409,
+            detail="当前正文还没有小节结构，请重新生成正文",
+        )
     blocking_issue = await db.scalar(
         select(MemoirCompletionIssue.id)
         .where(

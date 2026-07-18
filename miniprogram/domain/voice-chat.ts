@@ -814,11 +814,22 @@ export interface MemoirBookChapterDraftVersion {
   chapter_id: string;
   version: number;
   content: string;
+  sections: MemoirChapterDraftSection[];
   created_by: MemoirCreatedBy;
   model?: string | null;
   prompt_snapshot: string;
   feedback?: string | null;
   created_at: string;
+}
+
+export interface MemoirChapterDraftSection {
+  section_id: string;
+  title: string;
+  section_type: MemoirSectionType;
+  section_version: number;
+  sort_order: number;
+  content: string;
+  used_material_ids: string[];
 }
 
 export interface MemoirBookChapterDraft {
@@ -837,7 +848,10 @@ export interface MemoirBookChapterDraft {
 
 export interface MemoirBookChapterDraftRevisionRequest {
   expected_version_id: string;
-  content: string;
+  sections: Array<{
+    section_id: string;
+    content: string;
+  }>;
 }
 
 export interface MemoirBookAssemblyResponse {
