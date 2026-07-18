@@ -290,6 +290,8 @@ class MemoirBookChapterDraftRevisionRequest(BaseModel):
         section_ids = [section.section_id for section in self.sections]
         if len(section_ids) != len(set(section_ids)):
             raise ValueError("section_id 不能重复")
+        if sum(len(section.content) for section in self.sections) > 200_000:
+            raise ValueError("整章正文不能超过 200000 个字符")
         return self
 
 

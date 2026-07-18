@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -27,6 +28,7 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
 )
+from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.services.memoir import (
     book_reviews,
     chapter_digests,
@@ -149,6 +151,20 @@ class LayeredBookAI:
                 "editor_notes": [],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+def test_section_revision_keeps_whole_chapter_size_limit():
+    with pytest.raises(ValueError, match="整章正文不能超过"):
+        MemoirBookChapterDraftRevisionRequest(
+            expected_version_id="version-1",
+            sections=[
+                {
+                    "section_id": f"section-{index}",
+                    "content": "一" * 70_000,
+                }
+                for index in range(3)
+            ],
+        )
 
 
 async def test_book_review_migration_creates_only_the_review_cache():
