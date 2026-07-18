@@ -22,10 +22,15 @@ from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirEditingJob,
 )
+from app.schemas.memoir_narrative import (
+    MemoirChapterCompletionNextAction,
+    MemoirChapterCompletionSummary,
+)
 from app.services.memoir import (
     book_reviews,
     chapter_digests,
     chapter_generation,
+    completion_read_model,
     section_digests,
 )
 from tests.memoir_helpers import (
@@ -328,6 +333,48 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
     assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
+
+
+async def test_book_overview_counts_all_unfinished_chapter_states(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, _, _ = await _book(client, test_db, chapter_count=3)
+    states = iter(("not_started", "needs_input", "draft_ready"))
+
+    async def fake_chapter_summary(db, *, project_id, chapter):
+        state = next(states)
+        return MemoirChapterCompletionSummary(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state=state,
+            next_action=MemoirChapterCompletionNextAction(
+                kind="prepare",
+                title="下一步",
+                detail="测试",
+            ),
+            headline="测试",
+            detail="测试",
+        )
+
+    monkeypatch.setattr(
+        completion_read_model,
+        "chapter_summary",
+        fake_chapter_summary,
+    )
+
+    overview = await completion_read_model.book_overview(
+        test_db,
+        project_id=project_id,
+    )
+
+    assert overview.headline == "还有 3 章未完成"
+    assert overview.detail == (
+        "1 章待检查，1 章待补充或确认，1 章待通读。"
+        "每章只显示当前最重要的一步。"
+    )
 
 
 async def test_book_completion_uses_layered_pipeline_without_editing_jobs(

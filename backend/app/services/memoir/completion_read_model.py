@@ -332,15 +332,17 @@ async def book_overview(
         item.state in {"not_started", "failed"} for item in items
     )
     ready_to_review = sum(item.state == "draft_ready" for item in items)
-    if needs_input:
-        headline = f"还有 {needs_input} 章需要处理"
-        detail = "每章只显示当前最重要的一步。"
-    elif needs_check:
-        headline = f"还有 {needs_check} 章需要检查"
-        detail = "先判断是否真的需要补充，再决定是否整理正文。"
-    elif ready_to_review:
-        headline = f"还有 {ready_to_review} 章等待通读"
-        detail = "内容已经整理好，通读、修改并确认即可。"
+    unfinished = len(items) - completed
+    if unfinished:
+        progress = []
+        if needs_check:
+            progress.append(f"{needs_check} 章待检查")
+        if needs_input:
+            progress.append(f"{needs_input} 章待补充或确认")
+        if ready_to_review:
+            progress.append(f"{ready_to_review} 章待通读")
+        headline = f"还有 {unfinished} 章未完成"
+        detail = "，".join(progress) + "。每章只显示当前最重要的一步。"
     else:
         headline = "全书正文已经确认"
         detail = "需要时仍可按当前素材重新检查。"
