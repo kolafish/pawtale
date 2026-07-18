@@ -15,12 +15,12 @@ from app.domain.memoir.narrative_types import (
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirChatMessage,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
 )
@@ -146,13 +146,13 @@ async def _scheduled_shadow_job(
     *,
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
-    completion_item_id: str | None = None,
+    completion_issue_id: str | None = None,
 ) -> MemoirEditingJob:
     job = await schedule_shadow_policy_evaluation(
         test_db,
         session=session,
         generated_message=generated_message,
-        completion_item_id=completion_item_id,
+        completion_issue_id=completion_issue_id,
         requested_ai_model="fake-policy-model",
         enabled=True,
     )
@@ -233,7 +233,7 @@ async def test_active_policy_executes_low_risk_action_and_suggests_medium_action
     active = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "follow_current_story"
@@ -244,7 +244,7 @@ async def test_active_policy_executes_low_risk_action_and_suggests_medium_action
     suggest = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "return_to_prior_story"
@@ -290,7 +290,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     policy_turn = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "offer_new_topic",
@@ -358,7 +358,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     continued = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "follow_current_story"
@@ -387,7 +387,7 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     switch_context = await build_current_policy_context(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         policy_version=ACTIVE_POLICY_VERSION,
     )
     assert switch_context is not None
@@ -436,7 +436,7 @@ async def test_active_policy_only_executes_pause_when_safety_makes_it_mandatory(
     policy_turn = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI("pause_or_end"),
         enabled=True,
@@ -463,7 +463,7 @@ async def test_active_policy_response_outcome_is_scheduled_and_recorded(
     policy_turn = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "follow_current_story"
@@ -557,7 +557,7 @@ async def test_policy_outcome_rejects_uncontrolled_value(test_db):
     policy_turn = await prepare_active_policy_turn(
         test_db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         requested_ai_model=None,
         ai_client_factory=lambda model=None: FakePolicyAI(
             "continue_listening"
@@ -651,7 +651,7 @@ async def test_shadow_decision_is_not_attributed_to_later_user_answer(test_db):
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=response_utterance,
-        completion_item=None,
+        completion_issue=None,
     )
     await test_db.commit()
 
@@ -724,24 +724,22 @@ async def test_book_completion_shadow_brief_keeps_task_and_recent_answer_refs(
         session_goal="book_completion",
     )
     test_db.add(session)
-    item = MemoirCompletionItem(
+    issue = MemoirCompletionIssue(
         project_id=project.id,
-        scope_type="book",
-        item_type="relationship",
-        severity="medium",
-        dimension="relationship_clarity",
-        title="人物关系",
-        description="补清人物关系",
-        fingerprint=sha256(b"completion-shadow").hexdigest(),
-        action="interview",
+        scope="book",
+        issue_type="relationship",
+        channel="interview",
         question="康惠和您是什么关系？",
-        priority=1,
+        reason="补清人物关系",
+        priority="medium",
+        fingerprint=sha256(b"completion-shadow").hexdigest(),
+        related_material_ids_json=[],
+        input_signature="completion-shadow",
         status="in_progress",
-        detected_by="rules",
     )
-    test_db.add(item)
+    test_db.add(issue)
     await test_db.flush()
-    session.current_completion_item_id = item.id
+    session.current_completion_issue_id = issue.id
     user_message = MemoirChatMessage(
         project_id=project.id,
         voice_session_id=session.id,
@@ -763,19 +761,32 @@ async def test_book_completion_shadow_brief_keeps_task_and_recent_answer_refs(
         content_text="好的，这一段已经保存了。",
         turn_index=1,
     )
-    test_db.add_all([utterance, generated_message])
+    other_project = Project(type="memoir", title="另一个人的回忆录")
+    test_db.add(other_project)
+    await test_db.flush()
+    other_session = MemoirVoiceSession(project_id=other_project.id)
+    test_db.add(other_session)
+    await test_db.flush()
+    other_utterance = MemoirVoiceUtterance(
+        voice_session_id=other_session.id,
+        transcript_raw="这是另一个项目不能泄漏的私密内容。",
+    )
+    test_db.add_all([utterance, generated_message, other_utterance])
+    await test_db.flush()
+    issue.related_material_ids_json = [other_utterance.id]
     await test_db.commit()
 
     job = await _scheduled_shadow_job(
         test_db,
         session=session,
         generated_message=generated_message,
-        completion_item_id=item.id,
+        completion_issue_id=issue.id,
     )
+    ai_client = FakePolicyAI("summarize_and_confirm")
     result = await run_shadow_policy_evaluation_job(
         test_db,
         job,
-        ai_client=FakePolicyAI("summarize_and_confirm"),
+        ai_client=ai_client,
     )
     await test_db.commit()
     decision = await test_db.get(
@@ -785,10 +796,17 @@ async def test_book_completion_shadow_brief_keeps_task_and_recent_answer_refs(
 
     assert decision is not None
     assert decision.state_snapshot_json["source_kind"] == "book_completion"
-    assert decision.state_snapshot_json["completion_item_id"] == item.id
-    assert decision.state_snapshot_json["unresolved_item_ids"] == [item.id]
+    assert decision.state_snapshot_json["completion_issue_id"] == issue.id
+    assert decision.state_snapshot_json["unresolved_issue_ids"] == [issue.id]
     assert utterance.id in decision.state_snapshot_json["existing_material_refs"]
+    assert (
+        other_utterance.id
+        not in decision.state_snapshot_json["existing_material_refs"]
+    )
     assert "康惠是我的姐姐" not in str(decision.state_snapshot_json)
+    assert "另一个项目不能泄漏" not in str(
+        ai_client.calls[0]["user_prompt"]
+    )
 
 
 async def test_human_shadow_evaluation_is_controlled_and_append_only(test_db):

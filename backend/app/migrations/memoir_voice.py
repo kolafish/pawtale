@@ -35,6 +35,11 @@ VOICE_INTEGRITY_TRIGGERS = (
     "memoir_automation_events_links_insert",
     "memoir_automation_events_links_update",
 )
+VOICE_TARGET_TRIGGERS = VOICE_INTEGRITY_TRIGGERS[:4]
+VOICE_COMPLETION_COLUMNS = {
+    "memoir_voice_sessions": "current_completion_issue_id",
+    "memoir_voice_utterances": "completion_issue_id",
+}
 
 
 async def _object_exists(conn, *, object_type: str, name: str) -> bool:
@@ -48,6 +53,58 @@ async def _object_exists(conn, *, object_type: str, name: str) -> bool:
         )
         is not None
     )
+
+
+async def _table_columns(conn, table_name: str) -> set[str]:
+    rows = (await conn.execute(text(f"PRAGMA table_info({table_name})"))).fetchall()
+    return {str(row[1]) for row in rows}
+
+
+async def _ensure_completion_issue_columns(conn) -> list[str]:
+    changed: list[str] = []
+    statements = {
+        "memoir_voice_sessions": (
+            "ALTER TABLE memoir_voice_sessions "
+            "ADD COLUMN current_completion_issue_id VARCHAR(36) "
+            "REFERENCES memoir_completion_issues(id) ON DELETE SET NULL"
+        ),
+        "memoir_voice_utterances": (
+            "ALTER TABLE memoir_voice_utterances "
+            "ADD COLUMN completion_issue_id VARCHAR(36) "
+            "REFERENCES memoir_completion_issues(id) ON DELETE SET NULL"
+        ),
+    }
+    indexes = {
+        "memoir_voice_sessions": (
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_memoir_voice_sessions_current_completion_issue_id "
+            "ON memoir_voice_sessions(current_completion_issue_id)"
+        ),
+        "memoir_voice_utterances": (
+            "CREATE INDEX IF NOT EXISTS "
+            "ix_memoir_voice_utterances_completion_issue_id "
+            "ON memoir_voice_utterances(completion_issue_id)"
+        ),
+    }
+    for table_name, column_name in VOICE_COMPLETION_COLUMNS.items():
+        if column_name not in await _table_columns(conn, table_name):
+            await conn.execute(text(statements[table_name]))
+            changed.append(f"{table_name}.{column_name}")
+        await conn.execute(text(indexes[table_name]))
+    return changed
+
+
+async def _drop_stale_voice_target_triggers(conn) -> None:
+    for name in VOICE_TARGET_TRIGGERS:
+        sql = await conn.scalar(
+            text(
+                "SELECT sql FROM sqlite_master "
+                "WHERE type = 'trigger' AND name = :name"
+            ),
+            {"name": name},
+        )
+        if sql and "completion_issue_id" not in str(sql):
+            await conn.execute(text(f"DROP TRIGGER {name}"))
 
 
 async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
@@ -134,12 +191,19 @@ async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
 async def _ensure_voice_integrity_triggers(conn) -> list[str]:
     session_validation = """
         (
-            NEW.current_completion_item_id IS NOT NULL
-            AND NOT EXISTS (
-                SELECT 1 FROM memoir_completion_items AS item
-                WHERE item.id = NEW.current_completion_item_id
-                  AND item.project_id = NEW.project_id
+            NEW.current_completion_issue_id IS NOT NULL
+            AND (
+                NEW.session_goal != 'book_completion'
+                OR NOT EXISTS (
+                    SELECT 1 FROM memoir_completion_issues AS issue
+                    WHERE issue.id = NEW.current_completion_issue_id
+                      AND issue.project_id = NEW.project_id
+                )
             )
+        )
+        OR (
+            NEW.current_completion_issue_id IS NOT NULL
+            AND NEW.anchor_framework_item_id IS NOT NULL
         )
         OR (
             NEW.anchor_framework_item_id IS NOT NULL
@@ -155,15 +219,19 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
     """
     utterance_validation = """
         (
-            NEW.completion_item_id IS NOT NULL
+            NEW.completion_issue_id IS NOT NULL
             AND NOT EXISTS (
                 SELECT 1
-                FROM memoir_completion_items AS item
+                FROM memoir_completion_issues AS issue
                 JOIN memoir_voice_sessions AS session
                   ON session.id = NEW.voice_session_id
-                WHERE item.id = NEW.completion_item_id
-                  AND item.project_id = session.project_id
+                WHERE issue.id = NEW.completion_issue_id
+                  AND issue.project_id = session.project_id
             )
+        )
+        OR (
+            NEW.completion_issue_id IS NOT NULL
+            AND NEW.framework_item_id IS NOT NULL
         )
         OR (
             NEW.framework_item_id IS NOT NULL
@@ -229,7 +297,8 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
             CREATE TRIGGER memoir_voice_sessions_targets_update
             BEFORE UPDATE OF
                 project_id,
-                current_completion_item_id,
+                session_goal,
+                current_completion_issue_id,
                 anchor_framework_item_id
             ON memoir_voice_sessions
             WHEN {session_validation}
@@ -249,7 +318,7 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
             CREATE TRIGGER memoir_voice_utterances_targets_update
             BEFORE UPDATE OF
                 voice_session_id,
-                completion_item_id,
+                completion_issue_id,
                 framework_item_id,
                 policy_decision_id
             ON memoir_voice_utterances
@@ -300,10 +369,13 @@ async def migrate_memoir_voice_schema(engine: AsyncEngine) -> dict[str, object]:
     register_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        changed_columns = await _ensure_completion_issue_columns(conn)
+        await _drop_stale_voice_target_triggers(conn)
         fts = await _ensure_transcript_fts(conn)
         fts["changed_triggers"].extend(
             await _ensure_voice_integrity_triggers(conn)
         )
+        fts["changed_columns"] = changed_columns
     return fts
 
 
@@ -329,5 +401,8 @@ async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
                 name=name,
             ):
                 missing.append(name)
+        for table_name, column_name in VOICE_COMPLETION_COLUMNS.items():
+            if column_name not in await _table_columns(conn, table_name):
+                missing.append(f"{table_name}.{column_name}")
     if missing:
         raise RuntimeError(f"Missing memoir voice schema objects: {sorted(missing)}")

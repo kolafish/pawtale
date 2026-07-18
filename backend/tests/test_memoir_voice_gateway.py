@@ -1378,7 +1378,7 @@ async def test_voice_gateway_persistence_flushes_unfinalized_audio_from_pending_
     assert utterance is not None
     assert utterance.transcript_raw == ""
     assert utterance.provider_payload_json == {"source": "unfinalized_audio"}
-    assert utterance.completion_item_id is None
+    assert utterance.completion_issue_id is None
     assert utterance.framework_item_id is None
     assert not pending_path.exists()
     assert persistence.pending_audio_path is None
@@ -1426,7 +1426,7 @@ async def test_voice_gateway_persistence_keeps_unfinalized_interviewer_as_contex
     }
     assert utterance.source_material_type == "interviewer_prompt"
     assert utterance.source_route_action == "ignore"
-    assert utterance.completion_item_id is None
+    assert utterance.completion_issue_id is None
     assert utterance.framework_item_id is None
 
 

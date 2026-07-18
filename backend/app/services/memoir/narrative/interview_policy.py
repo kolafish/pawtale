@@ -22,10 +22,14 @@ from app.domain.memoir.narrative_types import (
     MemoirInterviewResponseOutcome,
     MemoirInterviewStoryState,
 )
-from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
+from app.models.memoir import (
+    MemoirChatMessage,
+    MemoirCompletionIssue,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
 from app.models.memoir_narrative import (
     MemoirFrameworkItem,
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
     MemoirProjectFramework,
@@ -40,9 +44,7 @@ def open_narration_brief(
     current_story_state: MemoirInterviewStoryState,
     conversation_momentum: MemoirConversationMomentum,
     existing_material_refs: tuple[str, ...] = (),
-    unresolved_item_ids: tuple[str, ...] = (),
-    known_claim_ids: tuple[str, ...] = (),
-    do_not_repeat_claim_ids: tuple[str, ...] = (),
+    unresolved_issue_ids: tuple[str, ...] = (),
     candidate_topic_ids: tuple[str, ...] = (),
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
@@ -59,49 +61,50 @@ def open_narration_brief(
         user_preferences=user_preferences or {},
         safety_constraints=safety_constraints,
         existing_material=existing_material_refs,
-        unresolved_items=unresolved_item_ids,
-        known_claims=known_claim_ids,
-        do_not_repeat_claims=do_not_repeat_claim_ids,
+        unresolved_issue_ids=unresolved_issue_ids,
         candidate_topic_ids=candidate_topic_ids,
-        expected_evidence_hint="",
-        completion_policy="",
+        answer_hint="",
+        completion_channel="",
         template_version=None,
         policy_version=policy_version,
     ).with_candidates()
 
 
-def completion_item_brief(
+def completion_issue_brief(
     *,
-    item: MemoirCompletionItem,
+    issue: MemoirCompletionIssue,
     current_story_state: MemoirInterviewStoryState,
     conversation_momentum: MemoirConversationMomentum,
     recent_material_refs: tuple[str, ...] = (),
+    related_material_refs: tuple[str, ...] | None = None,
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
     policy_version: str = DEFAULT_POLICY_VERSION,
 ) -> InterviewBrief:
-    claim_ids = tuple(
-        claim_id
-        for claim_id in (item.claim_id, item.related_claim_id)
-        if claim_id
-    )
     return InterviewBrief(
         source_kind=MemoirInterviewBriefSourceKind.BOOK_COMPLETION,
-        target_id=item.id,
-        purpose=item.description or item.title,
-        opening_question=item.question or item.title,
+        target_id=issue.id,
+        purpose=issue.reason,
+        opening_question=issue.question,
         candidate_actions=(),
         current_story_state=current_story_state,
         conversation_momentum=conversation_momentum,
         user_preferences=user_preferences or {},
         safety_constraints=safety_constraints,
-        existing_material=tuple(sorted(set(claim_ids) | set(recent_material_refs))),
-        unresolved_items=(item.id,),
-        known_claims=claim_ids,
-        do_not_repeat_claims=(),
+        existing_material=tuple(
+            sorted(
+                set(
+                    issue.related_material_ids_json
+                    if related_material_refs is None
+                    else related_material_refs
+                )
+                | set(recent_material_refs)
+            )
+        ),
+        unresolved_issue_ids=(issue.id,),
         candidate_topic_ids=(),
-        expected_evidence_hint=item.dimension,
-        completion_policy=item.action,
+        answer_hint=issue.issue_type,
+        completion_channel=issue.channel,
         template_version=None,
         policy_version=policy_version,
     ).with_candidates()
@@ -115,8 +118,6 @@ def framework_item_brief(
     current_story_state: MemoirInterviewStoryState,
     conversation_momentum: MemoirConversationMomentum,
     existing_material_refs: tuple[str, ...] = (),
-    known_claim_ids: tuple[str, ...] = (),
-    do_not_repeat_claim_ids: tuple[str, ...] = (),
     user_preferences: Mapping[str, object] | None = None,
     safety_constraints: tuple[str, ...] = (),
     policy_version: str = DEFAULT_POLICY_VERSION,
@@ -133,17 +134,11 @@ def framework_item_brief(
         conversation_momentum=conversation_momentum,
         user_preferences=user_preferences or {},
         safety_constraints=safety_constraints,
-        existing_material=tuple(
-            sorted(set(existing_material_refs) | set(known_claim_ids))
-        ),
-        unresolved_items=(),
-        known_claims=tuple(sorted(set(known_claim_ids))),
-        do_not_repeat_claims=tuple(
-            sorted(set(do_not_repeat_claim_ids))
-        ),
+        existing_material=tuple(sorted(set(existing_material_refs))),
+        unresolved_issue_ids=(),
         candidate_topic_ids=(),
-        expected_evidence_hint="",
-        completion_policy="",
+        answer_hint="",
+        completion_channel="",
         template_version=template_version,
         policy_version=policy_version,
     ).with_candidates()
@@ -323,29 +318,15 @@ async def assign_utterance(
     db: AsyncSession,
     *,
     utterance: MemoirVoiceUtterance,
-    completion_item: MemoirCompletionItem | None,
+    completion_issue: MemoirCompletionIssue | None,
     framework_item: MemoirFrameworkItem | None = None,
     policy_decision: MemoirInterviewPolicyDecision | None = None,
 ) -> MemoirVoiceUtterance:
     session = await db.get(MemoirVoiceSession, utterance.voice_session_id)
     if session is None:
         raise ValueError("讲述记录对应的访谈会话不存在")
-    if completion_item is not None and completion_item.project_id != session.project_id:
-        raise ValueError("补全项不属于讲述记录所在项目")
-    if completion_item is not None and framework_item is not None:
+    if completion_issue is not None and framework_item is not None:
         raise ValueError("讲述记录只能归属一个访谈目标")
-    if framework_item is not None:
-        framework_project_id = await db.scalar(
-            select(MemoirProjectFramework.project_id)
-            .join(
-                MemoirFrameworkItem,
-                MemoirFrameworkItem.project_framework_id
-                == MemoirProjectFramework.id,
-            )
-            .where(MemoirFrameworkItem.id == framework_item.id)
-        )
-        if framework_project_id != session.project_id:
-            raise ValueError("话题地图方向不属于讲述记录所在项目")
     if policy_decision is None:
         policy_decision = await policy_decision_for_utterance(
             db,
@@ -359,22 +340,22 @@ async def assign_utterance(
             != MemoirInterviewPolicyExecutionMode.ACTIVE.value
         ):
             raise ValueError("只有实际执行的策略决策才能归因用户回答")
-        snapshot_item_id = (
+        snapshot_issue_id = (
             policy_decision.state_snapshot_json or {}
-        ).get("completion_item_id")
+        ).get("completion_issue_id")
         snapshot_framework_item_id = (
             policy_decision.state_snapshot_json or {}
         ).get("framework_item_id")
-        if snapshot_item_id and snapshot_framework_item_id:
+        if snapshot_issue_id and snapshot_framework_item_id:
             raise ValueError("策略决策同时包含多个访谈目标")
-        if completion_item is None and framework_item is None:
-            if snapshot_item_id:
-                completion_item = await db.get(
-                    MemoirCompletionItem,
-                    snapshot_item_id,
+        if completion_issue is None and framework_item is None:
+            if snapshot_issue_id:
+                completion_issue = await db.get(
+                    MemoirCompletionIssue,
+                    snapshot_issue_id,
                 )
-                if completion_item is None:
-                    raise ValueError("策略决策引用的补全项不存在")
+                if completion_issue is None:
+                    raise ValueError("策略决策引用的补全问题不存在")
             elif snapshot_framework_item_id:
                 framework_item = await db.get(
                     MemoirFrameworkItem,
@@ -382,34 +363,52 @@ async def assign_utterance(
                 )
                 if framework_item is None:
                     raise ValueError("策略决策引用的话题方向不存在")
-        expected_item_id = completion_item.id if completion_item else None
+        expected_issue_id = completion_issue.id if completion_issue else None
         expected_framework_item_id = framework_item.id if framework_item else None
         if (
-            snapshot_item_id != expected_item_id
+            snapshot_issue_id != expected_issue_id
             or snapshot_framework_item_id != expected_framework_item_id
         ):
             raise ValueError("策略决策与讲述记录的补访目标不一致")
 
+    if (
+        completion_issue is not None
+        and completion_issue.project_id != session.project_id
+    ):
+        raise ValueError("补全问题不属于讲述记录所在项目")
+    if framework_item is not None:
+        framework_project_id = await db.scalar(
+            select(MemoirProjectFramework.project_id)
+            .join(
+                MemoirFrameworkItem,
+                MemoirFrameworkItem.project_framework_id
+                == MemoirProjectFramework.id,
+            )
+            .where(MemoirFrameworkItem.id == framework_item.id)
+        )
+        if framework_project_id != session.project_id:
+            raise ValueError("话题地图方向不属于讲述记录所在项目")
+
     expected_framework_id = framework_item.id if framework_item else None
-    expected_item_id = completion_item.id if completion_item else None
+    expected_issue_id = completion_issue.id if completion_issue else None
     expected_policy_id = policy_decision.id if policy_decision else None
     if any(
         (
             utterance.framework_item_id,
-            utterance.completion_item_id,
+            utterance.completion_issue_id,
             utterance.policy_decision_id,
         )
     ):
         if (
             utterance.framework_item_id != expected_framework_id
-            or utterance.completion_item_id != expected_item_id
+            or utterance.completion_issue_id != expected_issue_id
             or utterance.policy_decision_id != expected_policy_id
         ):
             raise ValueError("讲述记录已经归属另一访谈目标")
         return utterance
 
     utterance.framework_item_id = expected_framework_id
-    utterance.completion_item_id = expected_item_id
+    utterance.completion_issue_id = expected_issue_id
     utterance.policy_decision_id = expected_policy_id
     db.add(utterance)
     await db.flush()
@@ -420,13 +419,14 @@ async def answer_belongs_to_creation_assignment(
     db: AsyncSession,
     *,
     utterance_id: str,
-    completion_item_id: str,
+    completion_issue_id: str,
 ) -> bool:
     return (
         await db.scalar(
             select(MemoirVoiceUtterance.id).where(
                 MemoirVoiceUtterance.id == utterance_id,
-                MemoirVoiceUtterance.completion_item_id == completion_item_id,
+                MemoirVoiceUtterance.completion_issue_id
+                == completion_issue_id,
             )
         )
         is not None

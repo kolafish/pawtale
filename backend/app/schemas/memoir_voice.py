@@ -21,7 +21,7 @@ class MemoirVoiceSessionCreate(BaseModel):
     guidance_mode: MemoirGuidanceMode = MemoirGuidanceMode.FREE_NARRATION
     interview_type: MemoirInterviewType = MemoirInterviewType.AI_INTERVIEW
     session_goal: MemoirSessionGoal = MemoirSessionGoal.OPEN_NARRATION
-    current_completion_item_id: str | None = Field(default=None, max_length=36)
+    current_completion_issue_id: str | None = Field(default=None, max_length=36)
     anchor_framework_item_id: str | None = Field(default=None, max_length=36)
     current_guidance_module: str | None = None
     provider: str | None = None
@@ -30,8 +30,13 @@ class MemoirVoiceSessionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_interview_target(self):
-        if self.current_completion_item_id and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION:
-            raise ValueError("current_completion_item_id requires book_completion session_goal")
+        if (
+            self.current_completion_issue_id
+            and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION
+        ):
+            raise ValueError(
+                "current_completion_issue_id requires book_completion session_goal"
+            )
         if self.anchor_framework_item_id and (
             self.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW
             or self.session_goal != MemoirSessionGoal.OPEN_NARRATION
@@ -39,9 +44,9 @@ class MemoirVoiceSessionCreate(BaseModel):
             raise ValueError(
                 "anchor_framework_item_id requires guided_interview open_narration"
             )
-        if self.current_completion_item_id and self.anchor_framework_item_id:
+        if self.current_completion_issue_id and self.anchor_framework_item_id:
             raise ValueError(
-                "voice session cannot target a completion item and framework item together"
+                "voice session cannot target a completion issue and framework item together"
             )
         return self
 
@@ -108,7 +113,7 @@ class MemoirVoiceSessionResponse(BaseModel):
     guidance_mode: MemoirGuidanceMode
     interview_type: MemoirInterviewType
     session_goal: MemoirSessionGoal
-    current_completion_item_id: str | None = None
+    current_completion_issue_id: str | None = None
     anchor_framework_item_id: str | None = None
     current_guidance_module: str | None = None
     provider: str | None = None
@@ -156,6 +161,9 @@ class MemoirVoiceUtteranceResponse(BaseModel):
     source_route_confidence: float | None = None
     source_route_reason: str = ""
     source_route_updated_at: datetime | None = None
+    framework_item_id: str | None = None
+    completion_issue_id: str | None = None
+    policy_decision_id: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -172,7 +180,7 @@ class MemoirVoiceSessionSummaryResponse(BaseModel):
     guidance_mode: MemoirGuidanceMode
     interview_type: MemoirInterviewType
     session_goal: MemoirSessionGoal
-    current_completion_item_id: str | None = None
+    current_completion_issue_id: str | None = None
     anchor_framework_item_id: str | None = None
     current_guidance_module: str | None = None
     started_at: datetime | None = None

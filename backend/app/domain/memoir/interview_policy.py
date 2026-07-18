@@ -14,7 +14,7 @@ from app.domain.memoir.narrative_types import (
 )
 
 
-INTERVIEW_BRIEF_SCHEMA_VERSION = "1"
+INTERVIEW_BRIEF_SCHEMA_VERSION = "2"
 SAFETY_CONSTRAINT_CODES = {
     "avoid_sensitive_topics",
     "do_not_continue",
@@ -59,12 +59,10 @@ class InterviewBrief:
     user_preferences: Mapping[str, object]
     safety_constraints: tuple[str, ...]
     existing_material: tuple[str, ...]
-    unresolved_items: tuple[str, ...]
-    known_claims: tuple[str, ...]
-    do_not_repeat_claims: tuple[str, ...]
+    unresolved_issue_ids: tuple[str, ...]
     candidate_topic_ids: tuple[str, ...]
-    expected_evidence_hint: str
-    completion_policy: str
+    answer_hint: str
+    completion_channel: str
     template_version: str | None
     policy_version: str
 
@@ -150,14 +148,14 @@ def brief_context_snapshot(brief: InterviewBrief) -> dict[str, object]:
             if brief.source_kind == MemoirInterviewBriefSourceKind.FRAMEWORK
             else None
         ),
-        "completion_item_id": (
+        "completion_issue_id": (
             brief.target_id
             if brief.source_kind == MemoirInterviewBriefSourceKind.BOOK_COMPLETION
             else None
         ),
         "template_version": brief.template_version,
         "policy_version": brief.policy_version,
-        "completion_policy": brief.completion_policy,
+        "completion_channel": brief.completion_channel,
         "current_story_state": brief.current_story_state.value,
         "conversation_momentum": brief.conversation_momentum.value,
         "user_preference_snapshot": _user_preference_snapshot(
@@ -167,9 +165,8 @@ def brief_context_snapshot(brief: InterviewBrief) -> dict[str, object]:
             brief.safety_constraints
         ),
         "existing_material_refs": sorted(set(brief.existing_material)),
-        "unresolved_item_ids": sorted(set(brief.unresolved_items)),
-        "known_claim_ids": sorted(set(brief.known_claims)),
-        "do_not_repeat_claim_ids": sorted(set(brief.do_not_repeat_claims)),
+        "unresolved_issue_ids": sorted(set(brief.unresolved_issue_ids)),
+        "answer_hint": brief.answer_hint,
         "candidate_framework_item_ids": sorted(
             set(brief.candidate_topic_ids)
         ),

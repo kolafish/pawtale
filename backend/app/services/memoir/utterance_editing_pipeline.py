@@ -8,8 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import MemoirEditingJobType
-from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirVoiceSession, MemoirVoiceUtterance
-from app.services.memoir import editing_jobs, source_cards
+from app.models.memoir import (
+    MemoirChatMessage,
+    MemoirEditingJob,
+    MemoirSectionMaterial,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
+from app.services.memoir import editing_jobs, sections, source_cards
 from app.services.memoir.narrative import ingestion_jobs as narrative_ingestion
 from app.services.memoir.source_disposition import is_ignored_non_memoir_source
 
@@ -151,6 +157,26 @@ async def schedule_source_processing_for_ready_utterance(
 ) -> SourceProcessingJobs:
     if not current_utterance_text(utterance) or is_ignored_non_memoir_source(utterance):
         return SourceProcessingJobs(source_card_job=None, route_job=None, narrative_job=None)
+    already_layered = await db.scalar(
+        select(MemoirSectionMaterial.id).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == utterance.id,
+        )
+    )
+    if utterance.completion_issue_id or already_layered is not None:
+        transcript_version_id = current_transcript_version_id(utterance)
+        if already_layered is not None and transcript_version_id:
+            await sections.refresh_material_transcript_version(
+                db,
+                project_id=project_id,
+                utterance_id=utterance.id,
+                transcript_version_id=transcript_version_id,
+            )
+        return SourceProcessingJobs(
+            source_card_job=None,
+            route_job=None,
+            narrative_job=None,
+        )
     source_card_job = await source_cards.schedule_source_card_generation_job(
         db,
         project_id=project_id,

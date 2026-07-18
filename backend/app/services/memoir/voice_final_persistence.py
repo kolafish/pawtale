@@ -16,9 +16,10 @@ from app.domain.memoir.types import (
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import MemoirChatMessage, MemoirTranscriptVersion, MemoirVoiceSession, MemoirVoiceUtterance
-from app.models.memoir_narrative import MemoirCompletionItem, MemoirFrameworkItem
+from app.models.memoir_narrative import MemoirFrameworkItem
 from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
+from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
 from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
@@ -56,9 +57,13 @@ async def _assign_interview_target(
     voice_session: MemoirVoiceSession,
     utterance: MemoirVoiceUtterance,
 ) -> None:
-    completion_item = (
-        await db.get(MemoirCompletionItem, voice_session.current_completion_item_id)
-        if voice_session.current_completion_item_id
+    completion_issue = (
+        await completion_issues.get_issue(
+            db,
+            project_id=voice_session.project_id,
+            issue_id=voice_session.current_completion_issue_id,
+        )
+        if voice_session.current_completion_issue_id
         else None
     )
     framework_item = (
@@ -69,9 +74,15 @@ async def _assign_interview_target(
     assigned = await interview_policy.assign_utterance(
         db,
         utterance=utterance,
-        completion_item=completion_item,
+        completion_issue=completion_issue,
         framework_item=framework_item,
     )
+    if completion_issue is not None:
+        await completion_interviews.bind_answer_segment(
+            db,
+            voice_session=voice_session,
+            utterance=assigned,
+        )
     if (
         assigned.framework_item_id
         and voice_session.anchor_framework_item_id != assigned.framework_item_id

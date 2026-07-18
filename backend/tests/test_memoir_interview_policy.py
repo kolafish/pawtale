@@ -3,6 +3,7 @@ from __future__ import annotations
 from hashlib import sha256
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.domain.memoir.interview_policy import (
@@ -17,11 +18,11 @@ from app.domain.memoir.narrative_types import (
 )
 from app.models.memoir import (
     MemoirChatMessage,
+    MemoirCompletionIssue,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
     MemoirInterviewPolicyEvaluation,
 )
@@ -82,7 +83,7 @@ def test_interview_brief_fingerprint_is_stable_and_contains_only_references():
         current_story_state=MemoirInterviewStoryState.ACTIVE,
         conversation_momentum=MemoirConversationMomentum.STEADY,
         existing_material_refs=("story-2", "story-1"),
-        unresolved_item_ids=("item-2", "item-1"),
+        unresolved_issue_ids=("item-2", "item-1"),
         user_preferences={
             "pace": "slow",
             "private_note": "不要把这段原话写进日志",
@@ -93,7 +94,7 @@ def test_interview_brief_fingerprint_is_stable_and_contains_only_references():
 
     assert first == second
     assert first["existing_material_refs"] == ["story-1", "story-2"]
-    assert first["unresolved_item_ids"] == ["item-1", "item-2"]
+    assert first["unresolved_issue_ids"] == ["item-1", "item-2"]
     assert first["user_preference_snapshot"] == {"pace": "slow"}
     assert len(str(first["brief_fingerprint"])) == 64
     assert "opening_question" not in first
@@ -171,7 +172,7 @@ async def test_policy_decision_message_and_user_response_are_traceable(test_db):
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        completion_item=None,
+        completion_issue=None,
     )
     await interview_policy.record_response_outcome(
         test_db,
@@ -188,7 +189,7 @@ async def test_policy_decision_message_and_user_response_are_traceable(test_db):
 
     persisted_assignment = await test_db.get(MemoirVoiceUtterance, assignment.id)
     assert persisted_assignment is not None
-    assert persisted_assignment.completion_item_id is None
+    assert persisted_assignment.completion_issue_id is None
     assert persisted_assignment.policy_decision_id == decision.id
     persisted_decision = await test_db.get(MemoirInterviewPolicyDecision, decision.id)
     assert persisted_decision is not None
@@ -244,7 +245,7 @@ async def test_policy_selection_and_assignment_target_are_immutable(test_db):
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        completion_item=None,
+        completion_issue=None,
     )
     await test_db.commit()
     assignment_id = assignment.id
@@ -258,7 +259,60 @@ async def test_policy_selection_and_assignment_target_are_immutable(test_db):
 
     assignment = await test_db.get(MemoirVoiceUtterance, assignment_id)
     assert assignment is not None
-    assert assignment.completion_item_id is None
+    assert assignment.completion_issue_id is None
+
+
+async def test_policy_assignment_rejects_cross_project_issue_from_snapshot(
+    test_db,
+):
+    first_project = Project(type="memoir", title="第一个项目")
+    second_project = Project(type="memoir", title="第二个项目")
+    test_db.add_all([first_project, second_project])
+    await test_db.flush()
+    session = MemoirVoiceSession(project_id=first_project.id)
+    test_db.add(session)
+    issue = MemoirCompletionIssue(
+        project_id=second_project.id,
+        scope="book",
+        issue_type="relationship",
+        channel="interview",
+        question="这两个人是什么关系？",
+        reason="补清关系",
+        priority="medium",
+        fingerprint=sha256(b"cross-project-policy").hexdigest(),
+        related_material_ids_json=[],
+        input_signature="cross-project-policy",
+    )
+    test_db.add(issue)
+    await test_db.flush()
+    decision = await interview_policy.create_policy_decision(
+        test_db,
+        session_id=session.id,
+        trigger_message_id=None,
+        brief=interview_policy.completion_issue_brief(
+            issue=issue,
+            current_story_state=MemoirInterviewStoryState.ACTIVE,
+            conversation_momentum=MemoirConversationMomentum.STEADY,
+        ),
+        selected_action=MemoirInterviewAction.FOLLOW_CURRENT_STORY,
+        reason_code="invalid_cross_project_test",
+        reason_summary="",
+        execution_mode=MemoirInterviewPolicyExecutionMode.ACTIVE,
+    )
+    utterance = MemoirVoiceUtterance(
+        voice_session_id=session.id,
+        transcript_raw="她是我的老师。",
+    )
+    test_db.add(utterance)
+    await test_db.flush()
+
+    with pytest.raises(ValueError, match="补全问题不属于"):
+        await interview_policy.assign_utterance(
+            test_db,
+            utterance=utterance,
+            completion_issue=None,
+            policy_decision=decision,
+        )
 
 
 async def test_policy_decision_rejects_action_outside_persisted_candidates(test_db):
@@ -295,7 +349,7 @@ async def test_policy_decision_rejects_action_outside_persisted_candidates(test_
         await test_db.rollback()
 
 
-async def test_project_deletion_removes_policy_and_completion_item(
+async def test_project_deletion_removes_policy_and_completion_issue(
     test_db,
 ):
     project = Project(type="memoir", title="删除策略数据")
@@ -308,26 +362,24 @@ async def test_project_deletion_removes_policy_and_completion_item(
     )
     test_db.add(session)
     await test_db.flush()
-    item = MemoirCompletionItem(
+    issue = MemoirCompletionIssue(
         project_id=project.id,
-        scope_type="book",
-        item_type="relationship",
-        severity="medium",
-        dimension="relationship_clarity",
-        title="人物关系",
-        description="补充人物关系",
-        fingerprint=sha256(b"project-delete-policy").hexdigest(),
-        action="interview",
+        scope="book",
+        issue_type="relationship",
+        channel="interview",
         question="当时是什么关系？",
-        priority=1,
+        reason="补充人物关系",
+        priority="medium",
+        fingerprint=sha256(b"project-delete-policy").hexdigest(),
+        related_material_ids_json=[],
+        input_signature="project-delete-policy",
         status="in_progress",
-        detected_by="rules",
     )
-    test_db.add(item)
+    test_db.add(issue)
     await test_db.flush()
-    session.current_completion_item_id = item.id
-    brief = interview_policy.completion_item_brief(
-        item=item,
+    session.current_completion_issue_id = issue.id
+    brief = interview_policy.completion_issue_brief(
+        issue=issue,
         current_story_state=MemoirInterviewStoryState.ACTIVE,
         conversation_momentum=MemoirConversationMomentum.STEADY,
     )
@@ -350,7 +402,7 @@ async def test_project_deletion_removes_policy_and_completion_item(
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        completion_item=item,
+        completion_issue=issue,
         policy_decision=decision,
     )
     evaluation = await interview_policy.record_human_evaluation(
@@ -364,7 +416,7 @@ async def test_project_deletion_removes_policy_and_completion_item(
     decision_id = decision.id
     evaluation_id = evaluation.id
     assignment_id = assignment.id
-    item_id = item.id
+    issue_id = issue.id
     project_id = project.id
 
     await delete_project(test_db, project)
@@ -374,4 +426,8 @@ async def test_project_deletion_removes_policy_and_completion_item(
     assert await test_db.get(MemoirInterviewPolicyDecision, decision_id) is None
     assert await test_db.get(MemoirInterviewPolicyEvaluation, evaluation_id) is None
     assert await test_db.get(MemoirVoiceUtterance, assignment_id) is None
-    assert await test_db.get(MemoirCompletionItem, item_id) is None
+    assert await test_db.scalar(
+        select(MemoirCompletionIssue.id).where(
+            MemoirCompletionIssue.id == issue_id
+        )
+    ) is None

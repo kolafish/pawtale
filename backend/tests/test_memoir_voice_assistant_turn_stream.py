@@ -19,11 +19,11 @@ from app.models.memoir import (
     AudioFile,
     MemoirBookPlanChapter,
     MemoirChatMessage,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirVoiceSession,
 )
 from app.models.memoir_narrative import (
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
 )
 from app.services.ai_streaming import AITextStreamChunk
@@ -168,28 +168,27 @@ async def test_book_completion_acknowledgement_suppresses_global_progress_and_en
         project_id=created["session"]["project_id"],
         chapter_title="山桃花开的心动",
     )
-    item = MemoirCompletionItem(
+    issue = MemoirCompletionIssue(
         project_id=created["session"]["project_id"],
-        scope_type="chapter",
-        chapter_id=chapter.id,
-        item_type="causality",
-        severity="medium",
-        dimension="chapter_context",
-        title="补充重新联系的背景",
-        description="说明两人如何重新联系。",
-        fingerprint="a" * 64,
-        action="interview",
+        scope="book",
+        issue_type="context",
+        channel="interview",
         question="这段内容开始前，读者还需要知道哪些重要背景？",
-        priority=100,
-        status="in_progress",
-        detected_by="ai",
+        reason="说明两人如何重新联系。",
+        priority="medium",
+        fingerprint="a" * 64,
+        related_material_ids_json=[],
+        input_signature="assistant-turn-completion",
+        status="closed",
+        outcome="answered",
+        answered_material_id=created["utterance_id"],
     )
-    test_db.add(item)
+    test_db.add(issue)
     await test_db.flush()
     session = await test_db.get(MemoirVoiceSession, created["session"]["id"])
     assert session is not None
     session.session_goal = "book_completion"
-    session.current_completion_item_id = item.id
+    session.current_completion_issue_id = issue.id
     test_db.add(session)
     await automation_events.record_automation_event(
         test_db,
@@ -213,9 +212,18 @@ async def test_book_completion_acknowledgement_suppresses_global_progress_and_en
     assert completed["progress_spoken_text"] == ""
     assert "另有5条讲述未归入章节" not in ai_client.calls[0]["user_prompt"]
     assert "不要播报全书进度" in ai_client.calls[0]["user_prompt"]
+    assert "这段内容开始前，读者还需要知道哪些重要背景" in ai_client.calls[0][
+        "user_prompt"
+    ]
+    assert "只做结束确认，不再追问" in ai_client.calls[0]["user_prompt"]
     assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert assistant_message is not None
     assert assistant_message.metadata_json["expects_answer"] is False
+    assert await test_db.scalar(
+        select(func.count(MemoirInterviewPolicyDecision.id)).where(
+            MemoirInterviewPolicyDecision.session_id == session.id
+        )
+    ) == 0
 
 
 async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing_reply(
