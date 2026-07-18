@@ -50,6 +50,7 @@ def _issue_fingerprint(
     chapter_id: str | None,
     issue_type: MemoirCompletionIssueType,
     related_material_ids: list[str],
+    related_section_ids: list[str] | None = None,
 ) -> str:
     payload = {
         "scope": scope.value,
@@ -57,6 +58,7 @@ def _issue_fingerprint(
         "chapter_id": chapter_id,
         "issue_type": issue_type.value,
         "material_ids": sorted(set(related_material_ids)),
+        "section_ids": sorted(set(related_section_ids or [])),
     }
     encoded = json.dumps(
         payload,
@@ -239,6 +241,103 @@ async def refresh_section_issues(
             issue.closed_at = now
             db.add(issue)
 
+    await db.flush()
+    return sorted(current, key=_sort_key)
+
+
+async def sync_chapter_digest_issues(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    input_signature: str,
+    candidates: list[dict],
+) -> list[MemoirCompletionIssue]:
+    values: list[dict] = []
+    for candidate in candidates[:3]:
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            issue_type = MemoirCompletionIssueType(candidate.get("issue_type"))
+            priority = MemoirCompletionIssuePriority(candidate.get("priority"))
+            channel = MemoirCompletionIssueChannel(candidate.get("channel"))
+        except ValueError:
+            continue
+        question = str(candidate.get("question") or "").strip()
+        reason = str(candidate.get("reason") or "").strip()
+        if not question or not reason:
+            continue
+        material_ids = [
+            str(value).strip()
+            for value in candidate.get("material_ids", [])
+            if str(value).strip()
+        ]
+        section_ids = [
+            str(value).strip()
+            for value in candidate.get("section_ids", [])
+            if str(value).strip()
+        ]
+        values.append(
+            {
+                "project_id": project_id,
+                "scope": MemoirCompletionIssueScope.CHAPTER.value,
+                "section_id": None,
+                "chapter_id": chapter_id,
+                "issue_type": issue_type.value,
+                "channel": channel.value,
+                "question": question,
+                "reason": reason,
+                "priority": priority.value,
+                "fingerprint": _issue_fingerprint(
+                    scope=MemoirCompletionIssueScope.CHAPTER,
+                    section_id=None,
+                    chapter_id=chapter_id,
+                    issue_type=issue_type,
+                    related_material_ids=material_ids,
+                    related_section_ids=section_ids,
+                ),
+                "related_material_ids_json": material_ids,
+                "input_signature": input_signature,
+            }
+        )
+    existing = list(
+        (
+            await db.scalars(
+                select(MemoirCompletionIssue).where(
+                    MemoirCompletionIssue.project_id == project_id,
+                    MemoirCompletionIssue.chapter_id == chapter_id,
+                    MemoirCompletionIssue.section_id.is_(None),
+                    MemoirCompletionIssue.scope
+                    == MemoirCompletionIssueScope.CHAPTER.value,
+                )
+            )
+        ).all()
+    )
+    by_fingerprint = {item.fingerprint: item for item in existing}
+    current: list[MemoirCompletionIssue] = []
+    fingerprints = {value["fingerprint"] for value in values}
+    for value in values:
+        issue = by_fingerprint.get(value["fingerprint"])
+        if issue is None:
+            issue = MemoirCompletionIssue(**value)
+            db.add(issue)
+        elif issue.status != MemoirCompletionIssueStatus.CLOSED.value:
+            for field, field_value in value.items():
+                if field not in {"project_id", "fingerprint"}:
+                    setattr(issue, field, field_value)
+            db.add(issue)
+        current.append(issue)
+    now = _utcnow()
+    for issue in existing:
+        if (
+            issue.fingerprint not in fingerprints
+            and issue.status == MemoirCompletionIssueStatus.OPEN.value
+        ):
+            issue.status = MemoirCompletionIssueStatus.CLOSED.value
+            issue.outcome = MemoirCompletionIssueOutcome.SUPERSEDED.value
+            issue.outcome_note = "章节内容变化后，该问题已不再是当前问题"
+            issue.closed_at = now
+            db.add(issue)
     await db.flush()
     return sorted(current, key=_sort_key)
 

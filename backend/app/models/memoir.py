@@ -1011,6 +1011,65 @@ class MemoirCompletionIssue(Base):
     )
 
 
+class MemoirChapterDigest(Base):
+    __tablename__ = "memoir_chapter_digests"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "chapter_id",
+            "engine",
+            "input_signature",
+            name="uq_memoir_chapter_digests_signature",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
+            name="ck_memoir_chapter_digests_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chapter_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    input_signature: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+    )
+    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSemanticCacheStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    digest_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship(
+        "MemoirBookPlanChapter"
+    )
+
+
 class MemoirBookChapterDraft(Base):
     __tablename__ = "memoir_book_chapter_drafts"
     __table_args__ = (
@@ -1073,6 +1132,22 @@ class MemoirBookChapterDraftVersion(Base):
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     prompt_snapshot: Mapped[str] = mapped_column(Text, default="", nullable=False)
     feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_signature: Mapped[str] = mapped_column(
+        String(128),
+        default="",
+        nullable=False,
+        index=True,
+    )
+    used_material_ids_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+    material_snapshot_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     draft: Mapped[MemoirBookChapterDraft] = orm_relationship("MemoirBookChapterDraft", back_populates="versions")
