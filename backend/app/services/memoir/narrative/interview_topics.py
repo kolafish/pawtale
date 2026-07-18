@@ -13,17 +13,16 @@ from app.domain.memoir.types import (
     MemoirGuidanceMode,
     MemoirSessionGoal,
 )
-from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
+from app.models.memoir import (
+    MemoirChatMessage,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
 from app.models.memoir_narrative import (
-    MemoirClaim,
     MemoirFrameworkItem,
-    MemoirFrameworkItemClaim,
     MemoirProjectFramework,
 )
 from app.services.memoir.narrative import frameworks, interview_policy
-from app.services.memoir.narrative.claim_usage_policy import (
-    known_for_conversation_filters,
-)
 
 
 MAX_TOPIC_CANDIDATES = 6
@@ -175,21 +174,13 @@ async def brief_for_candidate(
         for definition in template.items
         if definition.item_key == item.item_key
     )
-    known_claim_ids = tuple(
+    topic_material_ids = tuple(
         sorted(
             set(
                 (
                     await db.scalars(
-                        select(MemoirFrameworkItemClaim.claim_id)
-                        .join(
-                            MemoirClaim,
-                            MemoirClaim.id
-                            == MemoirFrameworkItemClaim.claim_id,
-                        )
-                        .where(
-                            MemoirFrameworkItemClaim.framework_item_id
-                            == item.id,
-                            *known_for_conversation_filters(MemoirClaim),
+                        select(MemoirVoiceUtterance.id).where(
+                            MemoirVoiceUtterance.framework_item_id == item.id
                         )
                     )
                 ).all()
@@ -202,9 +193,12 @@ async def brief_for_candidate(
         template_version=project_framework.template_version,
         current_story_state=base_brief.current_story_state,
         conversation_momentum=base_brief.conversation_momentum,
-        existing_material_refs=base_brief.existing_material,
-        known_claim_ids=known_claim_ids,
-        do_not_repeat_claim_ids=known_claim_ids,
+        existing_material_refs=tuple(
+            sorted(
+                set(base_brief.existing_material)
+                | set(topic_material_ids)
+            )
+        ),
         user_preferences=base_brief.user_preferences,
         safety_constraints=base_brief.safety_constraints,
         policy_version=base_brief.policy_version,

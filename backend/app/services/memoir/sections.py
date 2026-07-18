@@ -596,6 +596,86 @@ async def _move_materials(
     return affected_section_ids
 
 
+async def assign_material_to_section(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    section_id: str,
+    utterance_id: str,
+    assigned_by: MemoirSectionMaterialAssignedBy,
+    assignment_reason: str,
+) -> MemoirSectionMaterial:
+    target = await _load_section(
+        db,
+        project_id=project_id,
+        section_id=section_id,
+    )
+    await _move_materials(
+        db,
+        project_id=project_id,
+        target=target,
+        utterance_ids=[utterance_id],
+        assigned_by=assigned_by,
+        assignment_reason=assignment_reason,
+    )
+    material = await db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == utterance_id,
+        )
+    )
+    if material is None:
+        raise RuntimeError("讲述素材归入小章节失败")
+    return material
+
+
+async def refresh_material_transcript_version(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_id: str,
+    transcript_version_id: str,
+) -> MemoirSectionMaterial | None:
+    material = await db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == utterance_id,
+        )
+    )
+    if material is None:
+        return None
+    valid_version_id = await db.scalar(
+        select(MemoirTranscriptVersion.id)
+        .join(
+            MemoirVoiceSession,
+            MemoirVoiceSession.id
+            == MemoirTranscriptVersion.voice_session_id,
+        )
+        .where(
+            MemoirTranscriptVersion.id == transcript_version_id,
+            MemoirTranscriptVersion.source_artifact_id == utterance_id,
+            MemoirVoiceSession.project_id == project_id,
+        )
+    )
+    if valid_version_id is None:
+        raise HTTPException(
+            status_code=409,
+            detail="正文文本版本不属于当前讲述素材",
+        )
+    if material.transcript_version_id == transcript_version_id:
+        return material
+    material.transcript_version_id = transcript_version_id
+    material.updated_at = _utcnow()
+    db.add(material)
+    await mark_section_digests_stale(
+        db,
+        project_id=project_id,
+        section_ids={material.section_id},
+    )
+    await db.flush()
+    return material
+
+
 async def assign_materials(
     db: AsyncSession,
     *,

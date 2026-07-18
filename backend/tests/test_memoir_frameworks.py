@@ -511,23 +511,23 @@ async def test_framework_assignment_validates_project_and_is_immutable(test_db):
         await interview_policy.assign_utterance(
             test_db,
             utterance=utterance,
-            completion_item=None,
+            completion_issue=None,
             framework_item=second_framework.items[0],
         )
 
     assignment = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        completion_item=None,
+        completion_issue=None,
         framework_item=first_framework.items[0],
     )
     repeated = await interview_policy.assign_utterance(
         test_db,
         utterance=utterance,
-        completion_item=None,
+        completion_issue=None,
         framework_item=first_framework.items[0],
     )
 
     assert repeated.id == assignment.id
     assert assignment.framework_item_id == first_framework.items[0].id
-    assert assignment.completion_item_id is None
+    assert assignment.completion_issue_id is None

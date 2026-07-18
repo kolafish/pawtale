@@ -25,8 +25,11 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSessionDetailResponse,
     MemoirVoiceSessionStopRequest,
 )
-from app.services.memoir import progress_snapshot
-from app.services.memoir.narrative import completion_items
+from app.services.memoir import (
+    completion_interviews,
+    completion_issues,
+    progress_snapshot,
+)
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.source_disposition import (
     IGNORED_SOURCE_MATERIAL_TYPES,
@@ -66,20 +69,18 @@ async def create_voice_session(
 ) -> MemoirVoiceSessionDetailResponse:
     project = await load_memoir_project(db, project_id, user_id)
 
-    task = None
+    completion_issue = None
     if req.session_goal == MemoirSessionGoal.BOOK_COMPLETION:
-        if not req.current_completion_item_id:
+        if not req.current_completion_issue_id:
             raise HTTPException(
                 status_code=409,
                 detail="本次要补的问题尚未准备好，请从首页重新进入补全成书",
             )
-        task = await completion_items.get_item(
+        completion_issue = await completion_issues.get_issue(
             db,
             project_id=project.id,
-            item_id=req.current_completion_item_id,
+            issue_id=req.current_completion_issue_id,
         )
-        if task is None:
-            raise HTTPException(status_code=404, detail="补全项不存在")
 
     anchor_item = None
     if req.anchor_framework_item_id:
@@ -137,16 +138,12 @@ async def create_voice_session(
     )
     db.add(voice_session)
     await db.flush()
-    if task is not None:
-        try:
-            await completion_items.start_item_for_session(
-                db,
-                item=task,
-                voice_session=voice_session,
-            )
-        except ValueError as exc:
-            await db.rollback()
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if completion_issue is not None:
+        await completion_interviews.start_issue_for_session(
+            db,
+            issue=completion_issue,
+            voice_session=voice_session,
+        )
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)
 
@@ -227,7 +224,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         guidance_mode=voice_session.guidance_mode,
         interview_type=voice_session.interview_type,
         session_goal=voice_session.session_goal,
-        current_completion_item_id=voice_session.current_completion_item_id,
+        current_completion_issue_id=voice_session.current_completion_issue_id,
         anchor_framework_item_id=voice_session.anchor_framework_item_id,
         current_guidance_module=voice_session.current_guidance_module,
         started_at=voice_session.started_at,
@@ -323,10 +320,9 @@ async def stop_voice_session(
         MemoirVoiceSessionStatus.STOPPED.value,
         MemoirVoiceSessionStatus.FAILED.value,
     }:
-        await completion_items.release_session_item(
+        await completion_interviews.release_session_issue(
             db,
             voice_session=voice_session,
-            reason="voice session ended before new evidence completed the task",
         )
         voice_session.status = (
             MemoirVoiceSessionStatus.FAILED.value

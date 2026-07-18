@@ -28,28 +28,21 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirChatMessage,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.models.memoir_narrative import (
-    MemoirClaim,
-    MemoirClaimEvidence,
-    MemoirCompletionItem,
     MemoirInterviewPolicyDecision,
-    MemoirStoryClaim,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import (
-    completion_items,
     interview_policy,
     interview_topics,
-)
-from app.services.memoir.narrative.claim_usage_policy import (
-    known_for_conversation_filters,
 )
 
 
@@ -239,12 +232,11 @@ def _user_preferences(session: MemoirVoiceSession) -> dict[str, object]:
 async def _recent_material_state(
     db: AsyncSession,
     *,
-    project_id: str,
     user_messages: list[MemoirChatMessage],
-) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+) -> tuple[str, ...]:
     message_ids = [message.id for message in user_messages[-MAX_POLICY_CONTEXT_MESSAGES:]]
     if not message_ids:
-        return (), (), ()
+        return ()
     utterance_ids = tuple(
         sorted(
             set(
@@ -258,79 +250,58 @@ async def _recent_material_state(
             )
         )
     )
-    if not utterance_ids:
-        return (), (), ()
-    claim_ids = tuple(
-        sorted(
-            set(
-                (
-                    await db.scalars(
-                        select(MemoirClaim.id)
-                        .join(
-                            MemoirClaimEvidence,
-                            MemoirClaimEvidence.claim_id == MemoirClaim.id,
-                        )
-                        .where(
-                            MemoirClaim.project_id == project_id,
-                            MemoirClaimEvidence.utterance_id.in_(utterance_ids),
-                            *known_for_conversation_filters(MemoirClaim),
-                        )
-                    )
-                ).all()
-            )
-        )
-    )
-    story_ids: tuple[str, ...] = ()
-    if claim_ids:
-        story_ids = tuple(
-            sorted(
-                set(
-                    (
-                        await db.scalars(
-                            select(MemoirStoryClaim.story_id).where(
-                                MemoirStoryClaim.project_id == project_id,
-                                MemoirStoryClaim.claim_id.in_(claim_ids),
-                            )
-                        )
-                    ).all()
-                )
-            )
-        )
-    material_refs = tuple(sorted(set(utterance_ids) | set(story_ids)))
-    return material_refs, claim_ids, claim_ids
+    return utterance_ids
 
 
 async def _completion_context(
     db: AsyncSession,
-    item: MemoirCompletionItem,
-) -> str:
-    claim_ids = [
-        claim_id
-        for claim_id in (item.claim_id, item.related_claim_id)
-        if claim_id
+    issue: MemoirCompletionIssue,
+) -> tuple[str, tuple[str, ...]]:
+    material_ids = [
+        str(value).strip()
+        for value in issue.related_material_ids_json
+        if str(value).strip()
     ]
-    claims = (
+    materials = (
         list(
             (
                 await db.scalars(
-                    select(MemoirClaim).where(
-                        MemoirClaim.project_id == item.project_id,
-                        MemoirClaim.id.in_(claim_ids),
+                    select(MemoirVoiceUtterance)
+                    .join(
+                        MemoirVoiceSession,
+                        MemoirVoiceSession.id
+                        == MemoirVoiceUtterance.voice_session_id,
+                    )
+                    .where(
+                        MemoirVoiceSession.project_id == issue.project_id,
+                        MemoirVoiceUtterance.id.in_(material_ids),
                     )
                 )
             ).all()
         )
-        if claim_ids
+        if material_ids
         else []
     )
-    known = [claim.statement.strip() for claim in claims if claim.statement.strip()]
+    known = [
+        (
+            (material.transcript_edited or "").strip()
+            or (material.transcript_raw or "").strip()
+        )[:120]
+        for material in materials
+        if (
+            (material.transcript_edited or "").strip()
+            or (material.transcript_raw or "").strip()
+        )
+    ]
     lines = [
-        f"补访目的：{(item.description or item.title).strip()}",
-        f"当前唯一问题：{(item.question or item.title).strip()}",
+        f"补访目的：{issue.reason}",
+        f"当前唯一问题：{issue.question}",
     ]
     if known:
-        lines.append(f"已知事实（不要重复索取）：{'；'.join(known[:6])}")
-    return "\n".join(lines)
+        lines.append(f"已有相关素材（不要机械重复索取）：{'；'.join(known[:4])}")
+    return "\n".join(lines), tuple(
+        sorted(material.id for material in materials)
+    )
 
 
 async def _load_shadow_context(
@@ -338,14 +309,14 @@ async def _load_shadow_context(
     *,
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
-    completion_item_id: str | None,
+    completion_issue_id: str | None,
 ) -> InterviewPolicyContext | None:
     messages = _ordered_messages_before(session, generated_message)
     return await _build_policy_context(
         db,
         session=session,
         messages=messages,
-        completion_item_id=completion_item_id,
+        completion_issue_id=completion_issue_id,
         policy_version=SHADOW_POLICY_VERSION,
     )
 
@@ -355,7 +326,7 @@ async def _build_policy_context(
     *,
     session: MemoirVoiceSession,
     messages: list[MemoirChatMessage],
-    completion_item_id: str | None,
+    completion_issue_id: str | None,
     policy_version: str,
 ) -> InterviewPolicyContext | None:
     latest_user = _latest_user_message(messages)
@@ -367,12 +338,9 @@ async def _build_policy_context(
         for message in messages
         if message.role == MemoirChatMessageRole.USER.value
     ]
-    material_refs, known_claim_ids, do_not_repeat_claim_ids = (
-        await _recent_material_state(
-            db,
-            project_id=session.project_id,
-            user_messages=user_messages,
-        )
+    material_refs = await _recent_material_state(
+        db,
+        user_messages=user_messages,
     )
     completion_session = (
         session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value
@@ -392,25 +360,27 @@ async def _build_policy_context(
         ...,
     ] = ()
     if completion_session:
-        if not completion_item_id:
+        if not completion_issue_id:
             return None
-        item = await completion_items.get_item(
-            db,
-            project_id=session.project_id,
-            item_id=completion_item_id,
+        issue = await db.get(
+            MemoirCompletionIssue,
+            completion_issue_id,
         )
-        if item is None:
+        if issue is None or issue.project_id != session.project_id:
             return None
-        brief = interview_policy.completion_item_brief(
-            item=item,
+        completion_context, related_material_refs = (
+            await _completion_context(db, issue)
+        )
+        brief = interview_policy.completion_issue_brief(
+            issue=issue,
             current_story_state=current_story_state,
             conversation_momentum=conversation_momentum,
             recent_material_refs=material_refs,
+            related_material_refs=related_material_refs,
             user_preferences=_user_preferences(session),
             safety_constraints=safety_constraints,
             policy_version=policy_version,
         )
-        completion_context = await _completion_context(db, item)
     else:
         topic_candidates = await interview_topics.candidate_topics(
             db,
@@ -421,8 +391,6 @@ async def _build_policy_context(
             current_story_state=current_story_state,
             conversation_momentum=conversation_momentum,
             existing_material_refs=material_refs,
-            known_claim_ids=known_claim_ids,
-            do_not_repeat_claim_ids=do_not_repeat_claim_ids,
             candidate_topic_ids=tuple(
                 candidate.item_id for candidate in topic_candidates
             ),
@@ -445,7 +413,7 @@ async def build_current_policy_context(
     db: AsyncSession,
     *,
     session: MemoirVoiceSession,
-    completion_item_id: str | None,
+    completion_issue_id: str | None,
     policy_version: str,
 ) -> InterviewPolicyContext | None:
     messages = [
@@ -461,7 +429,7 @@ async def build_current_policy_context(
         db,
         session=session,
         messages=messages,
-        completion_item_id=completion_item_id,
+        completion_issue_id=completion_issue_id,
         policy_version=policy_version,
     )
 
@@ -663,7 +631,7 @@ async def prepare_active_policy_turn(
     db: AsyncSession,
     *,
     session: MemoirVoiceSession,
-    completion_item_id: str | None,
+    completion_issue_id: str | None,
     requested_ai_model: str | None,
     ai_client_factory=get_ai_service,
     enabled: bool | None = None,
@@ -692,7 +660,7 @@ async def prepare_active_policy_turn(
     context = await build_current_policy_context(
         db,
         session=session,
-        completion_item_id=completion_item_id,
+        completion_issue_id=completion_issue_id,
         policy_version=ACTIVE_POLICY_VERSION,
     )
     if context is None:
@@ -779,7 +747,7 @@ async def anchored_opening_reply_instruction(
     context = await build_current_policy_context(
         db,
         session=session,
-        completion_item_id=None,
+        completion_issue_id=None,
         policy_version=ACTIVE_POLICY_VERSION,
     )
     if context is None or len(context.topic_candidates) != 1:
@@ -831,7 +799,7 @@ async def schedule_shadow_policy_evaluation(
     *,
     session: MemoirVoiceSession,
     generated_message: MemoirChatMessage,
-    completion_item_id: str | None,
+    completion_issue_id: str | None,
     requested_ai_model: str | None,
     enabled: bool | None = None,
 ) -> MemoirEditingJob | None:
@@ -867,7 +835,7 @@ async def schedule_shadow_policy_evaluation(
         "session_id": session.id,
         "generated_message_id": generated_message.id,
         "trigger_message_id": trigger.id if trigger else None,
-        "completion_item_id": completion_item_id,
+        "completion_issue_id": completion_issue_id,
         "policy_version": SHADOW_POLICY_VERSION,
         "prompt_version": SHADOW_PROMPT_VERSION,
     }
@@ -895,7 +863,9 @@ async def run_shadow_policy_evaluation_job(
     payload = job.payload_json if isinstance(job.payload_json, dict) else {}
     session_id = str(payload.get("session_id") or "").strip()
     generated_message_id = str(payload.get("generated_message_id") or "").strip()
-    completion_item_id = str(payload.get("completion_item_id") or "").strip() or None
+    completion_issue_id = (
+        str(payload.get("completion_issue_id") or "").strip() or None
+    )
     if not session_id or not generated_message_id:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
@@ -947,7 +917,7 @@ async def run_shadow_policy_evaluation_job(
         db,
         session=session,
         generated_message=generated_message,
-        completion_item_id=completion_item_id,
+        completion_issue_id=completion_issue_id,
     )
     if context is None:
         return EditingJobResult(

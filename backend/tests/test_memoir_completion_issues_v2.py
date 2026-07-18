@@ -1,24 +1,48 @@
 import json
 
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.database import Base, register_models
 from app.domain.memoir.types import (
+    MemoirCreatedBy,
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssueStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
+    MemoirTranscriptVersionType,
 )
 from app.migrations.memoir_completion import (
     assert_memoir_completion_schema,
     migrate_memoir_completion_schema,
 )
-from app.models.memoir import MemoirCompletionIssue
-from app.services.memoir import completion_issues
+from app.migrations.memoir_voice import _ensure_completion_issue_columns
+from app.models.memoir import (
+    MemoirCompletionIssue,
+    MemoirEditingJob,
+    MemoirSectionMaterial,
+    MemoirTranscriptVersion,
+    MemoirVoiceSession,
+    MemoirVoiceUtterance,
+)
+from app.services.memoir import (
+    completion_issues,
+    sections,
+    voice_transcript_correction,
+)
+from app.services.memoir.asr import StreamingASREvent
+from app.services.memoir.voice_final_persistence import (
+    VoiceFinalPersistenceService,
+)
+from app.services.memoir.voice_transcripts import CleanedTranscriptText
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    post_mobile_memoir_voice_session,
 )
 
 
@@ -133,6 +157,72 @@ async def test_completion_issue_migration_has_only_layered_targets():
         assert "claim_id" not in columns
         assert "evidence_id" not in columns
         assert "ck_memoir_completion_issues_lifecycle" in table_sql
+    finally:
+        await engine.dispose()
+
+
+async def test_voice_migration_adds_layered_completion_targets_idempotently():
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("CREATE TABLE memoir_completion_issues (id VARCHAR(36) PRIMARY KEY)")
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_voice_sessions ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "current_completion_item_id VARCHAR(36))"
+                )
+            )
+            await conn.execute(
+                text(
+                    "CREATE TABLE memoir_voice_utterances ("
+                    "id VARCHAR(36) PRIMARY KEY, "
+                    "completion_item_id VARCHAR(36))"
+                )
+            )
+            first = await _ensure_completion_issue_columns(conn)
+            second = await _ensure_completion_issue_columns(conn)
+            session_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_voice_sessions)")
+                    )
+                ).fetchall()
+            }
+            utterance_columns = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text("PRAGMA table_info(memoir_voice_utterances)")
+                    )
+                ).fetchall()
+            }
+            indexes = {
+                row[1]
+                for row in (
+                    await conn.execute(
+                        text(
+                            "SELECT type, name FROM sqlite_master "
+                            "WHERE type = 'index'"
+                        )
+                    )
+                ).fetchall()
+            }
+
+        assert first == [
+            "memoir_voice_sessions.current_completion_issue_id",
+            "memoir_voice_utterances.completion_issue_id",
+        ]
+        assert second == []
+        assert "current_completion_issue_id" in session_columns
+        assert "completion_issue_id" in utterance_columns
+        assert {
+            "ix_memoir_voice_sessions_current_completion_issue_id",
+            "ix_memoir_voice_utterances_completion_issue_id",
+        } <= indexes
     finally:
         await engine.dispose()
 
@@ -298,3 +388,251 @@ async def test_answered_issue_requires_material_from_same_project(client, test_d
     )
     assert persisted is not None
     assert persisted.outcome == MemoirCompletionIssueOutcome.ANSWERED.value
+
+
+async def test_completion_voice_session_appends_every_answer_segment_to_section(
+    client,
+    test_db,
+):
+    project_id, section, materials = await _section(client, test_db)
+    issue = (
+        await completion_issues.refresh_section_issues(
+            test_db,
+            project_id=project_id,
+            section_id=section["id"],
+            ai_client=FakeDigestAI(
+                _digest_payload(materials[0]["utterance_id"])
+            ),
+        )
+    )[0]
+    await test_db.commit()
+
+    created = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_completion_issue_id": issue.id,
+        },
+    )
+    assert created.status_code == 201
+    session_id = created.json()["session"]["id"]
+    assert created.json()["session"]["current_completion_issue_id"] == issue.id
+    persistence = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=session_id,
+        user_id=(await client.get("/api/auth/me")).json()["id"],
+    )
+
+    first = await persistence.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="那时我们已经两年没有见面了。",
+            start_ms=0,
+            end_ms=1600,
+            raw={"segment": 1},
+        )
+    )
+    second = await persistence.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="这次爬山让我们重新熟悉起来。",
+            start_ms=1600,
+            end_ms=3200,
+            raw={"segment": 2},
+        )
+    )
+
+    assignments = list(
+        (
+            await test_db.scalars(
+                select(MemoirSectionMaterial)
+                .where(
+                    MemoirSectionMaterial.utterance_id.in_(
+                        [first.utterance_id, second.utterance_id]
+                    )
+                )
+                .order_by(MemoirSectionMaterial.sort_order)
+            )
+        ).all()
+    )
+    await test_db.refresh(issue)
+    session = await test_db.get(MemoirVoiceSession, session_id)
+
+    assert [item.utterance_id for item in assignments] == [
+        first.utterance_id,
+        second.utterance_id,
+    ]
+    assert {item.section_id for item in assignments} == {section["id"]}
+    assert all(
+        item.assignment_reason == f"completion_issue:{issue.id}"
+        for item in assignments
+    )
+    assert issue.status == MemoirCompletionIssueStatus.CLOSED.value
+    assert issue.outcome == MemoirCompletionIssueOutcome.ANSWERED.value
+    assert issue.answered_material_id == first.utterance_id
+    assert session is not None
+    assert session.current_completion_issue_id == issue.id
+
+    stopped = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop",
+        json={},
+    )
+    assert stopped.status_code == 200
+    assert stopped.json()["session"]["current_completion_issue_id"] is None
+
+
+async def test_stopping_completion_session_without_answer_reopens_issue(
+    client,
+    test_db,
+):
+    project_id, section, materials = await _section(client, test_db)
+    issue = (
+        await completion_issues.refresh_section_issues(
+            test_db,
+            project_id=project_id,
+            section_id=section["id"],
+            ai_client=FakeDigestAI(
+                _digest_payload(materials[0]["utterance_id"])
+            ),
+        )
+    )[0]
+    await test_db.commit()
+    created = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_completion_issue_id": issue.id,
+        },
+    )
+    assert created.status_code == 201
+    session_id = created.json()["session"]["id"]
+    test_db.add(
+        MemoirVoiceUtterance(
+            voice_session_id=session_id,
+            completion_issue_id=issue.id,
+            transcript_raw="   ",
+        )
+    )
+    await test_db.commit()
+
+    stopped = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop",
+        json={},
+    )
+    await test_db.refresh(issue)
+
+    assert stopped.status_code == 200
+    assert issue.status == MemoirCompletionIssueStatus.OPEN.value
+    assert issue.started_at is None
+    assert stopped.json()["session"]["current_completion_issue_id"] is None
+
+
+async def test_completion_answer_correction_refreshes_layered_material_version(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, section, materials = await _section(client, test_db)
+    issue = (
+        await completion_issues.refresh_section_issues(
+            test_db,
+            project_id=project_id,
+            section_id=section["id"],
+            ai_client=FakeDigestAI(
+                _digest_payload(materials[0]["utterance_id"])
+            ),
+        )
+    )[0]
+    await test_db.commit()
+    created = await post_mobile_memoir_voice_session(
+        client,
+        project_id=project_id,
+        json={
+            "guidance_mode": "guided_interview",
+            "session_goal": "book_completion",
+            "current_completion_issue_id": issue.id,
+        },
+    )
+    assert created.status_code == 201
+    session_id = created.json()["session"]["id"]
+    persistence = VoiceFinalPersistenceService(
+        db=test_db,
+        voice_session_id=session_id,
+        user_id=(await client.get("/api/auth/me")).json()["id"],
+    )
+    persisted = await persistence.persist_final(
+        StreamingASREvent(
+            type="final",
+            text="嗯，那次爬山让我们又熟悉了。",
+            raw={"segment": 1},
+        )
+    )
+    correction_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
+            MemoirEditingJob.dedupe_key
+            == f"correct_transcript:{persisted.utterance_id}",
+        )
+    )
+    assert correction_job is not None
+
+    async def fake_clean(*_args, **_kwargs):
+        return CleanedTranscriptText(
+            content="那次爬山让我们重新熟悉起来。",
+            provider="test",
+            created_by=MemoirCreatedBy.AI,
+        )
+
+    async def reject_legacy_source_processing(*_args, **_kwargs):
+        raise AssertionError("分层素材不应再进入旧素材卡或知识图谱链路")
+
+    monkeypatch.setattr(
+        voice_transcript_correction,
+        "generate_cleaned_transcript_text",
+        fake_clean,
+    )
+    monkeypatch.setattr(
+        voice_transcript_correction,
+        "schedule_source_processing_for_ready_utterance",
+        reject_legacy_source_processing,
+    )
+
+    result = await voice_transcript_correction.run_transcript_correction_job(
+        test_db,
+        correction_job,
+    )
+    material = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.utterance_id == persisted.utterance_id
+        )
+    )
+    corrected = await test_db.scalar(
+        select(MemoirTranscriptVersion).where(
+            MemoirTranscriptVersion.source_artifact_id
+            == persisted.utterance_id,
+            MemoirTranscriptVersion.version_type
+            == MemoirTranscriptVersionType.DIALECT_CORRECTED.value,
+        )
+    )
+
+    assert result.status == MemoirEditingJobStatus.SUCCEEDED
+    assert material is not None
+    assert material.section_id == section["id"]
+    assert corrected is not None
+    assert material.transcript_version_id == corrected.id
+    with pytest.raises(
+        HTTPException,
+        match="正文文本版本不属于当前讲述素材",
+    ):
+        await sections.refresh_material_transcript_version(
+            test_db,
+            project_id=project_id,
+            utterance_id=persisted.utterance_id,
+            transcript_version_id=materials[0]["transcript_version_id"],
+        )

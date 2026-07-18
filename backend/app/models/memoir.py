@@ -77,7 +77,7 @@ class MemoirVoiceSession(Base):
             name="ck_memoir_voice_sessions_session_goal",
         ),
         CheckConstraint(
-            "current_completion_item_id IS NULL OR session_goal = 'book_completion'",
+            "current_completion_issue_id IS NULL OR session_goal = 'book_completion'",
             name="ck_memoir_voice_sessions_completion_goal",
         ),
         CheckConstraint(
@@ -88,7 +88,7 @@ class MemoirVoiceSession(Base):
         ),
         CheckConstraint(
             "anchor_framework_item_id IS NULL "
-            "OR current_completion_item_id IS NULL",
+            "OR current_completion_issue_id IS NULL",
             name="ck_memoir_voice_sessions_single_target",
         ),
     )
@@ -115,6 +115,12 @@ class MemoirVoiceSession(Base):
         String(30),
         default=MemoirSessionGoal.OPEN_NARRATION.value,
         nullable=False,
+    )
+    current_completion_issue_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_completion_issues.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     current_completion_item_id: Mapped[str | None] = mapped_column(
         String(36),
@@ -236,7 +242,7 @@ class MemoirVoiceUtterance(Base):
     __tablename__ = "memoir_voice_utterances"
     __table_args__ = (
         CheckConstraint(
-            "framework_item_id IS NULL OR completion_item_id IS NULL",
+            "framework_item_id IS NULL OR completion_issue_id IS NULL",
             name="ck_memoir_voice_utterances_one_interview_target",
         ),
     )
@@ -263,6 +269,12 @@ class MemoirVoiceUtterance(Base):
     framework_item_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("memoir_framework_items.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    completion_issue_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_completion_issues.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -986,7 +998,12 @@ class MemoirCompletionIssue(Base):
     outcome_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
     answered_material_id: Mapped[str | None] = mapped_column(
         String(36),
-        ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"),
+        ForeignKey(
+            "memoir_voice_utterances.id",
+            name="fk_memoir_completion_issues_answered_material",
+            ondelete="SET NULL",
+            use_alter=True,
+        ),
         nullable=True,
         index=True,
     )
@@ -1008,7 +1025,8 @@ class MemoirCompletionIssue(Base):
         overlaps="section",
     )
     answered_material: Mapped[MemoirVoiceUtterance | None] = orm_relationship(
-        "MemoirVoiceUtterance"
+        "MemoirVoiceUtterance",
+        foreign_keys=[answered_material_id],
     )
 
 

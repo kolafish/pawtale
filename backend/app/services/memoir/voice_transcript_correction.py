@@ -10,8 +10,13 @@ from app.domain.memoir.types import (
     MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
-from app.models.memoir import MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
-from app.services.memoir import editing_jobs
+from app.models.memoir import (
+    MemoirEditingJob,
+    MemoirSectionMaterial,
+    MemoirTranscriptVersion,
+    MemoirVoiceUtterance,
+)
+from app.services.memoir import completion_interviews, editing_jobs, sections
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.utterance_editing_pipeline import schedule_source_processing_for_ready_utterance
 from app.services.memoir.voice_transcripts import (
@@ -40,6 +45,41 @@ async def schedule_transcript_correction_job(
         },
         dedupe_key=f"correct_transcript:{utterance_id}",
     )
+
+
+async def _refresh_layered_material(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance: MemoirVoiceUtterance,
+    transcript_version_id: str | None,
+) -> bool:
+    layered_material = await db.scalar(
+        select(MemoirSectionMaterial.id).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == utterance.id,
+        )
+    )
+    if utterance.completion_issue_id:
+        await completion_interviews.bind_answer_segment(
+            db,
+            voice_session=utterance.voice_session,
+            utterance=utterance,
+        )
+        layered_material = layered_material or await db.scalar(
+            select(MemoirSectionMaterial.id).where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSectionMaterial.utterance_id == utterance.id,
+            )
+        )
+    if transcript_version_id:
+        await sections.refresh_material_transcript_version(
+            db,
+            project_id=project_id,
+            utterance_id=utterance.id,
+            transcript_version_id=transcript_version_id,
+        )
+    return layered_material is not None
 
 
 async def run_transcript_correction_job(
@@ -78,43 +118,81 @@ async def run_transcript_correction_job(
     message = utterance.chat_message
     raw_transcript_version_id = str(payload.get("raw_transcript_version_id") or "").strip()
     if (utterance.transcript_edited or "").strip():
-        processing_jobs = await schedule_source_processing_for_ready_utterance(
+        is_layered = await _refresh_layered_material(
             db,
             project_id=job.project_id,
             utterance=utterance,
-            source="transcript_already_edited",
+            transcript_version_id=(
+                message.transcript_version_id if message else None
+            ),
+        )
+        processing_jobs = (
+            None
+            if is_layered
+            else await schedule_source_processing_for_ready_utterance(
+                db,
+                project_id=job.project_id,
+                utterance=utterance,
+                source="transcript_already_edited",
+            )
         )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
+                "route_source_job_id": (
+                    processing_jobs.route_job.id
+                    if processing_jobs and processing_jobs.route_job
+                    else None
+                ),
                 "source_card_job_id": (
-                    processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
+                    processing_jobs.source_card_job.id
+                    if processing_jobs and processing_jobs.source_card_job
+                    else None
                 ),
                 "narrative_ingestion_job_id": (
-                    processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
+                    processing_jobs.narrative_job.id
+                    if processing_jobs and processing_jobs.narrative_job
+                    else None
                 ),
             },
             error_message="transcript already edited",
         )
     if message and raw_transcript_version_id and message.transcript_version_id != raw_transcript_version_id:
-        processing_jobs = await schedule_source_processing_for_ready_utterance(
+        is_layered = await _refresh_layered_material(
             db,
             project_id=job.project_id,
             utterance=utterance,
-            source="transcript_version_already_changed",
+            transcript_version_id=message.transcript_version_id,
+        )
+        processing_jobs = (
+            None
+            if is_layered
+            else await schedule_source_processing_for_ready_utterance(
+                db,
+                project_id=job.project_id,
+                utterance=utterance,
+                source="transcript_version_already_changed",
+            )
         )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
                 "utterance_id": utterance.id,
-                "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
+                "route_source_job_id": (
+                    processing_jobs.route_job.id
+                    if processing_jobs and processing_jobs.route_job
+                    else None
+                ),
                 "source_card_job_id": (
-                    processing_jobs.source_card_job.id if processing_jobs.source_card_job else None
+                    processing_jobs.source_card_job.id
+                    if processing_jobs and processing_jobs.source_card_job
+                    else None
                 ),
                 "narrative_ingestion_job_id": (
-                    processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
+                    processing_jobs.narrative_job.id
+                    if processing_jobs and processing_jobs.narrative_job
+                    else None
                 ),
             },
             error_message="transcript version changed",
@@ -161,11 +239,21 @@ async def run_transcript_correction_job(
         utterance_id=utterance.id,
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
     )
-    processing_jobs = await schedule_source_processing_for_ready_utterance(
+    is_layered = await _refresh_layered_material(
         db,
         project_id=job.project_id,
         utterance=utterance,
-        source="transcript_correction_succeeded",
+        transcript_version_id=corrected_version.id,
+    )
+    processing_jobs = (
+        None
+        if is_layered
+        else await schedule_source_processing_for_ready_utterance(
+            db,
+            project_id=job.project_id,
+            utterance=utterance,
+            source="transcript_correction_succeeded",
+        )
     )
     return EditingJobResult(
         result_json={
@@ -173,10 +261,20 @@ async def run_transcript_correction_job(
             "transcript_version_id": corrected_version.id,
             "provider": cleaned.provider,
             "created_by": cleaned.created_by.value,
-            "route_source_job_id": processing_jobs.route_job.id if processing_jobs.route_job else None,
-            "source_card_job_id": processing_jobs.source_card_job.id if processing_jobs.source_card_job else None,
+            "route_source_job_id": (
+                processing_jobs.route_job.id
+                if processing_jobs and processing_jobs.route_job
+                else None
+            ),
+            "source_card_job_id": (
+                processing_jobs.source_card_job.id
+                if processing_jobs and processing_jobs.source_card_job
+                else None
+            ),
             "narrative_ingestion_job_id": (
-                processing_jobs.narrative_job.id if processing_jobs.narrative_job else None
+                processing_jobs.narrative_job.id
+                if processing_jobs and processing_jobs.narrative_job
+                else None
             ),
         }
     )
