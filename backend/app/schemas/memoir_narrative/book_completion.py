@@ -6,7 +6,10 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.memoir.types import MemoirEditingJobStatus
-from app.schemas.memoir_sections import MemoirChapterSectionSummary
+from app.schemas.memoir_sections import (
+    MemoirChapterDraftSectionResponse,
+    MemoirChapterSectionSummary,
+)
 
 
 MemoirBookCompletionState = Literal[
@@ -88,3 +91,6 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     draft_version: int | None = None
     draft_status: str | None = None
     draft_content: str = ""
+    draft_sections: list[MemoirChapterDraftSectionResponse] = Field(
+        default_factory=list
+    )

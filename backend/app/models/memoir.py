@@ -1199,6 +1199,12 @@ class MemoirBookChapterDraftVersion(Base):
         server_default=sql_text("'[]'"),
         nullable=False,
     )
+    section_snapshot_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        server_default=sql_text("'[]'"),
+        nullable=False,
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     draft: Mapped[MemoirBookChapterDraft] = orm_relationship("MemoirBookChapterDraft", back_populates="versions")

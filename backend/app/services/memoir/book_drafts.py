@@ -52,6 +52,7 @@ def _version_response(
         chapter_id=version.chapter_id,
         version=version.version,
         content=version.content,
+        sections=list(version.section_snapshot_json),
         created_by=MemoirCreatedBy(version.created_by),
         model=version.model,
         prompt_snapshot=version.prompt_snapshot,
@@ -237,6 +238,7 @@ async def revise_chapter_draft(
         input_signature=context.input_signature,
         used_material_ids_json=list(latest.used_material_ids_json),
         material_snapshot_json=list(latest.material_snapshot_json),
+        section_snapshot_json=[],
     )
     db.add(current_version)
     await db.flush()

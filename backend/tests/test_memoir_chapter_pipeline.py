@@ -84,13 +84,142 @@ class FakeChapterAI:
             }
         else:
             payload = {
-                "content": "朋友发来一张山桃花照片，后来我们一起去爬山。"
-                "这次见面让一段疏远的关系重新有了联系。",
-                "used_material_ids": self.draft_material_ids,
+                "sections": [
+                    {
+                        "section_id": self.chapter_section_id,
+                        "content": (
+                            "朋友发来一张山桃花照片，后来我们一起去爬山。"
+                            "这次见面让一段疏远的关系重新有了联系。"
+                        ),
+                        "used_material_ids": self.draft_material_ids,
+                    }
+                ],
                 "missing_source_candidates": [],
                 "editor_notes": ["合并了重复描述。"],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+def _two_section_context() -> chapter_generation.ChapterGenerationContext:
+    first_material = chapter_generation.ChapterMaterialInput(
+        material_id="material-1",
+        section_id="section-1",
+        section_title="出发",
+        section_type="event",
+        section_version=1,
+        section_order=0,
+        material_order=0,
+        transcript_version_id="transcript-1",
+        text="那天我从家里出发。",
+    )
+    second_material = chapter_generation.ChapterMaterialInput(
+        material_id="material-2",
+        section_id="section-2",
+        section_title="抵达",
+        section_type="event",
+        section_version=2,
+        section_order=1,
+        material_order=0,
+        transcript_version_id="transcript-2",
+        text="傍晚时我终于抵达。",
+    )
+    return chapter_generation.ChapterGenerationContext(
+        project_id="project-1",
+        chapter_id="chapter-1",
+        chapter_title="一次远行",
+        sections=(
+            chapter_generation.ChapterSectionInput(
+                section_id="section-1",
+                title="出发",
+                section_type="event",
+                section_version=1,
+                sort_order=0,
+                materials=(first_material,),
+            ),
+            chapter_generation.ChapterSectionInput(
+                section_id="section-2",
+                title="抵达",
+                section_type="event",
+                section_version=2,
+                sort_order=1,
+                materials=(second_material,),
+            ),
+        ),
+        materials=(first_material, second_material),
+        input_signature="signature",
+    )
+
+
+def test_chapter_generation_preserves_explicit_section_boundaries():
+    generated = chapter_generation.normalize_generated_chapter(
+        {
+            "sections": [
+                {
+                    "section_id": "section-1",
+                    "content": "那天我从家里出发。",
+                    "used_material_ids": ["material-1"],
+                },
+                {
+                    "section_id": "section-2",
+                    "content": "傍晚时我终于抵达。",
+                    "used_material_ids": ["material-2"],
+                },
+            ]
+        },
+        context=_two_section_context(),
+        model="test",
+    )
+
+    assert [section.section_id for section in generated.sections] == [
+        "section-1",
+        "section-2",
+    ]
+    assert generated.content == "那天我从家里出发。\n\n傍晚时我终于抵达。"
+    assert generated.used_material_ids == ("material-1", "material-2")
+
+
+def test_chapter_generation_rejects_reordered_sections():
+    with pytest.raises(ValueError, match="complete section order"):
+        chapter_generation.normalize_generated_chapter(
+            {
+                "sections": [
+                    {
+                        "section_id": "section-2",
+                        "content": "傍晚时我终于抵达。",
+                        "used_material_ids": ["material-2"],
+                    },
+                    {
+                        "section_id": "section-1",
+                        "content": "那天我从家里出发。",
+                        "used_material_ids": ["material-1"],
+                    },
+                ]
+            },
+            context=_two_section_context(),
+            model="test",
+        )
+
+
+def test_chapter_generation_rejects_cross_section_material():
+    with pytest.raises(ValueError, match="outside allowlist"):
+        chapter_generation.normalize_generated_chapter(
+            {
+                "sections": [
+                    {
+                        "section_id": "section-1",
+                        "content": "傍晚时我终于抵达。",
+                        "used_material_ids": ["material-2"],
+                    },
+                    {
+                        "section_id": "section-2",
+                        "content": "那天我从家里出发。",
+                        "used_material_ids": ["material-1"],
+                    },
+                ]
+            },
+            context=_two_section_context(),
+            model="test",
+        )
 
 
 async def _chapter(client, test_db):
@@ -158,11 +287,17 @@ async def test_chapter_migration_adds_digest_and_draft_provenance():
                     "DROP COLUMN material_snapshot_json"
                 )
             )
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_book_chapter_draft_versions "
+                    "DROP COLUMN section_snapshot_json"
+                )
+            )
 
         first = await migrate_memoir_chapter_schema(engine)
         second = await migrate_memoir_chapter_schema(engine)
         assert first["changed_tables"] == ["memoir_chapter_digests"]
-        assert len(first["changed_columns"]) == 3
+        assert len(first["changed_columns"]) == 4
         assert second["changed_tables"] == []
         assert second["changed_columns"] == []
         await assert_memoir_chapter_schema(engine)
@@ -186,6 +321,7 @@ async def test_runtime_cutover_preserves_legacy_draft_rows():
                 "input_signature",
                 "used_material_ids_json",
                 "material_snapshot_json",
+                "section_snapshot_json",
             ):
                 await conn.execute(
                     text(
@@ -256,7 +392,8 @@ async def test_runtime_cutover_preserves_legacy_draft_rows():
                 await conn.execute(
                     text(
                         "SELECT content, input_signature, "
-                        "used_material_ids_json, material_snapshot_json "
+                        "used_material_ids_json, material_snapshot_json, "
+                        "section_snapshot_json "
                         "FROM memoir_book_chapter_draft_versions "
                         "WHERE id = 'version-1'"
                     )
@@ -269,7 +406,7 @@ async def test_runtime_cutover_preserves_legacy_draft_rows():
                     "'_memoir_book_chapter_draft_versions_before_cutover'"
                 )
             )
-        assert row == ("不能丢失的旧正文", "", "[]", "[]")
+        assert row == ("不能丢失的旧正文", "", "[]", "[]", "[]")
         assert temp is None
     finally:
         await engine.dispose()
@@ -345,6 +482,20 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
             "text_hash": version.material_snapshot_json[0]["text_hash"],
             "section_order": 0,
             "material_order": 0,
+        }
+    ]
+    assert version.section_snapshot_json == [
+        {
+            "section_id": section["id"],
+            "title": section["title"],
+            "section_type": section["section_type"],
+            "section_version": section["version"],
+            "sort_order": section["sort_order"],
+            "content": (
+                "朋友发来一张山桃花照片，后来我们一起去爬山。"
+                "这次见面让一段疏远的关系重新有了联系。"
+            ),
+            "used_material_ids": [materials[0]["utterance_id"]],
         }
     ]
     assert version.input_signature

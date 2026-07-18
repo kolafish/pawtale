@@ -40,7 +40,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-CHAPTER_GENERATION_ENGINE = "llm_layered_chapter_draft_v1"
+CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v2"
 CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
@@ -61,16 +61,35 @@ class ChapterMaterialInput:
 
 
 @dataclass(frozen=True)
+class ChapterSectionInput:
+    section_id: str
+    title: str
+    section_type: str
+    section_version: int
+    sort_order: int
+    materials: tuple[ChapterMaterialInput, ...]
+
+
+@dataclass(frozen=True)
 class ChapterGenerationContext:
     project_id: str
     chapter_id: str
     chapter_title: str
+    sections: tuple[ChapterSectionInput, ...]
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
 
 
 @dataclass(frozen=True)
+class GeneratedChapterSection:
+    section_id: str
+    content: str
+    used_material_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class GeneratedChapter:
+    sections: tuple[GeneratedChapterSection, ...]
     content: str
     used_material_ids: tuple[str, ...]
     missing_source_candidates: tuple[str, ...]
@@ -119,6 +138,7 @@ async def load_chapter_generation_context(
         raise HTTPException(status_code=404, detail="章节不存在")
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=409, detail="请先确认章节规划")
+    sections: list[ChapterSectionInput] = []
     materials: list[ChapterMaterialInput] = []
     for section in sorted(
         chapter.sections,
@@ -129,6 +149,7 @@ async def load_chapter_generation_context(
             or not section.include_in_book
         ):
             continue
+        section_materials: list[ChapterMaterialInput] = []
         for material in sorted(
             section.materials,
             key=lambda item: (item.sort_order, item.id),
@@ -138,17 +159,28 @@ async def load_chapter_generation_context(
             text = _material_text(material)
             if not text:
                 continue
-            materials.append(
-                ChapterMaterialInput(
-                    material_id=material.utterance_id,
+            item = ChapterMaterialInput(
+                material_id=material.utterance_id,
+                section_id=section.id,
+                section_title=section.title,
+                section_type=section.section_type,
+                section_version=section.version,
+                section_order=section.sort_order,
+                material_order=material.sort_order,
+                transcript_version_id=material.transcript_version_id,
+                text=text,
+            )
+            section_materials.append(item)
+            materials.append(item)
+        if section_materials:
+            sections.append(
+                ChapterSectionInput(
                     section_id=section.id,
-                    section_title=section.title,
+                    title=section.title,
                     section_type=section.section_type,
                     section_version=section.version,
-                    section_order=section.sort_order,
-                    material_order=material.sort_order,
-                    transcript_version_id=material.transcript_version_id,
-                    text=text,
+                    sort_order=section.sort_order,
+                    materials=tuple(section_materials),
                 )
             )
     if not materials:
@@ -182,6 +214,7 @@ async def load_chapter_generation_context(
         project_id=project_id,
         chapter_id=chapter.id,
         chapter_title=chapter.title,
+        sections=tuple(sections),
         materials=tuple(materials),
         input_signature=signature,
     )
@@ -193,12 +226,22 @@ def build_chapter_generation_prompt(
     editorial_guidance: list[str],
 ) -> str:
     blocks = "\n\n".join(
-        (
-            f"material_id: {item.material_id}\n"
-            f"小章节: {item.section_title}\n"
-            f"原始讲述: {item.text}"
+        "\n".join(
+            [
+                f"section_id: {section.section_id}",
+                f"小节标题: {section.title}",
+                f"小节类型: {section.section_type}",
+                "允许素材：",
+                *[
+                    (
+                        f"material_id: {material.material_id}\n"
+                        f"原始讲述: {material.text}"
+                    )
+                    for material in section.materials
+                ],
+            ]
         )
-        for item in context.materials
+        for section in context.sections
     )
     guidance = "\n".join(
         f"- {' '.join(item.split())[:240]}"
@@ -215,17 +258,25 @@ def build_chapter_generation_prompt(
 
 输出严格 JSON：
 {{
-  "content": "完整、连贯、第一人称的章节正文",
-  "used_material_ids": ["正文实际使用的 material_id"],
+  "sections": [
+    {{
+      "section_id": "输入中的 section_id",
+      "content": "这一小节完整、连贯、第一人称的正文",
+      "used_material_ids": ["这一小节正文实际使用的 material_id"]
+    }}
+  ],
   "missing_source_candidates": ["想表达但现有素材没有支持的内容，只列出，不写入正文"],
   "editor_notes": ["可选的简短编辑说明"]
 }}
 
 要求：
-- 一次输出完整章节，不拆成正文块或局部补丁。
+- 一次输出完整章节，并严格按输入顺序返回每个小节。
+- 每个输入 section_id 必须出现且只能出现一次，不新增、删除、合并或改名小节。
+- 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
+- 小节之间要有自然承接，合起来应当是一篇完整章节。
 - 只能使用输入中的事实和感受，可以调整顺序、合并重复、补充自然过渡。
 - 不要为了完整而虚构时间、地点、人物、因果或心理活动。
-- 不在正文中出现 material_id、编辑指令、“叙述者”等后台术语。
+- 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
 - 同一次讲述保持连续，不把一条 Material 拆散后穿插到多处。
 """
 
@@ -246,30 +297,92 @@ def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
 def normalize_generated_chapter(
     payload: Any,
     *,
-    allowed_material_ids: set[str],
+    context: ChapterGenerationContext,
     model: str | None,
 ) -> GeneratedChapter:
     if not isinstance(payload, dict):
         raise ValueError("chapter generation AI did not return a JSON object")
-    content = payload.get("content")
-    content = content.strip() if isinstance(content, str) else ""
-    if not content:
-        raise ValueError("chapter content is empty")
-    used = _string_list(
-        payload.get("used_material_ids"),
-        limit=len(allowed_material_ids),
-        item_limit=36,
+    raw_sections = payload.get("sections")
+    if not isinstance(raw_sections, list):
+        raise ValueError("chapter generation returned no sections")
+    allowed_sections = {
+        section.section_id: section for section in context.sections
+    }
+    seen_sections: set[str] = set()
+    seen_materials: set[str] = set()
+    generated_sections: list[GeneratedChapterSection] = []
+    for raw_section in raw_sections:
+        if not isinstance(raw_section, dict):
+            raise ValueError("chapter generation returned invalid section")
+        section_id_value = raw_section.get("section_id")
+        section_id = (
+            section_id_value.strip()
+            if isinstance(section_id_value, str)
+            else ""
+        )
+        section = allowed_sections.get(section_id)
+        if section is None:
+            raise ValueError("chapter generation used section outside allowlist")
+        if section_id in seen_sections:
+            raise ValueError("chapter generation returned duplicate section")
+        content_value = raw_section.get("content")
+        content = (
+            content_value.strip() if isinstance(content_value, str) else ""
+        )
+        if not content:
+            raise ValueError("chapter section content is empty")
+        allowed_material_ids = {
+            material.material_id for material in section.materials
+        }
+        used = _string_list(
+            raw_section.get("used_material_ids"),
+            limit=len(allowed_material_ids),
+            item_limit=36,
+        )
+        if not used:
+            raise ValueError("chapter section returned no used material")
+        if set(used) - allowed_material_ids:
+            raise ValueError(
+                "chapter generation used material outside allowlist for section"
+            )
+        if seen_materials.intersection(used):
+            raise ValueError(
+                "chapter generation reused material across sections"
+            )
+        internal_ids = set(allowed_sections) | {
+            material.material_id for material in context.materials
+        }
+        if any(internal_id in content for internal_id in internal_ids):
+            raise ValueError("chapter section exposed internal id")
+        seen_sections.add(section_id)
+        seen_materials.update(used)
+        generated_sections.append(
+            GeneratedChapterSection(
+                section_id=section_id,
+                content=content,
+                used_material_ids=tuple(used),
+            )
+        )
+    expected_section_ids = [
+        section.section_id for section in context.sections
+    ]
+    if [section.section_id for section in generated_sections] != (
+        expected_section_ids
+    ):
+        raise ValueError(
+            "chapter generation did not preserve complete section order"
+        )
+    content = "\n\n".join(
+        section.content for section in generated_sections
     )
-    if not used:
-        raise ValueError("chapter generation returned no used material")
-    unexpected = set(used) - allowed_material_ids
-    if unexpected:
-        raise ValueError("chapter generation used material outside allowlist")
-    if any(material_id in content for material_id in allowed_material_ids):
-        raise ValueError("chapter content exposed internal material id")
     return GeneratedChapter(
+        sections=tuple(generated_sections),
         content=content,
-        used_material_ids=tuple(used),
+        used_material_ids=tuple(
+            material_id
+            for section in generated_sections
+            for material_id in section.used_material_ids
+        ),
         missing_source_candidates=tuple(
             _string_list(
                 payload.get("missing_source_candidates"),
@@ -309,9 +422,7 @@ async def generate_chapter(
     )
     return normalize_generated_chapter(
         extract_json_payload(str(raw)),
-        allowed_material_ids={
-            material.material_id for material in context.materials
-        },
+        context=context,
         model=getattr(client, "model_name", ai_model),
     )
 
@@ -365,6 +476,28 @@ def _snapshot(
     ]
 
 
+def _section_snapshot(
+    context: ChapterGenerationContext,
+    *,
+    generated: GeneratedChapter,
+) -> list[dict]:
+    inputs = {
+        section.section_id: section for section in context.sections
+    }
+    return [
+        {
+            "section_id": section.section_id,
+            "title": inputs[section.section_id].title,
+            "section_type": inputs[section.section_id].section_type,
+            "section_version": inputs[section.section_id].section_version,
+            "sort_order": inputs[section.section_id].sort_order,
+            "content": section.content,
+            "used_material_ids": list(section.used_material_ids),
+        }
+        for section in generated.sections
+    ]
+
+
 async def generate_and_save_chapter_draft(
     db: AsyncSession,
     *,
@@ -413,10 +546,12 @@ async def generate_and_save_chapter_draft(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    section_snapshot = _section_snapshot(before, generated=generated)
     if (
         latest is not None
         and latest.input_signature == before.input_signature
         and latest.content.strip() == generated.content.strip()
+        and list(latest.section_snapshot_json) == section_snapshot
     ):
         return draft, latest
     version = MemoirBookChapterDraftVersion(
@@ -435,6 +570,7 @@ async def generate_and_save_chapter_draft(
             before,
             used_material_ids=set(generated.used_material_ids),
         ),
+        section_snapshot_json=section_snapshot,
     )
     db.add(version)
     draft.status = MemoirBookChapterDraftStatus.DRAFT.value
@@ -542,6 +678,7 @@ def draft_response(
             chapter_id=version.chapter_id,
             version=version.version,
             content=version.content,
+            sections=list(version.section_snapshot_json),
             input_signature=version.input_signature,
             used_material_ids=list(version.used_material_ids_json),
             material_snapshot=list(version.material_snapshot_json),

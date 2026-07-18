@@ -13,7 +13,10 @@ from app.schemas.memoir_voice import (
     MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
 )
-from app.schemas.memoir_sections import MemoirChapterSectionSummary
+from app.schemas.memoir_sections import (
+    MemoirChapterDraftSectionResponse,
+    MemoirChapterSectionSummary,
+)
 
 
 class MemoirBookChapterSourceRef(BaseModel):
@@ -240,6 +243,9 @@ class MemoirBookChapterDraftVersionResponse(BaseModel):
     chapter_id: str
     version: int
     content: str
+    sections: list[MemoirChapterDraftSectionResponse] = Field(
+        default_factory=list
+    )
     created_by: MemoirCreatedBy
     model: str | None = None
     prompt_snapshot: str

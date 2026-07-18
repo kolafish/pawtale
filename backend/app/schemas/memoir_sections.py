@@ -43,6 +43,16 @@ class MemoirChapterSectionSummary(BaseModel):
     )
 
 
+class MemoirChapterDraftSectionResponse(BaseModel):
+    section_id: str
+    title: str
+    section_type: MemoirSectionType
+    section_version: int
+    sort_order: int
+    content: str
+    used_material_ids: list[str] = Field(default_factory=list)
+
+
 class MemoirSectionResponse(BaseModel):
     id: str
     project_id: str
