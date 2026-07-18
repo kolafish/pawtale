@@ -133,11 +133,13 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 20rpx;
 }
 
 .section-structure-summary {
   flex: 0 0 auto;
+  max-width: 100%;
   padding-top: 4rpx;
   color: #756963;
   font-size: 23rpx;

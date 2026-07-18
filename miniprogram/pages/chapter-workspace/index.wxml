@@ -43,7 +43,9 @@
             aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}"
             bindtap="toggleSection"
           >
-            <text class="section-index">{{item.indexText}}</text>
+            <view class="section-index">
+              <text>{{item.indexText}}</text>
+            </view>
             <view class="section-copy">
               <text class="section-name">{{item.title}}</text>
               <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
