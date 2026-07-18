@@ -204,7 +204,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     wx.showModal({
       title: "重新生成本章小节",
-      content: "AI 会重新划分本章讲述的分组和顺序。原始讲述与现有正文版本会保留，完成后需要按新结构重新生成正文。",
+      content: "AI 会重新划分本章讲述的分组和顺序。原始讲述、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
       confirmText: "开始生成",
       cancelText: "先不生成",
       success: (result) => {

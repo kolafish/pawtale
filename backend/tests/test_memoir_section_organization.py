@@ -387,6 +387,16 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         test_db,
     )
     original_section = data["sections"][0]
+    excluded = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == created[0]["utterance_id"],
+        )
+    )
+    assert excluded is not None
+    excluded.include_in_book = False
+    test_db.add(excluded)
+    await test_db.commit()
     fake = ReplayMaterialOrganizationAI()
     monkeypatch.setattr(
         section_regeneration,
@@ -434,6 +444,10 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         material["assigned_by"] == "ai"
         for material in chapter_sections[0]["materials"]
     )
+    assert [
+        material["include_in_book"]
+        for material in chapter_sections[0]["materials"]
+    ] == [False, True]
     assert len(fake.prompts) == 2
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert "山桃花里的重逢" in fake.prompts[1]

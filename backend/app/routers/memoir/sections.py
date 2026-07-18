@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
@@ -131,19 +131,15 @@ async def regenerate_memoir_chapter_sections(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        result = await section_regeneration.regenerate_chapter_sections(
-            db,
-            user_id=current_user.id,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            req=req,
-            allow_admin=is_admin_user(current_user),
-        )
-        await db.commit()
-    except ValueError as exc:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    result = await section_regeneration.regenerate_chapter_sections(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
+        allow_admin=is_admin_user(current_user),
+    )
+    await db.commit()
     return MemoirSectionRegenerateResponse(
         project_id=project_id,
         chapter_id=chapter_id,

@@ -44,6 +44,7 @@ class _MaterialSnapshot:
     text: str
     text_hash: str
     transcript_version_id: str | None
+    include_in_book: bool
 
 
 @dataclass(frozen=True)
@@ -101,22 +102,25 @@ def _validate_expected_sections(
         raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后重试")
 
 
-def _ordered_utterances(
+def _ordered_materials(
     chapter: MemoirBookPlanChapter,
-) -> list[MemoirVoiceUtterance]:
-    utterances = [
-        material.utterance
+) -> list[tuple[MemoirSection, MemoirSectionMaterial]]:
+    materials = [
+        (section, material)
         for section in chapter.sections
         for material in section.materials
     ]
-    if not utterances:
+    if not materials:
         raise HTTPException(status_code=422, detail="本章没有可用于生成小节的讲述")
-    ids = [utterance.id for utterance in utterances]
+    ids = [material.utterance_id for _, material in materials]
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=409, detail="本章讲述存在重复归属，请先处理")
     return sorted(
-        utterances,
-        key=lambda item: (item.created_at, item.id),
+        materials,
+        key=lambda item: (
+            item[1].utterance.created_at,
+            item[1].utterance_id,
+        ),
     )
 
 
@@ -129,8 +133,12 @@ def _material_snapshots(
             text=text,
             text_hash=source_text_hash(text),
             transcript_version_id=current_transcript_version_id(utterance),
+            include_in_book=(
+                section.include_in_book and material.include_in_book
+            ),
         )
-        for utterance in _ordered_utterances(chapter)
+        for section, material in _ordered_materials(chapter)
+        if (utterance := material.utterance)
         if is_narrator_material(utterance)
         and (text := current_utterance_text(utterance))
     ]
@@ -250,7 +258,10 @@ async def regenerate_chapter_sections(
         ai_model=req.ai_model,
     )
     if not planned_sections:
-        raise ValueError("AI 未能为本章生成任何小节，请重试")
+        raise HTTPException(
+            status_code=409,
+            detail="AI 未能为本章生成任何小节，请重试",
+        )
 
     chapter = await _load_chapter(
         db,
@@ -297,6 +308,7 @@ async def regenerate_chapter_sections(
                 ),
             )
             material.assignment_confidence = assignment.decision.confidence
+            material.include_in_book = assignment.material.include_in_book
             db.add(material)
             assigned_count += 1
 
