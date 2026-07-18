@@ -7,6 +7,7 @@ import {
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
   prepareMemoirBookChapter,
+  regenerateMemoirChapterSections,
   rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-voice-api";
@@ -64,6 +65,7 @@ interface ChapterWorkspacePageData {
   expandedSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
   processBusy: boolean;
+  regeneratingSections: boolean;
   rewritingDraft: boolean;
   startingIssueId: string;
   confirmingChapter: boolean;
@@ -93,6 +95,7 @@ definePage<ChapterWorkspacePageData>()({
     expandedSectionIds: {},
     canConfirmChapter: false,
     processBusy: false,
+    regeneratingSections: false,
     rewritingDraft: false,
     startingIssueId: "",
     confirmingChapter: false,
@@ -184,6 +187,74 @@ definePage<ChapterWorkspacePageData>()({
       expandedSectionIds,
       ...chapterWorkspaceViewPatch(workspace, expandedSectionIds),
     });
+  },
+
+  regenerateSections() {
+    const workspace = this.data.workspace;
+    if (
+      !workspace?.sections.length
+      || this.data.regeneratingSections
+      || this.data.processBusy
+      || this.data.rewritingDraft
+      || this.data.confirmingChapter
+      || this.data.savingDraft
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    wx.showModal({
+      title: "重新生成本章小节",
+      content: "AI 会重新划分本章讲述的分组和顺序。原始讲述、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
+      confirmText: "开始生成",
+      cancelText: "先不生成",
+      success: (result) => {
+        if (result.confirm) {
+          void this.performSectionRegeneration();
+        }
+      },
+    });
+  },
+
+  async performSectionRegeneration() {
+    const workspace = this.data.workspace;
+    if (!workspace?.sections.length || this.data.regeneratingSections) {
+      return;
+    }
+    this.setData({ regeneratingSections: true, error: "" });
+    try {
+      const result = await regenerateMemoirChapterSections(
+        this.data.projectId,
+        this.data.chapterId,
+        workspace.sections.map((section) => ({
+          id: section.id,
+          version: section.version,
+        })),
+      );
+      this.setData({ expandedSectionIds: {} });
+      await this.loadPageData(true);
+      if (result.unassigned_count > 0) {
+        wx.showModal({
+          title: "小节已重新生成",
+          content: `生成了 ${result.section_count} 个小节；另有 ${result.unassigned_count} 条讲述暂未归类，可以到记录页继续处理。`,
+          showCancel: false,
+          confirmText: "知道了",
+        });
+      } else {
+        wx.showToast({
+          title: `已生成${result.section_count}个小节`,
+          icon: "success",
+        });
+      }
+    } catch (error) {
+      if (routeAuthError(error, "me")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "小节重新生成失败",
+      });
+    } finally {
+      this.setData({ regeneratingSections: false });
+    }
   },
 
   async runNextAction() {

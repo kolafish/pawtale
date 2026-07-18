@@ -103,6 +103,7 @@ export function chapterWorkspaceViewPatch(
     sectionViews,
     canConfirmChapter:
       summary.state === "draft_ready"
+      && !workspace.draft_needs_rewrite
       && Boolean(workspace.draft_version_id)
       && workspace.draft_sections.length > 0
       && workspace.draft_sections.every(

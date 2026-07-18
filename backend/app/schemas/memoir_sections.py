@@ -118,6 +118,36 @@ class MemoirSectionReorderRequest(BaseModel):
         return value
 
 
+class MemoirSectionVersionReference(BaseModel):
+    id: str = Field(min_length=1, max_length=36)
+    version: int = Field(ge=1)
+
+
+class MemoirSectionRegenerateRequest(BaseModel):
+    expected_sections: list[MemoirSectionVersionReference] = Field(min_length=1)
+    ai_model: str | None = Field(default=None, max_length=120)
+
+    @field_validator("expected_sections")
+    @classmethod
+    def unique_section_ids(
+        cls,
+        value: list[MemoirSectionVersionReference],
+    ) -> list[MemoirSectionVersionReference]:
+        ids = [section.id for section in value]
+        if len(ids) != len(set(ids)):
+            raise ValueError("expected_sections must contain unique ids")
+        return value
+
+
+class MemoirSectionRegenerateResponse(BaseModel):
+    project_id: str
+    chapter_id: str
+    material_count: int
+    assigned_count: int
+    unassigned_count: int
+    section_count: int
+
+
 class MemoirSectionMaterialAssignmentRequest(BaseModel):
     utterance_ids: list[str] = Field(min_length=1)
 

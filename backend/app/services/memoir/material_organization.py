@@ -57,6 +57,21 @@ class MaterialOrganizationDecision:
     reason: str
 
 
+@dataclass(frozen=True)
+class MaterialOrganizationChapterCandidate:
+    id: str
+    title: str
+
+
+@dataclass
+class MaterialOrganizationSectionCandidate:
+    id: str
+    chapter_id: str
+    title: str
+    section_type: str
+    existing_material_examples: list[str]
+
+
 def _compact(value: object, *, limit: int) -> str:
     text = value if isinstance(value, str) else ""
     return re.sub(r"\s+", " ", text).strip()[:limit]
@@ -76,21 +91,32 @@ def _material_text(material: MemoirSectionMaterial) -> str:
     )
 
 
-def build_material_organization_prompt(
+def material_organization_excerpt(material_text: str) -> str:
+    return _compact(material_text, limit=120)
+
+
+def material_organization_candidates(
     *,
-    material_text: str,
     chapters: list[MemoirBookPlanChapter],
     sections: list[MemoirSection],
-) -> str:
-    chapter_titles = {chapter.id: chapter.title for chapter in chapters}
-    candidates = [
-        {
-            "section_id": section.id,
-            "chapter_id": section.chapter_id,
-            "chapter_title": chapter_titles.get(section.chapter_id, ""),
-            "section_title": section.title,
-            "section_type": section.section_type,
-            "existing_material_examples": [
+) -> tuple[
+    list[MaterialOrganizationChapterCandidate],
+    list[MaterialOrganizationSectionCandidate],
+]:
+    chapter_candidates = [
+        MaterialOrganizationChapterCandidate(
+            id=chapter.id,
+            title=chapter.title,
+        )
+        for chapter in chapters
+    ]
+    section_candidates = [
+        MaterialOrganizationSectionCandidate(
+            id=section.id,
+            chapter_id=section.chapter_id,
+            title=section.title,
+            section_type=section.section_type,
+            existing_material_examples=[
                 text
                 for text in (
                     _material_text(material)
@@ -101,9 +127,30 @@ def build_material_organization_prompt(
                 )
                 if text
             ],
-        }
+        )
         for section in sections
         if section.status == MemoirSectionStatus.ACTIVE.value
+    ]
+    return chapter_candidates, section_candidates
+
+
+def build_material_organization_prompt(
+    *,
+    material_text: str,
+    chapters: list[MaterialOrganizationChapterCandidate],
+    sections: list[MaterialOrganizationSectionCandidate],
+) -> str:
+    chapter_titles = {chapter.id: chapter.title for chapter in chapters}
+    candidates = [
+        {
+            "section_id": section.id,
+            "chapter_id": section.chapter_id,
+            "chapter_title": chapter_titles.get(section.chapter_id, ""),
+            "section_title": section.title,
+            "section_type": section.section_type,
+            "existing_material_examples": section.existing_material_examples,
+        }
+        for section in sections
     ]
     chapter_candidates = [
         {"chapter_id": chapter.id, "chapter_title": chapter.title}
@@ -159,6 +206,32 @@ def normalize_material_organization_decision(
         section_type=section_type,
         confidence=_confidence(data.get("confidence")),
         reason=reason,
+    )
+
+
+async def decide_material_organization(
+    *,
+    material_text: str,
+    chapters: list[MaterialOrganizationChapterCandidate],
+    sections: list[MaterialOrganizationSectionCandidate],
+    ai_client: AITextClient,
+) -> MaterialOrganizationDecision:
+    prompt = build_material_organization_prompt(
+        material_text=material_text,
+        chapters=chapters,
+        sections=sections,
+    )
+    content = await ai_client._call_llm(
+        SYSTEM_PROMPT,
+        prompt,
+        temperature=0.1,
+        max_tokens=800,
+        timeout=60.0,
+    )
+    return normalize_material_organization_decision(
+        extract_json_payload(str(content)),
+        allowed_section_ids={section.id for section in sections},
+        allowed_chapter_ids={chapter.id for chapter in chapters},
     )
 
 
@@ -281,23 +354,16 @@ async def organize_material(
             result_json={"utterance_id": utterance_id, "reason": "book_plan_not_confirmed"},
         )
 
-    prompt = build_material_organization_prompt(
-        material_text=text,
+    chapter_candidates, section_candidates = material_organization_candidates(
         chapters=chapters,
         sections=current_sections,
     )
     client = ai_client or get_ai_service(ai_model)
-    content = await client._call_llm(
-        SYSTEM_PROMPT,
-        prompt,
-        temperature=0.1,
-        max_tokens=800,
-        timeout=60.0,
-    )
-    decision = normalize_material_organization_decision(
-        extract_json_payload(str(content)),
-        allowed_section_ids={section.id for section in current_sections},
-        allowed_chapter_ids={chapter.id for chapter in chapters},
+    decision = await decide_material_organization(
+        material_text=text,
+        chapters=chapter_candidates,
+        sections=section_candidates,
+        ai_client=client,
     )
     if decision.action == "leave_unassigned":
         return EditingJobResult(

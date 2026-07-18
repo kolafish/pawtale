@@ -49,26 +49,40 @@ function installWx(requests) {
   };
 }
 
-test("chapter completion API exposes workspace, prepare, and rewrite actions", async () => {
+test("chapter completion API exposes workspace, section regeneration, prepare, and rewrite actions", async () => {
   const requests = [];
   installWx(requests);
   resetModules();
-  const { getMemoirChapterWorkspace } = require("../services/memoir-chapter-workspace-api.ts");
+  const {
+    getMemoirChapterWorkspace,
+    regenerateMemoirChapterSections,
+  } = require("../services/memoir-chapter-workspace-api.ts");
   const {
     prepareMemoirBookChapter,
     rewriteMemoirBookChapter,
   } = require("../services/memoir-book-completion-api.ts");
 
   await getMemoirChapterWorkspace("project/1", "chapter/1");
+  await regenerateMemoirChapterSections(
+    "project/1",
+    "chapter/1",
+    [{ id: "section/1", version: 3 }],
+  );
   await prepareMemoirBookChapter("project/1", "chapter/1");
   await rewriteMemoirBookChapter("project/1", "chapter/1");
 
   const apiRequests = requests.filter((request) => request.url.includes("/api/memoir/projects/"));
   assert.equal(apiRequests[0].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/workspace");
-  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
-  assert.deepEqual(apiRequests[1].data, {});
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.equal(apiRequests[1].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/sections/regenerate");
+  assert.deepEqual(apiRequests[1].data, {
+    expected_sections: [{ id: "section/1", version: 3 }],
+    ai_model: "deepseek-v4-flash",
+  });
+  assert.equal(apiRequests[1].timeout, 300000);
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
   assert.deepEqual(apiRequests[2].data, {});
-  assert.equal(apiRequests.length, 3);
+  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.deepEqual(apiRequests[3].data, {});
+  assert.equal(apiRequests.length, 4);
   delete global.wx;
 });
