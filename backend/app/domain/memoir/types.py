@@ -72,6 +72,25 @@ class MemoirBookChapterDraftStatus(str, Enum):
     CONFIRMED = "confirmed"
 
 
+class MemoirSectionType(str, Enum):
+    EVENT = "event"
+    LIFE_FRAGMENT = "life_fragment"
+    PERSON_PORTRAIT = "person_portrait"
+    LIFE_STAGE_SUMMARY = "life_stage_summary"
+    VIEWPOINT_REFLECTION = "viewpoint_reflection"
+
+
+class MemoirSectionStatus(str, Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class MemoirSectionMaterialAssignedBy(str, Enum):
+    AI = "ai"
+    USER = "user"
+    SYSTEM = "system"
+
+
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
