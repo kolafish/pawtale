@@ -22,6 +22,8 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_sections import (
+    MemoirChapterSectionMaterialSummary,
+    MemoirChapterSectionSummary,
     MemoirSectionCollectionResponse,
     MemoirSectionCreateRequest,
     MemoirSectionMaterialAssignmentRequest,
@@ -191,6 +193,51 @@ def _section_response(
         created_at=section.created_at,
         updated_at=section.updated_at,
     )
+
+
+def _section_summary(section: MemoirSection) -> MemoirChapterSectionSummary:
+    materials = sorted(
+        section.materials,
+        key=lambda item: (item.sort_order, item.id),
+    )
+    return MemoirChapterSectionSummary(
+        id=section.id,
+        title=section.title,
+        section_type=section.section_type,
+        sort_order=section.sort_order,
+        status=section.status,
+        include_in_book=section.include_in_book,
+        version=section.version,
+        material_count=len(materials),
+        included_material_count=sum(
+            1 for material in materials if material.include_in_book
+        ),
+        materials=[
+            MemoirChapterSectionMaterialSummary(
+                utterance_id=material.utterance_id,
+                sort_order=material.sort_order,
+                text=_material_text(material),
+                include_in_book=material.include_in_book,
+            )
+            for material in materials
+        ],
+    )
+
+
+async def section_summaries_by_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str | None = None,
+) -> dict[str, list[MemoirChapterSectionSummary]]:
+    result: dict[str, list[MemoirChapterSectionSummary]] = {}
+    for section in await _load_sections(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    ):
+        result.setdefault(section.chapter_id, []).append(_section_summary(section))
+    return result
 
 
 async def _unassigned_material_count(

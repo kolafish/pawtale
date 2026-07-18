@@ -22,6 +22,8 @@ from app.schemas.memoir_book import (
     MemoirBookSourceCoverageItem,
     MemoirBookSourceIncludedChapter,
 )
+from app.schemas.memoir_sections import MemoirChapterSectionSummary
+from app.services.memoir import sections as memoir_sections
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.book_source_links import (
     ChapterSourceChangeState,
@@ -270,6 +272,7 @@ def chapter_response(
     created_at_by_utterance: dict[str, datetime] | None = None,
     source_refs: list[dict[str, object]] | None = None,
     source_change_state: ChapterSourceChangeState | None = None,
+    sections: list[MemoirChapterSectionSummary] | None = None,
 ) -> MemoirBookPlanChapterResponse:
     source_created_at = created_at_by_utterance or {}
     if source_change_state:
@@ -296,6 +299,7 @@ def chapter_response(
             for ref in refs
             if isinstance(ref, dict)
         ],
+        sections=sections or [],
         metadata_json=chapter.metadata_json or {},
         pending_source_count=pending_source_count,
         pending_completion_source_count=pending_completion_source_count,
@@ -309,6 +313,10 @@ def chapter_response(
 async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPlanResponse:
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     source_change_states = await chapter_source_change_states_by_chapter(db, plan)
+    sections_by_chapter = await memoir_sections.section_summaries_by_chapter(
+        db,
+        project_id=plan.project_id,
+    )
     return MemoirBookPlanResponse(
         id=plan.id,
         project_id=plan.project_id,
@@ -322,6 +330,7 @@ async def plan_response(db: AsyncSession, plan: MemoirBookPlan) -> MemoirBookPla
                 chapter,
                 source_refs=refs_by_chapter.get(chapter.id, []),
                 source_change_state=source_change_states.get(chapter.id),
+                sections=sections_by_chapter.get(chapter.id, []),
             )
             for chapter in plan.chapters
         ],
