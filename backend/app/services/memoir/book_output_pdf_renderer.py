@@ -154,6 +154,7 @@ class PDFTocEntry:
     title: str
     anchor: str
     page_number: int | None = None
+    section_titles: tuple[str, ...] = ()
 
 
 LINE_START_FORBIDDEN_CHARS = set("，。！？；：、）】》」』”’〕］｝〉〗〙〛,.!?;:)]}")
@@ -464,6 +465,7 @@ class PDFBookBuilder:
         min_start_lines: int = 1,
         keep_last_lines: int = 1,
         target_anchor: str | None = None,
+        font_name: str | None = None,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = line_height or self.layout.line_height
@@ -497,6 +499,7 @@ class PDFBookBuilder:
                         y=self.y,
                         font_size=font_size,
                         target_anchor=target_anchor,
+                        font_name=font_name,
                     )
                 )
                 self.y -= line_height
@@ -536,6 +539,17 @@ class PDFBookBuilder:
             line_height=self.layout.line_height + 4,
             max_units=max(12, self.layout.max_line_units - 2),
             spacing_after=6,
+        )
+
+    def add_section_heading(self, text: str) -> None:
+        self._ensure_space(3)
+        self.add_text(
+            text,
+            font_size=self.layout.font_size + 2,
+            line_height=self.layout.line_height + 2,
+            max_units=max(12, self.layout.max_line_units - 2),
+            spacing_after=5,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
     def add_centered(
@@ -603,29 +617,32 @@ class PDFBookBuilder:
         label: str,
         page_text: str,
         target_anchor: str | None = None,
+        indent: int = 0,
+        font_size: int | None = None,
     ) -> None:
-        font_size = self.layout.font_size
+        font_size = font_size or self.layout.font_size
         line_height = self.layout.line_height + 2
         self._ensure_space(1)
         page = self._ensure_page()
+        label_x = self.layout.margin_x + indent
         page_x = (
             self.layout.page_width
             - self.layout.margin_x
             - _estimated_text_width(page_text, font_size)
         )
-        max_label_units = max(8, (page_x - self.layout.margin_x - 22) / max(font_size, 1))
+        max_label_units = max(8, (page_x - label_x - 22) / max(font_size, 1))
         fitted_label = _truncate_units(label, max_label_units)
         page.commands.append(
             PDFTextCommand(
                 text=fitted_label,
-                x=self.layout.margin_x,
+                x=label_x,
                 y=self.y,
                 font_size=font_size,
                 target_anchor=target_anchor,
             )
         )
         if page_text:
-            label_end_x = self.layout.margin_x + _estimated_text_width(fitted_label, font_size)
+            label_end_x = label_x + _estimated_text_width(fitted_label, font_size)
             leader_x = label_end_x + 6
             leader_units = max(0, (page_x - leader_x - 6) / max(font_size, 1))
             leaders = "." * max(2, int(leader_units / _char_units("."))) if leader_units > 2 else ""

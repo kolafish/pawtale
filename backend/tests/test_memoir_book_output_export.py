@@ -87,7 +87,22 @@ def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) 
             {"kind": "title_page", "title": "扉页", "content": "家人内部保存。"},
             {"kind": "preface", "title": "前言", "content": "这些故事从家人的讲述开始。"},
         ],
-        "table_of_contents": [{"index": 1, "title": "外婆家的童年", "source_count": 2}],
+        "table_of_contents": [
+            {
+                "index": 1,
+                "title": "外婆家的童年",
+                "source_count": 2,
+                "sections": [
+                    {
+                        "section_id": "section-1",
+                        "index": 1,
+                        "title": "院子里的日子",
+                        "char_count": len(chapter_content),
+                        "source_count": 2,
+                    }
+                ],
+            }
+        ],
         "chapters": [
             {
                 "chapter_id": "chapter-1",
@@ -96,6 +111,17 @@ def _sample_manuscript(chapter_content: str, *, cover_style: str | None = None) 
                 "intro": "记忆最早回到外婆家的院子。",
                 "pull_quotes": [{"text": "我小时候常在外婆家的院子里晒太阳。"}],
                 "content": chapter_content,
+                "sections": [
+                    {
+                        "section_id": "section-1",
+                        "index": 1,
+                        "title": "院子里的日子",
+                        "section_type": "life_fragment",
+                        "content": chapter_content,
+                        "char_count": len(chapter_content),
+                        "source_count": 2,
+                    }
+                ],
                 "source_refs": [{"utterance_id": "u1"}, {"utterance_id": "u2"}],
             }
         ],
@@ -311,6 +337,20 @@ def test_table_of_contents_links_to_numbered_chapter_pages():
     assert page_command.target_anchor == "chapter-1"
     assert page_command.x > toc_command.x
     assert page_command.y == toc_command.y
+    section_command = next(
+        command
+        for command in toc_page.commands
+        if "院子里的日子" in command.text
+    )
+    assert section_command.text == "1.1　院子里的日子"
+    assert section_command.target_anchor == "chapter-1"
+
+    chapter_page = next(page for page in pages if page.anchor == "chapter-1")
+    assert any(
+        command.text == "院子里的日子"
+        and command.font_name == PDF_SERIF_BOLD_FONT_NAME
+        for command in chapter_page.commands
+    )
 
 
 def test_table_of_contents_skips_links_without_chapter_pages():

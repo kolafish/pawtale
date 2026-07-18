@@ -16,6 +16,8 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptSourceRef,
     MemoirBookOutputStructuredChapterResponse,
     MemoirBookOutputStructuredContentResponse,
+    MemoirBookOutputSectionResponse,
+    MemoirBookOutputSectionTableOfContentsItemResponse,
     MemoirBookOutputTableOfContentsItemResponse,
 )
 from app.services.memoir.book_manuscript_ai import GeneratedManuscriptCopy
@@ -73,6 +75,48 @@ def safe_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
+def _section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:
+    if not isinstance(value, list):
+        return []
+    sections: list[MemoirBookOutputSectionResponse] = []
+    for fallback_index, item in enumerate(value, start=1):
+        if not isinstance(item, dict):
+            continue
+        section_id = safe_str(item.get("section_id"))
+        title = safe_str(item.get("title"))
+        content = safe_str(item.get("content"))
+        if not section_id or not title or not content:
+            continue
+        sections.append(
+            MemoirBookOutputSectionResponse(
+                section_id=section_id,
+                index=positive_int(item.get("section_index")) or fallback_index,
+                title=title,
+                section_type=safe_str(item.get("section_type")),
+                content=content,
+                char_count=positive_int(item.get("content_char_count"))
+                or len(content),
+                source_count=positive_int(item.get("source_count")),
+            )
+        )
+    return sections
+
+
+def _section_toc_items(
+    sections: list[MemoirBookOutputSectionResponse],
+) -> list[MemoirBookOutputSectionTableOfContentsItemResponse]:
+    return [
+        MemoirBookOutputSectionTableOfContentsItemResponse(
+            section_id=section.section_id,
+            index=section.index,
+            title=section.title,
+            char_count=section.char_count,
+            source_count=section.source_count,
+        )
+        for section in sections
+    ]
+
+
 def limited_book_text(value: object, *, max_chars: int) -> str:
     text = safe_str(value)
     return text[:max_chars] if len(text) > max_chars else text
@@ -105,6 +149,7 @@ def structured_content_response(
         chapter_content = safe_str(item.get("content"))
         if not chapter_id or not chapter_title or not chapter_content:
             continue
+        sections = _section_responses(item.get("sections"))
         chapters.append(
             MemoirBookOutputStructuredChapterResponse(
                 chapter_id=chapter_id,
@@ -115,6 +160,7 @@ def structured_content_response(
                 source_count=positive_int(item.get("source_count")),
                 draft_version_id=safe_str(item.get("draft_version_id")) or None,
                 draft_version=optional_positive_int(item.get("draft_version")),
+                sections=sections,
             )
         )
     if not chapters:
@@ -126,6 +172,7 @@ def structured_content_response(
             title=chapter.title,
             char_count=chapter.char_count,
             source_count=chapter.source_count,
+            sections=_section_toc_items(chapter.sections),
         )
         for chapter in chapters
     ]
@@ -344,6 +391,7 @@ def manuscript_from_snapshot(
         if not chapter_id or not chapter_title or not chapter_content:
             continue
         source_refs = _manuscript_source_refs(item.get("source_refs"))
+        sections = _section_responses(item.get("sections"))
         chapter_index = positive_int(item.get("chapter_index")) or fallback_index
         toc.append(
             MemoirBookOutputTableOfContentsItemResponse(
@@ -352,6 +400,7 @@ def manuscript_from_snapshot(
                 title=chapter_title,
                 char_count=positive_int(item.get("content_char_count")) or len(chapter_content),
                 source_count=positive_int(item.get("source_count")) or len(source_refs),
+                sections=_section_toc_items(sections),
             )
         )
         generated_pull_quote = _generated_chapter_pull_quote(chapter_id=chapter_id, editorial_copy=editorial_copy)
@@ -363,6 +412,7 @@ def manuscript_from_snapshot(
                 intro=intro_by_chapter_id.get(chapter_id) or fallback_chapter_intro(chapter_title, chapter_content),
                 pull_quotes=[generated_pull_quote] if generated_pull_quote else _chapter_pull_quotes(chapter_content, source_refs),
                 content=chapter_content,
+                sections=sections,
                 source_refs=source_refs,
                 illustrations=(chapter_illustrations_by_chapter or {}).get(chapter_id, []),
             )

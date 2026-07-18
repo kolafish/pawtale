@@ -1,3 +1,5 @@
+import pytest
+from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -463,6 +465,42 @@ async def test_mobile_memoir_book_output_routes_require_login(anonymous_client):
     assert response.status_code == 401
 
 
+async def test_book_output_requires_structured_small_sections(test_db, client):
+    project_id = await ensure_mobile_memoir_project(client)
+    plan, chapters = await _create_confirmed_book_plan(
+        test_db,
+        project_id=project_id,
+    )
+    plan_id = plan.id
+    first_chapter_title = chapters[0].title
+    version = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.chapter_id == chapters[0].id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert version is not None
+    version.section_snapshot_json = []
+    await test_db.commit()
+    plan = await test_db.scalar(
+        select(MemoirBookPlan)
+        .where(MemoirBookPlan.id == plan_id)
+        .options(
+            selectinload(MemoirBookPlan.chapters)
+            .selectinload(MemoirBookPlanChapter.draft)
+            .selectinload(MemoirBookChapterDraft.versions)
+        )
+        .execution_options(populate_existing=True)
+    )
+    assert plan is not None
+
+    with pytest.raises(HTTPException) as error:
+        book_outputs._require_confirmed_chapters(plan)
+
+    assert error.value.status_code == 400
+    assert "重新整理以下章节以生成小节" in error.value.detail
+    assert first_chapter_title in error.value.detail
+
+
 async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     plan, chapters = await _create_confirmed_book_plan(test_db, project_id=project_id)
@@ -484,8 +522,9 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert data["title"] == "外婆的回忆录"
     assert data["latest_version"]["version"] == 1
     content = data["latest_version"]["content"]
-    assert "目录\n1. 外婆家的童年\n2. 第一次离家" in content
+    assert "目录\n1. 外婆家的童年\n  1.1 外婆家的童年\n2. 第一次离家" in content
     assert "第1章 外婆家的童年" in content
+    assert "\n\n外婆家的童年\n\n我小时候常在外婆家的院子里晒太阳。" in content
     assert "我小时候常在外婆家的院子里晒太阳。" in content
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
@@ -493,6 +532,8 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert [item["chapter_id"] for item in snapshot] == [chapters[0].id, chapters[1].id]
     assert snapshot[0]["chapter_index"] == 1
     assert snapshot[0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert snapshot[0]["section_count"] == 1
+    assert snapshot[0]["sections"][0]["title"] == "外婆家的童年"
     structured = data["latest_version"]["structured_content"]
     assert structured["title"] == "外婆的回忆录"
     assert structured["chapter_count"] == 2
@@ -500,8 +541,12 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert structured["chapters"][0]["chapter_id"] == chapters[0].id
     assert structured["chapters"][0]["index"] == 1
     assert structured["chapters"][0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert structured["table_of_contents"][0]["sections"][0]["title"] == "外婆家的童年"
+    assert structured["chapters"][0]["sections"][0]["content"] == (
+        "我小时候常在外婆家的院子里晒太阳。"
+    )
     manuscript = data["latest_version"]["manuscript"]
-    assert manuscript["schema_version"] == 1
+    assert manuscript["schema_version"] == 2
     assert manuscript["profile"]["template"] == "classic_family"
     assert manuscript["profile"]["title"] == "外婆的回忆录"
     assert manuscript["profile"]["subtitle"] == "关于外婆家的童年、第一次离家的记忆"
@@ -515,6 +560,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
+    assert manuscript["chapters"][0]["sections"][0]["title"] == "外婆家的童年"
     assert manuscript["chapters"][0]["intro"].startswith("记忆先回到外婆家的童年")
     assert "这一章主要记录" not in manuscript["chapters"][0]["intro"]
     assert "从口述内容看" not in manuscript["chapters"][0]["intro"]
@@ -983,7 +1029,9 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     assert first.json()["alignment_provider"] == "fake-tts"
     assert first.json()["alignment"][0]["text_start"] == 0
     assert len(fake_tts.calls) == 2
-    assert fake_tts.calls[0]["text"] == "我小时候常在外婆家的院子里晒太阳。"
+    assert fake_tts.calls[0]["text"] == (
+        "外婆家的童年\n\n我小时候常在外婆家的院子里晒太阳。"
+    )
     assert fake_tts.calls[0]["speed_ratio"] == 1.5
     assert fake_tts.calls[1]["speed_ratio"] == 0.7
     playback = await client.get(f"/api/mobile/memoir/audio-files/{first.json()['audio_file_ids'][0]}/playback")

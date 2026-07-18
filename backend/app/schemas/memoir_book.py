@@ -459,12 +459,30 @@ class MemoirBookTitleSuggestionResponse(BaseModel):
     model: str | None = None
 
 
+class MemoirBookOutputSectionTableOfContentsItemResponse(BaseModel):
+    section_id: str
+    index: int
+    title: str
+    char_count: int = 0
+    source_count: int = 0
+
+
+class MemoirBookOutputSectionResponse(
+    MemoirBookOutputSectionTableOfContentsItemResponse
+):
+    section_type: str = ""
+    content: str
+
+
 class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
     chapter_id: str
     index: int
     title: str
     char_count: int = 0
     source_count: int = 0
+    sections: list[MemoirBookOutputSectionTableOfContentsItemResponse] = Field(
+        default_factory=list
+    )
 
 
 class MemoirBookOutputStructuredChapterResponse(BaseModel):
@@ -476,6 +494,7 @@ class MemoirBookOutputStructuredChapterResponse(BaseModel):
     source_count: int = 0
     draft_version_id: str | None = None
     draft_version: int | None = None
+    sections: list[MemoirBookOutputSectionResponse] = Field(default_factory=list)
 
 
 class MemoirBookOutputStructuredContentResponse(BaseModel):
@@ -554,6 +573,7 @@ class MemoirBookManuscriptChapter(BaseModel):
     people_notes: list[MemoirBookManuscriptPersonNote] = Field(default_factory=list)
     uncertain_facts: list[MemoirBookManuscriptUnconfirmedFact] = Field(default_factory=list)
     content: str
+    sections: list[MemoirBookOutputSectionResponse] = Field(default_factory=list)
     source_refs: list[MemoirBookManuscriptSourceRef] = Field(default_factory=list)
     illustrations: list[MemoirBookManuscriptIllustration] = Field(default_factory=list)
 
@@ -579,7 +599,7 @@ class MemoirBookManuscriptBackMatter(BaseModel):
 
 
 class MemoirBookManuscript(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2
     profile: MemoirBookManuscriptProfile
     front_matter: list[MemoirBookManuscriptSection] = Field(default_factory=list)
     table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)

@@ -21,19 +21,34 @@
     <view wx:if="{{bookPreviewTocItems.length}}" class="reader-section">
       <text class="section-label">目录</text>
       <view class="toc-list">
-        <view wx:for="{{bookPreviewTocItems}}" wx:key="id" class="toc-row">
-          <text class="toc-index">{{item.indexText}}</text>
-          <text class="toc-title">{{item.title}}</text>
+        <view wx:for="{{bookPreviewTocItems}}" wx:key="id" wx:for-item="chapter" class="toc-group">
+          <view class="toc-row">
+            <text class="toc-index">{{chapter.indexText}}</text>
+            <text class="toc-title">{{chapter.title}}</text>
+          </view>
+          <view wx:if="{{chapter.sections.length}}" class="toc-section-list">
+            <view wx:for="{{chapter.sections}}" wx:key="id" wx:for-item="section" class="toc-section-row">
+              <text class="toc-section-index">{{section.indexText}}</text>
+              <text class="toc-section-title">{{section.title}}</text>
+            </view>
+          </view>
         </view>
       </view>
     </view>
 
     <view wx:if="{{bookPreviewChapters.length}}" class="chapter-list">
-      <view wx:for="{{bookPreviewChapters}}" wx:key="id" class="chapter-block">
-        <text class="chapter-index">{{item.indexText}}</text>
-        <text class="chapter-title">{{item.title}}</text>
-        <text wx:if="{{item.metaText}}" class="chapter-meta">{{item.metaText}}</text>
-        <text class="chapter-content" selectable>{{item.content}}</text>
+      <view wx:for="{{bookPreviewChapters}}" wx:key="id" wx:for-item="chapter" class="chapter-block">
+        <text class="chapter-index">{{chapter.indexText}}</text>
+        <text class="chapter-title">{{chapter.title}}</text>
+        <text wx:if="{{chapter.metaText}}" class="chapter-meta">{{chapter.metaText}}</text>
+        <view wx:if="{{chapter.sections.length}}" class="reader-small-section-list">
+          <view wx:for="{{chapter.sections}}" wx:key="id" wx:for-item="section" class="reader-small-section">
+            <text class="small-section-index">小节 {{section.indexText}}</text>
+            <text class="small-section-title">{{section.title}}</text>
+            <text class="small-section-content" selectable>{{section.content}}</text>
+          </view>
+        </view>
+        <text wx:else class="chapter-content" selectable>{{chapter.content}}</text>
       </view>
     </view>
 

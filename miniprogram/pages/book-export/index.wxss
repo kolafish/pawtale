@@ -745,10 +745,27 @@
   margin-top: 22rpx;
 }
 
+.toc-group {
+  min-width: 0;
+}
+
 .toc-item {
   color: #6f5144;
   font-size: 26rpx;
   line-height: 1.5;
+}
+
+.toc-small-section {
+  display: block;
+  margin-top: 6rpx;
+  margin-left: 26rpx;
+  padding-left: 18rpx;
+  border-left: 2rpx solid #ead9c8;
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
 }
 
 .preview-toggle-row {
@@ -775,7 +792,29 @@
   line-height: 1.45;
 }
 
+.chapter-small-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  margin-top: 16rpx;
+}
+
+.chapter-small-section + .chapter-small-section {
+  padding-top: 18rpx;
+  border-top: 1rpx solid #f0e2d4;
+}
+
+.chapter-small-section-title {
+  display: block;
+  color: #4d3d34;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .chapter-excerpt {
+  display: block;
   margin-top: 10rpx;
   color: #6f5144;
   font-size: 25rpx;

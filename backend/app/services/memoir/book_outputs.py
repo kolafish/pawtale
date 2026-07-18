@@ -60,7 +60,11 @@ from app.services.memoir.book_output_manuscript import (
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
     updated_manuscript_payload as _updated_manuscript_payload,
 )
-from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_output_snapshots import (
+    book_content_from_chapter_snapshots,
+    chapter_snapshot,
+    normalized_section_snapshots,
+)
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_output_export import (
     MemoirBookOutputExportFormat,
@@ -85,6 +89,7 @@ SNAPSHOT_COMPARE_KEYS = (
     "draft_version_id",
     "draft_version",
     "content_char_count",
+    "section_count",
 )
 
 
@@ -178,17 +183,32 @@ def _require_confirmed_chapters(plan: MemoirBookPlan) -> list[tuple[MemoirBookPl
         raise HTTPException(status_code=400, detail="章节规划不能为空")
 
     missing: list[str] = []
+    unstructured: list[str] = []
     confirmed: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]] = []
     for chapter in chapters:
         version = _latest_chapter_version(chapter.draft)
-        if not chapter.draft or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value or not version:
+        if (
+            not chapter.draft
+            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
+            or not version
+        ):
             missing.append(chapter.title)
+            continue
+        if not normalized_section_snapshots(version.section_snapshot_json):
+            unstructured.append(chapter.title)
             continue
         confirmed.append((chapter, version))
     if missing:
         preview = "、".join(missing[:3])
         suffix = "等章节" if len(missing) > 3 else ""
         raise HTTPException(status_code=400, detail=f"请先确认所有章节：{preview}{suffix}")
+    if unstructured:
+        preview = "、".join(unstructured[:3])
+        suffix = "等章节" if len(unstructured) > 3 else ""
+        raise HTTPException(
+            status_code=400,
+            detail=f"请先重新整理以下章节以生成小节：{preview}{suffix}",
+        )
     return confirmed
 
 
@@ -198,12 +218,8 @@ def _compose_book_content(
     chapters: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]],
     source_refs_by_chapter: dict[str, list[dict[str, object]]] | None = None,
 ) -> tuple[str, list[dict[str, object]]]:
-    toc = "\n".join(f"{index}. {chapter.title}" for index, (chapter, _) in enumerate(chapters, start=1))
-    body_parts: list[str] = []
     snapshot: list[dict[str, object]] = []
     for index, (chapter, version) in enumerate(chapters, start=1):
-        content = version.content.strip()
-        body_parts.append(f"第{index}章 {chapter.title}\n\n{content}")
         snapshot.append(
             chapter_snapshot(
                 chapter,
@@ -212,8 +228,7 @@ def _compose_book_content(
                 source_refs=(source_refs_by_chapter or {}).get(chapter.id),
             )
         )
-    content = f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)
-    return content.strip(), snapshot
+    return book_content_from_chapter_snapshots(title=title, snapshots=snapshot), snapshot
 
 
 def _compose_book_content_from_snapshot(
@@ -221,21 +236,10 @@ def _compose_book_content_from_snapshot(
     title: str,
     snapshot: list[dict[str, object]],
 ) -> str:
-    toc = "\n".join(
-        f"{_positive_int(item.get('chapter_index')) or index}. {_safe_str(item.get('chapter_title')) or _safe_str(item.get('title')) or f'第{index}章'}"
-        for index, item in enumerate(snapshot, start=1)
-        if isinstance(item, dict)
+    return book_content_from_chapter_snapshots(
+        title=title,
+        snapshots=[item for item in snapshot if isinstance(item, dict)],
     )
-    body_parts: list[str] = []
-    for index, item in enumerate(snapshot, start=1):
-        if not isinstance(item, dict):
-            continue
-        chapter_index = _positive_int(item.get("chapter_index")) or index
-        chapter_title = _safe_str(item.get("chapter_title")) or _safe_str(item.get("title")) or f"第{chapter_index}章"
-        chapter_content = _safe_str(item.get("content"))
-        if chapter_content:
-            body_parts.append(f"第{chapter_index}章 {chapter_title}\n\n{chapter_content}")
-    return (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body_parts)).strip()
 
 
 def _current_book_snapshot(
@@ -250,7 +254,12 @@ def _current_book_snapshot(
     unavailable_titles: list[str] = []
     for index, chapter in enumerate(chapters, start=1):
         version = _latest_chapter_version(chapter.draft)
-        if not chapter.draft or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value or not version:
+        if (
+            not chapter.draft
+            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
+            or not version
+            or not normalized_section_snapshots(version.section_snapshot_json)
+        ):
             unavailable_titles.append(chapter.title)
             continue
         snapshot.append(

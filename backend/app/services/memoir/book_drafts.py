@@ -37,6 +37,10 @@ from app.services.memoir.book_audio import (
     synthesize_text_audio,
 )
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.book_output_snapshots import (
+    normalized_section_snapshots,
+    sectioned_chapter_content,
+)
 from app.services.memoir import chapter_generation
 from app.services.memoir.voice_tts_types import TTSClient
 
@@ -322,7 +326,8 @@ async def synthesize_chapter_draft_audio(
         draft.versions,
         key=lambda item: (item.version, item.created_at, item.id),
     )
-    text = latest.content.strip()
+    sections = normalized_section_snapshots(latest.section_snapshot_json)
+    text = sectioned_chapter_content(sections) or latest.content.strip()
     text_hash = source_text_hash(text)
     speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
     cached = cached_audio_response(
