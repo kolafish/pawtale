@@ -181,65 +181,64 @@ test("voice chat view patch combines human speaker choice with record actions", 
   assert.equal(authorizationPatch.micButtonText, "同意后开始说话");
 });
 
-test("book completion renders one item question without disabling unrelated recording controls", () => {
+test("book completion renders one issue without disabling recording controls", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
     voiceAuthorizationAgreed: true,
     assistantPromptText: "模型生成的另一个问法",
-    completionItemAction: "switch",
-    completionItem: {
-      id: "item-1",
+    completionIssueAction: "deferred",
+    completionIssue: {
+      id: "issue-1",
       question: "爷爷退休以后为什么还一直忙公司的事？",
-      purpose: "补足退休后的动机和影响。",
       status: "in_progress",
     },
   });
 
-  assert.equal(patch.showCompletionItemPanel, true);
+  assert.equal(patch.showCompletionIssuePanel, true);
   assert.equal(patch.topSubtitle, "一次只补一个重点");
   assert.equal(patch.showAssistantPanel, true);
   assert.equal(patch.showAssistantOpening, false);
   assert.equal(patch.assistantDisplayText, "模型生成的另一个问法");
-  assert.equal(patch.completionItemQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
-  assert.equal("completionItemPurposeText" in patch, false);
-  assert.equal(patch.showCompletionItemActions, true);
-  assert.equal(patch.completionItemControlsDisabled, true);
+  assert.equal(patch.completionIssueQuestionText, "爷爷退休以后为什么还一直忙公司的事？");
+  assert.equal(patch.showCompletionIssueActions, true);
+  assert.equal(patch.completionIssueControlsDisabled, true);
   assert.equal(patch.micButtonDisabled, false);
   assert.equal(patch.finishButtonText, "保存离开");
 });
 
-test("book completion without an item exposes the invalid session and disables recording", () => {
+test("book completion without an issue exposes the invalid session and disables recording", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
     voiceAuthorizationAgreed: true,
-    completionItem: null,
-    completionItemLoading: false,
+    completionIssue: null,
+    completionIssueLoading: false,
   });
 
-  assert.equal(patch.completionItemStatusText, "没有拿到本次要补的问题");
-  assert.equal(patch.completionItemQuestionText, "本次问题没有准备好");
+  assert.equal(patch.completionIssueStatusText, "没有拿到本次要补的问题");
+  assert.equal(patch.completionIssueQuestionText, "本次问题没有准备好");
   assert.equal(patch.liveDisplayText, "请保存离开后，从首页重新进入");
-  assert.equal(patch.showCompletionItemActions, false);
+  assert.equal(patch.showCompletionIssueActions, false);
   assert.equal(patch.showAssistantPanel, false);
   assert.equal(patch.micButtonDisabled, true);
   assert.equal(patch.micButtonText, "请先保存离开");
 });
 
-test("deferred book completion returns to the whole-book overview", () => {
+test("closed book completion returns to the whole-book overview", () => {
   const patch = voiceChatViewPatch({
     ...initialVoiceChatData(),
     sessionGoal: "book_completion",
-    completionItem: {
-      id: "item-1",
+    completionIssue: {
+      id: "issue-1",
       question: "请按顺序讲讲这段经历。",
-      status: "deferred",
+      status: "closed",
+      outcome: "deferred",
     },
   });
 
-  assert.equal(patch.showCompletionItemContinue, true);
-  assert.equal(patch.completionItemStatusText, "已留到以后再补");
+  assert.equal(patch.showCompletionIssueContinue, true);
+  assert.equal(patch.completionIssueStatusText, "本次补充已经结束");
   assert.equal(patch.showControlBar, false);
   assert.equal(patch.showAssistantActions, false);
 });
@@ -251,8 +250,8 @@ test("answered book completion ends recording flow before background verificatio
     voiceAuthorizationAgreed: true,
     assistantExpectsAnswer: false,
     assistantPromptText: "这段背景已经保存，接下来可以返回全书概览。",
-    completionItem: {
-      id: "item-1",
+    completionIssue: {
+      id: "issue-1",
       question: "这段内容开始前，读者还需要知道哪些重要背景？",
       status: "in_progress",
     },
@@ -268,8 +267,8 @@ test("answered book completion ends recording flow before background verificatio
   assert.equal(patch.showControlBar, false);
   assert.equal(patch.showCaptureStrip, false);
   assert.equal(patch.micButtonDisabled, true);
-  assert.equal(patch.showCompletionItemActions, false);
-  assert.equal(patch.showCompletionItemContinue, true);
+  assert.equal(patch.showCompletionIssueActions, false);
+  assert.equal(patch.showCompletionIssueContinue, true);
   assert.equal(patch.showAssistantActions, false);
   assert.equal(patch.stageStatusText, "本次补充已经完成");
   assert.equal(patch.liveDisplayText, "回答已经保存，可以返回全书概览。");
@@ -411,7 +410,7 @@ test("voice chat session detail selector applies saved and assistant state", () 
   assert.equal(patch.followUpAudioFileId, "audio-assistant");
 });
 
-test("voice session detail selector carries the canonical completion item binding", () => {
+test("voice session detail selector carries the canonical completion issue binding", () => {
   const data = initialVoiceChatData();
   const patch = voiceSessionDetailPatch({
     session: {
@@ -420,7 +419,7 @@ test("voice session detail selector carries the canonical completion item bindin
       guidance_mode: "guided_interview",
       interview_type: "human_interview",
       session_goal: "book_completion",
-      current_completion_item_id: "item-1",
+      current_completion_issue_id: "issue-1",
       error_message: "",
     },
     messages: [],
@@ -429,7 +428,7 @@ test("voice session detail selector carries the canonical completion item bindin
 
   assert.equal(patch.projectId, "project-1");
   assert.equal(patch.sessionGoal, "book_completion");
-  assert.equal(patch.currentCompletionItemId, "item-1");
+  assert.equal(patch.currentCompletionIssueId, "issue-1");
 });
 
 test("voice chat realtime selectors derive capture, gateway, status, and error patches", () => {

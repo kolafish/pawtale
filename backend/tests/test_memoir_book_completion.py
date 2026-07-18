@@ -284,7 +284,7 @@ async def test_closed_section_issue_is_not_reopened_on_prepare(
     summary = first.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "start_interview"
-    issue_id = summary["active_item"]["id"]
+    issue_id = summary["active_issue"]["id"]
 
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
@@ -323,7 +323,7 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     summary = prepared.json()["completion_summary"]
     assert summary["state"] == "needs_input"
     assert summary["next_action"]["kind"] == "confirm"
-    assert summary["active_item"]["question"] == "这一章是否愿意保留真实学校名称？"
+    assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
 
 
 async def test_book_review_uses_chapter_digests_and_creates_book_issue(

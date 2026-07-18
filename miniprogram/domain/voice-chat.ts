@@ -23,13 +23,32 @@ export type MemoirBookChapterDraftStatus = "draft" | "confirmed";
 export type MemoirOutputStatus = "draft" | "accepted" | "archived";
 export type VoiceGatewayState = "ready" | "listening" | "finishing" | "stopped" | "failed";
 export type VoiceChatErrorKind = "connection" | "recorder" | "gateway" | "asr" | "persistence" | "timeout" | "unknown";
-export type MemoirCompletionItemStatus =
+export type MemoirCompletionIssueStatus =
   | "open"
   | "in_progress"
+  | "closed";
+export type MemoirCompletionIssueOutcome =
+  | "answered"
+  | "resolved_by_material"
+  | "confirmed"
+  | "not_remembered"
   | "deferred"
-  | "resolved"
-  | "unable_to_answer";
-export type MemoirCompletionUnableToAnswerResolution = "unable_to_answer" | "ask_family_later";
+  | "declined"
+  | "superseded";
+export type MemoirCompletionIssueScope = "section" | "chapter" | "book";
+export type MemoirCompletionIssueChannel = "interview" | "manual_review";
+export type MemoirCompletionIssueType =
+  | "context"
+  | "sequence"
+  | "relationship"
+  | "motivation"
+  | "impact"
+  | "meaning"
+  | "clarity"
+  | "structure"
+  | "privacy"
+  | "conflict";
+export type MemoirCompletionIssuePriority = "high" | "medium" | "low";
 
 export type MemoirBookCompletionState = MemoirChapterCompletionState;
 export type MemoirBookCompletionAction =
@@ -50,53 +69,38 @@ export interface MemoirBookCompletion {
   chapter_id?: string | null;
 }
 
-export interface MemoirCompletionItem {
+export interface MemoirCompletionIssue {
   id: string;
   project_id: string;
-  scope_type: "story" | "chapter" | "book";
+  scope: MemoirCompletionIssueScope;
+  section_id?: string | null;
   chapter_id?: string | null;
-  story_id?: string | null;
-  claim_id?: string | null;
-  related_claim_id?: string | null;
-  item_type:
-    | "missing_slot"
-    | "chronology"
-    | "relationship"
-    | "causality"
-    | "contradiction"
-    | "repetition"
-    | "unclear_reference"
-    | "unsupported_fact";
-  severity: "high" | "medium" | "low";
-  dimension: string;
-  title: string;
-  description: string;
-  action: "interview" | "editorial" | "manual_review";
+  issue_type: MemoirCompletionIssueType;
+  channel: MemoirCompletionIssueChannel;
   question: string;
-  priority: number;
-  status: MemoirCompletionItemStatus;
-  defer_until?: string | null;
+  reason: string;
+  priority: MemoirCompletionIssuePriority;
+  related_material_ids: string[];
+  input_signature: string;
+  status: MemoirCompletionIssueStatus;
+  outcome?: MemoirCompletionIssueOutcome | null;
   outcome_note: string;
-  detected_by: "rules" | "ai" | "user";
-  detection_count: number;
-  first_detected_at: string;
-  last_detected_at: string;
+  answered_material_id?: string | null;
   started_at?: string | null;
-  completed_at?: string | null;
+  closed_at?: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export interface MemoirCompletionItemActionRequest {
+export interface MemoirCompletionIssueCollection {
+  project_id: string;
+  current_issue?: MemoirCompletionIssue | null;
+  issues: MemoirCompletionIssue[];
+}
+
+export interface MemoirCompletionIssueCloseRequest {
+  outcome: Exclude<MemoirCompletionIssueOutcome, "answered">;
   note?: string;
-}
-
-export interface MemoirCompletionItemDeferRequest extends MemoirCompletionItemActionRequest {
-  defer_until?: string | null;
-}
-
-export interface MemoirCompletionItemSwitchRequest extends MemoirCompletionItemActionRequest {
-  current_item_id: string;
 }
 
 export interface MemoirVoiceSession {
@@ -106,7 +110,7 @@ export interface MemoirVoiceSession {
   guidance_mode: MemoirGuidanceMode;
   interview_type: MemoirInterviewType;
   session_goal: MemoirSessionGoal;
-  current_completion_item_id?: string | null;
+  current_completion_issue_id?: string | null;
   anchor_framework_item_id?: string | null;
   current_guidance_module?: string | null;
   provider?: string | null;
@@ -147,6 +151,7 @@ export interface MemoirVoiceUtterance {
   end_ms?: number | null;
   provider?: string | null;
   provider_payload_json: Record<string, unknown>;
+  completion_issue_id?: string | null;
   created_at: string;
 }
 
@@ -163,7 +168,7 @@ export interface MemoirVoiceSessionSummary {
   guidance_mode: MemoirGuidanceMode;
   interview_type: MemoirInterviewType;
   session_goal: MemoirSessionGoal;
-  current_completion_item_id?: string | null;
+  current_completion_issue_id?: string | null;
   anchor_framework_item_id?: string | null;
   current_guidance_module?: string | null;
   started_at?: string | null;
@@ -238,17 +243,6 @@ export interface MemoirAutomationEventListResponse {
   limit: number;
 }
 
-export interface MemoirCompletionOutcome {
-  status: "processing" | "incorporated" | "not_used";
-  voice_session_id: string;
-  item_id?: string | null;
-  item_status?: MemoirCompletionItem["status"] | null;
-  chapter_id?: string | null;
-  chapter_title: string;
-  utterance_id?: string | null;
-  message: string;
-}
-
 export interface MemoirProjectProgressChapter {
   chapter_id: string;
   title: string;
@@ -302,7 +296,7 @@ export interface MemoirVoiceSessionCreate {
   guidance_mode: MemoirGuidanceMode;
   interview_type?: MemoirInterviewType;
   session_goal?: MemoirSessionGoal;
-  current_completion_item_id?: string;
+  current_completion_issue_id?: string;
   anchor_framework_item_id?: string;
   current_guidance_module?: string;
   provider?: string;

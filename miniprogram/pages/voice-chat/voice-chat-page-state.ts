@@ -1,5 +1,5 @@
 import type {
-  MemoirCompletionItem,
+  MemoirCompletionIssue,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
@@ -47,12 +47,12 @@ export interface VoiceChatData {
   currentGuidanceModule: string;
   interviewType: MemoirInterviewType;
   sessionGoal: MemoirSessionGoal;
-  currentCompletionItemId: string;
-  completionItem: MemoirCompletionItem | null;
-  completionItemLoading: boolean;
-  completionItemAction: string;
-  completionItemError: string;
-  completionItemNotice: string;
+  currentCompletionIssueId: string;
+  completionIssue: MemoirCompletionIssue | null;
+  completionIssueLoading: boolean;
+  completionIssueAction: string;
+  completionIssueError: string;
+  completionIssueNotice: string;
   speakerRole: MemoirSpeakerRole;
   status: VoiceChatConnectionStatus;
   statusText: string;
@@ -120,14 +120,14 @@ export interface VoiceChatData {
   showRecoveryActions: boolean;
   showVoiceAuthorizationPanel: boolean;
   showAssistantPanel: boolean;
-  showCompletionItemPanel: boolean;
-  completionItemPanelClass: string;
-  completionItemStatusText: string;
-  completionItemQuestionText: string;
-  showCompletionItemActions: boolean;
-  showCompletionItemContinue: boolean;
-  completionItemControlsDisabled: boolean;
-  completionItemActionText: string;
+  showCompletionIssuePanel: boolean;
+  completionIssuePanelClass: string;
+  completionIssueStatusText: string;
+  completionIssueQuestionText: string;
+  showCompletionIssueActions: boolean;
+  showCompletionIssueContinue: boolean;
+  completionIssueControlsDisabled: boolean;
+  completionIssueActionText: string;
   assistantPanelClass: string;
   assistantLabelText: string;
   showAssistantOpening: boolean;
@@ -186,12 +186,12 @@ export function initialVoiceChatData(): VoiceChatData {
     currentGuidanceModule: "",
     interviewType: "ai_interview",
     sessionGoal: "open_narration",
-    currentCompletionItemId: "",
-    completionItem: null,
-    completionItemLoading: false,
-    completionItemAction: "",
-    completionItemError: "",
-    completionItemNotice: "",
+    currentCompletionIssueId: "",
+    completionIssue: null,
+    completionIssueLoading: false,
+    completionIssueAction: "",
+    completionIssueError: "",
+    completionIssueNotice: "",
     speakerRole: "narrator",
     status: "idle",
     statusText: "未连接",
@@ -265,14 +265,14 @@ export function initialVoiceChatData(): VoiceChatData {
     showRecoveryActions: false,
     showVoiceAuthorizationPanel: true,
     showAssistantPanel: false,
-    showCompletionItemPanel: false,
-    completionItemPanelClass: "completion-item-panel",
-    completionItemStatusText: "",
-    completionItemQuestionText: "",
-    showCompletionItemActions: false,
-    showCompletionItemContinue: false,
-    completionItemControlsDisabled: false,
-    completionItemActionText: "",
+    showCompletionIssuePanel: false,
+    completionIssuePanelClass: "completion-issue-panel",
+    completionIssueStatusText: "",
+    completionIssueQuestionText: "",
+    showCompletionIssueActions: false,
+    showCompletionIssueContinue: false,
+    completionIssueControlsDisabled: false,
+    completionIssueActionText: "",
     assistantPanelClass: "assistant-panel",
     assistantLabelText: "小余想听您讲讲",
     showAssistantOpening: true,
@@ -329,14 +329,14 @@ export type VoiceChatViewPatch = Pick<
   | "showRecoveryActions"
   | "showVoiceAuthorizationPanel"
   | "showAssistantPanel"
-  | "showCompletionItemPanel"
-  | "completionItemPanelClass"
-  | "completionItemStatusText"
-  | "completionItemQuestionText"
-  | "showCompletionItemActions"
-  | "showCompletionItemContinue"
-  | "completionItemControlsDisabled"
-  | "completionItemActionText"
+  | "showCompletionIssuePanel"
+  | "completionIssuePanelClass"
+  | "completionIssueStatusText"
+  | "completionIssueQuestionText"
+  | "showCompletionIssueActions"
+  | "showCompletionIssueContinue"
+  | "completionIssueControlsDisabled"
+  | "completionIssueActionText"
   | "assistantPanelClass"
   | "assistantLabelText"
   | "showAssistantOpening"
@@ -390,40 +390,37 @@ function speakerRoleLabel(role: MemoirSpeakerRole): string {
   return role === "interviewer" ? "采访者" : "被访者";
 }
 
-function completionItemStatusText(state: VoiceChatData): string {
-  if (state.completionItemError) {
-    return "补全问题加载失败";
+function completionIssueStatusText(state: VoiceChatData): string {
+  if (state.completionIssueError) {
+    return "补充问题加载失败";
   }
-  if (state.completionItemLoading && !state.completionItem) {
+  if (state.completionIssueLoading && !state.completionIssue) {
     return "正在准备要补的问题";
   }
-  if (state.completionItemNotice) {
-    return state.completionItemNotice;
+  if (state.completionIssueNotice) {
+    return state.completionIssueNotice;
   }
-  const status = state.completionItem?.status;
+  const status = state.completionIssue?.status;
   if (!status) {
     return "没有拿到本次要补的问题";
   }
   return ({
-    open: "这项等待补充",
-    in_progress: "正在补这一项",
-    resolved: "这项已经补上了",
-    deferred: "已留到以后再补",
-    unable_to_answer: "这个问题暂时答不上来",
+    open: "等待您补充",
+    in_progress: "正在补充这一点",
+    closed: "本次补充已经结束",
   })[status];
 }
 
 export function bookCompletionRoundFinished(
   state: Pick<
     VoiceChatData,
-    "sessionGoal" | "completionItem" | "assistantExpectsAnswer" | "transcriptLines"
+    "sessionGoal" | "completionIssue" | "assistantExpectsAnswer" | "transcriptLines"
   >,
 ): boolean {
   if (state.sessionGoal !== "book_completion") {
     return false;
   }
-  const status = state.completionItem?.status;
-  if (status === "resolved" || status === "deferred" || status === "unable_to_answer") {
+  if (state.completionIssue?.status === "closed") {
     return true;
   }
   return state.assistantExpectsAnswer === false
@@ -437,9 +434,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   const isBookCompletion = state.sessionGoal === "book_completion";
   const completionRoundFinished = bookCompletionRoundFinished(state);
   const completionUnavailable = isBookCompletion
-    && !state.completionItemLoading
-    && !state.completionItem;
-  const showCompletionItemPanel = isBookCompletion;
+    && !state.completionIssueLoading
+    && !state.completionIssue;
+  const showCompletionIssuePanel = isBookCompletion;
   const showAssistantPanel = !isHumanInterview
     && !state.recording
     && Boolean(hasAssistantPrompt || state.followUpLoading || state.followUpError || state.canRequestFollowUp);
@@ -490,9 +487,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
       ? "回答已经保存，可以返回全书概览。"
       : (
         state.latestTranscriptText
-        || (state.completionItem
+        || (state.completionIssue
           ? "按您记得的顺序讲一段就好"
-          : (state.completionItemLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"))
+          : (state.completionIssueLoading ? "正在准备要补的问题" : "请保存离开后，从首页重新进入"))
       );
   }
   let controlHintText = isHumanInterview
@@ -542,7 +539,7 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
   if (!showControlBar) {
     pageClass.push("no-control-bar");
   }
-  const focusClass = largeTextFocusClass(state, showAssistantPanel || showCompletionItemPanel);
+  const focusClass = largeTextFocusClass(state, showAssistantPanel || showCompletionIssuePanel);
   if (state.largeTextEnabled) {
     pageClass.push("large-text", focusClass);
   }
@@ -556,18 +553,16 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     state.recording ? "recording" : "",
     micButtonDisabled ? "disabled" : "",
   ].filter(Boolean).join(" ");
-  const completionItemStatus = state.completionItem?.status;
-  const showCompletionItemActions = !completionRoundFinished
-    && (completionItemStatus === "open" || completionItemStatus === "in_progress");
-  const showCompletionItemContinue = completionRoundFinished
-    || completionItemStatus === "resolved"
-    || completionItemStatus === "deferred"
-    || completionItemStatus === "unable_to_answer";
-  const completionItemControlsDisabled = Boolean(state.completionItemAction) || state.recording;
-  const completionItemPanelClass = [
-    "completion-item-panel",
-    state.completionItemError ? "error-state" : "",
-    completionItemStatus === "resolved" ? "complete-state" : "",
+  const completionIssueStatus = state.completionIssue?.status;
+  const showCompletionIssueActions = !completionRoundFinished
+    && (completionIssueStatus === "open" || completionIssueStatus === "in_progress");
+  const showCompletionIssueContinue = completionRoundFinished
+    || completionIssueStatus === "closed";
+  const completionIssueControlsDisabled = Boolean(state.completionIssueAction) || state.recording;
+  const completionIssuePanelClass = [
+    "completion-issue-panel",
+    state.completionIssueError ? "error-state" : "",
+    completionIssueStatus === "closed" ? "complete-state" : "",
   ].filter(Boolean).join(" ");
   return {
     voiceChatPageClass: pageClass.filter(Boolean).join(" "),
@@ -584,14 +579,14 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showRecoveryActions: Boolean(state.canReconnect || state.canFinishAfterDisconnect),
     showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
     showAssistantPanel,
-    showCompletionItemPanel,
-    completionItemPanelClass,
-    completionItemStatusText: completionItemStatusText(state),
-    completionItemQuestionText: state.completionItem?.question || "本次问题没有准备好",
-    showCompletionItemActions,
-    showCompletionItemContinue,
-    completionItemControlsDisabled,
-    completionItemActionText: state.completionItemAction ? "正在处理" : "",
+    showCompletionIssuePanel,
+    completionIssuePanelClass,
+    completionIssueStatusText: completionIssueStatusText(state),
+    completionIssueQuestionText: state.completionIssue?.question || "本次问题没有准备好",
+    showCompletionIssueActions,
+    showCompletionIssueContinue,
+    completionIssueControlsDisabled,
+    completionIssueActionText: state.completionIssueAction ? "正在处理" : "",
     assistantPanelClass: state.followUpError ? "assistant-panel error-state" : "assistant-panel",
     assistantLabelText: state.followUpError
       ? "小余没说好"
@@ -676,7 +671,7 @@ type VoiceSessionPatchCurrent = Pick<
   | "interviewType"
   | "projectId"
   | "sessionGoal"
-  | "currentCompletionItemId"
+  | "currentCompletionIssueId"
   | "transcriptLines"
   | "lastFollowUpSourceMessageId"
   | "dismissedFollowUpMessageId"
@@ -796,9 +791,9 @@ export function voiceSessionSnapshotPatch(
   const currentGuidanceModule = snapshot.detail?.session.current_guidance_module || current.currentGuidanceModule;
   const interviewType = snapshot.detail?.session.interview_type || current.interviewType;
   const sessionGoal = snapshot.detail?.session.session_goal || current.sessionGoal;
-  const currentCompletionItemId = snapshot.detail
-    ? (snapshot.detail.session.current_completion_item_id || "")
-    : current.currentCompletionItemId;
+  const currentCompletionIssueId = snapshot.detail
+    ? (snapshot.detail.session.current_completion_issue_id || "")
+    : current.currentCompletionIssueId;
   return {
     ...assistantSessionPatch(snapshot.transcriptLines, guidanceMode, {
       ...current,
@@ -809,7 +804,7 @@ export function voiceSessionSnapshotPatch(
     interviewType,
     projectId: snapshot.detail?.session.project_id || current.projectId,
     sessionGoal,
-    currentCompletionItemId,
+    currentCompletionIssueId,
     recoveryNotice: snapshot.pendingClose ? "正在恢复上次离开前的讲述记录" : current.recoveryNotice,
   };
 }
@@ -860,7 +855,7 @@ export function voiceSessionDetailPatch(
     interviewType,
     projectId: detail.session.project_id || current.projectId,
     sessionGoal,
-    currentCompletionItemId: detail.session.current_completion_item_id || "",
+    currentCompletionIssueId: detail.session.current_completion_issue_id || "",
   };
 }
 

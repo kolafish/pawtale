@@ -9,6 +9,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
     MemoirSemanticCacheStatus,
+    MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -18,10 +19,11 @@ from app.models.memoir import (
     MemoirChapterDigest,
     MemoirCompletionIssue,
     MemoirSection,
+    MemoirVoiceSession,
 )
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
-    MemoirChapterCompletionItem,
+    MemoirChapterCompletionIssue,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
     MemoirChapterWorkspaceResponse,
@@ -103,6 +105,32 @@ async def _active_issue(
             if issue.status != MemoirCompletionIssueStatus.CLOSED.value
         ),
         None,
+    )
+
+
+async def _active_issue_session_id(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    issue_id: str,
+) -> str | None:
+    return await db.scalar(
+        select(MemoirVoiceSession.id)
+        .where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceSession.current_completion_issue_id == issue_id,
+            MemoirVoiceSession.status.not_in(
+                {
+                    MemoirVoiceSessionStatus.STOPPED.value,
+                    MemoirVoiceSessionStatus.FAILED.value,
+                }
+            ),
+        )
+        .order_by(
+            MemoirVoiceSession.updated_at.desc(),
+            MemoirVoiceSession.id.desc(),
+        )
+        .limit(1)
     )
 
 
@@ -188,13 +216,17 @@ async def chapter_summary(
                 title="需要您确认一件事" if manual else "建议补讲一件事",
                 detail=issue.question,
                 action_text="确认" if manual else "去补充",
-                item_id=issue.id,
+                issue_id=issue.id,
             ),
-            active_item=MemoirChapterCompletionItem(
+            active_issue=MemoirChapterCompletionIssue(
                 id=issue.id,
                 question=issue.question,
                 status=item_status,
-                active_session_id=None,
+                active_session_id=await _active_issue_session_id(
+                    db,
+                    project_id=project_id,
+                    issue_id=issue.id,
+                ),
             ),
             headline="需要确认" if manual else "还需要补充一点",
             detail=issue.reason,

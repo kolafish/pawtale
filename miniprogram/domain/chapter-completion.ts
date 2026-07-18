@@ -20,13 +20,13 @@ export interface MemoirChapterCompletionNextAction {
   detail: string;
   action_text: string;
   disabled: boolean;
-  item_id?: string | null;
+  issue_id?: string | null;
 }
 
-export interface MemoirChapterCompletionItem {
+export interface MemoirChapterCompletionIssue {
   id: string;
   question: string;
-  status: "pending" | "in_progress" | "deferred";
+  status: "pending" | "in_progress";
   active_session_id?: string | null;
 }
 
@@ -36,7 +36,7 @@ export interface MemoirChapterCompletionSummary {
   sort_order: number;
   state: MemoirChapterCompletionState;
   next_action: MemoirChapterCompletionNextAction;
-  active_item?: MemoirChapterCompletionItem | null;
+  active_issue?: MemoirChapterCompletionIssue | null;
   headline: string;
   detail: string;
 }

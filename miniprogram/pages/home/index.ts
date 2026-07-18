@@ -553,13 +553,15 @@ definePage<HomeData>()({
     entry: HomeVoiceEntry,
     interviewType: MemoirInterviewType,
     sessionGoal: MemoirSessionGoal,
-    currentCompletionItemId = "",
+    currentCompletionIssueId = "",
   ) {
     const detail = await createMemoirVoiceSession({
       guidance_mode: mode,
       interview_type: interviewType,
       session_goal: sessionGoal,
-      ...(currentCompletionItemId ? { current_completion_item_id: currentCompletionItemId } : {}),
+      ...(currentCompletionIssueId
+        ? { current_completion_issue_id: currentCompletionIssueId }
+        : {}),
       provider: "volc_streaming_asr",
       input_format: "pcm_s16le_16000_mono",
       metadata_json: {
