@@ -58,6 +58,7 @@ from app.services.memoir.narrative import chapter_draft_state, completion_refres
 from app.services.memoir.narrative.ingestion_jobs import (
     schedule_narrative_ingestion_job,
 )
+from app.services.memoir.project_ai_preferences import project_ai_model
 from app.services.memoir.source_disposition import is_countable_source_utterance
 
 
@@ -790,6 +791,8 @@ async def start_project_narrative_rebuild(
     if confirm_project_title != preview.project_title:
         raise NarrativeProjectRebuildError("项目标题确认不匹配")
     _assert_preview_is_rebuildable(preview)
+    project = await _load_project(db, project_id)
+    ai_model = project_ai_model(project)
     run_id = str(uuid.uuid4())
     closed_session_ids = await _close_active_sessions(
         db,
@@ -813,6 +816,7 @@ async def start_project_narrative_rebuild(
             project_id=project_id,
             utterance=utterance,
             source=REBUILD_SOURCE,
+            ai_model=ai_model,
             rebuild_run_id=run_id,
         )
         if job is None:
