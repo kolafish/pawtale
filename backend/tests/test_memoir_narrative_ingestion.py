@@ -109,9 +109,14 @@ def test_extraction_prompt_defines_claim_story_semantic_boundaries():
     assert "最小且不重复的 Claim 集合" in prompt
     assert "均不要按分句重复拆取" in prompt
     assert "已有 Story 候选只影响 Story 归属，不得影响 Claim 的数量和粒度" in prompt
+    assert "纯主观反思、瞬时行动意图或孤立的关系结论" in prompt
+    assert "不得据此新建同义 Story" in prompt
+    assert "彼此不同或无法相交的认知" in prompt
+    assert "范围更宽的 Story 应包含关系经历、关系演变或多个不同阶段" in prompt
     assert "已有 Story 候选不是必须复用" in prompt
+    assert "措辞相似也不是复用依据" in prompt
     assert "标题和摘要只是复述当前 Claim" in prompt
-    assert "原文不足以建立新 Story 时，stories 可以为空" in prompt
+    assert "无法安全归入更宽 Story 时，stories 应为空" in prompt
     assert '"statement": "忠于原文、具有单一语义中心的完整命题"' in prompt
     assert "1～3" not in prompt
     assert "最多 4" not in prompt
@@ -129,6 +134,7 @@ def test_extraction_repair_prompt_preserves_claim_story_semantic_boundaries():
     assert "想发消息、不知道说什么、想保持联系、不确定对方心意" in prompt
     assert "最小且不重复的 Claim 集合" in prompt
     assert "它不是单条 Claim 的改写" in prompt
+    assert "本身只形成 Claim，不足以建立新的 Story" in prompt
     assert "已有 Story 候选不是必须复用" in prompt
     assert "发现后先合并或删除重复项" in prompt
 
