@@ -7,6 +7,7 @@ from . import interview_editor
 from . import material_editor
 from . import mobile
 from . import narrative
+from . import sections
 from . import speaker_transcription
 from . import transcript_cleanup_editor
 from . import voice
@@ -20,6 +21,7 @@ router.include_router(book_editor.router, prefix="/api/memoir")
 router.include_router(chapter_source_editor.router, prefix="/api/memoir")
 router.include_router(transcript_cleanup_editor.router, prefix="/api/memoir")
 router.include_router(narrative.router, prefix="/api/memoir")
+router.include_router(sections.router, prefix="/api/memoir")
 router.include_router(book.router, prefix="/api/mobile/memoir")
 router.include_router(mobile.router, prefix="/api/mobile/memoir")
 router.include_router(voice.router, prefix="/api/mobile/memoir")
