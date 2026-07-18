@@ -16,6 +16,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text as sql_text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
@@ -1135,17 +1136,20 @@ class MemoirBookChapterDraftVersion(Base):
     input_signature: Mapped[str] = mapped_column(
         String(128),
         default="",
+        server_default=sql_text("''"),
         nullable=False,
         index=True,
     )
     used_material_ids_json: Mapped[list] = mapped_column(
         JSON,
         default=list,
+        server_default=sql_text("'[]'"),
         nullable=False,
     )
     material_snapshot_json: Mapped[list] = mapped_column(
         JSON,
         default=list,
+        server_default=sql_text("'[]'"),
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
