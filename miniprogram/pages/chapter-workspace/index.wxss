@@ -52,6 +52,8 @@
 .section-meta,
 .section-material-index,
 .section-material-text,
+.draft-section-title,
+.draft-section-meta,
 .draft-content,
 .empty-title,
 .empty-detail,
@@ -386,13 +388,58 @@ button[disabled] {
   line-height: 30rpx;
 }
 
-.draft-body {
+.draft-section-list {
   margin-top: 26rpx;
   padding-top: 28rpx;
   border-top: 1rpx solid #e5ded6;
 }
 
+.draft-section-card {
+  padding: 28rpx 26rpx;
+  border-radius: 16rpx;
+  background: #faf7f2;
+  box-shadow:
+    0 0 0 1rpx rgba(77, 56, 47, 0.06),
+    0 2rpx 5rpx -2rpx rgba(77, 56, 47, 0.08),
+    0 8rpx 20rpx rgba(77, 56, 47, 0.04);
+}
+
+.draft-section-card + .draft-section-card {
+  margin-top: 22rpx;
+}
+
+.draft-section-heading {
+  padding-bottom: 20rpx;
+  border-bottom: 1rpx solid #e5ded6;
+}
+
+.draft-section-number {
+  color: #8f5c48;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 32rpx;
+  font-variant-numeric: tabular-nums;
+}
+
+.draft-section-title {
+  margin-top: 6rpx;
+  color: #382c28;
+  font-size: 32rpx;
+  font-weight: 700;
+  line-height: 46rpx;
+  text-wrap: balance;
+}
+
+.draft-section-meta {
+  margin-top: 6rpx;
+  color: #786c66;
+  font-size: 23rpx;
+  line-height: 34rpx;
+  font-variant-numeric: tabular-nums;
+}
+
 .draft-content {
+  margin-top: 22rpx;
   color: #403531;
   font-size: 29rpx;
   line-height: 52rpx;

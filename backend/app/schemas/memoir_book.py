@@ -1,7 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -253,14 +259,40 @@ class MemoirBookChapterDraftVersionResponse(BaseModel):
     created_at: datetime
 
 
-class MemoirBookChapterDraftRevisionRequest(BaseModel):
-    expected_version_id: str = Field(min_length=1, max_length=36)
-    content: str = Field(min_length=1, max_length=200_000)
+class MemoirBookChapterDraftSectionRevision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-    @field_validator("expected_version_id", "content")
+    section_id: str = Field(min_length=1, max_length=36)
+    content: str = Field(min_length=1, max_length=100_000)
+
+    @field_validator("section_id", "content")
     @classmethod
-    def _strip_draft_revision(cls, value: str) -> str:
+    def _strip_section_revision(cls, value: str) -> str:
         return value.strip()
+
+
+class MemoirBookChapterDraftRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version_id: str = Field(min_length=1, max_length=36)
+    sections: list[MemoirBookChapterDraftSectionRevision] = Field(
+        min_length=1,
+        max_length=100,
+    )
+
+    @field_validator("expected_version_id")
+    @classmethod
+    def _strip_expected_version_id(cls, value: str) -> str:
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _unique_section_ids(self):
+        section_ids = [section.section_id for section in self.sections]
+        if len(section_ids) != len(set(section_ids)):
+            raise ValueError("section_id 不能重复")
+        if sum(len(section.content) for section in self.sections) > 200_000:
+            raise ValueError("整章正文不能超过 200000 个字符")
+        return self
 
 
 class MemoirBookChapterDraftResponse(BaseModel):

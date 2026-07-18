@@ -408,6 +408,7 @@ async def chapter_workspace(
         version is not None
         and (
             signature_changed
+            or not version.section_snapshot_json
             or source_changes.pending_source_count
             or source_changes.removed_source_count
         )

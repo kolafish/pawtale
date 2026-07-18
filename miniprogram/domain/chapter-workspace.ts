@@ -1,5 +1,8 @@
 import type { MemoirChapterCompletionSummary } from "./chapter-completion";
-import type { MemoirChapterSectionSummary } from "./voice-chat";
+import type {
+  MemoirChapterDraftSection,
+  MemoirChapterSectionSummary,
+} from "./voice-chat";
 
 export interface MemoirChapterWorkspace {
   project_id: string;
@@ -16,4 +19,5 @@ export interface MemoirChapterWorkspace {
   draft_version?: number | null;
   draft_status?: string | null;
   draft_content: string;
+  draft_sections: MemoirChapterDraftSection[];
 }

@@ -68,8 +68,8 @@ interface ChapterWorkspacePageData {
   startingIssueId: string;
   confirmingChapter: boolean;
   savingDraft: boolean;
-  editingDraft: boolean;
-  editingDraftContent: string;
+  editingSectionId: string;
+  editingSectionContent: string;
 }
 
 definePage<ChapterWorkspacePageData>()({
@@ -97,8 +97,8 @@ definePage<ChapterWorkspacePageData>()({
     startingIssueId: "",
     confirmingChapter: false,
     savingDraft: false,
-    editingDraft: false,
-    editingDraftContent: "",
+    editingSectionId: "",
+    editingSectionContent: "",
   },
 
   async onLoad(query: PageQuery = {}) {
@@ -332,37 +332,49 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  startDraftEdit() {
+  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
     const workspace = this.data.workspace;
-    if (!workspace?.draft_version_id || !workspace.draft_content) {
+    const sectionId = datasetString(event, "id");
+    const section = workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
+    );
+    if (!workspace?.draft_version_id || !section) {
       return;
     }
     this.setData({
-      editingDraft: true,
-      editingDraftContent: workspace.draft_content,
+      editingSectionId: section.section_id,
+      editingSectionContent: section.content,
     });
   },
 
-  changeDraftContent(event: PageTextInputEvent) {
-    this.setData({ editingDraftContent: event.detail.value });
+  changeDraftSectionContent(event: PageTextInputEvent) {
+    this.setData({ editingSectionContent: event.detail.value });
   },
 
-  cancelDraftEdit() {
-    this.setData({ editingDraft: false, editingDraftContent: "" });
+  cancelDraftSectionEdit() {
+    this.setData({ editingSectionId: "", editingSectionContent: "" });
   },
 
-  async saveDraftEdit() {
+  async saveDraftSectionEdit() {
     const workspace = this.data.workspace;
-    const content = this.data.editingDraftContent.trim();
-    if (!workspace?.draft_version_id || this.data.savingDraft) {
+    const sectionId = this.data.editingSectionId;
+    const content = this.data.editingSectionContent.trim();
+    const currentSection = workspace?.draft_sections.find(
+      (section) => section.section_id === sectionId,
+    );
+    if (
+      !workspace?.draft_version_id
+      || !currentSection
+      || this.data.savingDraft
+    ) {
       return;
     }
     if (!content) {
-      wx.showToast({ title: "正文不能为空", icon: "none" });
+      wx.showToast({ title: "小节正文不能为空", icon: "none" });
       return;
     }
-    if (content === workspace.draft_content.trim()) {
-      this.cancelDraftEdit();
+    if (content === currentSection.content.trim()) {
+      this.cancelDraftSectionEdit();
       return;
     }
     this.setData({ savingDraft: true, error: "" });
@@ -372,12 +384,17 @@ definePage<ChapterWorkspacePageData>()({
         this.data.chapterId,
         {
           expected_version_id: workspace.draft_version_id,
-          content,
+          sections: workspace.draft_sections.map((section) => ({
+            section_id: section.section_id,
+            content: section.section_id === sectionId
+              ? content
+              : section.content,
+          })),
         },
       );
-      this.setData({ editingDraft: false, editingDraftContent: "" });
+      this.setData({ editingSectionId: "", editingSectionContent: "" });
       await this.loadPageData(true);
-      wx.showToast({ title: "正文已保存", icon: "success" });
+      wx.showToast({ title: "小节已保存", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "me")) {
         return;
@@ -392,7 +409,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !this.data.canConfirmChapter
       || this.data.confirmingChapter
-      || this.data.editingDraft
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }
@@ -421,7 +438,7 @@ definePage<ChapterWorkspacePageData>()({
       || Boolean(this.data.startingIssueId)
       || this.data.confirmingChapter
       || this.data.savingDraft
-      || this.data.editingDraft
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }

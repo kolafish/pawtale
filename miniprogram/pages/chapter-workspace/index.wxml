@@ -67,7 +67,7 @@
       <view class="draft-heading">
         <view>
           <text class="section-kicker">本章正文</text>
-          <text class="section-title">通读后一次确认</text>
+          <text class="section-title">按小节通读，最后整章确认</text>
         </view>
         <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
       </view>
@@ -78,55 +78,69 @@
         <button
           class="rewrite-action"
           loading="{{rewritingDraft}}"
-          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingDraft}}"
+          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
         >按现有素材重写</button>
       </view>
 
-      <view wx:if="{{workspace.draft_content}}" class="draft-body">
-        <block wx:if="{{editingDraft}}">
-          <textarea
-            class="draft-editor"
-            value="{{editingDraftContent}}"
-            maxlength="-1"
-            auto-height
-            cursor-spacing="24"
-            bindinput="changeDraftContent"
-          />
-          <view class="edit-actions">
-            <button
-              class="secondary-action"
-              disabled="{{savingDraft}}"
-              bindtap="cancelDraftEdit"
-            >取消</button>
-            <button
-              class="secondary-action strong"
-              loading="{{savingDraft}}"
-              disabled="{{savingDraft}}"
-              bindtap="saveDraftEdit"
-            >保存修改</button>
+      <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
+        <view
+          wx:for="{{workspace.draft_sections}}"
+          wx:key="section_id"
+          class="draft-section-card"
+        >
+          <view class="draft-section-heading">
+            <view class="draft-section-number">小节 {{index + 1}}</view>
+            <text class="draft-section-title">{{item.title}}</text>
+            <text class="draft-section-meta">{{item.used_material_ids.length}} 条讲述整理</text>
           </view>
-        </block>
-        <block wx:else>
-          <text class="draft-content">{{workspace.draft_content}}</text>
-          <button
-            class="text-action"
-            disabled="{{confirmingChapter || rewritingDraft}}"
-            bindtap="startDraftEdit"
-          >修改本章正文</button>
-        </block>
+
+          <block wx:if="{{editingSectionId === item.section_id}}">
+            <textarea
+              class="draft-editor"
+              value="{{editingSectionContent}}"
+              maxlength="-1"
+              auto-height
+              cursor-spacing="24"
+              aria-label="编辑小节 {{item.title}}"
+              bindinput="changeDraftSectionContent"
+            />
+            <view class="edit-actions">
+              <button
+                class="secondary-action"
+                disabled="{{savingDraft}}"
+                bindtap="cancelDraftSectionEdit"
+              >取消</button>
+              <button
+                class="secondary-action strong"
+                loading="{{savingDraft}}"
+                disabled="{{savingDraft}}"
+                bindtap="saveDraftSectionEdit"
+              >保存这一小节</button>
+            </view>
+          </block>
+          <block wx:else>
+            <text class="draft-content">{{item.content}}</text>
+            <button
+              class="text-action"
+              data-id="{{item.section_id}}"
+              disabled="{{confirmingChapter || rewritingDraft || editingSectionId !== ''}}"
+              bindtap="startDraftSectionEdit"
+            >修改这一小节</button>
+          </block>
+        </view>
       </view>
 
       <view wx:else class="draft-empty">
-        <text class="empty-title">正文还没有准备好</text>
-        <text class="empty-detail">先完成上面的当前步骤，系统会自动整理正文。</text>
+        <text class="empty-title">{{workspace.draft_content ? "需要重新整理小节正文" : "正文还没有准备好"}}</text>
+        <text class="empty-detail">{{workspace.draft_content ? "当前版本还没有保存小节边界，请按上方提示重新整理。" : "先完成上面的当前步骤，系统会自动整理正文。"}}</text>
       </view>
 
       <button
-        wx:if="{{workspace.draft_content && workspace.completion_summary.state === 'draft_ready'}}"
+        wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
         class="primary-action confirm-chapter-action"
         loading="{{confirmingChapter}}"
-        disabled="{{!canConfirmChapter || confirmingChapter || editingDraft}}"
+        disabled="{{!canConfirmChapter || confirmingChapter || editingSectionId !== ''}}"
         bindtap="confirmChapter"
       >确认本章正文</button>
     </view>

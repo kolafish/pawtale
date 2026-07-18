@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -223,26 +225,61 @@ async def revise_chapter_draft(
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
     if latest.input_signature != context.input_signature:
         raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
-    if latest.content.strip() == req.content:
+    latest_sections = list(latest.section_snapshot_json)
+    if not latest_sections:
+        raise HTTPException(
+            status_code=409,
+            detail="当前正文还没有小节结构，请先重新整理本章",
+        )
+    expected_section_ids = [
+        str(section.get("section_id") or "")
+        for section in latest_sections
+        if isinstance(section, dict)
+    ]
+    revised_section_ids = [
+        section.section_id for section in req.sections
+    ]
+    if (
+        len(expected_section_ids) != len(latest_sections)
+        or revised_section_ids != expected_section_ids
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="本章小节已经变化，请刷新后再修改",
+        )
+    revised_sections: list[dict] = []
+    for previous, revision in zip(
+        latest_sections,
+        req.sections,
+        strict=True,
+    ):
+        revised = dict(previous)
+        revised["content"] = revision.content
+        revised_sections.append(revised)
+    content = "\n\n".join(
+        section["content"] for section in revised_sections
+    )
+    if revised_sections == latest_sections:
         return _draft_response(draft)
     current_version = MemoirBookChapterDraftVersion(
         draft_id=draft.id,
         project_id=project_id,
         chapter_id=chapter_id,
         version=latest.version + 1,
-        content=req.content,
+        content=content,
         created_by=MemoirCreatedBy.USER.value,
         model=None,
         prompt_snapshot=chapter_generation.CHAPTER_GENERATION_ENGINE,
-        feedback="用户修改整章正文",
+        feedback="用户按小节修改正文",
         input_signature=context.input_signature,
         used_material_ids_json=list(latest.used_material_ids_json),
         material_snapshot_json=list(latest.material_snapshot_json),
-        section_snapshot_json=[],
+        section_snapshot_json=revised_sections,
     )
     db.add(current_version)
     await db.flush()
     draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+    draft.updated_at = datetime.now(UTC).replace(tzinfo=None)
     output = await db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
