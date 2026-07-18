@@ -137,6 +137,10 @@ def test_extraction_repair_prompt_preserves_claim_story_semantic_boundaries():
     assert "本身只形成 Claim，不足以建立新的 Story" in prompt
     assert "已有 Story 候选不是必须复用" in prompt
     assert "发现后先合并或删除重复项" in prompt
+    assert "stories[].claims 必须是对象数组" in prompt
+    assert '"claim_key": "claim_1"' in prompt
+    assert "不得使用旧字段 claim_keys" in prompt
+    assert "不得把 narrative_role、subject_entity_key" in prompt
 
 
 def _extraction_payload(source_text: str) -> dict:
