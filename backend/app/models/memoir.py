@@ -1071,6 +1071,54 @@ class MemoirChapterDigest(Base):
     )
 
 
+class MemoirBookReview(Base):
+    __tablename__ = "memoir_book_reviews"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "engine",
+            "input_signature",
+            name="uq_memoir_book_reviews_signature",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirSemanticCacheStatus)})",
+            name="ck_memoir_book_reviews_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    input_signature: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+    )
+    engine: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirSemanticCacheStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    review_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+
 class MemoirBookChapterDraft(Base):
     __tablename__ = "memoir_book_chapter_drafts"
     __table_args__ = (

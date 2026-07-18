@@ -1,23 +1,55 @@
 from __future__ import annotations
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.memoir import MemoirEditingJob
-from app.schemas.memoir_narrative.book_completion import (
+from app.domain.memoir.types import (
+    MemoirCompletionIssueStatus,
+    MemoirSemanticCacheStatus,
+)
+from app.models.memoir import MemoirBookPlanChapter, MemoirSection
+from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
+    MemoirChapterWorkspaceResponse,
 )
-from app.services.memoir.book_plan_sources import (
-    included_book_chapters,
-    load_plan_with_chapters,
+from app.services.memoir import (
+    chapter_digests,
+    chapter_generation,
+    completion_issues,
+    completion_read_model,
+    sections,
 )
-from app.services.memoir.narrative import (
-    chapter_completion_summary,
-    completion_refresh,
-)
-from app.services.memoir.narrative.gap_rules import (
-    load_chapter_audit_context,
-    load_chapter_audit_contexts,
-)
+
+
+async def _ensure_sections(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    user_id: str,
+) -> None:
+    chapter = await db.scalar(
+        select(MemoirBookPlanChapter).where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.id == chapter_id,
+        )
+    )
+    if chapter is None:
+        raise ValueError("章节不存在")
+    exists = await db.scalar(
+        select(MemoirSection.id)
+        .where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == chapter_id,
+        )
+        .limit(1)
+    )
+    if exists is None:
+        await sections.bootstrap_sections(
+            db,
+            user_id=user_id,
+            project_id=project_id,
+        )
 
 
 async def prepare_chapter(
@@ -26,20 +58,47 @@ async def prepare_chapter(
     project_id: str,
     chapter_id: str,
     user_id: str,
-) -> MemoirEditingJob:
-    del user_id
-    await load_chapter_audit_context(
+) -> MemoirChapterWorkspaceResponse:
+    await _ensure_sections(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        user_id=user_id,
+    )
+    digest = await chapter_digests.generate_or_reuse_chapter_digest(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        force_regenerate=True,
+    )
+    if digest.status != MemoirSemanticCacheStatus.READY.value:
+        raise ValueError(digest.error_message or "章节审阅失败")
+    issues = await completion_issues.list_issues(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    return await completion_refresh.enqueue_chapter_completion_refresh(
+    active_issue = next(
+        (
+            issue
+            for issue in issues
+            if issue.status != MemoirCompletionIssueStatus.CLOSED.value
+        ),
+        None,
+    )
+    if active_issue is None:
+        await chapter_generation.generate_and_save_chapter_draft(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            editorial_guidance=list(
+                digest.digest_json.get("structure_guidance", [])
+            ),
+        )
+    return await completion_read_model.chapter_workspace(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
-        include_semantic_audit=True,
-        ai_model=None,
-        source="book_completion_prepare",
     )
 
 
@@ -48,39 +107,7 @@ async def get_book_completion_overview(
     *,
     project_id: str,
 ) -> MemoirBookCompletionOverviewResponse:
-    plan = await load_plan_with_chapters(db, project_id)
-    chapters = included_book_chapters(plan) if plan else []
-    if not chapters:
-        return MemoirBookCompletionOverviewResponse(
-            project_id=project_id,
-            headline="先确定这本书准备写哪些章节",
-            detail="有了章节后，可以逐章整理、通读并确认正文。",
-            total_chapters=0,
-            completed_chapters=0,
-            chapters=[],
-        )
-
-    contexts = await load_chapter_audit_contexts(
+    return await completion_read_model.book_overview(
         db,
         project_id=project_id,
-        chapters=chapters,
-    )
-    summaries = await chapter_completion_summary.get_chapter_completion_summaries(
-        db,
-        project_id=project_id,
-        chapters=chapters,
-        contexts=contexts,
-    )
-    chapter_items = [summaries[chapter.id] for chapter in chapters]
-    completed = sum(item.state == "confirmed" for item in chapter_items)
-    return MemoirBookCompletionOverviewResponse(
-        project_id=project_id,
-        headline="逐章整理这本书",
-        detail=(
-            "每章只显示一个下一步：需要补充时先讲一件事，"
-            "否则直接生成正文供您通读。"
-        ),
-        total_chapters=len(chapter_items),
-        completed_chapters=completed,
-        chapters=chapter_items,
     )

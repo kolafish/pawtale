@@ -34,18 +34,8 @@ from app.services.memoir.book_audio import (
     source_text_hash,
     synthesize_text_audio,
 )
-from app.services.memoir.book_plan_sources import (
-    DRAFT_STATUS_REASON_KEY,
-    REMOVED_SOURCE_UTTERANCE_IDS_KEY,
-    metadata_without_keys,
-    source_change_counts,
-    source_change_metadata_keys,
-)
-from app.services.memoir.book_source_links import (
-    chapter_source_change_state,
-    mark_chapter_sources_merged,
-)
 from app.services.memoir.narrative.book_readiness import invalidate_formal_book_output
+from app.services.memoir import chapter_generation
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -72,10 +62,6 @@ def _version_response(
 
 def _draft_response(
     draft: MemoirBookChapterDraft,
-    *,
-    chapter_metadata_json: dict | None = None,
-    pending_source_count: int | None = None,
-    removed_source_count: int | None = None,
 ) -> MemoirBookChapterDraftResponse:
     versions = [
         _version_response(version)
@@ -84,18 +70,14 @@ def _draft_response(
             key=lambda item: (item.version, item.created_at, item.id),
         )
     ]
-    if pending_source_count is None or removed_source_count is None:
-        pending_source_count, removed_source_count = source_change_counts(
-            chapter_metadata_json
-        )
     return MemoirBookChapterDraftResponse(
         id=draft.id,
         project_id=draft.project_id,
         chapter_id=draft.chapter_id,
         status=MemoirBookChapterDraftStatus(draft.status),
         metadata_json=draft.metadata_json or {},
-        pending_source_count=pending_source_count,
-        removed_source_count=removed_source_count,
+        pending_source_count=0,
+        removed_source_count=0,
         latest_version=versions[-1] if versions else None,
         versions=versions,
         created_at=draft.created_at,
@@ -172,13 +154,7 @@ async def get_chapter_draft(
     draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="章节稿不存在")
-    changes = await chapter_source_change_state(db, chapter=chapter)
-    return _draft_response(
-        draft,
-        chapter_metadata_json=chapter.metadata_json,
-        pending_source_count=changes.pending_source_count,
-        removed_source_count=changes.removed_source_count,
-    )
+    return _draft_response(draft)
 
 
 async def confirm_chapter_draft(
@@ -197,43 +173,16 @@ async def confirm_chapter_draft(
         allow_admin=allow_admin,
     )
     _require_confirmed_plan(chapter)
-    changes = await chapter_source_change_state(db, chapter=chapter)
-    if changes.pending_source_ids or changes.removed_source_ids:
-        raise HTTPException(status_code=400, detail="请先在章节工作台重新组装正文")
-    draft = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
-    if draft is None or not draft.versions:
-        raise HTTPException(status_code=400, detail="章节稿为空，无法确认")
-    latest = max(
-        draft.versions,
-        key=lambda item: (item.version, item.created_at, item.id),
-    )
-    draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
-    draft.metadata_json = metadata_without_keys(
-        draft.metadata_json,
-        {DRAFT_STATUS_REASON_KEY, REMOVED_SOURCE_UTTERANCE_IDS_KEY},
-    )
-    chapter.metadata_json = metadata_without_keys(
-        chapter.metadata_json,
-        source_change_metadata_keys(),
-    )
-    db.add(chapter)
-    await mark_chapter_sources_merged(
+    await chapter_generation.confirm_chapter_draft(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
-        draft_version_id=latest.id,
-        include_removed=True,
     )
     await db.commit()
     refreshed = await _load_draft(db, project_id=project_id, chapter_id=chapter_id)
     if refreshed is None:
         raise HTTPException(status_code=500, detail="章节稿确认失败")
-    return _draft_response(
-        refreshed,
-        chapter_metadata_json=chapter.metadata_json,
-        pending_source_count=0,
-        removed_source_count=0,
-    )
+    return _draft_response(refreshed)
 
 
 async def revise_chapter_draft(
@@ -253,9 +202,11 @@ async def revise_chapter_draft(
         allow_admin=allow_admin,
     )
     _require_confirmed_plan(chapter)
-    changes = await chapter_source_change_state(db, chapter=chapter)
-    if changes.pending_source_ids or changes.removed_source_ids:
-        raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
+    context = await chapter_generation.load_chapter_generation_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     draft = await _load_draft(
         db,
         project_id=project_id,
@@ -269,13 +220,10 @@ async def revise_chapter_draft(
     )
     if latest.id != req.expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
+    if latest.input_signature != context.input_signature:
+        raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
     if latest.content.strip() == req.content:
-        return _draft_response(
-            draft,
-            chapter_metadata_json=chapter.metadata_json,
-            pending_source_count=0,
-            removed_source_count=0,
-        )
+        return _draft_response(draft)
     current_version = MemoirBookChapterDraftVersion(
         draft_id=draft.id,
         project_id=project_id,
@@ -284,18 +232,15 @@ async def revise_chapter_draft(
         content=req.content,
         created_by=MemoirCreatedBy.USER.value,
         model=None,
-        prompt_snapshot="",
+        prompt_snapshot=chapter_generation.CHAPTER_GENERATION_ENGINE,
         feedback="用户修改整章正文",
+        input_signature=context.input_signature,
+        used_material_ids_json=list(latest.used_material_ids_json),
+        material_snapshot_json=list(latest.material_snapshot_json),
     )
     db.add(current_version)
     await db.flush()
     draft.status = MemoirBookChapterDraftStatus.DRAFT.value
-    await mark_chapter_sources_merged(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        draft_version_id=current_version.id,
-    )
     output = await db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
@@ -310,12 +255,7 @@ async def revise_chapter_draft(
     )
     if refreshed is None:
         raise HTTPException(status_code=500, detail="章节正文保存失败")
-    return _draft_response(
-        refreshed,
-        chapter_metadata_json=chapter.metadata_json,
-        pending_source_count=0,
-        removed_source_count=0,
-    )
+    return _draft_response(refreshed)
 
 
 async def synthesize_chapter_draft_audio(

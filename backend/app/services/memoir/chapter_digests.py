@@ -150,13 +150,23 @@ async def ensure_section_digests(
     if not sections:
         raise HTTPException(status_code=422, detail="章节没有可收录的小章节")
     for section in sections:
-        digest = await section_digests.generate_or_reuse_section_digest(
+        await completion_issues.refresh_section_issues(
             db,
             project_id=project_id,
             section_id=section.id,
             ai_model=ai_model,
             ai_client=ai_client,
         )
+        digest = await section_digests.get_current_section_digest(
+            db,
+            project_id=project_id,
+            section_id=section.id,
+        )
+        if digest is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"小章节“{section.title}”审阅失败",
+            )
         if digest.status != MemoirSemanticCacheStatus.READY.value:
             raise HTTPException(
                 status_code=422,
