@@ -132,10 +132,19 @@ class LayeredBookAI:
                 "candidate_issues": candidates,
             }
         else:
+            section_materials = _prompt_section_materials(user_prompt)
             payload = {
-                "content": "那年，我参加了学校比赛。"
-                "这段经历让我一直记得，也让我第一次认真看待输赢。",
-                "used_material_ids": material_ids,
+                "sections": [
+                    {
+                        "section_id": section_id,
+                        "content": (
+                            "那年，我参加了学校比赛。"
+                            "这段经历让我一直记得，也让我第一次认真看待输赢。"
+                        ),
+                        "used_material_ids": allowed_material_ids,
+                    }
+                    for section_id, allowed_material_ids in section_materials
+                ],
                 "missing_source_candidates": [],
                 "editor_notes": [],
             }
@@ -173,6 +182,22 @@ def _prompt_ids(prompt: str, key: str) -> list[str]:
         for line in prompt.splitlines()
         if line.startswith(prefix)
     ]
+
+
+def _prompt_section_materials(prompt: str) -> list[tuple[str, list[str]]]:
+    result: list[tuple[str, list[str]]] = []
+    current_materials: list[str] | None = None
+    for line in prompt.splitlines():
+        if line.startswith("section_id: "):
+            current_materials = []
+            result.append(
+                (line.removeprefix("section_id: ").strip(), current_materials)
+            )
+        elif line.startswith("material_id: ") and current_materials is not None:
+            current_materials.append(
+                line.removeprefix("material_id: ").strip()
+            )
+    return result
 
 
 def _install_ai(monkeypatch, fake: LayeredBookAI) -> None:
@@ -503,6 +528,9 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     body = prepared.json()
     assert body["completion_summary"]["state"] == "draft_ready"
     assert body["draft_content"].startswith("那年，我参加了学校比赛")
+    assert len(body["draft_sections"]) == 1
+    assert body["draft_sections"][0]["content"] == body["draft_content"]
+    assert body["draft_sections"][0]["used_material_ids"]
     original_version_id = body["draft_version_id"]
     assert await test_db.scalar(
         select(MemoirEditingJob.id).where(
@@ -524,6 +552,7 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
         revised.json()["latest_version"]["id"],
     )
     assert revised_version is not None
+    assert revised.json()["latest_version"]["sections"] == []
     assert revised_version.input_signature
     assert revised_version.used_material_ids_json
 

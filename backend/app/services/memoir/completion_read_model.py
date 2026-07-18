@@ -443,4 +443,7 @@ async def chapter_workspace(
         draft_version=version.version if version else None,
         draft_status=draft.status if draft else None,
         draft_content=version.content if version else "",
+        draft_sections=(
+            list(version.section_snapshot_json) if version else []
+        ),
     )

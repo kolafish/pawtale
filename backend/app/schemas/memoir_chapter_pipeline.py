@@ -8,6 +8,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirSemanticCacheStatus,
 )
+from app.schemas.memoir_sections import MemoirChapterDraftSectionResponse
 
 
 class MemoirChapterDigestGenerateRequest(BaseModel):
@@ -40,6 +41,9 @@ class MemoirLayeredChapterDraftVersionResponse(BaseModel):
     chapter_id: str
     version: int
     content: str
+    sections: list[MemoirChapterDraftSectionResponse] = Field(
+        default_factory=list
+    )
     input_signature: str
     used_material_ids: list[str] = Field(default_factory=list)
     material_snapshot: list[dict] = Field(default_factory=list)

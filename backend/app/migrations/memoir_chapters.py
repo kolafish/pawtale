@@ -24,6 +24,7 @@ _DRAFT_COLUMNS = {
     "input_signature",
     "used_material_ids_json",
     "material_snapshot_json",
+    "section_snapshot_json",
 }
 
 
@@ -63,6 +64,9 @@ async def migrate_memoir_chapter_schema(
                 "JSON NOT NULL DEFAULT '[]'"
             ),
             "material_snapshot_json": (
+                "JSON NOT NULL DEFAULT '[]'"
+            ),
+            "section_snapshot_json": (
                 "JSON NOT NULL DEFAULT '[]'"
             ),
         }
