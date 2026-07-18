@@ -385,6 +385,16 @@ async def create_test_chapter_draft(
             )
         ).all()
     )
+    section = await test_db.scalar(
+        select(MemoirSection)
+        .where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == chapter_id,
+        )
+        .order_by(MemoirSection.sort_order)
+    )
+    assert section is not None
+    used_material_ids = [row.utterance_id for row in material_rows]
     version = MemoirBookChapterDraftVersion(
         draft_id=draft.id,
         project_id=project_id,
@@ -393,13 +403,24 @@ async def create_test_chapter_draft(
         content=content,
         created_by=MemoirCreatedBy.USER.value,
         prompt_snapshot="",
-        used_material_ids_json=[row.utterance_id for row in material_rows],
+        used_material_ids_json=used_material_ids,
         material_snapshot_json=[
             {
                 "material_id": row.utterance_id,
                 "transcript_version_id": row.transcript_version_id,
             }
             for row in material_rows
+        ],
+        section_snapshot_json=[
+            {
+                "section_id": section.id,
+                "title": section.title,
+                "section_type": section.section_type,
+                "section_version": section.version,
+                "sort_order": section.sort_order,
+                "content": content,
+                "used_material_ids": used_material_ids,
+            }
         ],
     )
     test_db.add(version)

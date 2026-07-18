@@ -171,6 +171,26 @@ function sampleStructuredBookContent({ chapterCount = 2, firstChapterSourceCount
       source_count: firstChapterSourceCount,
       draft_version_id: "draft-version-1",
       draft_version: 1,
+      sections: [
+        {
+          section_id: "section-1",
+          index: 1,
+          title: "院子里的日子",
+          section_type: "life_fragment",
+          content: "我小时候常在院子里晒太阳。",
+          char_count: 14,
+          source_count: firstChapterSourceCount,
+        },
+        {
+          section_id: "section-2",
+          index: 2,
+          title: "外婆的身影",
+          section_type: "person",
+          content: "外婆总在屋里屋外忙碌。",
+          char_count: 12,
+          source_count: 1,
+        },
+      ],
     },
     {
       chapter_id: "chapter-2",
@@ -181,9 +201,35 @@ function sampleStructuredBookContent({ chapterCount = 2, firstChapterSourceCount
       source_count: 1,
       draft_version_id: "draft-version-2",
       draft_version: 1,
+      sections: [
+        {
+          section_id: "section-3",
+          index: 1,
+          title: "去县城读书",
+          section_type: "event",
+          content: "第一次离家去县城读书。",
+          char_count: 10,
+          source_count: 1,
+        },
+      ],
     },
   ].slice(0, chapterCount);
-  const tableOfContents = chapterItems.map(({ content, draft_version_id, draft_version, ...item }) => item);
+  const tableOfContents = chapterItems.map(({
+    content,
+    draft_version_id,
+    draft_version,
+    sections,
+    ...item
+  }) => ({
+    ...item,
+    sections: sections.map((section) => ({
+      section_id: section.section_id,
+      index: section.index,
+      title: section.title,
+      char_count: section.char_count,
+      source_count: section.source_count,
+    })),
+  }));
 
   return {
     title: "外婆回忆录",
@@ -197,7 +243,7 @@ function sampleStructuredBookContent({ chapterCount = 2, firstChapterSourceCount
 function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_plain", { chapterCount = 2 } = {}) {
   const singleChapter = chapterCount === 1;
   return {
-    schema_version: 1,
+    schema_version: 2,
     profile: {
       template: "classic_family",
       title,
@@ -233,6 +279,7 @@ function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_p
         people_notes: [],
         uncertain_facts: [],
         content: "我小时候常在院子里晒太阳。",
+        sections: sampleStructuredBookContent({ chapterCount: 1 }).chapters[0].sections,
         source_refs: [{ utterance_id: "utterance-1", transcript_version_id: "version-1", voice_session_id: "voice-1", quote: "院子" }],
       },
       {
@@ -247,6 +294,7 @@ function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_p
         people_notes: [],
         uncertain_facts: [],
         content: "第一次离家去县城读书。",
+        sections: sampleStructuredBookContent({ chapterCount: 2 }).chapters[1].sections,
         source_refs: [],
       },
     ].slice(0, chapterCount),

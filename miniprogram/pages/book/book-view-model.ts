@@ -111,6 +111,17 @@ export interface BookOutputTocView {
   indexText: string;
   title: string;
   metaText: string;
+  sections: BookOutputSectionView[];
+}
+
+export interface BookOutputSectionView {
+  id: string;
+  index: number;
+  indexText: string;
+  title: string;
+  content: string;
+  excerpt: string;
+  metaText: string;
 }
 
 export interface BookOutputChapterPreviewView {
@@ -120,7 +131,9 @@ export interface BookOutputChapterPreviewView {
   indexText: string;
   title: string;
   content: string;
+  excerpt: string;
   metaText: string;
+  sections: BookOutputSectionView[];
 }
 
 export interface BookOutputVersionOptionView {
@@ -564,6 +577,25 @@ export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVers
       const chapterIndex = responseCount(item.index) || index + 1;
       const charCount = responseCount(item.char_count);
       const sourceCount = responseCount(item.source_count);
+      const sections = (item.sections || [])
+        .filter((section) => section.section_id && trimText(section.title))
+        .map((section, sectionOffset) => {
+          const sectionIndex = responseCount(section.index) || sectionOffset + 1;
+          const sectionCharCount = responseCount(section.char_count);
+          const sectionSourceCount = responseCount(section.source_count);
+          return {
+            id: section.section_id,
+            index: sectionIndex,
+            indexText: `${chapterIndex}.${sectionIndex}`,
+            title: trimText(section.title),
+            content: "",
+            excerpt: "",
+            metaText: [
+              `${sectionCharCount} 字`,
+              bookOralSourceCountText(sectionSourceCount),
+            ].join(" · "),
+          };
+        });
       return {
         id: `${item.chapter_id}:${chapterIndex}`,
         chapterId: item.chapter_id,
@@ -571,6 +603,7 @@ export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVers
         indexText: `${chapterIndex}`,
         title: trimText(item.title),
         metaText: [`${charCount} 字`, bookSourceCountText(sourceCount)].join(" · "),
+        sections,
       };
     });
 }
@@ -586,6 +619,25 @@ export function bookOutputChapterPreviews(
       const chapterIndex = responseCount(chapter.index) || index + 1;
       const charCount = responseCount(chapter.char_count) || trimText(chapter.content).length;
       const sourceCount = responseCount(chapter.source_count);
+      const sections = (chapter.sections || [])
+        .filter((section) => section.section_id && trimText(section.title) && trimText(section.content))
+        .map((section, sectionOffset) => {
+          const sectionIndex = responseCount(section.index) || sectionOffset + 1;
+          const sectionContent = trimText(section.content);
+          const sectionSourceCount = responseCount(section.source_count);
+          return {
+            id: section.section_id,
+            index: sectionIndex,
+            indexText: `${chapterIndex}.${sectionIndex}`,
+            title: trimText(section.title),
+            content: sectionContent,
+            excerpt: previewText(sectionContent, 72),
+            metaText: [
+              `${responseCount(section.char_count) || sectionContent.length} 字`,
+              bookOralSourceCountText(sectionSourceCount),
+            ].join(" · "),
+          };
+        });
       const versionText = responseCount(chapter.draft_version) ? `已修改 ${chapter.draft_version} 次` : "";
       return {
         id: `${chapter.chapter_id}:${chapterIndex}`,
@@ -594,7 +646,9 @@ export function bookOutputChapterPreviews(
         indexText: `第 ${chapterIndex} 章`,
         title: trimText(chapter.title),
         content: trimText(chapter.content),
+        excerpt: previewText(chapter.content, 96),
         metaText: [`${charCount} 字`, bookSourceCountText(sourceCount), versionText].filter(Boolean).join(" · "),
+        sections,
       };
     });
 }
@@ -777,7 +831,14 @@ function manuscriptChapterViews(
       quoteText,
       quoteSourceRefId,
       quoteSourceText,
-      metaText: [hintText, `${trimText(chapter.content).length} 字`, bookSourceCountText(sourceCount)]
+      metaText: [
+        hintText,
+        chapter.sections?.length
+          ? `${chapter.sections.length} 个小节`
+          : "",
+        `${trimText(chapter.content).length} 字`,
+        bookSourceCountText(sourceCount),
+      ]
         .filter(Boolean)
         .join(" · "),
       contentPreview: previewText(chapter.content, 96),

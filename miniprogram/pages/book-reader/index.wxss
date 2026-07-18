@@ -29,10 +29,15 @@
 .section-label,
 .toc-index,
 .toc-title,
+.toc-section-index,
+.toc-section-title,
 .chapter-index,
 .chapter-title,
 .chapter-meta,
 .chapter-content,
+.small-section-index,
+.small-section-title,
+.small-section-content,
 .book-content,
 .reader-state {
   display: block;
@@ -110,6 +115,10 @@
   gap: 14rpx;
 }
 
+.toc-group {
+  min-width: 0;
+}
+
 .toc-row {
   display: grid;
   grid-template-columns: 96rpx minmax(0, 1fr);
@@ -121,6 +130,7 @@
   color: #9b6a52;
   font-size: 25rpx;
   line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .toc-title {
@@ -128,6 +138,38 @@
   font-size: 30rpx;
   font-weight: 700;
   line-height: 1.5;
+  word-break: break-word;
+}
+
+.toc-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  margin-top: 8rpx;
+  margin-left: 36rpx;
+  padding-left: 20rpx;
+  border-left: 2rpx solid #ead9c8;
+}
+
+.toc-section-row {
+  display: grid;
+  grid-template-columns: 76rpx minmax(0, 1fr);
+  align-items: start;
+  gap: 12rpx;
+}
+
+.toc-section-index,
+.toc-section-title {
+  color: #7b6f68;
+  font-size: 25rpx;
+  line-height: 1.5;
+}
+
+.toc-section-index {
+  font-variant-numeric: tabular-nums;
+}
+
+.toc-section-title {
   word-break: break-word;
 }
 
@@ -162,6 +204,47 @@
   color: #8a7467;
   font-size: 24rpx;
   line-height: 1.5;
+}
+
+.reader-small-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 34rpx;
+  margin-top: 30rpx;
+}
+
+.reader-small-section {
+  min-width: 0;
+}
+
+.reader-small-section + .reader-small-section {
+  padding-top: 30rpx;
+  border-top: 1rpx solid #f0e2d4;
+}
+
+.small-section-index {
+  color: #9b6a52;
+  font-size: 23rpx;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.small-section-title {
+  margin-top: 8rpx;
+  color: #3d2922;
+  font-size: 33rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.small-section-content {
+  margin-top: 18rpx;
+  color: #332822;
+  font-size: 32rpx;
+  line-height: 1.82;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .chapter-content,

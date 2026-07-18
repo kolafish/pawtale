@@ -626,15 +626,29 @@ def _chapter_toc_entries(
     entries: list[PDFTocEntry] = []
     for fallback_index, raw_item in enumerate(items, start=1):
         item = _dict(raw_item)
+        chapter = (
+            _dict(chapters[fallback_index - 1])
+            if fallback_index <= len(chapters)
+            else {}
+        )
         index = _int(item.get("index"), fallback_index)
         title = _str(item.get("title")) or f"第{index}章"
         anchor = _chapter_anchor(fallback_index)
+        section_items = _list(item.get("sections")) or _list(
+            chapter.get("sections")
+        )
+        section_titles = tuple(
+            section_title
+            for raw_section in section_items
+            if (section_title := _str(_dict(raw_section).get("title")))
+        )
         entries.append(
             PDFTocEntry(
                 index=index,
                 title=title,
                 anchor=anchor,
                 page_number=page_numbers.get(anchor),
+                section_titles=section_titles,
             )
         )
     return entries
@@ -656,6 +670,19 @@ def _add_table_of_contents(
             page_text=str(entry.page_number) if entry.page_number is not None else "",
             target_anchor=entry.anchor if entry.page_number is not None else None,
         )
+        for section_index, section_title in enumerate(
+            entry.section_titles,
+            start=1,
+        ):
+            builder.add_toc_row(
+                label=f"{entry.index}.{section_index}　{section_title}",
+                page_text="",
+                target_anchor=(
+                    entry.anchor if entry.page_number is not None else None
+                ),
+                indent=18,
+                font_size=builder.layout.small_font_size,
+            )
 
 
 def _chapter_pull_quote(chapter: dict[str, Any]) -> str:
@@ -795,7 +822,28 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         _add_chapter_illustrations(builder, chapter)
         builder.add_spacer(0.5)
 
-        content = _without_leading_quote_overlap(_str(chapter.get("content")), quote)
+        sections = [
+            _dict(item)
+            for item in _list(chapter.get("sections"))
+            if _str(_dict(item).get("title"))
+            and _str(_dict(item).get("content"))
+        ]
+        if sections:
+            for section_index, section in enumerate(sections):
+                builder.add_section_heading(_str(section.get("title")))
+                section_content = _str(section.get("content"))
+                if section_index == 0:
+                    section_content = _without_leading_quote_overlap(
+                        section_content,
+                        quote,
+                    )
+                if section_content:
+                    builder.add_body_text(section_content, spacing_after=4)
+            continue
+        content = _without_leading_quote_overlap(
+            _str(chapter.get("content")),
+            quote,
+        )
         if content:
             builder.add_body_text(content)
 

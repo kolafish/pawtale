@@ -48,6 +48,14 @@ test("book reader page loads the finished book by project id", async () => {
   assert.equal(context.data.readerTitle, "外婆回忆录");
   assert.equal(context.data.bookContent, "外婆回忆录正文");
   assert.equal(context.data.bookPreviewChapters.length, 2);
+  assert.deepEqual(
+    context.data.bookPreviewTocItems[0].sections.map((section) => section.title),
+    ["院子里的日子", "外婆的身影"],
+  );
+  assert.deepEqual(
+    context.data.bookPreviewChapters[0].sections.map((section) => section.content),
+    ["我小时候常在院子里晒太阳。", "外婆总在屋里屋外忙碌。"],
+  );
   assert.equal(context.data.error, "");
 });
 
@@ -81,4 +89,28 @@ test("book reader page shares the same finished-book route", async () => {
   } finally {
     delete global.wx;
   }
+});
+
+test("book reader keeps flat chapter content as a historical-version fallback", async () => {
+  const structured = sampleStructuredBookContent({ chapterCount: 1 });
+  structured.table_of_contents[0].sections = [];
+  structured.chapters[0].sections = [];
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => sampleBookOutput(
+      1,
+      "旧版扁平正文",
+      false,
+      [],
+      structured,
+    ),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { projectId: "project/1" });
+
+  assert.equal(context.data.bookPreviewChapters[0].sections.length, 0);
+  assert.equal(
+    context.data.bookPreviewChapters[0].content,
+    "我小时候常在院子里晒太阳。",
+  );
 });

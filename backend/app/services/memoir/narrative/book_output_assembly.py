@@ -28,7 +28,11 @@ from app.services.memoir.book_output_manuscript import (
     manuscript_from_snapshot,
     stored_cover_style,
 )
-from app.services.memoir.book_output_snapshots import chapter_snapshot
+from app.services.memoir.book_output_snapshots import (
+    book_content_from_chapter_snapshots,
+    chapter_snapshot,
+    normalized_section_snapshots,
+)
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.image_assets import manuscript_image_snapshots
@@ -105,6 +109,7 @@ async def assemble_book_output(
         tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]
     ] = []
     incomplete_titles: list[str] = []
+    unstructured_titles: list[str] = []
     for chapter in chapters:
         version = _latest_chapter_version(chapter)
         if (
@@ -114,27 +119,28 @@ async def assemble_book_output(
             or not version.content.strip()
         ):
             incomplete_titles.append(chapter.title or "未命名章节")
-        else:
-            chapter_versions.append((chapter, version))
+            continue
+        if not normalized_section_snapshots(version.section_snapshot_json):
+            unstructured_titles.append(chapter.title or "未命名章节")
+            continue
+        chapter_versions.append((chapter, version))
     if incomplete_titles:
         raise ValueError(
             "book output requires confirmed chapter drafts: "
             + ", ".join(incomplete_titles)
+        )
+    if unstructured_titles:
+        raise ValueError(
+            "book output requires structured chapter drafts: "
+            + ", ".join(unstructured_titles)
         )
 
     project = await db.get(Project, project_id)
     if project is None:
         raise ValueError("project does not exist")
     source_refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
-    toc = "\n".join(
-        f"{index}. {chapter.title}"
-        for index, (chapter, _) in enumerate(chapter_versions, start=1)
-    )
     chapter_snapshots: list[dict[str, object]] = []
-    body: list[str] = []
     for index, (chapter, version) in enumerate(chapter_versions, start=1):
-        chapter_content = version.content.strip()
-        body.append(f"第{index}章 {chapter.title}\n\n{chapter_content}")
         chapter_snapshots.append(
             chapter_snapshot(
                 chapter,
@@ -151,7 +157,10 @@ async def assemble_book_output(
         if output is not None
         else formal_book_title(plan.title or "我的回忆录")
     )
-    content = (f"{title}\n\n目录\n{toc}\n\n" + "\n\n".join(body)).strip()
+    content = book_content_from_chapter_snapshots(
+        title=title,
+        snapshots=chapter_snapshots,
+    )
     previous_version: MemoirBookOutputVersion | None = None
     if output is None:
         output = MemoirBookOutput(

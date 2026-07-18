@@ -924,12 +924,26 @@ export interface MemoirBookTitleSuggestionResponse {
 export type MemoirBookOutputExportFormat = "pdf" | "txt";
 export type MemoirBookOutputExportLayout = "standard" | "large_print";
 
+export interface MemoirBookOutputSectionTableOfContentsItem {
+  section_id: string;
+  index: number;
+  title: string;
+  char_count: number;
+  source_count: number;
+}
+
+export interface MemoirBookOutputSection extends MemoirBookOutputSectionTableOfContentsItem {
+  section_type: string;
+  content: string;
+}
+
 export interface MemoirBookOutputTableOfContentsItem {
   chapter_id: string;
   index: number;
   title: string;
   char_count: number;
   source_count: number;
+  sections: MemoirBookOutputSectionTableOfContentsItem[];
 }
 
 export interface MemoirBookOutputStructuredChapter {
@@ -941,6 +955,7 @@ export interface MemoirBookOutputStructuredChapter {
   source_count: number;
   draft_version_id?: string | null;
   draft_version?: number | null;
+  sections: MemoirBookOutputSection[];
 }
 
 export interface MemoirBookOutputStructuredContent {
@@ -1018,6 +1033,7 @@ export interface MemoirBookManuscriptChapter {
   people_notes: MemoirBookManuscriptPersonNote[];
   uncertain_facts: MemoirBookManuscriptUnconfirmedFact[];
   content: string;
+  sections: MemoirBookOutputSection[];
   source_refs: MemoirBookManuscriptSourceRef[];
   illustrations: MemoirBookManuscriptIllustration[];
 }
