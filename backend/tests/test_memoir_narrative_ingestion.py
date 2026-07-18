@@ -55,6 +55,7 @@ from app.services.memoir.narrative.ingestion_jobs import (
 from app.services.memoir.narrative.gap_rules import load_chapter_audit_context
 from app.services.memoir.narrative.extraction import (
     build_narrative_extraction_prompt,
+    build_narrative_extraction_repair_prompt,
     is_narrative_control_only,
 )
 from app.services.memoir.voice_transcripts import prune_transcript_versions_for_utterance
@@ -89,7 +90,7 @@ class FakeNarrativeAI:
         return json.dumps(response, ensure_ascii=False)
 
 
-def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
+def test_extraction_prompt_defines_claim_story_semantic_boundaries():
     prompt = build_narrative_extraction_prompt(
         source_text="最近十年我一直腿疼。",
         speaker_role=MemoirClaimEvidenceSpeakerRole.NARRATOR,
@@ -101,8 +102,35 @@ def test_extraction_prompt_keeps_fact_fragments_out_of_story_objects():
     assert "Story 是可独立讲述的叙事单元，不是 Claim 的同义包装" in prompt
     assert "孤立的时间范围、身份、属性、症状清单" in prompt
     assert "不要为了覆盖每条 Claim 而拆成多个" in prompt
-    assert "Claim 采用稍高层次、可独立理解的事实粒度" in prompt
-    assert "共同表达同一转折或结果的动作" in prompt
+    assert "Claim 是由原文证据支持、具有单一语义中心的完整命题" in prompt
+    assert "不是按逗号、句号或语法分句拆出的事实片段" in prompt
+    assert "以最终判断或行动意图为语义中心" in prompt
+    assert "即使能够分别复述，也属于同一条 Claim" in prompt
+    assert "最小且不重复的 Claim 集合" in prompt
+    assert "均不要按分句重复拆取" in prompt
+    assert "已有 Story 候选只影响 Story 归属，不得影响 Claim 的数量和粒度" in prompt
+    assert "已有 Story 候选不是必须复用" in prompt
+    assert "标题和摘要只是复述当前 Claim" in prompt
+    assert "原文不足以建立新 Story 时，stories 可以为空" in prompt
+    assert '"statement": "忠于原文、具有单一语义中心的完整命题"' in prompt
+    assert "1～3" not in prompt
+    assert "最多 4" not in prompt
+
+
+def test_extraction_repair_prompt_preserves_claim_story_semantic_boundaries():
+    prompt = build_narrative_extraction_repair_prompt(
+        source_text="想联系他，但不知道说什么，只想保持联系。",
+        invalid_response='{"schema_version":"1"}',
+        validation_error=ValueError("missing extraction arrays"),
+    )
+
+    assert "Claim 是由原文证据支持、具有单一语义中心的完整命题" in prompt
+    assert "前提、转折、解释、犹豫、强调、重复和结论，应合并" in prompt
+    assert "想发消息、不知道说什么、想保持联系、不确定对方心意" in prompt
+    assert "最小且不重复的 Claim 集合" in prompt
+    assert "它不是单条 Claim 的改写" in prompt
+    assert "已有 Story 候选不是必须复用" in prompt
+    assert "发现后先合并或删除重复项" in prompt
 
 
 def _extraction_payload(source_text: str) -> dict:

@@ -28,6 +28,14 @@ NARRATIVE_EXTRACTION_SYSTEM_PROMPT = (
     "你是一位严谨的中文回忆录事实编辑。只能抽取原文明确表达、可由逐字引文支持的事实。"
 )
 NARRATIVE_EXTRACTION_MAX_TOKENS = 6000
+NARRATIVE_CLAIM_STORY_BOUNDARY_GUIDANCE = """- Claim 是由原文证据支持、具有单一语义中心的完整命题，不是按逗号、句号或语法分句拆出的事实片段。
+- 同一人物、同一时段或场景中，围绕同一个事实、关系判断、心理判断或行动意图的前提、转折、解释、犹豫、强调、重复和结论，应合并为一条 Claim。
+- 对 reflection 或主观 relationship，以最终判断或行动意图为语义中心；支撑它的感受、内在冲突、原因、犹豫、对他人态度的不确定和比喻总结，即使能够分别复述，也属于同一条 Claim。
+- 例如“觉得彼此不同、羡慕对方的人生、舍不下自己的生活、像平行线”整体是一个关系判断；“想发消息、不知道说什么、想保持联系、不确定对方心意”整体是一个联系意图，均不要按分句重复拆取。
+- 只有当内容属于不同事件、不同时间阶段、不同人物关系，或脱离彼此后仍对核验和成书具有独立意义时，才拆成不同 Claim。输出完整保留原意的最小且不重复的 Claim 集合。
+- Story 是可跨多次讲述持续积累的事件、关系、人生阶段或贯穿主题，负责组织一个或多个 Claim；它不是单条 Claim 的改写。先确定 Claim，再把它们归入合适的 Story，已有 Story 候选只影响 Story 归属，不得影响 Claim 的数量和粒度。
+- 已有 Story 候选不是必须复用。只有候选表达了边界合适、可以继续积累内容的故事线时才复用；如果标题和摘要只是复述当前 Claim，或边界明显过窄，就不要复用。原文不足以建立新 Story 时，stories 可以为空。
+- 输出前检查是否存在同义重复的 Claim、被拆开的同一判断，以及只是复述单条 Claim 的微型 Story；发现后先合并或删除重复项，再输出 JSON。"""
 STORY_CLUSTER_CLAIM_TYPES = {
     MemoirClaimType.EVENT,
     MemoirClaimType.RELATIONSHIP,
@@ -176,8 +184,7 @@ def build_narrative_extraction_repair_prompt(
 - 每条 evidence_quote 必须逐字、连续地出现在 source_text 中。
 - Story 必须是可独立讲述的事件、持续关系、人生阶段或贯穿主题；孤立的时间、身份、属性、症状或背景事实只保留为 Claim。
 - 同一段经历的多条 Claim 应归入同一个 Story，不得拆成一批只有单个事实片段的微型 Story。
-- Claim 粒度应稍高、能够独立理解；同一场景中连续发生并共同表达同一转折或结果的动作，
-  优先合并为一条 Claim，明显属于不同时间、人物关系或事件阶段时再拆分。
+{NARRATIVE_CLAIM_STORY_BOUNDARY_GUIDANCE}
 - validation_errors 指出共享同一人物或地点锚点的可证实 Claim 未归入 Story 时，必须按真实事件或关系补齐 Story 分组；不得丢 Claim，也不得机械地按素材创建一个万能 Story。
 - active_completion 非空且原文确实回答该问题时，保留对 active_completion.story_id 的关联；原文无关时不得强行关联。
 - entities、claims、stories 无法可靠抽取时可以为空数组。
@@ -376,7 +383,7 @@ source_text:
     {{
       "key": "claim_1",
       "claim_type": "event|relationship|attribute|chronology|reflection",
-      "statement": "忠于原文的事实描述",
+      "statement": "忠于原文、具有单一语义中心的完整命题",
       "subject_entity_key": "person_1 或 null",
       "predicate_code":
         "narrative_fact|family_relationship|social_relationship|identity_attribute|occurred_at|before|after",
@@ -418,8 +425,7 @@ source_text:
 - 不推断原文没有说出的人物关系、年份、地点、因果或身份。
 - “我”指叙述者时，创建 is_narrator=true 的 person entity，并让相关 claim 引用它。
 - 每条 claim 至少提供一段逐字引文；无法找到逐字引文就不要输出该 claim。
-- Claim 采用稍高层次、可独立理解的事实粒度；同一场景中连续发生并共同表达同一转折或结果的动作，
-  优先合并为一条 Claim，明显属于不同时间、人物关系或事件阶段时再拆分。
+{NARRATIVE_CLAIM_STORY_BOUNDARY_GUIDANCE}
 - 时间不确定时保留 time_text，certainty 使用 approximate 或 uncertain，不猜具体日期。
 - speaker_role=interviewer 时，采访者提出的问题不是叙述者事实；采访者自己陈述的新事实可以抽取，但会由系统进入人工核实。
 - “接着聊那个朋友吧”“换个话题”等只控制访谈流程的句子不是人物关系或回忆事实；整条 source_text 只有这类话语时，entities、claims、stories 全部返回空数组。
