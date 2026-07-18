@@ -62,6 +62,7 @@ from app.models.memoir_narrative import (
     MemoirStory,
     MemoirStoryClaim,
 )
+from app.models.projects import Project
 from app.services.memoir.narrative import frameworks
 from app.services.memoir.narrative.project_rebuild import (
     NarrativeProjectRebuildError,
@@ -297,6 +298,14 @@ async def test_rebuild_resets_only_ai_derived_state_and_enqueues_sources(
     test_db,
 ):
     project_id = await ensure_mobile_memoir_project(client, title="写给他的话")
+    project = await test_db.get(Project, project_id)
+    assert project is not None
+    project.metadata_json = {
+        **(project.metadata_json or {}),
+        "ai_model": "deepseek-v4-pro",
+    }
+    test_db.add(project)
+    await test_db.commit()
     source = await create_test_voice_transcript(
         client,
         test_db,
@@ -340,6 +349,7 @@ async def test_rebuild_resets_only_ai_derived_state_and_enqueues_sources(
     assert job is not None
     assert job.status == MemoirEditingJobStatus.PENDING.value
     assert job.payload_json["rebuild_run_id"] == result.run_id
+    assert job.payload_json["ai_model"] == "deepseek-v4-pro"
     assert job.dedupe_key.startswith(f"rebuild_narrative:{result.run_id}:")
 
     assert await _count(
