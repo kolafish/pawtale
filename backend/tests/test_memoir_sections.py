@@ -91,6 +91,10 @@ async def test_section_migration_creates_missing_tables():
                 conn,
                 "memoir_section_materials",
             )
+            assert "input_signature" in await _table_columns(
+                conn,
+                "memoir_section_digests",
+            )
     finally:
         await engine.dispose()
 
@@ -136,6 +140,14 @@ async def test_section_tables_define_constraints_and_indexes():
                     )
                 )
             ).scalar_one()
+            digest_sql = (
+                await conn.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' AND name = 'memoir_section_digests'"
+                    )
+                )
+            ).scalar_one()
 
             assert "uq_memoir_sections_chapter_order" in section_sql
             assert "ck_memoir_sections_type" in section_sql
@@ -143,16 +155,21 @@ async def test_section_tables_define_constraints_and_indexes():
             assert "uq_memoir_section_materials_project_utterance" in material_sql
             assert "ck_memoir_section_materials_assigned_by" in material_sql
             assert "ck_memoir_section_materials_confidence" in material_sql
+            assert "uq_memoir_section_digests_signature" in digest_sql
+            assert "ck_memoir_section_digests_status" in digest_sql
 
             section_indexes = await _index_names(conn, "memoir_sections")
             material_indexes = await _index_names(
                 conn,
                 "memoir_section_materials",
             )
+            digest_indexes = await _index_names(conn, "memoir_section_digests")
             assert "ix_memoir_sections_project_id" in section_indexes
             assert "ix_memoir_sections_chapter_id" in section_indexes
             assert "ix_memoir_section_materials_section_id" in material_indexes
             assert "ix_memoir_section_materials_utterance_id" in material_indexes
+            assert "ix_memoir_section_digests_section_id" in digest_indexes
+            assert "ix_memoir_section_digests_input_signature" in digest_indexes
     finally:
         await engine.dispose()
 
