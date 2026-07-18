@@ -35,6 +35,27 @@ function workspace(overrides = {}) {
     can_rewrite_draft: false,
     pending_completion_source_count: 0,
     pending_new_source_count: 0,
+    sections: [
+      {
+        id: "section-1",
+        title: "离家前的准备",
+        section_type: "event",
+        sort_order: 0,
+        status: "active",
+        include_in_book: true,
+        version: 1,
+        material_count: 1,
+        included_material_count: 1,
+        materials: [
+          {
+            utterance_id: "utterance-1",
+            sort_order: 0,
+            text: "十八岁那年，我第一次离开家。",
+            include_in_book: true,
+          },
+        ],
+      },
+    ],
     draft_id: "draft-1",
     draft_version_id: "version-1",
     draft_version: 1,
@@ -102,10 +123,34 @@ test("chapter workspace loads one whole chapter draft", async () => {
 
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.sectionStructureSummary, "1 个小节 · 1 条讲述");
+  assert.equal(context.data.sectionViews[0].title, "离家前的准备");
+  assert.equal(context.data.sectionViews[0].typeText, "一段经历");
   assert.equal(context.data.canConfirmChapter, true);
   assert.doesNotMatch(
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
+  );
+  delete global.wx;
+});
+
+test("chapter workspace expands materials under their section", async () => {
+  installWx();
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  page.toggleSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+
+  assert.equal(context.data.sectionViews[0].expanded, true);
+  assert.equal(
+    context.data.sectionViews[0].visibleMaterials[0].text,
+    "十八岁那年，我第一次离开家。",
   );
   delete global.wx;
 });

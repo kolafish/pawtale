@@ -1,4 +1,5 @@
 import type { MemoirChapterCompletionSummary } from "./chapter-completion";
+import type { MemoirChapterSectionSummary } from "./voice-chat";
 
 export interface MemoirChapterWorkspace {
   project_id: string;
@@ -9,6 +10,7 @@ export interface MemoirChapterWorkspace {
   can_rewrite_draft: boolean;
   pending_completion_source_count: number;
   pending_new_source_count: number;
+  sections: MemoirChapterSectionSummary[];
   draft_id?: string | null;
   draft_version_id?: string | null;
   draft_version?: number | null;
