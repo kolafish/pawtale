@@ -27,6 +27,12 @@ from app.domain.memoir.types import (
     MemoirBookPlanStatus,
     MemoirChapterSourceAssignedBy,
     MemoirChapterSourceLinkStatus,
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueOutcome,
+    MemoirCompletionIssuePriority,
+    MemoirCompletionIssueScope,
+    MemoirCompletionIssueStatus,
+    MemoirCompletionIssueType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirChatContentStatus,
@@ -844,6 +850,165 @@ class MemoirSectionDigest(Base):
     )
 
     section: Mapped[MemoirSection] = orm_relationship("MemoirSection")
+
+
+class MemoirCompletionIssue(Base):
+    __tablename__ = "memoir_completion_issues"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "fingerprint",
+            name="uq_memoir_completion_issues_project_fingerprint",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "section_id"],
+            ["memoir_sections.project_id", "memoir_sections.id"],
+            name="fk_memoir_completion_issues_project_section",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "chapter_id"],
+            [
+                "memoir_book_plan_chapters.project_id",
+                "memoir_book_plan_chapters.id",
+            ],
+            name="fk_memoir_completion_issues_project_chapter",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            f"scope IN ({_enum_values(MemoirCompletionIssueScope)})",
+            name="ck_memoir_completion_issues_scope",
+        ),
+        CheckConstraint(
+            f"issue_type IN ({_enum_values(MemoirCompletionIssueType)})",
+            name="ck_memoir_completion_issues_type",
+        ),
+        CheckConstraint(
+            f"channel IN ({_enum_values(MemoirCompletionIssueChannel)})",
+            name="ck_memoir_completion_issues_channel",
+        ),
+        CheckConstraint(
+            f"priority IN ({_enum_values(MemoirCompletionIssuePriority)})",
+            name="ck_memoir_completion_issues_priority",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirCompletionIssueStatus)})",
+            name="ck_memoir_completion_issues_status",
+        ),
+        CheckConstraint(
+            "outcome = '' "
+            f"OR outcome IN ({_enum_values(MemoirCompletionIssueOutcome)})",
+            name="ck_memoir_completion_issues_outcome",
+        ),
+        CheckConstraint(
+            "(scope = 'section' AND section_id IS NOT NULL "
+            "AND chapter_id IS NOT NULL) "
+            "OR (scope = 'chapter' AND section_id IS NULL "
+            "AND chapter_id IS NOT NULL) "
+            "OR (scope = 'book' AND section_id IS NULL "
+            "AND chapter_id IS NULL)",
+            name="ck_memoir_completion_issues_target",
+        ),
+        CheckConstraint(
+            "(status = 'closed' AND outcome != '') "
+            "OR (status != 'closed' AND outcome = '')",
+            name="ck_memoir_completion_issues_lifecycle",
+        ),
+        CheckConstraint(
+            "length(trim(fingerprint)) = 64",
+            name="ck_memoir_completion_issues_fingerprint",
+        ),
+        CheckConstraint(
+            "length(trim(question)) > 0",
+            name="ck_memoir_completion_issues_question",
+        ),
+        Index(
+            "ix_memoir_completion_issues_project_current",
+            "project_id",
+            "status",
+            "priority",
+            "created_at",
+        ),
+        Index(
+            "ix_memoir_completion_issues_chapter_current",
+            "project_id",
+            "chapter_id",
+            "status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    section_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
+    chapter_id: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+        index=True,
+    )
+    issue_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    channel: Mapped[str] = mapped_column(String(24), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    priority: Mapped[str] = mapped_column(String(12), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    related_material_ids_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+    input_signature: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirCompletionIssueStatus.OPEN.value,
+        nullable=False,
+        index=True,
+    )
+    outcome: Mapped[str] = mapped_column(String(32), default="", nullable=False)
+    outcome_note: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    answered_material_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+    )
+
+    section: Mapped[MemoirSection | None] = orm_relationship(
+        "MemoirSection",
+        overlaps="chapter",
+    )
+    chapter: Mapped[MemoirBookPlanChapter | None] = orm_relationship(
+        "MemoirBookPlanChapter",
+        overlaps="section",
+    )
+    answered_material: Mapped[MemoirVoiceUtterance | None] = orm_relationship(
+        "MemoirVoiceUtterance"
+    )
 
 
 class MemoirBookChapterDraft(Base):

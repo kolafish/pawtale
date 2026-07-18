@@ -170,6 +170,52 @@ class MemoirSemanticCacheStatus(str, Enum):
     FAILED = "failed"
 
 
+class MemoirCompletionIssueScope(str, Enum):
+    SECTION = "section"
+    CHAPTER = "chapter"
+    BOOK = "book"
+
+
+class MemoirCompletionIssueChannel(str, Enum):
+    INTERVIEW = "interview"
+    MANUAL_REVIEW = "manual_review"
+
+
+class MemoirCompletionIssueType(str, Enum):
+    CONTEXT = "context"
+    SEQUENCE = "sequence"
+    RELATIONSHIP = "relationship"
+    MOTIVATION = "motivation"
+    IMPACT = "impact"
+    MEANING = "meaning"
+    CLARITY = "clarity"
+    STRUCTURE = "structure"
+    PRIVACY = "privacy"
+    CONFLICT = "conflict"
+
+
+class MemoirCompletionIssuePriority(str, Enum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+class MemoirCompletionIssueStatus(str, Enum):
+    OPEN = "open"
+    IN_PROGRESS = "in_progress"
+    CLOSED = "closed"
+
+
+class MemoirCompletionIssueOutcome(str, Enum):
+    ANSWERED = "answered"
+    RESOLVED_BY_MATERIAL = "resolved_by_material"
+    CONFIRMED = "confirmed"
+    NOT_REMEMBERED = "not_remembered"
+    DEFERRED = "deferred"
+    DECLINED = "declined"
+    SUPERSEDED = "superseded"
+
+
 class MemoirChapterSourceLinkStatus(str, Enum):
     ACTIVE = "active"
     REMOVED = "removed"
