@@ -8,6 +8,7 @@
     "minified": true,
     "postcss": true,
     "urlCheck": false,
+    "swc": false,
     "useCompilerPlugins": [
       "typescript"
     ]
