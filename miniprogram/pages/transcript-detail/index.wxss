@@ -88,7 +88,7 @@
 .edit-exit-button {
   flex: 0 0 auto;
   min-width: 152rpx;
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 0;
   border: 0;
   border-radius: 18rpx;
@@ -358,7 +358,7 @@
 
 .edit-reference-toggle {
   width: 100%;
-  min-height: 80rpx;
+  min-height: 88rpx;
   margin: 18rpx 0 0;
   border: 0;
   border-radius: 18rpx;

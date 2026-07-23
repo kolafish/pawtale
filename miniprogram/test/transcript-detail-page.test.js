@@ -1126,10 +1126,17 @@ test("transcript detail page can open directly in edit mode", async () => {
 
 test("transcript detail edit mode exposes original text reference and protects unsaved changes", async () => {
   const modalCalls = [];
+  const unloadAlerts = [];
   global.wx = {
     showModal(options) {
       modalCalls.push(options);
       options.success({ confirm: false });
+    },
+    enableAlertBeforeUnload(options) {
+      unloadAlerts.push({ type: "enable", message: options.message });
+    },
+    disableAlertBeforeUnload() {
+      unloadAlerts.push({ type: "disable" });
     },
   };
   const { page } = loadTranscriptDetailPage({
@@ -1148,12 +1155,17 @@ test("transcript detail edit mode exposes original text reference and protects u
   assert.equal(context.data.editReferenceExpanded, true);
   assert.equal(context.data.item.isEditing, true);
   assert.equal(modalCalls[0].title, "放弃这次修改？");
+  assert.deepEqual(unloadAlerts.slice(-1), [{
+    type: "enable",
+    message: "尚未保存的文字修改会丢失，确定离开吗？",
+  }]);
 
   global.wx.showModal = (options) => options.success({ confirm: true });
   await page.cancelEdit.call(context);
 
   assert.equal(context.data.item.isEditing, false);
   assert.equal(context.data.editReferenceExpanded, false);
+  assert.deepEqual(unloadAlerts.slice(-1), [{ type: "disable" }]);
   delete global.wx;
 });
 

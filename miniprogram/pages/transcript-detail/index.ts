@@ -325,6 +325,19 @@ function changedItem(item: TranscriptDetailItemView, editingText: string): Trans
   };
 }
 
+function syncEditUnloadAlert(item: TranscriptDetailItemView | null): void {
+  if (typeof wx === "undefined") {
+    return;
+  }
+  if (item?.isEditing && item.changed) {
+    wx.enableAlertBeforeUnload?.({
+      message: "尚未保存的文字修改会丢失，确定离开吗？",
+    });
+    return;
+  }
+  wx.disableAlertBeforeUnload?.();
+}
+
 function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
   return new Promise((resolve) => {
     const preview = item.titleText || item.display_text || item.transcript_raw || "这条讲述记录";
@@ -611,17 +624,19 @@ definePage<TranscriptDetailData>()({
     this.stopPlayback();
     this.resetShareVideoState();
     const current = item.transcript_edited || item.transcript_raw;
+    const nextItem: TranscriptDetailItemView = {
+      ...item,
+      editingText: current,
+      editingCharCount: current.trim().length,
+      changed: false,
+      isEditing: true,
+    };
     this.setData({
-      item: {
-        ...item,
-        editingText: current,
-        editingCharCount: current.trim().length,
-        changed: false,
-        isEditing: true,
-      },
+      item: nextItem,
       editReferenceExpanded: false,
       error: "",
     });
+    syncEditUnloadAlert(nextItem);
   },
 
   toggleEditReference() {
@@ -986,7 +1001,9 @@ definePage<TranscriptDetailData>()({
     if (!item || item.canRecoverTranscription) {
       return;
     }
-    this.setData({ item: changedItem(item, event.detail.value) });
+    const nextItem = changedItem(item, event.detail.value);
+    this.setData({ item: nextItem });
+    syncEditUnloadAlert(nextItem);
   },
 
   async cancelEdit() {
@@ -997,11 +1014,13 @@ definePage<TranscriptDetailData>()({
     if (item.changed && !await confirmDiscardEdit()) {
       return;
     }
+    const nextItem = toViewItem(item);
     this.setData({
-      item: toViewItem(item),
+      item: nextItem,
       editReferenceExpanded: false,
       error: "",
     });
+    syncEditUnloadAlert(nextItem);
   },
 
   async saveTranscript() {
@@ -1017,10 +1036,12 @@ definePage<TranscriptDetailData>()({
     this.setData({ saving: true, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
+      const nextItem = toViewItem(updated);
       this.setData({
-        item: toViewItem(updated),
+        item: nextItem,
         editReferenceExpanded: false,
       });
+      syncEditUnloadAlert(nextItem);
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存", icon: "success" });
@@ -1062,7 +1083,9 @@ definePage<TranscriptDetailData>()({
     if (!item || item.canRecoverTranscription) {
       return;
     }
-    this.setData({ item: changedItem(item, item.transcript_raw) });
+    const nextItem = changedItem(item, item.transcript_raw);
+    this.setData({ item: nextItem });
+    syncEditUnloadAlert(nextItem);
   },
 
   async startVoiceEdit() {
@@ -1429,6 +1452,7 @@ definePage<TranscriptDetailData>()({
   },
 
   onUnload() {
+    syncEditUnloadAlert(null);
     this.stopOfflineAsrPolling();
     this.stopPlayback();
     this.cancelVoiceEdit();
