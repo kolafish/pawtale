@@ -134,6 +134,7 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   item: TranscriptDetailItemView | null;
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
+  editReferenceExpanded: boolean;
   voiceEditRecording: boolean;
   voiceEditLoading: boolean;
   voiceEditSaving: boolean;
@@ -352,6 +353,20 @@ function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise
   });
 }
 
+function confirmDiscardEdit(): Promise<boolean> {
+  return new Promise((resolve) => {
+    wx.showModal({
+      title: "放弃这次修改？",
+      content: "尚未保存的文字修改会丢失，原来的成书文字不会变化。",
+      confirmText: "放弃修改",
+      confirmColor: "#b84a5a",
+      cancelText: "继续编辑",
+      success: (result) => resolve(Boolean(result.confirm)),
+      fail: () => resolve(false),
+    });
+  });
+}
+
 function confirmOfflineAsr(item: TranscriptDetailItemView): Promise<boolean> {
   const state = item.offline_asr;
   const dialectLine = state.dialect_enhancement_enabled && state.dialect_label
@@ -411,6 +426,7 @@ definePage<TranscriptDetailData>()({
     item: null,
     questionExpanded: false,
     moreActionsExpanded: false,
+    editReferenceExpanded: false,
     voiceEditRecording: false,
     voiceEditLoading: false,
     voiceEditSaving: false,
@@ -428,6 +444,7 @@ definePage<TranscriptDetailData>()({
       utteranceId,
       questionExpanded: false,
       moreActionsExpanded: false,
+      editReferenceExpanded: false,
     });
     await this.loadTranscript();
     if (queryParam(options, "mode") === "edit") {
@@ -585,9 +602,13 @@ definePage<TranscriptDetailData>()({
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
+      || this.data.voiceEditRecording
+      || this.data.voiceEditLoading
+      || this.data.voiceEditSaving
     ) {
       return;
     }
+    this.stopPlayback();
     this.resetShareVideoState();
     const current = item.transcript_edited || item.transcript_raw;
     this.setData({
@@ -598,8 +619,16 @@ definePage<TranscriptDetailData>()({
         changed: false,
         isEditing: true,
       },
+      editReferenceExpanded: false,
       error: "",
     });
+  },
+
+  toggleEditReference() {
+    if (!this.data.item?.isEditing) {
+      return;
+    }
+    this.setData({ editReferenceExpanded: !this.data.editReferenceExpanded });
   },
 
   toggleQuestionExpanded() {
@@ -960,12 +989,19 @@ definePage<TranscriptDetailData>()({
     this.setData({ item: changedItem(item, event.detail.value) });
   },
 
-  cancelEdit() {
+  async cancelEdit() {
     const item = this.data.item;
     if (!item || this.data.saving || this.data.deleting) {
       return;
     }
-    this.setData({ item: toViewItem(item), error: "" });
+    if (item.changed && !await confirmDiscardEdit()) {
+      return;
+    }
+    this.setData({
+      item: toViewItem(item),
+      editReferenceExpanded: false,
+      error: "",
+    });
   },
 
   async saveTranscript() {
@@ -981,7 +1017,10 @@ definePage<TranscriptDetailData>()({
     this.setData({ saving: true, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
-      this.setData({ item: toViewItem(updated) });
+      this.setData({
+        item: toViewItem(updated),
+        editReferenceExpanded: false,
+      });
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存", icon: "success" });

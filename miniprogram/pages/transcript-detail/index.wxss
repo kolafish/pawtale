@@ -52,6 +52,58 @@
   background: #fffdf9;
 }
 
+.edit-mode-summary {
+  margin-top: 24rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid rgba(43, 23, 19, 0.10);
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.edit-mode-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.edit-mode-title,
+.edit-mode-hint {
+  display: block;
+}
+
+.edit-mode-title {
+  color: #8f3e35;
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 42rpx;
+}
+
+.edit-mode-hint {
+  margin-top: 4rpx;
+  color: #7b6f68;
+  font-size: 24rpx;
+  line-height: 36rpx;
+}
+
+.edit-exit-button {
+  flex: 0 0 auto;
+  min-width: 152rpx;
+  min-height: 80rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 18rpx;
+  background: #f5eee7;
+  color: #8f3e35;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 38rpx;
+}
+
+.edit-exit-button::after,
+.edit-reference-toggle::after {
+  border: 0;
+}
+
 .playback-panel {
   margin-top: 20rpx;
   padding: 26rpx 28rpx;
@@ -302,6 +354,46 @@
   color: #2b1713;
   font-size: 30rpx;
   line-height: 1.55;
+}
+
+.edit-reference-toggle {
+  width: 100%;
+  min-height: 80rpx;
+  margin: 18rpx 0 0;
+  border: 0;
+  border-radius: 18rpx;
+  background: #f5eee7;
+  color: #8f3e35;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.edit-reference-panel {
+  margin-top: 14rpx;
+  padding: 20rpx 22rpx;
+  border-radius: 18rpx;
+  background: #f1ede8;
+}
+
+.edit-reference-label,
+.edit-reference-text {
+  display: block;
+}
+
+.edit-reference-label {
+  color: #7b6f68;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+}
+
+.edit-reference-text {
+  margin-top: 8rpx;
+  color: #4d4038;
+  font-size: 28rpx;
+  line-height: 46rpx;
+  word-break: break-word;
 }
 
 .actions-row {
@@ -1009,6 +1101,7 @@
 
 .detail-page.large-text .record-meta,
 .detail-page.large-text .section-hint,
+.detail-page.large-text .edit-mode-hint,
 .detail-page.large-text .offline-asr-detail,
 .detail-page.large-text .offline-asr-error,
 .detail-page.large-text .danger-panel-copy,
@@ -1023,6 +1116,7 @@
 }
 
 .detail-page.large-text .section-title,
+.detail-page.large-text .edit-mode-title,
 .detail-page.large-text .danger-panel-title,
 .detail-page.large-text .repair-panel-title,
 .detail-page.large-text .voice-edit-status-title {
@@ -1040,6 +1134,7 @@
 }
 
 .detail-page.large-text .body-text,
+.detail-page.large-text .edit-reference-text,
 .detail-page.large-text .voice-edit-text,
 .detail-page.large-text .voice-edit-diff-text,
 .detail-page.large-text .share-video-segment-text,
@@ -1058,6 +1153,8 @@
 .detail-page.large-text .ghost-button,
 .detail-page.large-text .repair-button,
 .detail-page.large-text .danger-button,
+.detail-page.large-text .edit-exit-button,
+.detail-page.large-text .edit-reference-toggle,
 .detail-page.large-text .text-action-button {
   min-height: 48px;
   font-size: 30rpx;

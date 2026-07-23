@@ -1121,6 +1121,40 @@ test("transcript detail page can open directly in edit mode", async () => {
 
   assert.equal(context.data.item.isEditing, true);
   assert.equal(context.data.item.editingText, "爷爷退休后还在帮公司做事。");
+  assert.equal(context.data.editReferenceExpanded, false);
+});
+
+test("transcript detail edit mode exposes original text reference and protects unsaved changes", async () => {
+  const modalCalls = [];
+  global.wx = {
+    showModal(options) {
+      modalCalls.push(options);
+      options.success({ confirm: false });
+    },
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    },
+  });
+  const context = pageContext(page, { utteranceId: "utterance-edit" });
+
+  await page.loadTranscript.call(context);
+  page.beginEdit.call(context);
+  page.toggleEditReference.call(context);
+  page.changeText.call(context, { detail: { value: "尚未保存的修改。" } });
+  await page.cancelEdit.call(context);
+
+  assert.equal(context.data.editReferenceExpanded, true);
+  assert.equal(context.data.item.isEditing, true);
+  assert.equal(modalCalls[0].title, "放弃这次修改？");
+
+  global.wx.showModal = (options) => options.success({ confirm: true });
+  await page.cancelEdit.call(context);
+
+  assert.equal(context.data.item.isEditing, false);
+  assert.equal(context.data.editReferenceExpanded, false);
+  delete global.wx;
 });
 
 test("transcript detail page saves edited display text", async () => {
