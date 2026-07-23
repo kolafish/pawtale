@@ -272,6 +272,8 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(item.bookInclusionText, "等待转写后再入章");
   assert.equal(item.bookStatusClass, "book-status pending");
   assert.equal(item.cardClass, "transcript-card recovery-pending");
+  assert.equal(item.detailActionText, "查看音频");
+  assert.match(item.cardAriaLabel, /查看音频$/);
   global.wx = {
     showToast(options) {
       toasts.push(options);

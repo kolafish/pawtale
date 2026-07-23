@@ -40,9 +40,9 @@
 .search-clear {
   flex: 0 0 72rpx;
   width: 72rpx;
-  height: 72rpx;
-  min-width: 40px;
-  min-height: 40px;
+  height: 80rpx;
+  min-width: 44px;
+  min-height: 44px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -55,6 +55,7 @@
   font-size: 32rpx;
   font-weight: 800;
   line-height: 1;
+  transition: transform 150ms ease-out, opacity 150ms ease-out;
 }
 
 .search-clear::after {
@@ -65,8 +66,8 @@
   flex: 0 0 132rpx;
   width: 132rpx;
   min-width: 0;
-  height: 72rpx;
-  min-height: 40px;
+  height: 80rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0;
   border: 0;
@@ -79,6 +80,7 @@
   font-size: 24rpx;
   font-weight: 800;
   line-height: 1;
+  transition: transform 150ms ease-out, opacity 150ms ease-out;
 }
 
 .voice-search-button.recording {
@@ -92,6 +94,11 @@
 
 .voice-search-button::after {
   border: 0;
+}
+
+.search-control-hover {
+  opacity: 0.86;
+  transform: scale(0.94);
 }
 
 .search-chips {
@@ -346,6 +353,12 @@
   font-size: 28rpx;
   font-weight: 700;
   line-height: 42rpx;
+  transition: transform 150ms ease-out, background-color 150ms ease-out;
+}
+
+.empty-secondary-button-hover {
+  background: #ede3da;
+  transform: scale(0.98);
 }
 
 .small-primary[disabled],

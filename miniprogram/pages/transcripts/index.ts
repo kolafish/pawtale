@@ -375,6 +375,7 @@ function toViewItem(
   const bookInclusionText = canRecoverTranscription
     ? "等待转写后再入章"
     : transcriptBookInclusionText(item);
+  const detailActionText = canRecoverTranscription ? "查看音频" : "查看详情";
   const recordMetaText = [
     createdAtText,
     durationText,
@@ -398,8 +399,8 @@ function toViewItem(
     bookStatusClass: canRecoverTranscription
       ? "book-status pending"
       : (isIncludedInBook ? "book-status included" : "book-status"),
-    detailActionText: canRecoverTranscription ? "查看音频" : "查看详情",
-    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${bookInclusionText}，点击查看详情`,
+    detailActionText,
+    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${bookInclusionText}，${detailActionText}`,
   };
 }
 

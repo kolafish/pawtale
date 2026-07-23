@@ -19,6 +19,7 @@
         wx:if="{{showSearchClear}}"
         class="search-clear"
         bindtap="clearSearch"
+        hover-class="search-control-hover"
         aria-label="清除搜索"
       >×</button>
       <button
@@ -26,6 +27,7 @@
         bindtap="startVoiceSearch"
         loading="{{voiceSearchTranscribing}}"
         disabled="{{voiceSearchDisabled}}"
+        hover-class="search-control-hover"
         aria-label="{{voiceSearchButtonText}}"
       >
         {{voiceSearchButtonText}}
@@ -65,7 +67,11 @@
   <view wx:elif="{{showSearchEmpty}}" class="empty-panel">
     <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
-    <button class="empty-secondary-button" bindtap="clearSearch">清除搜索，查看全部</button>
+    <button
+      class="empty-secondary-button"
+      bindtap="clearSearch"
+      hover-class="empty-secondary-button-hover"
+    >清除搜索，查看全部</button>
   </view>
 
   <view wx:elif="{{showGenericEmpty}}" class="empty-panel">
