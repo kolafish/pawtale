@@ -1,4 +1,4 @@
-export const MINIPROGRAM_APP_ID = "wx71acdf73e2ba7067";
+export const MINIPROGRAM_APP_ID = "wxc0f8f18e80b4fd70";
 
 export const BACKEND_HTTP_BASE_URL = "https://pawtale-api.spaceflows.cn";
 export const BACKEND_WS_BASE_URL = "wss://pawtale-api.spaceflows.cn";
