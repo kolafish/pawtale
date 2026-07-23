@@ -215,17 +215,25 @@
     </view>
   </view>
 
-  <view class="history-panel">
-    <view class="history-header">
-      <text>本次讲述</text>
-      <text class="history-count">{{historyCountText}}</text>
-    </view>
-    <view wx:if="{{showHistoryEmpty}}" class="empty-state">
-      <text>一句话说完后，会在这里保存下来。</text>
-    </view>
-    <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
-      <text class="line-role">{{item.roleText}}</text>
-      <text>{{item.text}}</text>
+  <view wx:if="{{showHistoryPanel}}" class="history-panel">
+    <button
+      class="history-toggle"
+      bindtap="toggleHistory"
+      hover-class="history-toggle-hover"
+      aria-expanded="{{historyExpanded}}"
+      aria-label="{{historyToggleText}}本次已保存的讲述"
+    >
+      <view class="history-heading">
+        <text>本次已保存</text>
+        <text class="history-count">{{historyCountText}}</text>
+      </view>
+      <text class="history-toggle-text">{{historyToggleText}}</text>
+    </button>
+    <view wx:if="{{showHistoryLines}}" class="history-lines">
+      <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
+        <text class="line-role">{{item.roleText}}</text>
+        <text>{{item.text}}</text>
+      </view>
     </view>
   </view>
 

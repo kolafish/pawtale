@@ -154,8 +154,11 @@ export interface VoiceChatData {
   captureStripClass: string;
   showLiveCharCount: boolean;
   showInlineHelp: boolean;
+  historyExpanded: boolean;
   historyCountText: string;
-  showHistoryEmpty: boolean;
+  showHistoryPanel: boolean;
+  showHistoryLines: boolean;
+  historyToggleText: string;
   transcriptLineViews: VoiceChatTranscriptLineView[];
   controlHintText: string;
   micButtonClass: string;
@@ -299,8 +302,11 @@ export function initialVoiceChatData(): VoiceChatData {
     captureStripClass: "capture-strip",
     showLiveCharCount: false,
     showInlineHelp: false,
+    historyExpanded: false,
     historyCountText: "0 段 · 0 字",
-    showHistoryEmpty: true,
+    showHistoryPanel: false,
+    showHistoryLines: false,
+    historyToggleText: "查看",
     transcriptLineViews: [],
     controlHintText: "说一两句也可以，我会帮您记下来。",
     micButtonClass: "mic-button disabled",
@@ -364,7 +370,9 @@ export type VoiceChatViewPatch = Pick<
   | "showLiveCharCount"
   | "showInlineHelp"
   | "historyCountText"
-  | "showHistoryEmpty"
+  | "showHistoryPanel"
+  | "showHistoryLines"
+  | "historyToggleText"
   | "transcriptLineViews"
   | "controlHintText"
   | "micButtonClass"
@@ -624,7 +632,9 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showLiveCharCount: Boolean(state.recording && state.liveCharCount),
     showInlineHelp: Boolean(!isHumanInterview && state.recording && !state.liveText && state.canRequestFollowUp),
     historyCountText: `${state.transcriptLines.length} 段 · ${state.totalTranscriptCharCount} 字`,
-    showHistoryEmpty: state.transcriptLines.length === 0,
+    showHistoryPanel: state.transcriptLines.length > 0,
+    showHistoryLines: state.historyExpanded && state.transcriptLines.length > 0,
+    historyToggleText: state.historyExpanded ? "收起" : "查看",
     transcriptLineViews: state.transcriptLines.map((line) => ({
       ...line,
       lineClass: line.role === "assistant"

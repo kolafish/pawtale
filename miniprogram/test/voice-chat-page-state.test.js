@@ -41,6 +41,9 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.equal(first.liveScrollTop, 0);
   assert.equal(first.liveTextEndId, "live-text-end");
   assert.equal(first.historyCountText, "0 段 · 0 字");
+  assert.equal(first.historyExpanded, false);
+  assert.equal(first.showHistoryPanel, false);
+  assert.equal(first.showHistoryLines, false);
   assert.deepEqual(first.transcriptLines, []);
   assert.deepEqual(first.transcriptLineViews, []);
   assert.equal(first.openingTopicOptions.length, 5);
@@ -114,7 +117,9 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.showLiveCharCount, true);
   assert.equal(patch.showInlineHelp, true);
   assert.equal(patch.historyCountText, "2 段 · 7 字");
-  assert.equal(patch.showHistoryEmpty, false);
+  assert.equal(patch.showHistoryPanel, true);
+  assert.equal(patch.showHistoryLines, false);
+  assert.equal(patch.historyToggleText, "查看");
   assert.deepEqual(patch.transcriptLineViews.map((line) => [line.lineClass, line.roleText]), [
     ["transcript-line assistant", "小余"],
     ["transcript-line user", "我"],
@@ -122,6 +127,29 @@ test("voice chat view patch derives transcript and recording render fields", () 
   assert.equal(patch.controlHintText, "说完请点这里");
   assert.equal(patch.micButtonClass, "mic-button recording");
   assert.equal(patch.micButtonText, "说完了，帮我整理");
+});
+
+test("voice chat only expands saved history when the user asks to review it", () => {
+  const lines = [
+    { id: "user-1", role: "user", text: "我想讲外婆。" },
+  ];
+  const collapsed = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    transcriptLines: lines,
+    totalTranscriptCharCount: 7,
+  });
+  const expanded = voiceChatViewPatch({
+    ...initialVoiceChatData(),
+    transcriptLines: lines,
+    totalTranscriptCharCount: 7,
+    historyExpanded: true,
+  });
+
+  assert.equal(collapsed.showHistoryPanel, true);
+  assert.equal(collapsed.showHistoryLines, false);
+  assert.equal(collapsed.historyToggleText, "查看");
+  assert.equal(expanded.showHistoryLines, true);
+  assert.equal(expanded.historyToggleText, "收起");
 });
 
 test("voice chat view patch combines human speaker choice with record actions", () => {

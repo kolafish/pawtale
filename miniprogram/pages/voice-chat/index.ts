@@ -1506,6 +1506,13 @@ definePage<VoiceChatData>()({
     });
   },
 
+  toggleHistory() {
+    if (!this.data.transcriptLines.length) {
+      return;
+    }
+    setVoiceChatData(this, { historyExpanded: !this.data.historyExpanded });
+  },
+
   connectGateway(): Promise<boolean> {
     if (!this.data.voiceSessionId) {
       return Promise.resolve(false);

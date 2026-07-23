@@ -385,34 +385,78 @@
 }
 
 .resume-actions {
-  margin-top: 18rpx;
+  margin-top: 22rpx;
+}
+
+.more-actions-toggle {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 20rpx;
+  background: transparent;
+  color: #6f5d54;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20rpx;
+  transition-property: transform, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.more-actions-toggle::after {
+  border: 0;
+}
+
+.more-actions-toggle-hover {
+  background: #f5eee7;
+  transform: scale(0.98);
+}
+
+.more-actions-chevron {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 44rpx;
+}
+
+.more-actions-panel {
+  margin-top: 10rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid rgba(43, 23, 19, 0.08);
   display: flex;
   flex-direction: column;
-  gap: 16rpx;
+  gap: 14rpx;
 }
 
 .resume-ask-button {
   box-sizing: border-box;
-  width: 92%;
-  min-height: 96rpx;
-  margin: 0 auto;
+  width: 100%;
+  min-height: 92rpx;
+  margin: 0;
   border: 0;
-  border-radius: 999rpx;
+  border-radius: 22rpx;
   background: #ffffff;
   color: #5c4b43;
-  font-size: 32rpx;
+  font-size: 30rpx;
   font-weight: 700;
   line-height: 44rpx;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   justify-content: center;
-  padding: 0 32rpx;
-  text-align: center;
-  white-space: nowrap;
-  word-break: keep-all;
+  gap: 2rpx;
+  padding: 16rpx 24rpx;
+  text-align: left;
   box-shadow:
     0 0 0 1rpx rgba(43, 23, 19, 0.08),
-    0 6rpx 14rpx rgba(93, 61, 42, 0.06);
+    0 4rpx 10rpx rgba(93, 61, 42, 0.05);
   transition-property: transform, background-color, box-shadow, opacity;
   transition-duration: 150ms;
   transition-timing-function: ease-out;
@@ -448,6 +492,13 @@
   box-shadow:
     0 0 0 1rpx rgba(56, 101, 82, 0.14),
     0 6rpx 14rpx rgba(93, 61, 42, 0.06);
+}
+
+.resume-action-hint {
+  color: #7b6f68;
+  font-size: 25rpx;
+  font-weight: 400;
+  line-height: 36rpx;
 }
 
 .voice-auth-panel {
@@ -604,10 +655,27 @@
 }
 
 .home-page.large-text .resume-ask-button,
+.home-page.large-text .more-actions-toggle,
 .home-page.large-text .launch-secondary-button {
   min-height: 124rpx;
   padding: 0 34rpx;
   font-size: 40rpx;
+  line-height: 60rpx;
+}
+
+.home-page.large-text .resume-ask-button {
+  align-items: flex-start;
+  padding-top: 20rpx;
+  padding-bottom: 20rpx;
+}
+
+.home-page.large-text .resume-action-hint {
+  font-size: 32rpx;
+  line-height: 48rpx;
+}
+
+.home-page.large-text .more-actions-chevron {
+  font-size: 44rpx;
   line-height: 60rpx;
 }
 
