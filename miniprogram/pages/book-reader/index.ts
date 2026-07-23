@@ -2,7 +2,12 @@ import type { MemoirBookOutput } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { getMemoirBookOutput } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
-import { queryParam, type PageQuery } from "../../services/page-input";
+import {
+  datasetString,
+  queryParam,
+  type PageDatasetEvent,
+  type PageQuery,
+} from "../../services/page-input";
 import {
   bookShareAppMessage,
   bookShareTimeline,
@@ -33,6 +38,19 @@ type BookReaderData = Pick<
   readerTitle: string;
   readerSubtitle: string;
 };
+
+type ReaderDatasetEvent = PageDatasetEvent<{ index?: string }>;
+
+type WxWithPageScrollTo = typeof wx & {
+  pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
+};
+
+function scrollReader(options: { selector?: string; scrollTop?: number }) {
+  const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
+  if (typeof pageScrollTo === "function") {
+    pageScrollTo({ ...options, duration: 280 });
+  }
+}
 
 function readerData(output: MemoirBookOutput | null): Pick<
   BookReaderData,
@@ -107,6 +125,18 @@ definePage<BookReaderData>()({
       bookTitle: this.data.readerTitle,
       hasBookContent: Boolean(this.data.bookContent),
     });
+  },
+
+  openReaderChapter(event: ReaderDatasetEvent) {
+    const chapterIndex = datasetString(event, "index");
+    if (!/^\d+$/.test(chapterIndex)) {
+      return;
+    }
+    scrollReader({ selector: `#reader-chapter-${chapterIndex}` });
+  },
+
+  scrollReaderToTop() {
+    scrollReader({ scrollTop: 0 });
   },
 
   async loadBookReader(projectId: string) {

@@ -50,7 +50,7 @@
         </view>
       </view>
 
-      <view class="caption-box">
+      <view wx:if="{{item.detailsExpanded}}" class="caption-box">
         <text class="caption-label">图片说明</text>
         <textarea
           class="caption-input"
@@ -65,11 +65,23 @@
           class="minor-button"
           data-id="{{item.id}}"
           loading="{{savingTarget === item.id}}"
-          disabled="{{savingTarget === item.id}}"
+          disabled="{{savingTarget === item.id || !item.captionChanged}}"
           bindtap="saveCaption"
         >
-          保存说明
+          {{item.captionChanged ? "保存说明" : "说明已保存"}}
         </button>
+
+        <view class="asset-secondary-actions">
+          <button
+            class="action-button danger"
+            data-id="{{item.id}}"
+            loading="{{deletingTarget === item.id}}"
+            disabled="{{deletingTarget === item.id}}"
+            bindtap="deleteAsset"
+          >
+            删除图片素材
+          </button>
+        </view>
       </view>
 
       <view class="asset-actions">
@@ -104,16 +116,16 @@
         >
           移出书稿
         </button>
-        <button
-          class="action-button danger"
-          data-id="{{item.id}}"
-          loading="{{deletingTarget === item.id}}"
-          disabled="{{deletingTarget === item.id}}"
-          bindtap="deleteAsset"
-        >
-          删除
-        </button>
       </view>
+
+      <button
+        class="asset-details-toggle"
+        data-id="{{item.id}}"
+        aria-expanded="{{item.detailsExpanded}}"
+        bindtap="toggleAssetDetails"
+      >
+        {{item.detailsExpanded ? "收起图片说明与更多操作" : "编辑图片说明与更多操作"}}
+      </button>
     </view>
   </view>
 

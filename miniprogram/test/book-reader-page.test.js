@@ -91,6 +91,28 @@ test("book reader page shares the same finished-book route", async () => {
   }
 });
 
+test("book reader jumps from the table of contents to a chapter and back to the top", () => {
+  const scrolls = [];
+  global.wx = {
+    pageScrollTo(options) {
+      scrolls.push(options);
+    },
+  };
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+
+  page.openReaderChapter.call(context, {
+    currentTarget: { dataset: { index: "1" } },
+  });
+  page.scrollReaderToTop.call(context);
+
+  assert.deepEqual(scrolls, [
+    { selector: "#reader-chapter-1", duration: 280 },
+    { scrollTop: 0, duration: 280 },
+  ]);
+  delete global.wx;
+});
+
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {
   const structured = sampleStructuredBookContent({ chapterCount: 1 });
   structured.table_of_contents[0].sections = [];

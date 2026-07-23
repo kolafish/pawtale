@@ -45,6 +45,8 @@ function imageAssetView(asset, localPath = "") {
     placementText: "尚未入书",
     createdAtText: "07-01 08:00",
     captionDraft: asset.caption,
+    captionChanged: false,
+    detailsExpanded: false,
     enabledPlacements: asset.placements.filter((placement) => placement.enabled),
   };
 }
@@ -185,4 +187,29 @@ test("image assets page keeps successful placement removals when a later removal
   );
   assert.equal(context.data.items[0].localPath, "/tmp/asset-1-thumb.jpg");
   assert.equal(context.data.error, "第二个位置删除失败");
+});
+
+test("image assets page reveals secondary editing on demand and tracks caption changes", () => {
+  const asset = imageAsset("asset-1", { caption: "原说明" });
+  const { page } = loadImageAssetsPage();
+  const context = pageContext(page, {
+    items: [imageAssetView(asset)],
+  });
+
+  page.toggleAssetDetails.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+  });
+  assert.equal(context.data.items[0].detailsExpanded, true);
+
+  page.onCaptionInput.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+    detail: { value: "新说明" },
+  });
+  assert.equal(context.data.items[0].captionChanged, true);
+
+  page.onCaptionInput.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+    detail: { value: " 原说明 " },
+  });
+  assert.equal(context.data.items[0].captionChanged, false);
 });

@@ -22,10 +22,16 @@
       <text class="section-label">目录</text>
       <view class="toc-list">
         <view wx:for="{{bookPreviewTocItems}}" wx:key="id" wx:for-item="chapter" class="toc-group">
-          <view class="toc-row">
+          <button
+            class="toc-row"
+            data-index="{{index}}"
+            aria-label="跳到 {{chapter.title}}"
+            bindtap="openReaderChapter"
+          >
             <text class="toc-index">{{chapter.indexText}}</text>
             <text class="toc-title">{{chapter.title}}</text>
-          </view>
+            <text class="toc-action">阅读</text>
+          </button>
           <view wx:if="{{chapter.sections.length}}" class="toc-section-list">
             <view wx:for="{{chapter.sections}}" wx:key="id" wx:for-item="section" class="toc-section-row">
               <text class="toc-section-index">{{section.indexText}}</text>
@@ -37,7 +43,13 @@
     </view>
 
     <view wx:if="{{bookPreviewChapters.length}}" class="chapter-list">
-      <view wx:for="{{bookPreviewChapters}}" wx:key="id" wx:for-item="chapter" class="chapter-block">
+      <view
+        wx:for="{{bookPreviewChapters}}"
+        wx:key="id"
+        wx:for-item="chapter"
+        id="reader-chapter-{{index}}"
+        class="chapter-block"
+      >
         <text class="chapter-index">{{chapter.indexText}}</text>
         <text class="chapter-title">{{chapter.title}}</text>
         <text wx:if="{{chapter.metaText}}" class="chapter-meta">{{chapter.metaText}}</text>
@@ -56,5 +68,7 @@
       <text class="section-label">正文</text>
       <text class="book-content" selectable>{{bookContent}}</text>
     </view>
+
+    <button class="reader-top-action" bindtap="scrollReaderToTop">回到目录与封面</button>
   </block>
 </view>

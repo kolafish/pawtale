@@ -134,6 +134,30 @@ test("book export page explains the selected export action", () => {
   assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
 });
 
+test("book export keeps advanced settings collapsed and opens immersive reading", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadBookExportPage();
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "全书正文",
+  });
+
+  assert.equal(context.data.showBookSettings, false);
+  page.toggleBookSettings.call(context);
+  assert.equal(context.data.showBookSettings, true);
+
+  page.openBookReader.call(context);
+  assert.deepEqual(navigations, [
+    "/pages/book-reader/index?projectId=project%2F1",
+  ]);
+  delete global.wx;
+});
+
 test("book export page saves full-book metadata and cover style", async () => {
   const updates = [];
   const { page } = loadBookExportPage({

@@ -40,6 +40,8 @@ interface ImageAssetView extends MemoirImageAsset {
   placementText: string;
   createdAtText: string;
   captionDraft: string;
+  captionChanged: boolean;
+  detailsExpanded: boolean;
   enabledPlacements: MemoirBookImagePlacement[];
 }
 
@@ -135,7 +137,11 @@ function assetTitle(asset: MemoirImageAsset): string {
   );
 }
 
-function buildAssetView(asset: MemoirImageAsset, localPath = ""): ImageAssetView {
+function buildAssetView(
+  asset: MemoirImageAsset,
+  localPath = "",
+  detailsExpanded = false,
+): ImageAssetView {
   return {
     ...asset,
     localPath,
@@ -145,6 +151,8 @@ function buildAssetView(asset: MemoirImageAsset, localPath = ""): ImageAssetView
     placementText: placementText(asset),
     createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
     captionDraft: trimText(asset.caption),
+    captionChanged: false,
+    detailsExpanded,
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
 }
@@ -154,7 +162,12 @@ function buildAssetViews(
   currentItems: ImageAssetView[],
 ): ImageAssetView[] {
   const localPaths = new Map(currentItems.map((item) => [item.id, item.localPath]));
-  return response.items.map((asset) => buildAssetView(asset, localPaths.get(asset.id) || ""));
+  const expandedItems = new Map(currentItems.map((item) => [item.id, item.detailsExpanded]));
+  return response.items.map((asset) => buildAssetView(
+    asset,
+    localPaths.get(asset.id) || "",
+    expandedItems.get(asset.id) || false,
+  ));
 }
 
 function assetCountData(items: ImageAssetView[]): Pick<
@@ -329,7 +342,24 @@ definePage<ImageAssetsData>()({
     const value = event.detail.value;
     this.setData({
       items: this.data.items.map((item) => (
-        item.id === assetId ? { ...item, captionDraft: value } : item
+        item.id === assetId
+          ? {
+            ...item,
+            captionDraft: value,
+            captionChanged: trimText(value) !== trimText(item.caption),
+          }
+          : item
+      )),
+    });
+  },
+
+  toggleAssetDetails(event: DatasetEvent) {
+    const assetId = datasetString(event, "id");
+    this.setData({
+      items: this.data.items.map((item) => (
+        item.id === assetId
+          ? { ...item, detailsExpanded: !item.detailsExpanded }
+          : item
       )),
     });
   },
@@ -464,7 +494,11 @@ definePage<ImageAssetsData>()({
 
   replaceAsset(asset: MemoirImageAsset) {
     const current = this.assetById(asset.id);
-    const updatedView = buildAssetView(asset, current?.localPath || "");
+    const updatedView = buildAssetView(
+      asset,
+      current?.localPath || "",
+      current?.detailsExpanded || false,
+    );
     const nextItems = this.data.items.map((item) => (
       item.id === asset.id ? updatedView : item
     ));

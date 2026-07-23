@@ -207,7 +207,7 @@
 }
 
 .minor-button {
-  min-height: 72rpx;
+  min-height: 44px;
   margin: 16rpx 0 0;
   padding: 0 22rpx;
   border: 0;
@@ -228,7 +228,7 @@
 
 .action-button {
   min-width: 150rpx;
-  min-height: 76rpx;
+  min-height: 44px;
   margin: 0;
   padding: 0 20rpx;
   border: 0;
@@ -261,6 +261,34 @@
 .action-button.danger {
   background: #fff1f3;
   color: #b84a5a;
+}
+
+.asset-secondary-actions {
+  margin-top: 16rpx;
+  padding-top: 16rpx;
+  border-top: 1rpx solid #eadfd4;
+}
+
+.asset-details-toggle {
+  width: 100%;
+  min-height: 44px;
+  margin: 14rpx 0 0;
+  padding: 10rpx 12rpx;
+  border: 0;
+  background: transparent;
+  color: #7b4a40;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  transition: transform 140ms ease-out;
+}
+
+.asset-details-toggle::after {
+  border: 0;
+}
+
+.asset-details-toggle:active {
+  transform: scale(0.98);
 }
 
 .action-button.disabled,
