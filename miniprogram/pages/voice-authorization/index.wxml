@@ -1,7 +1,6 @@
 <view class="voice-authorization-page">
-  <view class="header">
-    <text class="page-title">声纹授权协议</text>
-    <text class="page-meta">版本：{{version}}</text>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context ui-tabular">协议版本 {{version}}</text>
   </view>
 
   <view class="agreement-panel">

@@ -1,9 +1,6 @@
 <view class="image-assets-page">
-  <view class="top-row">
-    <view class="title-block">
-      <text class="page-title">图片素材</text>
-      <text class="page-meta">统一管理生成图片，选择可入书的插图</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">统一管理生成图片，选择可入书的插图</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>

@@ -1376,10 +1376,6 @@ definePage<TranscriptDetailData>()({
     }
   },
 
-  goBack() {
-    wx.navigateBack({ delta: 1 });
-  },
-
   openLogin() {
     switchToMe();
   },

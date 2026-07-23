@@ -105,9 +105,11 @@ function loadWorkspacePage({
 function installWx() {
   const navigations = [];
   const toasts = [];
+  const navigationTitles = [];
   global.wx = {
     navigateTo(options) { navigations.push(options.url); },
     navigateBack() {},
+    setNavigationBarTitle(options) { navigationTitles.push(options.title); },
     pageScrollTo() {},
     stopPullDownRefresh() {},
     showToast(options) { toasts.push(options); },
@@ -115,11 +117,11 @@ function installWx() {
       options.success?.({ confirm: true, cancel: false });
     },
   };
-  return { navigations, toasts };
+  return { navigations, navigationTitles, toasts };
 }
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
-  installWx();
+  const { navigationTitles } = installWx();
   let loadCount = 0;
   const { page } = loadWorkspacePage({
     voiceApiExports: {
@@ -140,6 +142,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
   assert.equal(context.data.canConfirmChapter, true);
+  assert.deepEqual(navigationTitles, ["第一次离家"]);
   assert.doesNotMatch(
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,

@@ -1,27 +1,7 @@
 .me-page {
   min-height: 100vh;
-  padding: 52rpx 36rpx 120rpx;
+  padding: 30rpx 36rpx 120rpx;
   background: #fcf7ed;
-}
-
-.header {
-  margin-bottom: 30rpx;
-}
-
-.page-title {
-  display: block;
-  color: #2b1713;
-  font-size: 48rpx;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.page-subtitle {
-  display: block;
-  margin-top: 10rpx;
-  color: #7b6f68;
-  font-size: 28rpx;
-  line-height: 1.4;
 }
 
 .profile-panel,
@@ -511,15 +491,9 @@
 }
 
 .me-page.large-text {
-  padding: 44rpx 24rpx 120rpx;
+  padding: 28rpx 24rpx 120rpx;
 }
 
-.me-page.large-text .page-title {
-  font-size: 56rpx;
-  line-height: 72rpx;
-}
-
-.me-page.large-text .page-subtitle,
 .me-page.large-text .panel-copy,
 .me-page.large-text .action-meta,
 .me-page.large-text .voice-desc,

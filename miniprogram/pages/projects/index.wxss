@@ -1,34 +1,7 @@
 .projects-page {
   min-height: 100vh;
-  padding: 44rpx 36rpx 120rpx;
+  padding: 28rpx 36rpx 120rpx;
   background: #fcf7ed;
-}
-
-.top-row {
-  display: flex;
-  align-items: center;
-  gap: 22rpx;
-  margin-bottom: 28rpx;
-}
-
-.back-hit {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 72rpx;
-  line-height: 1;
-}
-
-.page-title {
-  color: #2b1713;
-  font-size: 44rpx;
-  font-weight: 800;
 }
 
 .error {

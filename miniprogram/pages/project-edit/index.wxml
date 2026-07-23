@@ -1,12 +1,6 @@
 <view class="project-edit-page">
-  <view class="top-row">
-    <view class="back-hit" bindtap="cancel">
-      <text class="back-mark">‹</text>
-    </view>
-    <view class="title-block">
-      <text class="page-title">{{pageTitle}}</text>
-      <text class="page-meta">资料会用于语音访谈和小余追问</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">资料会用于语音访谈和小余追问</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>

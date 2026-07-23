@@ -20,6 +20,7 @@ import {
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -151,6 +152,7 @@ definePage<ChapterWorkspacePageData>()({
         this.data.projectId,
         this.data.chapterId,
       );
+      setPageNavigationTitle(workspace.chapter_title || "本章正文");
       this.setData({
         workspace,
         ...chapterWorkspaceViewPatch(workspace, this.data.expandedSectionIds),
@@ -571,9 +573,5 @@ definePage<ChapterWorkspacePageData>()({
       clearTimeout(this.preparationPollTimer);
       this.preparationPollTimer = null;
     }
-  },
-
-  goBack() {
-    wx.navigateBack();
   },
 });

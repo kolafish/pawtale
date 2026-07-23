@@ -1,50 +1,9 @@
 .speaker-transcription-page {
   min-height: 100vh;
-  padding: 44rpx 30rpx 128rpx;
+  padding: 28rpx 30rpx 128rpx;
   background: #f7f3ed;
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
-}
-
-.top-row {
-  display: flex;
-  align-items: center;
-  gap: 22rpx;
-  margin-bottom: 28rpx;
-}
-
-.back-hit {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 72rpx;
-  line-height: 1;
-}
-
-.title-block {
-  min-width: 0;
-}
-
-.page-title {
-  display: block;
-  color: #2b1713;
-  font-size: 48rpx;
-  font-weight: 850;
-  line-height: 1.2;
-}
-
-.page-meta {
-  display: block;
-  margin-top: 8rpx;
-  color: #7b6f68;
-  font-size: 30rpx;
-  line-height: 1.35;
 }
 
 .error {
@@ -543,11 +502,6 @@
   padding-right: 24rpx;
 }
 
-.speaker-transcription-page.large-text .page-title {
-  font-size: 52rpx;
-}
-
-.speaker-transcription-page.large-text .page-meta,
 .speaker-transcription-page.large-text .control-meta,
 .speaker-transcription-page.large-text .line-meta,
 .speaker-transcription-page.large-text .line-status {

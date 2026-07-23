@@ -1,33 +1,7 @@
 .transcripts-page {
   min-height: 100vh;
-  padding: 44rpx 32rpx 120rpx;
+  padding: 28rpx 32rpx 120rpx;
   background: #fcf7ed;
-}
-
-.top-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 28rpx;
-}
-
-.title-block {
-  min-width: 0;
-}
-
-.page-title {
-  display: block;
-  color: #2b1713;
-  font-size: 40rpx;
-  font-weight: 700;
-  line-height: 52rpx;
-}
-
-.page-meta {
-  display: block;
-  margin-top: 8rpx;
-  color: #7b6f68;
-  font-size: 26rpx;
-  line-height: 1.35;
 }
 
 .search-panel {
@@ -393,15 +367,9 @@
 }
 
 .transcripts-page.large-text {
-  padding: 40rpx 24rpx 120rpx;
+  padding: 28rpx 24rpx 120rpx;
 }
 
-.transcripts-page.large-text .page-title {
-  font-size: 48rpx;
-  line-height: 64rpx;
-}
-
-.transcripts-page.large-text .page-meta,
 .transcripts-page.large-text .search-summary,
 .transcripts-page.large-text .record-meta {
   font-size: 30rpx;

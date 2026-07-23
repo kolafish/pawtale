@@ -1,28 +1,8 @@
 .voice-authorization-page {
   min-height: 100vh;
-  padding: 44rpx 36rpx 160rpx;
+  padding: 28rpx 36rpx 160rpx;
   background: #fcf7ed;
   box-sizing: border-box;
-}
-
-.header {
-  margin-bottom: 26rpx;
-}
-
-.page-title {
-  display: block;
-  color: #2b1713;
-  font-size: 46rpx;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.page-meta {
-  display: block;
-  margin-top: 10rpx;
-  color: #7b6f68;
-  font-size: 25rpx;
-  line-height: 1.35;
 }
 
 .agreement-panel {

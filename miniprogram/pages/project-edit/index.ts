@@ -18,6 +18,7 @@ import {
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 
 interface ProjectEditDataset {
   gender?: string;
@@ -89,6 +90,7 @@ definePage<ProjectEditData>()({
     const projectId = queryParam(query, "projectId");
     if (projectId) {
       this.setData({ projectId, pageTitle: "编辑回忆录" });
+      setPageNavigationTitle("编辑回忆录");
       await this.loadProject(projectId);
       return;
     }
@@ -101,6 +103,7 @@ definePage<ProjectEditData>()({
       narratorAgeText: "",
       defaultGuidanceMode: "free_narration",
     });
+    setPageNavigationTitle("新建回忆录");
   },
 
   async loadProject(projectId: string) {

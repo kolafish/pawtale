@@ -767,7 +767,6 @@ Page<SpeakerTranscriptionPageData, {
   ): Promise<void>;
   toggleRecording(): Promise<void>;
   clearTranscript(): void;
-  goBack(): void;
 }>({
   client: null,
   pageActive: true,
@@ -1256,9 +1255,5 @@ Page<SpeakerTranscriptionPageData, {
       latestFinalLineId: "",
       ...pagePatch("idle", false),
     });
-  },
-
-  goBack() {
-    wx.navigateBack({ delta: 1 });
   },
 });
