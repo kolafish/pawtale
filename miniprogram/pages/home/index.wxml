@@ -52,9 +52,21 @@
       <text class="panel-label">{{panelLabelText}}</text>
       <text class="mode-tag">{{modeTagText}}</text>
     </view>
-    <text class="project-title">
-      {{projectHeadingText}}
-    </text>
+    <view
+      wx:if="{{hasProject}}"
+      class="active-project-link"
+      bindtap="openProjects"
+      hover-class="active-project-link-hover"
+      aria-role="button"
+      aria-label="当前回忆录 {{projectHeadingText}}，点击切换"
+    >
+      <view class="active-project-copy">
+        <text class="project-title">{{projectHeadingText}}</text>
+        <text class="project-switch-hint">当前回忆录 · 点击切换</text>
+      </view>
+      <text class="project-switch-action">切换 ›</text>
+    </view>
+    <text wx:else class="project-title">{{projectHeadingText}}</text>
     <text class="project-meta">
       {{projectMetaText}}
     </text>

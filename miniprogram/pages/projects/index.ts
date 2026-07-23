@@ -74,6 +74,16 @@ function confirmDeleteProject(project: ProjectItem): Promise<boolean> {
   });
 }
 
+function chooseProjectMoreAction(): Promise<number | null> {
+  return new Promise((resolve) => {
+    wx.showActionSheet({
+      itemList: ["删除回忆录"],
+      success: (result) => resolve(result.tapIndex),
+      fail: () => resolve(null),
+    });
+  });
+}
+
 definePage<ProjectsData>()({
   data: {
     loading: false,
@@ -145,8 +155,24 @@ definePage<ProjectsData>()({
     wx.navigateTo({ url: pageUrl("/pages/project-edit/index", { projectId: id }) });
   },
 
-  async deleteProject(event: DatasetEvent) {
+  async openProjectMore(event: DatasetEvent) {
     const id = datasetString(event, "id");
+    const project = this.data.projects.find((item) => item.id === id);
+    if (!project || this.data.busy) {
+      return;
+    }
+    if (!project.canDelete) {
+      this.setData({ error: "至少保留一本回忆录" });
+      return;
+    }
+    const actionIndex = await chooseProjectMoreAction();
+    if (actionIndex !== 0) {
+      return;
+    }
+    await this.deleteProjectById(id);
+  },
+
+  async deleteProjectById(id: string) {
     const project = this.data.projects.find((item) => item.id === id);
     if (!project || this.data.busy) {
       return;

@@ -17,12 +17,6 @@ function loadMePage({
     getMemoirIdentity: async () => {
       throw new Error("getMemoirIdentity was not mocked");
     },
-    loginWithEmail: async () => {
-      throw new Error("loginWithEmail was not mocked");
-    },
-    loginWithWeChat: async () => {
-      throw new Error("loginWithWeChat was not mocked");
-    },
     logoutBackendSession: async () => {},
     setAccountCredentials: async () => {
       throw new Error("setAccountCredentials was not mocked");
@@ -124,7 +118,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test("me shows the login panel instead of redirecting when the session is missing", async () => {
+test("me shows the single guest login entry when the session is missing", async () => {
   const { ApiError } = require("../services/request.ts");
   const { page } = loadMePage({
     authExports: {
@@ -140,6 +134,21 @@ test("me shows the login panel instead of redirecting when the session is missin
   assert.equal(context.data.loggedIn, false);
   assert.equal(context.data.error, "");
   assert.equal(context.data.loading, false);
+});
+
+test("me opens the dedicated login page from the guest entry", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadMePage();
+
+  page.openLogin.call(pageContext(page));
+
+  assert.deepEqual(navigations, ["/pages/login/index"]);
+  delete global.wx;
 });
 
 test("me saves local accessibility and voice environment switches", () => {
@@ -212,7 +221,6 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
   assert.equal(context.data.displayName, "微信昵称");
   assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
   assert.equal(context.data.accountEmailText, "微信账号登录");
-  assert.equal(context.data.accountMode, false);
 });
 
 test("me keeps existing voice stats while refreshing the same project", async () => {
@@ -374,41 +382,6 @@ test("me shows missing voice authorization consent as not agreed", () => {
   assert.match(context.data.voiceAuthorizationDetailText, /开始语音前/);
 });
 
-test("me refreshes profile after wechat login", async () => {
-  let refreshed = false;
-  const { page } = loadMePage({
-    authExports: {
-      loginWithWeChat: async () => ({
-        user: {
-          id: "user-1",
-          email: "wechat_x@wechat.local",
-          password_login_enabled: false,
-          display_name: "微信昵称",
-          created_at: "2026-06-15T00:00:00",
-        },
-        needs_credentials: true,
-      }),
-    },
-  });
-  global.wx = {
-    showToast() {},
-  };
-  const context = {
-    ...pageContext(page),
-    async loadMe() {
-      refreshed = true;
-      this.setData({ loggedIn: true });
-    },
-  };
-
-  await page.submitWeChat.call(context);
-
-  assert.equal(refreshed, true);
-  assert.equal(context.data.loggedIn, true);
-  assert.equal(context.data.wechatLoading, false);
-  delete global.wx;
-});
-
 test("me validates email before setting Web login credentials", async () => {
   let credentialsCalls = 0;
   const { page } = loadMePage({
@@ -483,51 +456,6 @@ test("me saves Web login credentials without overriding wechat nickname", async 
   ]);
   assert.equal(refreshed, true);
   assert.equal(context.data.passwordLoginEnabled, true);
-  delete global.wx;
-});
-
-test("me refreshes profile after Pawtale account login", async () => {
-  const loginCalls = [];
-  let refreshed = false;
-  const { page } = loadMePage({
-    authExports: {
-      loginWithEmail: async (input) => {
-        loginCalls.push(input);
-        return {
-          id: "user-1",
-          email: input.email,
-          password_login_enabled: true,
-          display_name: "作者",
-          created_at: "2026-06-15T00:00:00",
-        };
-      },
-    },
-  });
-  global.wx = {
-    showToast() {},
-  };
-  const context = {
-    ...pageContext(page, {
-      emailInput: " author@example.com ",
-      password: "password123",
-    }),
-    async loadMe() {
-      refreshed = true;
-      this.setData({ loggedIn: true });
-    },
-  };
-
-  await page.submitAccount.call(context);
-
-  assert.deepEqual(loginCalls, [
-    {
-      email: "author@example.com",
-      password: "password123",
-    },
-  ]);
-  assert.equal(refreshed, true);
-  assert.equal(context.data.loggedIn, true);
-  assert.equal(context.data.loading, false);
   delete global.wx;
 });
 

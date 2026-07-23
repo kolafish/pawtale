@@ -27,11 +27,15 @@ export function switchToMe(): void {
   wx.switchTab({ url: ME_PAGE_URL });
 }
 
+export function navigateToLogin(): void {
+  wx.navigateTo({ url: LOGIN_PAGE_URL });
+}
+
 export function relaunchLogin(): void {
   wx.reLaunch({ url: LOGIN_PAGE_URL });
 }
 
-export function routeAuthError(error: unknown, target: AuthNavigationTarget = "me"): boolean {
+export function routeAuthError(error: unknown, target: AuthNavigationTarget = "login"): boolean {
   if (!isAuthError(error)) {
     return false;
   }

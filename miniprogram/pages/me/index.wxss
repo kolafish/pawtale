@@ -5,7 +5,7 @@
 }
 
 .profile-panel,
-.login-panel,
+.guest-login-panel,
 .credential-panel,
 .action-card,
 .project-overview,
@@ -17,8 +17,22 @@
   box-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
 }
 
-.login-panel {
-  padding: 36rpx 32rpx;
+.guest-login-panel {
+  padding: 56rpx 36rpx 40rpx;
+  text-align: center;
+}
+
+.guest-login-mark {
+  width: 104rpx;
+  height: 104rpx;
+  margin: 0 auto 28rpx;
+  border-radius: 999rpx;
+  background: #fff3ef;
+  color: #a64b3e;
+  font-size: 44rpx;
+  font-weight: 800;
+  line-height: 104rpx;
+  text-align: center;
 }
 
 .credential-panel {
@@ -39,6 +53,12 @@
   color: #7b6f68;
   font-size: 26rpx;
   line-height: 1.45;
+}
+
+.guest-login-panel .panel-copy {
+  max-width: 520rpx;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .field {
@@ -64,12 +84,7 @@
   font-size: 30rpx;
 }
 
-.account-panel {
-  margin-top: 12rpx;
-}
-
 .primary-button,
-.mode-button,
 .secondary-button {
   width: 100%;
   height: 98rpx;
@@ -84,7 +99,6 @@
 }
 
 .primary-button::after,
-.mode-button::after,
 .secondary-button::after {
   border: 0;
 }
@@ -92,11 +106,6 @@
 .primary-button {
   background: #a64b3e;
   color: #ffffff;
-}
-
-.mode-button {
-  background: #fff3ef;
-  color: #a64b3e;
 }
 
 .secondary-button {
@@ -107,12 +116,6 @@
 .primary-button[disabled] {
   background: #a64b3e;
   color: #ffffff;
-  opacity: 0.72;
-}
-
-.mode-button[disabled] {
-  background: #fff3ef;
-  color: #a64b3e;
   opacity: 0.72;
 }
 
@@ -526,7 +529,6 @@
 
 .me-page.large-text .primary-button,
 .me-page.large-text .secondary-button,
-.me-page.large-text .mode-button,
 .me-page.large-text .logout-button,
 .me-page.large-text .overview-button,
 .me-page.large-text .mini-button,

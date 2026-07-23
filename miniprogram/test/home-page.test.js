@@ -684,11 +684,11 @@ test("home sends voice starts without a project to project creation", async () =
   delete global.wx;
 });
 
-test("home sends login-required voice starts to the me tab", async () => {
-  const switches = [];
+test("home sends login-required voice starts to the dedicated login page", async () => {
+  const navigations = [];
   global.wx = {
-    switchTab(options) {
-      switches.push(options.url);
+    navigateTo(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadHomePage();
@@ -706,7 +706,34 @@ test("home sends login-required voice starts to the me tab", async () => {
 
   await page.startVoiceChat.call(context);
 
-  assert.deepEqual(switches, ["/pages/me/index"]);
+  assert.deepEqual(navigations, ["/pages/login/index"]);
+  delete global.wx;
+});
+
+test("home opens the project switcher from the current memoir", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadHomePage();
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      needsLogin: false,
+      projectId: "project-1",
+      hasProject: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  page.openProjects.call(context);
+
+  assert.deepEqual(navigations, ["/pages/projects/index"]);
   delete global.wx;
 });
 

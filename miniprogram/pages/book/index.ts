@@ -33,9 +33,9 @@ import {
 import { ApiError } from "../../services/request";
 import {
   isAuthError,
+  navigateToLogin,
   routeAuthError,
   switchToHome,
-  switchToMe,
 } from "../../services/navigation";
 import {
   datasetChoice,
@@ -577,7 +577,7 @@ definePage<BookPageData>()({
       trackAuditAction("book.plan_generate", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "已生成章节", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节生成失败" });
@@ -611,7 +611,7 @@ definePage<BookPageData>()({
       trackAuditAction("book.plan_confirm", { chapter_count: plan.chapters.length }, { projectId: this.data.projectId });
       wx.showToast({ title: "章节已确认", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "章节确认失败" });
@@ -739,7 +739,7 @@ definePage<BookPageData>()({
       trackAuditAction("book.chapter_title_generate", {}, { projectId: this.data.projectId });
       return true;
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return false;
       }
       const message = error instanceof Error ? error.message : "小余起名失败";
@@ -885,7 +885,7 @@ definePage<BookPageData>()({
       await this.applyUpdatedPlan(plan, toastTitle);
       return plan;
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return null;
       }
       this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
@@ -1077,7 +1077,7 @@ definePage<BookPageData>()({
 
   openLogin() {
     this.stopPlayback();
-    switchToMe();
+    navigateToLogin();
   },
 
   createProject() {

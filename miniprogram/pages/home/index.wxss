@@ -229,6 +229,50 @@
   line-height: 60rpx;
 }
 
+.active-project-link {
+  min-height: 88rpx;
+  margin: 8rpx -18rpx 0;
+  padding: 14rpx 18rpx;
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  transition-property: transform, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.active-project-link-hover {
+  background: #f5eee7;
+  transform: scale(0.98);
+}
+
+.active-project-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.active-project-link .project-title {
+  margin-top: 0;
+}
+
+.project-switch-hint {
+  display: block;
+  margin-top: 6rpx;
+  color: #7b6f68;
+  font-size: 24rpx;
+  font-weight: 500;
+  line-height: 34rpx;
+}
+
+.project-switch-action {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
 .project-meta {
   display: block;
   margin-top: 18rpx;
@@ -507,6 +551,12 @@
   margin-top: 18rpx;
   font-size: 68rpx;
   line-height: 86rpx;
+}
+
+.home-page.large-text .project-switch-hint,
+.home-page.large-text .project-switch-action {
+  font-size: 28rpx;
+  line-height: 1.45;
 }
 
 .home-page.large-text .launch-body,
