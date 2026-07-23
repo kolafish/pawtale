@@ -16,9 +16,8 @@
     </view>
   </block>
 
-  <block wx:else>
   <view class="section">
-    <text class="section-title">显示和环境</text>
+    <text class="section-title">显示与辅助</text>
     <view class="settings-card">
       <view class="switch-row">
         <view class="switch-copy">
@@ -28,24 +27,14 @@
         <switch
           checked="{{largeTextEnabled}}"
           color="#a64b3e"
+          aria-label="大字模式"
           bindchange="changeLargeText"
-        />
-      </view>
-      <view class="settings-divider"></view>
-      <view class="switch-row">
-        <view class="switch-copy">
-          <text class="action-title">自动检测我说话</text>
-          <text class="action-meta">环境嘈杂时可以关闭，改成点按钮后再开始回答。</text>
-        </view>
-        <switch
-          checked="{{autoBargeInEnabled}}"
-          color="#a64b3e"
-          bindchange="changeAutoBargeIn"
         />
       </view>
     </view>
   </view>
 
+  <block wx:if="{{loggedIn}}">
   <view class="profile-panel">
     <image wx:if="{{avatarUrl}}" class="avatar-image" src="{{avatarUrl}}" mode="aspectFill" />
     <view wx:else class="avatar">
@@ -75,8 +64,18 @@
   </view>
 
   <view wx:if="{{!passwordLoginEnabled}}" class="section">
-    <text class="section-title">Web 登录账号</text>
-    <view class="credential-panel">
+    <button
+      class="settings-disclosure"
+      aria-expanded="{{showAccountSettings}}"
+      bindtap="toggleAccountSettings"
+    >
+      <view class="settings-disclosure-copy">
+        <text class="action-title">补充邮箱登录</text>
+        <text class="action-meta">设置后也可以在 Web 端使用邮箱和密码登录。</text>
+      </view>
+      <text class="settings-disclosure-action">{{showAccountSettings ? "收起" : "设置"}}</text>
+    </button>
+    <view wx:if="{{showAccountSettings}}" class="credential-panel disclosure-content">
       <view class="field">
         <text class="field-label">邮箱</text>
         <input
@@ -158,7 +157,7 @@
 
   <view class="section">
     <text class="section-title">回忆录管理</text>
-    <view class="action-card" bindtap="openProjects" hover-class="tap-hover">
+    <button class="action-card" bindtap="openProjects" hover-class="tap-hover">
       <view>
         <text class="action-title">{{projectCount ? "管理回忆录" : "创建回忆录"}}</text>
         <text class="action-meta">
@@ -166,18 +165,18 @@
         </text>
       </view>
       <text class="chevron">›</text>
-    </view>
+    </button>
   </view>
 
   <view class="section">
     <text class="section-title">语音工具</text>
-    <view class="action-card" bindtap="openSpeakerTranscription" hover-class="tap-hover">
+    <button class="action-card" bindtap="openSpeakerTranscription" hover-class="tap-hover">
       <view>
         <text class="action-title">多人实时转写</text>
         <text class="action-meta">实时区分多人对话，本次转写不会保存到素材库。</text>
       </view>
       <text class="chevron">›</text>
-    </view>
+    </button>
   </view>
 
   <view class="section">
@@ -185,12 +184,47 @@
       <text class="section-title">声纹授权</text>
       <text class="setting-current {{voiceAuthorizationAgreed ? 'ok' : 'warn'}}">{{voiceAuthorizationStatusText}}</text>
     </view>
-    <view class="action-card" bindtap="openVoiceAuthorization" hover-class="tap-hover">
+    <button class="action-card" bindtap="openVoiceAuthorization" hover-class="tap-hover">
       <view>
         <text class="action-title">查看声纹授权协议</text>
         <text class="action-meta">{{voiceAuthorizationDetailText}}</text>
       </view>
       <text class="chevron">›</text>
+    </button>
+  </view>
+
+  <view class="section">
+    <button
+      class="settings-disclosure"
+      aria-expanded="{{showVoiceSettings}}"
+      bindtap="toggleVoiceSettings"
+    >
+      <view class="settings-disclosure-copy">
+        <text class="action-title">语音与 AI 设置</text>
+        <text class="action-meta">
+          {{aiModelLabel}} · 访谈 {{chatTTSVoiceLabel}} / {{chatTTSSpeedLabel}} · 成书 {{bookTTSVoiceLabel}} / {{bookTTSSpeedLabel}}
+        </text>
+      </view>
+      <text class="settings-disclosure-action">{{showVoiceSettings ? "收起" : "调整"}}</text>
+    </button>
+  </view>
+
+  <block wx:if="{{showVoiceSettings}}">
+  <view class="section settings-subsection">
+    <text class="section-title">访谈环境</text>
+    <view class="settings-card">
+      <view class="switch-row">
+        <view class="switch-copy">
+          <text class="action-title">自动检测我说话</text>
+          <text class="action-meta">环境嘈杂时可以关闭，改成点按钮后再开始回答。</text>
+        </view>
+        <switch
+          checked="{{autoBargeInEnabled}}"
+          color="#a64b3e"
+          aria-label="自动检测我说话"
+          bindchange="changeAutoBargeIn"
+        />
+      </view>
     </view>
   </view>
 
@@ -200,17 +234,18 @@
       <text class="setting-current">{{aiModelLabel}}</text>
     </view>
     <view class="voice-options">
-      <view
+      <button
         wx:for="{{aiModelOptions}}"
         wx:key="value"
         class="voice-option {{item.value === aiModel ? 'selected' : ''}}"
         data-model="{{item.value}}"
+        aria-pressed="{{item.value === aiModel}}"
         bindtap="selectAIModel"
         hover-class="tap-hover"
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
+      </button>
     </view>
   </view>
 
@@ -220,18 +255,19 @@
       <text class="setting-current">{{chatTTSVoiceLabel}}</text>
     </view>
     <view class="voice-options">
-      <view
+      <button
         wx:for="{{ttsVoiceOptions}}"
         wx:key="value"
         class="voice-option {{item.value === chatTTSVoice ? 'selected' : ''}}"
         data-scope="chat"
         data-voice="{{item.value}}"
+        aria-pressed="{{item.value === chatTTSVoice}}"
         bindtap="selectTTSVoice"
         hover-class="tap-hover"
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
+      </button>
     </view>
   </view>
 
@@ -241,18 +277,19 @@
       <text class="setting-current">{{chatTTSSpeedLabel}}</text>
     </view>
     <view class="voice-options">
-      <view
+      <button
         wx:for="{{ttsSpeedOptions}}"
         wx:key="value"
         class="voice-option {{item.value === chatTTSSpeedRatio ? 'selected' : ''}}"
         data-scope="chat"
         data-speed="{{item.value}}"
+        aria-pressed="{{item.value === chatTTSSpeedRatio}}"
         bindtap="selectTTSSpeed"
         hover-class="tap-hover"
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
+      </button>
     </view>
   </view>
 
@@ -262,18 +299,19 @@
       <text class="setting-current">{{bookTTSVoiceLabel}}</text>
     </view>
     <view class="voice-options">
-      <view
+      <button
         wx:for="{{ttsVoiceOptions}}"
         wx:key="value"
         class="voice-option {{item.value === bookTTSVoice ? 'selected' : ''}}"
         data-scope="book"
         data-voice="{{item.value}}"
+        aria-pressed="{{item.value === bookTTSVoice}}"
         bindtap="selectTTSVoice"
         hover-class="tap-hover"
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
+      </button>
     </view>
   </view>
 
@@ -283,20 +321,22 @@
       <text class="setting-current">{{bookTTSSpeedLabel}}</text>
     </view>
     <view class="voice-options">
-      <view
+      <button
         wx:for="{{ttsSpeedOptions}}"
         wx:key="value"
         class="voice-option {{item.value === bookTTSSpeedRatio ? 'selected' : ''}}"
         data-scope="book"
         data-speed="{{item.value}}"
+        aria-pressed="{{item.value === bookTTSSpeedRatio}}"
         bindtap="selectTTSSpeed"
         hover-class="tap-hover"
       >
         <text class="voice-label">{{item.label}}</text>
         <text class="voice-desc">{{item.description}}</text>
-      </view>
+      </button>
     </view>
   </view>
+  </block>
 
   <button class="logout-button" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出登录</button>
   </block>

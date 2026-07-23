@@ -92,6 +92,8 @@ interface MeData {
   ttsSpeedOptions: TTSSpeedOption[];
   largeTextEnabled: boolean;
   autoBargeInEnabled: boolean;
+  showAccountSettings: boolean;
+  showVoiceSettings: boolean;
 }
 
 interface MeDataset {
@@ -234,6 +236,8 @@ function loggedOutData(): Partial<MeData> {
     credentialEmail: "",
     credentialPassword: "",
     credentialsLoading: false,
+    showAccountSettings: false,
+    showVoiceSettings: false,
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -286,6 +290,8 @@ definePage<MeData>()({
     ttsSpeedOptions: TTS_SPEED_OPTIONS,
     largeTextEnabled: false,
     autoBargeInEnabled: true,
+    showAccountSettings: false,
+    showVoiceSettings: false,
   },
 
   async onShow() {
@@ -514,6 +520,14 @@ definePage<MeData>()({
       autoBargeInEnabled: settings.autoBargeInEnabled,
     });
     wx.showToast({ title: settings.autoBargeInEnabled ? "自动检测已打开" : "自动检测已关闭", icon: "none" });
+  },
+
+  toggleAccountSettings() {
+    this.setData({ showAccountSettings: !this.data.showAccountSettings });
+  },
+
+  toggleVoiceSettings() {
+    this.setData({ showVoiceSettings: !this.data.showVoiceSettings });
   },
 
   openVoiceAuthorization() {

@@ -254,12 +254,24 @@
 }
 
 .action-card {
+  width: 100%;
   min-height: 112rpx;
+  margin: 0;
   padding: 28rpx 30rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 24rpx;
+  border: 2rpx solid #e8d8c3;
+  color: inherit;
+  text-align: left;
+  line-height: normal;
+}
+
+.action-card::after,
+.settings-disclosure::after,
+.voice-option::after {
+  border: 0;
 }
 
 .action-title {
@@ -424,10 +436,61 @@
   background: rgba(43, 23, 19, 0.08);
 }
 
+.settings-disclosure {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 26rpx 28rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22rpx;
+  border: 2rpx solid #e8d8c3;
+  border-radius: 24rpx;
+  background: #fff;
+  color: inherit;
+  text-align: left;
+  line-height: normal;
+  box-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
+  transition: transform 140ms ease-out;
+}
+
+.settings-disclosure:active {
+  transform: scale(0.98);
+}
+
+.settings-disclosure-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-disclosure-action {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.disclosure-content {
+  margin-top: 16rpx;
+}
+
+.settings-subsection {
+  margin-top: 18rpx;
+}
+
 .voice-option {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
   padding: 20rpx 22rpx;
   border: 2rpx solid transparent;
   border-radius: 18rpx;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  line-height: normal;
 }
 
 .voice-option.selected {
@@ -488,7 +551,8 @@
 .me-page.large-text .action-meta,
 .me-page.large-text .voice-desc,
 .me-page.large-text .profile-email,
-.me-page.large-text .setting-current {
+.me-page.large-text .setting-current,
+.me-page.large-text .settings-disclosure-action {
   font-size: 30rpx;
   line-height: 1.5;
 }
@@ -539,7 +603,8 @@
 
 .me-page.large-text .voice-option,
 .me-page.large-text .switch-row,
-.me-page.large-text .action-card {
+.me-page.large-text .action-card,
+.me-page.large-text .settings-disclosure {
   min-height: 120rpx;
 }
 
