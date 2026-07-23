@@ -75,7 +75,7 @@
 - UI 视觉、大字模式、滚动、播放进度、后台退出、麦克风权限等体验问题，单元测试只能覆盖状态逻辑；合入前应补充人工或自动化 smoke 验证，并在最终汇报说明是否执行。
 - 删除低价值测试优先于维护它：如果一个测试只证明实现细节存在、不能复现真实问题、经常阻碍合理重排，就应删除或改写成业务行为/回归测试。
 
-## Memoir Voice Chat Redesign Context
+## Memoir Product Architecture Context
 
 - 回忆录小程序实时语音架构以 `docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md` 为准。
 - 项目级访谈与成书协作架构以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
