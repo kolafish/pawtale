@@ -41,7 +41,7 @@
           <text class="option-label">{{item.label}}</text>
           <text class="option-desc">{{item.description}}</text>
         </view>
-        <view class="selection-mark {{item.value === aiModel ? 'visible' : ''}}">
+        <view class="selection-mark {{item.value === aiModel ? 'visible' : ''}}" aria-hidden="true">
           <text>✓</text>
         </view>
       </view>
@@ -68,7 +68,7 @@
             <text class="option-label">{{item.label}}</text>
             <text class="option-desc">{{item.description}}</text>
           </view>
-          <view class="selection-mark {{item.value === chatTTSVoice ? 'visible' : ''}}">
+          <view class="selection-mark {{item.value === chatTTSVoice ? 'visible' : ''}}" aria-hidden="true">
             <text>✓</text>
           </view>
         </view>
@@ -114,7 +114,7 @@
             <text class="option-label">{{item.label}}</text>
             <text class="option-desc">{{item.description}}</text>
           </view>
-          <view class="selection-mark {{item.value === bookTTSVoice ? 'visible' : ''}}">
+          <view class="selection-mark {{item.value === bookTTSVoice ? 'visible' : ''}}" aria-hidden="true">
             <text>✓</text>
           </view>
         </view>
