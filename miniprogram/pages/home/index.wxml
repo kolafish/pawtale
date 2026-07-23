@@ -94,26 +94,49 @@
 
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <button
-        class="{{resumeAskButtonClass}} topic-map"
-        bindtap="openTopicMap"
-        hover-class="{{resumeAskButtonHoverClass}}"
+        class="more-actions-toggle"
+        bindtap="toggleMoreActions"
+        hover-class="more-actions-toggle-hover"
+        aria-expanded="{{showMoreActions}}"
+        aria-label="{{moreActionsToggleAriaLabel}}"
       >
-        看看聊过的话题
+        <text>{{moreActionsToggleText}}</text>
+        <text class="more-actions-chevron">{{showMoreActions ? "⌃" : "⌄"}}</text>
       </button>
-      <button
-        class="{{resumeAskButtonClass}} completion"
-        bindtap="startBookCompletion"
-        hover-class="{{resumeAskButtonHoverClass}}"
-      >
-        {{completionButtonTitle}}
-      </button>
-      <button
-        class="{{resumeAskButtonClass}}"
-        bindtap="startHumanInterview"
-        hover-class="{{resumeAskButtonHoverClass}}"
-      >
-        人工访谈
-      </button>
+      <view wx:if="{{showMoreActions}}" class="more-actions-panel">
+        <button
+          class="{{resumeAskButtonClass}}"
+          bindtap="startAlternateGuidance"
+          hover-class="{{resumeAskButtonHoverClass}}"
+        >
+          <text>{{alternateModeButtonTitle}}</text>
+          <text class="resume-action-hint">换一种讲述方式</text>
+        </button>
+        <button
+          class="{{resumeAskButtonClass}} topic-map"
+          bindtap="openTopicMap"
+          hover-class="{{resumeAskButtonHoverClass}}"
+        >
+          <text>看看聊过的话题</text>
+          <text class="resume-action-hint">回顾已经讲过的内容</text>
+        </button>
+        <button
+          class="{{resumeAskButtonClass}} completion"
+          bindtap="startBookCompletion"
+          hover-class="{{resumeAskButtonHoverClass}}"
+        >
+          <text>{{completionButtonTitle}}</text>
+          <text class="resume-action-hint">查找全书还缺的内容</text>
+        </button>
+        <button
+          class="{{resumeAskButtonClass}}"
+          bindtap="startHumanInterview"
+          hover-class="{{resumeAskButtonHoverClass}}"
+        >
+          <text>人工访谈</text>
+          <text class="resume-action-hint">由家人分别记录问与答</text>
+        </button>
+      </view>
     </view>
   </view>
 

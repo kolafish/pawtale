@@ -171,6 +171,8 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonClass,
       voiceStartButtonHoverClass: homeViewPatch({ ...baseData, creatingVoice: true }).voiceStartButtonHoverClass,
       showResumeActions: homeViewPatch(baseData).showResumeActions,
+      moreActionsToggleText: homeViewPatch(baseData).moreActionsToggleText,
+      alternateModeButtonTitle: homeViewPatch(baseData).alternateModeButtonTitle,
       showVoiceAuthorizationPanel: homeViewPatch(baseData).showVoiceAuthorizationPanel,
     },
     {
@@ -183,9 +185,91 @@ test("home view patch keeps first-screen template state simple", () => {
       voiceStartButtonClass: "voice-start-button button-blocked",
       voiceStartButtonHoverClass: "none",
       showResumeActions: true,
+      moreActionsToggleText: "其他讲述与整理方式",
+      alternateModeButtonTitle: "让小余陪着问",
       showVoiceAuthorizationPanel: false,
     },
   );
+});
+
+test("home primary CTA and alternate action follow the current project's guidance mode", () => {
+  const { homeViewPatch } = loadHomePage().mod;
+  const baseData = {
+    ...loadHomePage().page.data,
+    hasProject: true,
+    needsLogin: false,
+    voiceAuthorizationAgreed: true,
+  };
+
+  const guided = homeViewPatch({
+    ...baseData,
+    selectedMode: "guided_interview",
+    guidanceLabel: "小余陪着问",
+  });
+  assert.equal(guided.modeTagText, "小余陪着问");
+  assert.equal(guided.primaryVoiceButtonTitle, "让小余陪着问");
+  assert.equal(guided.voiceStartNoteText, "小余会从一件具体的事开始问起。");
+  assert.equal(guided.alternateModeButtonTitle, "我想自己讲");
+
+  const expanded = homeViewPatch({
+    ...baseData,
+    showMoreActions: true,
+  });
+  assert.equal(expanded.moreActionsToggleText, "收起其他方式");
+  assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述与整理方式");
+});
+
+test("home only shows project actions and voice consent after a usable project has loaded", () => {
+  const loaded = loadHomePage();
+  const { homeViewPatch } = loaded.mod;
+  const baseData = {
+    ...loaded.page.data,
+    loading: false,
+    needsLogin: false,
+    hasProject: true,
+    voiceAuthorizationAgreed: false,
+  };
+
+  assert.equal(homeViewPatch(baseData).showResumeActions, true);
+  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, true);
+  assert.equal(homeViewPatch({ ...baseData, loading: true }).showResumeActions, false);
+  assert.equal(homeViewPatch({ ...baseData, loading: true }).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
+});
+
+test("home primary and alternate CTAs create sessions with their displayed guidance modes", async () => {
+  const createdModes = [];
+  global.wx = {
+    navigateTo() {},
+  };
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      createMemoirVoiceSession: async (input) => {
+        createdModes.push(input.guidance_mode);
+        return { session: { id: `voice-${createdModes.length}` } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      selectedMode: "guided_interview",
+      projectId: "project-1",
+      hasProject: true,
+      voiceAuthorizationAgreed: true,
+    },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  await page.startPrimaryVoiceChat.call(context);
+  await page.startAlternateGuidance.call(context);
+
+  assert.deepEqual(createdModes, ["guided_interview", "free_narration"]);
+  delete global.wx;
 });
 
 test("home voice CTA uses a view shell instead of native button shrink wrapping", () => {

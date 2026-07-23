@@ -733,34 +733,72 @@
 
 .history-panel {
   margin-top: 30rpx;
-  padding: 34rpx;
+  padding: 12rpx;
   border: 0;
-  border-radius: 30rpx;
+  border-radius: 24rpx;
   background: #ffffff;
   box-shadow:
     0 0 0 1rpx rgba(43, 23, 19, 0.06),
     0 10rpx 26rpx rgba(93, 61, 42, 0.06);
 }
 
-.history-header {
+.history-toggle {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 88rpx;
+  margin: 0;
+  border: 0;
+  border-radius: 18rpx;
+  background: transparent;
+  color: #2b1713;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  color: #2b1713;
-  font-size: 34rpx;
+  gap: 18rpx;
+  padding: 14rpx 18rpx;
+  text-align: left;
+  transition-property: transform, background-color;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.history-toggle::after {
+  border: 0;
+}
+
+.history-toggle-hover {
+  background: #f8f2e8;
+  transform: scale(0.98);
+}
+
+.history-heading {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+  font-size: 32rpx;
   font-weight: 700;
+  line-height: 44rpx;
 }
 
 .history-count {
   color: #8b6a55;
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 38rpx;
   font-variant-numeric: tabular-nums;
 }
 
-.empty-state {
-  margin-top: 22rpx;
-  color: #7b6f68;
-  font-size: 30rpx;
-  line-height: 1.5;
+.history-toggle-text {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 42rpx;
+}
+
+.history-lines {
+  padding: 0 14rpx 14rpx;
 }
 
 .transcript-line {
@@ -1151,10 +1189,14 @@
 }
 
 .voice-chat-page.large-text .topic-panel,
-.voice-chat-page.large-text .assistant-panel,
-.voice-chat-page.large-text .history-panel {
+.voice-chat-page.large-text .assistant-panel {
   padding: 36rpx 32rpx;
   border-radius: 36rpx;
+}
+
+.voice-chat-page.large-text .history-panel {
+  padding: 14rpx;
+  border-radius: 30rpx;
 }
 
 .voice-chat-page.large-text .completion-issue-panel {
@@ -1278,7 +1320,6 @@
 
 .voice-chat-page.large-text .capture-strip,
 .voice-chat-page.large-text .inline-help-button,
-.voice-chat-page.large-text .empty-state,
 .voice-chat-page.large-text .voice-auth-desc,
 .voice-chat-page.large-text .error,
 .voice-chat-page.large-text .session-state-strip,
@@ -1287,8 +1328,20 @@
   line-height: 56rpx;
 }
 
-.voice-chat-page.large-text .history-header {
+.voice-chat-page.large-text .history-toggle {
+  min-height: 112rpx;
+  padding: 18rpx 22rpx;
+}
+
+.voice-chat-page.large-text .history-heading {
   font-size: 38rpx;
+  line-height: 56rpx;
+}
+
+.voice-chat-page.large-text .history-count,
+.voice-chat-page.large-text .history-toggle-text {
+  font-size: 32rpx;
+  line-height: 48rpx;
 }
 
 .voice-chat-page.large-text .transcript-line {
@@ -1529,20 +1582,13 @@
 .voice-chat-page.large-text.assistant-focus .history-panel,
 .voice-chat-page.large-text.capture-focus .history-panel {
   margin-top: 24rpx;
-  padding: 26rpx 28rpx;
+  padding: 12rpx;
   border-radius: 30rpx;
 }
 
-.voice-chat-page.large-text.assistant-focus .history-header,
-.voice-chat-page.large-text.capture-focus .history-header {
-  font-size: 34rpx;
-}
-
-.voice-chat-page.large-text.assistant-focus .empty-state,
-.voice-chat-page.large-text.capture-focus .empty-state {
-  margin-top: 16rpx;
-  font-size: 30rpx;
-  line-height: 46rpx;
+.voice-chat-page.large-text.assistant-focus .history-toggle,
+.voice-chat-page.large-text.capture-focus .history-toggle {
+  min-height: 100rpx;
 }
 
 .voice-chat-page.large-text.assistant-focus .transcript-line,

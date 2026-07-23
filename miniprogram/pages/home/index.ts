@@ -86,6 +86,10 @@ interface HomeData {
   resumeAskButtonHoverClass: string;
   completionButtonTitle: string;
   showResumeActions: boolean;
+  showMoreActions: boolean;
+  moreActionsToggleText: string;
+  moreActionsToggleAriaLabel: string;
+  alternateModeButtonTitle: string;
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
@@ -114,6 +118,9 @@ type HomeViewPatch = Pick<
   | "resumeAskButtonHoverClass"
   | "completionButtonTitle"
   | "showResumeActions"
+  | "moreActionsToggleText"
+  | "moreActionsToggleAriaLabel"
+  | "alternateModeButtonTitle"
   | "showVoiceAuthorizationPanel"
   | "homePageClass"
 >;
@@ -226,7 +233,7 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
     launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
     panelLabelText: state.loading ? "正在准备" : (state.hasProject ? "今天接着聊" : "准备开始"),
-    modeTagText: state.loading ? "加载中" : (state.hasProject ? "慢慢讲" : "待创建"),
+    modeTagText: state.loading ? "加载中" : (state.hasProject ? state.guidanceLabel : "待创建"),
     projectHeadingText: state.loading
       ? "正在加载回忆录"
       : (
@@ -251,7 +258,15 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
             : (
                 !state.hasProject
                   ? "创建回忆录"
-                  : (!state.voiceAuthorizationAgreed ? "同意协议后开始" : (state.creatingVoice ? "正在准备" : "随便讲一段"))
+                  : (
+                      !state.voiceAuthorizationAgreed
+                        ? "同意协议后开始"
+                        : (
+                            state.creatingVoice
+                              ? "正在准备"
+                              : (state.selectedMode === "guided_interview" ? "让小余陪着问" : "随便讲一段")
+                          )
+                    )
               )
         ),
     voiceStartNoteText: state.loading
@@ -262,14 +277,32 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
             : (
                 !state.hasProject
                   ? "先起个名字，我再听您讲。"
-                  : (!state.voiceAuthorizationAgreed ? "同意后才会打开麦克风。" : (state.creatingVoice ? "我马上开始听。" : "说一两句也可以，我会帮您记下来。"))
+                  : (
+                      !state.voiceAuthorizationAgreed
+                        ? "同意后才会打开麦克风。"
+                        : (
+                            state.creatingVoice
+                              ? "我马上开始听。"
+                              : (
+                                  state.selectedMode === "guided_interview"
+                                    ? "小余会从一件具体的事开始问起。"
+                                    : "说一两句也可以，我会帮您记下来。"
+                                )
+                          )
+                    )
               )
         ),
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
     completionButtonTitle: "帮我补全这本书",
-    showResumeActions: state.hasProject && !state.needsLogin,
-    showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
+    showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
+    moreActionsToggleText: state.showMoreActions ? "收起其他方式" : "其他讲述与整理方式",
+    moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述与整理方式" : "展开其他讲述与整理方式",
+    alternateModeButtonTitle: state.selectedMode === "guided_interview" ? "我想自己讲" : "让小余陪着问",
+    showVoiceAuthorizationPanel: state.hasProject
+      && !state.needsLogin
+      && !state.loading
+      && !state.voiceAuthorizationAgreed,
   };
 }
 
@@ -336,7 +369,11 @@ definePage<HomeData>()({
     resumeAskButtonHoverClass: "resume-ask-button-hover",
     completionButtonTitle: "帮我补全这本书",
     showResumeActions: false,
-    showVoiceAuthorizationPanel: true,
+    showMoreActions: false,
+    moreActionsToggleText: "其他讲述与整理方式",
+    moreActionsToggleAriaLabel: "展开其他讲述与整理方式",
+    alternateModeButtonTitle: "让小余陪着问",
+    showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
   },
@@ -392,6 +429,7 @@ definePage<HomeData>()({
         launchVariant,
         ...launchCopy(launchVariant, projectDisplayTitle),
         hasProject,
+        showMoreActions: false,
         ...guidancePatch(profile.defaultGuidanceMode),
       });
     } catch (error) {
@@ -410,6 +448,7 @@ definePage<HomeData>()({
           launchVariant: "none",
           ...launchCopy("none", ""),
           hasProject: false,
+          showMoreActions: false,
           ...guidancePatch("free_narration"),
         });
         return;
@@ -469,7 +508,7 @@ definePage<HomeData>()({
   },
 
   async startPrimaryVoiceChat() {
-    await this.startVoiceChatWithMode(this.data.hasProject ? "free_narration" : this.data.selectedMode, "home_resume");
+    await this.startVoiceChatWithMode(this.data.selectedMode, "home_resume");
   },
 
   async startLaunchVoiceChat() {
@@ -478,6 +517,17 @@ definePage<HomeData>()({
 
   async startFreeNarration() {
     await this.startVoiceChatWithMode("free_narration", "home_resume");
+  },
+
+  async startAlternateGuidance() {
+    const mode = this.data.selectedMode === "guided_interview"
+      ? "free_narration"
+      : "guided_interview";
+    await this.startVoiceChatWithMode(mode, "home_resume");
+  },
+
+  toggleMoreActions() {
+    setHomeData(this, { showMoreActions: !this.data.showMoreActions });
   },
 
   startBookCompletion() {
