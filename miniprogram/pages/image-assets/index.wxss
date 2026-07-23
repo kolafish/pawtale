@@ -1,35 +1,9 @@
 .image-assets-page {
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 44rpx 30rpx 36rpx;
+  padding: 28rpx 30rpx 36rpx;
   background: #fcf7ed;
   color: #2b1713;
-}
-
-.top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24rpx;
-}
-
-.title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 8rpx;
-}
-
-.page-title {
-  font-size: 52rpx;
-  font-weight: 900;
-  line-height: 1.15;
-  color: #25130f;
-}
-
-.page-meta {
-  font-size: 28rpx;
-  color: #76685f;
-  line-height: 1.35;
 }
 
 .error {

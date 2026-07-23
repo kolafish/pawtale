@@ -1,12 +1,6 @@
 <view class="{{pageClass}}">
-  <view class="top-row">
-    <view class="back-hit" bindtap="goBack">
-      <text class="back-mark">‹</text>
-    </view>
-    <view class="title-block">
-      <text class="page-title">这段讲述</text>
-      <text class="page-meta">{{item ? (item.project_title || "我的回忆录") : "讲述记录"}}</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">{{item ? (item.project_title || "我的回忆录") : "讲述记录"}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>

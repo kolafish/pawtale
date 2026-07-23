@@ -1,12 +1,6 @@
 <view class="workspace-page">
-  <view class="page-header">
-    <view class="back-hit" bindtap="goBack" role="button" aria-label="返回">
-      <text class="back-mark">‹</text>
-    </view>
-    <view class="header-main">
-      <text class="page-title">{{workspace ? workspace.chapter_title : "本章正文"}}</text>
-      <text class="page-meta">只处理当前最重要的一步</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">只处理当前最重要的一步</text>
   </view>
 
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>

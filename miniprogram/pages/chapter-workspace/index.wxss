@@ -1,45 +1,17 @@
 .workspace-page {
   min-height: 100vh;
-  padding: 34rpx 30rpx 112rpx;
+  padding: 24rpx 30rpx 112rpx;
   box-sizing: border-box;
   background: #f7f4ee;
   color: #2b211e;
 }
 
-.page-header,
 .draft-heading,
 .edit-actions {
   display: flex;
   align-items: center;
 }
 
-.page-header {
-  gap: 18rpx;
-}
-
-.back-hit {
-  width: 88rpx;
-  height: 88rpx;
-  margin-left: -18rpx;
-  flex: 0 0 88rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 68rpx;
-  line-height: 1;
-}
-
-.header-main {
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.page-title,
-.page-meta,
 .section-kicker,
 .status-title,
 .status-detail,
@@ -60,20 +32,6 @@
 .loading-state {
   display: block;
   overflow-wrap: anywhere;
-}
-
-.page-title {
-  font-size: 40rpx;
-  font-weight: 700;
-  line-height: 52rpx;
-  text-wrap: balance;
-}
-
-.page-meta {
-  margin-top: 4rpx;
-  color: #756963;
-  font-size: 24rpx;
-  line-height: 34rpx;
 }
 
 .loading-state {

@@ -7,7 +7,6 @@ import {
   listMemoirProjects,
 } from "../../services/memoir";
 import { projectProfileSummary } from "../../services/memoir-project-profile";
-import { switchToMe } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -171,9 +170,5 @@ definePage<ProjectsData>()({
     } finally {
       this.setData({ busy: false, deletingId: "" });
     }
-  },
-
-  openMe() {
-    switchToMe();
   },
 });

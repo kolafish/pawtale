@@ -1,9 +1,6 @@
 <view class="{{pageClass}}">
-  <view class="top-row">
-    <view class="title-block">
-      <text class="page-title">讲述记录</text>
-      <text class="page-meta">{{pageMetaText}}</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">{{pageMetaText}}</text>
   </view>
 
   <view wx:if="{{activeProjectId}}" class="search-panel">

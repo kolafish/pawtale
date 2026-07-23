@@ -1,9 +1,6 @@
 <view class="progress-page">
-  <view class="top-row">
-    <view>
-      <text class="page-title">讲述进度</text>
-      <text class="page-subtitle">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的讲述进度"}}</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的讲述进度"}}</text>
     <button class="refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadProgress">刷新</button>
   </view>
 

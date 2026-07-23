@@ -1,9 +1,6 @@
 <view class="{{pageClass}}">
-  <view class="top-row">
-    <view class="title-block">
-      <text class="page-title">书稿</text>
-      <text class="page-meta">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
-    </view>
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
     <button
       wx:if="{{bookContent}}"
       class="book-share-button"

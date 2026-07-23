@@ -1,11 +1,4 @@
 <view class="projects-page">
-  <view class="top-row">
-    <view class="back-hit" bindtap="openMe">
-      <text class="back-mark">‹</text>
-    </view>
-    <text class="page-title">我的回忆录</text>
-  </view>
-
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="action-bar">

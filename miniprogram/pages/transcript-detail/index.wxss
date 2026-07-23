@@ -1,49 +1,8 @@
 .detail-page {
   min-height: 100vh;
-  padding: 44rpx 36rpx 120rpx;
+  padding: 28rpx 36rpx 120rpx;
   background: #f7f3ed;
   box-sizing: border-box;
-}
-
-.top-row {
-  display: flex;
-  align-items: center;
-  gap: 22rpx;
-  margin-bottom: 28rpx;
-}
-
-.back-hit {
-  width: 72rpx;
-  height: 72rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.back-mark {
-  color: #a64b3e;
-  font-size: 72rpx;
-  line-height: 1;
-}
-
-.title-block {
-  min-width: 0;
-}
-
-.page-title {
-  display: block;
-  color: #2b1713;
-  font-size: 44rpx;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.page-meta {
-  display: block;
-  margin-top: 8rpx;
-  color: #7b6f68;
-  font-size: 26rpx;
-  line-height: 1.35;
 }
 
 .error {
@@ -1045,20 +1004,9 @@
 }
 
 .detail-page.large-text {
-  padding: 40rpx 24rpx 120rpx;
+  padding: 28rpx 24rpx 120rpx;
 }
 
-.detail-page.large-text .back-hit {
-  min-width: 48px;
-  min-height: 48px;
-}
-
-.detail-page.large-text .page-title {
-  font-size: 50rpx;
-  line-height: 66rpx;
-}
-
-.detail-page.large-text .page-meta,
 .detail-page.large-text .record-meta,
 .detail-page.large-text .section-hint,
 .detail-page.large-text .offline-asr-detail,
