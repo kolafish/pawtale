@@ -136,3 +136,28 @@ test("book reader keeps flat chapter content as a historical-version fallback", 
     "我小时候常在院子里晒太阳。",
   );
 });
+
+test("book reader opens the version selected by the export flow", async () => {
+  const latest = sampleFinishedBook("最新版正文");
+  const historical = {
+    ...latest.latest_version,
+    id: "book-output-version-history",
+    version: 0,
+    content: "历史版本正文",
+  };
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => ({
+      ...latest,
+      versions: [historical, ...(latest.versions || [])],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project/1",
+    versionId: "book-output-version-history",
+  });
+
+  assert.equal(context.data.versionId, "book-output-version-history");
+  assert.equal(context.data.bookContent, "历史版本正文");
+});

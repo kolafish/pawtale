@@ -596,6 +596,7 @@ definePage<BookExportData>()({
     wx.navigateTo({
       url: pageUrl("/pages/book-reader/index", {
         projectId: this.data.projectId,
+        versionId: this.data.bookSelectedVersionId,
       }),
     });
   },

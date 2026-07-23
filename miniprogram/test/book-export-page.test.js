@@ -145,6 +145,7 @@ test("book export keeps advanced settings collapsed and opens immersive reading"
   const context = pageContext(page, {
     projectId: "project/1",
     bookContent: "全书正文",
+    bookSelectedVersionId: "book-output-version-2",
   });
 
   assert.equal(context.data.showBookSettings, false);
@@ -153,7 +154,7 @@ test("book export keeps advanced settings collapsed and opens immersive reading"
 
   page.openBookReader.call(context);
   assert.deepEqual(navigations, [
-    "/pages/book-reader/index?projectId=project%2F1",
+    "/pages/book-reader/index?projectId=project%2F1&versionId=book-output-version-2",
   ]);
   delete global.wx;
 });
