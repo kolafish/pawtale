@@ -402,6 +402,8 @@ declare namespace WechatMiniprogram {
     showShareMenu?(option: ShowShareMenuOption): void;
     shareFileMessage?(option: ShareFileMessageOption): void;
     previewImage(option: PreviewImageOption): void;
+    enableAlertBeforeUnload?(option: { message: string }): void;
+    disableAlertBeforeUnload?(option?: Record<string, never>): void;
     setInnerAudioOption?(option: InnerAudioOption): void;
     navigateTo(option: NavigateOption): void;
     redirectTo(option: NavigateOption): void;

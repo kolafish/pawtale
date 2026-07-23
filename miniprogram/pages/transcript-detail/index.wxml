@@ -26,7 +26,7 @@
       <text class="record-meta">{{item.recordMetaText}}</text>
       <text wx:if="{{item.transcriptionNoticeText}}" class="transcription-notice">{{item.transcriptionNoticeText}}</text>
       <text class="book-status {{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
-      <view class="actions-row primary-actions">
+      <view wx:if="{{!item.isEditing}}" class="actions-row primary-actions">
         <button
           wx:if="{{item.canRecoverTranscription}}"
           class="primary-button"
@@ -39,22 +39,32 @@
         <button
           wx:else
           class="primary-button"
-          bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || item.canRecoverTranscription}}"
-        >
-          编辑成书文字
-        </button>
-        <button
-          class="ghost-button"
           bindtap="playAnswerAudio"
           disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayAnswerAudio}}"
         >
           {{playingAudioKind === "answer" ? "停止讲述" : "听讲述原音"}}
         </button>
+        <button
+          wx:if="{{!item.canRecoverTranscription}}"
+          class="ghost-button"
+          bindtap="beginEdit"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditRecording || voiceEditLoading || voiceEditSaving}}"
+        >
+          编辑成书文字
+        </button>
+      </view>
+      <view wx:else class="edit-mode-summary">
+        <view class="edit-mode-copy">
+          <text class="edit-mode-title">正在编辑成书文字</text>
+          <text class="edit-mode-hint">原始录音和识别原文不会被覆盖</text>
+        </view>
+        <button class="edit-exit-button" bindtap="cancelEdit" disabled="{{saving || deleting}}">
+          退出编辑
+        </button>
       </view>
     </view>
 
-    <view wx:if="{{answerPlaybackVisible}}" class="playback-panel">
+    <view wx:if="{{!item.isEditing && answerPlaybackVisible}}" class="playback-panel">
       <view class="playback-head">
         <view class="section-heading">
           <text class="section-title">讲述原音</text>
@@ -121,21 +131,32 @@
         auto-height
         cursor-spacing="24"
       />
+      <button
+        class="edit-reference-toggle"
+        bindtap="toggleEditReference"
+        aria-expanded="{{editReferenceExpanded}}"
+      >
+        {{editReferenceExpanded ? "收起原始讲述" : "查看原始讲述作为参考"}}
+      </button>
+      <view wx:if="{{editReferenceExpanded}}" class="edit-reference-panel">
+        <text class="edit-reference-label">原始讲述</text>
+        <text class="edit-reference-text">{{item.transcript_raw}}</text>
+      </view>
       <view class="actions-row">
         <button class="ghost-button" bindtap="resetToRaw" disabled="{{saving || deleting || convertingQuestionToAnswer}}">恢复原始讲述</button>
-        <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting || convertingQuestionToAnswer}}">取消</button>
+        <button class="ghost-button" bindtap="cancelEdit" disabled="{{saving || deleting || convertingQuestionToAnswer}}">取消编辑</button>
         <button
           class="primary-button"
           bindtap="saveTranscript"
           loading="{{saving}}"
           disabled="{{saving || deleting || convertingQuestionToAnswer || !item.changed}}"
         >
-          保存
+          保存修改
         </button>
       </view>
     </view>
 
-    <view wx:if="{{item.question_text}}" class="section-card question-card">
+    <view wx:if="{{!item.isEditing && item.question_text}}" class="section-card question-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">{{item.questionTitleText}}</text>
@@ -171,7 +192,7 @@
       </view>
     </view>
 
-    <view wx:if="{{item.showOfflineAsr && !item.canRecoverTranscription}}" class="section-card offline-asr-card">
+    <view wx:if="{{!item.isEditing && item.showOfflineAsr && !item.canRecoverTranscription}}" class="section-card offline-asr-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">离线加强识别</text>
@@ -196,8 +217,8 @@
     <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card edit-tools-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">修改这段文字</text>
-          <text class="section-hint">直接编辑，或说出要替换的词、句子和片段。</text>
+          <text class="section-title">用语音说修改</text>
+          <text class="section-hint">说出要替换的词、句子或片段，小余先给出预览，确认后才保存。</text>
         </view>
         <text class="section-count voice-edit-count {{voiceEditStatusClass}}">{{voiceEditStatusText}}</text>
       </view>
@@ -213,13 +234,6 @@
       <view class="actions-row edit-choice-actions">
         <button
           class="primary-button"
-          bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || item.isEditing || voiceEditRecording || voiceEditLoading || voiceEditSaving}}"
-        >
-          手动编辑
-        </button>
-        <button
-          class="ghost-button"
           bindtap="startVoiceEdit"
           loading="{{voiceEditLoading}}"
           disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
@@ -449,7 +463,7 @@
       </view>
     </view>
 
-    <view class="section-card">
+    <view wx:if="{{!item.isEditing}}" class="section-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">章节位置</text>
@@ -459,7 +473,7 @@
       </view>
     </view>
 
-    <view class="section-card raw-material-card">
+    <view wx:if="{{!item.isEditing}}" class="section-card raw-material-card">
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">原始讲述</text>
@@ -477,7 +491,7 @@
       </text>
     </view>
 
-    <view class="section-card more-actions-card">
+    <view wx:if="{{!item.isEditing}}" class="section-card more-actions-card">
       <view class="section-head more-actions-head" bindtap="toggleMoreActionsExpanded">
         <view class="section-heading">
           <text class="section-title">更多操作</text>
