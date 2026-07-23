@@ -1,82 +1,63 @@
-# 余主任留声机小程序
+# “余主任留声机”微信小程序
 
-当前主线是实时语音聊天形态，详见 [../docs/MEMOIR_VOICE_CHAT_REDESIGN.md](../docs/MEMOIR_VOICE_CHAT_REDESIGN.md)。
+小程序是 Pawtale 的回忆录讲述与移动端成书界面。
+
+当前语音和成书架构分别见：
+
+- [实时语音架构](../docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
+- [访谈与成书协作架构](../docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
+- [事实、素材与成书不变量](../docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)
+
+## 当前用户动线
 
 ```text
-登录
- -> 微信登录或 Pawtale 账号登录
- -> 首次微信登录直接进入小程序，可在“我的”里补 Web 端邮箱密码
- -> 选择或创建回忆录
- -> 选择自由讲述或 AI 引导
- -> 创建 voice session
- -> 通过 WSS 发送录音帧
- -> Streaming ASR 实时识别并显示大字文字
- -> AI 基于当前项目上下文追问、鼓励或引导
- -> 保存 voice session、chat message、utterance、音频证据
- -> 后端持续沉淀进度快照、自动整理事件和成书素材
+微信登录 / Pawtale 账号登录
+  → 创建或选择回忆录
+  → 同意语音授权
+  → 自由讲述、AI 引导、人工访谈或成书补讲
+  → 实时录音、Streaming ASR、AI 回应和 Streaming TTS
+  → 保存讲述记录、原始音频和转写版本
+  → 搜索、回听、校正和分享
+  → 生成章节目录并逐章补全
+  → 确认章节、生成全书
+  → 阅读和导出
 ```
 
-下一阶段小程序侧重点不是继续单独追“流式 TTS”，而是配合后端完成：
+## 一级导航
 
-- AI 说话时支持用户点击麦克风抢占，立即停止 AI 播放并开始录音。
-- 语音聊天展示来自后端真实项目进度的自然鼓励。
-- 成书和进度页面消费后端自动归章、自动补写、章节审计和待确认事件。
-- 语音编辑只负责录音、展示 AI 解释和操作预览；复杂语义判断放到后端 planner。
+- `pages/home`：当前回忆录、继续讲述和折叠后的其他讲述方式；
+- `pages/transcripts`：讲述记录、文字/语音搜索和转写恢复；
+- `pages/book`：章节、成书进度、图片素材和后台整理事件；
+- `pages/me`：账号、回忆录管理、AI/TTS 设置和大字模式。
+
+## 功能页面
+
+### 账号与项目
+
+- `pages/login`：微信登录，或展开使用 Pawtale 邮箱账号；
+- `pages/projects`：创建、切换、重命名和删除回忆录；
+- `pages/project-edit`：回忆录名称、叙述者资料和默认讲述方式；
+- `pages/voice-authorization`：语音、转写、音频留存和 AI 处理的明确授权。
+
+### 语音与素材
+
+- `pages/voice-chat`：录音、partial/final 转写、动态追问、流式播放、自动续听、用户打断和断线恢复；
+- `pages/topic-map`：查看已经讲过的话题，并记录“够了/不适合/不想聊”等用户决定；
+- `pages/transcript-detail`：回听、阅读/编辑切换、人工校正、重新识别、清理、删除和分享视频；
+- `pages/voice-progress`：当前回忆录会话和真实进度快照；
+- `pages/speaker-transcription`：多人实时转写与说话人标记调试。
+
+### 成书
+
+- `pages/book-completion`：整本书和每章的下一步；
+- `pages/chapter-workspace`：Section、素材、补讲问题、章节正文、版本和确认；
+- `pages/image-assets`：生成图片、章节插图/图录归属和素材状态；
+- `pages/book-export`：全书元数据、封面、版式、图片、来源附录和版本选择；
+- `pages/book-reader`：沉浸式阅读、目录跳转、返回顶部和历史版本。
+
+`pages/index` 是启动路由，进入首页。
 
 ## 本地运行
-
-用微信开发者工具打开仓库根目录 `Pawtale/`。根目录的 `project.config.json` 会把 `miniprogram/` 识别为小程序根目录。
-
-小程序直连 Pawtale backend 的 HTTP/WSS 服务，不连接 ASR/TTS provider，也不携带 provider API key。开发验证阶段 provider key 和微信小程序 AppSecret 只放在 `backend/.env`。
-
-## 后端配置
-
-默认地址在 `miniprogram/config.ts`：
-
-```ts
-export const BACKEND_HTTP_BASE_URL = "https://pawtale-api.spaceflows.cn";
-export const BACKEND_WS_BASE_URL = "wss://pawtale-api.spaceflows.cn";
-```
-
-开发者工具可临时覆盖运行时配置：
-
-```ts
-wx.setStorageSync("pawtale_backend_config", {
-  httpBaseUrl: "http://127.0.0.1:8000",
-  wsBaseUrl: "ws://127.0.0.1:8000",
-});
-```
-
-真机预览必须使用手机可访问的 HTTPS/WSS 域名，并在微信公众平台配置 request/socket 合法域名。
-
-## 登录链路
-
-- 新用户：点击微信登录，后端用 `wx.login()` 返回的 code 换取 openid，创建 Pawtale 账号，并优先保存微信昵称和头像；Web 端邮箱和密码可稍后在“我的”里设置。
-- 已有 Pawtale Web 用户：展开“使用 Pawtale 账号登录”，用 Web 端邮箱和密码进入小程序。
-- 邮箱密码登录和补 Web 登录凭据时，小程序端会先校验邮箱格式，后端仍会再次校验。
-- 小程序端不保存微信 AppSecret，也不保存 ASR/TTS/LLM provider key。
-- ECS 后端必须在 `/opt/pawtale/backend/.env` 配置：
-
-```bash
-WECHAT_MINIPROGRAM_APPID=wx71acdf73e2ba7067
-WECHAT_MINIPROGRAM_SECRET=从微信公众平台获取
-WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
-```
-
-## 当前页面
-
-- `pages/login`：微信登录、已有 Pawtale 账号登录。
-- `pages/home`：新版语音入口和当前回忆录入口，按当前回忆录绑定的讲述方式直接进入语音聊天。
-- `pages/projects`：创建、切换、重命名、删除回忆录。
-- `pages/voice-chat`：实时录音、WebSocket、partial/final transcript、AI 追问 TTS、本地快照恢复，以及下一阶段的麦克风抢占。
-- `pages/transcripts`：默认查看当前回忆录的讲述记录、识别原文、整理文字、AI 引导问题，并支持问题和回答连播。
-- `pages/book`：成书入口，支持章节规划、章节确认、分章成稿、来源记录查看，并逐步接入自动归章和自动补写事件。
-- `pages/voice-progress`：查看当前项目会话、模块覆盖、语音段、AI 追问、累计文字，并逐步改为后端统一 progress snapshot。
-- `pages/me`：账号信息、Web 登录凭据设置、当前项目统计、项目入口和 TTS 音色设置。
-
-旧 workbench、stories、profile、固定问答和整段录音上传页面已移除。
-
-## 检查
 
 ```bash
 cd miniprogram
@@ -85,13 +66,56 @@ npm run typecheck
 npm test
 ```
 
-## 未完成
+使用微信开发者工具打开仓库根目录。`project.config.json` 已将 `miniprogram/` 设为小程序根目录。
 
-- 麦克风抢占：AI 播放或准备音频时，用户点击麦克风可中断 AI 并立即开始说话。
-- 项目进度快照：统一“我的”、进度页、AI 访谈使用的统计口径。
-- AI 进度鼓励：只播报后端给出的真实记录数、已归章数、成文字数和自动整理事件。
-- 后台自动整理：新记录自动判断归入已有章节、候选新章节或待确认，并触发现有自动补写。
-- 章节完整度审计：输出章节缺口和下一轮访谈建议。
-- 语音编辑 planner：自然语言语音命令由后端生成可确认的操作计划。
-- 结构化记忆提取、证据链浏览和更完整的成稿编辑页。
-- 方言/噪声评测集、provider fallback、限流和成本监控。
+默认后端地址在 `config.ts`：
+
+```ts
+export const BACKEND_HTTP_BASE_URL = "https://pawtale-api.spaceflows.cn";
+export const BACKEND_WS_BASE_URL = "wss://pawtale-api.spaceflows.cn";
+```
+
+开发者工具可临时覆盖：
+
+```ts
+wx.setStorageSync("pawtale_backend_config", {
+  httpBaseUrl: "http://127.0.0.1:8000",
+  wsBaseUrl: "ws://127.0.0.1:8000",
+});
+```
+
+真机必须使用手机可访问的 HTTPS/WSS 地址，并在微信公众平台配置合法域名。
+
+## 登录和安全
+
+- 微信登录：小程序将 `wx.login()` code 交给后端，后端调用 code2session；
+- Pawtale 登录：使用已有邮箱和密码；
+- 微信新用户可以先进入小程序，之后在“我的”里补充 Web 登录凭据；
+- session cookie 由后端管理；
+- 微信 AppSecret、ASR/TTS/LLM key 不得写入小程序、tracked 配置或文档示例；
+- 语音授权版本同时保存在本地和后端审计记录中。
+
+## 状态与恢复
+
+- 服务端 VoiceSession 和消息是持久状态真相；
+- ASR partial 只用于页面实时显示；
+- provider final、音频、VoiceUtterance 和 TranscriptVersion 由后端幂等保存；
+- 页面隐藏时停止录音和 AI 播放，重新显示后从后端刷新；
+- 音频已经保存但转写失败时展示可恢复状态，不伪造空记录；
+- 阅读和编辑模式分离，未保存编辑在退出前确认；
+- 大字模式保存在本地，并在主要页面统一应用。
+
+## 测试策略
+
+`test/` 使用 Node test runner 和页面 harness，主要覆盖：
+
+- page method、view model、service mock 和用户可观察结果；
+- 语音事件顺序、录音资源释放、自动续听和 AI 打断；
+- 搜索、转写编辑、成书状态、版本和返回路径；
+- 登录、隐私授权、分享、设置与大字模式。
+
+WXML/WXSS 只在路由、配置或模板绑定本身是失败边界时做轻量断言。录音权限、真机后台切换、播放进度、滚动和视觉层级仍需 [真机 Smoke](../docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。
+
+## 发布边界
+
+代码合并后默认只更新本地小程序代码并执行类型检查和测试。除非当前任务明确要求，不自动调用微信开发者工具上传、生成体验版、提交审核或发布。

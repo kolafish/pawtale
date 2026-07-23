@@ -1,15 +1,6 @@
 # Pawtale Backend
 
-FastAPI 后端，提供认证、项目写作系统、项目资料和 AI 辅助 API。
-
-## 技术栈
-
-- FastAPI
-- async SQLAlchemy
-- SQLite + aiosqlite
-- Pydantic
-- pytest
-- DeepSeek / Claude 文本模型
+FastAPI 后端，统一提供账号认证、项目写作系统、回忆录语音与成书、AI provider、导出、后台任务和审计 API。
 
 ## 运行
 
@@ -19,19 +10,21 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-PYTHONPATH=. python scripts/migrate_runtime_schema.py --skip-backup
+
+PYTHONPATH=. python scripts/migrate_runtime_schema.py
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
-已有本地数据库时，去掉 `--skip-backup` 会先在 `data/backups/` 下创建备份再迁移。API 启动只做 schema 校验，不会自动创建或修改数据库表。
+- 数据库默认位于仓库根目录 `data/pawtale.db`；
+- 迁移脚本对已有数据库默认先创建备份；
+- 全新数据库可显式使用 `--skip-backup`；
+- API 启动只执行运行时配置和 schema 校验，不自动建表或迁移。
 
-macOS 上如果 `python3.12` 指向 Miniforge/Conda，建议用 Homebrew Python 创建 venv：
-`/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv venv`。
+本地入口：
 
-API 文档：
-
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+- 健康检查：<http://localhost:8000/health>
+- OpenAPI：<http://localhost:8000/docs>
+- ReDoc：<http://localhost:8000/redoc>
 
 ## 测试
 
@@ -40,21 +33,109 @@ cd backend
 venv/bin/python -m pytest -q
 ```
 
-常用定向测试：
+常用范围：
 
 ```bash
-venv/bin/python -m pytest tests/test_project_core.py -q
-venv/bin/python -m pytest tests/test_project_structure.py -q
-venv/bin/python -m pytest tests/test_project_references.py -q
-venv/bin/python -m pytest tests/test_project_ai.py -q
+# 通用项目系统
+venv/bin/python -m pytest tests/test_project_*.py -q
+
+# 回忆录语音
+venv/bin/python -m pytest \
+  tests/test_memoir_voice_sessions.py \
+  tests/test_memoir_voice_transcripts.py \
+  tests/test_memoir_voice_assistant_turn_stream.py -q
+
+# 回忆录章节和成书
+venv/bin/python -m pytest \
+  tests/test_memoir_sections.py \
+  tests/test_memoir_chapter_pipeline.py \
+  tests/test_memoir_book_outputs.py -q
 ```
 
-## 回忆录语音网关压测
+## 应用结构
 
-只验证 10 个不同登录用户的 WebSocket 容量，不触发真实 ASR/LLM/TTS：
+```text
+app/
+├── main.py
+├── config.py
+├── database.py
+├── migrations/
+├── domain/
+├── models/
+├── schemas/
+├── routers/
+│   ├── auth.py
+│   ├── audit.py
+│   ├── github.py
+│   ├── projects/
+│   └── memoir/
+└── services/
+    ├── projects/
+    ├── memoir/
+    ├── ai_base.py
+    ├── ai_factory.py
+    ├── ai_text.py
+    ├── ai_claude.py
+    └── ai_volc.py
+```
+
+### 通用项目服务
+
+- `routers/projects/`：项目、结构、资料、活动、导出、GitHub 同步和 AI；
+- `services/projects/`：项目业务编排与权限；
+- `project_documents.py`：文档文件与数据库事务补偿；
+- `content_storage.py`：正文文件存储；
+- `domain/projects/`：项目类型和默认模板。
+
+### 回忆录服务
+
+- `voice*.py`：VoiceSession、gateway、final 持久化、动态回应、TTS 和恢复；
+- `material*.py` / `transcript*.py`：素材、转写版本、校对和批量处理；
+- `sections.py` / `section_digests.py`：素材归属与 Section 派生摘要；
+- `chapter*.py` / `completion*.py`：章节 pipeline、下一步和补讲；
+- `book*.py`：章节稿、全书版本、图片、朗读和导出；
+- `editing_jobs.py`：后台整理 job、lease 和 worker；
+- `share_video*.py`：分享视频场景、背景、对齐和渲染；
+- `narrative/`：访谈策略、话题地图和成书领域决策。
+
+详细边界见仓库根目录 [TECH.md](../TECH.md)。
+
+## 后台 Worker
+
+`app.main` 根据配置启动：
+
+- 回忆录 editing worker；
+- 分享视频 worker。
+
+任务使用数据库持久化、lease、heartbeat 和重试。关闭 worker 不影响 API 读取原始音频和转写，但会暂停依赖后台处理的派生结果。
+
+## 运行配置
+
+完整变量和安全注释以 [.env.example](./.env.example) 与 `app/config.py` 为准。主要分组包括：
+
+- 应用与 SQLite；
+- 微信小程序登录；
+- Claude、DeepSeek、Doubao 文本模型；
+- 火山流式 ASR 和 TTS；
+- StepFun 批量 ASR；
+- 回忆录 editing/share-video worker；
+- 访谈策略和话题地图 rollout；
+- GitHub App 单向备份。
+
+生产环境要求：
 
 ```bash
-cd backend
+APP_ENV=production
+APP_SECRET_KEY=<至少 32 字符的非默认随机值>
+```
+
+微信 AppSecret、AI/ASR/TTS key 和 GitHub App private key 只能放在部署环境的 `backend/.env`，不得进入小程序或 tracked 文件。
+
+## 语音网关容量检查
+
+只验证多个登录用户的 WebSocket 容量、不触发真实 provider：
+
+```bash
 venv/bin/python scripts/loadtest_voice_gateway.py \
   --base-url https://pawtale-api.spaceflows.cn \
   --users 10 \
@@ -63,90 +144,4 @@ venv/bin/python scripts/loadtest_voice_gateway.py \
   --expect-eleventh-rejected
 ```
 
-脚本会自动注册测试用户、创建 voice session、携带各自的 `pawtale_session` cookie 连接 gateway，并验证第 11 条连接返回 `voice_gateway_capacity_reached`。如果指定 `--mode asr`，脚本会发送生成的静音 PCM 帧并触发真实 ASR provider，请先确认 provider 额度和费用。
-
-## 核心结构
-
-```text
-app/
-├── main.py
-├── auth.py
-├── domain/
-│   ├── projects/
-│   ├── novel/
-│   ├── article/
-│   └── memoir/
-├── models/
-├── schemas/
-├── routers/
-│   ├── auth.py
-│   └── projects/
-└── services/
-    ├── projects/
-    ├── project_documents.py
-    ├── content_storage.py
-    └── ai_*.py
-```
-
-## 项目系统
-
-- `Project.type` 支持 `novel`、`article`、`memoir`
-- 默认模板由 `app/domain/projects/templates.py` 分发
-- `/api/projects` 路由按 `core`、`structure`、`references`、`activity`、`ai` 拆分
-- 项目业务编排放在 `app/services/projects/`
-- 文档正文由 `content_storage.py` 存在 `data/projects/{project_id}/{document_id}.md`
-
-## 环境变量
-
-`backend/.env`：
-
-```bash
-APP_ENV=development
-APP_SECRET_KEY=replace-with-at-least-32-random-characters
-# DATABASE_URL=sqlite+aiosqlite:///../data/pawtale.db
-
-WECHAT_MINIPROGRAM_APPID=wx71acdf73e2ba7067
-WECHAT_MINIPROGRAM_SECRET=xxx
-WECHAT_JSCODE2SESSION_URL=https://api.weixin.qq.com/sns/jscode2session
-
-DEEPSEEK_API_KEY=xxx
-DEEPSEEK_BASE_URL=xxx
-
-ANTHROPIC_AUTH_TOKEN=xxx
-ANTHROPIC_BASE_URL=xxx
-
-DEFAULT_AI_MODEL=claude-opus-4
-AI_TEXT_MAX_CONCURRENT_REQUESTS=3
-
-# GitHub App 单向备份。Private key 只放后端，可用 inline 内容或文件路径二选一。
-GITHUB_APP_ID=
-GITHUB_APP_SLUG=
-GITHUB_APP_PRIVATE_KEY=
-GITHUB_APP_PRIVATE_KEY_PATH=
-GITHUB_APP_SETUP_REDIRECT_URL=http://localhost:5173/
-GITHUB_SYNC_DEFAULT_BRANCH=main
-
-# AI 追问语音合成，默认 disabled；启用火山 V3 时改成 volc
-TTS_PROVIDER=disabled
-TTS_TIMEOUT_SECONDS=30
-TTS_MAX_CONCURRENT_REQUESTS=3
-
-# 火山/豆包语音 V3 TTS。AI 访谈和成书语音编辑使用 bidirectional WebSocket，历史消息重播和长文朗读仍可使用 unidirectional SSE。
-VOLC_TTS_APP_ID=
-VOLC_TTS_ACCESS_TOKEN=
-VOLC_TTS_API_KEY=
-VOLC_TTS_ENDPOINT=https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse
-VOLC_TTS_BIDIRECTIONAL_ENDPOINT=wss://openspeech.bytedance.com/api/v3/tts/bidirection
-VOLC_TTS_RESOURCE_ID=seed-tts-2.0
-VOLC_TTS_SPEAKER=zh_female_vv_uranus_bigtts
-VOLC_TTS_RESPONSE_FORMAT=mp3
-VOLC_TTS_SAMPLE_RATE=24000
-```
-
-生产环境必须设置 `APP_ENV=production`，并使用至少 32 字符的非默认随机 `APP_SECRET_KEY`；否则后端启动会失败。
-
-`DEFAULT_AI_MODEL` 可选：
-
-- `claude-opus-4`
-- `claude-sonnet-4`
-- `deepseek`
+`--mode asr` 会发送音频帧并触发真实 ASR，执行前需确认 provider 额度和费用。

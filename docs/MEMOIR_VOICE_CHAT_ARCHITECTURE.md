@@ -1,8 +1,8 @@
-# 回忆录实时语音聊天架构
+# 回忆录实时语音架构
 
 ## 文档状态
 
-本文是回忆录小程序实时语音链路的当前基线，负责：
+本文定义回忆录小程序实时语音链路：
 
 - VAD 与录音控制；
 - Streaming ASR；
@@ -13,11 +13,7 @@
 
 素材、Section、章节正文和成书补全边界见
 `MEMOIR_NARRATIVE_ARCHITECTURE.md`；主题访谈和成书补全协作见
-`MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`。
-
-旧固定问答链只通过 commit
-`bd3599ad3dddf382b242c47071c856d382543cac` 追溯。当前代码不保留旧页面、
-旧表、兼容接口或双写。
+`MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`。
 
 ## 一、产品形态
 
@@ -88,7 +84,7 @@ created → listening ↔ speaking → stopped
 - 页面是否可见。
 
 持久状态以后端为准。页面恢复、前后台切换或断线重连时，客户端重新读取
-VoiceSession 和消息，不根据旧 UI 状态猜测服务端结果。
+VoiceSession 和消息，不根据客户端缓存的 UI 状态猜测服务端结果。
 
 ## 四、录音与 Streaming ASR
 
@@ -224,7 +220,7 @@ TTS 播放失败不能删除已经完成的文字回复，但必须显式展示�
 
 ## 九、与成书链路的边界
 
-语音层只产出可追溯 Material。后续链路是：
+语音层只产出可追溯 Material。成书链路是：
 
 ```text
 VoiceUtterance
@@ -239,8 +235,7 @@ VoiceUtterance
 归属和正文生成不在 WebSocket 回调里同步执行，而通过独立领域服务和 Job 完成。失败时
 原始音频和转写仍然可见。
 
-小程序记录页不提供旧式“手工归章”入口。结构调整统一在书稿的章节/Section 工作区完成，
-避免多个页面同时修改素材归属。
+结构调整统一在书稿的章节/Section 工作区完成，避免多个页面同时修改素材归属。
 
 ## 十、主要代码边界
 
