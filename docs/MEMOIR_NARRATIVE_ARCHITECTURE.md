@@ -2,9 +2,9 @@
 
 ## 文档状态
 
-本文描述回忆录以 Material 和 Section 为核心的事实来源、派生语义和成书质量不变量。历史实现只通过 Git 追溯，不在当前架构中保留兼容模型。
+本文描述回忆录以 Material 和 Section 为核心的事实来源、派生语义和成书质量不变量。
 
-本文不覆盖 VAD、Streaming ASR、TTS 和 WebSocket 状态机，相关内容见 `MEMOIR_VOICE_CHAT_REDESIGN.md`。主题访谈与成书补全协作见 `MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`。
+VAD、Streaming ASR、TTS 和 WebSocket 状态机见 `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`。主题访谈与成书补全协作见 `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`。
 
 ## 一、核心原则
 
@@ -121,11 +121,11 @@ BookReview 签名至少包含：
 - 当前已确认正文版本；
 - 引擎与 prompt 版本。
 
-任务运行前和发布前各校验一次签名。输入变化时旧结果不得发布。
+任务运行前和发布前各校验一次签名。输入变化时过期结果不得发布。
 
 ## 五、CompletionIssue
 
-CompletionIssue 同时表达“发现的问题”和“当前要处理的一件事”，不再维护问题、任务和回答之间的多套状态。
+CompletionIssue 同时表达“发现的问题”和“当前要处理的一件事”，是补全工作唯一的持久化状态。
 
 只有需要用户持续处理的问题才持久化：
 
@@ -219,16 +219,12 @@ InterviewBrief 向语音层提供经过整理的上下文：
 
 ## 九、数据库与删除原则
 
-最终运行模型只创建当前需要的表。退出运行时的表、列、索引、枚举、路由、任务、脚本、配置和测试必须物理删除，不保留：
-
-- 双写；
-- 空实现兼容壳；
-- 永久 fallback；
-- 只为旧测试存在的配置；
-- 已无消费者的序列化字段；
-- 注释掉但仍留在仓库的实现。
-
-破坏性迁移前确认没有运行中的旧 Job；迁移后 OpenAPI、ORM metadata、物理 schema、任务注册和小程序类型中都不得出现退出运行时的对象。
+- ORM metadata、物理 schema、OpenAPI、后台任务和客户端类型保持一致；
+- 项目删除通过明确的 project 边界清理素材、Section、章节、全书、图片、音频和后台任务；
+- 文件删除与数据库事务使用可验证的补偿路径；
+- 运行时只使用一套规范表和字段，不执行双写；
+- 所有枚举、路由、序列化字段和任务都必须有明确消费者；
+- 破坏性迁移在执行前检查运行中 Job，并先创建可恢复备份。
 
 ## 十、测试不变量
 
@@ -237,7 +233,7 @@ InterviewBrief 向语音层提供经过整理的上下文：
 - Audio / TranscriptVersion → Material → Section → Chapter 的追溯；
 - 一条 Material 不会同时属于多个 Section；
 - 跨项目归属被拒绝；
-- 输入变化时旧 Digest 或 Job 不发布；
+- 输入变化时过期 Digest 或 Job 不发布；
 - 有足够素材时生成一份完整章节正文；
 - 正文返回的 used Material 全部属于 allowlist；
 - 缺素材时只展示一个当前 Issue；
@@ -245,6 +241,4 @@ InterviewBrief 向语音层提供经过整理的上下文：
 - 人工修改后可以整章确认；
 - 未确认章节不能组装全书；
 - 相同输入组装幂等；
-- 已退出模型、API、表和客户端调用完全消失。
-
-不保留只验证已删除实现细节的测试。
+- 项目删除不会影响其他用户或项目。

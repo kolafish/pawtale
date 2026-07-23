@@ -75,14 +75,12 @@
 - UI 视觉、大字模式、滚动、播放进度、后台退出、麦克风权限等体验问题，单元测试只能覆盖状态逻辑；合入前应补充人工或自动化 smoke 验证，并在最终汇报说明是否执行。
 - 删除低价值测试优先于维护它：如果一个测试只证明实现细节存在、不能复现真实问题、经常阻碍合理重排，就应删除或改写成业务行为/回归测试。
 
-## Memoir Voice Chat Redesign Context
+## Memoir Product Architecture Context
 
-- 回忆录小程序新版主线文档是 `docs/MEMOIR_VOICE_CHAT_REDESIGN.md`，后续回忆录小程序改造默认以它为准。
-- 项目级结构化访谈框架与成书补全重构的规划基线是 `docs/MEMOIR_STRUCTURED_INTERVIEW_AND_BOOK_COMPLETION_PLAN.md`；相关数据模型、状态边界、开发拆分和验收必须以它为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
-- 旧版固定问题、整段录音上传、离线 ASR、整理稿确认链路只通过 commit `bd3599ad3dddf382b242c47071c856d382543cac` 追溯，不在文档里维护旧代码路径清单。
-- 旧版回忆录文档已删除；需要查看 legacy 背景时通过上述 baseline commit 做 Git 追溯。
-- 新版产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心，不再继续强化固定问答模型。
-- 新版创建/开始访谈时要区分 `free_narration` 弱引导和 `guided_interview` 强引导：弱引导支持叙述者按时间线自主讲述，强引导由 AI 按人物、事件、地点、时间段、主题等模块推进。
+- 回忆录小程序实时语音架构以 `docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md` 为准。
+- 项目级访谈与成书协作架构以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
+- 产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心。
+- 创建/开始访谈时要区分 `free_narration` 弱引导和 `guided_interview` 强引导：弱引导支持叙述者按时间线自主讲述，强引导由 AI 按人物、事件、地点、时间段、主题等模块推进。
 - 用户原始语音是回忆录基础数据资产。ASR 原文、校正文、结构化记忆和最终文章都必须能回溯到原始音频、transcript version 和音频时间段。
 - 小程序端不能保存或暴露 ASR/TTS/LLM provider key。开发验证阶段 provider key 统一放在 `backend/.env`，不要写入 tracked config、文档示例或小程序代码。
 

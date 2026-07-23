@@ -1,48 +1,53 @@
 # Pawtale
 
-AI 辅助内容创作工作台。当前核心是以项目为单位管理写作，支持小说、公众号文章、回忆录三个创作方向。
+Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 
-## 当前能力
+- Web 写作工作台：小说、公众号文章和回忆录编辑；
+- 微信小程序“余主任留声机”：低门槛语音访谈、讲述记录和回忆录成书；
+- FastAPI 后端：认证、项目数据、AI/语音 provider 编排、回忆录素材与成书服务。
 
-- 项目类型：小说、公众号、回忆录
-- 项目结构：Project -> DocumentGroup -> Document
-- 项目内参考资料：角色、地点、笔记、大纲
-- 写作编辑器：自动保存、Cmd+S、字数统计、TXT 导出
-- AI 辅助：续写、单模型修改、多模型修改对比、diff review、项目内容分析
-- 多模型：Claude Opus 4.6、Claude Sonnet 4.6、DeepSeek V4 Flash、DeepSeek V4 Pro、Doubao Seed 2.0 Pro
-- 登录与用户隔离：项目、资料和 API 均基于当前用户访问
+## 当前产品
 
-## 产品方向
+### Web 工作台
 
-Pawtale 目前保留在一个代码库中，通过项目类型和 workspace 边界拆分产品体验：
+- 邮箱注册、登录和基于用户/项目的访问隔离；
+- 项目列表、重命名、删除和项目级导出；
+- 小说/公众号：分组与文档树、资料 Binder、自动保存、AI 续写、修改对比和项目分析；
+- 回忆录：素材校对、问答关系、方言词表、章节目录、章节稿、全书预览与 PDF/TXT 导出；
+- GitHub App 单向项目备份；
+- 管理员用户行为审计。
 
-- 小说创作：章节结构、大纲、人物设定、Inspector、项目分析
-- 公众号创作：较短篇幅，当前复用共享草稿工作台
-- 回忆录创作：小程序正在从固定问题面板改版为实时语音聊天，目标是弱引导/强引导两种访谈模式、Streaming ASR 大字转写、LLM 动态追问和 Streaming TTS 语音回复
+### 微信小程序
 
-## 项目结构
+小程序以“首页、记录、书稿、我的”四个一级入口组织完整回忆录动线：
+
+```text
+登录并选择回忆录
+  → 同意语音授权
+  → 自由讲述 / AI 引导 / 人工访谈 / 成书补讲
+  → Streaming ASR 实时转写
+  → LLM 动态回应 + Streaming TTS
+  → 保存原始音频、讲述和转写版本
+  → 搜索、回听和校正讲述记录
+  → 生成章节规划并逐章补全
+  → 确认章节稿
+  → 生成、阅读和导出全书
+```
+
+小程序还提供话题地图、语音搜索、图片素材、分享视频、多人实时转写、AI/TTS 偏好和大字模式。
+
+## 仓库结构
 
 ```text
 Pawtale/
-├── backend/                    # FastAPI + async SQLAlchemy
-│   ├── app/
-│   │   ├── domain/             # 项目类型和默认模板
-│   │   ├── models/             # SQLAlchemy models
-│   │   ├── routers/            # API routers
-│   │   ├── schemas/            # Pydantic schemas
-│   │   └── services/           # 业务服务和 AI 服务
-│   └── tests/
-├── frontend/                   # React + TypeScript + Vite
-│   └── src/
-│       ├── components/
-│       ├── domain/
-│       ├── hooks/
-│       ├── stores/
-│       └── api/
-├── miniprogram/                # 微信小程序回忆录采集端
-├── data/                       # SQLite 数据库和项目文档文件
-├── PRODUCT.md                  # 产品文档
-└── TECH.md                     # 技术文档
+├── backend/                    # FastAPI、SQLAlchemy、后台任务和 provider 集成
+├── frontend/                   # React Web 工作台
+├── miniprogram/                # 微信小程序
+├── docs/                       # 当前架构和测试文档
+├── scripts/                    # 仓库级验证脚本
+├── data/                       # 本地运行数据（不作为产品文档）
+├── PRODUCT.md                  # 当前产品功能与用户动线
+└── TECH.md                     # 当前技术架构与代码边界
 ```
 
 ## 快速开始
@@ -55,13 +60,13 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
+PYTHONPATH=. python scripts/migrate_runtime_schema.py
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
-macOS 上如果 `python3.12` 指向 Miniforge/Conda，建议用 Homebrew Python 创建 venv：
-`/opt/homebrew/opt/python@3.12/bin/python3.12 -m venv venv`。
+已有本地数据库时，迁移脚本默认先在 `data/backups/` 创建备份。服务启动只校验 schema，不会自动修改数据库。
 
-### 前端
+### Web 前端
 
 ```bash
 cd frontend
@@ -69,69 +74,42 @@ npm install
 npm run dev
 ```
 
-访问 http://localhost:5173
+访问 <http://localhost:5173>。开发服务器通过 `/api` 代理到本地后端。
 
-## 环境变量
-
-后端读取 `backend/.env`：
-
-| 变量 | 说明 |
-| --- | --- |
-| `APP_ENV` | 应用环境：`development` / `test` / `production`；生产环境必须显式设为 `production` |
-| `APP_SECRET_KEY` | session cookie 签名密钥；生产环境必须是至少 32 字符的非默认随机值 |
-| `DATABASE_URL` | 可选数据库连接；不设置时使用 `data/pawtale.db` |
-| `SQLITE_JOURNAL_MODE` | SQLite journal 模式；默认 `WAL`，用于小规模并发读写 |
-| `SQLITE_SYNCHRONOUS` | SQLite 同步级别；默认 `NORMAL` |
-| `SQLITE_BUSY_TIMEOUT_MS` | SQLite 写锁等待时间；默认 `5000` |
-| `WECHAT_MINIPROGRAM_APPID` | 微信小程序 AppID，用于后端 code2session |
-| `WECHAT_MINIPROGRAM_SECRET` | 微信小程序 AppSecret，只能放后端 `.env` |
-| `WECHAT_JSCODE2SESSION_URL` | 微信 code2session 接口地址 |
-| `DEEPSEEK_API_KEY` | DeepSeek API key |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 |
-| `DEEPSEEK_MODEL` | DeepSeek 模型；默认 `deepseek-v4-flash`，可切 `deepseek-v4-pro` |
-| `DEEPSEEK_THINKING_TYPE` | DeepSeek thinking 模式；默认 `disabled`，保持与旧 `deepseek-chat` 非思考行为接近 |
-| `VOLC_ARK_API_KEY` | 火山方舟 API key |
-| `VOLC_ARK_BASE_URL` | 火山方舟 Responses API 地址；默认 `https://ark.cn-beijing.volces.com/api/v3` |
-| `VOLC_ARK_MODEL` | 火山方舟模型；默认 `doubao-seed-2-0-pro-260215` |
-| `VOLC_ARK_THINKING_TYPE` | 火山方舟 thinking 模式；默认 `disabled`，避免短追问被隐藏推理 token 截断 |
-| `ANTHROPIC_AUTH_TOKEN` | Claude 代理认证 token |
-| `ANTHROPIC_BASE_URL` | Claude 代理地址，OpenAI 兼容格式 |
-| `DEFAULT_AI_MODEL` | 默认模型：`claude-opus-4` / `claude-sonnet-4` / `deepseek` / `deepseek-v4-flash` / `deepseek-v4-pro` / `doubao-seed-2-0-pro-260215` |
-| `AI_TEXT_MAX_CONCURRENT_REQUESTS` | 文本 AI provider 并发请求上限；默认 `3`，`0` 表示不限制 |
-| `GITHUB_APP_ID` | 可选，GitHub App ID，用于项目单向备份到用户授权仓库 |
-| `GITHUB_APP_SLUG` | 可选，GitHub App slug，用于生成安装链接 |
-| `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_PRIVATE_KEY_PATH` | 可选，GitHub App private key；只放后端，二选一 |
-| `GITHUB_APP_SETUP_REDIRECT_URL` | 可选，GitHub App 安装完成后的前端跳转地址 |
-| `VOLC_ASR_API_KEY` | 豆包流式 ASR API key |
-| `VOICE_GATEWAY_MAX_ACTIVE_SESSIONS` | 回忆录语音网关全局 active WebSocket 上限；默认 `10` |
-| `VOICE_GATEWAY_MAX_ACTIVE_SESSIONS_PER_USER` | 单用户 active 语音网关上限；默认 `1` |
-| `VOLC_ASR_RESOURCE_ID` | 豆包流式 ASR 资源 ID |
-| `VOLC_ASR_WS_URL` | 豆包流式 ASR WebSocket 地址 |
-| `TTS_MAX_CONCURRENT_REQUESTS` | TTS provider 并发请求上限；默认 `3`，`0` 表示不限制 |
-| `TTS_ALIGNMENT_MAX_CONCURRENT_REQUESTS` | TTS forced-alignment provider 并发请求上限；默认 `2`，`0` 表示不限制 |
-
-## 常用命令
+### 微信小程序
 
 ```bash
-# 前端检查
-cd frontend && npm run lint
-cd frontend && npm run build
+cd miniprogram
+npm install
+npm run typecheck
+npm test
+```
 
-# 小程序检查
-./scripts/test-miniprogram.sh
+使用微信开发者工具打开仓库根目录；`project.config.json` 已将 `miniprogram/` 配置为小程序根目录。开发和发布约束见 [miniprogram/README.md](./miniprogram/README.md)。
 
-# 后端测试
+## 常用验证
+
+```bash
+# Web
+cd frontend && npm run lint && npm test && npm run build
+
+# 小程序
+cd miniprogram && npm run typecheck && npm test
+
+# 后端
 cd backend && venv/bin/python -m pytest -q
 ```
 
+真机语音、后台切换、权限和播放体验不能只依赖单元测试，合入相关改动前还应执行 [小程序真机 Smoke](./docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。
+
 ## 文档
 
-- [PRODUCT.md](./PRODUCT.md)
-- [TECH.md](./TECH.md)
-- [docs/MEMOIR_VOICE_CHAT_REDESIGN.md](./docs/MEMOIR_VOICE_CHAT_REDESIGN.md) 回忆录小程序新版主线
-- [docs/MEMOIR_MINIPROGRAM_PRODUCT.md](./docs/MEMOIR_MINIPROGRAM_PRODUCT.md) legacy
-- [docs/MEMOIR_MEMORY_ARCHITECTURE.md](./docs/MEMOIR_MEMORY_ARCHITECTURE.md) legacy/long-term reference
-- [docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md](./docs/MEMOIR_MEMORY_FIRST_V1_PLAN.md) legacy
-- [miniprogram/README.md](./miniprogram/README.md)
-- [backend/README.md](./backend/README.md)
-- [frontend/README.md](./frontend/README.md)
+- [产品功能与用户动线](./PRODUCT.md)
+- [技术架构与开发边界](./TECH.md)
+- [小程序说明](./miniprogram/README.md)
+- [Web 前端说明](./frontend/README.md)
+- [后端说明](./backend/README.md)
+- [回忆录事实、素材与成书架构](./docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)
+- [回忆录访谈与成书协作架构](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
+- [回忆录实时语音架构](./docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
+- [AI provider 架构](./backend/docs/AI_ARCHITECTURE.md)
