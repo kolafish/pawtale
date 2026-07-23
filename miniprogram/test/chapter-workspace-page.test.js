@@ -150,6 +150,25 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   delete global.wx;
 });
 
+test("chapter workspace returns to the previous book flow with a book-tab fallback", () => {
+  const tabNavigations = [];
+  global.wx = {
+    navigateBack(options) {
+      options.fail?.();
+    },
+    switchTab(options) {
+      tabNavigations.push(options.url);
+    },
+  };
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+
+  page.returnToBookFlow.call(context);
+
+  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  delete global.wx;
+});
+
 test("chapter workspace expands materials under their section", async () => {
   installWx();
   const { page } = loadWorkspacePage();

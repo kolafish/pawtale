@@ -1,4 +1,9 @@
 <view class="completion-page">
+  <view class="flow-context">
+    <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 全书进度</text>
+    <button class="flow-context-action" bindtap="openBookHome">书稿首页</button>
+  </view>
+
   <view class="page-intro">
     <text class="page-kicker">整理成书</text>
     <text class="page-title">{{headline}}</text>
@@ -14,11 +19,16 @@
       <text class="completion-notice-title">{{bulkCheckTitle}}</text>
       <text class="completion-notice-detail">{{bulkCheckDetail}}</text>
       <button
+        wx:if="{{allChaptersConfirmed}}"
+        class="book-ready-action"
+        bindtap="openBookHome"
+      >返回书稿，生成全书</button>
+      <button
         class="recheck-book-action"
         loading="{{recheckingAll}}"
         disabled="{{recheckingAll}}"
         bindtap="recheckAllChapters"
-      >{{bulkCheckActionText}}</button>
+      >{{allChaptersConfirmed ? "重新检查全书" : bulkCheckActionText}}</button>
     </view>
 
     <view
@@ -45,6 +55,7 @@
     <view wx:if="{{!chapters.length}}" class="empty-state">
       <text>这本书还没有章节。</text>
       <text>先到书稿页确定章节，再回来补全。</text>
+      <button class="book-ready-action" bindtap="openBookHome">返回书稿</button>
     </view>
   </view>
 </view>

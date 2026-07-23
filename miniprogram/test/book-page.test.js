@@ -244,6 +244,34 @@ test("book page routes chapter card actions to the chapter workspace", () => {
   delete global.wx;
 });
 
+test("book page routes unfinished book progress into the unified completion flow", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { mod, page } = loadBookPage();
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "爷爷的故事",
+    stage: "drafting",
+  });
+  context.stopPlayback = () => {};
+
+  assert.equal(
+    mod.bookCompletionPageUrl("project/1", "爷爷的故事"),
+    "/pages/book-completion/index?projectId=project%2F1&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B",
+  );
+
+  page.openBookCompletion.call(context);
+
+  assert.deepEqual(navigations, [
+    "/pages/book-completion/index?projectId=project%2F1&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B",
+  ]);
+  delete global.wx;
+});
+
 test("book page exposes chapter reordering after the plan is confirmed", () => {
   const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   global.wx = { switchTab() {} };

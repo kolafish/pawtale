@@ -1,6 +1,7 @@
 <view class="workspace-page">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">只处理当前最重要的一步</text>
+    <text class="ui-page-context">{{workspace ? workspace.chapter_title : "本章正文"}} · 当前一步</text>
+    <button class="workspace-home-action" bindtap="openBookHome">书稿首页</button>
   </view>
 
   <view wx:if="{{error}}" class="message error-message">{{error}}</view>
@@ -147,6 +148,12 @@
         disabled="{{!canConfirmChapter || confirmingChapter || editingSectionId !== ''}}"
         bindtap="confirmChapter"
       >确认本章正文</button>
+
+      <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
+        <text class="chapter-finished-title">本章已完成</text>
+        <text class="chapter-finished-detail">正文已经收入书稿，可以返回查看其他章节或生成全书。</text>
+        <button class="primary-action" bindtap="returnToBookFlow">完成，返回全书进度</button>
+      </view>
     </view>
   </block>
 </view>

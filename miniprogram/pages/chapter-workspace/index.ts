@@ -140,6 +140,18 @@ definePage<ChapterWorkspacePageData>()({
     wx.stopPullDownRefresh();
   },
 
+  openBookHome() {
+    wx.switchTab({ url: "/pages/book/index" });
+  },
+
+  returnToBookFlow() {
+    wx.navigateBack({
+      fail: () => {
+        this.openBookHome();
+      },
+    });
+  },
+
   async loadPageData(silent = false) {
     if (!this.data.projectId || !this.data.chapterId) {
       return;
