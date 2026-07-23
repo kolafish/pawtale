@@ -553,6 +553,10 @@
   line-height: 86rpx;
 }
 
+.home-page.large-text .active-project-link .project-title {
+  margin-top: 0;
+}
+
 .home-page.large-text .project-switch-hint,
 .home-page.large-text .project-switch-action {
   font-size: 28rpx;

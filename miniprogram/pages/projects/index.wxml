@@ -23,7 +23,7 @@
     bindtap="activateProject"
     hover-class="{{item.active ? 'none' : 'project-card-hover'}}"
     aria-role="button"
-    aria-disabled="{{item.active || busy}}"
+    aria-disabled="{{busy}}"
     aria-label="{{item.active ? ('当前回忆录，' + item.title) : ('切换到回忆录，' + item.title)}}"
   >
     <view class="project-main">

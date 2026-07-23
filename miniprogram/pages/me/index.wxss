@@ -84,8 +84,7 @@
   font-size: 30rpx;
 }
 
-.primary-button,
-.secondary-button {
+.primary-button {
   width: 100%;
   height: 98rpx;
   margin: 30rpx 0 0;
@@ -98,8 +97,7 @@
   font-weight: 800;
 }
 
-.primary-button::after,
-.secondary-button::after {
+.primary-button::after {
   border: 0;
 }
 
@@ -108,19 +106,8 @@
   color: #ffffff;
 }
 
-.secondary-button {
-  background: #2b1713;
-  color: #ffffff;
-}
-
 .primary-button[disabled] {
   background: #a64b3e;
-  color: #ffffff;
-  opacity: 0.72;
-}
-
-.secondary-button[disabled] {
-  background: #2b1713;
   color: #ffffff;
   opacity: 0.72;
 }
@@ -528,7 +515,6 @@
 }
 
 .me-page.large-text .primary-button,
-.me-page.large-text .secondary-button,
 .me-page.large-text .logout-button,
 .me-page.large-text .overview-button,
 .me-page.large-text .mini-button,
