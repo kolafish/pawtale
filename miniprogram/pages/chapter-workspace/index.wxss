@@ -6,6 +6,25 @@
   color: #2b211e;
 }
 
+.workspace-home-action {
+  flex: 0 0 auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 24rpx;
+  border: 0;
+  border-radius: 999rpx;
+  background: #fffdf9;
+  color: #8f4439;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 44px;
+  box-shadow: 0 0 0 1rpx rgba(143, 68, 57, 0.16);
+}
+
+.workspace-home-action::after {
+  border: 0;
+}
+
 .draft-heading,
 .edit-actions {
   display: flex;
@@ -55,6 +74,31 @@
 
 .status-card {
   border-left: 6rpx solid #a64b3e;
+}
+
+.chapter-finished {
+  margin-top: 30rpx;
+  padding-top: 28rpx;
+  border-top: 1rpx solid #e8e1d9;
+}
+
+.chapter-finished-title,
+.chapter-finished-detail {
+  display: block;
+}
+
+.chapter-finished-title {
+  color: #386552;
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 42rpx;
+}
+
+.chapter-finished-detail {
+  margin-top: 10rpx;
+  color: #675d58;
+  font-size: 26rpx;
+  line-height: 40rpx;
 }
 
 .section-kicker {

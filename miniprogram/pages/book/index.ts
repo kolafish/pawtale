@@ -40,6 +40,7 @@ import {
 import {
   datasetChoice,
   datasetString,
+  pageUrl,
   pickerIndex,
   type PageDatasetEvent,
   type PagePickerEvent,
@@ -103,6 +104,13 @@ export {
   buildChapterPickerOptions,
   buildChapterViews,
 } from "./book-view-model";
+
+export function bookCompletionPageUrl(projectId: string, projectTitle: string): string {
+  return pageUrl("/pages/book-completion/index", {
+    projectId,
+    projectTitle,
+  });
+}
 
 interface BookDataset {
   id?: string;
@@ -701,6 +709,19 @@ definePage<BookPageData>()({
     }
     const action = datasetString(event, "action") || "preview";
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
+  },
+
+  openBookCompletion() {
+    if (!this.data.projectId || this.data.stage !== "drafting") {
+      return;
+    }
+    this.stopPlayback();
+    wx.navigateTo({
+      url: bookCompletionPageUrl(
+        this.data.projectId,
+        this.data.projectTitle,
+      ),
+    });
   },
 
   changeBookWorkspaceView(event: DatasetEvent) {

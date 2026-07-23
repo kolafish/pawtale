@@ -111,6 +111,22 @@ test("book completion overview exposes confirmed chapter progress and one action
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
 });
 
+test("book completion returns to the book hub for generation and chapter management", () => {
+  const tabNavigations = [];
+  global.wx = {
+    switchTab(options) {
+      tabNavigations.push(options.url);
+    },
+  };
+  const { page } = loadBookCompletionPage();
+  const context = pageContext(page);
+
+  page.openBookHome.call(context);
+
+  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  delete global.wx;
+});
+
 test("book completion offers one whole-book recheck after all chapters are confirmed", async () => {
   const prepared = [];
   const toasts = [];

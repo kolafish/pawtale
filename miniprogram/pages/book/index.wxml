@@ -54,7 +54,14 @@
     </view>
     <view wx:if="{{stage === 'drafting'}}" class="progress-actions">
       <button
-        wx:if="{{!bookContent || bookStaleNotice}}"
+        wx:if="{{!allChaptersConfirmed}}"
+        class="primary-button small"
+        bindtap="openBookCompletion"
+      >
+        继续逐章整理
+      </button>
+      <button
+        wx:elif="{{!bookContent || bookStaleNotice}}"
         class="primary-button small"
         loading="{{generatingBook}}"
         disabled="{{updatingPlanStructure || generatingBook || !canGenerateBook}}"
@@ -69,6 +76,14 @@
         bindtap="openBookExportPage"
       >
         查看与导出
+      </button>
+      <button
+        wx:if="{{allChaptersConfirmed}}"
+        class="ghost-button small"
+        disabled="{{generatingBook}}"
+        bindtap="openBookCompletion"
+      >
+        检查是否需要补充
       </button>
     </view>
   </view>

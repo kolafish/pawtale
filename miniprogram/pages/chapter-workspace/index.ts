@@ -140,6 +140,53 @@ definePage<ChapterWorkspacePageData>()({
     wx.stopPullDownRefresh();
   },
 
+  hasUnsavedSectionChanges() {
+    if (!this.data.editingSectionId || !this.data.workspace) {
+      return false;
+    }
+    const section = this.data.workspace.draft_sections.find(
+      (item) => item.section_id === this.data.editingSectionId,
+    );
+    return Boolean(
+      section
+      && section.content !== this.data.editingSectionContent,
+    );
+  },
+
+  leaveAfterEditConfirmation(navigate: () => void) {
+    if (!this.hasUnsavedSectionChanges()) {
+      navigate();
+      return;
+    }
+    wx.showModal({
+      title: "放弃未保存的修改？",
+      content: "当前小节的文字还没有保存，离开后这些修改会丢失。",
+      confirmText: "放弃修改",
+      cancelText: "继续编辑",
+      success: (result) => {
+        if (result.confirm) {
+          navigate();
+        }
+      },
+    });
+  },
+
+  openBookHome() {
+    this.leaveAfterEditConfirmation(() => {
+      wx.switchTab({ url: "/pages/book/index" });
+    });
+  },
+
+  returnToBookFlow() {
+    this.leaveAfterEditConfirmation(() => {
+      wx.navigateBack({
+        fail: () => {
+          wx.switchTab({ url: "/pages/book/index" });
+        },
+      });
+    });
+  },
+
   async loadPageData(silent = false) {
     if (!this.data.projectId || !this.data.chapterId) {
       return;

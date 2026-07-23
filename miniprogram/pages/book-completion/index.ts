@@ -186,6 +186,10 @@ definePage<BookCompletionData>()({
     wx.stopPullDownRefresh();
   },
 
+  openBookHome() {
+    wx.switchTab({ url: "/pages/book/index" });
+  },
+
   async loadOverview(silent = false) {
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
