@@ -1,6 +1,5 @@
 import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
-import type { TTSSpeedOption, TTSSettingsScope, TTSVoiceOption } from "../../services/tts-settings";
 import {
   getMemoirIdentity,
   isValidEmail,
@@ -10,40 +9,19 @@ import {
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
 import { isAuthError, navigateToLogin } from "../../services/navigation";
+import { type PageTextInputEvent } from "../../services/page-input";
 import {
-  datasetChoice,
-  datasetNumber,
-  datasetString,
-  type PageDatasetEvent,
-  type PageTextInputEvent,
-} from "../../services/page-input";
-import {
-  AI_MODEL_OPTIONS,
   aiModelLabel,
   readSelectedAIModel,
-  saveSelectedAIModel,
-  type AIModelOption,
 } from "../../services/ai-model-settings";
 import {
   accessibilityPageClass,
   readAccessibilitySettings,
-  saveAutoBargeInEnabled,
   saveLargeTextEnabled,
 } from "../../services/accessibility-settings";
-import { formatBeijingDateTime } from "../../services/time";
-import {
-  readScopedTTSSettings,
-  readTTSSettingsProfiles,
-  saveScopedTTSSettings,
-  TTS_SPEED_OPTIONS,
-  TTS_VOICE_OPTIONS,
-  ttsSpeedLabel,
-  ttsVoiceLabel,
-} from "../../services/tts-settings";
 import {
   readVoiceAuthorizationConsentRecord,
   VOICE_AUTHORIZATION_PAGE_URL,
-  VOICE_AUTHORIZATION_VERSION,
 } from "../../services/voice-authorization";
 import { replaceMemoirStore } from "../../stores/session";
 
@@ -74,38 +52,13 @@ interface MeData {
   utteranceCount: number;
   totalUserCharCount: number;
   totalAudioText: string;
-  aiModel: string;
   aiModelLabel: string;
-  aiModelOptions: AIModelOption[];
   voiceAuthorizationAgreed: boolean;
   voiceAuthorizationStatusText: string;
-  voiceAuthorizationDetailText: string;
-  chatTTSVoice: string;
-  chatTTSVoiceLabel: string;
-  bookTTSVoice: string;
-  bookTTSVoiceLabel: string;
-  ttsVoiceOptions: TTSVoiceOption[];
-  chatTTSSpeedRatio: number;
-  chatTTSSpeedLabel: string;
-  bookTTSSpeedRatio: number;
-  bookTTSSpeedLabel: string;
-  ttsSpeedOptions: TTSSpeedOption[];
   largeTextEnabled: boolean;
-  autoBargeInEnabled: boolean;
   showAccountSettings: boolean;
-  showVoiceSettings: boolean;
 }
 
-interface MeDataset {
-  scope?: string;
-  voice?: string;
-  speed?: string | number;
-  model?: string;
-}
-
-type VoiceDatasetEvent = PageDatasetEvent<MeDataset>;
-type SpeedDatasetEvent = PageDatasetEvent<MeDataset>;
-type ModelDatasetEvent = PageDatasetEvent<MeDataset>;
 type InputEvent = PageTextInputEvent;
 
 interface SwitchChangeEvent {
@@ -113,8 +66,6 @@ interface SwitchChangeEvent {
     value: boolean;
   };
 }
-
-const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
 
 function isProvisionalWeChatEmail(email: string): boolean {
   return email.trim().toLowerCase().endsWith("@wechat.local");
@@ -158,66 +109,35 @@ function voiceStatsData(progress: MemoirVoiceProgressResponse) {
   };
 }
 
-function ttsScopeData(scope: TTSSettingsScope, settings: { voice: string; speedRatio: number }): Partial<MeData> {
-  if (scope === "book") {
-    return {
-      bookTTSVoice: settings.voice,
-      bookTTSVoiceLabel: ttsVoiceLabel(settings.voice),
-      bookTTSSpeedRatio: settings.speedRatio,
-      bookTTSSpeedLabel: ttsSpeedLabel(settings.speedRatio),
-    };
-  }
-  return {
-    chatTTSVoice: settings.voice,
-    chatTTSVoiceLabel: ttsVoiceLabel(settings.voice),
-    chatTTSSpeedRatio: settings.speedRatio,
-    chatTTSSpeedLabel: ttsSpeedLabel(settings.speedRatio),
-  };
-}
-
-function ttsProfilesData(): Partial<MeData> {
-  const profiles = readTTSSettingsProfiles();
-  return {
-    ...ttsScopeData("chat", profiles.chat),
-    ...ttsScopeData("book", profiles.book),
-  };
-}
-
-function aiModelSettingsData(): Pick<MeData, "aiModel" | "aiModelLabel" | "aiModelOptions"> {
+function aiModelSettingsData(): Pick<MeData, "aiModelLabel"> {
   const model = readSelectedAIModel();
   return {
-    aiModel: model,
     aiModelLabel: aiModelLabel(model),
-    aiModelOptions: AI_MODEL_OPTIONS,
   };
 }
 
 function voiceAuthorizationSettingsData(): Pick<
   MeData,
-  "voiceAuthorizationAgreed" | "voiceAuthorizationStatusText" | "voiceAuthorizationDetailText"
+  "voiceAuthorizationAgreed" | "voiceAuthorizationStatusText"
 > {
   const consent = readVoiceAuthorizationConsentRecord();
   if (consent?.agreed) {
-    const agreedAtText = formatBeijingDateTime(consent.agreedAt);
     return {
       voiceAuthorizationAgreed: true,
       voiceAuthorizationStatusText: "已同意",
-      voiceAuthorizationDetailText: `${agreedAtText ? `${agreedAtText} 已同意 · ` : ""}协议版本 ${consent.version}`,
     };
   }
   return {
     voiceAuthorizationAgreed: false,
     voiceAuthorizationStatusText: "未同意",
-    voiceAuthorizationDetailText: `开始语音前需要阅读并同意当前版本协议 ${VOICE_AUTHORIZATION_VERSION}`,
   };
 }
 
-function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabled" | "autoBargeInEnabled"> {
+function accessibilitySettingsData(): Pick<MeData, "pageClass" | "largeTextEnabled"> {
   const settings = readAccessibilitySettings();
   return {
     pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
     largeTextEnabled: settings.largeTextEnabled,
-    autoBargeInEnabled: settings.autoBargeInEnabled,
   };
 }
 
@@ -237,7 +157,6 @@ function loggedOutData(): Partial<MeData> {
     credentialPassword: "",
     credentialsLoading: false,
     showAccountSettings: false,
-    showVoiceSettings: false,
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -245,6 +164,7 @@ function loggedOutData(): Partial<MeData> {
     utteranceCount: 0,
     totalUserCharCount: 0,
     totalAudioText: "0 秒",
+    ...aiModelSettingsData(),
     ...voiceAuthorizationSettingsData(),
     ...accessibilitySettingsData(),
   };
@@ -278,20 +198,8 @@ definePage<MeData>()({
     totalAudioText: "0 秒",
     ...aiModelSettingsData(),
     ...voiceAuthorizationSettingsData(),
-    chatTTSVoice: "",
-    chatTTSVoiceLabel: "默认音色",
-    bookTTSVoice: "",
-    bookTTSVoiceLabel: "默认音色",
-    ttsVoiceOptions: TTS_VOICE_OPTIONS,
-    chatTTSSpeedRatio: 1,
-    chatTTSSpeedLabel: "正常 1.0x",
-    bookTTSSpeedRatio: 1,
-    bookTTSSpeedLabel: "正常 1.0x",
-    ttsSpeedOptions: TTS_SPEED_OPTIONS,
     largeTextEnabled: false,
-    autoBargeInEnabled: true,
     showAccountSettings: false,
-    showVoiceSettings: false,
   },
 
   async onShow() {
@@ -339,7 +247,6 @@ definePage<MeData>()({
           totalAudioText: "0 秒",
         }),
         ...aiModelSettingsData(),
-        ...ttsProfilesData(),
         ...accessibilitySettingsData(),
       });
       if (activeProjectId) {
@@ -475,59 +382,17 @@ definePage<MeData>()({
     }
   },
 
-  selectTTSVoice(event: VoiceDatasetEvent) {
-    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
-    const voice = datasetString(event, "voice");
-    const settings = saveScopedTTSSettings(scope, { ...readScopedTTSSettings(scope), voice });
-    this.setData(ttsScopeData(scope, settings));
-    wx.showToast({ title: "已保存", icon: "success" });
-  },
-
-  selectTTSSpeed(event: SpeedDatasetEvent) {
-    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
-    const current = readScopedTTSSettings(scope);
-    const speedRatio = datasetNumber(event, "speed", current.speedRatio);
-    const settings = saveScopedTTSSettings(scope, { ...current, speedRatio });
-    this.setData(ttsScopeData(scope, settings));
-    wx.showToast({ title: "已保存", icon: "success" });
-  },
-
-  selectAIModel(event: ModelDatasetEvent) {
-    const model = saveSelectedAIModel(datasetString(event, "model"));
-    this.setData({
-      aiModel: model,
-      aiModelLabel: aiModelLabel(model),
-      aiModelOptions: AI_MODEL_OPTIONS,
-    });
-    wx.showToast({ title: "已保存", icon: "success" });
-  },
-
   changeLargeText(event: SwitchChangeEvent) {
     const settings = saveLargeTextEnabled(event.detail.value);
     this.setData({
       pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
       largeTextEnabled: settings.largeTextEnabled,
-      autoBargeInEnabled: settings.autoBargeInEnabled,
     });
     wx.showToast({ title: settings.largeTextEnabled ? "大字模式已打开" : "大字模式已关闭", icon: "none" });
   },
 
-  changeAutoBargeIn(event: SwitchChangeEvent) {
-    const settings = saveAutoBargeInEnabled(event.detail.value);
-    this.setData({
-      pageClass: accessibilityPageClass("me-page", settings.largeTextEnabled),
-      largeTextEnabled: settings.largeTextEnabled,
-      autoBargeInEnabled: settings.autoBargeInEnabled,
-    });
-    wx.showToast({ title: settings.autoBargeInEnabled ? "自动检测已打开" : "自动检测已关闭", icon: "none" });
-  },
-
   toggleAccountSettings() {
     this.setData({ showAccountSettings: !this.data.showAccountSettings });
-  },
-
-  toggleVoiceSettings() {
-    this.setData({ showVoiceSettings: !this.data.showVoiceSettings });
   },
 
   openVoiceAuthorization() {
@@ -548,6 +413,10 @@ definePage<MeData>()({
 
   openSpeakerTranscription() {
     wx.navigateTo({ url: "/pages/speaker-transcription/index" });
+  },
+
+  openVoiceSettings() {
+    wx.navigateTo({ url: "/pages/voice-settings/index" });
   },
 
   async logout() {

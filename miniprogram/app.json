@@ -18,6 +18,7 @@
     "pages/speaker-transcription/index",
     "pages/projects/index",
     "pages/project-edit/index",
+    "pages/voice-settings/index",
     "pages/me/index"
   ],
   "tabBar": {

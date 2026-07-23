@@ -165,23 +165,19 @@ test("me keeps large text available before login-only settings", () => {
   assert.ok(loggedInSettings > largeTextControl);
 });
 
-test("me reveals account and voice settings only when requested", () => {
+test("me reveals account settings only when requested", () => {
   const { page } = loadMePage();
   const context = pageContext(page);
 
   assert.equal(context.data.showAccountSettings, false);
-  assert.equal(context.data.showVoiceSettings, false);
 
   page.toggleAccountSettings.call(context);
-  page.toggleVoiceSettings.call(context);
 
   assert.equal(context.data.showAccountSettings, true);
-  assert.equal(context.data.showVoiceSettings, true);
 });
 
-test("me saves local accessibility and voice environment switches", () => {
+test("me saves the local large text preference", () => {
   const savedLargeText = [];
-  const savedBargeIn = [];
   const toasts = [];
   global.wx = {
     showToast(options) {
@@ -198,10 +194,6 @@ test("me saves local accessibility and voice environment switches", () => {
         savedLargeText.push(largeTextEnabled);
         return { largeTextEnabled, autoBargeInEnabled: false };
       },
-      saveAutoBargeInEnabled: (autoBargeInEnabled) => {
-        savedBargeIn.push(autoBargeInEnabled);
-        return { largeTextEnabled: true, autoBargeInEnabled };
-      },
     },
   });
   const context = pageContext(page);
@@ -209,18 +201,13 @@ test("me saves local accessibility and voice environment switches", () => {
   page.refreshAccessibilitySettings.call(context);
   assert.equal(context.data.pageClass, "me-page large-text");
   assert.equal(context.data.largeTextEnabled, true);
-  assert.equal(context.data.autoBargeInEnabled, false);
 
   page.changeLargeText.call(context, { detail: { value: false } });
-  assert.equal(context.data.pageClass, "me-page");
-  page.changeAutoBargeIn.call(context, { detail: { value: true } });
 
   assert.deepEqual(savedLargeText, [false]);
-  assert.deepEqual(savedBargeIn, [true]);
-  assert.equal(context.data.largeTextEnabled, true);
-  assert.equal(context.data.pageClass, "me-page large-text");
-  assert.equal(context.data.autoBargeInEnabled, true);
-  assert.deepEqual(toasts, ["大字模式已关闭", "自动检测已打开"]);
+  assert.equal(context.data.largeTextEnabled, false);
+  assert.equal(context.data.pageClass, "me-page");
+  assert.deepEqual(toasts, ["大字模式已关闭"]);
   delete global.wx;
 });
 
@@ -393,8 +380,6 @@ test("me shows voice authorization status and opens agreement", () => {
 
   assert.equal(context.data.voiceAuthorizationAgreed, true);
   assert.equal(context.data.voiceAuthorizationStatusText, "已同意");
-  assert.match(context.data.voiceAuthorizationDetailText, /06-18 08:00 北京时间 已同意/);
-  assert.match(context.data.voiceAuthorizationDetailText, /协议版本 2026-06-18/);
   assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
   delete global.wx;
 });
@@ -407,7 +392,6 @@ test("me shows missing voice authorization consent as not agreed", () => {
 
   assert.equal(context.data.voiceAuthorizationAgreed, false);
   assert.equal(context.data.voiceAuthorizationStatusText, "未同意");
-  assert.match(context.data.voiceAuthorizationDetailText, /开始语音前/);
 });
 
 test("me validates email before setting Web login credentials", async () => {
@@ -487,123 +471,7 @@ test("me saves Web login credentials without overriding wechat nickname", async 
   delete global.wx;
 });
 
-test("me saves chat and book TTS settings independently", () => {
-  let profiles = {
-    chat: {
-      voice: "zh_female_vv_uranus_bigtts",
-      speedRatio: 0.7,
-    },
-    book: {
-      voice: "",
-      speedRatio: 1,
-    },
-  };
-  const saved = [];
-  const { page } = loadMePage({
-    ttsExports: {
-      readTTSSettingsProfiles: () => profiles,
-      readScopedTTSSettings: (scope) => profiles[scope],
-      saveScopedTTSSettings: (scope, nextSettings) => {
-        profiles = {
-          ...profiles,
-          [scope]: nextSettings,
-        };
-        saved.push({ scope, settings: nextSettings });
-        return nextSettings;
-      },
-      ttsVoiceLabel: (voice) => (voice ? "通用男声" : "默认音色"),
-      ttsSpeedLabel: (speedRatio) => `${speedRatio}x`,
-    },
-  });
-  const toastCalls = [];
-  global.wx = {
-    showToast(input) {
-      toastCalls.push(input);
-    },
-  };
-  const context = pageContext(page, {
-    chatTTSVoice: profiles.chat.voice,
-    chatTTSSpeedRatio: profiles.chat.speedRatio,
-    bookTTSVoice: profiles.book.voice,
-    bookTTSSpeedRatio: profiles.book.speedRatio,
-  });
-
-  page.selectTTSVoice.call(context, {
-    currentTarget: {
-      dataset: {
-        scope: "book",
-        voice: "zh_male_m191_uranus_bigtts",
-      },
-    },
-  });
-  page.selectTTSSpeed.call(context, {
-    currentTarget: {
-      dataset: {
-        scope: "chat",
-        speed: "1.5",
-      },
-    },
-  });
-
-  assert.deepEqual(saved, [
-    {
-      scope: "book",
-      settings: {
-        voice: "zh_male_m191_uranus_bigtts",
-        speedRatio: 1,
-      },
-    },
-    {
-      scope: "chat",
-      settings: {
-        voice: "zh_female_vv_uranus_bigtts",
-        speedRatio: 1.5,
-      },
-    },
-  ]);
-  assert.equal(context.data.bookTTSVoice, "zh_male_m191_uranus_bigtts");
-  assert.equal(context.data.bookTTSSpeedRatio, 1);
-  assert.equal(context.data.chatTTSVoice, "zh_female_vv_uranus_bigtts");
-  assert.equal(context.data.chatTTSSpeedRatio, 1.5);
-  assert.equal(context.data.chatTTSSpeedLabel, "1.5x");
-  assert.equal(toastCalls.length, 2);
-  delete global.wx;
-});
-
-test("me saves selected AI model", () => {
-  const saved = [];
-  const { page } = loadMePage({
-    aiModelExports: {
-      saveSelectedAIModel: (model) => {
-        saved.push(model);
-        return model === "doubao-seed-2-0-pro-260215" ? model : "deepseek-v4-pro";
-      },
-    },
-  });
-  const toastCalls = [];
-  global.wx = {
-    showToast(input) {
-      toastCalls.push(input);
-    },
-  };
-  const context = pageContext(page);
-
-  page.selectAIModel.call(context, {
-    currentTarget: {
-      dataset: {
-        model: "doubao-seed-2-0-pro-260215",
-      },
-    },
-  });
-
-  assert.deepEqual(saved, ["doubao-seed-2-0-pro-260215"]);
-  assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
-  assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
-  assert.equal(toastCalls.length, 1);
-  delete global.wx;
-});
-
-test("me keeps memoir management, voice progress, and speaker transcription as separate entries", () => {
+test("me keeps memoir management, voice progress, speaker transcription, and voice settings as separate entries", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -616,11 +484,13 @@ test("me keeps memoir management, voice progress, and speaker transcription as s
   page.openVoiceProgress.call(context);
   page.openProjects.call(context);
   page.openSpeakerTranscription.call(context);
+  page.openVoiceSettings.call(context);
 
   assert.deepEqual(navigations, [
     "/pages/voice-progress/index",
     "/pages/projects/index",
     "/pages/speaker-transcription/index",
+    "/pages/voice-settings/index",
   ]);
   delete global.wx;
 });

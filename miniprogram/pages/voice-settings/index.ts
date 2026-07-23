@@ -1,0 +1,135 @@
+import { definePage } from "../../services/page-definition";
+import {
+  AI_MODEL_OPTIONS,
+  aiModelLabel,
+  readSelectedAIModel,
+  saveSelectedAIModel,
+  type AIModelOption,
+} from "../../services/ai-model-settings";
+import {
+  accessibilityPageClass,
+  readAccessibilitySettings,
+  saveAutoBargeInEnabled,
+} from "../../services/accessibility-settings";
+import {
+  datasetChoice,
+  datasetNumber,
+  datasetString,
+  type PageDatasetEvent,
+} from "../../services/page-input";
+import {
+  readScopedTTSSettings,
+  readTTSSettingsProfiles,
+  saveScopedTTSSettings,
+  TTS_SPEED_OPTIONS,
+  TTS_VOICE_OPTIONS,
+  type TTSSpeedOption,
+  type TTSSettingsScope,
+  type TTSVoiceOption,
+} from "../../services/tts-settings";
+
+interface VoiceSettingsData {
+  pageClass: string;
+  autoBargeInEnabled: boolean;
+  aiModel: string;
+  aiModelLabel: string;
+  aiModelOptions: AIModelOption[];
+  chatTTSVoice: string;
+  chatTTSSpeedRatio: number;
+  bookTTSVoice: string;
+  bookTTSSpeedRatio: number;
+  ttsVoiceOptions: TTSVoiceOption[];
+  ttsSpeedOptions: TTSSpeedOption[];
+}
+
+interface VoiceSettingsDataset {
+  model?: string;
+  scope?: string;
+  voice?: string;
+  speed?: string | number;
+}
+
+type SettingsEvent = PageDatasetEvent<VoiceSettingsDataset>;
+
+interface SwitchChangeEvent {
+  detail: {
+    value: boolean;
+  };
+}
+
+const TTS_SCOPE_VALUES: readonly TTSSettingsScope[] = ["chat", "book"];
+
+function voiceSettingsData(): VoiceSettingsData {
+  const accessibility = readAccessibilitySettings();
+  const profiles = readTTSSettingsProfiles();
+  const aiModel = readSelectedAIModel();
+  return {
+    pageClass: accessibilityPageClass("voice-settings-page", accessibility.largeTextEnabled),
+    autoBargeInEnabled: accessibility.autoBargeInEnabled,
+    aiModel,
+    aiModelLabel: aiModelLabel(aiModel),
+    aiModelOptions: AI_MODEL_OPTIONS,
+    chatTTSVoice: profiles.chat.voice,
+    chatTTSSpeedRatio: profiles.chat.speedRatio,
+    bookTTSVoice: profiles.book.voice,
+    bookTTSSpeedRatio: profiles.book.speedRatio,
+    ttsVoiceOptions: TTS_VOICE_OPTIONS,
+    ttsSpeedOptions: TTS_SPEED_OPTIONS,
+  };
+}
+
+definePage<VoiceSettingsData>()({
+  data: voiceSettingsData(),
+
+  onShow() {
+    this.setData(voiceSettingsData());
+  },
+
+  changeAutoBargeIn(event: SwitchChangeEvent) {
+    const settings = saveAutoBargeInEnabled(event.detail.value);
+    this.setData({
+      pageClass: accessibilityPageClass("voice-settings-page", settings.largeTextEnabled),
+      autoBargeInEnabled: settings.autoBargeInEnabled,
+    });
+    wx.showToast({
+      title: settings.autoBargeInEnabled ? "自动检测已打开" : "自动检测已关闭",
+      icon: "none",
+    });
+  },
+
+  selectAIModel(event: SettingsEvent) {
+    const model = saveSelectedAIModel(datasetString(event, "model"));
+    this.setData({
+      aiModel: model,
+      aiModelLabel: aiModelLabel(model),
+    });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectTTSVoice(event: SettingsEvent) {
+    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
+    const voice = datasetString(event, "voice");
+    const settings = saveScopedTTSSettings(scope, {
+      ...readScopedTTSSettings(scope),
+      voice,
+    });
+    this.setData(scope === "book"
+      ? { bookTTSVoice: settings.voice }
+      : { chatTTSVoice: settings.voice });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+
+  selectTTSSpeed(event: SettingsEvent) {
+    const scope = datasetChoice(event, "scope", TTS_SCOPE_VALUES, "chat");
+    const current = readScopedTTSSettings(scope);
+    const speedRatio = datasetNumber(event, "speed", current.speedRatio);
+    const settings = saveScopedTTSSettings(scope, {
+      ...current,
+      speedRatio,
+    });
+    this.setData(scope === "book"
+      ? { bookTTSSpeedRatio: settings.speedRatio }
+      : { chatTTSSpeedRatio: settings.speedRatio });
+    wx.showToast({ title: "已保存", icon: "success" });
+  },
+});
