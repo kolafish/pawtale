@@ -295,11 +295,14 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
     completionButtonTitle: "帮我补全这本书",
-    showResumeActions: state.hasProject && !state.needsLogin,
+    showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
     moreActionsToggleText: state.showMoreActions ? "收起其他方式" : "其他讲述与整理方式",
     moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述与整理方式" : "展开其他讲述与整理方式",
     alternateModeButtonTitle: state.selectedMode === "guided_interview" ? "我想自己讲" : "让小余陪着问",
-    showVoiceAuthorizationPanel: !state.voiceAuthorizationAgreed,
+    showVoiceAuthorizationPanel: state.hasProject
+      && !state.needsLogin
+      && !state.loading
+      && !state.voiceAuthorizationAgreed,
   };
 }
 
@@ -370,7 +373,7 @@ definePage<HomeData>()({
     moreActionsToggleText: "其他讲述与整理方式",
     moreActionsToggleAriaLabel: "展开其他讲述与整理方式",
     alternateModeButtonTitle: "让小余陪着问",
-    showVoiceAuthorizationPanel: true,
+    showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
   },

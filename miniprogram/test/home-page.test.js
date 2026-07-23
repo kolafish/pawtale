@@ -219,6 +219,25 @@ test("home primary CTA and alternate action follow the current project's guidanc
   assert.equal(expanded.moreActionsToggleAriaLabel, "收起其他讲述与整理方式");
 });
 
+test("home only shows project actions and voice consent after a usable project has loaded", () => {
+  const loaded = loadHomePage();
+  const { homeViewPatch } = loaded.mod;
+  const baseData = {
+    ...loaded.page.data,
+    loading: false,
+    needsLogin: false,
+    hasProject: true,
+    voiceAuthorizationAgreed: false,
+  };
+
+  assert.equal(homeViewPatch(baseData).showResumeActions, true);
+  assert.equal(homeViewPatch(baseData).showVoiceAuthorizationPanel, true);
+  assert.equal(homeViewPatch({ ...baseData, loading: true }).showResumeActions, false);
+  assert.equal(homeViewPatch({ ...baseData, loading: true }).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, hasProject: false }).showVoiceAuthorizationPanel, false);
+  assert.equal(homeViewPatch({ ...baseData, needsLogin: true }).showVoiceAuthorizationPanel, false);
+});
+
 test("home primary and alternate CTAs create sessions with their displayed guidance modes", async () => {
   const createdModes = [];
   global.wx = {
