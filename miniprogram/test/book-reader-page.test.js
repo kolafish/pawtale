@@ -91,6 +91,28 @@ test("book reader page shares the same finished-book route", async () => {
   }
 });
 
+test("book reader jumps from the table of contents to a chapter and back to the top", () => {
+  const scrolls = [];
+  global.wx = {
+    pageScrollTo(options) {
+      scrolls.push(options);
+    },
+  };
+  const { page } = loadBookReaderPage();
+  const context = pageContext(page);
+
+  page.openReaderChapter.call(context, {
+    currentTarget: { dataset: { index: "1" } },
+  });
+  page.scrollReaderToTop.call(context);
+
+  assert.deepEqual(scrolls, [
+    { selector: "#reader-chapter-1", duration: 280 },
+    { scrollTop: 0, duration: 280 },
+  ]);
+  delete global.wx;
+});
+
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {
   const structured = sampleStructuredBookContent({ chapterCount: 1 });
   structured.table_of_contents[0].sections = [];
@@ -113,4 +135,29 @@ test("book reader keeps flat chapter content as a historical-version fallback", 
     context.data.bookPreviewChapters[0].content,
     "我小时候常在院子里晒太阳。",
   );
+});
+
+test("book reader opens the version selected by the export flow", async () => {
+  const latest = sampleFinishedBook("最新版正文");
+  const historical = {
+    ...latest.latest_version,
+    id: "book-output-version-history",
+    version: 0,
+    content: "历史版本正文",
+  };
+  const { page } = loadBookReaderPage({
+    getMemoirBookOutput: async () => ({
+      ...latest,
+      versions: [historical, ...(latest.versions || [])],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project/1",
+    versionId: "book-output-version-history",
+  });
+
+  assert.equal(context.data.versionId, "book-output-version-history");
+  assert.equal(context.data.bookContent, "历史版本正文");
 });

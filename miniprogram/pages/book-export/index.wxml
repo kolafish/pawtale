@@ -25,12 +25,14 @@
 
     <view wx:if="{{!bookContent}}" class="state-card">
       <text>回到书稿页生成全书后，可以在这里预览和导出。</text>
+      <button class="ghost-button state-action" bindtap="openBookHome">返回书稿</button>
     </view>
 
     <block wx:else>
       <view class="preview-card">
         <view class="section-head">
           <text class="section-title">全书预览</text>
+          <button class="text-button reader-entry-action" bindtap="openBookReader">沉浸阅读</button>
         </view>
 
         <view wx:if="{{bookPreviewTocItems.length}}" class="toc-list">
@@ -126,6 +128,19 @@
       </view>
       <text class="export-action-hint">{{exportActionHintText}}</text>
 
+      <button
+        class="settings-toggle"
+        aria-expanded="{{showBookSettings}}"
+        bindtap="toggleBookSettings"
+      >
+        <view class="settings-toggle-copy">
+          <text class="settings-toggle-title">成书信息与更多设置</text>
+          <text class="settings-toggle-meta">书名、封面、前后记、书稿结构和历史版本</text>
+        </view>
+        <text class="settings-toggle-action">{{showBookSettings ? "收起" : "展开"}}</text>
+      </button>
+
+      <block wx:if="{{showBookSettings}}">
       <view class="book-design-panel">
         <view class="book-design-head">
           <view>
@@ -438,6 +453,7 @@
           </button>
         </view>
       </view>
+      </block>
     </block>
   </block>
 </view>

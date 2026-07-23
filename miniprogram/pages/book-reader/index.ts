@@ -2,7 +2,12 @@ import type { MemoirBookOutput } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import { getMemoirBookOutput } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
-import { queryParam, type PageQuery } from "../../services/page-input";
+import {
+  datasetString,
+  queryParam,
+  type PageDatasetEvent,
+  type PageQuery,
+} from "../../services/page-input";
 import {
   bookShareAppMessage,
   bookShareTimeline,
@@ -30,11 +35,25 @@ type BookReaderData = Pick<
   loading: boolean;
   error: string;
   projectId: string;
+  versionId: string;
   readerTitle: string;
   readerSubtitle: string;
 };
 
-function readerData(output: MemoirBookOutput | null): Pick<
+type ReaderDatasetEvent = PageDatasetEvent<{ index?: string }>;
+
+type WxWithPageScrollTo = typeof wx & {
+  pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
+};
+
+function scrollReader(options: { selector?: string; scrollTop?: number }) {
+  const pageScrollTo = (wx as WxWithPageScrollTo).pageScrollTo;
+  if (typeof pageScrollTo === "function") {
+    pageScrollTo({ ...options, duration: 280 });
+  }
+}
+
+function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
   BookReaderData,
   | "bookOutput"
   | "bookContent"
@@ -49,7 +68,7 @@ function readerData(output: MemoirBookOutput | null): Pick<
   | "readerTitle"
   | "readerSubtitle"
 > {
-  const data = bookOutputData(output);
+  const data = bookOutputData(output, versionId);
   const readerTitle = (
     trimText(data.bookManuscriptTitle)
     || trimText(data.bookPreviewTitle)
@@ -76,17 +95,19 @@ definePage<BookReaderData>()({
     loading: false,
     error: "",
     projectId: "",
+    versionId: "",
     ...readerData(null),
   },
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
-    this.setData({ projectId });
+    const versionId = queryParam(query, "versionId");
+    this.setData({ projectId, versionId });
     if (!projectId) {
       this.setData({ error: "缺少成书信息，暂时无法打开。" });
       return;
     }
-    await this.loadBookReader(projectId);
+    await this.loadBookReader(projectId, versionId);
   },
 
   onShow() {
@@ -109,11 +130,23 @@ definePage<BookReaderData>()({
     });
   },
 
-  async loadBookReader(projectId: string) {
+  openReaderChapter(event: ReaderDatasetEvent) {
+    const chapterIndex = datasetString(event, "index");
+    if (!/^\d+$/.test(chapterIndex)) {
+      return;
+    }
+    scrollReader({ selector: `#reader-chapter-${chapterIndex}` });
+  },
+
+  scrollReaderToTop() {
+    scrollReader({ scrollTop: 0 });
+  },
+
+  async loadBookReader(projectId: string, versionId = "") {
     this.setData({ loading: true, error: "" });
     try {
       const output = await getMemoirBookOutput(projectId);
-      this.setData(readerData(output));
+      this.setData(readerData(output, versionId));
       if (!trimText(this.data.bookContent)) {
         this.setData({ error: "这本书还没有生成成书内容。" });
       }

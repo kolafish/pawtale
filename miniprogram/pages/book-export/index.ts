@@ -20,6 +20,7 @@ import {
   datasetChoice,
   datasetString,
   pickerIndex,
+  pageUrl,
   queryParam,
   type PageDatasetEvent,
   type PagePickerEvent,
@@ -134,6 +135,7 @@ type BookExportData = Pick<
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;
+  showBookSettings: boolean;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
@@ -194,6 +196,7 @@ definePage<BookExportData>()({
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     exportActionHintText: exportActionHint("reading_pdf"),
+    showBookSettings: false,
     ...bookOutputData(null),
   },
 
@@ -584,6 +587,26 @@ definePage<BookExportData>()({
 
   toggleBookPreviewChapters() {
     this.setData({ bookPreviewChaptersExpanded: !this.data.bookPreviewChaptersExpanded });
+  },
+
+  openBookReader() {
+    if (!this.data.projectId || !this.data.bookContent) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-reader/index", {
+        projectId: this.data.projectId,
+        versionId: this.data.bookSelectedVersionId,
+      }),
+    });
+  },
+
+  openBookHome() {
+    wx.switchTab({ url: "/pages/book/index" });
+  },
+
+  toggleBookSettings() {
+    this.setData({ showBookSettings: !this.data.showBookSettings });
   },
 
   async downloadBookOutputExport(event: DatasetEvent) {

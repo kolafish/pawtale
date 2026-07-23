@@ -133,6 +133,12 @@
   color: #a64b3e;
 }
 
+.state-action {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 20rpx;
+}
+
 .export-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(180rpx, 1fr));
@@ -176,6 +182,72 @@
 
 .text-button::after {
   border: 0;
+}
+
+.reader-entry-action {
+  min-height: 44px;
+  margin: -10rpx -12rpx -10rpx 0;
+  padding: 10rpx 12rpx;
+  font-weight: 700;
+}
+
+.settings-toggle {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 24rpx 26rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  border: 0;
+  border-radius: 12rpx;
+  background: #fffaf3;
+  color: #332822;
+  text-align: left;
+  box-shadow:
+    0 0 0 1rpx #ead9c8,
+    0 10rpx 24rpx rgba(93, 59, 40, 0.06);
+  transition: transform 140ms ease-out;
+}
+
+.settings-toggle::after {
+  border: 0;
+}
+
+.settings-toggle:active {
+  transform: scale(0.98);
+}
+
+.settings-toggle-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.settings-toggle-title,
+.settings-toggle-meta,
+.settings-toggle-action {
+  display: block;
+}
+
+.settings-toggle-title {
+  font-size: 29rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.settings-toggle-meta {
+  margin-top: 6rpx;
+  color: #7b6f68;
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.settings-toggle-action {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 25rpx;
+  font-weight: 700;
 }
 
 .ghost-button.compact {
