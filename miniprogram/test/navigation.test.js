@@ -34,7 +34,7 @@ test("navigation helper routes auth errors to login or me", () => {
     },
   };
 
-  assert.equal(routeAuthError(new ApiError(401, "login required", null), "login"), true);
+  assert.equal(routeAuthError(new ApiError(401, "login required", null)), true);
   assert.equal(routeAuthError(new ApiError(403, "forbidden", null), "me"), true);
   assert.equal(routeAuthError(new ApiError(404, "missing", null)), false);
   navigateToLogin();
