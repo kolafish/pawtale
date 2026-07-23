@@ -15,12 +15,18 @@
         bindinput="onSearchInput"
         bindconfirm="onSearchConfirm"
       />
-      <button wx:if="{{showSearchClear}}" class="search-clear" bindtap="clearSearch">×</button>
+      <button
+        wx:if="{{showSearchClear}}"
+        class="search-clear"
+        bindtap="clearSearch"
+        aria-label="清除搜索"
+      >×</button>
       <button
         class="{{voiceSearchButtonClass}}"
         bindtap="startVoiceSearch"
         loading="{{voiceSearchTranscribing}}"
         disabled="{{voiceSearchDisabled}}"
+        aria-label="{{voiceSearchButtonText}}"
       >
         {{voiceSearchButtonText}}
       </button>
@@ -59,6 +65,7 @@
   <view wx:elif="{{showSearchEmpty}}" class="empty-panel">
     <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
+    <button class="empty-secondary-button" bindtap="clearSearch">清除搜索，查看全部</button>
   </view>
 
   <view wx:elif="{{showGenericEmpty}}" class="empty-panel">
@@ -73,16 +80,12 @@
     class="{{item.cardClass}}"
     data-id="{{item.id}}"
     bindtap="openTranscriptDetail"
+    hover-class="transcript-card-hover"
+    aria-role="button"
+    aria-label="{{item.cardAriaLabel}}"
   >
-    <view class="record-head">
-      <view class="record-main">
-        <text class="record-title">{{item.summaryTitleText}}</text>
-        <text class="record-meta">{{item.recordMetaText}}</text>
-        <text wx:if="{{item.transcriptionStatusText}}" class="transcription-status">{{item.transcriptionStatusText}}</text>
-        <text class="{{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
-      </view>
-      <text class="{{item.recordCountClass}}">{{item.recordCountText}}</text>
-    </view>
+    <text class="record-meta">{{item.recordMetaText}}</text>
+    <text class="record-title">{{item.summaryTitleText}}</text>
 
     <text class="summary-preview">
       <text
@@ -96,9 +99,10 @@
 
     <view
       wx:if="{{item.canRecoverTranscription}}"
-      class="actions-row list-actions"
+      class="recovery-row"
       catchtap="stopCardTap"
     >
+      <text class="recovery-notice">{{item.recoveryNoticeText}}</text>
       <button
         class="small-primary"
         data-id="{{item.id}}"
@@ -108,6 +112,10 @@
       >
         {{item.recoverButtonText}}
       </button>
+    </view>
+    <view class="record-footer">
+      <text class="{{item.bookStatusClass}}">{{item.bookInclusionText}}</text>
+      <text class="detail-action">{{item.detailActionText}} ›</text>
     </view>
   </view>
 

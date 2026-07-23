@@ -68,9 +68,7 @@ interface TranscriptItemView {
   summarySegments: TranscriptTextSegment[];
   anchorId: string;
   recordMetaText: string;
-  recordCountText: string;
-  recordCountClass: string;
-  transcriptionStatusText: string;
+  recoveryNoticeText: string;
   canRecoverTranscription: boolean;
   recoverButtonLoading: boolean;
   recoverButtonDisabled: boolean;
@@ -79,6 +77,8 @@ interface TranscriptItemView {
   isIncludedInBook: boolean;
   cardClass: string;
   bookStatusClass: string;
+  detailActionText: string;
+  cardAriaLabel: string;
 }
 
 interface TranscriptsData {
@@ -210,7 +210,7 @@ export function transcriptsViewPatch(state: TranscriptsData): TranscriptsViewPat
     showSearchClear: Boolean(state.searchInput || state.hasSearchCriteria),
     showSearchChips: state.searchChips.length > 0,
     voiceSearchButtonClass: state.voiceSearchRecording ? "voice-search-button recording" : "voice-search-button",
-    voiceSearchButtonText: state.voiceSearchRecording ? "停止" : (state.voiceSearchTranscribing ? "识别中" : "语音"),
+    voiceSearchButtonText: state.voiceSearchRecording ? "停止" : (state.voiceSearchTranscribing ? "识别中" : "语音搜索"),
     voiceSearchDisabled: state.voiceSearchTranscribing,
     loadingEmptyText: state.hasSearchCriteria ? "正在搜索" : "正在加载",
     showNoProjectPanel,
@@ -375,7 +375,11 @@ function toViewItem(
   const bookInclusionText = canRecoverTranscription
     ? "等待转写后再入章"
     : transcriptBookInclusionText(item);
-  const recordMetaText = [createdAtText, durationText].filter(Boolean).join(" · ");
+  const recordMetaText = [
+    createdAtText,
+    durationText,
+    canRecoverTranscription ? "" : `${item.display_char_count} 字`,
+  ].filter(Boolean).join(" · ");
   return {
     id: item.id,
     summaryTitleText,
@@ -383,9 +387,7 @@ function toViewItem(
     summarySegments: highlightTranscriptText(summaryPreviewText, searchQuery),
     anchorId: transcriptAnchorId(item.id),
     recordMetaText,
-    recordCountText: canRecoverTranscription ? "待转写" : `${item.display_char_count} 字`,
-    recordCountClass: canRecoverTranscription ? "record-count pending" : "record-count",
-    transcriptionStatusText: canRecoverTranscription ? "音频已保存" : "",
+    recoveryNoticeText: canRecoverTranscription ? "音频已保存，恢复转写后即可继续整理。" : "",
     canRecoverTranscription,
     recoverButtonLoading: false,
     recoverButtonDisabled: false,
@@ -396,6 +398,8 @@ function toViewItem(
     bookStatusClass: canRecoverTranscription
       ? "book-status pending"
       : (isIncludedInBook ? "book-status included" : "book-status"),
+    detailActionText: canRecoverTranscription ? "查看音频" : "查看详情",
+    cardAriaLabel: `${summaryTitleText}，${recordMetaText}，${bookInclusionText}，点击查看详情`,
   };
 }
 
@@ -442,7 +446,7 @@ definePage<TranscriptsData>()({
     showSearchClear: false,
     showSearchChips: false,
     voiceSearchButtonClass: "voice-search-button",
-    voiceSearchButtonText: "语音",
+    voiceSearchButtonText: "语音搜索",
     voiceSearchDisabled: false,
     loadingEmptyText: "正在加载",
     showNoProjectPanel: true,

@@ -62,8 +62,8 @@
 }
 
 .voice-search-button {
-  flex: 0 0 112rpx;
-  width: 112rpx;
+  flex: 0 0 132rpx;
+  width: 132rpx;
   min-width: 0;
   height: 72rpx;
   min-height: 40px;
@@ -184,12 +184,22 @@
   font-weight: 800;
 }
 
-.login-button::after {
+.login-button::after,
+.empty-secondary-button::after {
   border: 0;
 }
 
 .transcript-card {
   padding: 30rpx;
+  transition-property: transform, background-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.transcript-card-hover {
+  background: #fffdf9;
+  transform: scale(0.985);
+  box-shadow: 0 4rpx 14rpx rgba(93, 61, 42, 0.05);
 }
 
 .transcript-card.highlighted {
@@ -202,35 +212,18 @@
   background: #fffdf9;
 }
 
-.record-head,
-.actions-row {
-  display: flex;
-  align-items: center;
-}
-
-.record-head {
-  justify-content: space-between;
-  gap: 22rpx;
-  align-items: flex-start;
-}
-
-.record-main {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
 .record-title {
   display: block;
+  margin-top: 10rpx;
   color: #2b1713;
-  font-size: 34rpx;
+  font-size: 36rpx;
   font-weight: 700;
-  line-height: 46rpx;
+  line-height: 50rpx;
   word-break: break-word;
 }
 
 .record-meta {
   display: block;
-  margin-top: 12rpx;
   color: #7b6f68;
   font-size: 25rpx;
   line-height: 1.4;
@@ -239,60 +232,26 @@
 
 .book-status {
   display: inline-flex;
+  flex: 0 1 auto;
   max-width: 100%;
-  margin-top: 12rpx;
-  padding: 8rpx 14rpx;
-  border-radius: 999rpx;
-  background: #fff2d9;
   color: #9a6a24;
   font-size: 24rpx;
   font-weight: 600;
-  line-height: 32rpx;
+  line-height: 38rpx;
   word-break: break-word;
 }
 
 .book-status.included {
-  background: #fff3ef;
   color: #a64b3e;
 }
 
 .book-status.pending {
-  background: #f2eee6;
   color: #74675e;
-}
-
-.transcription-status {
-  display: inline-flex;
-  max-width: 100%;
-  margin-top: 12rpx;
-  padding: 8rpx 14rpx;
-  border-radius: 999rpx;
-  background: #f8eadf;
-  color: #8b5c43;
-  font-size: 24rpx;
-  font-weight: 700;
-  line-height: 32rpx;
-  word-break: break-word;
-}
-
-.record-count {
-  flex: 0 0 auto;
-  padding: 10rpx 16rpx;
-  border-radius: 999rpx;
-  background: #f6eee5;
-  color: #8b6a55;
-  font-size: 24rpx;
-  font-weight: 600;
-}
-
-.record-count.pending {
-  background: #a64b3e;
-  color: #ffffff;
 }
 
 .summary-preview {
   display: block;
-  margin-top: 22rpx;
+  margin-top: 16rpx;
   color: #3a2a25;
   font-size: 28rpx;
   line-height: 46rpx;
@@ -305,16 +264,22 @@
   font-weight: 800;
 }
 
-.actions-row {
-  justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 14rpx;
-  margin-top: 26rpx;
+.recovery-row {
+  margin-top: 22rpx;
+  padding: 20rpx;
+  border-radius: 18rpx;
+  background: #f8f2e8;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
 }
 
-.list-actions {
-  justify-content: flex-start;
-  margin-top: 24rpx;
+.recovery-notice {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #6c5c53;
+  font-size: 25rpx;
+  line-height: 38rpx;
 }
 
 .small-primary,
@@ -336,7 +301,9 @@
 }
 
 .small-primary {
-  flex: 1 1 148rpx;
+  flex: 0 0 auto;
+  min-width: 168rpx;
+  padding: 0 22rpx;
 }
 
 .small-primary::after,
@@ -347,6 +314,38 @@
 .small-primary {
   background: #a64b3e;
   color: #ffffff;
+}
+
+.record-footer {
+  margin-top: 22rpx;
+  padding-top: 18rpx;
+  border-top: 1rpx solid rgba(43, 23, 19, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.detail-action {
+  flex: 0 0 auto;
+  color: #a64b3e;
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 38rpx;
+  white-space: nowrap;
+}
+
+.empty-secondary-button {
+  width: 100%;
+  min-height: 84rpx;
+  margin: 26rpx 0 0;
+  border: 0;
+  border-radius: 20rpx;
+  background: #f5eee7;
+  color: #8f3e35;
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 42rpx;
 }
 
 .small-primary[disabled],
@@ -394,8 +393,7 @@
 
 .transcripts-page.large-text .search-chip,
 .transcripts-page.large-text .book-status,
-.transcripts-page.large-text .transcription-status,
-.transcripts-page.large-text .record-count {
+.transcripts-page.large-text .detail-action {
   font-size: 28rpx;
   line-height: 40rpx;
 }
@@ -419,8 +417,14 @@
 
 .transcripts-page.large-text .small-primary,
 .transcripts-page.large-text .load-more,
-.transcripts-page.large-text .login-button {
+.transcripts-page.large-text .login-button,
+.transcripts-page.large-text .empty-secondary-button {
   min-height: 48px;
   font-size: 30rpx;
   line-height: 1.35;
+}
+
+.transcripts-page.large-text .recovery-notice {
+  font-size: 30rpx;
+  line-height: 46rpx;
 }
