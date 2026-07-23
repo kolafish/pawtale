@@ -1,0 +1,142 @@
+<view class="{{pageClass}}">
+  <view class="ui-page-context-row">
+    <text class="ui-page-context">访谈语音和成书朗读可以分别设置，选择后立即保存。</text>
+  </view>
+
+  <view class="section first-section">
+    <text class="section-title">访谈环境</text>
+    <view class="settings-card">
+      <view class="switch-row">
+        <view class="switch-copy">
+          <text class="option-label">自动检测我说话</text>
+          <text class="option-desc">环境嘈杂时可以关闭，改成点击按钮后再回答。</text>
+        </view>
+        <switch
+          checked="{{autoBargeInEnabled}}"
+          color="#a64b3e"
+          aria-label="自动检测我说话"
+          bindchange="changeAutoBargeIn"
+        />
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-header">
+      <text class="section-title">AI 模型</text>
+      <text class="section-current">{{aiModelLabel}}</text>
+    </view>
+    <view class="settings-list">
+      <view
+        wx:for="{{aiModelOptions}}"
+        wx:key="value"
+        class="option-row {{item.value === aiModel ? 'selected' : ''}}"
+        aria-role="button"
+        data-model="{{item.value}}"
+        aria-pressed="{{item.value === aiModel}}"
+        bindtap="selectAIModel"
+        hover-class="option-row-hover"
+      >
+        <view class="option-copy">
+          <text class="option-label">{{item.label}}</text>
+          <text class="option-desc">{{item.description}}</text>
+        </view>
+        <view class="selection-mark {{item.value === aiModel ? 'visible' : ''}}" aria-hidden="true">
+          <text>✓</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <text class="section-title">语音聊天</text>
+    <view class="settings-list">
+      <view class="settings-subgroup">
+        <text class="subgroup-label">音色</text>
+        <view
+          wx:for="{{ttsVoiceOptions}}"
+          wx:key="value"
+          class="option-row compact {{item.value === chatTTSVoice ? 'selected' : ''}}"
+          aria-role="button"
+          data-scope="chat"
+          data-voice="{{item.value}}"
+          aria-pressed="{{item.value === chatTTSVoice}}"
+          bindtap="selectTTSVoice"
+          hover-class="option-row-hover"
+        >
+          <view class="option-copy">
+            <text class="option-label">{{item.label}}</text>
+            <text class="option-desc">{{item.description}}</text>
+          </view>
+          <view class="selection-mark {{item.value === chatTTSVoice ? 'visible' : ''}}" aria-hidden="true">
+            <text>✓</text>
+          </view>
+        </view>
+      </view>
+      <view class="settings-subgroup speed-subgroup">
+        <text class="subgroup-label">语速</text>
+        <view class="speed-options">
+          <view
+            wx:for="{{ttsSpeedOptions}}"
+            wx:key="value"
+            class="speed-option {{item.value === chatTTSSpeedRatio ? 'selected' : ''}}"
+            aria-role="button"
+            data-scope="chat"
+            data-speed="{{item.value}}"
+            aria-pressed="{{item.value === chatTTSSpeedRatio}}"
+            bindtap="selectTTSSpeed"
+            hover-class="speed-option-hover"
+          >
+            <text>{{item.label}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="section">
+    <text class="section-title">成书朗读</text>
+    <view class="settings-list">
+      <view class="settings-subgroup">
+        <text class="subgroup-label">音色</text>
+        <view
+          wx:for="{{ttsVoiceOptions}}"
+          wx:key="value"
+          class="option-row compact {{item.value === bookTTSVoice ? 'selected' : ''}}"
+          aria-role="button"
+          data-scope="book"
+          data-voice="{{item.value}}"
+          aria-pressed="{{item.value === bookTTSVoice}}"
+          bindtap="selectTTSVoice"
+          hover-class="option-row-hover"
+        >
+          <view class="option-copy">
+            <text class="option-label">{{item.label}}</text>
+            <text class="option-desc">{{item.description}}</text>
+          </view>
+          <view class="selection-mark {{item.value === bookTTSVoice ? 'visible' : ''}}" aria-hidden="true">
+            <text>✓</text>
+          </view>
+        </view>
+      </view>
+      <view class="settings-subgroup speed-subgroup">
+        <text class="subgroup-label">语速</text>
+        <view class="speed-options">
+          <view
+            wx:for="{{ttsSpeedOptions}}"
+            wx:key="value"
+            class="speed-option {{item.value === bookTTSSpeedRatio ? 'selected' : ''}}"
+            aria-role="button"
+            data-scope="book"
+            data-speed="{{item.value}}"
+            aria-pressed="{{item.value === bookTTSSpeedRatio}}"
+            bindtap="selectTTSSpeed"
+            hover-class="speed-option-hover"
+          >
+            <text>{{item.label}}</text>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+</view>
