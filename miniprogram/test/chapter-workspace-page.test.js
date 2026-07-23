@@ -150,8 +150,12 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   delete global.wx;
 });
 
-test("chapter workspace returns to the previous book flow with a book-tab fallback", () => {
+test("chapter workspace protects unsaved edits before returning to the book flow", () => {
   const tabNavigations = [];
+  const modalResults = [
+    { confirm: false, cancel: true },
+    { confirm: true, cancel: false },
+  ];
   global.wx = {
     navigateBack(options) {
       options.fail?.();
@@ -159,12 +163,21 @@ test("chapter workspace returns to the previous book flow with a book-tab fallba
     switchTab(options) {
       tabNavigations.push(options.url);
     },
+    showModal(options) {
+      options.success?.(modalResults.shift());
+    },
   };
   const { page } = loadWorkspacePage();
-  const context = pageContext(page);
+  const context = pageContext(page, {
+    workspace: workspace(),
+    editingSectionId: "section-1",
+    editingSectionContent: "还没有保存的修改",
+  });
 
   page.returnToBookFlow.call(context);
+  assert.deepEqual(tabNavigations, []);
 
+  page.returnToBookFlow.call(context);
   assert.deepEqual(tabNavigations, ["/pages/book/index"]);
   delete global.wx;
 });

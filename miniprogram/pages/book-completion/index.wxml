@@ -22,7 +22,7 @@
         wx:if="{{allChaptersConfirmed}}"
         class="book-ready-action"
         bindtap="openBookHome"
-      >返回书稿，生成全书</button>
+      >返回书稿</button>
       <button
         class="recheck-book-action"
         loading="{{recheckingAll}}"
