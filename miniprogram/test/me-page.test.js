@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -149,6 +151,32 @@ test("me opens the dedicated login page from the guest entry", () => {
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
   delete global.wx;
+});
+
+test("me keeps large text available before login-only settings", () => {
+  const pageWxml = fs.readFileSync(
+    path.join(__dirname, "../pages/me/index.wxml"),
+    "utf8",
+  );
+  const largeTextControl = pageWxml.indexOf('aria-label="大字模式"');
+  const loggedInSettings = pageWxml.indexOf('<block wx:if="{{loggedIn}}">');
+
+  assert.ok(largeTextControl > 0);
+  assert.ok(loggedInSettings > largeTextControl);
+});
+
+test("me reveals account and voice settings only when requested", () => {
+  const { page } = loadMePage();
+  const context = pageContext(page);
+
+  assert.equal(context.data.showAccountSettings, false);
+  assert.equal(context.data.showVoiceSettings, false);
+
+  page.toggleAccountSettings.call(context);
+  page.toggleVoiceSettings.call(context);
+
+  assert.equal(context.data.showAccountSettings, true);
+  assert.equal(context.data.showVoiceSettings, true);
 });
 
 test("me saves local accessibility and voice environment switches", () => {
