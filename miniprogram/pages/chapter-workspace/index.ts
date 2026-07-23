@@ -165,7 +165,7 @@ definePage<ChapterWorkspacePageData>()({
         this.stopPreparationPolling();
       }
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
@@ -248,7 +248,7 @@ definePage<ChapterWorkspacePageData>()({
         });
       }
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
@@ -292,7 +292,7 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       this.schedulePreparationPolling();
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "本章整理失败" });
@@ -343,7 +343,7 @@ definePage<ChapterWorkspacePageData>()({
       );
       this.openVoiceChat(detail.session.id);
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "AI 访谈创建失败" });
@@ -396,7 +396,7 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       this.schedulePreparationPolling();
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "确认失败" });
@@ -469,7 +469,7 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       wx.showToast({ title: "小节已保存", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
@@ -492,7 +492,7 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       wx.showToast({ title: "本章正文已确认", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
@@ -541,7 +541,7 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       wx.showToast({ title: "本章正文已更新", icon: "success" });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({

@@ -19,9 +19,8 @@
 }
 
 .primary-button,
-.small-primary,
 .ghost-button,
-.danger-button {
+.more-button {
   border: 0;
   border-radius: 22rpx;
   display: flex;
@@ -32,9 +31,8 @@
 }
 
 .primary-button::after,
-.small-primary::after,
 .ghost-button::after,
-.danger-button::after {
+.more-button::after {
   border: 0;
 }
 
@@ -58,6 +56,18 @@
 
 .project-card.active {
   border-color: #a64b3e;
+  background: #fff9f3;
+}
+
+.project-card {
+  transition-property: transform, background-color, border-color, box-shadow;
+  transition-duration: 150ms;
+  transition-timing-function: ease-out;
+}
+
+.project-card-hover {
+  transform: scale(0.98);
+  border-color: #d8c0a6;
   background: #fff9f3;
 }
 
@@ -98,17 +108,27 @@
   line-height: 1.35;
 }
 
+.project-hint {
+  display: block;
+  margin-top: 14rpx;
+  color: #a64b3e;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .project-actions {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  display: flex;
+  justify-content: flex-end;
   gap: 18rpx;
   margin-top: 26rpx;
 }
 
 .ghost-button,
-.small-primary,
-.danger-button {
-  height: 78rpx;
+.more-button {
+  min-width: 176rpx;
+  height: 88rpx;
+  margin: 0;
   font-size: 28rpx;
 }
 
@@ -117,24 +137,14 @@
   color: #a64b3e;
 }
 
-.small-primary {
-  background: #a64b3e;
-  color: #ffffff;
+.more-button {
+  background: #f5eee7;
+  color: #5c4b43;
 }
 
-.danger-button {
-  background: #fff1f3;
-  color: #b84a5a;
-}
-
-.small-primary.disabled {
-  background: #e8d8c3;
-  color: #6d817d;
-}
-
-.danger-button.disabled {
-  background: #f8efe7;
-  color: #b8a7a0;
+.project-action-hover {
+  transform: scale(0.96);
+  opacity: 0.86;
 }
 
 .empty-panel {

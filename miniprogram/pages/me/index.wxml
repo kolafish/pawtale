@@ -1,10 +1,22 @@
 <view class="{{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">账号、回忆录和语音访谈设置</text>
+    <text class="ui-page-context">{{loggedIn ? "账号、回忆录和语音访谈设置" : "登录并继续记录家里的故事"}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
+  <block wx:if="{{!loggedIn}}">
+    <view class="guest-login-panel">
+      <view class="guest-login-mark">余</view>
+      <text class="panel-title">登录后管理你的回忆录</text>
+      <text class="panel-copy">讲述记录、成书进度和个人设置都会跟随账号保存。</text>
+      <button class="primary-button" bindtap="openLogin" hover-class="ui-button-hover">
+        前往登录
+      </button>
+    </view>
+  </block>
+
+  <block wx:else>
   <view class="section">
     <text class="section-title">显示和环境</text>
     <view class="settings-card">
@@ -34,66 +46,6 @@
     </view>
   </view>
 
-  <block wx:if="{{!loggedIn}}">
-    <view class="login-panel">
-      <text class="panel-title">登录 Pawtale</text>
-      <text class="panel-copy">
-        登录后管理回忆录、讲述记录和成书。
-      </text>
-
-      <button
-        class="primary-button"
-        loading="{{wechatLoading}}"
-        disabled="{{loading || wechatLoading || credentialsLoading}}"
-        bindtap="submitWeChat"
-      >
-        {{wechatLoading ? "微信登录中" : "微信登录"}}
-      </button>
-
-      <button
-        class="mode-button"
-        disabled="{{loading || wechatLoading || credentialsLoading}}"
-        bindtap="toggleAccountMode"
-      >
-        {{accountMode ? "收起账号登录" : "使用 Pawtale 账号登录"}}
-      </button>
-
-      <view wx:if="{{accountMode}}" class="account-panel">
-        <view class="field">
-          <text class="field-label">邮箱</text>
-          <input
-            class="field-input"
-            type="text"
-            value="{{emailInput}}"
-            placeholder="name@example.com"
-            bindinput="changeEmailInput"
-          />
-        </view>
-
-        <view class="field">
-          <text class="field-label">密码</text>
-          <input
-            class="field-input"
-            password
-            value="{{password}}"
-            placeholder="至少 8 位"
-            bindinput="changePassword"
-          />
-        </view>
-
-        <button
-          class="secondary-button"
-          loading="{{loading}}"
-          disabled="{{loading || wechatLoading || credentialsLoading}}"
-          bindtap="submitAccount"
-        >
-          {{loading ? "登录中" : "账号登录"}}
-        </button>
-      </view>
-    </view>
-  </block>
-
-  <block wx:else>
   <view class="profile-panel">
     <image wx:if="{{avatarUrl}}" class="avatar-image" src="{{avatarUrl}}" mode="aspectFill" />
     <view wx:else class="avatar">

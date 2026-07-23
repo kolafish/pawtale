@@ -27,8 +27,8 @@ import {
 } from "../../services/share";
 import {
   isAuthError,
+  navigateToLogin,
   routeAuthError,
-  switchToMe,
 } from "../../services/navigation";
 import {
   recordMemoirVoiceSearchQuery,
@@ -1377,7 +1377,7 @@ definePage<TranscriptDetailData>()({
   },
 
   openLogin() {
-    switchToMe();
+    navigateToLogin();
   },
 
   onShow() {

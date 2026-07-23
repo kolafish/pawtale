@@ -25,7 +25,7 @@ import {
   guidanceModeLabel,
   memoirProjectProfile,
 } from "../../services/memoir-project-profile";
-import { isAuthError, switchToMe } from "../../services/navigation";
+import { isAuthError, navigateToLogin } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
 import {
   readVoiceAuthorizationConsent,
@@ -452,6 +452,18 @@ definePage<HomeData>()({
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 
+  openProjects() {
+    if (this.data.needsLogin) {
+      navigateToLogin();
+      return;
+    }
+    if (!this.data.projectId) {
+      this.createProject();
+      return;
+    }
+    wx.navigateTo({ url: "/pages/projects/index" });
+  },
+
   async startVoiceChat() {
     await this.startVoiceChatWithMode(this.data.selectedMode, "home");
   },
@@ -509,7 +521,7 @@ definePage<HomeData>()({
       return false;
     }
     if (this.data.needsLogin) {
-      switchToMe();
+      navigateToLogin();
       return false;
     }
     if (!this.data.projectId) {
@@ -537,7 +549,7 @@ definePage<HomeData>()({
       await this.createAndOpenVoiceChat(mode, entry, interviewType, sessionGoal);
     } catch (error) {
       if (isAuthError(error)) {
-        switchToMe();
+        navigateToLogin();
         return;
       }
       setHomeData(this, {

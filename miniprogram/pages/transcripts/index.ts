@@ -16,7 +16,7 @@ import {
 import { getMemoirIdentity } from "../../services/auth";
 import {
   isAuthError,
-  switchToMe,
+  navigateToLogin,
 } from "../../services/navigation";
 import {
   clearTranscriptNavigationTarget,
@@ -703,7 +703,7 @@ definePage<TranscriptsData>()({
   },
 
   openLogin() {
-    switchToMe();
+    navigateToLogin();
   },
 
   createProject() {

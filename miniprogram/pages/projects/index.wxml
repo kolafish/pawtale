@@ -15,31 +15,44 @@
     <text>暂无回忆录</text>
   </view>
 
-  <view wx:for="{{projects}}" wx:key="id" class="project-card {{item.active ? 'active' : ''}}">
+  <view
+    wx:for="{{projects}}"
+    wx:key="id"
+    class="project-card {{item.active ? 'active' : ''}}"
+    data-id="{{item.id}}"
+    bindtap="activateProject"
+    hover-class="{{item.active ? 'none' : 'project-card-hover'}}"
+    aria-role="button"
+    aria-disabled="{{busy}}"
+    aria-label="{{item.active ? ('当前回忆录，' + item.title) : ('切换到回忆录，' + item.title)}}"
+  >
     <view class="project-main">
       <view class="project-title-row">
         <text class="project-title">{{item.title}}</text>
         <text wx:if="{{item.active}}" class="active-badge">当前</text>
       </view>
       <text class="project-meta">{{item.profileSummary || "资料未填写"}} · {{item.wordCountText}} · {{item.updatedText || "刚刚"}}</text>
+      <text class="project-hint">{{item.active ? "当前正在使用" : "点击卡片切换为当前回忆录"}}</text>
     </view>
 
     <view class="project-actions">
-      <button class="ghost-button" data-id="{{item.id}}" bindtap="openProjectEdit">编辑</button>
       <button
-        class="small-primary {{item.active ? 'disabled' : ''}}"
+        class="ghost-button"
         data-id="{{item.id}}"
-        bindtap="activateProject"
+        catchtap="openProjectEdit"
+        hover-class="project-action-hover"
       >
-        {{item.active ? "使用中" : "切换"}}
+        编辑资料
       </button>
       <button
-        class="danger-button {{item.canDelete ? '' : 'disabled'}}"
+        wx:if="{{item.canDelete}}"
+        class="more-button"
         data-id="{{item.id}}"
-        disabled="{{!item.canDelete || busy}}"
-        bindtap="deleteProject"
+        disabled="{{busy}}"
+        catchtap="openProjectMore"
+        hover-class="project-action-hover"
       >
-        {{deletingId === item.id ? "删除中" : "删除"}}
+        {{deletingId === item.id ? "处理中" : "更多"}}
       </button>
     </view>
   </view>

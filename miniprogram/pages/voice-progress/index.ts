@@ -186,7 +186,7 @@ definePage<ProgressData>()({
         modules: progress.modules.map(toModuleView),
       });
     } catch (error) {
-      if (routeAuthError(error, "me")) {
+      if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "讲述进度加载失败" });

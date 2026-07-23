@@ -4,14 +4,12 @@ import type { TTSSpeedOption, TTSSettingsScope, TTSVoiceOption } from "../../ser
 import {
   getMemoirIdentity,
   isValidEmail,
-  loginWithEmail,
-  loginWithWeChat,
   logoutBackendSession,
   setAccountCredentials,
   updateBackendProfile,
 } from "../../services/auth";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
-import { isAuthError } from "../../services/navigation";
+import { isAuthError, navigateToLogin } from "../../services/navigation";
 import {
   datasetChoice,
   datasetNumber,
@@ -58,7 +56,6 @@ interface MeData {
   savingName: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
-  wechatLoading: boolean;
   credentialsLoading: boolean;
   error: string;
   displayName: string;
@@ -68,11 +65,8 @@ interface MeData {
   email: string;
   accountEmailText: string;
   passwordLoginEnabled: boolean;
-  emailInput: string;
-  password: string;
   credentialEmail: string;
   credentialPassword: string;
-  accountMode: boolean;
   projectTitle: string;
   projectCount: number;
   voiceStatsProjectId: string;
@@ -237,11 +231,8 @@ function loggedOutData(): Partial<MeData> {
     email: "",
     accountEmailText: "",
     passwordLoginEnabled: false,
-    emailInput: "",
-    password: "",
     credentialEmail: "",
     credentialPassword: "",
-    accountMode: false,
     credentialsLoading: false,
     projectTitle: "",
     projectCount: 0,
@@ -263,7 +254,6 @@ definePage<MeData>()({
     savingName: false,
     editingName: false,
     voiceStatsLoading: false,
-    wechatLoading: false,
     credentialsLoading: false,
     error: "",
     displayName: "",
@@ -273,11 +263,8 @@ definePage<MeData>()({
     email: "",
     accountEmailText: "",
     passwordLoginEnabled: false,
-    emailInput: "",
-    password: "",
     credentialEmail: "",
     credentialPassword: "",
-    accountMode: false,
     projectTitle: "",
     projectCount: 0,
     voiceStatsProjectId: "",
@@ -326,9 +313,6 @@ definePage<MeData>()({
       const keepVoiceStats = Boolean(activeProjectId && this.data.voiceStatsProjectId === activeProjectId);
       this.setData({
         loggedIn: true,
-        accountMode: false,
-        emailInput: "",
-        password: "",
         credentialEmail: "",
         credentialPassword: "",
         displayName,
@@ -369,14 +353,6 @@ definePage<MeData>()({
     }
   },
 
-  changeEmailInput(event: InputEvent) {
-    this.setData({ emailInput: event.detail.value, error: "" });
-  },
-
-  changePassword(event: InputEvent) {
-    this.setData({ password: event.detail.value, error: "" });
-  },
-
   changeCredentialEmail(event: InputEvent) {
     this.setData({ credentialEmail: event.detail.value, error: "" });
   },
@@ -385,65 +361,8 @@ definePage<MeData>()({
     this.setData({ credentialPassword: event.detail.value, error: "" });
   },
 
-  toggleAccountMode() {
-    this.setData({
-      accountMode: !this.data.accountMode,
-      error: "",
-    });
-  },
-
-  async submitWeChat() {
-    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
-      return;
-    }
-    this.setData({ wechatLoading: true, error: "" });
-    try {
-      await loginWithWeChat();
-      await this.loadMe();
-      if (this.data.loggedIn) {
-        wx.showToast({ title: "已登录", icon: "success" });
-      }
-    } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "微信登录失败",
-      });
-    } finally {
-      this.setData({ wechatLoading: false });
-    }
-  },
-
-  async submitAccount() {
-    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
-      return;
-    }
-    const email = this.data.emailInput.trim();
-    const password = this.data.password;
-    if (!email || !password) {
-      this.setData({ error: "请输入邮箱和密码" });
-      return;
-    }
-    if (!isValidEmail(email)) {
-      this.setData({ error: "请输入正确的邮箱地址" });
-      return;
-    }
-    this.setData({ loading: true, error: "" });
-    try {
-      await loginWithEmail({ email, password });
-      await this.loadMe();
-      if (this.data.loggedIn) {
-        wx.showToast({ title: "已登录", icon: "success" });
-      }
-    } catch (error) {
-      this.setData({
-        error: error instanceof Error ? error.message : "登录失败",
-      });
-    } finally {
-      this.setData({ loading: false });
-    }
-  },
-
   async submitCredentials() {
-    if (this.data.loading || this.data.wechatLoading || this.data.credentialsLoading) {
+    if (this.data.loading || this.data.credentialsLoading) {
       return;
     }
     const email = this.data.credentialEmail.trim();
@@ -599,6 +518,10 @@ definePage<MeData>()({
 
   openVoiceAuthorization() {
     wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+  },
+
+  openLogin() {
+    navigateToLogin();
   },
 
   openProjects() {
