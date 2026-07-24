@@ -5,18 +5,22 @@ from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
 
+CLAUDE_FABLE_MODEL = "claude-fable-5"
+CLAUDE_OPUS_4_8_MODEL = "claude-opus-4-8"
+
 
 class ClaudeTextService(AITextServiceBase):
     """Claude 文本生成服务（通过 OpenAI 兼容代理）"""
 
-    def __init__(self, model: str = "claude-opus-4"):
+    def __init__(self, model: str = CLAUDE_FABLE_MODEL):
         self.auth_token = settings.anthropic_auth_token
         self.base_url = settings.anthropic_base_url
         model_map = {
-            "claude-opus-4": "claude-opus-4-6",
+            CLAUDE_FABLE_MODEL: CLAUDE_FABLE_MODEL,
+            CLAUDE_OPUS_4_8_MODEL: CLAUDE_OPUS_4_8_MODEL,
             "claude-sonnet-4": "claude-sonnet-4-6",
         }
-        self.model = model_map.get(model, "claude-opus-4-6")
+        self.model = model_map.get(model, CLAUDE_FABLE_MODEL)
         self.max_concurrent_requests = settings.ai_text_max_concurrent_requests
 
     @property
@@ -45,7 +49,7 @@ class ClaudeTextService(AITextServiceBase):
         async def request() -> dict:
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/v1/chat/completions",
+                    self._chat_completions_url(),
                     headers={
                         "Authorization": f"Bearer {self.auth_token}",
                         "Content-Type": "application/json",
@@ -76,6 +80,12 @@ class ClaudeTextService(AITextServiceBase):
         if return_raw:
             return content, result
         return content
+
+    def _chat_completions_url(self) -> str:
+        base_url = self.base_url.rstrip("/")
+        if base_url.endswith("/v1"):
+            return f"{base_url}/chat/completions"
+        return f"{base_url}/v1/chat/completions"
 
     def _extract_response_text(self, result: dict) -> str:
         """兼容不同代理/网关返回的 Claude 内容格式"""

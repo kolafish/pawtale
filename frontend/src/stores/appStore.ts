@@ -17,7 +17,7 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set) => ({
-  defaultAiModel: 'claude-opus-4',
+  defaultAiModel: 'claude-fable-5',
   currentProject: null,
   currentDocumentId: null,
   currentReferenceId: null,

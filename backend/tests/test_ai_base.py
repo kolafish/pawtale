@@ -290,6 +290,17 @@ class TestCallLlmContract:
             result = await service._call_llm("sys", "user")
         assert isinstance(result, str)
         assert result == "hello"
+        args, kwargs = inst.post.call_args
+        assert args[0] == "https://blankapi.com/v1/chat/completions"
+        assert kwargs["json"]["model"] == "claude-fable-5"
+
+    def test_claude_accepts_base_url_with_or_without_v1(self):
+        service = ClaudeTextService()
+        service.base_url = "https://blankapi.com/"
+        assert service._chat_completions_url() == "https://blankapi.com/v1/chat/completions"
+
+        service.base_url = "https://blankapi.com/v1/"
+        assert service._chat_completions_url() == "https://blankapi.com/v1/chat/completions"
 
     @pytest.mark.asyncio
     async def test_claude_returns_tuple_with_raw(self):

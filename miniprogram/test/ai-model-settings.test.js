@@ -15,6 +15,8 @@ const {
 test("normalizes supported AI models", () => {
   assert.equal(normalizeAIModel(" deepseek-v4-flash "), "deepseek-v4-flash");
   assert.equal(normalizeAIModel("deepseek-v4-pro"), "deepseek-v4-pro");
+  assert.equal(normalizeAIModel("claude-fable-5"), "claude-fable-5");
+  assert.equal(normalizeAIModel("claude-opus-4-8"), "claude-opus-4-8");
   assert.equal(normalizeAIModel("doubao-seed-2-0-pro-260215"), "doubao-seed-2-0-pro-260215");
   assert.equal(normalizeAIModel("unknown-model"), DEFAULT_AI_MODEL);
   assert.equal(normalizeAIModel(null), DEFAULT_AI_MODEL);
@@ -30,6 +32,8 @@ test("normalizes persisted AI model settings", () => {
 
 test("returns labels with default fallback", () => {
   assert.equal(aiModelLabel("deepseek-v4-pro"), "DeepSeek V4 Pro");
+  assert.equal(aiModelLabel("claude-fable-5"), "Claude Fable 5");
+  assert.equal(aiModelLabel("claude-opus-4-8"), "Claude Opus 4.8");
   assert.equal(aiModelLabel("bad"), "DeepSeek V4 Pro");
 });
 

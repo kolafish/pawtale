@@ -25,7 +25,7 @@ Pawtale 是单仓库、单后端的多产品系统。认证、用户、项目、
 | 后端 | Python 3.12、FastAPI、async SQLAlchemy、Pydantic、SQLite/aiosqlite、pytest |
 | Web | React 19、TypeScript 5.9、Vite 7、TailwindCSS 4、Zustand、TanStack Query、Vitest |
 | 小程序 | 微信原生小程序、TypeScript、Node test runner |
-| 文本 AI | Claude 4.6 兼容代理、DeepSeek V4、火山方舟 Doubao Seed 2.0 |
+| 文本 AI | Claude Fable 5 / Opus 4.8 / Sonnet 4.6 兼容代理、DeepSeek V4、火山方舟 Doubao Seed 2.0 |
 | 语音 | 火山流式 ASR、火山双向/单向 TTS、StepFun 批量 ASR |
 | 导出 | TXT/Markdown/ZIP 项目导出，回忆录 TXT/PDF，分享视频后台渲染 |
 
@@ -229,7 +229,7 @@ miniprogram/
 ## AI 与 provider
 
 - `AITextServiceBase` 定义文本 provider 合约；
-- `AIServiceFactory` 支持 Claude Opus/Sonnet、DeepSeek Flash/Pro 和 Doubao Seed；
+- `AIServiceFactory` 支持 Claude Fable 5、Opus 4.8、Sonnet 4.6、DeepSeek Flash/Pro 和 Doubao Seed；
 - provider 并发由共享 limiter 控制；
 - 回忆录访谈策略、素材整理、章节生成和全书文案各自拥有用例 service；
 - 流式 ASR/TTS 和离线 ASR 使用独立协议适配器；

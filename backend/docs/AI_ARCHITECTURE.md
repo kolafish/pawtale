@@ -24,7 +24,8 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 | `deepseek-v4-flash` | DeepSeek OpenAI-compatible chat API |
 | `deepseek-v4-pro` | DeepSeek OpenAI-compatible chat API |
 | `doubao-seed-2-0-pro-260215` | Volc Ark Responses API |
-| `claude-opus-4` | Claude Opus 4.6 兼容代理 |
+| `claude-fable-5` | Claude Fable 5 OpenAI-compatible relay |
+| `claude-opus-4-8` | Claude Opus 4.8 OpenAI-compatible relay |
 | `claude-sonnet-4` | Claude Sonnet 4.6 兼容代理 |
 
 `AIServiceFactory.get_service(model)` 负责产品模型值到 transport 的映射。未知值回退到后端配置的默认模型。
@@ -54,6 +55,7 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 ### Claude 兼容代理
 
 - 使用 OpenAI-compatible `/v1/chat/completions`；
+- Base URL 兼容带或不带 `/v1`；
 - 当前代理可能忽略 system role，因此 transport 将 system 与 user prompt 合并；
 - 响应解析兼容 OpenAI message、Anthropic content blocks 和纯文本 content。
 
