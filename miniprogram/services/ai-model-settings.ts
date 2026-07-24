@@ -19,6 +19,16 @@ export const AI_MODEL_OPTIONS: AIModelOption[] = [
     description: "质量优先，适合回忆录追问、整理和成文",
   },
   {
+    value: "claude-fable-5",
+    label: "Claude Fable 5",
+    description: "高质量别名模型，适合深度追问、整理和成书",
+  },
+  {
+    value: "claude-opus-4-8",
+    label: "Claude Opus 4.8",
+    description: "旗舰推理模型，适合复杂结构和长文润色",
+  },
+  {
     value: "doubao-seed-2-0-pro-260215",
     label: "Doubao Seed 2.0 Pro",
     description: "豆包旗舰模型，适合中文表达和多模态任务",

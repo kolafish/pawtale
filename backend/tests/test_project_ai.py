@@ -30,14 +30,14 @@ class TestAIContinue:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-continue",
-                json={"ai_model": "claude-opus-4"},
+                json={"ai_model": "claude-fable-5"},
             )
 
         assert response.status_code == 200
         data = response.json()
         assert data["document_id"] == document_id
         assert "他走过来" in data["content"]
-        assert data["ai_model"] == "claude-opus-4"
+        assert data["ai_model"] == "claude-fable-5"
 
     async def test_ai_continue_with_instruction(self, client):
         project_id, document_id = await create_document_with_content(
@@ -95,7 +95,7 @@ class TestAIRevise:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise",
-                json={"instruction": "增加环境描写", "ai_model": "claude-opus-4"},
+                json={"instruction": "增加环境描写", "ai_model": "claude-opus-4-8"},
             )
 
         assert response.status_code == 200
@@ -103,7 +103,7 @@ class TestAIRevise:
         assert data["document_id"] == document_id
         assert data["scope"] == "full"
         assert "玻璃门" in data["revised_text"]
-        assert data["ai_model"] == "claude-opus-4"
+        assert data["ai_model"] == "claude-opus-4-8"
 
     async def test_ai_revise_selection(self, client):
         project_id, document_id = await create_document_with_content(
@@ -163,7 +163,7 @@ class TestAIRevise:
             mock_service.revise_chapter = AsyncMock(return_value={
                 "content": "修改后的内容",
                 "debug_info": {
-                    "request": {"provider": "claude", "model": "claude-opus-4-6"},
+                    "request": {"provider": "claude", "model": "claude-fable-5"},
                     "response": {"raw_text": "原始响应"},
                     "meta": {"truncated": False},
                 },
@@ -196,7 +196,7 @@ class TestAIReviseMulti:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
-                json={"instruction": "改得更好", "models": ["claude-opus-4", "deepseek"]},
+                json={"instruction": "改得更好", "models": ["claude-fable-5", "deepseek"]},
             )
 
         assert response.status_code == 200
@@ -226,12 +226,12 @@ class TestAIReviseMulti:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-revise-multi",
-                json={"instruction": "改", "models": ["claude-opus-4", "deepseek"]},
+                json={"instruction": "改", "models": ["claude-fable-5", "deepseek"]},
             )
 
         assert response.status_code == 200
         data = response.json()
-        claude_result = next(r for r in data["results"] if r["ai_model"] == "claude-opus-4")
+        claude_result = next(r for r in data["results"] if r["ai_model"] == "claude-fable-5")
         deepseek_result = next(r for r in data["results"] if r["ai_model"] == "deepseek")
         assert claude_result["error"] is not None
         assert claude_result.get("revised_text") is None

@@ -23,7 +23,7 @@ from app.schemas.projects import (
     ProjectAnalyzeResponse,
     ReferenceItemBrief,
 )
-from app.services.ai_factory import get_ai_service
+from app.services.ai_factory import CLAUDE_FABLE_MODEL, get_ai_service
 import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
 from app.services.projects.access import get_document, load_project
@@ -61,7 +61,7 @@ async def analyze_project(
         clipped_parts = [f"{header}\n{content}" for header, content in raw_parts]
     combined = "\n\n---\n\n".join(clipped_parts)
 
-    selected_ai_model = req.ai_model or "claude-opus-4"
+    selected_ai_model = req.ai_model or CLAUDE_FABLE_MODEL
     ai_service = get_ai_service(selected_ai_model)
 
     try:
@@ -157,7 +157,7 @@ async def ai_continue_document(
     if not base_content:
         raise HTTPException(status_code=400, detail="请先写一些内容")
 
-    selected_ai_model = req.ai_model or "claude-opus-4"
+    selected_ai_model = req.ai_model or CLAUDE_FABLE_MODEL
     ai_service = get_ai_service(selected_ai_model)
     scene_payload = {
         "name": "当前文本",
@@ -208,7 +208,7 @@ async def ai_revise_document(
 ) -> DocumentAIReviseResponse:
     await load_project(db, project_id, user_id)
     await get_document(db, project_id, document_id)
-    selected_ai_model = req.ai_model or "claude-opus-4"
+    selected_ai_model = req.ai_model or CLAUDE_FABLE_MODEL
     ai_service = get_ai_service(selected_ai_model)
 
     if req.selected_text:
