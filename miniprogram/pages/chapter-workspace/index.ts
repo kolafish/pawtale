@@ -61,6 +61,11 @@ interface ChapterWorkspacePageData {
   readinessDetail: string;
   rewriteNoticeTitle: string;
   rewriteNoticeDetail: string;
+  draftRecoveryTitle: string;
+  draftRecoveryDetail: string;
+  draftRecoveryActionText: string;
+  draftRecoveryActionKind: "none" | "next" | "rewrite" | "status";
+  draftRecoveryActionDisabled: boolean;
   sectionStructureSummary: string;
   sectionViews: ChapterSectionView[];
   expandedSectionIds: Record<string, boolean>;
@@ -91,6 +96,11 @@ definePage<ChapterWorkspacePageData>()({
     readinessDetail: "",
     rewriteNoticeTitle: "",
     rewriteNoticeDetail: "",
+    draftRecoveryTitle: "",
+    draftRecoveryDetail: "",
+    draftRecoveryActionText: "",
+    draftRecoveryActionKind: "none",
+    draftRecoveryActionDisabled: true,
     sectionStructureSummary: "",
     sectionViews: [],
     expandedSectionIds: {},
@@ -252,10 +262,10 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "重新生成本章小节",
+      title: "重新整理小节分组",
       content: "AI 会重新划分本章讲述的分组和顺序。原始讲述、是否入书的选择和现有正文版本都会保留，完成后需要按新结构重新生成正文。",
-      confirmText: "开始生成",
-      cancelText: "先不生成",
+      confirmText: "开始整理",
+      cancelText: "暂不整理",
       success: (result) => {
         if (result.confirm) {
           void this.performSectionRegeneration();
@@ -283,14 +293,14 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       if (result.unassigned_count > 0) {
         wx.showModal({
-          title: "小节已重新生成",
+          title: "小节分组已重新整理",
           content: `生成了 ${result.section_count} 个小节；另有 ${result.unassigned_count} 条讲述暂未归类，可以到记录页继续处理。`,
           showCancel: false,
           confirmText: "知道了",
         });
       } else {
         wx.showToast({
-          title: `已生成${result.section_count}个小节`,
+          title: `已整理为${result.section_count}个小节`,
           icon: "success",
         });
       }
@@ -325,6 +335,34 @@ definePage<ChapterWorkspacePageData>()({
     }
     if (action.kind === "review_draft" || action.kind === "complete") {
       scrollToSection("#chapter-draft");
+    }
+  },
+
+  async runDraftRecoveryAction() {
+    const workspace = this.data.workspace;
+    if (
+      !workspace?.draft_content
+      || workspace.draft_sections.length > 0
+      || this.data.draftRecoveryActionDisabled
+      || this.data.processBusy
+      || this.data.rewritingDraft
+      || this.data.confirmingChapter
+      || this.data.savingDraft
+      || Boolean(this.data.startingIssueId)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    if (this.data.draftRecoveryActionKind === "rewrite") {
+      this.rewriteChapter();
+      return;
+    }
+    if (this.data.draftRecoveryActionKind === "next") {
+      await this.runNextAction();
+      return;
+    }
+    if (this.data.draftRecoveryActionKind === "status") {
+      scrollToSection("#chapter-status");
     }
   },
 
@@ -563,10 +601,10 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "按现有素材重写",
+      title: "重新生成小节正文",
       content: "会重新生成一版完整章节，当前正文会保留在历史版本中。",
-      confirmText: "开始重写",
-      cancelText: "先不重写",
+      confirmText: "开始生成",
+      cancelText: "暂不生成",
       success: (result) => {
         if (result.confirm) {
           void this.performChapterRewrite();
@@ -586,7 +624,7 @@ definePage<ChapterWorkspacePageData>()({
         this.data.chapterId,
       );
       await this.loadPageData(true);
-      wx.showToast({ title: "本章正文已更新", icon: "success" });
+      wx.showToast({ title: "小节正文已更新", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;

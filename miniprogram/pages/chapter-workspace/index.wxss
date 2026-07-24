@@ -542,7 +542,13 @@ button[disabled] {
 }
 
 .draft-empty {
-  padding: 70rpx 10rpx 54rpx;
+  margin-top: 26rpx;
+  padding: 30rpx 26rpx;
+  border-radius: 18rpx;
+  background: #faf7f2;
+  box-shadow:
+    0 0 0 1rpx rgba(77, 56, 47, 0.05),
+    0 4rpx 12rpx rgba(77, 56, 47, 0.04);
   text-align: center;
 }
 
@@ -557,6 +563,11 @@ button[disabled] {
   color: #756963;
   font-size: 25rpx;
   line-height: 40rpx;
+  text-wrap: pretty;
+}
+
+.draft-recovery-action {
+  margin-top: 24rpx;
 }
 
 .confirm-chapter-action {

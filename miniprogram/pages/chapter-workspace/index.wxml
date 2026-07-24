@@ -8,7 +8,7 @@
   <view wx:if="{{loading && !workspace}}" class="loading-state">正在读取本章</view>
 
   <block wx:if="{{workspace}}">
-    <view class="status-card">
+    <view class="status-card" id="chapter-status">
       <text class="section-kicker">本章进度</text>
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
@@ -31,13 +31,13 @@
       </view>
 
       <view class="structure-tools">
-        <text class="structure-tools-detail">如果当前分组不合适，可以按新讲述进入系统时的相同方式重新整理，可能需要几分钟。</text>
+        <text class="structure-tools-detail">仅在讲述分组不合适时使用；这一步不会直接生成正文，可能需要几分钟。</text>
         <view
           class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
           aria-disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="regenerateSections"
-        >{{regeneratingSections ? "正在重新生成…" : "重新生成小节"}}</view>
+        >{{regeneratingSections ? "正在重新整理…" : "重新整理小节分组"}}</view>
       </view>
 
       <view class="section-list">
@@ -73,12 +73,12 @@
       <view class="draft-heading">
         <view>
           <text class="section-kicker">本章正文</text>
-          <text class="section-title">按小节通读，最后整章确认</text>
+          <text class="section-title">{{workspace.draft_sections.length ? "按小节通读，最后整章确认" : "完成当前步骤，生成小节正文"}}</text>
         </view>
         <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
       </view>
 
-      <view wx:if="{{workspace.draft_needs_rewrite}}" class="rewrite-notice">
+      <view wx:if="{{workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
         <view
@@ -86,7 +86,7 @@
           aria-role="button"
           aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
-        >{{rewritingDraft ? "正在重写…" : "按现有素材重写"}}</view>
+        >{{rewritingDraft ? "正在生成…" : "重新生成小节正文"}}</view>
       </view>
 
       <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
@@ -138,8 +138,20 @@
       </view>
 
       <view wx:else class="draft-empty">
-        <text class="empty-title">{{workspace.draft_content ? "需要重新整理小节正文" : "正文还没有准备好"}}</text>
-        <text class="empty-detail">{{workspace.draft_content ? "当前版本还没有保存小节边界，请按上方提示重新整理。" : "先完成上面的当前步骤，系统会自动整理正文。"}}</text>
+        <block wx:if="{{workspace.draft_content}}">
+          <text class="empty-title">{{draftRecoveryTitle}}</text>
+          <text class="empty-detail">{{draftRecoveryDetail}}</text>
+          <view
+            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || processBusy || rewritingDraft || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{draftRecoveryActionDisabled || processBusy || rewritingDraft || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+            bindtap="runDraftRecoveryAction"
+          >{{processBusy || rewritingDraft || startingIssueId !== "" ? "正在处理…" : draftRecoveryActionText}}</view>
+        </block>
+        <block wx:else>
+          <text class="empty-title">正文还没有准备好</text>
+          <text class="empty-detail">先完成上面的当前步骤，系统会自动整理正文。</text>
+        </block>
       </view>
 
       <view

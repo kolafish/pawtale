@@ -252,7 +252,7 @@ test("chapter workspace regenerates the current section structure after confirma
     "chapter-1",
     [{ id: "section-1", version: 1 }],
   ]]);
-  assert.equal(toasts.at(-1).title, "已生成2个小节");
+  assert.equal(toasts.at(-1).title, "已整理为2个小节");
   assert.equal(context.data.regeneratingSections, false);
   delete global.wx;
 });
@@ -398,6 +398,91 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
   delete global.wx;
 });
 
+test("legacy flat draft brings the required next step into the empty state", async () => {
+  const { navigations } = installWx();
+  const interviewSummary = summary({
+    state: "needs_input",
+    next_action: {
+      kind: "start_interview",
+      title: "建议补讲一件事",
+      detail: "再补充一次见面的细节。",
+      action_text: "去补充",
+      disabled: false,
+      issue_id: "issue-legacy",
+    },
+    active_issue: {
+      id: "issue-legacy",
+      question: "第一次见面还有哪些细节？",
+      status: "pending",
+      active_session_id: null,
+    },
+  });
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      completion_summary: interviewSummary,
+      draft_needs_rewrite: true,
+      can_rewrite_draft: false,
+      draft_sections: [],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.draftRecoveryTitle, "先完成本章当前一步");
+  assert.match(context.data.draftRecoveryDetail, /完成当前步骤/);
+  assert.match(context.data.draftRecoveryDetail, /全部完成后/);
+  assert.match(context.data.draftRecoveryDetail, /重新生成小节正文/);
+  assert.match(context.data.draftRecoveryDetail, /不是当前必做步骤/);
+  assert.equal(context.data.draftRecoveryActionText, "去补充");
+  assert.equal(context.data.draftRecoveryActionKind, "next");
+
+  await page.runDraftRecoveryAction.call(context);
+
+  assert.match(navigations[0], /pages\/voice-chat\/index/);
+  assert.match(navigations[0], /voiceSessionId=session-1/);
+  delete global.wx;
+});
+
+test("legacy flat draft exposes direct section draft regeneration when ready", async () => {
+  const { toasts } = installWx();
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+      draft_sections: [],
+    }),
+    voiceApiExports: {
+      rewriteMemoirBookChapter: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(
+    context.data.draftRecoveryTitle,
+    "现在可以重新生成小节正文",
+  );
+  assert.equal(context.data.draftRecoveryActionText, "重新生成小节正文");
+  assert.equal(context.data.draftRecoveryActionKind, "rewrite");
+
+  await page.runDraftRecoveryAction.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
+  assert.equal(toasts.at(-1).title, "小节正文已更新");
+  delete global.wx;
+});
+
 test("chapter workspace does not confirm a draft after its section structure changes", async () => {
   installWx();
   const { page } = loadWorkspacePage({
@@ -516,6 +601,6 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1"]]);
-  assert.equal(toasts.at(-1).title, "本章正文已更新");
+  assert.equal(toasts.at(-1).title, "小节正文已更新");
   delete global.wx;
 });
