@@ -434,6 +434,7 @@ test("legacy flat draft brings the required next step into the empty state", asy
 
   assert.equal(context.data.draftRecoveryTitle, "先完成本章当前一步");
   assert.match(context.data.draftRecoveryDetail, /完成当前步骤/);
+  assert.match(context.data.draftRecoveryDetail, /全部完成后/);
   assert.match(context.data.draftRecoveryDetail, /重新生成小节正文/);
   assert.match(context.data.draftRecoveryDetail, /不是当前必做步骤/);
   assert.equal(context.data.draftRecoveryActionText, "去补充");

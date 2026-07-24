@@ -118,7 +118,7 @@ function draftRecoveryPatch(
   if (nextAction.actionText) {
     return {
       draftRecoveryTitle: "先完成本章当前一步",
-      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；返回本页后，按钮会自动变为“重新生成小节正文”。上方“重新整理小节分组”不是当前必做步骤。`,
+      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“重新生成小节正文”。上方“重新整理小节分组”不是当前必做步骤。`,
       draftRecoveryActionText: nextAction.actionText,
       draftRecoveryActionKind: "next",
       draftRecoveryActionDisabled: nextAction.disabled,
@@ -151,7 +151,7 @@ export function chapterWorkspaceViewPatch(
     rewriteNoticeTitle: rewriteNoticeTitle(workspace),
     rewriteNoticeDetail: workspace.can_rewrite_draft
       ? "可以继续补充，也可以先用本章全部现有素材重新生成完整正文；旧版本仍会保留。"
-      : "请先完成上方必须确认的事项，再重新生成正文。",
+      : "请先完成本章当前步骤，再重新生成正文。",
     ...draftRecoveryPatch(workspace, nextAction),
     sectionStructureSummary: `${sectionViews.length} 个小节 · ${materialCount} 条讲述`,
     sectionViews,
