@@ -24,6 +24,11 @@ export interface ChapterWorkspaceViewPatch {
   readinessDetail: string;
   rewriteNoticeTitle: string;
   rewriteNoticeDetail: string;
+  draftRecoveryTitle: string;
+  draftRecoveryDetail: string;
+  draftRecoveryActionText: string;
+  draftRecoveryActionKind: "none" | "next" | "rewrite" | "status";
+  draftRecoveryActionDisabled: boolean;
   sectionStructureSummary: string;
   sectionViews: ChapterSectionView[];
   canConfirmChapter: boolean;
@@ -81,24 +86,73 @@ function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
   return "本章素材已经变化";
 }
 
+function draftRecoveryPatch(
+  workspace: MemoirChapterWorkspace,
+  nextAction: ChapterNextAction,
+): Pick<
+  ChapterWorkspaceViewPatch,
+  | "draftRecoveryTitle"
+  | "draftRecoveryDetail"
+  | "draftRecoveryActionText"
+  | "draftRecoveryActionKind"
+  | "draftRecoveryActionDisabled"
+> {
+  if (!workspace.draft_content || workspace.draft_sections.length > 0) {
+    return {
+      draftRecoveryTitle: "",
+      draftRecoveryDetail: "",
+      draftRecoveryActionText: "",
+      draftRecoveryActionKind: "none",
+      draftRecoveryActionDisabled: true,
+    };
+  }
+  if (workspace.can_rewrite_draft) {
+    return {
+      draftRecoveryTitle: "现在可以重新生成小节正文",
+      draftRecoveryDetail: "系统会按当前小节结构重新整理正文，旧版本仍会保留。上方“重新整理小节分组”只在分组不合适时使用。",
+      draftRecoveryActionText: "重新生成小节正文",
+      draftRecoveryActionKind: "rewrite",
+      draftRecoveryActionDisabled: false,
+    };
+  }
+  if (nextAction.actionText) {
+    return {
+      draftRecoveryTitle: "先完成本章当前一步",
+      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；返回本页后，按钮会自动变为“重新生成小节正文”。上方“重新整理小节分组”不是当前必做步骤。`,
+      draftRecoveryActionText: nextAction.actionText,
+      draftRecoveryActionKind: "next",
+      draftRecoveryActionDisabled: nextAction.disabled,
+    };
+  }
+  return {
+    draftRecoveryTitle: "先查看本章当前步骤",
+    draftRecoveryDetail: "完成页面顶部要求处理的事项后，即可在这里重新生成小节正文。上方“重新整理小节分组”不是当前必做步骤。",
+    draftRecoveryActionText: "查看当前步骤",
+    draftRecoveryActionKind: "status",
+    draftRecoveryActionDisabled: false,
+  };
+}
+
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean> = {},
 ): ChapterWorkspaceViewPatch {
   const summary = workspace.completion_summary;
+  const nextAction = chapterNextAction(summary);
   const sectionViews = visibleSectionViews(workspace, expandedSectionIds);
   const materialCount = sectionViews.reduce(
     (total, section) => total + section.visibleMaterials.length,
     0,
   );
   return {
-    nextAction: chapterNextAction(summary),
+    nextAction,
     readinessTitle: summary.headline,
     readinessDetail: summary.detail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace),
     rewriteNoticeDetail: workspace.can_rewrite_draft
       ? "可以继续补充，也可以先用本章全部现有素材重新生成完整正文；旧版本仍会保留。"
       : "请先完成上方必须确认的事项，再重新生成正文。",
+    ...draftRecoveryPatch(workspace, nextAction),
     sectionStructureSummary: `${sectionViews.length} 个小节 · ${materialCount} 条讲述`,
     sectionViews,
     canConfirmChapter:
