@@ -419,7 +419,7 @@
 .repair-button,
 .danger-button {
   min-width: 168rpx;
-  height: 76rpx;
+  height: 80rpx;
   margin: 0;
   border: 0;
   border-radius: 20rpx;
@@ -485,7 +485,7 @@
 }
 
 .text-action-button {
-  height: 58rpx;
+  height: 80rpx;
   margin: 0;
   padding: 0 18rpx;
   border: 0;
@@ -730,6 +730,11 @@
   background: var(--ui-success-surface);
   color: var(--ui-success-text);
   font-weight: 800;
+}
+
+.login-entry-action {
+  width: 100%;
+  margin-top: 24rpx;
 }
 
 .share-video-card {

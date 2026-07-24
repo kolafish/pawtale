@@ -10,9 +10,13 @@
       <view class="guest-login-mark">余</view>
       <text class="panel-title">登录后管理你的回忆录</text>
       <text class="panel-copy">讲述记录、成书进度和个人设置都会跟随账号保存。</text>
-      <button class="primary-button ui-pressable" bindtap="openLogin">
+      <view
+        class="primary-button ui-block-action ui-pressable"
+        aria-role="button"
+        bindtap="openLogin"
+      >
         前往登录
-      </button>
+      </view>
     </view>
 
     <view class="section">
@@ -109,13 +113,14 @@
           </view>
         </view>
 
-        <button
-          class="overview-button primary ui-pressable"
-          disabled="{{!projectCount}}"
+        <view
+          class="overview-button primary ui-block-action ui-pressable {{!projectCount ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{!projectCount}}"
           bindtap="openVoiceProgress"
         >
           查看讲述进度
-        </button>
+        </view>
       </view>
     </view>
 
@@ -249,17 +254,22 @@
           />
         </view>
 
-        <button
-          class="primary-button ui-pressable"
-          loading="{{credentialsLoading}}"
-          disabled="{{loading || credentialsLoading}}"
+        <view
+          class="primary-button ui-block-action ui-pressable {{loading || credentialsLoading ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{loading || credentialsLoading}}"
           bindtap="submitCredentials"
         >
           {{credentialsLoading ? "保存中" : "设置邮箱密码"}}
-        </button>
+        </view>
       </view>
     </view>
 
-    <button class="logout-button ui-pressable" loading="{{loading}}" disabled="{{loading}}" bindtap="logout">退出登录</button>
+    <view
+      class="logout-button ui-block-action ui-pressable {{loading ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{loading}}"
+      bindtap="logout"
+    >{{loading ? "正在退出…" : "退出登录"}}</view>
   </block>
 </view>

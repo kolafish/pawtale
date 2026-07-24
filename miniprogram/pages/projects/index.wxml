@@ -2,9 +2,14 @@
   <view wx:if="{{error}}" class="error">{{error}}</view>
 
   <view class="action-bar">
-    <button class="primary-button" bindtap="createProject" loading="{{busy}}">
+    <view
+      class="primary-button ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{busy}}"
+      bindtap="createProject"
+    >
       {{busy ? "处理中" : "新建回忆录"}}
-    </button>
+    </view>
   </view>
 
   <view wx:if="{{loading && !projects.length}}" class="empty-panel">

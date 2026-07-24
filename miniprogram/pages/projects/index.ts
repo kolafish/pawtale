@@ -125,6 +125,9 @@ definePage<ProjectsData>()({
   },
 
   createProject() {
+    if (this.data.busy) {
+      return;
+    }
     wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 

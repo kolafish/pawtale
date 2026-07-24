@@ -8,7 +8,11 @@
   <view wx:if="{{needsLogin}}" class="empty-panel">
     <text class="empty-title">登录后查看讲述</text>
     <text class="empty-copy">登录后可以核对原始讲述、成书文字和音频资料。</text>
-    <button class="primary-button" bindtap="openLogin">登录后查看</button>
+    <view
+      class="primary-button login-entry-action ui-block-action ui-pressable"
+      aria-role="button"
+      bindtap="openLogin"
+    >登录后查看</view>
   </view>
 
   <view wx:elif="{{loading && !item}}" class="empty-panel">
@@ -131,13 +135,14 @@
         auto-height
         cursor-spacing="24"
       />
-      <button
-        class="edit-reference-toggle"
+      <view
+        class="edit-reference-toggle ui-block-action ui-pressable"
+        aria-role="button"
         bindtap="toggleEditReference"
         aria-expanded="{{editReferenceExpanded}}"
       >
         {{editReferenceExpanded ? "收起原始讲述" : "查看原始讲述作为参考"}}
-      </button>
+      </view>
       <view wx:if="{{editReferenceExpanded}}" class="edit-reference-panel">
         <text class="edit-reference-label">原始讲述</text>
         <text class="edit-reference-text">{{item.transcript_raw}}</text>
@@ -502,26 +507,26 @@
       <view wx:if="{{moreActionsExpanded && item.canConvertQuestionToAnswer}}" class="repair-panel">
         <text class="repair-panel-title">这段其实是回答</text>
         <text class="repair-panel-copy">如果录音时把被访者的话记成了采访者问题，可以在这里改回讲述素材。</text>
-        <button
-          class="repair-button"
+        <view
+          class="repair-button ui-block-action ui-pressable {{saving || deleting || convertingQuestionToAnswer ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{saving || deleting || convertingQuestionToAnswer}}"
           bindtap="convertCurrentQuestionToAnswer"
-          loading="{{convertingQuestionToAnswer}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         >
           {{convertingQuestionToAnswer ? "正在修改" : "把这段改成回答"}}
-        </button>
+        </view>
       </view>
       <view wx:if="{{moreActionsExpanded}}" class="danger-panel">
         <text class="danger-panel-title">删除这条讲述</text>
         <text class="danger-panel-copy">删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。</text>
-        <button
-          class="danger-button"
+        <view
+          class="danger-button ui-block-action ui-pressable {{saving || deleting || convertingQuestionToAnswer ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{saving || deleting || convertingQuestionToAnswer}}"
           bindtap="deleteTranscript"
-          loading="{{deleting}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         >
-          删除这条讲述
-        </button>
+          {{deleting ? "正在删除…" : "删除这条讲述"}}
+        </view>
       </view>
     </view>
   </block>

@@ -25,7 +25,11 @@
 
     <view wx:if="{{!bookContent}}" class="state-card">
       <text>回到书稿页生成全书后，可以在这里预览和导出。</text>
-      <button class="ghost-button state-action" bindtap="openBookHome">返回书稿</button>
+      <view
+        class="ghost-button state-action ui-block-action ui-pressable"
+        aria-role="button"
+        bindtap="openBookHome"
+      >返回书稿</view>
     </view>
 
     <block wx:else>
@@ -128,8 +132,9 @@
       </view>
       <text class="export-action-hint">{{exportActionHintText}}</text>
 
-      <button
+      <view
         class="settings-toggle"
+        aria-role="button"
         aria-expanded="{{showBookSettings}}"
         bindtap="toggleBookSettings"
       >
@@ -138,7 +143,7 @@
           <text class="settings-toggle-meta">书名、封面、前后记、书稿结构和历史版本</text>
         </view>
         <text class="settings-toggle-action">{{showBookSettings ? "收起" : "展开"}}</text>
-      </button>
+      </view>
 
       <block wx:if="{{showBookSettings}}">
       <view class="book-design-panel">
@@ -315,14 +320,14 @@
           </view>
         </picker>
 
-        <button
-          class="ghost-button save-design-button"
-          loading="{{bookTitleSaving}}"
-          disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
+        <view
+          class="ghost-button save-design-button ui-block-action ui-pressable {{bookTitleSaving || bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{bookTitleSaving || bookViewingHistoricalVersion}}"
           bindtap="saveBookDesignSettings"
         >
-          保存成书信息
-        </button>
+          {{bookTitleSaving ? "正在保存…" : "保存成书信息"}}
+        </view>
       </view>
 
       <view wx:if="{{bookManuscriptAvailable}}" class="manuscript-card">

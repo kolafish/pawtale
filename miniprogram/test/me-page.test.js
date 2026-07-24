@@ -558,7 +558,7 @@ test("me keeps memoir management, voice progress, speaker transcription, and voi
     },
   };
   const { page } = loadMePage();
-  const context = pageContext(page);
+  const context = pageContext(page, { projectCount: 1 });
 
   page.openVoiceProgress.call(context);
   page.openProjects.call(context);
@@ -571,5 +571,21 @@ test("me keeps memoir management, voice progress, speaker transcription, and voi
     "/pages/speaker-transcription/index",
     "/pages/voice-settings/index",
   ]);
+  delete global.wx;
+});
+
+test("me does not open voice progress before a memoir exists", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadMePage();
+  const context = pageContext(page, { projectCount: 0 });
+
+  page.openVoiceProgress.call(context);
+
+  assert.deepEqual(navigations, []);
   delete global.wx;
 });

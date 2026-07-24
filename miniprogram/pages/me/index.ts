@@ -446,6 +446,9 @@ definePage<MeData>()({
   },
 
   openVoiceProgress() {
+    if (!this.data.projectCount) {
+      return;
+    }
     wx.navigateTo({ url: "/pages/voice-progress/index" });
   },
 

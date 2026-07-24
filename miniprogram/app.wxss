@@ -68,6 +68,25 @@ image {
   transform: scale(0.96);
 }
 
+.ui-block-action {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--ui-hit-size);
+  margin-right: 0;
+  margin-left: 0;
+  padding-right: 24rpx;
+  padding-left: 24rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.ui-block-action.is-disabled {
+  pointer-events: none;
+  opacity: 0.62;
+}
+
 .ui-tabular {
   font-variant-numeric: tabular-nums;
 }

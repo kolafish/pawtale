@@ -83,6 +83,9 @@ definePage<LoginData>()({
   },
 
   toggleAccountMode() {
+    if (this.data.loading || this.data.wechatLoading) {
+      return;
+    }
     this.setData({
       accountMode: !this.data.accountMode,
       error: "",

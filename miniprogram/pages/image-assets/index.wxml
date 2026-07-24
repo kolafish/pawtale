@@ -118,14 +118,15 @@
         </button>
       </view>
 
-      <button
-        class="asset-details-toggle"
+      <view
+        class="asset-details-toggle ui-block-action ui-pressable"
         data-id="{{item.id}}"
+        aria-role="button"
         aria-expanded="{{item.detailsExpanded}}"
         bindtap="toggleAssetDetails"
       >
         {{item.detailsExpanded ? "收起图片说明与更多操作" : "编辑图片说明与更多操作"}}
-      </button>
+      </view>
     </view>
   </view>
 
