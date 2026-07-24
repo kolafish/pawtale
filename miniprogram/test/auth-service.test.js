@@ -34,19 +34,6 @@ function installWxMock(handler) {
   return requests;
 }
 
-function installWxProfileMock(handler) {
-  const requests = installWxMock(handler);
-  global.wx.getUserProfile = (options) => {
-    options.success({
-      userInfo: {
-        nickName: "微信昵称",
-        avatarUrl: "https://avatar.example.com/wechat.png",
-      },
-    });
-  };
-  return requests;
-}
-
 test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
@@ -88,15 +75,11 @@ test("isValidEmail validates basic email shape", () => {
   assert.equal(isValidEmail("author @example.com"), false);
 });
 
-test("loginWithWeChat sends wechat nickname and avatar when authorized", async () => {
-  const requests = installWxProfileMock((options) => {
+test("loginWithWeChat does not depend on the retired getUserProfile result", async () => {
+  const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
     assert.equal(options.method, "POST");
-    assert.deepEqual(options.data, {
-      code: "wx-code-1",
-      display_name: "微信昵称",
-      avatar_url: "https://avatar.example.com/wechat.png",
-    });
+    assert.deepEqual(options.data, { code: "wx-code-1" });
     options.success({
       statusCode: 200,
       data: {
@@ -104,8 +87,7 @@ test("loginWithWeChat sends wechat nickname and avatar when authorized", async (
           id: "user-1",
           email: "wechat_x@wechat.local",
           password_login_enabled: false,
-          display_name: "微信昵称",
-          avatar_url: "https://avatar.example.com/wechat.png",
+          display_name: "微信用户",
           created_at: "2026-06-15T00:00:00",
         },
         needs_credentials: true,
@@ -114,13 +96,16 @@ test("loginWithWeChat sends wechat nickname and avatar when authorized", async (
       header: {},
     });
   });
+  global.wx.getUserProfile = () => {
+    throw new Error("getUserProfile should not be called");
+  };
   const { loginWithWeChat } = authModule();
 
   const response = await loginWithWeChat();
 
   assert.equal(requests.length, 1);
-  assert.equal(response.user.display_name, "微信昵称");
-  assert.equal(response.user.avatar_url, "https://avatar.example.com/wechat.png");
+  assert.equal(response.user.display_name, "微信用户");
+  assert.equal(response.user.avatar_url, undefined);
   delete global.wx;
 });
 

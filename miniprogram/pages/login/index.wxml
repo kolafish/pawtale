@@ -7,11 +7,9 @@
     </view>
   </view>
 
-  <view class="login-panel">
+  <view wx:if="{{!profileMode}}" class="login-panel">
     <text class="panel-title">欢迎登录</text>
-    <text class="panel-copy">
-      微信登录或使用已有 Pawtale 账号进入。
-    </text>
+    <text class="panel-copy">微信登录或使用已有 Pawtale 账号进入。</text>
 
     <view wx:if="{{error}}" class="error">{{error}}</view>
 
@@ -64,5 +62,67 @@
         {{loading ? "登录中" : "账号登录"}}
       </button>
     </view>
+  </view>
+
+  <view wx:else class="login-panel profile-setup-panel">
+    <text class="panel-eyebrow">微信登录成功</text>
+    <text class="panel-title">使用您的微信头像和昵称</text>
+    <text class="panel-copy">头像和昵称由您主动选择，也可以稍后在“我的”页面修改。</text>
+
+    <view wx:if="{{error}}" class="error">{{error}}</view>
+
+    <view class="profile-avatar-row">
+      <button
+        class="profile-avatar-picker"
+        open-type="chooseAvatar"
+        bindchooseavatar="chooseWeChatAvatar"
+        aria-label="选择微信头像"
+        hover-class="profile-avatar-picker-hover"
+      >
+        <image
+          wx:if="{{profileAvatarPath}}"
+          class="profile-avatar-image ui-image-outline"
+          src="{{profileAvatarPath}}"
+          mode="aspectFill"
+        />
+        <text wx:else class="profile-avatar-fallback">微</text>
+        <text class="profile-avatar-edit">换</text>
+      </button>
+      <view class="profile-avatar-copy">
+        <text class="profile-field-title">微信头像</text>
+        <text class="profile-field-hint">点击头像，从微信头像或相册中选择</text>
+      </view>
+    </view>
+
+    <view class="profile-name-field">
+      <text class="profile-field-title">昵称</text>
+      <input
+        class="profile-name-input"
+        type="nickname"
+        value="{{profileDisplayName}}"
+        maxlength="40"
+        placeholder="点击选择微信昵称"
+        bindinput="changeProfileDisplayName"
+      />
+      <text class="profile-field-hint">点击输入框，微信会提供当前昵称供您选择。</text>
+    </view>
+
+    <button
+      class="primary-button"
+      loading="{{profileSaving}}"
+      disabled="{{profileSaving}}"
+      bindtap="saveWeChatProfile"
+      hover-class="primary-button-hover"
+    >
+      {{profileSaving ? "保存中" : "保存并进入"}}
+    </button>
+    <button
+      class="skip-profile-button"
+      disabled="{{profileSaving}}"
+      bindtap="skipWeChatProfile"
+      hover-class="skip-profile-button-hover"
+    >
+      稍后设置
+    </button>
   </view>
 </view>

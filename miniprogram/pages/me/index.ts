@@ -23,6 +23,10 @@ import {
   readVoiceAuthorizationConsentRecord,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
+import {
+  resolveBackendAvatarUrl,
+  uploadBackendAvatar,
+} from "../../services/user-profile";
 import { replaceMemoirStore } from "../../stores/session";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
@@ -32,6 +36,7 @@ interface MeData {
   loading: boolean;
   loggedIn: boolean;
   savingName: boolean;
+  avatarSaving: boolean;
   editingName: boolean;
   voiceStatsLoading: boolean;
   credentialsLoading: boolean;
@@ -64,6 +69,12 @@ type InputEvent = PageTextInputEvent;
 interface SwitchChangeEvent {
   detail: {
     value: boolean;
+  };
+}
+
+interface ChooseAvatarEvent {
+  detail: {
+    avatarUrl?: string;
   };
 }
 
@@ -150,6 +161,7 @@ function loggedOutData(): Partial<MeData> {
     nameDraft: "",
     avatarText: "作",
     avatarUrl: "",
+    avatarSaving: false,
     email: "",
     accountEmailText: "",
     passwordLoginEnabled: false,
@@ -176,6 +188,7 @@ definePage<MeData>()({
     loading: false,
     loggedIn: false,
     savingName: false,
+    avatarSaving: false,
     editingName: false,
     voiceStatsLoading: false,
     credentialsLoading: false,
@@ -233,7 +246,7 @@ definePage<MeData>()({
         nameDraft: displayName,
         editingName: false,
         avatarText: Array.from(displayName)[0] || "作",
-        avatarUrl: identity.avatar_url || "",
+        avatarUrl: resolveBackendAvatarUrl(identity.avatar_url),
         email: identity.email,
         accountEmailText: accountEmailText(identity.email, identity.password_login_enabled),
         passwordLoginEnabled: identity.password_login_enabled,
@@ -324,6 +337,31 @@ definePage<MeData>()({
 
   changeNameDraft(event: InputEvent) {
     this.setData({ nameDraft: event.detail.value, error: "" });
+  },
+
+  async chooseWeChatAvatar(event: ChooseAvatarEvent) {
+    if (this.data.avatarSaving || this.data.loading) {
+      return;
+    }
+    const avatarPath = String(event.detail.avatarUrl || "").trim();
+    if (!avatarPath) {
+      return;
+    }
+    this.setData({ avatarSaving: true, error: "" });
+    try {
+      const user = await uploadBackendAvatar(avatarPath);
+      await getMemoirIdentity();
+      this.setData({
+        avatarUrl: resolveBackendAvatarUrl(user.avatar_url),
+      });
+      wx.showToast({ title: "头像已更新", icon: "success" });
+    } catch (error) {
+      this.setData({
+        error: error instanceof Error ? error.message : "头像保存失败",
+      });
+    } finally {
+      this.setData({ avatarSaving: false });
+    }
   },
 
   cancelEditName() {

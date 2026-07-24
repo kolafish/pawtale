@@ -1,4 +1,7 @@
+from io import BytesIO
+
 import pytest
+from PIL import Image
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -151,13 +154,14 @@ class TestAuthAPI:
 
         first = await anonymous_client.post(
             "/api/auth/wechat-login",
-            json={"code": "code-1", "display_name": "余主任", "avatar_url": "https://avatar"},
+            json={"code": "code-1"},
         )
         assert first.status_code == 200
         first_body = first.json()
         first_user = first_body["user"]
         assert first_body["needs_credentials"] is True
-        assert first_user["display_name"] == "余主任"
+        assert first_user["display_name"] == "微信用户"
+        assert first_user["avatar_url"] is None
         assert first_user["email"].startswith("wechat_")
         assert first_user["email"].endswith("@wechat.local")
         assert first_user["password_login_enabled"] is False
@@ -219,10 +223,11 @@ class TestAuthAPI:
         assert web_login.status_code == 200
         assert web_login.json()["user"]["display_name"] == "微信 Web 用户"
 
-    async def test_set_credentials_keeps_wechat_profile_when_display_name_is_omitted(
+    async def test_wechat_user_can_save_nickname_and_avatar(
         self,
         anonymous_client,
         monkeypatch,
+        tmp_path,
     ):
         async def fake_exchange(code: str) -> WeChatSession:
             return WeChatSession(openid=f"openid-{code}")
@@ -231,26 +236,60 @@ class TestAuthAPI:
 
         login = await anonymous_client.post(
             "/api/auth/wechat-login",
-            json={
-                "code": "profile-user",
-                "display_name": "微信昵称",
-                "avatar_url": "https://avatar.example.com/me.png",
-            },
+            json={"code": "profile-user"},
         )
         assert login.status_code == 200
-        assert login.json()["user"]["display_name"] == "微信昵称"
-        assert login.json()["user"]["avatar_url"] == "https://avatar.example.com/me.png"
+        assert login.json()["user"]["display_name"] == "微信用户"
+        assert login.json()["user"]["avatar_url"] is None
 
-        credentials = await anonymous_client.post(
-            "/api/auth/set-credentials",
-            json={
-                "email": "wechat-profile@example.com",
-                "password": "password123",
-            },
+        profile = await anonymous_client.patch(
+            "/api/auth/me",
+            json={"display_name": "微信昵称"},
         )
-        assert credentials.status_code == 200
-        assert credentials.json()["user"]["display_name"] == "微信昵称"
-        assert credentials.json()["user"]["avatar_url"] == "https://avatar.example.com/me.png"
+        assert profile.status_code == 200
+        assert profile.json()["display_name"] == "微信昵称"
+
+        monkeypatch.setattr("app.services.user_avatars.DATA_DIR", tmp_path)
+        image = Image.new("RGB", (640, 480), color=(166, 75, 62))
+        image_bytes = BytesIO()
+        image.save(image_bytes, format="PNG")
+        avatar = await anonymous_client.post(
+            "/api/auth/me/avatar",
+            files={"file": ("wechat-avatar.png", image_bytes.getvalue(), "image/png")},
+        )
+        assert avatar.status_code == 200
+        avatar_url = avatar.json()["avatar_url"]
+        assert avatar_url.startswith(f"/api/auth/avatars/{login.json()['user']['id']}/")
+
+        public_avatar = await anonymous_client.get(avatar_url)
+        assert public_avatar.status_code == 200
+        assert public_avatar.headers["content-type"] == "image/jpeg"
+        with Image.open(BytesIO(public_avatar.content)) as rendered:
+            assert rendered.size == (384, 384)
+
+    async def test_avatar_upload_rejects_non_image(self, anonymous_client, tmp_path, monkeypatch):
+        register = await anonymous_client.post(
+            "/api/auth/register",
+            json={"email": "avatar@example.com", "password": "password123"},
+        )
+        assert register.status_code == 201
+        monkeypatch.setattr("app.services.user_avatars.DATA_DIR", tmp_path)
+
+        avatar = await anonymous_client.post(
+            "/api/auth/me/avatar",
+            files={"file": ("avatar.txt", b"not-an-image", "text/plain")},
+        )
+
+        assert avatar.status_code == 400
+        assert avatar.json()["detail"] == "仅支持有效的头像图片"
+
+    async def test_avatar_route_rejects_non_uuid_user_path(self, anonymous_client):
+        avatar = await anonymous_client.get(
+            "/api/auth/avatars/not-a-user/0123456789abcdef0123456789abcdef.jpg",
+        )
+
+        assert avatar.status_code == 404
+        assert avatar.json()["detail"] == "头像不存在"
 
     async def test_set_credentials_rejects_invalid_email(self, anonymous_client, monkeypatch):
         async def fake_exchange(code: str) -> WeChatSession:

@@ -13,6 +13,7 @@ function loadMePage({
   aiModelExports = {},
   accessibilityExports = {},
   voiceAuthorizationExports = {},
+  profileExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
     isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
@@ -105,6 +106,13 @@ function loadMePage({
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
     VOICE_AUTHORIZATION_VERSION: "2026-06-18",
     ...voiceAuthorizationExports,
+  });
+  mockModule("../services/user-profile.ts", {
+    resolveBackendAvatarUrl: (avatarUrl) => avatarUrl || "",
+    uploadBackendAvatar: async () => {
+      throw new Error("uploadBackendAvatar was not mocked");
+    },
+    ...profileExports,
   });
 
   return loadPageModule("../pages/me/index.ts");
@@ -236,6 +244,66 @@ test("me treats wechat-only users as logged in and shows wechat profile", async 
   assert.equal(context.data.displayName, "微信昵称");
   assert.equal(context.data.avatarUrl, "https://avatar.example.com/wechat.png");
   assert.equal(context.data.accountEmailText, "微信账号登录");
+});
+
+test("me uploads a selected wechat avatar and refreshes the cached identity", async () => {
+  const uploads = [];
+  let identityRefreshes = 0;
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page } = loadMePage({
+    authExports: {
+      getMemoirIdentity: async () => {
+        identityRefreshes += 1;
+        return {
+          id: "user-1",
+          email: "wechat_x@wechat.local",
+          password_login_enabled: false,
+          display_name: "微信昵称",
+          avatar_url: "/api/auth/avatars/user-1/avatar.jpg",
+          created_at: "2026-07-24T00:00:00",
+          active_project_id: "",
+          active_project: null,
+          projects: [],
+        };
+      },
+    },
+    profileExports: {
+      resolveBackendAvatarUrl: (avatarUrl) => (
+        avatarUrl?.startsWith("/") ? `https://api.example.com${avatarUrl}` : avatarUrl || ""
+      ),
+      uploadBackendAvatar: async (filePath) => {
+        uploads.push(filePath);
+        return {
+          id: "user-1",
+          email: "wechat_x@wechat.local",
+          password_login_enabled: false,
+          display_name: "微信昵称",
+          avatar_url: "/api/auth/avatars/user-1/avatar.jpg",
+          created_at: "2026-07-24T00:00:00",
+        };
+      },
+    },
+  });
+  const context = pageContext(page, { loggedIn: true });
+
+  await page.chooseWeChatAvatar.call(context, {
+    detail: { avatarUrl: "wxfile://chosen-avatar" },
+  });
+
+  assert.deepEqual(uploads, ["wxfile://chosen-avatar"]);
+  assert.equal(identityRefreshes, 1);
+  assert.equal(
+    context.data.avatarUrl,
+    "https://api.example.com/api/auth/avatars/user-1/avatar.jpg",
+  );
+  assert.equal(context.data.avatarSaving, false);
+  assert.deepEqual(toasts, ["头像已更新"]);
+  delete global.wx;
 });
 
 test("me keeps existing voice stats while refreshing the same project", async () => {
