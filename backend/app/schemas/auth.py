@@ -29,8 +29,6 @@ class AuthLoginRequest(BaseModel):
 
 class WeChatLoginRequest(BaseModel):
     code: str
-    display_name: str | None = None
-    avatar_url: str | None = None
 
 
 class WeChatBindRequest(BaseModel):

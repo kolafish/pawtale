@@ -36,23 +36,35 @@
 
   <block wx:if="{{loggedIn}}">
     <view class="profile-panel">
-      <image wx:if="{{avatarUrl}}" class="avatar-image ui-image-outline" src="{{avatarUrl}}" mode="aspectFill" />
-      <view wx:else class="avatar">
-        <text>{{avatarText}}</text>
-      </view>
+      <button
+        class="profile-avatar-picker"
+        open-type="chooseAvatar"
+        disabled="{{avatarSaving || loading}}"
+        bindchooseavatar="chooseWeChatAvatar"
+        aria-label="更换微信头像"
+        hover-class="profile-avatar-picker-hover"
+      >
+        <image wx:if="{{avatarUrl}}" class="avatar-image ui-image-outline" src="{{avatarUrl}}" mode="aspectFill" />
+        <view wx:else class="avatar">
+          <text>{{avatarText}}</text>
+        </view>
+        <text class="avatar-edit-badge">{{avatarSaving ? "…" : "换"}}</text>
+      </button>
       <view class="profile-main">
         <view wx:if="{{editingName}}" class="name-edit-row">
           <input
             class="name-input"
+            type="nickname"
             value="{{nameDraft}}"
             maxlength="40"
-            placeholder="填写昵称"
+            placeholder="点击选择微信昵称"
             focus="{{editingName}}"
             bindinput="changeNameDraft"
           />
         </view>
         <text wx:else class="profile-name">{{displayName || "作者"}}</text>
         <text class="profile-email">{{accountEmailText || email || "正在加载账号"}}</text>
+        <text wx:if="{{!editingName}}" class="profile-avatar-hint">点击头像可选择微信头像</text>
       </view>
       <view wx:if="{{editingName}}" class="profile-actions">
         <button class="mini-button ghost ui-pressable" disabled="{{savingName}}" bindtap="cancelEditName">取消</button>

@@ -12,13 +12,13 @@
       <text class="section-kicker">本章进度</text>
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
-      <button
+      <view
         wx:if="{{nextAction.actionText}}"
-        class="primary-action"
-        loading="{{processBusy || startingIssueId !== ''}}"
-        disabled="{{nextAction.disabled || processBusy || startingIssueId !== ''}}"
+        class="primary-action {{nextAction.disabled || processBusy || startingIssueId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{nextAction.disabled || processBusy || startingIssueId !== ''}}"
         bindtap="runNextAction"
-      >{{nextAction.actionText}}</button>
+      >{{processBusy || startingIssueId !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
 
     <view wx:if="{{sectionViews.length}}" class="content-card structure-card">
@@ -32,19 +32,20 @@
 
       <view class="structure-tools">
         <text class="structure-tools-detail">如果当前分组不合适，可以按新讲述进入系统时的相同方式重新整理，可能需要几分钟。</text>
-        <button
-          class="structure-regenerate-action"
-          loading="{{regeneratingSections}}"
-          disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+        <view
+          class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="regenerateSections"
-        >重新生成小节</button>
+        >{{regeneratingSections ? "正在重新生成…" : "重新生成小节"}}</view>
       </view>
 
       <view class="section-list">
         <view wx:for="{{sectionViews}}" wx:key="id" class="section-item">
-          <button
+          <view
             class="section-toggle"
             data-id="{{item.id}}"
+            aria-role="button"
             aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}"
             bindtap="toggleSection"
           >
@@ -56,7 +57,7 @@
               <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
             </view>
             <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
-          </button>
+          </view>
 
           <view wx:if="{{item.expanded}}" class="section-material-list">
             <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
@@ -80,12 +81,12 @@
       <view wx:if="{{workspace.draft_needs_rewrite}}" class="rewrite-notice">
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
-        <button
-          class="rewrite-action"
-          loading="{{rewritingDraft}}"
-          disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+        <view
+          class="rewrite-action {{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
-        >按现有素材重写</button>
+        >{{rewritingDraft ? "正在重写…" : "按现有素材重写"}}</view>
       </view>
 
       <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
@@ -141,18 +142,18 @@
         <text class="empty-detail">{{workspace.draft_content ? "当前版本还没有保存小节边界，请按上方提示重新整理。" : "先完成上面的当前步骤，系统会自动整理正文。"}}</text>
       </view>
 
-      <button
+      <view
         wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action"
-        loading="{{confirmingChapter}}"
-        disabled="{{!canConfirmChapter || confirmingChapter || editingSectionId !== ''}}"
+        class="primary-action confirm-chapter-action {{!canConfirmChapter || confirmingChapter || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{!canConfirmChapter || confirmingChapter || editingSectionId !== ''}}"
         bindtap="confirmChapter"
-      >确认本章正文</button>
+      >{{confirmingChapter ? "正在确认…" : "确认本章正文"}}</view>
 
       <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
         <text class="chapter-finished-title">本章已完成</text>
         <text class="chapter-finished-detail">正文已经收入书稿，可以返回查看其他章节或生成全书。</text>
-        <button class="primary-action" bindtap="returnToBookFlow">完成，返回全书进度</button>
+        <view class="primary-action" aria-role="button" bindtap="returnToBookFlow">完成，返回全书进度</view>
       </view>
     </view>
   </block>

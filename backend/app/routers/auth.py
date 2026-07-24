@@ -2,7 +2,8 @@ import hashlib
 import re
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +28,7 @@ from app.schemas.auth import (
     WeChatBindRequest,
     WeChatLoginRequest,
 )
+from app.services import user_avatars
 from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_wechat_login_code
 
 
@@ -51,11 +53,6 @@ def _validate_password(password: str) -> None:
 def _provisional_wechat_email(openid: str) -> str:
     digest = hashlib.sha256(openid.encode("utf-8")).hexdigest()[:24]
     return f"wechat_{digest}@wechat.local"
-
-
-def _display_name_from_wechat(req: WeChatLoginRequest) -> str:
-    display_name = (req.display_name or "").strip()
-    return display_name or WECHAT_PLACEHOLDER_DISPLAY_NAME
 
 
 def _display_name_from_email(email: str) -> str:
@@ -156,27 +153,19 @@ async def wechat_login(
             raise HTTPException(status_code=409, detail="微信身份关联的用户不存在")
         if session.unionid and identity.provider_union_id != session.unionid:
             identity.provider_union_id = session.unionid
-        if req.avatar_url and not user.avatar_url:
-            user.avatar_url = req.avatar_url
-        if req.display_name and user.display_name == WECHAT_PLACEHOLDER_DISPLAY_NAME:
-            user.display_name = req.display_name.strip() or user.display_name
     else:
         user = User(
             email=_provisional_wechat_email(session.openid),
             password_hash=hash_password(secrets.token_urlsafe(32)),
             password_login_enabled=False,
-            display_name=_display_name_from_wechat(req),
-            avatar_url=req.avatar_url,
+            display_name=WECHAT_PLACEHOLDER_DISPLAY_NAME,
         )
         identity = AuthIdentity(
             user=user,
             provider=WECHAT_PROVIDER,
             provider_user_id=session.openid,
             provider_union_id=session.unionid,
-            profile_json={
-                "display_name": req.display_name,
-                "avatar_url": req.avatar_url,
-            },
+            profile_json={},
         )
         db.add_all([user, identity])
 
@@ -263,3 +252,29 @@ async def update_me(
     await db.commit()
     await db.refresh(current_user)
     return _user_response(current_user)
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def update_me_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await user_avatars.update_user_avatar(
+        db,
+        user=current_user,
+        upload=file,
+    )
+    return _user_response(user)
+
+
+@router.get("/avatars/{user_id}/{filename}")
+async def get_avatar(user_id: str, filename: str):
+    path = user_avatars.avatar_file_path(user_id, filename)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="头像不存在")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )

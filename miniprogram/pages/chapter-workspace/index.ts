@@ -308,7 +308,7 @@ definePage<ChapterWorkspacePageData>()({
 
   async runNextAction() {
     const action = this.data.nextAction;
-    if (action.disabled || this.data.processBusy) {
+    if (action.disabled || this.data.processBusy || Boolean(this.data.startingIssueId)) {
       return;
     }
     if (action.kind === "prepare") {

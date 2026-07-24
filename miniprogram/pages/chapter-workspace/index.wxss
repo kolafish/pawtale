@@ -66,10 +66,13 @@
   margin-top: 30rpx;
   padding: 34rpx 30rpx;
   box-sizing: border-box;
-  border: 1rpx solid #ded6cd;
-  border-radius: 16rpx;
+  border: 0;
+  border-radius: 24rpx;
   background: #ffffff;
-  box-shadow: 0 8rpx 28rpx rgba(71, 50, 42, 0.05);
+  box-shadow:
+    0 0 0 1rpx rgba(43, 33, 30, 0.06),
+    0 4rpx 10rpx rgba(71, 50, 42, 0.04),
+    0 16rpx 36rpx rgba(71, 50, 42, 0.07);
 }
 
 .status-card {
@@ -175,6 +178,9 @@
   margin: 18rpx 0 0;
   padding: 16rpx 24rpx;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 12rpx;
   background: #fffaf6;
   color: #8f4439;
@@ -211,6 +217,7 @@
   padding: 20rpx 2rpx;
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 18rpx;
   box-sizing: border-box;
   border-radius: 0;
@@ -250,6 +257,7 @@
 .section-copy {
   min-width: 0;
   flex: 1 1 auto;
+  text-align: left;
 }
 
 .section-name {
@@ -319,7 +327,9 @@
   border-radius: 12rpx;
   font-size: 28rpx;
   font-weight: 700;
-  transition: transform 120ms ease, opacity 120ms ease, background-color 120ms ease;
+  transition-property: transform, opacity, background-color;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
 }
 
 .primary-action {
@@ -332,6 +342,11 @@
   background: #a64b3e;
   color: #ffffff;
   line-height: 40rpx;
+}
+
+.is-disabled {
+  pointer-events: none;
+  opacity: 0.46;
 }
 
 .primary-action:active,
@@ -403,6 +418,9 @@ button[disabled] {
   margin: 22rpx 0 0;
   padding: 16rpx 24rpx;
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 12rpx;
   background: #fffaf6;
   color: #8f4439;

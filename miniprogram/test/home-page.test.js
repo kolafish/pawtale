@@ -272,11 +272,18 @@ test("home primary and alternate CTAs create sessions with their displayed guida
   delete global.wx;
 });
 
-test("home voice CTA uses a view shell instead of native button shrink wrapping", () => {
+test("home row actions use view shells instead of native button shrink wrapping", () => {
   const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
 
   assert.match(template, /<view\s+class="\{\{voiceStartButtonClass\}\}"/);
   assert.doesNotMatch(template, /<button\s+class="\{\{voiceStartButtonClass\}\}"/);
+  assert.match(template, /<view\s+class="more-actions-toggle"/);
+  assert.doesNotMatch(template, /<button\s+class="more-actions-toggle"/);
+  assert.equal(
+    (template.match(/<view\s+class="\{\{resumeAskButtonClass\}\}[^"]*"/g) || []).length,
+    4,
+  );
+  assert.doesNotMatch(template, /<button\s+class="\{\{resumeAskButtonClass\}\}/);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
