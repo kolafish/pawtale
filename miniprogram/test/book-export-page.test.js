@@ -159,6 +159,24 @@ test("book export keeps advanced settings collapsed and opens immersive reading"
   delete global.wx;
 });
 
+test("book export does not save settings while viewing a historical version", async () => {
+  let updateCalls = 0;
+  const { page } = loadBookExportPage({
+    updateMemoirBookOutput: async () => {
+      updateCalls += 1;
+      return sampleBookOutput();
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookViewingHistoricalVersion: true,
+  });
+
+  await page.saveBookDesignSettings.call(context);
+
+  assert.equal(updateCalls, 0);
+});
+
 test("book export page saves full-book metadata and cover style", async () => {
   const updates = [];
   const { page } = loadBookExportPage({

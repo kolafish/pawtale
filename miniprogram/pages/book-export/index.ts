@@ -484,6 +484,9 @@ definePage<BookExportData>()({
   },
 
   async saveBookDesignSettings() {
+    if (this.data.bookTitleSaving || this.data.bookViewingHistoricalVersion) {
+      return;
+    }
     await this.autosaveBookDesignSettings();
   },
 
