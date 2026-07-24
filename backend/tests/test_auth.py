@@ -267,6 +267,20 @@ class TestAuthAPI:
         with Image.open(BytesIO(public_avatar.content)) as rendered:
             assert rendered.size == (384, 384)
 
+        replacement = Image.new("RGB", (480, 640), color=(59, 101, 82))
+        replacement_bytes = BytesIO()
+        replacement.save(replacement_bytes, format="JPEG")
+        replaced_avatar = await anonymous_client.post(
+            "/api/auth/me/avatar",
+            files={"file": ("wechat-avatar.jpg", replacement_bytes.getvalue(), "image/jpeg")},
+        )
+        assert replaced_avatar.status_code == 200
+        assert replaced_avatar.json()["avatar_url"] != avatar_url
+        assert (await anonymous_client.get(avatar_url)).status_code == 404
+        assert (
+            await anonymous_client.get(replaced_avatar.json()["avatar_url"])
+        ).status_code == 200
+
     async def test_avatar_upload_rejects_non_image(self, anonymous_client, tmp_path, monkeypatch):
         register = await anonymous_client.post(
             "/api/auth/register",

@@ -173,6 +173,17 @@ test("me keeps large text available before login-only settings", () => {
   assert.ok(loggedInSettings > largeTextControl);
 });
 
+test("me profile exposes WeChat avatar and nickname controls", () => {
+  const pageWxml = fs.readFileSync(
+    path.join(__dirname, "../pages/me/index.wxml"),
+    "utf8",
+  );
+
+  assert.match(pageWxml, /open-type="chooseAvatar"/);
+  assert.match(pageWxml, /bindchooseavatar="chooseWeChatAvatar"/);
+  assert.match(pageWxml, /type="nickname"/);
+});
+
 test("me reveals account settings only when requested", () => {
   const { page } = loadMePage();
   const context = pageContext(page);

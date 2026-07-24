@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
@@ -28,6 +30,17 @@ function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
 
   return loadPageModule("../pages/login/index.ts");
 }
+
+test("login profile setup uses WeChat avatar and nickname components", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/login/index.wxml"),
+    "utf8",
+  );
+
+  assert.match(template, /open-type="chooseAvatar"/);
+  assert.match(template, /bindchooseavatar="chooseWeChatAvatar"/);
+  assert.match(template, /type="nickname"/);
+});
 
 test("login page relaunches home when the wechat profile is already complete", async () => {
   const relaunches = [];

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-from io import BytesIO
-from pathlib import Path
+import logging
 import re
 import uuid
+from io import BytesIO
+from pathlib import Path
 
 import aiofiles
 from fastapi import HTTPException, UploadFile
@@ -21,6 +22,7 @@ AVATAR_SIZE = 384
 AVATAR_JPEG_QUALITY = 88
 _AVATAR_FILENAME_PATTERN = re.compile(r"^[0-9a-f]{32}\.jpg$")
 _MANAGED_AVATAR_PREFIX = "/api/auth/avatars/"
+logger = logging.getLogger(__name__)
 
 
 def _avatar_root() -> Path:
@@ -71,16 +73,27 @@ def _render_avatar(content: bytes) -> bytes:
         raise HTTPException(status_code=400, detail="仅支持有效的头像图片") from exc
 
 
-def _managed_avatar_path(avatar_url: str | None) -> Path | None:
+def _managed_avatar_path(avatar_url: str | None, expected_user_id: str) -> Path | None:
     if not avatar_url or not avatar_url.startswith(_MANAGED_AVATAR_PREFIX):
         return None
     parts = avatar_url.removeprefix(_MANAGED_AVATAR_PREFIX).split("/")
     if len(parts) != 2:
         return None
     user_id, filename = parts
-    if not _is_canonical_user_id(user_id) or not _AVATAR_FILENAME_PATTERN.fullmatch(filename):
+    if (
+        user_id != expected_user_id
+        or not _is_canonical_user_id(user_id)
+        or not _AVATAR_FILENAME_PATTERN.fullmatch(filename)
+    ):
         return None
     return _avatar_root() / user_id / filename
+
+
+def _remove_avatar(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Failed to remove avatar file path=%s", path, exc_info=True)
 
 
 def avatar_file_path(user_id: str, filename: str) -> Path:
@@ -104,15 +117,15 @@ async def update_user_avatar(
     async with aiofiles.open(path, "wb") as file:
         await file.write(rendered)
 
-    previous_path = _managed_avatar_path(user.avatar_url)
+    previous_path = _managed_avatar_path(user.avatar_url, user.id)
     user.avatar_url = f"{_MANAGED_AVATAR_PREFIX}{user.id}/{filename}"
     try:
         await db.commit()
         await db.refresh(user)
     except Exception:
-        path.unlink(missing_ok=True)
+        _remove_avatar(path)
         raise
 
     if previous_path and previous_path != path:
-        previous_path.unlink(missing_ok=True)
+        _remove_avatar(previous_path)
     return user

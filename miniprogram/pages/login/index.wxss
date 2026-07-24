@@ -269,6 +269,7 @@
 }
 
 .profile-name-input {
+  box-sizing: border-box;
   width: 100%;
   height: 96rpx;
   min-height: 48px;

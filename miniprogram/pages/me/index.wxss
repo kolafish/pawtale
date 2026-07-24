@@ -224,6 +224,7 @@
 }
 
 .name-input {
+  box-sizing: border-box;
   width: 100%;
   height: 88rpx;
   min-height: 44px;
