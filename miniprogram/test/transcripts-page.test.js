@@ -137,6 +137,25 @@ test("transcripts view patch keeps empty states mutually exclusive", () => {
   });
 });
 
+test("transcripts load more action stays inactive while a page request is running", async () => {
+  let loadCalls = 0;
+  const { page } = loadTranscriptsPage();
+  const context = {
+    ...pageContext(page, {
+      loading: true,
+      items: [],
+      total: 1,
+    }),
+    async loadTranscripts() {
+      loadCalls += 1;
+    },
+  };
+
+  await page.loadMore.call(context);
+
+  assert.equal(loadCalls, 0);
+});
+
 test("transcripts page formats record time without timezone label", async () => {
   const { page } = loadTranscriptsPage({
     authExports: {

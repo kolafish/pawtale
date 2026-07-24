@@ -51,6 +51,22 @@ function projectItem(id, title, { active = false, canDelete = true } = {}) {
   };
 }
 
+test("new memoir action stays inactive while another project action is busy", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadProjectsPage();
+  const context = pageContext(page, { busy: true });
+
+  page.createProject.call(context);
+
+  assert.deepEqual(navigations, []);
+  delete global.wx;
+});
+
 test("project cards switch the active memoir directly", async () => {
   const activations = [];
   const toasts = [];

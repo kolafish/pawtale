@@ -42,6 +42,18 @@ test("login profile setup uses WeChat avatar and nickname components", () => {
   assert.match(template, /type="nickname"/);
 });
 
+test("login mode toggle stays inactive while a login request is running", () => {
+  const { page } = loadLoginPage();
+  const context = pageContext(page, {
+    accountMode: false,
+    wechatLoading: true,
+  });
+
+  page.toggleAccountMode.call(context);
+
+  assert.equal(context.data.accountMode, false);
+});
+
 test("login page relaunches home when the wechat profile is already complete", async () => {
   const relaunches = [];
   global.wx = {

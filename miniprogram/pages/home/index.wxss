@@ -244,7 +244,7 @@
 
 .active-project-link-hover {
   background: #f5eee7;
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 .active-project-copy {
@@ -415,7 +415,7 @@
 
 .more-actions-toggle-hover {
   background: #f5eee7;
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 .more-actions-chevron {
@@ -452,11 +452,11 @@
   line-height: 44rpx;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
   gap: 2rpx;
   padding: 16rpx 24rpx;
-  text-align: left;
+  text-align: center;
   box-shadow:
     0 0 0 1rpx rgba(43, 23, 19, 0.08),
     0 4rpx 10rpx rgba(93, 61, 42, 0.05);
@@ -468,7 +468,7 @@
 .resume-ask-button > text {
   display: block;
   width: 100%;
-  text-align: left;
+  text-align: center;
   text-wrap: balance;
 }
 
@@ -675,7 +675,7 @@
 }
 
 .home-page.large-text .resume-ask-button {
-  align-items: flex-start;
+  align-items: center;
   padding-top: 20rpx;
   padding-bottom: 20rpx;
 }

@@ -90,14 +90,15 @@
         bindtap="chooseCompletionIssueResolution"
       >暂时不补</button>
     </view>
-    <button
+    <view
       wx:if="{{showCompletionIssueContinue}}"
-      class="completion-issue-continue"
-      disabled="{{completionIssueControlsDisabled}}"
+      class="completion-issue-continue ui-block-action ui-pressable {{completionIssueControlsDisabled ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{completionIssueControlsDisabled}}"
       bindtap="finishCompletionRound"
     >
       返回全书概览
-    </button>
+    </view>
   </view>
 
   <view wx:if="{{showAssistantPanel}}" class="{{assistantPanelClass}}">
@@ -216,10 +217,11 @@
   </view>
 
   <view wx:if="{{showHistoryPanel}}" class="history-panel">
-    <button
+    <view
       class="history-toggle"
       bindtap="toggleHistory"
       hover-class="history-toggle-hover"
+      aria-role="button"
       aria-expanded="{{historyExpanded}}"
       aria-label="{{historyToggleText}}本次已保存的讲述"
     >
@@ -228,7 +230,7 @@
         <text class="history-count">{{historyCountText}}</text>
       </view>
       <text class="history-toggle-text">{{historyToggleText}}</text>
-    </button>
+    </view>
     <view wx:if="{{showHistoryLines}}" class="history-lines">
       <view wx:for="{{transcriptLineViews}}" wx:key="id" class="{{item.lineClass}}">
         <text class="line-role">{{item.roleText}}</text>

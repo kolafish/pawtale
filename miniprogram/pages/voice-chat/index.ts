@@ -531,7 +531,11 @@ definePage<VoiceChatData>()({
   },
 
   async finishCompletionRound() {
-    if (this.data.finishingSession || this.data.recording) {
+    if (
+      this.data.completionIssueControlsDisabled
+      || this.data.finishingSession
+      || this.data.recording
+    ) {
       return;
     }
     this.recordingStartGeneration += 1;

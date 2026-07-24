@@ -28,25 +28,27 @@
           </view>
           <text class="topic-intent">{{topic.intent}}</text>
           <text class="state-detail">{{topic.state_detail}}</text>
-          <button
+          <view
             wx:if="{{topic.user_resolution === 'none'}}"
-            class="topic-start-action {{topic.startDisabled ? 'disabled' : ''}}"
+            class="topic-start-action ui-block-action {{topic.startDisabled ? 'disabled is-disabled' : ''}}"
             data-item-id="{{topic.id}}"
             catchtap="startFromTopic"
             hover-class="{{topic.startDisabled ? 'none' : 'topic-start-action-hover'}}"
-            disabled="{{topic.startDisabled}}"
+            aria-role="button"
+            aria-disabled="{{topic.startDisabled}}"
           >
             {{topic.startText}}
-          </button>
-          <button
-            class="topic-choice-action {{topic.actionDisabled ? 'disabled' : ''}}"
+          </view>
+          <view
+            class="topic-choice-action ui-block-action {{topic.actionDisabled ? 'disabled is-disabled' : ''}}"
             data-item-id="{{topic.id}}"
             catchtap="chooseResolution"
             hover-class="{{topic.actionDisabled ? 'none' : 'topic-choice-action-hover'}}"
-            disabled="{{topic.actionDisabled}}"
+            aria-role="button"
+            aria-disabled="{{topic.actionDisabled}}"
           >
             {{topic.actionText}}
-          </button>
+          </view>
         </view>
       </view>
     </view>

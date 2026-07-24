@@ -13,22 +13,23 @@
 
     <view wx:if="{{error}}" class="error">{{error}}</view>
 
-    <button
-      class="primary-button"
-      loading="{{wechatLoading}}"
-      disabled="{{loading || wechatLoading}}"
+    <view
+      class="primary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{loading || wechatLoading}}"
       bindtap="submitWeChat"
     >
       {{wechatLoading ? "微信登录中" : "微信登录"}}
-    </button>
+    </view>
 
-    <button
-      class="mode-button"
-      disabled="{{loading || wechatLoading}}"
+    <view
+      class="mode-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{loading || wechatLoading}}"
       bindtap="toggleAccountMode"
     >
       {{accountMode ? "收起账号登录" : "使用 Pawtale 账号登录"}}
-    </button>
+    </view>
 
     <view wx:if="{{accountMode}}" class="account-panel">
       <view class="field">
@@ -53,14 +54,14 @@
         />
       </view>
 
-      <button
-        class="secondary-button"
-        loading="{{loading}}"
-        disabled="{{loading || wechatLoading}}"
+      <view
+        class="secondary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{loading || wechatLoading}}"
         bindtap="submitAccount"
       >
         {{loading ? "登录中" : "账号登录"}}
-      </button>
+      </view>
     </view>
   </view>
 
@@ -107,22 +108,23 @@
       <text class="profile-field-hint">点击输入框，微信会提供当前昵称供您选择。</text>
     </view>
 
-    <button
-      class="primary-button"
-      loading="{{profileSaving}}"
-      disabled="{{profileSaving}}"
+    <view
+      class="primary-button ui-block-action {{profileSaving ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{profileSaving}}"
       bindtap="saveWeChatProfile"
       hover-class="primary-button-hover"
     >
       {{profileSaving ? "保存中" : "保存并进入"}}
-    </button>
-    <button
-      class="skip-profile-button"
-      disabled="{{profileSaving}}"
+    </view>
+    <view
+      class="skip-profile-button ui-block-action {{profileSaving ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{profileSaving}}"
       bindtap="skipWeChatProfile"
       hover-class="skip-profile-button-hover"
     >
       稍后设置
-    </button>
+    </view>
   </view>
 </view>

@@ -358,6 +358,30 @@ test("book completion return stops the backend session when websocket is absent"
   delete global.wx;
 });
 
+test("book completion return stays inactive while issue controls are disabled", async () => {
+  let stopCalls = 0;
+  const page = loadVoiceChatPage({
+    voiceApiExports: {
+      stopMemoirVoiceSession: async () => {
+        stopCalls += 1;
+        return { session: { id: "voice-1", status: "stopped" } };
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      completionIssueControlsDisabled: true,
+      voiceSessionId: "voice-1",
+    },
+  };
+
+  await page.finishCompletionRound.call(context);
+
+  assert.equal(stopCalls, 0);
+});
+
 test("human interview record action starts the selected speaker in one tap", async () => {
   const startOptions = [];
   const page = loadVoiceChatPage({

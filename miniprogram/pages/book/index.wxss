@@ -231,7 +231,7 @@
 
 .automation-clear {
   min-width: 128rpx;
-  min-height: 64rpx;
+  min-height: 80rpx;
   margin: 0;
   padding: 0 18rpx;
   border: 0;
@@ -240,7 +240,7 @@
   color: #9c463b;
   font-size: 23rpx;
   font-weight: 700;
-  line-height: 64rpx;
+  line-height: 80rpx;
 }
 
 .automation-clear::after {
@@ -454,7 +454,7 @@
 .automation-ack {
   flex: 0 0 128rpx;
   width: 128rpx;
-  height: 60rpx;
+  height: 80rpx;
   margin: 0;
   padding: 0;
   border: 0;
@@ -463,7 +463,7 @@
   color: #ffffff;
   font-size: 23rpx;
   font-weight: 800;
-  line-height: 60rpx;
+  line-height: 80rpx;
 }
 
 .automation-ack::after {
@@ -896,7 +896,7 @@
 .source-toggle-button {
   flex: 0 0 auto;
   min-width: 212rpx;
-  height: 68rpx;
+  height: 80rpx;
   margin: 0;
   padding: 0 18rpx;
   border-radius: 16rpx;
@@ -972,7 +972,7 @@
 .source-split-toggle {
   flex: 0 0 112rpx;
   width: 112rpx;
-  height: 58rpx;
+  height: 80rpx;
   margin: 2rpx 0 0;
   padding: 0;
   border: 0;
@@ -1105,7 +1105,7 @@
 }
 
 .structure-button {
-  height: 64rpx;
+  height: 80rpx;
   margin: 0;
   padding: 0 18rpx;
   border: 0;
@@ -1265,14 +1265,14 @@
 .image-assets-entry-action {
   flex-shrink: 0;
   min-width: 96rpx;
-  min-height: 72rpx;
+  min-height: 80rpx;
   padding: 0 22rpx;
   border-radius: 18rpx;
   background: #2f1712;
   color: #fffaf2;
   font-size: 26rpx;
   font-weight: 800;
-  line-height: 72rpx;
+  line-height: 80rpx;
   text-align: center;
 }
 

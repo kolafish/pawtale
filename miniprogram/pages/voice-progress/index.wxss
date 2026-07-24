@@ -139,8 +139,8 @@
 }
 
 .continue-button {
-  width: 108rpx;
-  height: 64rpx;
+  width: 120rpx;
+  height: 80rpx;
   border-radius: 18rpx;
   background: #fff3ef;
   color: #a64b3e;

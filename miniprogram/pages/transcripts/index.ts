@@ -557,7 +557,7 @@ definePage<TranscriptsData>()({
   },
 
   async loadMore() {
-    if (this.data.items.length >= this.data.total) {
+    if (this.data.loading || this.data.items.length >= this.data.total) {
       return;
     }
     await this.loadTranscripts(false);

@@ -78,7 +78,7 @@
 
 .finish-button {
   width: 156rpx;
-  height: 78rpx;
+  height: 80rpx;
   margin: 0;
   border: 0;
   border-radius: 24rpx;
@@ -368,7 +368,7 @@
 }
 
 .assistant-topic-button {
-  min-height: 68rpx;
+  min-height: 80rpx;
   margin: 0;
   padding: 0 24rpx;
   border: 0;
@@ -667,7 +667,7 @@
 
 .inline-help-button {
   align-self: flex-start;
-  min-height: 76rpx;
+  min-height: 80rpx;
   margin: 22rpx 0 0;
   border: 0;
   border-radius: 999rpx;
@@ -768,7 +768,7 @@
 
 .history-toggle-hover {
   background: #f8f2e8;
-  transform: scale(0.98);
+  transform: scale(0.96);
 }
 
 .history-heading {
@@ -1095,7 +1095,7 @@
 
 .recovery-button {
   min-width: 160rpx;
-  height: 64rpx;
+  height: 80rpx;
   margin: 0;
   border: 0;
   border-radius: 16rpx;

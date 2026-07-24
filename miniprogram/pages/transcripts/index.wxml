@@ -51,13 +51,21 @@
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
     <text class="empty-title">浏览讲述记录</text>
     <text class="empty-copy">登录后可以查看语音聊天保存的识别原文、整理文字、音频时长和是否已收录到章节。</text>
-    <button class="login-button" bindtap="openLogin">登录后查看</button>
+    <view
+      class="login-button ui-block-action ui-pressable"
+      aria-role="button"
+      bindtap="openLogin"
+    >登录后查看</view>
   </view>
 
   <view wx:elif="{{showNoProjectPanel}}" class="empty-panel">
     <text class="empty-title">还没有回忆录</text>
     <text class="empty-copy">先创建一本回忆录，完成语音聊天后，讲述记录会显示在这里。</text>
-    <button class="login-button" bindtap="createProject">创建回忆录</button>
+    <view
+      class="login-button ui-block-action ui-pressable"
+      aria-role="button"
+      bindtap="createProject"
+    >创建回忆录</view>
   </view>
 
   <view wx:elif="{{showLoadingEmpty}}" class="empty-panel">
@@ -67,11 +75,12 @@
   <view wx:elif="{{showSearchEmpty}}" class="empty-panel">
     <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
-    <button
-      class="empty-secondary-button"
+    <view
+      class="empty-secondary-button ui-block-action"
       bindtap="clearSearch"
       hover-class="empty-secondary-button-hover"
-    >清除搜索，查看全部</button>
+      aria-role="button"
+    >清除搜索，查看全部</view>
   </view>
 
   <view wx:elif="{{showGenericEmpty}}" class="empty-panel">
@@ -125,15 +134,15 @@
     </view>
   </view>
 
-  <button
+  <view
     wx:if="{{showLoadMore}}"
-    class="load-more"
-    loading="{{loading}}"
-    disabled="{{loading}}"
+    class="load-more ui-block-action ui-pressable {{loading ? 'is-disabled' : ''}}"
+    aria-role="button"
+    aria-disabled="{{loading}}"
     bindtap="loadMore"
   >
-    加载更多
-  </button>
+    {{loading ? "正在加载…" : "加载更多"}}
+  </view>
 
   <view class="bottom-spacer"></view>
 </view>

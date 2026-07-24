@@ -61,7 +61,7 @@
 }
 
 .segment {
-  height: 78rpx;
+  height: 80rpx;
   display: flex;
   align-items: center;
   justify-content: center;
