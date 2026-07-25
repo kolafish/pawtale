@@ -164,6 +164,36 @@ async def get_chapter_draft(
     return _draft_response(draft)
 
 
+async def chapter_draft_responses_by_chapter(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_ids: list[str],
+) -> dict[str, MemoirBookChapterDraftResponse | None]:
+    responses: dict[str, MemoirBookChapterDraftResponse | None] = {
+        chapter_id: None
+        for chapter_id in chapter_ids
+    }
+    if not chapter_ids:
+        return responses
+    drafts = (
+        await db.execute(
+            select(MemoirBookChapterDraft)
+            .where(
+                MemoirBookChapterDraft.project_id == project_id,
+                MemoirBookChapterDraft.chapter_id.in_(chapter_ids),
+            )
+            .options(selectinload(MemoirBookChapterDraft.versions))
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
+    responses.update({
+        draft.chapter_id: _draft_response(draft)
+        for draft in drafts
+    })
+    return responses
+
+
 async def confirm_chapter_draft(
     db: AsyncSession,
     *,

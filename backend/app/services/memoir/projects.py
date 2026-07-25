@@ -10,7 +10,9 @@ from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
 from app.models.memoir import MemoirChatMessage
 from app.models.projects import DocumentGroup, Project
+from app.models.users import User
 from app.schemas.memoir_projects import (
+    MemoirIdentityResponse,
     MemoirProjectCreate,
     MemoirProjectListResponse,
     MemoirProjectUpdate,
@@ -183,6 +185,24 @@ async def mobile_project_list(
         active_project_id=active_project.id if active_project else "",
         active_project=active_project,
         projects=projects,
+    )
+
+
+async def memoir_identity_response(
+    db: AsyncSession,
+    user: User,
+) -> MemoirIdentityResponse:
+    projects = await mobile_project_list(db, user.id)
+    return MemoirIdentityResponse(
+        id=user.id,
+        email=user.email,
+        password_login_enabled=user.password_login_enabled,
+        display_name=user.display_name,
+        avatar_url=user.avatar_url,
+        created_at=user.created_at,
+        active_project_id=projects.active_project_id,
+        active_project=projects.active_project,
+        projects=projects.projects,
     )
 
 

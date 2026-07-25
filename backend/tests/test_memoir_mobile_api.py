@@ -3,6 +3,7 @@ from sqlalchemy import func, select
 from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
 from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
 from app.services.memoir import audio_files as memoir_audio_files
+from tests.memoir_helpers import create_test_voice_transcript
 
 
 async def test_mobile_memoir_routes_require_login(anonymous_client):
@@ -48,6 +49,37 @@ async def test_mobile_memoir_identity_includes_active_project(client):
     assert data["active_project"]["type"] == "memoir"
     assert len(data["projects"]) == 1
     assert data["projects"][0]["id"] == data["active_project_id"]
+
+
+async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_db):
+    created_response = await client.post(
+        "/api/mobile/memoir/projects",
+        json={"title": "母亲的回忆"},
+    )
+    project_id = created_response.json()["id"]
+
+    before = (await client.get("/api/mobile/memoir/home-snapshot")).json()
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        "小时候我常跟母亲去赶集。",
+        project_id=project_id,
+    )
+    after = (await client.get("/api/mobile/memoir/home-snapshot")).json()
+    book = (await client.get("/api/mobile/memoir/book-snapshot")).json()
+
+    assert before["identity"]["active_project_id"] == project_id
+    assert before["latest_transcript"] is None
+    assert after["server_revision"] > before["server_revision"]
+    assert after["latest_transcript"]["id"] == created["utterance_id"]
+    assert after["latest_transcript"]["display_text"] == "小时候我常跟母亲去赶集。"
+    assert book["server_revision"] == after["server_revision"]
+    assert book["identity"]["active_project_id"] == project_id
+    assert book["plan"] is None
+    assert book["drafts_by_chapter_id"] == {}
+    assert book["output"] is None
+    assert book["automation_events"]["items"] == []
+    assert book["image_assets"]["items"] == []
 
 
 async def test_mobile_memoir_projects_can_be_created_updated_and_activated(client):

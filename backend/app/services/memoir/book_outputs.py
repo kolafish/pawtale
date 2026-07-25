@@ -345,10 +345,28 @@ async def get_book_output(
     project_id: str,
     allow_admin: bool = False,
 ) -> MemoirBookOutputResponse:
+    response = await book_output_response_or_none(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    return response
+
+
+async def book_output_response_or_none(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    allow_admin: bool = False,
+) -> MemoirBookOutputResponse | None:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
     if not output:
-        raise HTTPException(status_code=404, detail="全书稿不存在")
+        return None
     plan = await _load_plan(
         db,
         user_id=user_id,
