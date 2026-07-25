@@ -484,7 +484,7 @@ SectionMaterial 解决的不是“素材是什么”，而是：
 
 当前有四种来源：
 
-- 确认章节规划：每章至少创建一个默认小节，初始标题通常等于章节标题；
+- 生成、保存或确认章节规划：每章至少创建一个默认小节，初始标题通常等于章节标题；
 - 新素材自动整理：AI 判断现有小节都不合适时，在目标章节创建新小节；
 - 章节工作台“重新整理小节分组”：AI 基于本章全部素材重新生成整套小节；
 - 后端结构 API：用户或管理端显式创建、拆分小节。
@@ -609,9 +609,9 @@ Chapter 自身不保存正文，也不直接保存规范的 source_refs。它通
 2. 为每条素材构造带 utterance、message、audio、time range 和文字的 SourceSegment；
 3. LLM 只基于这些素材返回章节标题和 source index；
 4. 服务端校验来源必须属于当前项目、每章至少有一条来源；
-5. 保存 draft BookPlan；
-6. 用户调整并确认后，替换为 confirmed plan；
-7. `sync_materials_to_chapters` 将章节来源同步到唯一的 SectionMaterial 归属表。
+5. 保存 draft BookPlan，并把来源同步到每章的默认 Section 和 SectionMaterial；
+6. 用户调整并确认后，保存 confirmed plan；
+7. 确认时再次通过 `sync_materials_to_chapters` 将最终章节来源同步到唯一的 SectionMaterial 归属表。
 
 确认后新增素材：
 
@@ -1163,7 +1163,6 @@ flowchart TD
     ChapterChange --> Draft
     Draft --> Output
     ChapterChange --> Output
-    BookReview --> Output
 ```
 
 失效表示“旧结果仍可被明确标记地查看，但不能当作当前结果继续发布”，不是立即删除旧版本。
