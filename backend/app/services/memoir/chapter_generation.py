@@ -380,10 +380,10 @@ def _reject_repeated_section_boundary(
     previous_content: str,
     current_content: str,
 ) -> None:
-    previous = previous_content.rstrip()[
+    previous = "".join(previous_content.split())[
         -CHAPTER_SECTION_BOUNDARY_LOOKBACK_CHARS:
     ]
-    current = current_content.lstrip()
+    current = "".join(current_content.split())
     for size in range(min(len(previous), len(current)), 0, -1):
         if size < CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS:
             return

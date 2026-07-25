@@ -304,6 +304,10 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
         "二零零四年，你们婆病了，癌症，病故了。二零零五年、"
         "二零零六年又在外面帮忙组织钢材。二零零六年，就跟温婆婆结婚了。"
     )
+    repeated_boundary_with_newline = repeated_boundary.replace(
+        "二零零四年，你们婆病了",
+        "二零零四年，\n你们婆病了",
+    )
 
     class BoundaryCopyingAI:
         model_name = "test-boundary-copy"
@@ -327,7 +331,7 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
                 repeated_boundary
                 if section_id == "section-1"
                 else (
-                    f"{repeated_boundary}\n\n"
+                    f"{repeated_boundary_with_newline}\n\n"
                     if "上次输出未通过校验" not in user_prompt
                     else ""
                 )
