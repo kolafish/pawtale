@@ -43,10 +43,7 @@
   border: 0;
   border-radius: 28rpx;
   background: var(--ui-surface);
-  box-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.06),
-    0 4rpx 10rpx rgba(0, 0, 0, 0.04),
-    0 20rpx 48rpx rgba(0, 0, 0, 0.09);
+  box-shadow: var(--ui-card-shadow-raised);
 }
 
 .panel-eyebrow {
