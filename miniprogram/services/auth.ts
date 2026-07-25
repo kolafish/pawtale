@@ -162,13 +162,16 @@ export async function requestWithBackendSession<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   await ensureBackendSession();
+  const attemptedSessionCookie = readSessionCookie();
   try {
     return await request<T>(path, options);
   } catch (error) {
     if (!(error instanceof ApiError) || error.statusCode !== 401) {
       throw error;
     }
-    clearSessionCookie();
+    if (readSessionCookie() === attemptedSessionCookie) {
+      clearSessionCookie();
+    }
     await ensureBackendSession();
     return request<T>(path, options);
   }

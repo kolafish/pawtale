@@ -17,7 +17,7 @@ interface MemoirRequestOptions {
 
 type QueryValue = string | number | boolean | null | undefined;
 
-export function withSelectedAIModel<T extends { ai_model?: string | null }>(data: T): T {
+function withSelectedAIModel<T extends { ai_model?: string | null }>(data: T): T {
   const explicitModel = typeof data.ai_model === "string" ? data.ai_model.trim() : "";
   return {
     ...data,
