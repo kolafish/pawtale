@@ -153,15 +153,6 @@ async def rewrite_chapter(
         chapter_id=chapter_id,
         user_id=user_id,
     )
-    digest = await chapter_digests.generate_or_reuse_chapter_digest(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        ai_model=ai_model,
-        force_regenerate=False,
-    )
-    if digest.status != MemoirSemanticCacheStatus.READY.value:
-        raise ValueError(digest.error_message or "章节审阅失败")
     issues = await completion_issues.list_issues(
         db,
         project_id=project_id,
@@ -172,26 +163,45 @@ async def rewrite_chapter(
         for issue in issues
     ):
         raise ValueError("本章还有一项需要您先确认")
-    for issue in issues:
-        if issue.status == MemoirCompletionIssueStatus.CLOSED.value:
-            continue
-        await completion_issues.close_issue(
-            db,
-            project_id=project_id,
-            issue_id=issue.id,
-            outcome=MemoirCompletionIssueOutcome.DEFERRED,
-            note="用户选择先按现有素材重新生成正文",
-            answered_material_id=None,
-        )
+    deferred_issue_ids = [
+        issue.id
+        for issue in issues
+        if issue.status != MemoirCompletionIssueStatus.CLOSED.value
+    ]
+    digest = await chapter_digests.get_current_chapter_digest(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    editorial_guidance = (
+        list(digest.digest_json.get("structure_guidance", []))
+        if digest is not None
+        and digest.status == MemoirSemanticCacheStatus.READY.value
+        else []
+    )
+    # The user has explicitly chosen to write from the current material. Do
+    # not generate another section/chapter review here: those auxiliary LLM
+    # calls can fail even though the section structure is already complete.
+    # Reuse ready guidance when present, then commit the remembered model
+    # preference before the long generation call so SQLite is not write-locked
+    # while the provider is working.
+    await db.commit()
     await chapter_generation.generate_and_save_chapter_draft(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
         ai_model=ai_model,
-        editorial_guidance=list(
-            digest.digest_json.get("structure_guidance", [])
-        ),
+        editorial_guidance=editorial_guidance,
     )
+    for issue_id in deferred_issue_ids:
+        await completion_issues.close_issue(
+            db,
+            project_id=project_id,
+            issue_id=issue_id,
+            outcome=MemoirCompletionIssueOutcome.DEFERRED,
+            note="用户选择先按现有素材重新生成正文",
+            answered_material_id=None,
+        )
     return await completion_read_model.chapter_workspace(
         db,
         project_id=project_id,

@@ -31,7 +31,11 @@ export interface ChapterWorkspaceViewPatch {
   draftRecoveryActionText: string;
   draftRecoveryActionKind: "none" | "next" | "rewrite" | "status";
   draftRecoveryActionDisabled: boolean;
+  narrativeSectionCount: number;
   sectionStructureSummary: string;
+  rewriteDraftActionText: string;
+  rewriteDraftBusyText: string;
+  rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
   canConfirmChapter: boolean;
 }
@@ -127,6 +131,8 @@ function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
 function draftRecoveryPatch(
   workspace: MemoirChapterWorkspace,
   nextAction: ChapterNextAction,
+  rewriteDraftActionText: string,
+  rewriteDraftScopeDetail: string,
 ): Pick<
   ChapterWorkspaceViewPatch,
   | "draftRecoveryTitle"
@@ -146,9 +152,9 @@ function draftRecoveryPatch(
   }
   if (workspace.can_rewrite_draft) {
     return {
-      draftRecoveryTitle: "现在可以重新生成小节正文",
-      draftRecoveryDetail: "系统会按当前小节结构重新整理正文，旧版本仍会保留。上方“重新整理小节分组”只在分组不合适时使用。",
-      draftRecoveryActionText: "重新生成小节正文",
+      draftRecoveryTitle: `现在可以${rewriteDraftActionText}`,
+      draftRecoveryDetail: rewriteDraftScopeDetail,
+      draftRecoveryActionText: rewriteDraftActionText,
       draftRecoveryActionKind: "rewrite",
       draftRecoveryActionDisabled: false,
     };
@@ -156,7 +162,7 @@ function draftRecoveryPatch(
   if (nextAction.actionText) {
     return {
       draftRecoveryTitle: "先完成本章当前一步",
-      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“重新生成小节正文”。上方“重新整理小节分组”不是当前必做步骤。`,
+      draftRecoveryDetail: `先点击“${nextAction.actionText}”完成当前步骤；如果还有必需事项，这里会继续显示下一步，全部完成后会出现“${rewriteDraftActionText}”。上方“重新整理小节分组”不是当前必做步骤。`,
       draftRecoveryActionText: nextAction.actionText,
       draftRecoveryActionKind: "next",
       draftRecoveryActionDisabled: nextAction.disabled,
@@ -164,7 +170,7 @@ function draftRecoveryPatch(
   }
   return {
     draftRecoveryTitle: "先查看本章当前步骤",
-    draftRecoveryDetail: "完成页面顶部要求处理的事项后，即可在这里重新生成小节正文。上方“重新整理小节分组”不是当前必做步骤。",
+    draftRecoveryDetail: `完成页面顶部要求处理的事项后，即可在这里${rewriteDraftActionText}。上方“重新整理小节分组”不是当前必做步骤。`,
     draftRecoveryActionText: "查看当前步骤",
     draftRecoveryActionKind: "status",
     draftRecoveryActionDisabled: false,
@@ -183,6 +189,15 @@ export function chapterWorkspaceViewPatch(
   const narrativeSectionCount = sectionViews.filter(
     (section) => !section.requires_user_assignment,
   ).length;
+  const rewriteDraftActionText = narrativeSectionCount
+    ? `重新生成全部 ${narrativeSectionCount} 个小节正文`
+    : "重新生成全部小节正文";
+  const rewriteDraftBusyText = narrativeSectionCount
+    ? `正在生成 ${narrativeSectionCount} 个小节正文…`
+    : "正在生成全部小节正文…";
+  const rewriteDraftScopeDetail = narrativeSectionCount
+    ? `会按照上方当前 ${narrativeSectionCount} 个小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。`
+    : "会按照上方当前小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。";
   const materialCount = sectionViews.reduce(
     (total, section) => total + section.visibleMaterials.length,
     0,
@@ -193,9 +208,15 @@ export function chapterWorkspaceViewPatch(
     readinessDetail: summary.detail,
     rewriteNoticeTitle: rewriteNoticeTitle(workspace),
     rewriteNoticeDetail: workspace.can_rewrite_draft
-      ? "可以继续补充，也可以先用本章全部现有素材重新生成完整正文；旧版本仍会保留。"
-      : "请先完成本章当前步骤，再重新生成正文。",
-    ...draftRecoveryPatch(workspace, nextAction),
+      ? `可以继续补充，也可以现在生成。${rewriteDraftScopeDetail}`
+      : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分小节。`,
+    ...draftRecoveryPatch(
+      workspace,
+      nextAction,
+      rewriteDraftActionText,
+      rewriteDraftScopeDetail,
+    ),
+    narrativeSectionCount,
     sectionStructureSummary: [
       `${narrativeSectionCount} 个小节`,
       `${materialCount} 条讲述`,
@@ -203,6 +224,9 @@ export function chapterWorkspaceViewPatch(
         ? [`${pendingAssignmentCount} 条待归类`]
         : []),
     ].join(" · "),
+    rewriteDraftActionText,
+    rewriteDraftBusyText,
+    rewriteDraftScopeDetail,
     sectionViews,
     canConfirmChapter:
       summary.state === "draft_ready"
