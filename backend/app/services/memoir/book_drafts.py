@@ -359,11 +359,37 @@ async def synthesize_chapter_draft_audio(
     )
     sections = normalized_section_snapshots(latest.section_snapshot_json)
     text = sectioned_chapter_content(sections) or latest.content.strip()
+    return await _synthesize_cached_draft_audio(
+        db,
+        user_id=user_id,
+        draft=draft,
+        text=text,
+        cache_key=CHAPTER_TTS_CACHE_KEY,
+        cache_metadata={
+            "draft_version_id": latest.id,
+            "chapter_id": chapter.id,
+        },
+        req=req,
+        tts_client=tts_client,
+    )
+
+
+async def _synthesize_cached_draft_audio(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    draft: MemoirBookChapterDraft,
+    text: str,
+    cache_key: str,
+    cache_metadata: dict[str, object],
+    req: MemoirBookAudioRequest,
+    tts_client: TTSClient | None,
+) -> MemoirBookAudioResponse:
     text_hash = source_text_hash(text)
     speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
     cached = cached_audio_response(
         draft.metadata_json or {},
-        cache_key=CHAPTER_TTS_CACHE_KEY,
+        cache_key=cache_key,
         text_hash=text_hash,
         voice=req.voice,
         speed_ratio=speed_ratio,
@@ -382,14 +408,13 @@ async def synthesize_chapter_draft_audio(
     try:
         draft.metadata_json = {
             **(draft.metadata_json or {}),
-            CHAPTER_TTS_CACHE_KEY: {
+            cache_key: {
                 **audio_cache_payload(
                     synthesis,
                     voice=req.voice,
                     speed_ratio=speed_ratio,
                 ),
-                "draft_version_id": latest.id,
-                "chapter_id": chapter.id,
+                **cache_metadata,
             },
         }
         db.add(draft)
@@ -440,45 +465,18 @@ async def synthesize_chapter_draft_section_audio(
     if section is None:
         raise HTTPException(status_code=404, detail="小节正文不存在")
     text = f"{section['title']}\n\n{section['content']}".strip()
-    text_hash = source_text_hash(text)
-    speed_ratio = effective_tts_speed_ratio(req.speed_ratio)
     cache_key = f"{CHAPTER_SECTION_TTS_CACHE_KEY_PREFIX}:{section_id}"
-    cached = cached_audio_response(
-        draft.metadata_json or {},
-        cache_key=cache_key,
-        text_hash=text_hash,
-        voice=req.voice,
-        speed_ratio=speed_ratio,
-        force_regenerate=req.force_regenerate,
-    )
-    if cached:
-        return cached
-    synthesis = await synthesize_text_audio(
+    return await _synthesize_cached_draft_audio(
         db,
         user_id=user_id,
+        draft=draft,
         text=text,
-        voice=req.voice,
-        speed_ratio=req.speed_ratio,
+        cache_key=cache_key,
+        cache_metadata={
+            "draft_version_id": latest.id,
+            "chapter_id": chapter.id,
+            "section_id": section_id,
+        },
+        req=req,
         tts_client=tts_client,
     )
-    try:
-        draft.metadata_json = {
-            **(draft.metadata_json or {}),
-            cache_key: {
-                **audio_cache_payload(
-                    synthesis,
-                    voice=req.voice,
-                    speed_ratio=speed_ratio,
-                ),
-                "draft_version_id": latest.id,
-                "chapter_id": chapter.id,
-                "section_id": section_id,
-            },
-        }
-        db.add(draft)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await discard_staged_audio_files(synthesis.staged_audio)
-        raise
-    return audio_response(synthesis)

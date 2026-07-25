@@ -204,7 +204,7 @@ function loadBookPage({
     ...cacheExports,
   });
   mockModule("../services/tts-settings.ts", {
-    readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),
+    readBookTTSRequest: () => ({}),
     ...ttsExports,
   });
 
@@ -974,9 +974,9 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
       },
     },
     ttsExports: {
-      readBookTTSSettings: () => ({
+      readBookTTSRequest: () => ({
         voice: "zh_male_m191_uranus_bigtts",
-        speedRatio: 1.5,
+        speed_ratio: 1.5,
       }),
     },
   });

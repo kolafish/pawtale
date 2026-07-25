@@ -1,3 +1,5 @@
+import type { MemoirBookAudioRequest } from "../domain/voice-chat";
+
 export interface TTSVoiceOption {
   value: string;
   label: string;
@@ -164,4 +166,19 @@ export function readChatTTSSettings(): TTSSettings {
 
 export function readBookTTSSettings(): TTSSettings {
   return readScopedTTSSettings("book");
+}
+
+export function bookTTSRequestFromSettings(
+  settings: TTSSettings,
+): MemoirBookAudioRequest {
+  return {
+    ...(settings.voice ? { voice: settings.voice } : {}),
+    ...(settings.speedRatio === DEFAULT_TTS_SPEED_RATIO
+      ? {}
+      : { speed_ratio: settings.speedRatio }),
+  };
+}
+
+export function readBookTTSRequest(): MemoirBookAudioRequest {
+  return bookTTSRequestFromSettings(readBookTTSSettings());
 }

@@ -1,6 +1,9 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import { trackAuditAction } from "../../services/audit-tracker";
-import { AudioPlaybackController } from "../../services/audio-playback";
+import {
+  AudioPlaybackController,
+  playAudioFileSequence,
+} from "../../services/audio-playback";
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
@@ -27,7 +30,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
-import { readBookTTSSettings } from "../../services/tts-settings";
+import { readBookTTSRequest } from "../../services/tts-settings";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -50,6 +53,20 @@ import {
 export { chapterWorkspaceViewPatch };
 
 const PREPARATION_POLL_INTERVAL_MS = 1500;
+
+type ChapterWorkspaceOperationKind =
+  | ""
+  | "prepare"
+  | "regenerate_sections"
+  | "move_material"
+  | "start_interview"
+  | "confirm_issue"
+  | "save_draft_section"
+  | "confirm_chapter"
+  | "regenerate_draft_section"
+  | "rewrite_chapter";
+
+type ChapterWorkspaceAudioPhase = "idle" | "preparing" | "playing";
 
 type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: (options: { selector: string; duration?: number }) => void;
@@ -88,16 +105,10 @@ interface ChapterWorkspacePageData {
   expandedSectionIds: Record<string, boolean>;
   expandedDraftSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
-  processBusy: boolean;
-  regeneratingSections: boolean;
-  rewritingDraft: boolean;
-  startingIssueId: string;
-  confirmingChapter: boolean;
-  savingDraft: boolean;
-  movingMaterialId: string;
-  regeneratingDraftSectionId: string;
-  ttsBusySectionId: string;
-  playingSectionId: string;
+  operationKind: ChapterWorkspaceOperationKind;
+  operationTargetId: string;
+  audioPhase: ChapterWorkspaceAudioPhase;
+  audioSectionId: string;
   editingSectionId: string;
   editingSectionContent: string;
 }
@@ -136,16 +147,10 @@ definePage<ChapterWorkspacePageData>()({
     expandedSectionIds: {},
     expandedDraftSectionIds: {},
     canConfirmChapter: false,
-    processBusy: false,
-    regeneratingSections: false,
-    rewritingDraft: false,
-    startingIssueId: "",
-    confirmingChapter: false,
-    savingDraft: false,
-    movingMaterialId: "",
-    regeneratingDraftSectionId: "",
-    ttsBusySectionId: "",
-    playingSectionId: "",
+    operationKind: "",
+    operationTargetId: "",
+    audioPhase: "idle",
+    audioSectionId: "",
     editingSectionId: "",
     editingSectionContent: "",
   },
@@ -185,6 +190,38 @@ definePage<ChapterWorkspacePageData>()({
   async onPullDownRefresh() {
     await this.loadPageData(true);
     wx.stopPullDownRefresh();
+  },
+
+  beginOperation(
+    kind: ChapterWorkspaceOperationKind,
+    targetId = "",
+  ): boolean {
+    if (!kind || this.data.operationKind) {
+      return false;
+    }
+    this.stopDraftSectionPlayback();
+    this.setData({
+      operationKind: kind,
+      operationTargetId: targetId,
+      error: "",
+    });
+    return true;
+  },
+
+  finishOperation(
+    kind: ChapterWorkspaceOperationKind,
+    targetId = "",
+  ) {
+    if (
+      this.data.operationKind !== kind
+      || (targetId && this.data.operationTargetId !== targetId)
+    ) {
+      return;
+    }
+    this.setData({
+      operationKind: "",
+      operationTargetId: "",
+    });
   },
 
   hasUnsavedSectionChanges() {
@@ -359,13 +396,7 @@ definePage<ChapterWorkspacePageData>()({
     const workspace = this.data.workspace;
     if (
       !workspace?.sections.length
-      || this.data.regeneratingSections
-      || Boolean(this.data.regeneratingDraftSectionId)
-      || this.data.processBusy
-      || this.data.rewritingDraft
-      || this.data.confirmingChapter
-      || this.data.savingDraft
-      || Boolean(this.data.movingMaterialId)
+      || Boolean(this.data.operationKind)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -385,11 +416,12 @@ definePage<ChapterWorkspacePageData>()({
 
   async performSectionRegeneration() {
     const workspace = this.data.workspace;
-    if (!workspace?.sections.length || this.data.regeneratingSections) {
+    if (
+      !workspace?.sections.length
+      || !this.beginOperation("regenerate_sections")
+    ) {
       return;
     }
-    this.stopDraftSectionPlayback();
-    this.setData({ regeneratingSections: true, error: "" });
     try {
       const result = await regenerateMemoirChapterSections(
         this.data.projectId,
@@ -427,7 +459,7 @@ definePage<ChapterWorkspacePageData>()({
         error: error instanceof Error ? error.message : "小节重新生成失败",
       });
     } finally {
-      this.setData({ regeneratingSections: false });
+      this.finishOperation("regenerate_sections");
     }
   },
 
@@ -435,9 +467,7 @@ definePage<ChapterWorkspacePageData>()({
     const action = this.data.nextAction;
     if (
       action.disabled
-      || this.data.processBusy
-      || Boolean(this.data.startingIssueId)
-      || Boolean(this.data.regeneratingDraftSectionId)
+      || Boolean(this.data.operationKind)
     ) {
       return;
     }
@@ -497,11 +527,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !utteranceId
       || !target
-      || this.data.movingMaterialId
-      || this.data.processBusy
-      || this.data.regeneratingSections
-      || this.data.rewritingDraft
-      || Boolean(this.data.regeneratingDraftSectionId)
+      || Boolean(this.data.operationKind)
     ) {
       return;
     }
@@ -522,10 +548,13 @@ definePage<ChapterWorkspacePageData>()({
     utteranceId: string,
     targetSectionId: string,
   ) {
-    if (!utteranceId || !targetSectionId || this.data.movingMaterialId) {
+    if (
+      !utteranceId
+      || !targetSectionId
+      || !this.beginOperation("move_material", utteranceId)
+    ) {
       return;
     }
-    this.setData({ movingMaterialId: utteranceId, error: "" });
     try {
       await moveMemoirChapterMaterial(
         this.data.projectId,
@@ -544,7 +573,7 @@ definePage<ChapterWorkspacePageData>()({
           : "素材移动失败",
       });
     } finally {
-      this.setData({ movingMaterialId: "" });
+      this.finishOperation("move_material", utteranceId);
     }
   },
 
@@ -554,13 +583,7 @@ definePage<ChapterWorkspacePageData>()({
       !workspace?.draft_content
       || workspace.draft_sections.length > 0
       || this.data.draftRecoveryActionDisabled
-      || this.data.processBusy
-      || this.data.rewritingDraft
-      || Boolean(this.data.regeneratingDraftSectionId)
-      || this.data.confirmingChapter
-      || this.data.savingDraft
-      || Boolean(this.data.movingMaterialId)
-      || Boolean(this.data.startingIssueId)
+      || Boolean(this.data.operationKind)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -579,11 +602,10 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async prepareChapter() {
-    if (this.data.processBusy || this.data.regeneratingDraftSectionId) {
+    if (!this.beginOperation("prepare")) {
       return;
     }
     this.stopPreparationPolling();
-    this.setData({ processBusy: true, error: "" });
     try {
       await prepareMemoirBookChapter(this.data.projectId, this.data.chapterId);
       await this.loadPageData(true);
@@ -594,7 +616,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "本章整理失败" });
     } finally {
-      this.setData({ processBusy: false });
+      this.finishOperation("prepare");
     }
   },
 
@@ -602,6 +624,9 @@ definePage<ChapterWorkspacePageData>()({
     const issue = this.data.workspace?.completion_summary.active_issue;
     if (!issue) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
+      return;
+    }
+    if (this.data.operationKind) {
       return;
     }
     if (issue.status === "in_progress" && issue.active_session_id) {
@@ -612,7 +637,9 @@ definePage<ChapterWorkspacePageData>()({
       wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
       return;
     }
-    this.setData({ startingIssueId: issue.id, error: "" });
+    if (!this.beginOperation("start_interview", issue.id)) {
+      return;
+    }
     try {
       await syncVoiceAuthorizationConsent();
       const detail = await createMemoirVoiceSession({
@@ -645,7 +672,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "AI 访谈创建失败" });
     } finally {
-      this.setData({ startingIssueId: "" });
+      this.finishOperation("start_interview", issue.id);
     }
   },
 
@@ -663,7 +690,11 @@ definePage<ChapterWorkspacePageData>()({
 
   confirmCurrentIssue() {
     const issue = this.data.workspace?.completion_summary.active_issue;
-    if (!issue || !this.data.nextAction.issueId || this.data.processBusy) {
+    if (
+      !issue
+      || !this.data.nextAction.issueId
+      || this.data.operationKind
+    ) {
       return;
     }
     wx.showModal({
@@ -680,10 +711,12 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async applyCurrentIssueConfirmation(issueId: string) {
-    if (!issueId || this.data.processBusy) {
+    if (
+      !issueId
+      || !this.beginOperation("confirm_issue", issueId)
+    ) {
       return;
     }
-    this.setData({ processBusy: true, error: "" });
     try {
       await closeMemoirCompletionIssue(this.data.projectId, issueId, {
         outcome: "confirmed",
@@ -698,7 +731,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "确认失败" });
     } finally {
-      this.setData({ processBusy: false });
+      this.finishOperation("confirm_issue", issueId);
     }
   },
 
@@ -712,10 +745,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (
-      this.data.regeneratingDraftSectionId
-      || this.data.regeneratingSections
-      || this.data.rewritingDraft
-      || this.data.confirmingChapter
+      this.data.operationKind
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -755,8 +785,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !workspace?.draft_version_id
       || !currentSection
-      || this.data.savingDraft
-      || Boolean(this.data.movingMaterialId)
+      || Boolean(this.data.operationKind)
     ) {
       return;
     }
@@ -768,7 +797,9 @@ definePage<ChapterWorkspacePageData>()({
       this.cancelDraftSectionEdit();
       return;
     }
-    this.setData({ savingDraft: true, error: "" });
+    if (!this.beginOperation("save_draft_section", sectionId)) {
+      return;
+    }
     try {
       await reviseMemoirBookChapterDraft(
         this.data.projectId,
@@ -792,20 +823,20 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
     } finally {
-      this.setData({ savingDraft: false });
+      this.finishOperation("save_draft_section", sectionId);
     }
   },
 
   async confirmChapter() {
     if (
       !this.data.canConfirmChapter
-      || this.data.confirmingChapter
-      || Boolean(this.data.regeneratingDraftSectionId)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
     }
-    this.setData({ confirmingChapter: true, error: "" });
+    if (!this.beginOperation("confirm_chapter")) {
+      return;
+    }
     try {
       await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
       await this.loadPageData(true);
@@ -816,7 +847,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
     } finally {
-      this.setData({ confirmingChapter: false });
+      this.finishOperation("confirm_chapter");
     }
   },
 
@@ -837,12 +868,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (
-      this.data.regeneratingDraftSectionId
-      || this.data.regeneratingSections
-      || this.data.rewritingDraft
-      || this.data.processBusy
-      || this.data.confirmingChapter
-      || this.data.savingDraft
+      this.data.operationKind
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -865,15 +891,10 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !workspace?.draft_version_id
       || !sectionId
-      || this.data.regeneratingDraftSectionId
+      || !this.beginOperation("regenerate_draft_section", sectionId)
     ) {
       return;
     }
-    this.stopDraftSectionPlayback();
-    this.setData({
-      regeneratingDraftSectionId: sectionId,
-      error: "",
-    });
     try {
       await regenerateMemoirChapterDraftSection(
         this.data.projectId,
@@ -898,7 +919,7 @@ definePage<ChapterWorkspacePageData>()({
           : "小节正文重新生成失败",
       });
     } finally {
-      this.setData({ regeneratingDraftSectionId: "" });
+      this.finishOperation("regenerate_draft_section", sectionId);
     }
   },
 
@@ -911,57 +932,49 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (
-      this.data.playingSectionId === sectionId
-      || this.data.ttsBusySectionId === sectionId
+      this.data.audioSectionId === sectionId
+      && this.data.audioPhase !== "idle"
     ) {
       this.stopDraftSectionPlayback();
       return;
     }
     if (
-      this.data.ttsBusySectionId
-      || Boolean(this.data.regeneratingDraftSectionId)
-      || this.data.regeneratingSections
-      || this.data.rewritingDraft
-      || this.data.processBusy
+      this.data.audioPhase !== "idle"
+      || Boolean(this.data.operationKind)
     ) {
       return;
     }
     this.stopDraftSectionPlayback();
     const token = this.audioPlayback.nextToken();
     this.playToken = token;
-    this.setData({ ttsBusySectionId: sectionId, error: "" });
-    const settings = readBookTTSSettings();
+    this.setData({
+      audioPhase: "preparing",
+      audioSectionId: sectionId,
+      error: "",
+    });
     try {
       const response = await createMemoirBookChapterDraftSectionTTS(
         this.data.projectId,
         this.data.chapterId,
         sectionId,
-        {
-          ...(settings.voice ? { voice: settings.voice } : {}),
-          ...(settings.speedRatio === 1
-            ? {}
-            : { speed_ratio: settings.speedRatio }),
-        },
+        readBookTTSRequest(),
       );
-      const audioFileIds = response.audio_file_ids || [];
-      if (!audioFileIds.length) {
-        throw new Error("没有可播放的音频");
-      }
       if (token !== this.playToken) {
         return;
       }
       this.setData({
-        ttsBusySectionId: "",
-        playingSectionId: sectionId,
+        audioPhase: "playing",
+        audioSectionId: sectionId,
       });
-      for (const audioFileId of audioFileIds) {
-        if (token !== this.playToken) {
-          return;
-        }
-        await this.audioPlayback.playFile(audioFileId, token, {
-          errorMessage: "小节朗读失败",
-        });
-      }
+      await playAudioFileSequence(response.audio_file_ids || [], {
+        token,
+        isCurrent: (candidate) => candidate === this.playToken,
+        playFile: (audioFileId) => this.audioPlayback.playFile(
+          audioFileId,
+          token,
+          { errorMessage: "小节朗读失败" },
+        ),
+      });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -974,8 +987,8 @@ definePage<ChapterWorkspacePageData>()({
     } finally {
       if (token === this.playToken) {
         this.setData({
-          ttsBusySectionId: "",
-          playingSectionId: "",
+          audioPhase: "idle",
+          audioSectionId: "",
         });
       }
     }
@@ -984,10 +997,10 @@ definePage<ChapterWorkspacePageData>()({
   stopDraftSectionPlayback() {
     this.audioPlayback.stop();
     this.playToken = this.audioPlayback.currentToken();
-    if (this.data.ttsBusySectionId || this.data.playingSectionId) {
+    if (this.data.audioPhase !== "idle" || this.data.audioSectionId) {
       this.setData({
-        ttsBusySectionId: "",
-        playingSectionId: "",
+        audioPhase: "idle",
+        audioSectionId: "",
       });
     }
   },
@@ -997,12 +1010,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !workspace?.draft_needs_rewrite
       || !workspace.can_rewrite_draft
-      || this.data.rewritingDraft
-      || this.data.processBusy
-      || Boolean(this.data.startingIssueId)
-      || this.data.confirmingChapter
-      || this.data.savingDraft
-      || Boolean(this.data.regeneratingDraftSectionId)
+      || Boolean(this.data.operationKind)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -1021,11 +1029,9 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async performChapterRewrite() {
-    if (this.data.rewritingDraft) {
+    if (!this.beginOperation("rewrite_chapter")) {
       return;
     }
-    this.stopDraftSectionPlayback();
-    this.setData({ rewritingDraft: true, error: "" });
     try {
       await rewriteMemoirBookChapter(
         this.data.projectId,
@@ -1041,7 +1047,7 @@ definePage<ChapterWorkspacePageData>()({
         error: error instanceof Error ? error.message : "本章重新生成失败",
       });
     } finally {
-      this.setData({ rewritingDraft: false });
+      this.finishOperation("rewrite_chapter");
     }
   },
 

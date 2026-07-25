@@ -46,7 +46,7 @@ import {
   type PagePickerEvent,
   type PageTextInputEvent,
 } from "../../services/page-input";
-import { readBookTTSSettings } from "../../services/tts-settings";
+import { readBookTTSRequest } from "../../services/tts-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -1049,11 +1049,7 @@ definePage<BookPageData>()({
   },
 
   async requestBookAudio(target: string) {
-    const settings = readBookTTSSettings();
-    const request = {
-      ...(settings.voice ? { voice: settings.voice } : {}),
-      ...(settings.speedRatio === 1 ? {} : { speed_ratio: settings.speedRatio }),
-    };
+    const request = readBookTTSRequest();
     if (target === "outline") {
       return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
     }

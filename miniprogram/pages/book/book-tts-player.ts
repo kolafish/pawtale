@@ -1,7 +1,10 @@
 import type {
   MemoirBookAudioResponse,
 } from "../../domain/voice-chat";
-import type { AudioPlaybackController } from "../../services/audio-playback";
+import {
+  playAudioFileSequence,
+  type AudioPlaybackController,
+} from "../../services/audio-playback";
 import {
   VoiceAssistantTTSProgressRuntime,
   type VoiceAssistantTTSProgressPatch,
@@ -44,9 +47,6 @@ export async function playBookAudioFiles(
   activeText: string,
 ): Promise<void> {
   const audioFileIds = response.audio_file_ids || [];
-  if (!audioFileIds.length) {
-    throw new Error("没有可播放的音频");
-  }
   const durationSeconds = positiveFiniteSeconds(response.duration_seconds);
   const alignment = Array.isArray(response.alignment) ? response.alignment : [];
   host.setData({
@@ -60,21 +60,24 @@ export async function playBookAudioFiles(
   updateBookTTSProgress(host, 0, durationSeconds);
   let elapsedBeforeSeconds = 0;
   try {
-    for (let index = 0; index < audioFileIds.length; index += 1) {
-      if (token !== host.playToken) {
-        return;
-      }
-      const fallbackDurationSeconds = positiveFiniteSeconds(response.audio_file_durations_seconds?.[index]);
-      const playedSeconds = await playBookAudioFile(
-        host,
-        audioFileIds[index],
-        token,
-        elapsedBeforeSeconds,
-        fallbackDurationSeconds,
-      );
-      elapsedBeforeSeconds += fallbackDurationSeconds || playedSeconds;
-    }
-    if (token === host.playToken) {
+    const completed = await playAudioFileSequence(audioFileIds, {
+      token,
+      isCurrent: (candidate) => candidate === host.playToken,
+      playFile: async (audioFileId, index) => {
+        const fallbackDurationSeconds = positiveFiniteSeconds(
+          response.audio_file_durations_seconds?.[index],
+        );
+        const playedSeconds = await playBookAudioFile(
+          host,
+          audioFileId,
+          token,
+          elapsedBeforeSeconds,
+          fallbackDurationSeconds,
+        );
+        elapsedBeforeSeconds += fallbackDurationSeconds || playedSeconds;
+      },
+    });
+    if (completed) {
       updateBookTTSProgress(host, durationSeconds || elapsedBeforeSeconds, durationSeconds || elapsedBeforeSeconds);
     }
   } finally {

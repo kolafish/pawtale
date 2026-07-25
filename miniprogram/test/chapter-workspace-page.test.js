@@ -163,6 +163,12 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /bindtap="toggleDraftSection"/);
   assert.match(template, /bindtap="regenerateDraftSection"/);
   assert.match(template, /bindtap="playDraftSection"/);
+  assert.match(template, /operationKind !== ''/);
+  assert.match(template, /audioPhase === "preparing"/);
+  assert.doesNotMatch(
+    template,
+    /processBusy|regeneratingSections|regeneratingDraftSectionId|ttsBusySectionId/,
+  );
 });
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
@@ -215,6 +221,59 @@ test("chapter workspace keeps draft bodies collapsed until the selected section 
     currentTarget: { dataset: { id: "section-1" } },
   });
   assert.equal(context.data.draftSectionViews[0].expanded, false);
+  delete global.wx;
+});
+
+test("chapter workspace serializes mutations through one operation state", () => {
+  installWx();
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+
+  assert.equal(
+    page.beginOperation.call(context, "regenerate_sections"),
+    true,
+  );
+  assert.equal(context.data.operationKind, "regenerate_sections");
+  assert.equal(
+    page.beginOperation.call(context, "rewrite_chapter"),
+    false,
+  );
+  page.finishOperation.call(context, "rewrite_chapter");
+  assert.equal(context.data.operationKind, "regenerate_sections");
+  page.finishOperation.call(context, "regenerate_sections");
+  assert.equal(context.data.operationKind, "");
+  assert.equal(context.data.operationTargetId, "");
+  delete global.wx;
+});
+
+test("chapter workspace blocks row actions while another operation is active", async () => {
+  const { modals } = installWx();
+  const ttsRequests = [];
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftSectionTTS: async (...args) => {
+        ttsRequests.push(args);
+        return { audio_file_ids: ["audio-1"] };
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  context.setData({ operationKind: "prepare" });
+  const sectionEvent = {
+    currentTarget: { dataset: { id: "section-1" } },
+  };
+
+  page.startDraftSectionEdit.call(context, sectionEvent);
+  page.regenerateDraftSection.call(context, sectionEvent);
+  await page.playDraftSection.call(context, sectionEvent);
+
+  assert.equal(context.data.editingSectionId, "");
+  assert.equal(modals.length, 0);
+  assert.deepEqual(ttsRequests, []);
   delete global.wx;
 });
 
@@ -305,7 +364,7 @@ test("chapter workspace regenerates the current section structure after confirma
     [{ id: "section-1", version: 1 }],
   ]]);
   assert.equal(toasts.at(-1).title, "已整理为2个小节");
-  assert.equal(context.data.regeneratingSections, false);
+  assert.equal(context.data.operationKind, "");
   delete global.wx;
 });
 
@@ -395,7 +454,7 @@ test("chapter workspace exposes pending materials and moves one after confirmati
     "section-1",
   ]]);
   assert.equal(toasts.at(-1).title, "已选择小节");
-  assert.equal(context.data.movingMaterialId, "");
+  assert.equal(context.data.operationKind, "");
   delete global.wx;
 });
 
@@ -562,7 +621,7 @@ test("chapter workspace regenerates one draft section with the current version",
   assert.match(modals.at(-1).content, /其他小节保持不变/);
   assert.equal(toasts.at(-1).title, "这一小节已更新");
   assert.equal(context.data.draftSectionViews[0].expanded, true);
-  assert.equal(context.data.regeneratingDraftSectionId, "");
+  assert.equal(context.data.operationKind, "");
   delete global.wx;
 });
 
@@ -614,8 +673,8 @@ test("chapter workspace reads one draft section with saved book voice settings",
     },
   ]]);
   assert.deepEqual(played, [["audio-1", 2], ["audio-2", 2]]);
-  assert.equal(context.data.playingSectionId, "");
-  assert.equal(context.data.ttsBusySectionId, "");
+  assert.equal(context.data.audioPhase, "idle");
+  assert.equal(context.data.audioSectionId, "");
   delete global.wx;
 });
 
@@ -861,11 +920,11 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   );
   assert.match(context.data.rewriteNoticeDetail, /上方当前 4 个小节/);
   assert.match(context.data.rewriteNoticeDetail, /不会重新划分小节/);
-  context.data.processBusy = true;
+  context.data.operationKind = "prepare";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(calls, []);
-  context.data.processBusy = false;
+  context.data.operationKind = "";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
 
