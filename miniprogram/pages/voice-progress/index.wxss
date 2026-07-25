@@ -1,7 +1,7 @@
 .progress-page {
   min-height: 100vh;
   padding: 28rpx 34rpx 88rpx;
-  background: #fcf7ed;
+  background: var(--ui-page-background);
 }
 
 .refresh-button,
@@ -23,10 +23,10 @@
   width: 128rpx;
   height: var(--ui-hit-size);
   border-radius: 18rpx;
-  background: #ffffff;
-  color: #a64b3e;
+  background: var(--ui-surface);
+  color: var(--ui-accent);
   font-size: 25rpx;
-  box-shadow: 0 8rpx 22rpx rgba(64, 43, 24, 0.08);
+  box-shadow: var(--ui-card-shadow);
 }
 
 .summary-grid {
@@ -39,10 +39,10 @@
 .summary-item,
 .section,
 .session-card {
-  border: 2rpx solid #e8d8c3;
+  border: 2rpx solid var(--ui-border);
   border-radius: 24rpx;
-  background: #ffffff;
-  box-shadow: 0 16rpx 40rpx rgba(64, 43, 24, 0.08);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow-raised);
 }
 
 .summary-item {
@@ -52,7 +52,7 @@
 
 .summary-value {
   display: block;
-  color: #a64b3e;
+  color: var(--ui-text-primary);
   font-size: 44rpx;
   font-weight: 900;
   line-height: 1;
@@ -61,7 +61,7 @@
 .summary-label {
   display: block;
   margin-top: 18rpx;
-  color: #7b6f68;
+  color: var(--ui-text-secondary);
   font-size: 26rpx;
 }
 
@@ -75,13 +75,13 @@
   align-items: center;
   justify-content: space-between;
   gap: 16rpx;
-  color: #2b1713;
+  color: var(--ui-text-primary);
   font-size: 32rpx;
   font-weight: 800;
 }
 
 .section-meta {
-  color: #a64b3e;
+  color: var(--ui-value-text);
   font-size: 26rpx;
 }
 
@@ -89,12 +89,12 @@
   margin-top: 20rpx;
   padding: 22rpx;
   border-radius: 18rpx;
-  background: #fff9f3;
+  background: var(--ui-accent-surface-subtle);
 }
 
 .module-title {
   display: block;
-  color: #7b4a40;
+  color: var(--ui-section-title);
   font-size: 30rpx;
   font-weight: 800;
 }
@@ -104,7 +104,7 @@
 .last-message,
 .empty-state {
   display: block;
-  color: #7b6f68;
+  color: var(--ui-text-secondary);
   font-size: 25rpx;
   line-height: 1.45;
 }
@@ -128,7 +128,7 @@
 
 .session-title {
   display: block;
-  color: #2b1713;
+  color: var(--ui-text-primary);
   font-size: 30rpx;
   font-weight: 800;
   line-height: 1.35;
@@ -142,8 +142,8 @@
   width: 120rpx;
   height: 80rpx;
   border-radius: 18rpx;
-  background: #fff3ef;
-  color: #a64b3e;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent);
   font-size: 25rpx;
   flex: 0 0 auto;
 }
@@ -162,8 +162,8 @@
 .session-stats text {
   padding: 8rpx 14rpx;
   border-radius: 999rpx;
-  background: #fff9f3;
-  color: #a64b3e;
+  background: var(--ui-accent-surface-subtle);
+  color: var(--ui-value-text);
   font-size: 24rpx;
   font-weight: 800;
 }
@@ -180,8 +180,8 @@
   margin-top: 24rpx;
   padding: 22rpx 26rpx;
   border-radius: 18rpx;
-  background: #fff1f3;
-  color: #b84a5a;
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
   font-size: 26rpx;
   line-height: 1.45;
 }

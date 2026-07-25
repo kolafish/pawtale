@@ -13,7 +13,7 @@
         </view>
         <switch
           checked="{{autoBargeInEnabled}}"
-          color="#a64b3e"
+          color="#a84f43"
           aria-label="自动检测我说话"
           bindchange="changeAutoBargeIn"
         />

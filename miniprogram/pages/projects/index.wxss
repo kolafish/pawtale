@@ -1,15 +1,15 @@
 .projects-page {
   min-height: 100vh;
   padding: 28rpx 36rpx 120rpx;
-  background: #fcf7ed;
+  background: var(--ui-page-background);
 }
 
 .error {
   margin-bottom: 24rpx;
   padding: 22rpx 26rpx;
   border-radius: 18rpx;
-  background: #fff1f3;
-  color: #b84a5a;
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
   font-size: 28rpx;
   line-height: 1.45;
 }
@@ -39,8 +39,8 @@
 .primary-button {
   width: 100%;
   height: 96rpx;
-  background: #a64b3e;
-  color: #ffffff;
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
   font-size: 32rpx;
 }
 
@@ -48,15 +48,15 @@
 .empty-panel {
   margin-top: 24rpx;
   padding: 30rpx;
-  border: 2rpx solid #e8d8c3;
+  border: 2rpx solid var(--ui-border);
   border-radius: 28rpx;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10rpx 28rpx rgba(64, 43, 24, 0.06);
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow);
 }
 
 .project-card.active {
-  border-color: #a64b3e;
-  background: #fff9f3;
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-surface-subtle);
 }
 
 .project-card {
@@ -67,8 +67,8 @@
 
 .project-card-hover {
   transform: scale(0.98);
-  border-color: #d8c0a6;
-  background: #fff9f3;
+  border-color: var(--ui-accent-border);
+  background: var(--ui-accent-surface-subtle);
 }
 
 .project-main {
@@ -84,7 +84,7 @@
 .project-title {
   flex: 1;
   min-width: 0;
-  color: #2b1713;
+  color: var(--ui-text-primary);
   font-size: 34rpx;
   font-weight: 800;
   line-height: 1.35;
@@ -94,8 +94,8 @@
   flex: 0 0 auto;
   padding: 8rpx 16rpx;
   border-radius: 999rpx;
-  background: #fff3ef;
-  color: #a64b3e;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent);
   font-size: 22rpx;
   font-weight: 700;
 }
@@ -103,7 +103,7 @@
 .project-meta {
   display: block;
   margin-top: 12rpx;
-  color: #7b6f68;
+  color: var(--ui-text-secondary);
   font-size: 26rpx;
   line-height: 1.35;
 }
@@ -111,7 +111,7 @@
 .project-hint {
   display: block;
   margin-top: 14rpx;
-  color: #a64b3e;
+  color: var(--ui-accent);
   font-size: 24rpx;
   font-weight: 600;
   line-height: 1.4;
@@ -133,13 +133,13 @@
 }
 
 .ghost-button {
-  background: #fff9f3;
-  color: #a64b3e;
+  background: var(--ui-accent-surface-subtle);
+  color: var(--ui-accent);
 }
 
 .more-button {
-  background: #f5eee7;
-  color: #5c4b43;
+  background: var(--ui-surface-subtle);
+  color: var(--ui-value-text);
 }
 
 .project-action-hover {
@@ -148,7 +148,7 @@
 }
 
 .empty-panel {
-  color: #7b6f68;
+  color: var(--ui-text-secondary);
   font-size: 30rpx;
   text-align: center;
 }

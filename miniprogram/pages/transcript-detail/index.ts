@@ -345,7 +345,7 @@ function confirmDelete(item: TranscriptDetailItemView): Promise<boolean> {
       title: "删除讲述记录",
       content: `确定删除“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”？删除后，这条原始讲述会从素材库移除；如果已放入章节，相关章节会标记为需重新确认，已生成正文不会自动改写。`,
       confirmText: "删除",
-      confirmColor: "#b84a5a",
+      confirmColor: "#b64545",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });
@@ -359,7 +359,7 @@ function confirmConvertQuestionToAnswer(item: TranscriptDetailItemView): Promise
       title: "改成回答？",
       content: `“${preview.slice(0, 24)}${preview.length > 24 ? "..." : ""}”现在被系统当作采访者提问。改成回答后，会作为讲述素材保留，之后可以放入章节；原音频和识别文字不会丢。`,
       confirmText: "改成回答",
-      confirmColor: "#2f6f4e",
+      confirmColor: "#5a7454",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });
@@ -372,7 +372,7 @@ function confirmDiscardEdit(): Promise<boolean> {
       title: "放弃这次修改？",
       content: "尚未保存的文字修改会丢失，原来的成书文字不会变化。",
       confirmText: "放弃修改",
-      confirmColor: "#b84a5a",
+      confirmColor: "#b64545",
       cancelText: "继续编辑",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
@@ -392,7 +392,7 @@ function confirmOfflineAsr(item: TranscriptDetailItemView): Promise<boolean> {
       title: item.offline_asr.status === "succeeded" ? "再次识别这条素材？" : "离线加强识别？",
       content: `将使用火山和 StepFun 重新识别原音频，再由 AI 校对。${dialectLine}`,
       confirmText: "开始识别",
-      confirmColor: "#a64b3e",
+      confirmColor: "#a84f43",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });
