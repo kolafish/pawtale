@@ -67,7 +67,7 @@ function confirmDeleteProject(project: ProjectItem): Promise<boolean> {
       title: "删除回忆录",
       content: `确定删除「${project.title}」吗？${activeHint}删除后不可恢复。`,
       confirmText: "删除",
-      confirmColor: "#b84a5a",
+      confirmColor: "#b64545",
       success: (result) => resolve(Boolean(result.confirm)),
       fail: () => resolve(false),
     });

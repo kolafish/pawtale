@@ -465,7 +465,7 @@ definePage<ImageAssetsData>()({
         title: "删除图片素材",
         content: "删除后会从图片素材库移除；已经生成的历史书稿不会自动删除图片说明，当前最新版会移出这张图。",
         confirmText: "删除",
-        confirmColor: "#b84a5a",
+        confirmColor: "#b64545",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });

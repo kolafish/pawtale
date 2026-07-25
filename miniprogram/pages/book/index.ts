@@ -840,7 +840,7 @@ definePage<BookPageData>()({
         title: "合并章节",
         content: `把「${sourceChapter.title}」合并到「${targetChapter.title}」，本章素材会保留在合并后的章节中。`,
         confirmText: "合并",
-        confirmColor: "#a64b3e",
+        confirmColor: "#a84f43",
         success: (result) => resolve(Boolean(result.confirm)),
         fail: () => resolve(false),
       });

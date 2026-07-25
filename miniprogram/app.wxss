@@ -1,23 +1,40 @@
 page {
-  --ui-page-background: #fcf7ed;
-  --ui-surface: #ffffff;
-  --ui-surface-warm: #fffdf9;
-  --ui-text-primary: #2b1713;
-  --ui-text-secondary: #6f625b;
-  --ui-accent: #a64b3e;
-  --ui-accent-strong: #8f3e35;
-  --ui-danger-surface: #fff1f3;
-  --ui-danger-text: #a83f50;
-  --ui-success-surface: #eef2e8;
-  --ui-success-text: #5f6f4f;
-  --ui-card-radius: 24rpx;
-  --ui-control-radius: 22rpx;
-  --ui-card-shadow: 0 12rpx 32rpx rgba(64, 43, 24, 0.07);
-  --ui-card-shadow-raised: 0 18rpx 42rpx rgba(63, 45, 35, 0.09);
+  --ui-page-background: #f7f3ec;
+  --ui-surface: #fffdfc;
+  --ui-surface-subtle: #f4f0eb;
+  --ui-text-primary: #2e2724;
+  --ui-text-secondary: #6f6864;
+  --ui-text-muted: #8a827d;
+  --ui-on-accent: #ffffff;
+  --ui-section-title: #77473f;
+  --ui-value-text: #5d514d;
+  --ui-accent: #a84f43;
+  --ui-accent-strong: #8f4037;
+  --ui-accent-surface: #f6e9e6;
+  --ui-accent-surface-subtle: #fbf4f2;
+  --ui-accent-border: #dfc0ba;
+  --ui-border: #e9e2da;
+  --ui-divider: #ece6df;
+  --ui-switch-off: #d8d6d2;
+  --ui-danger-surface: #fff1f1;
+  --ui-danger-text: #b64545;
+  --ui-success-surface: #edf3ea;
+  --ui-success-text: #5a7454;
+  --ui-warning-surface: #fff5de;
+  --ui-warning-text: #7d5c25;
+  --ui-card-shadow:
+    0 0 0 1rpx rgba(0, 0, 0, 0.04),
+    0 2rpx 6rpx rgba(0, 0, 0, 0.03),
+    0 12rpx 28rpx rgba(0, 0, 0, 0.04);
+  --ui-card-shadow-raised:
+    0 0 0 1rpx rgba(0, 0, 0, 0.05),
+    0 4rpx 10rpx rgba(0, 0, 0, 0.04),
+    0 18rpx 42rpx rgba(0, 0, 0, 0.06);
+  --ui-control-shadow: 0 0 0 1rpx rgba(0, 0, 0, 0.06);
   --ui-hit-size: 88rpx;
   min-height: 100vh;
   background: var(--ui-page-background);
-  color: #3a2a25;
+  color: var(--ui-text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
