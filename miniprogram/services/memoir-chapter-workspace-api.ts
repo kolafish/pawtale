@@ -52,25 +52,28 @@ export function regenerateMemoirChapterSections(
   );
 }
 
-export function regenerateMemoirChapterDraftSection(
+export function reviseMemoirChapterDraftSectionWithAI(
   projectId: string,
   chapterId: string,
   sectionId: string,
   expectedVersionId: string,
+  instructionText: string,
 ): Promise<MemoirChapterWorkspace> {
   return memoirAIRequest<
     MemoirChapterWorkspace,
     {
       expected_version_id: string;
+      instruction_text: string;
       ai_model: null;
     }
   >(
     memoirNarrativeProjectPath(
       projectId,
-      `/chapters/${encodeURIComponent(chapterId)}/draft-sections/${encodeURIComponent(sectionId)}/regenerate`,
+      `/chapters/${encodeURIComponent(chapterId)}/draft-sections/${encodeURIComponent(sectionId)}/ai-revise`,
     ),
     {
       expected_version_id: expectedVersionId,
+      instruction_text: instructionText.trim(),
       ai_model: null,
     },
   );

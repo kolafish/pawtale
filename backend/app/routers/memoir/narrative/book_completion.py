@@ -7,7 +7,7 @@ from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
     MemoirChapterAIRequest,
-    MemoirChapterDraftSectionRegenerateRequest,
+    MemoirChapterDraftSectionAIRevisionRequest,
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir.narrative import book_completion
@@ -130,14 +130,14 @@ async def rewrite_memoir_book_completion_chapter(
 
 
 @router.post(
-    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/regenerate",
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/ai-revise",
     response_model=MemoirChapterWorkspaceResponse,
 )
-async def regenerate_memoir_chapter_draft_section(
+async def revise_memoir_chapter_draft_section_with_ai(
     project_id: str,
     chapter_id: str,
     section_id: str,
-    req: MemoirChapterDraftSectionRegenerateRequest,
+    req: MemoirChapterDraftSectionAIRevisionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -150,12 +150,13 @@ async def regenerate_memoir_chapter_draft_section(
     selected_ai_model = requested_ai_model or project_ai_model(project)
     remember_project_ai_model(project, requested_ai_model)
     try:
-        workspace = await book_completion.regenerate_chapter_section(
+        workspace = await book_completion.revise_chapter_section_with_ai(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
             section_id=section_id,
             expected_version_id=req.expected_version_id,
+            instruction_text=req.instruction_text,
             user_id=current_user.id,
             ai_model=selected_ai_model,
         )

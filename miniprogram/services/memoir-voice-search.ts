@@ -60,7 +60,7 @@ function bindRecorderEvents(manager: WechatMiniprogram.RecorderManager): void {
       return;
     }
     if (!result.tempFilePath) {
-      pending.reject(new Error("没有生成可识别的搜索语音"));
+      pending.reject(new Error("没有生成可识别的语音"));
       return;
     }
     pending.resolve({ ...result, noVoiceAutoStopped: pending.noVoiceAutoStopped });
@@ -85,7 +85,7 @@ function recordVoiceSearchAudio(
   > = {},
 ): Promise<WechatMiniprogram.RecorderManagerStopCallbackResult & { noVoiceAutoStopped?: boolean }> {
   if (pendingRecording) {
-    return Promise.reject(new Error("已有语音搜索正在录音"));
+    return Promise.reject(new Error("已有语音输入正在录音"));
   }
   const manager = getRecorderManager();
   return new Promise((resolve, reject) => {
@@ -128,9 +128,9 @@ function readFileAsBase64(filePath: string): Promise<string> {
           resolve(result.data);
           return;
         }
-        reject(new Error("搜索语音读取失败"));
+        reject(new Error("语音读取失败"));
       },
-      fail: (error) => reject(new Error(error.errMsg || "搜索语音读取失败")),
+      fail: (error) => reject(new Error(error.errMsg || "语音读取失败")),
     });
   });
 }
@@ -205,7 +205,7 @@ export async function recordMemoirVoiceSearchQuery(
     throw new Error(
       wasNoVoice
         ? options.noVoiceTranscriptMessage || options.emptyTranscriptMessage || "没有听到声音，请再说一次"
-        : options.emptyTranscriptMessage || "没有识别到搜索内容，请换个说法再试",
+        : options.emptyTranscriptMessage || "没有识别到语音内容，请换个说法再试",
     );
   }
   return transcript;

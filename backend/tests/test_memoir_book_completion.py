@@ -28,6 +28,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
+    MemoirChapterDraftSectionAIRevisionRequest,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
 )
@@ -63,6 +64,7 @@ class LayeredBookAI:
         self.section_issue = section_issue
         self.chapter_manual_issue = chapter_manual_issue
         self.book_issue = book_issue
+        self.system_prompts: list[str] = []
         self.prompts: list[str] = []
 
     async def _call_llm(
@@ -74,6 +76,7 @@ class LayeredBookAI:
         timeout=60.0,
         return_raw=False,
     ):
+        self.system_prompts.append(system_prompt)
         self.prompts.append(user_prompt)
         material_ids = _prompt_ids(user_prompt, "material_id")
         section_ids = _prompt_ids(user_prompt, "section_id")
@@ -167,6 +170,26 @@ def test_section_revision_keeps_whole_chapter_size_limit():
                 }
                 for index in range(3)
             ],
+        )
+
+
+def test_section_ai_revision_normalizes_required_instruction():
+    assert MemoirChapterDraftSectionAIRevisionRequest(
+        expected_version_id=" version-1 ",
+        instruction_text=" 写得更平实一些 ",
+    ).model_dump() == {
+        "ai_model": None,
+        "expected_version_id": "version-1",
+        "instruction_text": "写得更平实一些",
+    }
+    with pytest.raises(ValueError, match="instruction_text 不能为空"):
+        MemoirChapterDraftSectionAIRevisionRequest(
+            expected_version_id="version-1",
+            instruction_text="   ",
+        )
+    with pytest.raises(ValueError):
+        MemoirChapterDraftSectionAIRevisionRequest(
+            expected_version_id="version-1",
         )
 
 
@@ -616,7 +639,7 @@ async def test_rewrite_directly_generates_all_current_sections_without_digest(
     assert requested_models == ["claude-opus-4-8"]
 
 
-async def test_regenerate_one_draft_section_preserves_other_section_content(
+async def test_ai_revision_of_one_draft_section_preserves_other_content(
     client,
     test_db,
     monkeypatch,
@@ -659,17 +682,18 @@ async def test_regenerate_one_draft_section_preserves_other_section_content(
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
-    regenerated = await client.post(
+    revised = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/"
-        f"draft-sections/{target_section.id}/regenerate",
+        f"draft-sections/{target_section.id}/ai-revise",
         json={
             "expected_version_id": version.id,
             "ai_model": "claude-opus-4-8",
+            "instruction_text": "保留比赛结果，把回想写得更克制一些。",
         },
     )
 
-    assert regenerated.status_code == 200, regenerated.text
-    body = regenerated.json()
+    assert revised.status_code == 200, revised.text
+    body = revised.json()
     assert body["draft_version"] == 2
     assert body["draft_status"] == MemoirBookChapterDraftStatus.DRAFT.value
     assert body["draft_sections"][0]["content"] == (
@@ -684,15 +708,37 @@ async def test_regenerate_one_draft_section_preserves_other_section_content(
     assert added_source["utterance_id"] in fake.prompts[0]
     assert "学校里的比赛1" in fake.prompts[0]
     assert "比赛后的回想" in fake.prompts[0]
+    assert "当前小节正文：" in fake.prompts[0]
+    assert "这是已经存在的完整章节正文。" in fake.prompts[0]
+    assert "保留比赛结果，把回想写得更克制一些。" in fake.prompts[0]
+    assert "用户明确给出的事实更正" in fake.system_prompts[0]
     assert requested_models == ["claude-opus-4-8"]
+    latest = await test_db.scalar(
+        select(MemoirBookChapterDraftVersion)
+        .where(MemoirBookChapterDraftVersion.draft_id == version.draft_id)
+        .order_by(MemoirBookChapterDraftVersion.version.desc())
+    )
+    assert latest is not None
+    assert latest.prompt_snapshot.endswith(":section_ai_revision")
+    assert latest.feedback == (
+        "AI 按要求修改小节《比赛后的回想》："
+        "保留比赛结果，把回想写得更克制一些。"
+    )
+    draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
+    assert draft is not None
+    assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"
+    assert draft.metadata_json["last_resolved_ai_model"] == "test-layered-book"
 
     stale = await client.post(
         f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/"
-        f"draft-sections/{target_section.id}/regenerate",
-        json={"expected_version_id": version.id},
+        f"draft-sections/{target_section.id}/ai-revise",
+        json={
+            "expected_version_id": version.id,
+            "instruction_text": "把结尾改得更简洁。",
+        },
     )
     assert stale.status_code == 409
-    assert stale.json()["detail"] == "正文已更新，请刷新后再重新生成"
+    assert stale.json()["detail"] == "正文已更新，请刷新后再修改"
     assert len(fake.prompts) == 1
 
 

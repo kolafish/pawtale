@@ -209,13 +209,14 @@ async def rewrite_chapter(
     )
 
 
-async def regenerate_chapter_section(
+async def revise_chapter_section_with_ai(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
     section_id: str,
     expected_version_id: str,
+    instruction_text: str,
     user_id: str,
     ai_model: str | None = None,
 ) -> MemoirChapterWorkspaceResponse:
@@ -237,12 +238,13 @@ async def regenerate_chapter_section(
         else []
     )
     await db.commit()
-    await chapter_generation.regenerate_and_save_chapter_draft_section(
+    await chapter_generation.revise_and_save_chapter_draft_section_with_ai(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
         section_id=section_id,
         expected_version_id=expected_version_id,
+        instruction_text=instruction_text,
         ai_model=ai_model,
         editorial_guidance=editorial_guidance,
     )
