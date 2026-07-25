@@ -614,6 +614,86 @@ async def test_rewrite_directly_generates_all_current_sections_without_digest(
     assert requested_models == ["claude-opus-4-8"]
 
 
+async def test_regenerate_one_draft_section_preserves_other_section_content(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, sources = await _book(client, test_db)
+    chapter = chapters[0]
+    added_source = await create_test_voice_transcript(
+        client,
+        test_db,
+        "比赛结束后，我一个人在操场边想了很久。",
+        project_id=project_id,
+    )
+    target_section = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        title="比赛后的回想",
+        section_type="viewpoint_reflection",
+        sort_order=1,
+    )
+    test_db.add(target_section)
+    await test_db.flush()
+    test_db.add(
+        MemoirSectionMaterial(
+            project_id=project_id,
+            section_id=target_section.id,
+            utterance_id=added_source["utterance_id"],
+            transcript_version_id=added_source["transcript_version_id"],
+            sort_order=0,
+            assignment_reason="single_section_regeneration_regression",
+        )
+    )
+    await test_db.commit()
+    _, version = await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    fake = LayeredBookAI()
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
+
+    regenerated = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/"
+        f"draft-sections/{target_section.id}/regenerate",
+        json={
+            "expected_version_id": version.id,
+            "ai_model": "claude-opus-4-8",
+        },
+    )
+
+    assert regenerated.status_code == 200, regenerated.text
+    body = regenerated.json()
+    assert body["draft_version"] == 2
+    assert body["draft_status"] == MemoirBookChapterDraftStatus.DRAFT.value
+    assert body["draft_sections"][0]["content"] == (
+        "这是已经存在的完整章节正文。"
+    )
+    assert body["draft_sections"][1]["section_id"] == target_section.id
+    assert body["draft_sections"][1]["content"].startswith(
+        "那年，我参加了学校比赛"
+    )
+    assert len(fake.prompts) == 1
+    assert sources[0]["utterance_id"] not in fake.prompts[0]
+    assert added_source["utterance_id"] in fake.prompts[0]
+    assert "学校里的比赛1" in fake.prompts[0]
+    assert "比赛后的回想" in fake.prompts[0]
+    assert requested_models == ["claude-opus-4-8"]
+
+    stale = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/"
+        f"draft-sections/{target_section.id}/regenerate",
+        json={"expected_version_id": version.id},
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"] == "正文已更新，请刷新后再重新生成"
+    assert len(fake.prompts) == 1
+
+
 async def test_book_overview_counts_all_unfinished_chapter_states(
     client,
     test_db,

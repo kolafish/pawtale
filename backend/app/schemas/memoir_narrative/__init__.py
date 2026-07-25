@@ -4,6 +4,7 @@ from .book_completion import (
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
     MemoirChapterAIRequest,
+    MemoirChapterDraftSectionRegenerateRequest,
     MemoirChapterPreparationJobResponse,
     MemoirChapterWorkspaceResponse,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "MemoirChapterCompletionNextAction",
     "MemoirChapterCompletionSummary",
     "MemoirChapterAIRequest",
+    "MemoirChapterDraftSectionRegenerateRequest",
     "MemoirChapterPreparationJobResponse",
     "MemoirChapterWorkspaceResponse",
 ]

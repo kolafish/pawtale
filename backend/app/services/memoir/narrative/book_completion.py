@@ -209,6 +209,50 @@ async def rewrite_chapter(
     )
 
 
+async def regenerate_chapter_section(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    expected_version_id: str,
+    user_id: str,
+    ai_model: str | None = None,
+) -> MemoirChapterWorkspaceResponse:
+    await _ensure_sections(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        user_id=user_id,
+    )
+    digest = await chapter_digests.get_current_chapter_digest(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    editorial_guidance = (
+        list(digest.digest_json.get("structure_guidance", []))
+        if digest is not None
+        and digest.status == MemoirSemanticCacheStatus.READY.value
+        else []
+    )
+    await db.commit()
+    await chapter_generation.regenerate_and_save_chapter_draft_section(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        section_id=section_id,
+        expected_version_id=expected_version_id,
+        ai_model=ai_model,
+        editorial_guidance=editorial_guidance,
+    )
+    return await completion_read_model.chapter_workspace(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+
+
 async def get_book_completion_overview(
     db: AsyncSession,
     *,

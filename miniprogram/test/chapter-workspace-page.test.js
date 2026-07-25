@@ -88,6 +88,7 @@ function loadWorkspacePage({
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
+    regenerateMemoirChapterDraftSection: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
     moveMemoirChapterMaterial: async () => {},
     rewriteMemoirBookChapter: async () => {},
@@ -95,6 +96,9 @@ function loadWorkspacePage({
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
     confirmMemoirBookChapterDraft: async () => ({}),
+    createMemoirBookChapterDraftSectionTTS: async () => ({
+      audio_file_ids: [],
+    }),
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
@@ -113,6 +117,14 @@ function installWx() {
   const modals = [];
   const navigationTitles = [];
   global.wx = {
+    getStorageSync(key) {
+      if (key === "pawtale_memoir_tts_settings") {
+        return {
+          book: { voice: "zh_female_xiaohe_uranus_bigtts", speedRatio: 1.5 },
+        };
+      }
+      return "";
+    },
     navigateTo(options) { navigations.push(options.url); },
     navigateBack() {},
     setNavigationBarTitle(options) { navigationTitles.push(options.title); },
@@ -141,6 +153,10 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /<view\s+class="rewrite-action/);
   assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
+  assert.match(template, /wx:for="{{draftSectionViews}}"/);
+  assert.match(template, /bindtap="toggleDraftSection"/);
+  assert.match(template, /bindtap="regenerateDraftSection"/);
+  assert.match(template, /bindtap="playDraftSection"/);
 });
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
@@ -161,6 +177,8 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(loadCount, 1);
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.workspace.draft_sections[0].title, "离家前的准备");
+  assert.equal(context.data.draftSectionViews[0].expanded, false);
+  assert.equal(context.data.draftSectionViews[0].metaText, "1 条讲述整理 · 14 字");
   assert.equal(context.data.sectionStructureSummary, "1 个小节 · 1 条讲述");
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
@@ -170,6 +188,27 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
   );
+  delete global.wx;
+});
+
+test("chapter workspace keeps draft bodies collapsed until the selected section is opened", async () => {
+  installWx();
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.draftSectionViews[0].expanded, false);
+  page.toggleDraftSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  assert.equal(context.data.draftSectionViews[0].expanded, true);
+  page.toggleDraftSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  assert.equal(context.data.draftSectionViews[0].expanded, false);
   delete global.wx;
 });
 
@@ -476,6 +515,96 @@ test("chapter workspace edits one small section with optimistic version control"
     },
   ]]);
   assert.equal(toasts[0].title, "小节已保存");
+  delete global.wx;
+});
+
+test("chapter workspace regenerates one draft section with the current version", async () => {
+  const { toasts, modals } = installWx();
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      regenerateMemoirChapterDraftSection: async (...args) => {
+        calls.push(args);
+        return workspace();
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  page.regenerateDraftSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "chapter-1",
+    "section-1",
+    "version-1",
+  ]]);
+  assert.equal(modals.at(-1).title, "重新生成“离家前的准备”？");
+  assert.match(modals.at(-1).content, /其他小节保持不变/);
+  assert.equal(toasts.at(-1).title, "这一小节已更新");
+  assert.equal(context.data.draftSectionViews[0].expanded, true);
+  assert.equal(context.data.regeneratingDraftSectionId, "");
+  delete global.wx;
+});
+
+test("chapter workspace reads one draft section with saved book voice settings", async () => {
+  installWx();
+  const requests = [];
+  const played = [];
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      createMemoirBookChapterDraftSectionTTS: async (...args) => {
+        requests.push(args);
+        return { audio_file_ids: ["audio-1", "audio-2"] };
+      },
+    },
+  });
+  const context = pageContext(page);
+  let token = 0;
+  context.audioPlayback = {
+    nextToken() {
+      token += 1;
+      return token;
+    },
+    currentToken() {
+      return token;
+    },
+    stop() {
+      token += 1;
+    },
+    async playFile(audioFileId, playToken) {
+      played.push([audioFileId, playToken]);
+    },
+  };
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  await page.playDraftSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+
+  assert.deepEqual(requests, [[
+    "project-1",
+    "chapter-1",
+    "section-1",
+    {
+      voice: "zh_female_xiaohe_uranus_bigtts",
+      speed_ratio: 1.5,
+    },
+  ]]);
+  assert.deepEqual(played, [["audio-1", 2], ["audio-2", 2]]);
+  assert.equal(context.data.playingSectionId, "");
+  assert.equal(context.data.ttsBusySectionId, "");
   delete global.wx;
 });
 

@@ -1,13 +1,16 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import { trackAuditAction } from "../../services/audit-tracker";
+import { AudioPlaybackController } from "../../services/audio-playback";
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
   confirmMemoirBookChapterDraft,
+  createMemoirBookChapterDraftSectionTTS,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
   moveMemoirChapterMaterial,
   prepareMemoirBookChapter,
+  regenerateMemoirChapterDraftSection,
   regenerateMemoirChapterSections,
   rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
@@ -24,6 +27,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
+import { readBookTTSSettings } from "../../services/tts-settings";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -35,6 +39,7 @@ import {
 } from "./chapter-next-action";
 import {
   chapterWorkspaceViewPatch,
+  type ChapterDraftSectionView,
   type ChapterSectionView,
 } from "./chapter-workspace-view";
 
@@ -75,7 +80,9 @@ interface ChapterWorkspacePageData {
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
+  draftSectionViews: ChapterDraftSectionView[];
   expandedSectionIds: Record<string, boolean>;
+  expandedDraftSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
   processBusy: boolean;
   regeneratingSections: boolean;
@@ -84,11 +91,16 @@ interface ChapterWorkspacePageData {
   confirmingChapter: boolean;
   savingDraft: boolean;
   movingMaterialId: string;
+  regeneratingDraftSectionId: string;
+  ttsBusySectionId: string;
+  playingSectionId: string;
   editingSectionId: string;
   editingSectionContent: string;
 }
 
 definePage<ChapterWorkspacePageData>()({
+  audioPlayback: new AudioPlaybackController(),
+  playToken: 0,
   preparationPollTimer: null as ReturnType<typeof setTimeout> | null,
   pageVisible: false,
   loadedOnce: false,
@@ -115,7 +127,9 @@ definePage<ChapterWorkspacePageData>()({
     rewriteDraftBusyText: "正在生成全部小节正文…",
     rewriteDraftScopeDetail: "",
     sectionViews: [],
+    draftSectionViews: [],
     expandedSectionIds: {},
+    expandedDraftSectionIds: {},
     canConfirmChapter: false,
     processBusy: false,
     regeneratingSections: false,
@@ -124,6 +138,9 @@ definePage<ChapterWorkspacePageData>()({
     confirmingChapter: false,
     savingDraft: false,
     movingMaterialId: "",
+    regeneratingDraftSectionId: "",
+    ttsBusySectionId: "",
+    playingSectionId: "",
     editingSectionId: "",
     editingSectionContent: "",
   },
@@ -151,11 +168,13 @@ definePage<ChapterWorkspacePageData>()({
   onHide() {
     this.pageVisible = false;
     this.stopPreparationPolling();
+    this.stopDraftSectionPlayback();
   },
 
   onUnload() {
     this.pageVisible = false;
     this.stopPreparationPolling();
+    this.stopDraftSectionPlayback();
   },
 
   async onPullDownRefresh() {
@@ -225,7 +244,11 @@ definePage<ChapterWorkspacePageData>()({
       setPageNavigationTitle(workspace.chapter_title || "本章正文");
       this.setData({
         workspace,
-        ...chapterWorkspaceViewPatch(workspace, this.data.expandedSectionIds),
+        ...chapterWorkspaceViewPatch(
+          workspace,
+          this.data.expandedSectionIds,
+          this.data.expandedDraftSectionIds,
+        ),
         loading: false,
         error: "",
       });
@@ -260,7 +283,34 @@ definePage<ChapterWorkspacePageData>()({
     };
     this.setData({
       expandedSectionIds,
-      ...chapterWorkspaceViewPatch(workspace, expandedSectionIds),
+      ...chapterWorkspaceViewPatch(
+        workspace,
+        expandedSectionIds,
+        this.data.expandedDraftSectionIds,
+      ),
+    });
+  },
+
+  toggleDraftSection(event: PageDatasetEvent<{ id?: string }>) {
+    const sectionId = datasetString(event, "id");
+    const workspace = this.data.workspace;
+    if (!sectionId || !workspace || this.data.editingSectionId === sectionId) {
+      return;
+    }
+    const expanded = this.data.draftSectionViews.find(
+      (section) => section.section_id === sectionId,
+    )?.expanded || false;
+    const expandedDraftSectionIds = {
+      ...this.data.expandedDraftSectionIds,
+      [sectionId]: !expanded,
+    };
+    this.setData({
+      expandedDraftSectionIds,
+      ...chapterWorkspaceViewPatch(
+        workspace,
+        this.data.expandedSectionIds,
+        expandedDraftSectionIds,
+      ),
     });
   },
 
@@ -269,6 +319,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !workspace?.sections.length
       || this.data.regeneratingSections
+      || Boolean(this.data.regeneratingDraftSectionId)
       || this.data.processBusy
       || this.data.rewritingDraft
       || this.data.confirmingChapter
@@ -296,6 +347,7 @@ definePage<ChapterWorkspacePageData>()({
     if (!workspace?.sections.length || this.data.regeneratingSections) {
       return;
     }
+    this.stopDraftSectionPlayback();
     this.setData({ regeneratingSections: true, error: "" });
     try {
       const result = await regenerateMemoirChapterSections(
@@ -340,7 +392,12 @@ definePage<ChapterWorkspacePageData>()({
 
   async runNextAction() {
     const action = this.data.nextAction;
-    if (action.disabled || this.data.processBusy || Boolean(this.data.startingIssueId)) {
+    if (
+      action.disabled
+      || this.data.processBusy
+      || Boolean(this.data.startingIssueId)
+      || Boolean(this.data.regeneratingDraftSectionId)
+    ) {
       return;
     }
     if (action.kind === "prepare") {
@@ -370,6 +427,7 @@ definePage<ChapterWorkspacePageData>()({
             ? chapterWorkspaceViewPatch(
               this.data.workspace,
               expandedSectionIds,
+              this.data.expandedDraftSectionIds,
             )
             : {}),
         });
@@ -402,6 +460,7 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.processBusy
       || this.data.regeneratingSections
       || this.data.rewritingDraft
+      || Boolean(this.data.regeneratingDraftSectionId)
     ) {
       return;
     }
@@ -456,6 +515,7 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.draftRecoveryActionDisabled
       || this.data.processBusy
       || this.data.rewritingDraft
+      || Boolean(this.data.regeneratingDraftSectionId)
       || this.data.confirmingChapter
       || this.data.savingDraft
       || Boolean(this.data.movingMaterialId)
@@ -478,7 +538,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async prepareChapter() {
-    if (this.data.processBusy) {
+    if (this.data.processBusy || this.data.regeneratingDraftSectionId) {
       return;
     }
     this.stopPreparationPolling();
@@ -610,7 +670,26 @@ definePage<ChapterWorkspacePageData>()({
     if (!workspace?.draft_version_id || !section) {
       return;
     }
+    if (
+      this.data.regeneratingDraftSectionId
+      || this.data.regeneratingSections
+      || this.data.rewritingDraft
+      || this.data.confirmingChapter
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    const expandedDraftSectionIds = {
+      ...this.data.expandedDraftSectionIds,
+      [section.section_id]: true,
+    };
     this.setData({
+      expandedDraftSectionIds,
+      ...chapterWorkspaceViewPatch(
+        workspace,
+        this.data.expandedSectionIds,
+        expandedDraftSectionIds,
+      ),
       editingSectionId: section.section_id,
       editingSectionContent: section.content,
     });
@@ -679,6 +758,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !this.data.canConfirmChapter
       || this.data.confirmingChapter
+      || Boolean(this.data.regeneratingDraftSectionId)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -698,6 +778,178 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
+  regenerateDraftSection(event: PageDatasetEvent<{ id?: string }>) {
+    const sectionId = datasetString(event, "id");
+    const workspace = this.data.workspace;
+    const section = workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
+    );
+    if (!workspace?.draft_version_id || !section) {
+      return;
+    }
+    if (workspace.draft_needs_rewrite) {
+      wx.showToast({
+        title: "请先更新全部小节正文",
+        icon: "none",
+      });
+      return;
+    }
+    if (
+      this.data.regeneratingDraftSectionId
+      || this.data.regeneratingSections
+      || this.data.rewritingDraft
+      || this.data.processBusy
+      || this.data.confirmingChapter
+      || this.data.savingDraft
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    wx.showModal({
+      title: `重新生成“${section.title}”？`,
+      content: "只会替换这一小节的正文，其他小节保持不变；当前正文仍会保留在历史版本中。",
+      confirmText: "重新生成",
+      cancelText: "暂不生成",
+      success: (result) => {
+        if (result.confirm) {
+          void this.performDraftSectionRegeneration(section.section_id);
+        }
+      },
+    });
+  },
+
+  async performDraftSectionRegeneration(sectionId: string) {
+    const workspace = this.data.workspace;
+    if (
+      !workspace?.draft_version_id
+      || !sectionId
+      || this.data.regeneratingDraftSectionId
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    this.setData({
+      regeneratingDraftSectionId: sectionId,
+      error: "",
+    });
+    try {
+      await regenerateMemoirChapterDraftSection(
+        this.data.projectId,
+        this.data.chapterId,
+        sectionId,
+        workspace.draft_version_id,
+      );
+      const expandedDraftSectionIds = {
+        ...this.data.expandedDraftSectionIds,
+        [sectionId]: true,
+      };
+      this.setData({ expandedDraftSectionIds });
+      await this.loadPageData(true);
+      wx.showToast({ title: "这一小节已更新", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error
+          ? error.message
+          : "小节正文重新生成失败",
+      });
+    } finally {
+      this.setData({ regeneratingDraftSectionId: "" });
+    }
+  },
+
+  async playDraftSection(event: PageDatasetEvent<{ id?: string }>) {
+    const sectionId = datasetString(event, "id");
+    const section = this.data.workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
+    );
+    if (!section || !this.data.projectId || !this.data.chapterId) {
+      return;
+    }
+    if (
+      this.data.playingSectionId === sectionId
+      || this.data.ttsBusySectionId === sectionId
+    ) {
+      this.stopDraftSectionPlayback();
+      return;
+    }
+    if (
+      this.data.ttsBusySectionId
+      || Boolean(this.data.regeneratingDraftSectionId)
+      || this.data.regeneratingSections
+      || this.data.rewritingDraft
+      || this.data.processBusy
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
+    this.setData({ ttsBusySectionId: sectionId, error: "" });
+    const settings = readBookTTSSettings();
+    try {
+      const response = await createMemoirBookChapterDraftSectionTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        sectionId,
+        {
+          ...(settings.voice ? { voice: settings.voice } : {}),
+          ...(settings.speedRatio === 1
+            ? {}
+            : { speed_ratio: settings.speedRatio }),
+        },
+      );
+      const audioFileIds = response.audio_file_ids || [];
+      if (!audioFileIds.length) {
+        throw new Error("没有可播放的音频");
+      }
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({
+        ttsBusySectionId: "",
+        playingSectionId: sectionId,
+      });
+      for (const audioFileId of audioFileIds) {
+        if (token !== this.playToken) {
+          return;
+        }
+        await this.audioPlayback.playFile(audioFileId, token, {
+          errorMessage: "小节朗读失败",
+        });
+      }
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : "小节朗读失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken) {
+        this.setData({
+          ttsBusySectionId: "",
+          playingSectionId: "",
+        });
+      }
+    }
+  },
+
+  stopDraftSectionPlayback() {
+    this.audioPlayback.stop();
+    this.playToken = this.audioPlayback.currentToken();
+    if (this.data.ttsBusySectionId || this.data.playingSectionId) {
+      this.setData({
+        ttsBusySectionId: "",
+        playingSectionId: "",
+      });
+    }
+  },
+
   rewriteChapter() {
     const workspace = this.data.workspace;
     if (
@@ -708,6 +960,7 @@ definePage<ChapterWorkspacePageData>()({
       || Boolean(this.data.startingIssueId)
       || this.data.confirmingChapter
       || this.data.savingDraft
+      || Boolean(this.data.regeneratingDraftSectionId)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -729,6 +982,7 @@ definePage<ChapterWorkspacePageData>()({
     if (this.data.rewritingDraft) {
       return;
     }
+    this.stopDraftSectionPlayback();
     this.setData({ rewritingDraft: true, error: "" });
     try {
       await rewriteMemoirBookChapter(

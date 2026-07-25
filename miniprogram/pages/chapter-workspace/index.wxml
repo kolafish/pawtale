@@ -14,9 +14,9 @@
       <text class="status-detail">{{readinessDetail}}</text>
       <view
         wx:if="{{nextAction.actionText}}"
-        class="primary-action {{nextAction.disabled || processBusy || startingIssueId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action {{nextAction.disabled || processBusy || startingIssueId !== '' || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{nextAction.disabled || processBusy || startingIssueId !== ''}}"
+        aria-disabled="{{nextAction.disabled || processBusy || startingIssueId !== '' || regeneratingDraftSectionId !== ''}}"
         bindtap="runNextAction"
       >{{processBusy || startingIssueId !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
@@ -33,9 +33,9 @@
       <view class="structure-tools">
         <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
         <view
-          class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="structure-regenerate-action {{regeneratingSections || regeneratingDraftSectionId !== '' || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
-          aria-disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== ''}}"
+          aria-disabled="{{regeneratingSections || regeneratingDraftSectionId !== '' || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== ''}}"
           bindtap="regenerateSections"
         >{{regeneratingSections ? "正在重新整理…" : "重新整理小节分组"}}</view>
       </view>
@@ -70,13 +70,13 @@
                 range="{{material.assignmentOptions}}"
                 range-key="title"
                 data-utterance-id="{{material.utterance_id}}"
-                disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft}}"
+                disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft}}"
                 bindchange="moveUnassignedMaterial"
               >
                 <view
-                  class="material-assignment-action {{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft ? 'is-disabled' : ''}}"
+                  class="material-assignment-action {{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft ? 'is-disabled' : ''}}"
                   aria-role="button"
-                  aria-disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft}}"
+                  aria-disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft}}"
                 >{{movingMaterialId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
               </picker>
             </view>
@@ -98,57 +98,89 @@
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
         <view
-          class="rewrite-action {{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="rewrite-action {{!workspace.can_rewrite_draft || rewritingDraft || regeneratingDraftSectionId !== '' || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
-          aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+          aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || regeneratingDraftSectionId !== '' || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
         >{{rewritingDraft ? rewriteDraftBusyText : rewriteDraftActionText}}</view>
       </view>
 
       <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
         <view
-          wx:for="{{workspace.draft_sections}}"
+          wx:for="{{draftSectionViews}}"
           wx:key="section_id"
-          class="draft-section-card"
+          class="draft-section-card {{item.expanded ? 'is-expanded' : ''}}"
         >
           <view class="draft-section-heading">
-            <view class="draft-section-number">小节 {{index + 1}}</view>
-            <text class="draft-section-title">{{item.title}}</text>
-            <text class="draft-section-meta">{{item.used_material_ids.length}} 条讲述整理</text>
+            <view
+              class="draft-section-heading-copy"
+              data-id="{{item.section_id}}"
+              aria-role="button"
+              aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}正文"
+              bindtap="toggleDraftSection"
+            >
+              <view>
+                <view class="draft-section-number">小节 {{item.indexText}}</view>
+                <text class="draft-section-title">{{item.title}}</text>
+                <text class="draft-section-meta">{{item.metaText}}</text>
+              </view>
+              <text class="draft-section-expand-mark">{{item.expanded ? "收起正文" : "展开正文"}}</text>
+            </view>
           </view>
 
           <block wx:if="{{editingSectionId === item.section_id}}">
-            <textarea
-              class="draft-editor"
-              value="{{editingSectionContent}}"
-              maxlength="-1"
-              auto-height
-              cursor-spacing="24"
-              aria-label="编辑小节 {{item.title}}"
-              bindinput="changeDraftSectionContent"
-            />
-            <view class="edit-actions">
-              <button
-                class="secondary-action"
-                disabled="{{savingDraft}}"
-                bindtap="cancelDraftSectionEdit"
-              >取消</button>
-              <button
-                class="secondary-action strong"
-                loading="{{savingDraft}}"
-                disabled="{{savingDraft}}"
-                bindtap="saveDraftSectionEdit"
-              >保存这一小节</button>
+            <view class="draft-section-body">
+              <textarea
+                class="draft-editor"
+                value="{{editingSectionContent}}"
+                maxlength="-1"
+                auto-height
+                cursor-spacing="24"
+                aria-label="编辑小节 {{item.title}}"
+                bindinput="changeDraftSectionContent"
+              />
+              <view class="edit-actions">
+                <button
+                  class="secondary-action"
+                  disabled="{{savingDraft}}"
+                  bindtap="cancelDraftSectionEdit"
+                >取消</button>
+                <button
+                  class="secondary-action strong"
+                  loading="{{savingDraft}}"
+                  disabled="{{savingDraft}}"
+                  bindtap="saveDraftSectionEdit"
+                >保存这一小节</button>
+              </view>
             </view>
           </block>
           <block wx:else>
-            <text class="draft-content">{{item.content}}</text>
-            <button
-              class="text-action"
-              data-id="{{item.section_id}}"
-              disabled="{{confirmingChapter || rewritingDraft || editingSectionId !== ''}}"
-              bindtap="startDraftSectionEdit"
-            >修改这一小节</button>
+            <view class="draft-section-actions">
+              <view
+                class="draft-section-action {{(ttsBusySectionId !== '' && ttsBusySectionId !== item.section_id) || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                data-id="{{item.section_id}}"
+                aria-role="button"
+                aria-disabled="{{(ttsBusySectionId !== '' && ttsBusySectionId !== item.section_id) || regeneratingDraftSectionId !== ''}}"
+                bindtap="playDraftSection"
+              >{{ttsBusySectionId === item.section_id ? "准备朗读…" : (playingSectionId === item.section_id ? "停止朗读" : "朗读")}}</view>
+              <view
+                class="draft-section-action {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                data-id="{{item.section_id}}"
+                aria-role="button"
+                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== ''}}"
+                bindtap="startDraftSectionEdit"
+              >修改</view>
+              <view
+                class="draft-section-action regenerate {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                data-id="{{item.section_id}}"
+                aria-role="button"
+                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== ''}}"
+                bindtap="regenerateDraftSection"
+              >{{regeneratingDraftSectionId === item.section_id ? "生成中…" : "重新生成"}}</view>
+            </view>
+            <view wx:if="{{item.expanded}}" class="draft-section-body">
+              <text class="draft-content" selectable>{{item.content}}</text>
+            </view>
           </block>
         </view>
       </view>
@@ -158,9 +190,9 @@
           <text class="empty-title">{{draftRecoveryTitle}}</text>
           <text class="empty-detail">{{draftRecoveryDetail}}</text>
           <view
-            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || processBusy || rewritingDraft || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || processBusy || rewritingDraft || regeneratingDraftSectionId !== '' || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{draftRecoveryActionDisabled || processBusy || rewritingDraft || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+            aria-disabled="{{draftRecoveryActionDisabled || processBusy || rewritingDraft || regeneratingDraftSectionId !== '' || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
             bindtap="runDraftRecoveryAction"
           >{{rewritingDraft ? rewriteDraftBusyText : (processBusy || startingIssueId !== "" ? "正在处理…" : draftRecoveryActionText)}}</view>
         </block>
@@ -172,9 +204,9 @@
 
       <view
         wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action {{!canConfirmChapter || confirmingChapter || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action confirm-chapter-action {{!canConfirmChapter || confirmingChapter || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{!canConfirmChapter || confirmingChapter || editingSectionId !== ''}}"
+        aria-disabled="{{!canConfirmChapter || confirmingChapter || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
         bindtap="confirmChapter"
       >{{confirmingChapter ? "正在确认…" : "确认本章正文"}}</view>
 

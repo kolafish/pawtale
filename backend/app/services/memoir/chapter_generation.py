@@ -488,51 +488,15 @@ async def generate_chapter(
     editor_notes: list[str] = []
     previous_section_ending = ""
     for section in context.sections:
-        section_context = _single_section_context(context, section)
-        prompt = build_chapter_generation_prompt(
-            section_context,
+        generated_section = await generate_chapter_section(
+            context,
+            section=section,
             editorial_guidance=editorial_guidance,
             chapter_sections=context.sections,
             previous_section_ending=previous_section_ending,
+            ai_model=ai_model,
+            ai_client=client,
         )
-        generated_section: GeneratedChapter | None = None
-        last_error: Exception | None = None
-        for attempt in range(CHAPTER_SECTION_GENERATION_ATTEMPTS):
-            try:
-                attempt_prompt = prompt
-                if last_error is not None:
-                    attempt_prompt += (
-                        "\n上次输出未通过校验："
-                        f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
-                    )
-                raw = await client._call_llm(
-                    CHAPTER_GENERATION_SYSTEM_PROMPT,
-                    attempt_prompt,
-                    temperature=0.3,
-                    max_tokens=5000,
-                    timeout=120.0,
-                )
-                generated_section = normalize_generated_chapter(
-                    extract_json_payload(str(raw)),
-                    context=section_context,
-                    model=getattr(client, "model_name", ai_model),
-                )
-                break
-            except (ValueError, httpx.HTTPError) as exc:
-                last_error = exc
-                logger.warning(
-                    "memoir chapter section generation attempt failed "
-                    "chapter_id=%s section_id=%s attempt=%s/%s error=%s",
-                    context.chapter_id,
-                    section.section_id,
-                    attempt + 1,
-                    CHAPTER_SECTION_GENERATION_ATTEMPTS,
-                    exc,
-                )
-        if generated_section is None:
-            raise ValueError(
-                f"小节“{section.title}”正文生成失败：{last_error}"
-            ) from last_error
         current = generated_section.sections[0]
         generated_sections.append(current)
         missing_source_candidates.extend(
@@ -556,6 +520,61 @@ async def generate_chapter(
         editor_notes=_deduplicated_strings(editor_notes),
         model=getattr(client, "model_name", ai_model),
     )
+
+
+async def generate_chapter_section(
+    context: ChapterGenerationContext,
+    *,
+    section: ChapterSectionInput,
+    editorial_guidance: list[str],
+    chapter_sections: tuple[ChapterSectionInput, ...],
+    previous_section_ending: str = "",
+    ai_model: str | None = None,
+    ai_client: AITextClient | None = None,
+) -> GeneratedChapter:
+    client = ai_client or get_ai_service(ai_model)
+    section_context = _single_section_context(context, section)
+    prompt = build_chapter_generation_prompt(
+        section_context,
+        editorial_guidance=editorial_guidance,
+        chapter_sections=chapter_sections,
+        previous_section_ending=previous_section_ending,
+    )
+    last_error: Exception | None = None
+    for attempt in range(CHAPTER_SECTION_GENERATION_ATTEMPTS):
+        try:
+            attempt_prompt = prompt
+            if last_error is not None:
+                attempt_prompt += (
+                    "\n上次输出未通过校验："
+                    f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
+                )
+            raw = await client._call_llm(
+                CHAPTER_GENERATION_SYSTEM_PROMPT,
+                attempt_prompt,
+                temperature=0.3,
+                max_tokens=5000,
+                timeout=120.0,
+            )
+            return normalize_generated_chapter(
+                extract_json_payload(str(raw)),
+                context=section_context,
+                model=getattr(client, "model_name", ai_model),
+            )
+        except (ValueError, httpx.HTTPError) as exc:
+            last_error = exc
+            logger.warning(
+                "memoir chapter section generation attempt failed "
+                "chapter_id=%s section_id=%s attempt=%s/%s error=%s",
+                context.chapter_id,
+                section.section_id,
+                attempt + 1,
+                CHAPTER_SECTION_GENERATION_ATTEMPTS,
+                exc,
+            )
+    raise ValueError(
+        f"小节“{section.title}”正文生成失败：{last_error}"
+    ) from last_error
 
 
 async def _next_version(db: AsyncSession, *, draft_id: str) -> int:
@@ -717,6 +736,176 @@ async def generate_and_save_chapter_draft(
             generated.missing_source_candidates
         ),
         "editor_notes": list(generated.editor_notes),
+    }
+    db.add(draft)
+    output = await db.scalar(
+        select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id
+        )
+    )
+    if output is not None:
+        invalidate_book_output(output)
+        db.add(output)
+    await db.flush()
+    return draft, version
+
+
+async def regenerate_and_save_chapter_draft_section(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    expected_version_id: str,
+    editorial_guidance: list[str],
+    ai_model: str | None = None,
+    ai_client: AITextClient | None = None,
+) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await _ensure_no_pending_assignment(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    before = await load_chapter_generation_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    target_index = next(
+        (
+            index
+            for index, section in enumerate(before.sections)
+            if section.section_id == section_id
+        ),
+        -1,
+    )
+    if target_index < 0:
+        raise HTTPException(status_code=404, detail="小节不存在")
+    draft = await db.scalar(
+        select(MemoirBookChapterDraft).where(
+            MemoirBookChapterDraft.project_id == project_id,
+            MemoirBookChapterDraft.chapter_id == chapter_id,
+        )
+    )
+    latest = await _latest_version(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if draft is None or latest is None:
+        raise HTTPException(status_code=404, detail="章节稿不存在")
+    if latest.id != expected_version_id:
+        raise HTTPException(status_code=409, detail="正文已更新，请刷新后再重新生成")
+    if latest.input_signature != before.input_signature:
+        raise HTTPException(status_code=409, detail="本章素材已变化，请先重新生成全部正文")
+    latest_sections = [
+        dict(section)
+        for section in latest.section_snapshot_json
+        if isinstance(section, dict)
+    ]
+    expected_section_ids = [section.section_id for section in before.sections]
+    if (
+        len(latest_sections) != len(before.sections)
+        or [
+            str(section.get("section_id") or "")
+            for section in latest_sections
+        ] != expected_section_ids
+    ):
+        raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再重新生成")
+    previous_section_ending = ""
+    if target_index > 0:
+        previous_section_ending = str(
+            latest_sections[target_index - 1].get("content") or ""
+        ).strip()[-300:]
+    target = before.sections[target_index]
+    await db.commit()
+    generated = await generate_chapter_section(
+        before,
+        section=target,
+        editorial_guidance=editorial_guidance,
+        chapter_sections=before.sections,
+        previous_section_ending=previous_section_ending,
+        ai_model=ai_model,
+        ai_client=ai_client,
+    )
+    db.expire_all()
+    after = await load_chapter_generation_context(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if after.input_signature != before.input_signature:
+        raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
+    current_latest = await _latest_version(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if current_latest is None or current_latest.id != expected_version_id:
+        raise HTTPException(status_code=409, detail="生成期间正文已更新，请刷新后重试")
+    draft = await db.scalar(
+        select(MemoirBookChapterDraft).where(
+            MemoirBookChapterDraft.id == current_latest.draft_id
+        )
+    )
+    if draft is None:
+        raise HTTPException(status_code=404, detail="章节稿不存在")
+    current = generated.sections[0]
+    target_input = after.sections[target_index]
+    replacement = {
+        "section_id": target_input.section_id,
+        "title": target_input.title,
+        "section_type": target_input.section_type,
+        "section_version": target_input.section_version,
+        "sort_order": target_input.sort_order,
+        "content": current.content,
+        "used_material_ids": list(current.used_material_ids),
+    }
+    revised_sections = [
+        replacement if index == target_index else section
+        for index, section in enumerate(latest_sections)
+    ]
+    revised_content = "\n\n".join(
+        str(section.get("content") or "").strip()
+        for section in revised_sections
+    )
+    if revised_sections == latest_sections:
+        return draft, current_latest
+    used_material_ids = [
+        material_id
+        for section in revised_sections
+        for material_id in (
+            section.get("used_material_ids", [])
+            if isinstance(section.get("used_material_ids"), list)
+            else []
+        )
+        if isinstance(material_id, str)
+    ]
+    version = MemoirBookChapterDraftVersion(
+        draft_id=draft.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        version=await _next_version(db, draft_id=draft.id),
+        content=revised_content,
+        created_by=MemoirCreatedBy.AI.value,
+        model=generated.model,
+        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section",
+        feedback=f"AI 重新生成小节《{target_input.title}》正文",
+        input_signature=after.input_signature,
+        used_material_ids_json=used_material_ids,
+        material_snapshot_json=_snapshot(
+            after,
+            used_material_ids=set(used_material_ids),
+        ),
+        section_snapshot_json=revised_sections,
+    )
+    db.add(version)
+    draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+    draft.updated_at = datetime.now(UTC).replace(tzinfo=None)
+    draft.metadata_json = {
+        **(draft.metadata_json or {}),
+        "source": CHAPTER_GENERATION_ENGINE,
+        "last_regenerated_section_id": section_id,
     }
     db.add(draft)
     output = await db.scalar(

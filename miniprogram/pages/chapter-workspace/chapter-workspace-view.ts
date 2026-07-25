@@ -1,5 +1,6 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import type {
+  MemoirChapterDraftSection,
   MemoirChapterSectionMaterialSummary,
   MemoirChapterSectionSummary,
   MemoirSectionType,
@@ -20,6 +21,12 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
   visibleMaterials: ChapterSectionMaterialView[];
 }
 
+export interface ChapterDraftSectionView extends MemoirChapterDraftSection {
+  indexText: string;
+  metaText: string;
+  expanded: boolean;
+}
+
 export interface ChapterWorkspaceViewPatch {
   nextAction: ChapterNextAction;
   readinessTitle: string;
@@ -37,6 +44,7 @@ export interface ChapterWorkspaceViewPatch {
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
+  draftSectionViews: ChapterDraftSectionView[];
   canConfirmChapter: boolean;
 }
 
@@ -113,6 +121,23 @@ function visibleSectionViews(
     });
 }
 
+function visibleDraftSectionViews(
+  workspace: MemoirChapterWorkspace,
+  expandedDraftSectionIds: Record<string, boolean>,
+): ChapterDraftSectionView[] {
+  return [...(workspace.draft_sections || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .map((section, index) => ({
+      ...section,
+      indexText: `${index + 1}`,
+      metaText: [
+        `${section.used_material_ids.length} 条讲述整理`,
+        `${section.content.replace(/\s/g, "").length} 字`,
+      ].join(" · "),
+      expanded: Boolean(expandedDraftSectionIds[section.section_id]),
+    }));
+}
+
 function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
   const completionCount = workspace.pending_completion_source_count || 0;
   const newCount = workspace.pending_new_source_count || 0;
@@ -180,6 +205,7 @@ function draftRecoveryPatch(
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean> = {},
+  expandedDraftSectionIds: Record<string, boolean> = {},
 ): ChapterWorkspaceViewPatch {
   const summary = workspace.completion_summary;
   const nextAction = chapterNextAction(summary);
@@ -228,6 +254,10 @@ export function chapterWorkspaceViewPatch(
     rewriteDraftBusyText,
     rewriteDraftScopeDetail,
     sectionViews,
+    draftSectionViews: visibleDraftSectionViews(
+      workspace,
+      expandedDraftSectionIds,
+    ),
     canConfirmChapter:
       summary.state === "draft_ready"
       && !workspace.draft_needs_rewrite

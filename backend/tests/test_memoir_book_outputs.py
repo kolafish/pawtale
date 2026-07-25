@@ -24,6 +24,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
+    MemoirSection,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
@@ -1036,6 +1037,57 @@ async def test_mobile_memoir_book_chapter_tts_generates_and_reuses_audio(
     assert fake_tts.calls[1]["speed_ratio"] == 0.7
     playback = await client.get(f"/api/mobile/memoir/audio-files/{first.json()['audio_file_ids'][0]}/playback")
     assert playback.status_code == 200
+
+
+async def test_mobile_memoir_book_chapter_section_tts_reads_only_selected_section(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.memoir.audio_files.MEMOIR_AUDIO_DIR",
+        tmp_path / "audio",
+    )
+    project_id = await ensure_mobile_memoir_project(client)
+    _, chapters = await _create_confirmed_book_plan(
+        test_db,
+        project_id=project_id,
+    )
+    section = await test_db.scalar(
+        select(MemoirSection).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.chapter_id == chapters[0].id,
+        )
+    )
+    assert section is not None
+    fake_tts = FakeBookTTS()
+    monkeypatch.setattr(
+        "app.services.memoir.book_audio.get_tts_client",
+        lambda: fake_tts,
+    )
+    endpoint = (
+        f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/"
+        f"{chapters[0].id}/draft/sections/{section.id}/tts"
+    )
+
+    first = await client.post(
+        endpoint,
+        json={"voice": "voice-a", "speed_ratio": 0.7},
+    )
+    second = await client.post(
+        endpoint,
+        json={"voice": "voice-a", "speed_ratio": 0.7},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["audio_file_ids"] == second.json()["audio_file_ids"]
+    assert len(fake_tts.calls) == 1
+    assert fake_tts.calls[0]["text"] == (
+        "外婆家的童年\n\n我小时候常在外婆家的院子里晒太阳。"
+    )
+    assert fake_tts.calls[0]["speed_ratio"] == 0.7
 
 
 async def test_mobile_memoir_book_outline_tts_generates_and_reuses_audio(
