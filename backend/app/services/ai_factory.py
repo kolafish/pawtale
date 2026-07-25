@@ -1,3 +1,5 @@
+import logging
+
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import (
@@ -9,6 +11,7 @@ from app.services.ai_volc import VolcArkTextService
 from app.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 
 DEEPSEEK_V4_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_V4_PRO_MODEL = "deepseek-v4-pro"
@@ -48,25 +51,39 @@ class AIServiceFactory:
         Returns:
             AI服务实例
         """
-        if model is None:
-            return AIServiceFactory._get_default_service()
+        requested_model = (model or "").strip() or None
+        if requested_model is None:
+            service = AIServiceFactory._get_default_service()
+            AIServiceFactory._log_resolution(requested_model, service)
+            return service
 
-        model = model.lower()
+        normalized_model = requested_model.lower()
 
-        if model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
-            return DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
-        elif model == DEEPSEEK_V4_PRO_MODEL:
-            return DeepSeekTextService(model=DEEPSEEK_V4_PRO_MODEL)
-        elif model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
-            return VolcArkTextService()
-        elif model == CLAUDE_FABLE_MODEL:
-            return ClaudeTextService(model=CLAUDE_FABLE_MODEL)
-        elif model == CLAUDE_OPUS_4_8_MODEL:
-            return ClaudeTextService(model=CLAUDE_OPUS_4_8_MODEL)
-        elif model == "claude-sonnet-4":
-            return ClaudeTextService(model="claude-sonnet-4")
+        if normalized_model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
+            service = DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
+        elif normalized_model == DEEPSEEK_V4_PRO_MODEL:
+            service = DeepSeekTextService(model=DEEPSEEK_V4_PRO_MODEL)
+        elif normalized_model in {"volc-doubao-pro", VOLC_DOUBAO_PRO_MODEL}:
+            service = VolcArkTextService()
+        elif normalized_model == CLAUDE_FABLE_MODEL:
+            service = ClaudeTextService(model=CLAUDE_FABLE_MODEL)
+        elif normalized_model == CLAUDE_OPUS_4_8_MODEL:
+            service = ClaudeTextService(model=CLAUDE_OPUS_4_8_MODEL)
+        elif normalized_model == "claude-sonnet-4":
+            service = ClaudeTextService(model="claude-sonnet-4")
         else:
-            return AIServiceFactory._get_default_service()
+            service = AIServiceFactory._get_default_service()
+        AIServiceFactory._log_resolution(requested_model, service)
+        return service
+
+    @staticmethod
+    def _log_resolution(requested_model: str | None, service: AITextServiceBase) -> None:
+        logger.info(
+            "AI model resolved requested=%s resolved=%s provider=%s",
+            requested_model or "<default>",
+            service.model_name,
+            type(service).__name__,
+        )
 
 
 # 便捷函数

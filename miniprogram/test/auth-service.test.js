@@ -38,7 +38,7 @@ test("loginWithWeChat exchanges wx login code through backend", async () => {
   const requests = installWxMock((options) => {
     assert.equal(options.url, "https://api.example.com/api/auth/wechat-login");
     assert.equal(options.method, "POST");
-    assert.equal(options.timeout, 10000);
+    assert.equal(options.timeout, 30000);
     assert.deepEqual(options.data, { code: "wx-code-1" });
     options.success({
       statusCode: 200,

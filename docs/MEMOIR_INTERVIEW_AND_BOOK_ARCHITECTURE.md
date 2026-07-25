@@ -6,6 +6,7 @@
 
 - 事实来源、正文生成和用户决定不变量见 `MEMOIR_NARRATIVE_ARCHITECTURE.md`。
 - 实时语音状态机见 `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`。
+- 客户端缓存、数据版本、请求超时和 AI 模型传递见 `MEMOIR_CLIENT_DATA_AND_REQUEST_ARCHITECTURE.md`。
 - 当前原则：共享素材和小章节，分别维护访谈策略与成书问题，不建立第二套完整度真相。
 
 ## 一、产品边界

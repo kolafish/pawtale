@@ -5,6 +5,7 @@ import {
   readBackendConfig,
   readSessionCookie,
   request,
+  type RequestOptions,
 } from "./request";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
@@ -37,6 +38,8 @@ export interface SetCredentialsInput extends RegisterCredentials {}
 export interface UpdateProfileInput {
   display_name: string;
 }
+
+let backendSessionPromise: Promise<void> | null = null;
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
   ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project || undefined));
@@ -119,20 +122,7 @@ export async function updateBackendProfile(input: UpdateProfileInput): Promise<B
   });
 }
 
-export async function ensureBackendSession(): Promise<void> {
-  if (readSessionCookie()) {
-    try {
-      await getBackendUser();
-      return;
-    } catch (error) {
-      if (error instanceof ApiError && [401, 403].includes(error.statusCode)) {
-        clearSessionCookie();
-      } else {
-        throw error;
-      }
-    }
-  }
-
+async function establishBackendSession(): Promise<void> {
   const config = readBackendConfig();
   if (!config.devEmail || !config.devPassword) {
     throw new ApiError(401, "请先登录", {});
@@ -155,7 +145,37 @@ export async function ensureBackendSession(): Promise<void> {
   }
 }
 
-export async function getMemoirIdentity(): Promise<MemoirIdentity> {
+export async function ensureBackendSession(): Promise<void> {
+  if (readSessionCookie()) {
+    return;
+  }
+  if (!backendSessionPromise) {
+    backendSessionPromise = establishBackendSession().finally(() => {
+      backendSessionPromise = null;
+    });
+  }
+  await backendSessionPromise;
+}
+
+export async function requestWithBackendSession<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
   await ensureBackendSession();
-  return rememberMemoirIdentity(await request<MemoirIdentity>("/api/mobile/memoir/me"));
+  try {
+    return await request<T>(path, options);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.statusCode !== 401) {
+      throw error;
+    }
+    clearSessionCookie();
+    await ensureBackendSession();
+    return request<T>(path, options);
+  }
+}
+
+export async function getMemoirIdentity(): Promise<MemoirIdentity> {
+  return rememberMemoirIdentity(
+    await requestWithBackendSession<MemoirIdentity>("/api/mobile/memoir/me"),
+  );
 }

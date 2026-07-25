@@ -1,17 +1,21 @@
-import { ensureBackendSession } from "./auth";
+import {
+  ensureBackendSession,
+  requestWithBackendSession,
+} from "./auth";
 import { readSelectedAIModel } from "./ai-model-settings";
-import { request, type HttpMethod } from "./request";
+import {
+  type HttpMethod,
+  type RequestTimeoutProfile,
+} from "./request";
 
 interface MemoirRequestOptions {
   method?: HttpMethod;
   data?: unknown;
   header?: Record<string, string>;
-  timeoutMs?: number;
+  timeoutProfile?: RequestTimeoutProfile;
 }
 
 type QueryValue = string | number | boolean | null | undefined;
-
-export const MEMOIR_MUTATION_TIMEOUT_MS = 600000;
 
 export function withSelectedAIModel<T extends { ai_model?: string | null }>(data: T): T {
   const explicitModel = typeof data.ai_model === "string" ? data.ai_model.trim() : "";
@@ -25,13 +29,23 @@ export async function memoirRequest<T>(
   path: string,
   options: MemoirRequestOptions = {},
 ): Promise<T> {
-  await ensureBackendSession();
   const method = options.method || "GET";
-  return request<T>(path, {
+  return requestWithBackendSession<T>(path, {
     ...options,
-    timeoutMs:
-      options.timeoutMs ??
-      (method === "GET" ? undefined : MEMOIR_MUTATION_TIMEOUT_MS),
+    timeoutProfile: options.timeoutProfile ?? (method === "GET" ? "interactive" : "mutation"),
+  });
+}
+
+export function memoirAIRequest<T, D extends { ai_model?: string | null }>(
+  path: string,
+  data: D,
+  options: Omit<MemoirRequestOptions, "data"> = {},
+): Promise<T> {
+  return memoirRequest<T>(path, {
+    ...options,
+    method: options.method || "POST",
+    timeoutProfile: options.timeoutProfile || "generation",
+    data: withSelectedAIModel(data),
   });
 }
 

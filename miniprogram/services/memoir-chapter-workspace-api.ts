@@ -1,8 +1,8 @@
 import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
+  memoirAIRequest,
   memoirRequest,
-  withSelectedAIModel,
 } from "./memoir-api-client";
 
 
@@ -34,17 +34,20 @@ export function regenerateMemoirChapterSections(
   chapterId: string,
   expectedSections: Array<{ id: string; version: number }>,
 ): Promise<MemoirChapterSectionRegenerationResult> {
-  return memoirRequest<MemoirChapterSectionRegenerationResult>(
+  return memoirAIRequest<
+    MemoirChapterSectionRegenerationResult,
+    {
+      expected_sections: Array<{ id: string; version: number }>;
+      ai_model: null;
+    }
+  >(
     memoirNarrativeProjectPath(
       projectId,
       `/chapters/${encodeURIComponent(chapterId)}/sections/regenerate`,
     ),
     {
-      method: "POST",
-      data: withSelectedAIModel({
-        expected_sections: expectedSections,
-        ai_model: null,
-      }),
+      expected_sections: expectedSections,
+      ai_model: null,
     },
   );
 }

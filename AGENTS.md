@@ -72,6 +72,7 @@
 - 真实 bug 必须沉淀最小回归样本；ASR/TTS/LLM 相关问题优先使用脱敏后的真实 provider payload、事件序列或录音时序建模，不只手写理想数据。
 - 小程序页面测试优先调用 view model、page method、service mock 和状态 patch，断言用户可观察结果；避免直接用 WXML/WXSS 正则锁 class、文案、字号、颜色、间距和布局细节。
 - 只有当路由注册、隐私声明、配置文件或模板绑定本身就是失败边界时，才允许读取 JSON/WXML/WXSS 做轻量断言；不要用这类测试替代真机/开发者工具 smoke。
+- 不为架构文档或开发约束本身增加静态扫描、源码正则、未来字段枚举或未来模型枚举测试；测试只覆盖当前功能、真实数据边界和可复现回归风险。
 - UI 视觉、大字模式、滚动、播放进度、后台退出、麦克风权限等体验问题，单元测试只能覆盖状态逻辑；合入前应补充人工或自动化 smoke 验证，并在最终汇报说明是否执行。
 - 删除低价值测试优先于维护它：如果一个测试只证明实现细节存在、不能复现真实问题、经常阻碍合理重排，就应删除或改写成业务行为/回归测试。
 
@@ -79,6 +80,10 @@
 
 - 回忆录小程序实时语音架构以 `docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md` 为准。
 - 项目级访谈与成书协作架构以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
+- 回忆录客户端缓存、服务端数据版本、认证请求、超时和 AI 模型上下文以 `docs/MEMOIR_CLIENT_DATA_AND_REQUEST_ARCHITECTURE.md` 为准。
+- 后端数据库始终是事实源；本地缓存必须按用户和项目隔离，持久化结构变化时明确提升缓存 schema、迁移或失效，不能宽泛合并未知旧数据。
+- 回忆录 HTTP 请求使用共享 timeout profile；新增生成能力不能在页面或业务 service 中复制毫秒数。成本高、耗时长或不能安全重试的生成默认设计为可恢复的异步任务。
+- 用户选择的 AI 模型必须沿客户端、API schema、workflow 和 provider 完整传递，并记录 requested / resolved model；不能因中间层漏传而静默换用默认模型。
 - 产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心。
 - 创建/开始访谈时要区分 `free_narration` 弱引导和 `guided_interview` 强引导：弱引导支持叙述者按时间线自主讲述，强引导由 AI 按人物、事件、地点、时间段、主题等模块推进。
 - 用户原始语音是回忆录基础数据资产。ASR 原文、校正文、结构化记忆和最终文章都必须能回溯到原始音频、transcript version 和音频时间段。

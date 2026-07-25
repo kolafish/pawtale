@@ -653,7 +653,7 @@ test("share video custom background upload and preview use backend session", asy
   );
   assert.equal(downloads[0].header.Cookie, "pawtale_session=abc");
   assert.equal(downloads[0].timeout, 60000);
-  assert.equal(requests[0].url, "http://backend.local:8000/api/auth/me");
+  assert.equal(requests.length, 0);
   delete global.wx;
 });
 
@@ -676,8 +676,8 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.reviseMemoirBookChapterDraft("project/1", "chapter/1", { expected_version_id: "version/1", sections: [{ section_id: "section/1", content: "修改后的小节正文" }] }), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/revise`, data: { expected_version_id: "version/1", sections: [{ section_id: "section/1", content: "修改后的小节正文" }] } },
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.assembleMemoirBookOutput("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble`, data: {} },
-    { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 180000 },
-    { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 180000 },
+    { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 600000 },
+    { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 600000 },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
