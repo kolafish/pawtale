@@ -321,6 +321,16 @@ class MemoirVoiceTranscriptIncludedChapterResponse(BaseModel):
     sort_order: int
 
 
+class MemoirVoiceTranscriptSectionAssignmentResponse(BaseModel):
+    chapter_id: str
+    chapter_title: str
+    chapter_sort_order: int
+    section_id: str
+    section_title: str
+    section_sort_order: int
+    requires_user_assignment: bool = False
+
+
 class MemoirMaterialOfflineASRRequest(BaseModel):
     ai_model: str | None = None
 
@@ -381,6 +391,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     current_guidance_module: str | None = None
     is_included_in_book: bool = False
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] = Field(default_factory=list)
+    section_assignment: MemoirVoiceTranscriptSectionAssignmentResponse | None = None
     offline_asr: MemoirMaterialOfflineASRStateResponse = Field(
         default_factory=MemoirMaterialOfflineASRStateResponse,
     )

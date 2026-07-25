@@ -38,6 +38,7 @@ function sampleTranscript(id, overrides = {}) {
     current_guidance_module: null,
     is_included_in_book: false,
     included_chapters: [],
+    section_assignment: null,
     offline_asr: {
       status: "idle",
       job_id: null,
@@ -210,8 +211,14 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     getMemoirTranscriptShareVideoContext: async () => {
       throw new Error("getMemoirTranscriptShareVideoContext was not mocked");
     },
+    getMemoirBookPlan: async () => {
+      throw new Error("getMemoirBookPlan was not mocked");
+    },
     getMemoirVoiceTranscript: async () => {
       throw new Error("getMemoirVoiceTranscript was not mocked");
+    },
+    moveMemoirChapterMaterial: async () => {
+      throw new Error("moveMemoirChapterMaterial was not mocked");
     },
     previewMemoirVoiceTranscriptVoiceEdit: async () => {
       throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
@@ -582,6 +589,15 @@ test("transcript detail page uses content-first inclusion labels", async () => {
           { chapter_id: "chapter-2", title: "家庭记忆", sort_order: 1 },
           { chapter_id: "chapter-1", title: "退休后的日子", sort_order: 0 },
         ],
+        section_assignment: {
+          chapter_id: "chapter-1",
+          chapter_title: "退休后的日子",
+          chapter_sort_order: 0,
+          section_id: "section-2",
+          section_title: "退休不下岗",
+          section_sort_order: 1,
+          requires_user_assignment: false,
+        },
       }),
     },
   });
@@ -589,8 +605,124 @@ test("transcript detail page uses content-first inclusion labels", async () => {
 
   await page.onLoad.call(context, { id: "utterance-included" });
 
-  assert.equal(context.data.item.bookInclusionText, "已放入第 1 章：退休后的日子等 2 章");
+  assert.equal(
+    context.data.item.bookInclusionText,
+    "已放入第 1 章：退休后的日子 · 小节 2：退休不下岗",
+  );
+  assert.equal(context.data.item.chapterLocationText, "第 1 章：退休后的日子");
+  assert.equal(context.data.item.sectionLocationText, "小节 2：退休不下岗");
   assert.equal(context.data.item.isIncludedInBook, true);
+});
+
+test("transcript detail page moves material to a selected chapter section", async () => {
+  const moveCalls = [];
+  const toasts = [];
+  let detailLoads = 0;
+  const originalAssignment = {
+    chapter_id: "chapter-1",
+    chapter_title: "退休后的日子",
+    chapter_sort_order: 0,
+    section_id: "section-1",
+    section_title: "退休不下岗",
+    section_sort_order: 0,
+    requires_user_assignment: false,
+  };
+  const updatedAssignment = {
+    chapter_id: "chapter-2",
+    chapter_title: "家里的人",
+    chapter_sort_order: 1,
+    section_id: "section-2",
+    section_title: "她给我送胡豆",
+    section_sort_order: 0,
+    requires_user_assignment: false,
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        detailLoads += 1;
+        return sampleTranscript(id, {
+          is_included_in_book: true,
+          included_chapters: [{
+            chapter_id: detailLoads > 1 ? "chapter-2" : "chapter-1",
+            title: detailLoads > 1 ? "家里的人" : "退休后的日子",
+            sort_order: detailLoads > 1 ? 1 : 0,
+          }],
+          section_assignment: detailLoads > 1
+            ? updatedAssignment
+            : originalAssignment,
+        });
+      },
+      getMemoirBookPlan: async () => ({
+        chapters: [
+          {
+            id: "chapter-1",
+            title: "退休后的日子",
+            sort_order: 0,
+            sections: [{
+              id: "section-1",
+              title: "退休不下岗",
+              sort_order: 0,
+              status: "active",
+              requires_user_assignment: false,
+            }],
+          },
+          {
+            id: "chapter-2",
+            title: "家里的人",
+            sort_order: 1,
+            sections: [{
+              id: "section-2",
+              title: "她给我送胡豆",
+              sort_order: 0,
+              status: "active",
+              requires_user_assignment: false,
+            }],
+          },
+        ],
+      }),
+      moveMemoirChapterMaterial: async (projectId, utteranceId, sectionId) => {
+        moveCalls.push({ projectId, utteranceId, sectionId });
+      },
+    },
+  });
+  const context = pageContext(page);
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+
+  await page.onLoad.call(context, { id: "utterance-assigned" });
+  assert.equal(context.data.assignmentEditorOpen, false);
+
+  await page.toggleMaterialAssignmentEditor.call(context);
+  assert.equal(context.data.assignmentEditorOpen, true);
+  assert.equal(
+    context.data.assignmentText,
+    "第 1 章 · 退休后的日子 · 小节 1 · 退休不下岗",
+  );
+  assert.equal(context.data.assignmentCanSave, false);
+
+  page.changeMaterialAssignment.call(context, { detail: { value: "1" } });
+  assert.equal(
+    context.data.assignmentText,
+    "第 2 章 · 家里的人 · 小节 1 · 她给我送胡豆",
+  );
+  assert.equal(context.data.assignmentCanSave, true);
+
+  await page.saveMaterialAssignment.call(context);
+
+  assert.deepEqual(moveCalls, [{
+    projectId: "project-1",
+    utteranceId: "utterance-assigned",
+    sectionId: "section-2",
+  }]);
+  assert.equal(detailLoads, 2);
+  assert.equal(context.data.assignmentEditorOpen, false);
+  assert.equal(context.data.item.chapterLocationText, "第 2 章：家里的人");
+  assert.equal(context.data.item.sectionLocationText, "小节 1：她给我送胡豆");
+  assert.deepEqual(toasts, [{ title: "章节和小节已更新", icon: "success" }]);
+  delete global.wx;
 });
 
 test("transcript detail page creates share video from selected corrected segments", async () => {

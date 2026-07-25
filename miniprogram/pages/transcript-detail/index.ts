@@ -1,4 +1,5 @@
 import type {
+  MemoirBookPlan,
   MemoirMaterialOfflineASRState,
   MemoirShareVideoCustomBackgroundAsset,
   MemoirVoiceTranscriptItem,
@@ -12,9 +13,11 @@ import {
   deleteMemoirVoiceTranscript,
   downloadMemoirShareVideoCustomBackgroundPreview,
   downloadMemoirShareVideoJob,
+  getMemoirBookPlan,
   getMemoirShareVideoJob,
   getMemoirTranscriptShareVideoContext,
   getMemoirVoiceTranscript,
+  moveMemoirChapterMaterial,
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
   startMemoirMaterialOfflineASR,
@@ -39,6 +42,8 @@ import {
   transcriptAudioText,
   transcriptBookInclusionText,
   transcriptCreatedAtText,
+  transcriptMaterialChapterText,
+  transcriptMaterialSectionText,
   transcriptTitleText,
   transcriptVoiceEditPreviewView,
   transcriptVoiceEditStateView,
@@ -49,7 +54,9 @@ import {
 import {
   datasetNumber,
   datasetString,
+  pickerIndex,
   type PageDatasetEvent,
+  type PagePickerEvent,
   queryParam,
   type PageQuery,
   type PageTextInputEvent,
@@ -72,6 +79,12 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
   backgroundSource?: string;
   backgroundStyle?: string;
 }>;
+type MaterialAssignmentPickerEvent = PagePickerEvent;
+
+interface MaterialAssignmentOption {
+  sectionId: string;
+  label: string;
+}
 
 interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
@@ -86,6 +99,8 @@ interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   bookStatusClass: string;
   canRecoverTranscription: boolean;
   bookInclusionText: string;
+  chapterLocationText: string;
+  sectionLocationText: string;
   isIncludedInBook: boolean;
   canPlayAudio: boolean;
   canPlayAnswerAudio: boolean;
@@ -146,6 +161,14 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   voiceEditStatusVisible: boolean;
   voiceEditActionText: string;
   voiceEditPreview: TranscriptVoiceEditPreviewView | null;
+  assignmentEditorOpen: boolean;
+  assignmentLoading: boolean;
+  assignmentSaving: boolean;
+  assignmentError: string;
+  assignmentOptions: MaterialAssignmentOption[];
+  assignmentIndex: number;
+  assignmentText: string;
+  assignmentCanSave: boolean;
 }
 
 type VoiceEditStateData = Pick<
@@ -242,6 +265,63 @@ function answerPlaybackPatch(
   };
 }
 
+function materialAssignmentOptions(
+  plan: MemoirBookPlan,
+): MaterialAssignmentOption[] {
+  return [...(plan.chapters || [])]
+    .sort((left, right) => left.sort_order - right.sort_order)
+    .flatMap((chapter) => (
+      [...(chapter.sections || [])]
+        .filter((section) => (
+          section.status === "active"
+          && !section.requires_user_assignment
+        ))
+        .sort((left, right) => left.sort_order - right.sort_order)
+        .map((section) => ({
+          sectionId: section.id,
+          label: [
+            `第 ${chapter.sort_order + 1} 章`,
+            chapter.title.trim() || "未命名章节",
+            `小节 ${section.sort_order + 1}`,
+            section.title.trim() || "未命名小节",
+          ].join(" · "),
+        }))
+    ));
+}
+
+function materialAssignmentPatch(
+  options: MaterialAssignmentOption[],
+  item: TranscriptDetailItemView,
+  requestedIndex?: number,
+): Pick<
+  TranscriptDetailData,
+  | "assignmentOptions"
+  | "assignmentIndex"
+  | "assignmentText"
+  | "assignmentCanSave"
+> {
+  const matchedIndex = options.findIndex(
+    (option) => option.sectionId === item.section_assignment?.section_id,
+  );
+  const assignmentIndex = Math.min(
+    Math.max(
+      requestedIndex ?? (matchedIndex >= 0 ? matchedIndex : 0),
+      0,
+    ),
+    Math.max(options.length - 1, 0),
+  );
+  const selected = options[assignmentIndex];
+  return {
+    assignmentOptions: options,
+    assignmentIndex,
+    assignmentText: selected?.label || "没有可选择的小节",
+    assignmentCanSave: Boolean(
+      selected
+      && selected.sectionId !== item.section_assignment?.section_id,
+    ),
+  };
+}
+
 function shareVideoFileName(item: TranscriptDetailItemView | null): string {
   const title = (item?.titleText || item?.summary_title || "回忆录片段")
     .replace(/[\\/:*?"<>|]/g, "")
@@ -284,6 +364,12 @@ function toViewItem(
     bookInclusionText: canRecoverTranscription
       ? "等待转写后再入章"
       : transcriptBookInclusionText(item),
+    chapterLocationText: canRecoverTranscription
+      ? "等待转写后再归入章节"
+      : transcriptMaterialChapterText(item),
+    sectionLocationText: canRecoverTranscription
+      ? "等待转写后再归入小节"
+      : transcriptMaterialSectionText(item),
     isIncludedInBook,
     canPlayAudio: Boolean(item.audio_file_id || item.question_audio_file_id),
     canPlayAnswerAudio: Boolean(item.audio_file_id),
@@ -445,6 +531,14 @@ definePage<TranscriptDetailData>()({
     voiceEditSaving: false,
     voiceEditInstructionText: "",
     voiceEditPreview: null,
+    assignmentEditorOpen: false,
+    assignmentLoading: false,
+    assignmentSaving: false,
+    assignmentError: "",
+    assignmentOptions: [],
+    assignmentIndex: 0,
+    assignmentText: "",
+    assignmentCanSave: false,
     ...voiceEditStateData("idle"),
     ...initialTranscriptShareVideoData(),
   },
@@ -458,6 +552,8 @@ definePage<TranscriptDetailData>()({
       questionExpanded: false,
       moreActionsExpanded: false,
       editReferenceExpanded: false,
+      assignmentEditorOpen: false,
+      assignmentError: "",
     });
     await this.loadTranscript();
     if (queryParam(options, "mode") === "edit") {
@@ -618,6 +714,7 @@ definePage<TranscriptDetailData>()({
       || this.data.voiceEditRecording
       || this.data.voiceEditLoading
       || this.data.voiceEditSaving
+      || this.data.assignmentEditorOpen
     ) {
       return;
     }
@@ -655,6 +752,131 @@ definePage<TranscriptDetailData>()({
 
   toggleMoreActionsExpanded() {
     this.setData({ moreActionsExpanded: !this.data.moreActionsExpanded });
+  },
+
+  async toggleMaterialAssignmentEditor() {
+    const item = this.data.item;
+    if (
+      !item
+      || item.canRecoverTranscription
+      || item.isEditing
+      || this.data.saving
+      || this.data.deleting
+      || this.data.convertingQuestionToAnswer
+    ) {
+      return;
+    }
+    if (this.data.assignmentEditorOpen) {
+      this.closeMaterialAssignmentEditor();
+      return;
+    }
+    this.setData({
+      assignmentEditorOpen: true,
+      assignmentLoading: true,
+      assignmentError: "",
+    });
+    try {
+      const plan = await getMemoirBookPlan(item.project_id);
+      const options = materialAssignmentOptions(plan);
+      if (!options.length) {
+        this.setData({
+          assignmentError: "还没有可选择的小节，请先在书稿中生成小节。",
+        });
+        return;
+      }
+      this.setData(materialAssignmentPatch(options, item));
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        assignmentError: error instanceof Error
+          ? error.message
+          : "章节和小节加载失败",
+      });
+    } finally {
+      this.setData({ assignmentLoading: false });
+    }
+  },
+
+  closeMaterialAssignmentEditor() {
+    if (this.data.assignmentSaving) {
+      return;
+    }
+    this.setData({
+      assignmentEditorOpen: false,
+      assignmentError: "",
+    });
+  },
+
+  changeMaterialAssignment(event: MaterialAssignmentPickerEvent) {
+    const item = this.data.item;
+    if (!item || this.data.assignmentLoading || this.data.assignmentSaving) {
+      return;
+    }
+    this.setData(materialAssignmentPatch(
+      this.data.assignmentOptions,
+      item,
+      pickerIndex(event),
+    ));
+  },
+
+  async saveMaterialAssignment() {
+    const item = this.data.item;
+    const target = this.data.assignmentOptions[this.data.assignmentIndex];
+    if (
+      !item
+      || !target
+      || !this.data.assignmentCanSave
+      || this.data.assignmentLoading
+      || this.data.assignmentSaving
+      || this.data.saving
+      || this.data.deleting
+      || this.data.convertingQuestionToAnswer
+    ) {
+      return;
+    }
+    this.stopPlayback();
+    this.setData({
+      saving: true,
+      assignmentSaving: true,
+      assignmentError: "",
+    });
+    try {
+      await moveMemoirChapterMaterial(
+        item.project_id,
+        item.id,
+        target.sectionId,
+      );
+      const updated = await getMemoirVoiceTranscript(item.id);
+      this.setData({
+        item: toViewItem(updated),
+        assignmentEditorOpen: false,
+      });
+      trackAuditAction(
+        "transcript.detail_material_assignment",
+        {
+          chapter_id: updated.section_assignment?.chapter_id || "",
+          section_id: updated.section_assignment?.section_id || "",
+        },
+        { projectId: item.project_id },
+      );
+      wx.showToast({ title: "章节和小节已更新", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        assignmentError: error instanceof Error
+          ? error.message
+          : "章节和小节更新失败",
+      });
+    } finally {
+      this.setData({
+        saving: false,
+        assignmentSaving: false,
+      });
+    }
   },
 
   resetShareVideoState() {

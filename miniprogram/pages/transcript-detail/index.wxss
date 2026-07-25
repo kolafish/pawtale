@@ -311,6 +311,162 @@
   word-break: break-word;
 }
 
+.material-location-summary {
+  padding: 4rpx 22rpx;
+  border-radius: 16rpx;
+  background: var(--ui-surface-subtle);
+  box-shadow: inset 0 0 0 1rpx var(--ui-border);
+}
+
+.material-location-row {
+  min-height: 76rpx;
+  padding: 14rpx 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+  box-sizing: border-box;
+}
+
+.material-location-row + .material-location-row {
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.material-location-label {
+  flex: 0 0 72rpx;
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.material-location-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ui-text-primary);
+  font-size: 27rpx;
+  font-weight: 750;
+  line-height: 40rpx;
+  word-break: break-word;
+}
+
+.material-location-action {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 18rpx;
+  border-radius: 16rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  box-sizing: border-box;
+  transition-property: transform, opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}
+
+.material-location-action:active {
+  transform: scale(0.96);
+}
+
+.material-location-action.is-disabled {
+  opacity: 0.56;
+}
+
+.material-assignment-editor {
+  margin-top: 16rpx;
+  padding: 20rpx;
+  border-radius: 16rpx;
+  background: var(--ui-page-background);
+  box-shadow: inset 0 0 0 1rpx var(--ui-border);
+}
+
+.material-assignment-state,
+.material-assignment-error {
+  display: block;
+  padding: 18rpx 20rpx;
+  border-radius: 14rpx;
+  font-size: 25rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.material-assignment-state {
+  background: var(--ui-surface);
+  color: var(--ui-text-secondary);
+}
+
+.material-assignment-error {
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
+}
+
+.material-assignment-picker {
+  min-height: 88rpx;
+  margin-top: 14rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 14rpx;
+  background: var(--ui-surface);
+  box-shadow: inset 0 0 0 1rpx var(--ui-border);
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  box-sizing: border-box;
+  transition-property: transform, opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease;
+}
+
+.material-assignment-picker:active {
+  transform: scale(0.96);
+}
+
+.material-assignment-picker.is-disabled {
+  opacity: 0.56;
+}
+
+.material-assignment-picker-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.material-assignment-label,
+.material-assignment-value {
+  display: block;
+}
+
+.material-assignment-label {
+  color: var(--ui-text-secondary);
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.material-assignment-value {
+  margin-top: 4rpx;
+  color: var(--ui-text-primary);
+  font-size: 26rpx;
+  font-weight: 800;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.material-assignment-chevron {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 44rpx;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.material-assignment-actions {
+  justify-content: flex-start;
+  margin-top: 18rpx;
+}
+
 .body-text {
   display: block;
   padding: 22rpx 24rpx;
@@ -1110,7 +1266,9 @@
 .detail-page.large-text .offline-asr-detail,
 .detail-page.large-text .offline-asr-error,
 .detail-page.large-text .danger-panel-copy,
-.detail-page.large-text .repair-panel-copy {
+.detail-page.large-text .repair-panel-copy,
+.detail-page.large-text .material-location-label,
+.detail-page.large-text .material-assignment-label {
   font-size: 30rpx;
   line-height: 1.5;
 }
@@ -1143,7 +1301,9 @@
 .detail-page.large-text .voice-edit-text,
 .detail-page.large-text .voice-edit-diff-text,
 .detail-page.large-text .share-video-segment-text,
-.detail-page.large-text .share-video-selection-text {
+.detail-page.large-text .share-video-selection-text,
+.detail-page.large-text .material-location-value,
+.detail-page.large-text .material-assignment-value {
   font-size: 34rpx;
   line-height: 1.65;
 }
@@ -1160,7 +1320,9 @@
 .detail-page.large-text .danger-button,
 .detail-page.large-text .edit-exit-button,
 .detail-page.large-text .edit-reference-toggle,
-.detail-page.large-text .text-action-button {
+.detail-page.large-text .text-action-button,
+.detail-page.large-text .material-location-action,
+.detail-page.large-text .material-assignment-picker {
   min-height: 48px;
   font-size: 30rpx;
   line-height: 1.35;
@@ -1171,7 +1333,9 @@
 .detail-page.large-text .share-video-background-label,
 .detail-page.large-text .custom-background-status,
 .detail-page.large-text .share-video-job-title,
-.detail-page.large-text .voice-edit-change-text {
+.detail-page.large-text .voice-edit-change-text,
+.detail-page.large-text .material-assignment-state,
+.detail-page.large-text .material-assignment-error {
   font-size: 30rpx;
   line-height: 1.5;
 }
