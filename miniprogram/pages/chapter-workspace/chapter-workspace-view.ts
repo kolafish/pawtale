@@ -138,7 +138,31 @@ function visibleDraftSectionViews(
     }));
 }
 
-function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
+function draftStructureChanged(workspace: MemoirChapterWorkspace): boolean {
+  if (!workspace.draft_sections.length) {
+    return false;
+  }
+  const currentSectionIds = workspace.sections
+    .filter((section) => (
+      section.status === "active"
+      && section.include_in_book !== false
+      && !section.requires_user_assignment
+    ))
+    .map((section) => section.id)
+    .sort();
+  const draftSectionIds = workspace.draft_sections
+    .map((section) => section.section_id)
+    .sort();
+  return currentSectionIds.length !== draftSectionIds.length
+    || currentSectionIds.some(
+      (sectionId, index) => sectionId !== draftSectionIds[index],
+    );
+}
+
+function rewriteNoticeTitle(
+  workspace: MemoirChapterWorkspace,
+  structureChanged: boolean,
+): string {
   const completionCount = workspace.pending_completion_source_count || 0;
   const newCount = workspace.pending_new_source_count || 0;
   if (completionCount && newCount) {
@@ -149,6 +173,9 @@ function rewriteNoticeTitle(workspace: MemoirChapterWorkspace): string {
   }
   if (newCount) {
     return `${newCount} 条新增讲述尚未写入正文`;
+  }
+  if (structureChanged) {
+    return "现有正文仍按原来的小节保留";
   }
   return "本章素材已经变化";
 }
@@ -228,14 +255,23 @@ export function chapterWorkspaceViewPatch(
     (total, section) => total + section.visibleMaterials.length,
     0,
   );
+  const structureChanged = draftStructureChanged(workspace);
   return {
     nextAction,
     readinessTitle: summary.headline,
     readinessDetail: summary.detail,
-    rewriteNoticeTitle: rewriteNoticeTitle(workspace),
-    rewriteNoticeDetail: workspace.can_rewrite_draft
-      ? `可以继续补充，也可以现在生成。${rewriteDraftScopeDetail}`
-      : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分小节。`,
+    rewriteNoticeTitle: rewriteNoticeTitle(workspace, structureChanged),
+    rewriteNoticeDetail: structureChanged
+      ? (
+        workspace.can_rewrite_draft
+          ? `旧正文没有丢失。${rewriteDraftScopeDetail}`
+          : `旧正文没有丢失。请先完成待归类等当前步骤，再${rewriteDraftActionText}。`
+      )
+      : (
+        workspace.can_rewrite_draft
+          ? `可以继续补充，也可以现在生成。${rewriteDraftScopeDetail}`
+          : `请先完成本章当前步骤，再${rewriteDraftActionText}；这不会重新划分小节。`
+      ),
     ...draftRecoveryPatch(
       workspace,
       nextAction,
