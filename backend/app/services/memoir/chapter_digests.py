@@ -27,6 +27,8 @@ from app.services.memoir.semantic_state import semantic_json_signature
 
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
+CHAPTER_DIGEST_MAX_TOKENS = 4800
+CHAPTER_DIGEST_TIMEOUT_SECONDS = 120.0
 CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录主编。"
     "你根据小章节摘要判断整章的结构和阅读体验，不创造新事实。"
@@ -122,13 +124,19 @@ async def ensure_section_digests(
     if not sections:
         raise HTTPException(status_code=422, detail="章节没有可收录的小章节")
     for section in sections:
-        await completion_issues.refresh_section_issues(
-            db,
-            project_id=project_id,
-            section_id=section.id,
-            ai_model=ai_model,
-            ai_client=ai_client,
-        )
+        try:
+            await completion_issues.refresh_section_issues(
+                db,
+                project_id=project_id,
+                section_id=section.id,
+                ai_model=ai_model,
+                ai_client=ai_client,
+            )
+        except HTTPException:
+            # Section digests are reusable semantic caches. Preserve completed
+            # provider work even if a later section or the chapter digest fails.
+            await db.commit()
+            raise
         digest = await section_digests.get_current_section_digest(
             db,
             project_id=project_id,
@@ -144,6 +152,7 @@ async def ensure_section_digests(
                 status_code=422,
                 detail=digest.error_message or f"小章节“{section.title}”审阅失败",
             )
+        await db.commit()
 
 
 async def load_chapter_digest_context(
@@ -300,7 +309,32 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 已有素材足够、只需重排或改写的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 最多三个；只保留用户回答或确认后会明显改善结果的问题。
 - 不能创建输入摘要之外的新事实。
+- 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。
 """
+
+
+def _llm_response_parts(
+    response: str | tuple[str, dict],
+) -> tuple[str, dict]:
+    if isinstance(response, tuple):
+        content, response_json = response
+        return str(content), response_json if isinstance(response_json, dict) else {}
+    return str(response), {}
+
+
+def _llm_finish_reason(response_json: dict) -> str:
+    choices = response_json.get("choices")
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        reason = choices[0].get("finish_reason")
+        if isinstance(reason, str):
+            return reason
+    incomplete = response_json.get("incomplete_details")
+    if isinstance(incomplete, dict):
+        reason = incomplete.get("reason")
+        if isinstance(reason, str):
+            return reason
+    status = response_json.get("status")
+    return status if isinstance(status, str) else ""
 
 
 def normalize_chapter_digest(
@@ -448,16 +482,38 @@ async def generate_or_reuse_chapter_digest(
         return existing
     prompt = build_chapter_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
+    response_diagnostics: dict[str, object] = {}
     try:
-        raw = await client._call_llm(
+        response = await client._call_llm(
             CHAPTER_DIGEST_SYSTEM_PROMPT,
             prompt,
             temperature=0.2,
-            max_tokens=2200,
-            timeout=60.0,
+            max_tokens=CHAPTER_DIGEST_MAX_TOKENS,
+            timeout=CHAPTER_DIGEST_TIMEOUT_SECONDS,
+            return_raw=True,
         )
+        content, response_json = _llm_response_parts(response)
+        finish_reason = _llm_finish_reason(response_json)
+        response_diagnostics = {
+            "finish_reason": finish_reason,
+            "response_char_count": len(content),
+        }
+        payload = extract_json_payload(content)
+        if not isinstance(payload, dict):
+            logger.warning(
+                "memoir chapter digest returned invalid JSON chapter_id=%s "
+                "provider=%s model=%s finish_reason=%s response_chars=%s",
+                chapter_id,
+                getattr(client, "provider_name", None),
+                getattr(client, "model_name", ai_model),
+                finish_reason or "<unknown>",
+                len(content),
+            )
+            if finish_reason in {"length", "max_tokens", "incomplete"}:
+                raise ValueError("章节审阅输出被截断，请重新检查本章")
+            raise ValueError("章节审阅没有返回可识别的结构，请重新检查本章")
         digest_json = normalize_chapter_digest(
-            extract_json_payload(str(raw)),
+            payload,
             allowed_section_ids={
                 item.section_id for item in context.sections
             },
@@ -495,14 +551,17 @@ async def generate_or_reuse_chapter_digest(
         engine=CHAPTER_DIGEST_ENGINE,
     )
     digest.status = status.value
+    generation = {
+        "requested_model": ai_model,
+        "provider": getattr(client, "provider_name", None),
+        "model": getattr(client, "model_name", ai_model),
+        "engine": CHAPTER_DIGEST_ENGINE,
+        **response_diagnostics,
+    }
     digest.digest_json = {
         **digest_json,
-        "generation": {
-            "provider": getattr(client, "provider_name", None),
-            "model": getattr(client, "model_name", ai_model),
-            "engine": CHAPTER_DIGEST_ENGINE,
-        },
-    } if digest_json else {}
+        "generation": generation,
+    } if digest_json else {"generation": generation}
     digest.error_message = error
     digest.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(digest)

@@ -18,10 +18,12 @@ from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirChapterDigest,
     MemoirCompletionIssue,
+    MemoirSectionDigest,
     MemoirSectionMaterial,
 )
-from app.services.memoir import chapter_digests, chapter_generation
+from app.services.memoir import chapter_digests, chapter_generation, section_digests
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -98,6 +100,42 @@ class FakeChapterAI:
                 "editor_notes": ["合并了重复描述。"],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+class TruncatedChapterDigestAI(FakeChapterAI):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.chapter_max_tokens: list[int] = []
+
+    async def _call_llm(
+        self,
+        system_prompt,
+        user_prompt,
+        temperature=0.7,
+        max_tokens=4000,
+        timeout=60.0,
+        return_raw=False,
+    ):
+        if "请审阅回忆录章节" not in user_prompt:
+            return await super()._call_llm(
+                system_prompt,
+                user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                return_raw=return_raw,
+            )
+        self.prompts.append(user_prompt)
+        self.chapter_max_tokens.append(max_tokens)
+        content = '{"summary":"这一章讲重新联系和共同爬山。",'
+        if return_raw:
+            return content, {
+                "choices": [{
+                    "finish_reason": "length",
+                    "message": {"content": content},
+                }]
+            }
+        return content
 
 
 def _two_section_context() -> chapter_generation.ChapterGenerationContext:
@@ -594,6 +632,56 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     )
     assert issue is not None
     assert issue.question == "这次见面对你意味着什么？"
+
+
+async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    fake = TruncatedChapterDigestAI(
+        section_material_id=materials[0]["utterance_id"],
+        chapter_section_id=section["id"],
+        chapter_material_id=materials[0]["utterance_id"],
+        draft_material_ids=[materials[0]["utterance_id"]],
+    )
+    monkeypatch.setattr(section_digests, "get_ai_service", lambda _model: fake)
+    monkeypatch.setattr(chapter_digests, "get_ai_service", lambda _model: fake)
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={"ai_model": "claude-opus-4-8"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "章节审阅输出被截断，请重新检查本章"
+    assert fake.chapter_max_tokens == [chapter_digests.CHAPTER_DIGEST_MAX_TOKENS]
+    assert fake.chapter_max_tokens[0] == 4800
+
+    section_digest = await test_db.scalar(
+        select(MemoirSectionDigest).where(
+            MemoirSectionDigest.section_id == section["id"],
+            MemoirSectionDigest.status == MemoirSemanticCacheStatus.READY.value,
+        )
+    )
+    assert section_digest is not None
+    chapter_digest = await test_db.scalar(
+        select(MemoirChapterDigest).where(
+            MemoirChapterDigest.chapter_id == chapter.id,
+        )
+    )
+    assert chapter_digest is not None
+    assert chapter_digest.status == MemoirSemanticCacheStatus.FAILED.value
+    assert chapter_digest.digest_json["generation"] == {
+        "requested_model": "claude-opus-4-8",
+        "provider": "test",
+        "model": "test-chapter",
+        "engine": chapter_digests.CHAPTER_DIGEST_ENGINE,
+        "finish_reason": "length",
+        "response_char_count": 28,
+    }
 
 
 async def test_chapter_generation_saves_material_allowlist_snapshot(client, test_db):
