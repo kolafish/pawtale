@@ -8,7 +8,6 @@ import {
   type RequestOptions,
 } from "./request";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
-import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 
 export interface BackendAuthUser {
   id: string;
@@ -42,7 +41,6 @@ export interface UpdateProfileInput {
 let backendSessionPromise: Promise<void> | null = null;
 
 function rememberMemoirIdentity(identity: MemoirIdentity): MemoirIdentity {
-  ensureMemoirStoreIdentity(cacheIdentityFromUser(identity, identity.active_project || undefined));
   writeMemoirIdentitySnapshot(identity);
   return identity;
 }
