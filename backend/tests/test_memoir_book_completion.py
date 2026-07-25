@@ -421,7 +421,9 @@ async def test_chapter_workspace_exposes_section_structure(
     )
 
     assert response.status_code == 200, response.text
-    section = response.json()["sections"][0]
+    body = response.json()
+    assert body["server_revision"] >= 1
+    section = body["sections"][0]
     assert section["title"] == chapter.title
     assert section["section_type"] == "life_fragment"
     assert section["material_count"] == 1

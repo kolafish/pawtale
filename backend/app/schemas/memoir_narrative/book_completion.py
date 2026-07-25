@@ -94,6 +94,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):
+    server_revision: int = Field(ge=0)
     project_id: str
     chapter_id: str
     chapter_title: str

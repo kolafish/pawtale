@@ -84,6 +84,7 @@ function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
   consent = true,
+  cacheExports = {},
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
@@ -103,6 +104,11 @@ function loadWorkspacePage({
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
   mockModule("../services/audit-tracker.ts", { trackAuditAction() {} });
+  mockModule("../stores/memoir-read-cache.ts", {
+    readCachedMemoirChapterWorkspace: () => ({ status: "miss" }),
+    writeCachedMemoirChapterWorkspace: () => {},
+    ...cacheExports,
+  });
   mockModule("../services/voice-authorization.ts", {
     readVoiceAuthorizationConsent: () => consent,
     syncVoiceAuthorizationConsent: async () => {},

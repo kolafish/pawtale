@@ -22,6 +22,7 @@ export interface MemoirSnapshotEnvelope<T> {
   envelope_version: number;
   cache_schema_version: number;
   server_revision: number;
+  local_invalidation_revision?: number;
   cached_at: string;
   stale?: boolean;
   scope: {
@@ -38,6 +39,7 @@ export interface MemoirSnapshotReadResult<T> {
   status: "miss" | "fresh" | "stale";
   payload?: T;
   serverRevision?: number;
+  localInvalidationRevision?: number;
   cachedAt?: string;
 }
 
@@ -106,6 +108,13 @@ function validEnvelope(value: unknown): value is MemoirSnapshotEnvelope<unknown>
     && Number.isInteger(envelope.cache_schema_version)
     && Number.isInteger(envelope.server_revision)
     && Number(envelope.server_revision) >= 0
+    && (
+      envelope.local_invalidation_revision === undefined
+      || (
+        Number.isInteger(envelope.local_invalidation_revision)
+        && Number(envelope.local_invalidation_revision) >= 0
+      )
+    )
     && validTimestamp(envelope.cached_at)
     && (envelope.stale === undefined || typeof envelope.stale === "boolean")
     && Boolean(
@@ -164,6 +173,7 @@ export function readMemoirSnapshot<T>(
     status: stale ? "stale" : "fresh",
     payload: raw.payload,
     serverRevision: raw.server_revision,
+    localInvalidationRevision: raw.local_invalidation_revision || 0,
     cachedAt: raw.cached_at,
   };
 }
@@ -194,6 +204,7 @@ export function writeMemoirSnapshot<T>(
     envelope_version: SNAPSHOT_ENVELOPE_VERSION,
     cache_schema_version: descriptor.cacheSchemaVersion,
     server_revision: serverRevision,
+    local_invalidation_revision: current.localInvalidationRevision || 0,
     cached_at: new Date(nowMs).toISOString(),
     stale: false,
     scope: normalizedScope(descriptor.scope),
@@ -222,6 +233,7 @@ export function markMemoirSnapshotStale<T>(
     envelope_version: SNAPSHOT_ENVELOPE_VERSION,
     cache_schema_version: descriptor.cacheSchemaVersion,
     server_revision: snapshot.serverRevision || 0,
+    local_invalidation_revision: (snapshot.localInvalidationRevision || 0) + 1,
     cached_at: snapshot.cachedAt || new Date().toISOString(),
     stale: true,
     scope: normalizedScope(descriptor.scope),
@@ -251,5 +263,32 @@ export function clearMemoirSnapshotsForUser(userId: string): void {
       .forEach((key) => removeSnapshotKey(key));
   } catch (error) {
     console.warn("clear memoir snapshot caches failed", error);
+  }
+}
+
+export function markMemoirSnapshotsStaleForUser(userId: string): void {
+  const normalizedUserId = userId.trim();
+  if (!normalizedUserId) {
+    return;
+  }
+  const userPrefix = `${SNAPSHOT_STORE_PREFIX}${encodedKeyPart(normalizedUserId)}:`;
+  try {
+    const storage = wx.getStorageInfoSync();
+    storage.keys
+      .filter((key) => key.startsWith(userPrefix))
+      .forEach((key) => {
+        const raw = wx.getStorageSync<unknown>(key);
+        if (!validEnvelope(raw)) {
+          removeSnapshotKey(key);
+          return;
+        }
+        wx.setStorageSync(key, {
+          ...raw,
+          local_invalidation_revision: (raw.local_invalidation_revision || 0) + 1,
+          stale: true,
+        });
+      });
+  } catch (error) {
+    console.warn("mark memoir snapshot caches stale failed", error);
   }
 }

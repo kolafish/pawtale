@@ -20,6 +20,7 @@ from app.models.memoir import (
     MemoirSection,
     MemoirVoiceSession,
 )
+from app.models.projects import Project
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
     MemoirChapterCompletionIssue,
@@ -397,6 +398,9 @@ async def chapter_workspace(
     project_id: str,
     chapter_id: str,
 ) -> MemoirChapterWorkspaceResponse:
+    server_revision = await db.scalar(
+        select(Project.memoir_data_revision).where(Project.id == project_id)
+    )
     chapter = await db.scalar(
         select(MemoirBookPlanChapter).where(
             MemoirBookPlanChapter.project_id == project_id,
@@ -463,6 +467,7 @@ async def chapter_workspace(
         if section.requires_user_assignment
     )
     return MemoirChapterWorkspaceResponse(
+        server_revision=server_revision or 0,
         project_id=project_id,
         chapter_id=chapter_id,
         chapter_title=chapter.title,
