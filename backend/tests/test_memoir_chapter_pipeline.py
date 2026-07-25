@@ -297,6 +297,73 @@ async def test_chapter_generation_retries_only_the_invalid_section():
     assert "上次输出未通过校验" in fake.prompts[2]
 
 
+async def test_chapter_generation_does_not_copy_previous_section_boundary():
+    repeated_boundary = (
+        "就这样搞到二零零四年，不行了，已经太老了，七十几岁了。"
+        "就回来，真的退休回来了。但退休回来又出去，再组织钢材。"
+        "二零零四年，你们婆病了，癌症，病故了。二零零五年、"
+        "二零零六年又在外面帮忙组织钢材。二零零六年，就跟温婆婆结婚了。"
+    )
+    repeated_boundary_with_newline = repeated_boundary.replace(
+        "二零零四年，你们婆病了",
+        "二零零四年，\n你们婆病了",
+    )
+
+    class BoundaryCopyingAI:
+        model_name = "test-boundary-copy"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            self.prompts.append(user_prompt)
+            section_id = next(
+                line.removeprefix("section_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("section_id: ")
+            )
+            material_id = next(
+                line.removeprefix("material_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("material_id: ")
+            )
+            content = (
+                repeated_boundary
+                if section_id == "section-1"
+                else (
+                    f"{repeated_boundary_with_newline}\n\n"
+                    if "上次输出未通过校验" not in user_prompt
+                    else ""
+                )
+                + "退休了以后，好多人到处聘我去。"
+            )
+            return json.dumps(
+                {
+                    "sections": [{
+                        "section_id": section_id,
+                        "content": content,
+                        "used_material_ids": [material_id],
+                    }],
+                    "missing_source_candidates": [],
+                    "editor_notes": [],
+                },
+                ensure_ascii=False,
+            )
+
+    fake = BoundaryCopyingAI()
+    generated = await chapter_generation.generate_chapter(
+        _two_section_context(),
+        editorial_guidance=[],
+        ai_client=fake,
+    )
+
+    assert len(fake.prompts) == 3
+    assert all(repeated_boundary not in prompt for prompt in fake.prompts)
+    assert "小节开头大段重复了上一小节结尾" in fake.prompts[2]
+    assert generated.sections[1].content == "退休了以后，好多人到处聘我去。"
+    assert generated.content.count(repeated_boundary) == 1
+
+
 async def _chapter(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     first = await create_test_voice_transcript(
