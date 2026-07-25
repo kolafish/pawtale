@@ -14,11 +14,11 @@
       <text class="status-detail">{{readinessDetail}}</text>
       <view
         wx:if="{{nextAction.actionText}}"
-        class="primary-action {{nextAction.disabled || processBusy || startingIssueId !== '' || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action {{nextAction.disabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{nextAction.disabled || processBusy || startingIssueId !== '' || regeneratingDraftSectionId !== ''}}"
+        aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
-      >{{processBusy || startingIssueId !== "" ? "正在处理…" : nextAction.actionText}}</view>
+      >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
 
     <view wx:if="{{sectionViews.length}}" class="content-card structure-card" id="chapter-structure">
@@ -33,11 +33,11 @@
       <view class="structure-tools">
         <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
         <view
-          class="structure-regenerate-action {{regeneratingSections || regeneratingDraftSectionId !== '' || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
-          aria-disabled="{{regeneratingSections || regeneratingDraftSectionId !== '' || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== ''}}"
+          aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
           bindtap="regenerateSections"
-        >{{regeneratingSections ? "正在重新整理…" : "重新整理小节分组"}}</view>
+        >{{operationKind === "regenerate_sections" ? "正在重新整理…" : "重新整理小节分组"}}</view>
       </view>
 
       <view class="section-list">
@@ -70,14 +70,14 @@
                 range="{{material.assignmentOptions}}"
                 range-key="title"
                 data-utterance-id="{{material.utterance_id}}"
-                disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft}}"
+                disabled="{{operationKind !== ''}}"
                 bindchange="moveUnassignedMaterial"
               >
                 <view
-                  class="material-assignment-action {{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft ? 'is-disabled' : ''}}"
+                  class="material-assignment-action {{operationKind !== '' ? 'is-disabled' : ''}}"
                   aria-role="button"
-                  aria-disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || regeneratingDraftSectionId !== '' || rewritingDraft}}"
-                >{{movingMaterialId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
+                  aria-disabled="{{operationKind !== ''}}"
+                >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
               </picker>
             </view>
           </view>
@@ -98,11 +98,11 @@
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
         <view
-          class="rewrite-action {{!workspace.can_rewrite_draft || rewritingDraft || regeneratingDraftSectionId !== '' || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="rewrite-action {{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
-          aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || regeneratingDraftSectionId !== '' || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+          aria-disabled="{{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
-        >{{rewritingDraft ? rewriteDraftBusyText : rewriteDraftActionText}}</view>
+        >{{operationKind === "rewrite_chapter" ? rewriteDraftBusyText : rewriteDraftActionText}}</view>
       </view>
 
       <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
@@ -142,13 +142,13 @@
               <view class="edit-actions">
                 <button
                   class="secondary-action"
-                  disabled="{{savingDraft}}"
+                  disabled="{{operationKind === 'save_draft_section'}}"
                   bindtap="cancelDraftSectionEdit"
                 >取消</button>
                 <button
                   class="secondary-action strong"
-                  loading="{{savingDraft}}"
-                  disabled="{{savingDraft}}"
+                  loading="{{operationKind === 'save_draft_section'}}"
+                  disabled="{{operationKind === 'save_draft_section'}}"
                   bindtap="saveDraftSectionEdit"
                 >保存这一小节</button>
               </view>
@@ -157,26 +157,26 @@
           <block wx:else>
             <view class="draft-section-actions">
               <view
-                class="draft-section-action {{(ttsBusySectionId !== '' && ttsBusySectionId !== item.section_id) || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action {{operationKind !== '' || (audioPhase !== 'idle' && audioSectionId !== item.section_id) ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{(ttsBusySectionId !== '' && ttsBusySectionId !== item.section_id) || regeneratingDraftSectionId !== ''}}"
+                aria-disabled="{{operationKind !== '' || (audioPhase !== 'idle' && audioSectionId !== item.section_id)}}"
                 bindtap="playDraftSection"
-              >{{ttsBusySectionId === item.section_id ? "准备朗读…" : (playingSectionId === item.section_id ? "停止朗读" : "朗读")}}</view>
+              >{{audioPhase === "preparing" && audioSectionId === item.section_id ? "准备朗读…" : (audioPhase === "playing" && audioSectionId === item.section_id ? "停止朗读" : "朗读")}}</view>
               <view
-                class="draft-section-action {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
+                aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                 bindtap="startDraftSectionEdit"
               >修改</view>
               <view
-                class="draft-section-action regenerate {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action regenerate {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
+                aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                 bindtap="regenerateDraftSection"
-              >{{regeneratingDraftSectionId === item.section_id ? "生成中…" : "重新生成"}}</view>
+              >{{operationKind === "regenerate_draft_section" && operationTargetId === item.section_id ? "生成中…" : "重新生成"}}</view>
             </view>
             <view wx:if="{{item.expanded}}" class="draft-section-body">
               <text class="draft-content" selectable>{{item.content}}</text>
@@ -190,11 +190,11 @@
           <text class="empty-title">{{draftRecoveryTitle}}</text>
           <text class="empty-detail">{{draftRecoveryDetail}}</text>
           <view
-            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || processBusy || rewritingDraft || regeneratingDraftSectionId !== '' || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+            class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{draftRecoveryActionDisabled || processBusy || rewritingDraft || regeneratingDraftSectionId !== '' || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+            aria-disabled="{{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== ''}}"
             bindtap="runDraftRecoveryAction"
-          >{{rewritingDraft ? rewriteDraftBusyText : (processBusy || startingIssueId !== "" ? "正在处理…" : draftRecoveryActionText)}}</view>
+          >{{operationKind === "rewrite_chapter" ? rewriteDraftBusyText : (operationKind !== "" ? "正在处理…" : draftRecoveryActionText)}}</view>
         </block>
         <block wx:else>
           <text class="empty-title">正文还没有准备好</text>
@@ -204,11 +204,11 @@
 
       <view
         wx:if="{{workspace.draft_sections.length && workspace.completion_summary.state === 'draft_ready'}}"
-        class="primary-action confirm-chapter-action {{!canConfirmChapter || confirmingChapter || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        class="primary-action confirm-chapter-action {{!canConfirmChapter || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{!canConfirmChapter || confirmingChapter || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
+        aria-disabled="{{!canConfirmChapter || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="confirmChapter"
-      >{{confirmingChapter ? "正在确认…" : "确认本章正文"}}</view>
+      >{{operationKind === "confirm_chapter" ? "正在确认…" : "确认本章正文"}}</view>
 
       <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
         <text class="chapter-finished-title">本章已完成</text>

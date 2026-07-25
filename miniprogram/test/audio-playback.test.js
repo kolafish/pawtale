@@ -26,6 +26,41 @@ test("configureAudiblePlayback disables mute switch and sets full volume", () =>
   delete global.wx;
 });
 
+test("playAudioFileSequence preserves order and stops when the token is stale", async () => {
+  delete require.cache[require.resolve("../services/audio-playback.ts")];
+  const { playAudioFileSequence } = require("../services/audio-playback.ts");
+  const played = [];
+  let current = true;
+
+  const completed = await playAudioFileSequence(
+    ["audio-1", "audio-2", "audio-3"],
+    {
+      token: 7,
+      isCurrent: () => current,
+      async playFile(audioFileId, index) {
+        played.push([audioFileId, index]);
+        if (index === 1) {
+          current = false;
+        }
+      },
+    },
+  );
+
+  assert.equal(completed, false);
+  assert.deepEqual(played, [
+    ["audio-1", 0],
+    ["audio-2", 1],
+  ]);
+  await assert.rejects(
+    playAudioFileSequence([], {
+      token: 8,
+      isCurrent: () => true,
+      async playFile() {},
+    }),
+    /没有可播放的音频/,
+  );
+});
+
 function createManualAudioContext() {
   const callbacks = {};
   const audio = {
