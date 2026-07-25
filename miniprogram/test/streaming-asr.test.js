@@ -824,7 +824,7 @@ test("streaming ASR connect times out while backend session check is pending", a
         };
       }
       if (key === "pawtale_backend_cookie") {
-        return "pawtale_session=abc";
+        return "";
       }
       return "";
     },
