@@ -7,6 +7,7 @@ from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
     MemoirChapterAIRequest,
+    MemoirChapterDraftSectionRegenerateRequest,
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir.narrative import book_completion
@@ -118,6 +119,43 @@ async def rewrite_memoir_book_completion_chapter(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
+            user_id=current_user.id,
+            ai_model=selected_ai_model,
+        )
+        await db.commit()
+        return workspace
+    except ValueError as exc:
+        await db.rollback()
+        raise decision_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/regenerate",
+    response_model=MemoirChapterWorkspaceResponse,
+)
+async def regenerate_memoir_chapter_draft_section(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    req: MemoirChapterDraftSectionRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = await authorize_project(
+        db,
+        project_id=project_id,
+        current_user=current_user,
+    )
+    requested_ai_model = (req.ai_model or "").strip()
+    selected_ai_model = requested_ai_model or project_ai_model(project)
+    remember_project_ai_model(project, requested_ai_model)
+    try:
+        workspace = await book_completion.regenerate_chapter_section(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            section_id=section_id,
+            expected_version_id=req.expected_version_id,
             user_id=current_user.id,
             ai_model=selected_ai_model,
         )

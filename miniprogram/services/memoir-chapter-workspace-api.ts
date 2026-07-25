@@ -52,6 +52,30 @@ export function regenerateMemoirChapterSections(
   );
 }
 
+export function regenerateMemoirChapterDraftSection(
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  expectedVersionId: string,
+): Promise<MemoirChapterWorkspace> {
+  return memoirAIRequest<
+    MemoirChapterWorkspace,
+    {
+      expected_version_id: string;
+      ai_model: null;
+    }
+  >(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/draft-sections/${encodeURIComponent(sectionId)}/regenerate`,
+    ),
+    {
+      expected_version_id: expectedVersionId,
+      ai_model: null,
+    },
+  );
+}
+
 export function moveMemoirChapterMaterial(
   projectId: string,
   utteranceId: string,

@@ -48,7 +48,12 @@ function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao
         return;
       }
       let data = samplePlan("confirmed");
-      if (options.url.endsWith("/draft/tts") || options.url.endsWith("/outline/tts") || options.url.endsWith("/book-output/tts")) {
+      if (
+        options.url.endsWith("/draft/tts")
+        || (options.url.includes("/draft/sections/") && options.url.endsWith("/tts"))
+        || options.url.endsWith("/outline/tts")
+        || options.url.endsWith("/book-output/tts")
+      ) {
         data = sampleAudioResponse();
       } else if (options.url.endsWith("/draft") || options.url.endsWith("/draft/confirm")) {
         data = sampleDraft();
@@ -677,6 +682,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.confirmMemoirBookChapterDraft("project/1", "chapter/1"), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/confirm` },
     { call: () => api.assembleMemoirBookOutput("project/1"), method: "POST", url: `${narrativeBase}/book-output/assemble`, data: {} },
     { call: () => api.createMemoirBookChapterDraftTTS("project/1", "chapter/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/tts`, timeout: 600000 },
+    { call: () => api.createMemoirBookChapterDraftSectionTTS("project/1", "chapter/1", "section/1", {}), method: "POST", url: `${base}/book-plan/chapters/chapter%2F1/draft/sections/section%2F1/tts`, timeout: 600000 },
     { call: () => api.createMemoirBookPlanOutlineTTS("project/1", {}), method: "POST", url: `${base}/book-plan/outline/tts`, timeout: 600000 },
     { call: () => api.applyMemoirBookPlanStructureCommand("project/1", { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" }), method: "POST", url: `${base}/book-plan/structure-commands`, data: { type: "merge_chapters", chapter_id: "chapter/2", target_chapter_id: "chapter/1" } },
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },

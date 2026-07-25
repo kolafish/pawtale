@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.memoir.types import MemoirEditingJobStatus
 from app.schemas.memoir_sections import (
@@ -34,6 +34,18 @@ MemoirChapterCompletionNextActionKind = Literal[
 
 class MemoirChapterAIRequest(BaseModel):
     ai_model: str | None = Field(default=None, max_length=120)
+
+
+class MemoirChapterDraftSectionRegenerateRequest(MemoirChapterAIRequest):
+    expected_version_id: str = Field(min_length=1, max_length=36)
+
+    @field_validator("expected_version_id")
+    @classmethod
+    def _strip_expected_version_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("expected_version_id 不能为空")
+        return normalized
 
 
 class MemoirChapterPreparationJobResponse(BaseModel):

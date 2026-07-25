@@ -384,6 +384,28 @@ async def create_mobile_memoir_book_chapter_tts(
     )
 
 
+@router.post(
+    "/projects/{project_id}/book-plan/chapters/{chapter_id}/draft/sections/{section_id}/tts",
+    response_model=MemoirBookAudioResponse,
+)
+async def create_mobile_memoir_book_chapter_section_tts(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    req: MemoirBookAudioRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_drafts.synthesize_chapter_draft_section_audio(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        section_id=section_id,
+        req=req,
+    )
+
+
 @router.get("/projects/{project_id}/book-output", response_model=MemoirBookOutputResponse)
 async def get_mobile_memoir_book_output(
     project_id: str,
