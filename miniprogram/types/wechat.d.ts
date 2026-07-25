@@ -418,6 +418,7 @@ declare namespace WechatMiniprogram {
     stopPullDownRefresh(): void;
     base64ToArrayBuffer(value: string): ArrayBuffer;
     getStorageSync<T = unknown>(key: string): T;
+    getStorageInfoSync(): { keys: string[] };
     setStorageSync<T = unknown>(key: string, value: T): void;
     removeStorageSync(key: string): void;
   }
