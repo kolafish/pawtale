@@ -146,6 +146,7 @@ class MemoirSectionRegenerateResponse(BaseModel):
     assigned_count: int
     unassigned_count: int
     section_count: int
+    ai_model: str | None = None
 
 
 class MemoirSectionMaterialAssignmentRequest(BaseModel):

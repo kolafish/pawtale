@@ -267,6 +267,66 @@ async def test_section_digest_creates_reusable_ranked_issues(client, test_db):
     ]
 
 
+async def test_section_digest_keeps_distinct_questions_for_same_material(
+    client,
+    test_db,
+):
+    project_id, section, materials = await _section(client, test_db)
+    material_id = materials[0]["utterance_id"]
+    payload = _digest_payload(material_id)
+    payload["candidate_issues"] = [
+        {
+            "issue_type": "sequence",
+            "question": "从发现包块到最后做手术，大概过了多久？",
+            "reason": "补充就医过程的时间顺序。",
+            "priority": "high",
+            "material_ids": [material_id],
+        },
+        {
+            "issue_type": "sequence",
+            "question": "从手术到发现扩散，中间过了多久？",
+            "reason": "补充病情变化的时间顺序。",
+            "priority": "high",
+            "material_ids": [material_id],
+        },
+    ]
+
+    issues = await completion_issues.refresh_section_issues(
+        test_db,
+        project_id=project_id,
+        section_id=section["id"],
+        ai_client=FakeDigestAI(payload),
+    )
+    await test_db.commit()
+
+    assert [issue.question for issue in issues] == [
+        "从发现包块到最后做手术，大概过了多久？",
+        "从手术到发现扩散，中间过了多久？",
+    ]
+    assert len({issue.fingerprint for issue in issues}) == 2
+
+    rewritten_payload = {
+        **payload,
+        "candidate_issues": [
+            {
+                **candidate,
+                "question": candidate["question"].replace("大概", "约莫"),
+            }
+            for candidate in payload["candidate_issues"]
+        ],
+    }
+    refreshed = await completion_issues.refresh_section_issues(
+        test_db,
+        project_id=project_id,
+        section_id=section["id"],
+        ai_client=FakeDigestAI(rewritten_payload),
+        force_digest=True,
+    )
+    await test_db.commit()
+
+    assert [issue.id for issue in refreshed] == [issue.id for issue in issues]
+
+
 async def test_closed_issue_is_not_reopened_or_rephrased(client, test_db):
     project_id, section, materials = await _section(client, test_db)
     fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))

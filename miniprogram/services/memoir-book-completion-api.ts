@@ -3,6 +3,7 @@ import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,
+  withSelectedAIModel,
 } from "./memoir-api-client";
 
 
@@ -27,7 +28,7 @@ export function prepareMemoirBookChapter(
     ),
     {
       method: "POST",
-      data: {},
+      data: withSelectedAIModel({ ai_model: null }),
     },
   );
 }
@@ -43,7 +44,7 @@ export function rewriteMemoirBookChapter(
     ),
     {
       method: "POST",
-      data: {},
+      data: withSelectedAIModel({ ai_model: null }),
     },
   );
 }

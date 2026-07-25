@@ -69,6 +69,32 @@ def _issue_fingerprint(
     return sha256(encoded.encode("utf-8")).hexdigest()
 
 
+def _disambiguate_issue_values(values: list[dict]) -> list[dict]:
+    result: list[dict] = []
+    seen_candidates: set[tuple[str, str]] = set()
+    occurrences: dict[str, int] = {}
+    for value in values:
+        base_fingerprint = value["fingerprint"]
+        candidate_key = (
+            base_fingerprint,
+            " ".join(str(value["question"]).split()),
+        )
+        if candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        occurrence = occurrences.get(base_fingerprint, 0)
+        occurrences[base_fingerprint] = occurrence + 1
+        if occurrence:
+            value = {
+                **value,
+                "fingerprint": sha256(
+                    f"{base_fingerprint}:{occurrence}".encode("utf-8")
+                ).hexdigest(),
+            }
+        result.append(value)
+    return result
+
+
 def _response(issue: MemoirCompletionIssue) -> MemoirCompletionIssueResponse:
     return MemoirCompletionIssueResponse(
         id=issue.id,
@@ -204,6 +230,7 @@ async def refresh_section_issues(
         )
         if candidate_values is not None:
             values.append(candidate_values)
+    values = _disambiguate_issue_values(values)
     fingerprints = {value["fingerprint"] for value in values}
     existing = list(
         (
@@ -300,6 +327,7 @@ async def sync_chapter_digest_issues(
                 "input_signature": input_signature,
             }
         )
+    values = _disambiguate_issue_values(values)
     existing = list(
         (
             await db.scalars(
@@ -396,6 +424,7 @@ async def sync_book_review_issues(
                 "input_signature": input_signature,
             }
         )
+    values = _disambiguate_issue_values(values)
     existing = list(
         (
             await db.scalars(

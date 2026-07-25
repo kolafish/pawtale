@@ -86,6 +86,26 @@ class FailingReplayMaterialOrganizationAI(ReplayMaterialOrganizationAI):
         )
 
 
+class PartiallyUnassignedReplayMaterialOrganizationAI(
+    ReplayMaterialOrganizationAI
+):
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        if self.prompts:
+            self.prompts.append(user_prompt)
+            return json.dumps(
+                {
+                    "action": "leave_unassigned",
+                    "reason": "暂不归章",
+                },
+                ensure_ascii=False,
+            )
+        return await super()._call_llm(
+            _system_prompt,
+            user_prompt,
+            **_kwargs,
+        )
+
+
 async def _bootstrap_two_chapters(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     first = await create_test_voice_transcript(
@@ -398,10 +418,16 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     test_db.add(excluded)
     await test_db.commit()
     fake = ReplayMaterialOrganizationAI()
+    requested_models: list[str | None] = []
+
+    def factory(model=None):
+        requested_models.append(model)
+        return fake
+
     monkeypatch.setattr(
         section_regeneration,
         "get_ai_service",
-        lambda _model=None: fake,
+        factory,
     )
 
     response = await client.post(
@@ -425,6 +451,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         "assigned_count": 2,
         "unassigned_count": 0,
         "section_count": 1,
+        "ai_model": "fake-section-organizer",
     }
     listed = await client.get(f"/api/memoir/projects/{project_id}/sections")
     assert listed.status_code == 200
@@ -449,6 +476,9 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         for material in chapter_sections[0]["materials"]
     ] == [False, True]
     assert len(fake.prompts) == 2
+    assert requested_models == ["deepseek-v4-flash"]
+    assert "不得保留为未归类素材" in fake.prompts[0]
+    assert "assign_existing|create_section|leave_unassigned" not in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert "山桃花里的重逢" in fake.prompts[1]
     untouched = [
@@ -460,7 +490,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     assert "工作这些年" not in fake.prompts[0]
 
 
-async def test_regenerate_chapter_sections_rolls_back_when_no_section_is_generated(
+async def test_regenerate_chapter_sections_preserves_every_material_or_rolls_back(
     client,
     test_db,
     monkeypatch,
@@ -470,7 +500,7 @@ async def test_regenerate_chapter_sections_rolls_back_when_no_section_is_generat
         test_db,
     )
     original_section = data["sections"][0]
-    fake = ReplayMaterialOrganizationAI(leave_unassigned=True)
+    fake = PartiallyUnassignedReplayMaterialOrganizationAI()
     monkeypatch.setattr(
         section_regeneration,
         "get_ai_service",
@@ -490,7 +520,10 @@ async def test_regenerate_chapter_sections_rolls_back_when_no_section_is_generat
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "AI 未能为本章生成任何小节，请重试"
+    assert response.json()["detail"] == (
+        "AI 未能为全部讲述安排小节，原小节结构已保留，请重试"
+    )
+    assert len(fake.prompts) == 2
     await test_db.rollback()
     persisted = await test_db.get(MemoirSection, original_section["id"])
     assert persisted is not None
