@@ -449,6 +449,9 @@ async def generate_or_reuse_section_digest(
         engine=engine,
         current_signature=context.input_signature,
     )
+    # Stale cache bookkeeping must not keep SQLite write-locked while the
+    # provider generates the replacement digest.
+    await db.commit()
     existing = await db.scalar(
         select(MemoirSectionDigest).where(
             MemoirSectionDigest.project_id == project_id,
