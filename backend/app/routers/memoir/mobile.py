@@ -10,6 +10,10 @@ from app.schemas.memoir_projects import (
     MemoirProjectListResponse,
     MemoirProjectUpdate,
 )
+from app.schemas.memoir_snapshots import (
+    MemoirBookSnapshotResponse,
+    MemoirHomeSnapshotResponse,
+)
 from app.schemas.memoir_topic_map import (
     MemoirTopicMapItemResponse,
     MemoirTopicMapResolutionRequest,
@@ -17,6 +21,7 @@ from app.schemas.memoir_topic_map import (
 )
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import projects as memoir_projects
+from app.services.memoir import read_snapshots as memoir_read_snapshots
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.narrative import topic_map
 
@@ -29,18 +34,23 @@ async def get_mobile_memoir_identity(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    projects = await memoir_projects.mobile_project_list(db, current_user.id)
-    return MemoirIdentityResponse(
-        id=current_user.id,
-        email=current_user.email,
-        password_login_enabled=current_user.password_login_enabled,
-        display_name=current_user.display_name,
-        avatar_url=current_user.avatar_url,
-        created_at=current_user.created_at,
-        active_project_id=projects.active_project_id,
-        active_project=projects.active_project,
-        projects=projects.projects,
-    )
+    return await memoir_projects.memoir_identity_response(db, current_user)
+
+
+@router.get("/home-snapshot", response_model=MemoirHomeSnapshotResponse)
+async def get_mobile_memoir_home_snapshot(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_read_snapshots.home_snapshot(db, current_user)
+
+
+@router.get("/book-snapshot", response_model=MemoirBookSnapshotResponse)
+async def get_mobile_memoir_book_snapshot(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_read_snapshots.book_snapshot(db, current_user)
 
 
 @router.get("/projects", response_model=MemoirProjectListResponse)

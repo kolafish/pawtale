@@ -203,6 +203,14 @@ async def test_confirm_plan_replaces_sections_without_legacy_links(
     assert len(memberships) == 2
     assert len({item.section_id for item in memberships}) == 1
 
+    snapshot_response = await client.get("/api/mobile/memoir/book-snapshot")
+    assert snapshot_response.status_code == 200
+    snapshot = snapshot_response.json()
+    chapter_id = payload["chapters"][0]["id"]
+    assert snapshot["plan"]["id"] == payload["id"]
+    assert snapshot["plan"]["chapters"][0]["id"] == chapter_id
+    assert snapshot["drafts_by_chapter_id"] == {chapter_id: None}
+
 
 async def test_book_plan_can_hide_and_restore_chapter(client, test_db):
     first = await create_test_voice_transcript(client, test_db, "童年。")
