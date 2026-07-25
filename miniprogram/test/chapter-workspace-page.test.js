@@ -495,6 +495,11 @@ test("chapter workspace edits one small section with optimistic version control"
   page.changeDraftSectionContent.call(context, {
     detail: { value: "修改后的第一小节正文" },
   });
+  page.startDraftSectionEdit.call(context, {
+    currentTarget: { dataset: { id: "section-2" } },
+  });
+  assert.equal(context.data.editingSectionId, "section-1");
+  assert.equal(context.data.editingSectionContent, "修改后的第一小节正文");
   await page.saveDraftSectionEdit.call(context);
 
   assert.deepEqual(calls, [[

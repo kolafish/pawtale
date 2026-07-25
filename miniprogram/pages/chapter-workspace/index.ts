@@ -675,6 +675,7 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.regeneratingSections
       || this.data.rewritingDraft
       || this.data.confirmingChapter
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }

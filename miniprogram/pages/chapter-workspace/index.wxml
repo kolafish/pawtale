@@ -164,17 +164,17 @@
                 bindtap="playDraftSection"
               >{{ttsBusySectionId === item.section_id ? "准备朗读…" : (playingSectionId === item.section_id ? "停止朗读" : "朗读")}}</view>
               <view
-                class="draft-section-action {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== ''}}"
+                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
                 bindtap="startDraftSectionEdit"
               >修改</view>
               <view
-                class="draft-section-action regenerate {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' ? 'is-disabled' : ''}}"
+                class="draft-section-action regenerate {{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== ''}}"
+                aria-disabled="{{confirmingChapter || rewritingDraft || regeneratingDraftSectionId !== '' || editingSectionId !== ''}}"
                 bindtap="regenerateDraftSection"
               >{{regeneratingDraftSectionId === item.section_id ? "生成中…" : "重新生成"}}</view>
             </view>
