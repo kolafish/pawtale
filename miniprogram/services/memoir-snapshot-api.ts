@@ -3,17 +3,12 @@ import type {
   MemoirHomeSnapshot,
 } from "../domain/memoir-snapshots";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
-import { cacheIdentityFromUser, ensureMemoirStoreIdentity } from "../stores/session";
 import { memoirRequest } from "./memoir-api-client";
 
 function rememberSnapshotIdentity<T extends MemoirHomeSnapshot | MemoirBookSnapshot>(
   snapshot: T,
 ): T {
-  const identity = snapshot.identity;
-  ensureMemoirStoreIdentity(
-    cacheIdentityFromUser(identity, identity.active_project || undefined),
-  );
-  writeMemoirIdentitySnapshot(identity);
+  writeMemoirIdentitySnapshot(snapshot.identity);
   return snapshot;
 }
 

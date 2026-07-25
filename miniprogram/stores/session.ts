@@ -1,4 +1,4 @@
-import type { MemoirIdentity, Project, User } from "../domain/memoir";
+import type { MemoirIdentity, Project } from "../domain/memoir";
 import type {
   MemoirVoiceSessionDetail,
   VoiceChatTranscriptLine,
@@ -57,21 +57,10 @@ function persistMemoirStore(store: MemoirSessionStore): MemoirSessionStore {
     wx.setStorageSync(STORE_KEY, store);
     return store;
   } catch {
-    if (!store.voice_session_cache) {
-      return {
-        ...store,
-        cache_write_failed_at: new Date().toISOString(),
-      };
-    }
-    const fallback = { ...store };
-    delete fallback.voice_session_cache;
-    fallback.cache_write_failed_at = new Date().toISOString();
-    try {
-      wx.setStorageSync(STORE_KEY, fallback);
-      return fallback;
-    } catch {
-      return fallback;
-    }
+    return {
+      ...store,
+      cache_write_failed_at: new Date().toISOString(),
+    };
   }
 }
 
@@ -89,58 +78,30 @@ export function replaceMemoirStore(next: MemoirSessionStore): MemoirSessionStore
   return persistMemoirStore(next);
 }
 
-export function cacheIdentityFromUser(
-  user: Pick<User, "id" | "storage_owner_id">,
-  project?: Pick<Project, "id">,
-): MemoirCacheIdentity {
-  return {
-    user_id: user.id,
-    storage_owner_id: user.storage_owner_id,
-    project_id: project?.id,
-  };
-}
-
-function sameCacheIdentity(current: MemoirCacheIdentity | undefined, next: MemoirCacheIdentity): boolean {
-  if (!current) {
-    return true;
-  }
-  if (current.user_id !== next.user_id) {
-    return false;
-  }
-  if ((current.storage_owner_id || "") !== (next.storage_owner_id || "")) {
-    return false;
-  }
-  const currentProjectId = current.project_id || "";
-  const nextProjectId = next.project_id || "";
-  if ((currentProjectId || nextProjectId) && currentProjectId !== nextProjectId) {
-    return false;
-  }
-  return true;
-}
-
-export function ensureMemoirStoreIdentity(identity: MemoirCacheIdentity): MemoirSessionStore {
+export function setMemoirCacheIdentity(identity: MemoirCacheIdentity): MemoirSessionStore {
   const current = readMemoirStore();
-  const hasCachedMemoirData = Boolean(
-    current.project
-    || current.identity
-    || current.identity_cache
-    || current.voice_session_cache,
-  );
-  if (!current.cache_identity && hasCachedMemoirData) {
+  const currentIdentity = current.cache_identity;
+  if (
+    !currentIdentity
+    || currentIdentity.user_id !== identity.user_id
+    || (currentIdentity.storage_owner_id || "") !== (identity.storage_owner_id || "")
+  ) {
     return replaceMemoirStore({ cache_identity: identity });
   }
-  if (!sameCacheIdentity(current.cache_identity, identity)) {
+  const currentProjectId = currentIdentity.project_id || "";
+  const nextProjectId = identity.project_id ?? currentIdentity.project_id;
+  if (identity.project_id !== undefined && currentProjectId !== identity.project_id) {
     return replaceMemoirStore({ cache_identity: identity });
   }
-  const nextIdentity = {
+  const nextIdentity: MemoirCacheIdentity = {
     user_id: identity.user_id,
     storage_owner_id: identity.storage_owner_id,
-    project_id: identity.project_id ?? current.cache_identity?.project_id,
+    project_id: nextProjectId,
   };
   if (
-    current.cache_identity?.user_id === nextIdentity.user_id
-    && current.cache_identity.storage_owner_id === nextIdentity.storage_owner_id
-    && current.cache_identity.project_id === nextIdentity.project_id
+    currentIdentity.user_id === nextIdentity.user_id
+    && currentIdentity.storage_owner_id === nextIdentity.storage_owner_id
+    && currentIdentity.project_id === nextIdentity.project_id
   ) {
     return current;
   }

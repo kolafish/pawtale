@@ -29,9 +29,24 @@ function installWxStorageMock(initialStorage = {}, failWrites = 0) {
     removeStorageSync(key) {
       delete storage[key];
     },
+    getStorageInfoSync() {
+      return { keys: Object.keys(storage) };
+    },
   };
 
   return { storage, writes };
+}
+
+function voiceStorage() {
+  return {
+    [STORE_KEY]: {
+      cache_identity: {
+        user_id: "user-1",
+        storage_owner_id: "owner-1",
+        project_id: "project-1",
+      },
+    },
+  };
 }
 
 function sessionStoreModule() {
@@ -45,11 +60,8 @@ function memoirCacheModule() {
   return require("../stores/memoir-cache.ts");
 }
 
-test("writeMemoirStore persists fallback when voice session cache is too large", () => {
-  const mock = installWxStorageMock({}, 1);
-  const { replaceMemoirStore } = sessionStoreModule();
-
-  const result = replaceMemoirStore({
+test("writeMemoirStore does not drop legacy voice data when storage is full", () => {
+  const original = {
     cache_identity: { user_id: "user-1", project_id: "project-1" },
     voice_session_cache: {
       version: 3,
@@ -60,23 +72,15 @@ test("writeMemoirStore persists fallback when voice session cache is too large",
         },
       },
     },
-  });
-
-  assert.equal(mock.writes.length, 2);
-  assert.equal(result.voice_session_cache, undefined);
-  assert.equal(typeof result.cache_write_failed_at, "string");
-  assert.deepEqual(mock.storage[STORE_KEY], result);
-});
-
-test("writeMemoirStore marks unpersisted result when storage write fails without fallback", () => {
-  installWxStorageMock({}, 1);
+  };
+  const mock = installWxStorageMock({ [STORE_KEY]: original }, 1);
   const { replaceMemoirStore } = sessionStoreModule();
 
-  const result = replaceMemoirStore({
-    cache_identity: { user_id: "user-1", project_id: "project-1" },
-  });
+  const result = replaceMemoirStore(original);
 
+  assert.equal(mock.writes.length, 1);
   assert.equal(typeof result.cache_write_failed_at, "string");
+  assert.deepEqual(mock.storage[STORE_KEY], original);
 });
 
 test("writeMemoirStore clears previous write failure marker after successful write", () => {
@@ -97,8 +101,62 @@ test("writeMemoirStore clears previous write failure marker after successful wri
   assert.equal(mock.storage[STORE_KEY].project.title, "回忆录");
 });
 
+test("legacy identity and pending voice data migrate without being dropped", () => {
+  const cachedAt = new Date().toISOString();
+  const mock = installWxStorageMock({
+    [STORE_KEY]: {
+      cache_identity: {
+        user_id: "user-1",
+        storage_owner_id: "owner-1",
+        project_id: "project-1",
+      },
+      identity: {
+        id: "user-1",
+        email: "author@example.com",
+        storage_owner_id: "owner-1",
+        active_project_id: "project-1",
+        projects: [],
+      },
+      identity_cache: { version: 3, cached_at: cachedAt },
+      voice_session_cache: {
+        version: 3,
+        sessions: {
+          "voice-1": {
+            transcript_lines: [{ id: "line-1", text: "尚未提交的一句" }],
+            pending_close: {
+              reason: "connection_error",
+              captured_at: cachedAt,
+              transcript_lines: [{ id: "line-1", text: "尚未提交的一句" }],
+              live_text: "还有半句",
+              recording: true,
+            },
+            cached_at: cachedAt,
+            stale: true,
+          },
+        },
+      },
+    },
+  });
+  const {
+    readMemoirIdentitySnapshot,
+    readMemoirVoiceSessionSnapshot,
+  } = memoirCacheModule();
+
+  assert.equal(readMemoirIdentitySnapshot().identity.id, "user-1");
+  const voice = readMemoirVoiceSessionSnapshot("voice-1");
+
+  assert.equal(voice.pendingClose.live_text, "还有半句");
+  assert.equal(voice.transcriptLines[0].text, "尚未提交的一句");
+  assert.equal(mock.storage[STORE_KEY].identity, undefined);
+  assert.equal(mock.storage[STORE_KEY].voice_session_cache, undefined);
+  assert.equal(
+    Object.keys(mock.storage).filter((key) => key.startsWith("pawtale_memoir_snapshot:")).length,
+    2,
+  );
+});
+
 test("voice session snapshots persist backend detail as transcript lines", () => {
-  const mock = installWxStorageMock();
+  const mock = installWxStorageMock(voiceStorage());
   const {
     readMemoirVoiceSessionSnapshot,
     transcriptLinesFromVoiceSessionDetail,
@@ -196,11 +254,13 @@ test("voice session snapshots persist backend detail as transcript lines", () =>
   assert.equal(snapshot.transcriptLines.length, 2);
   assert.equal(snapshot.transcriptLines[0].text, "你想先聊谁？");
   assert.equal(snapshot.transcriptLines[1].text, "我想聊我的外婆。");
-  assert.equal(mock.storage[STORE_KEY].voice_session_cache.version, 3);
+  const voiceCacheKey = Object.keys(mock.storage)
+    .find((key) => key.endsWith(":voice_session:voice-1"));
+  assert.equal(mock.storage[voiceCacheKey].cache_schema_version, 1);
 });
 
 test("voice session snapshots keep longer local transcript when backend detail lags", () => {
-  installWxStorageMock();
+  installWxStorageMock(voiceStorage());
   const {
     readMemoirVoiceSessionSnapshot,
     writeMemoirVoiceSessionSnapshot,
@@ -249,7 +309,7 @@ test("voice session snapshots keep longer local transcript when backend detail l
 });
 
 test("voice session pending close snapshots can be written, preserved, and cleared", () => {
-  installWxStorageMock();
+  installWxStorageMock(voiceStorage());
   const {
     clearMemoirVoiceSessionPendingClose,
     readMemoirVoiceSessionSnapshot,
