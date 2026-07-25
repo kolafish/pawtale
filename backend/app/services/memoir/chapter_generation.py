@@ -54,6 +54,8 @@ CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
     "不自行创造事实。"
 )
 CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
+CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS = 40
+CHAPTER_SECTION_BOUNDARY_LOOKBACK_CHARS = 300
 logger = logging.getLogger(__name__)
 
 
@@ -253,7 +255,6 @@ def build_chapter_generation_prompt(
     *,
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
-    previous_section_ending: str = "",
     current_section_content: str = "",
     revision_instruction: str = "",
 ) -> str:
@@ -293,14 +294,9 @@ def build_chapter_generation_prompt(
         for item in editorial_guidance[:8]
         if item.strip()
     ) or "（无额外编辑建议）"
-    continuity = (
-        f"\n上一小节结尾（仅用于自然衔接，不得改写其中事实）：\n"
-        f"{previous_section_ending}\n"
-        if previous_section_ending
-        else ""
-    )
     generation_scope = (
-        "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项。\n"
+        "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项；"
+        "不得复述其他小节的内容。\n"
         if target_section_id
         else "- 一次输出完整章节，并严格按输入顺序返回每个小节。\n"
     )
@@ -326,7 +322,6 @@ def build_chapter_generation_prompt(
 
 本章完整小节顺序：
 {outline}
-{continuity}
 {revision}
 编辑建议：
 {guidance}
@@ -351,8 +346,8 @@ def build_chapter_generation_prompt(
 {generation_scope}- 严格按输入顺序返回小节。
 - 每个输入 section_id 必须出现且只能出现一次，不新增、删除、合并或改名小节。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
-- 小节之间要有自然承接，合起来应当是一篇完整章节。
-- 只能使用输入中的事实和感受，可以调整顺序、合并重复、补充自然过渡。
+- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡。
+- 只能使用输入中的事实和感受，可以调整顺序、合并重复。
 - 不要为了完整而虚构时间、地点、人物、因果或心理活动。
 - 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
 - 同一次讲述保持连续，不把一条 Material 拆散后穿插到多处。
@@ -379,6 +374,21 @@ def _deduplicated_strings(
     limit: int = 8,
 ) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value for value in values if value))[:limit]
+
+
+def _reject_repeated_section_boundary(
+    previous_content: str,
+    current_content: str,
+) -> None:
+    previous = previous_content.rstrip()[
+        -CHAPTER_SECTION_BOUNDARY_LOOKBACK_CHARS:
+    ]
+    current = current_content.lstrip()
+    for size in range(min(len(previous), len(current)), 0, -1):
+        if size < CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS:
+            return
+        if previous.endswith(current[:size]):
+            raise ValueError("小节开头大段重复了上一小节结尾")
 
 
 def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
@@ -512,14 +522,14 @@ async def generate_chapter(
     generated_sections: list[GeneratedChapterSection] = []
     missing_source_candidates: list[str] = []
     editor_notes: list[str] = []
-    previous_section_ending = ""
+    previous_section_content = ""
     for section in context.sections:
         generated_section = await generate_chapter_section(
             context,
             section=section,
             editorial_guidance=editorial_guidance,
             chapter_sections=context.sections,
-            previous_section_ending=previous_section_ending,
+            previous_section_content=previous_section_content,
             ai_model=ai_model,
             ai_client=client,
         )
@@ -529,7 +539,7 @@ async def generate_chapter(
             generated_section.missing_source_candidates
         )
         editor_notes.extend(generated_section.editor_notes)
-        previous_section_ending = current.content[-300:]
+        previous_section_content = current.content
     return GeneratedChapter(
         sections=tuple(generated_sections),
         content="\n\n".join(
@@ -554,7 +564,7 @@ async def generate_chapter_section(
     section: ChapterSectionInput,
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...],
-    previous_section_ending: str = "",
+    previous_section_content: str = "",
     current_section_content: str = "",
     revision_instruction: str = "",
     ai_model: str | None = None,
@@ -566,7 +576,6 @@ async def generate_chapter_section(
         section_context,
         editorial_guidance=editorial_guidance,
         chapter_sections=chapter_sections,
-        previous_section_ending=previous_section_ending,
         current_section_content=current_section_content,
         revision_instruction=revision_instruction,
     )
@@ -590,11 +599,16 @@ async def generate_chapter_section(
                 max_tokens=5000,
                 timeout=120.0,
             )
-            return normalize_generated_chapter(
+            generated = normalize_generated_chapter(
                 extract_json_payload(str(raw)),
                 context=section_context,
                 model=getattr(client, "model_name", ai_model),
             )
+            _reject_repeated_section_boundary(
+                previous_section_content,
+                generated.sections[0].content,
+            )
+            return generated
         except (ValueError, httpx.HTTPError) as exc:
             last_error = exc
             logger.warning(
@@ -847,11 +861,11 @@ async def revise_and_save_chapter_draft_section_with_ai(
         ] != expected_section_ids
     ):
         raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再修改")
-    previous_section_ending = ""
-    if target_index > 0:
-        previous_section_ending = str(
-            latest_sections[target_index - 1].get("content") or ""
-        ).strip()[-300:]
+    previous_section_content = (
+        str(latest_sections[target_index - 1].get("content") or "").strip()
+        if target_index > 0
+        else ""
+    )
     target = before.sections[target_index]
     revision_instruction = instruction_text.strip()
     await db.commit()
@@ -860,7 +874,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
         section=target,
         editorial_guidance=editorial_guidance,
         chapter_sections=before.sections,
-        previous_section_ending=previous_section_ending,
+        previous_section_content=previous_section_content,
         current_section_content=str(
             latest_sections[target_index].get("content") or ""
         ).strip(),
