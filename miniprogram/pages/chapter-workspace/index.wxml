@@ -14,9 +14,9 @@
       <text class="status-detail">{{readinessDetail}}</text>
       <view
         wx:if="{{nextAction.actionText}}"
-        class="primary-action {{nextAction.disabled || operationKind !== '' ? 'is-disabled' : ''}}"
+        class="primary-action {{nextAction.disabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{nextAction.disabled || operationKind !== ''}}"
+        aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>

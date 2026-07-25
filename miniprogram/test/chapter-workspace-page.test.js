@@ -243,6 +243,13 @@ test("chapter workspace serializes mutations through one operation state", () =>
   page.finishOperation.call(context, "regenerate_sections");
   assert.equal(context.data.operationKind, "");
   assert.equal(context.data.operationTargetId, "");
+  context.setData({ editingSectionId: "section-1" });
+  assert.equal(page.beginOperation.call(context, "prepare"), false);
+  assert.equal(
+    page.beginOperation.call(context, "save_draft_section", "section-1"),
+    true,
+  );
+  page.finishOperation.call(context, "save_draft_section", "section-1");
   delete global.wx;
 });
 

@@ -196,7 +196,14 @@ definePage<ChapterWorkspacePageData>()({
     kind: ChapterWorkspaceOperationKind,
     targetId = "",
   ): boolean {
-    if (!kind || this.data.operationKind) {
+    if (
+      !kind
+      || this.data.operationKind
+      || (
+        this.data.editingSectionId
+        && kind !== "save_draft_section"
+      )
+    ) {
       return false;
     }
     this.stopDraftSectionPlayback();
@@ -468,6 +475,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       action.disabled
       || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }
