@@ -11,6 +11,8 @@ interface MemoirRequestOptions {
 
 type QueryValue = string | number | boolean | null | undefined;
 
+export const MEMOIR_MUTATION_TIMEOUT_MS = 600000;
+
 export function withSelectedAIModel<T extends { ai_model?: string | null }>(data: T): T {
   const explicitModel = typeof data.ai_model === "string" ? data.ai_model.trim() : "";
   return {
@@ -24,7 +26,13 @@ export async function memoirRequest<T>(
   options: MemoirRequestOptions = {},
 ): Promise<T> {
   await ensureBackendSession();
-  return request<T>(path, options);
+  const method = options.method || "GET";
+  return request<T>(path, {
+    ...options,
+    timeoutMs:
+      options.timeoutMs ??
+      (method === "GET" ? undefined : MEMOIR_MUTATION_TIMEOUT_MS),
+  });
 }
 
 export async function ensureMemoirBackendSession(): Promise<void> {

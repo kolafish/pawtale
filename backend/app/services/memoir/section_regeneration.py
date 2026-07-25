@@ -30,6 +30,10 @@ from app.services.memoir.material_organization import (
     material_organization_excerpt,
 )
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.project_ai_preferences import (
+    project_ai_model,
+    remember_project_ai_model,
+)
 from app.services.memoir.sections import assign_material_to_section
 from app.services.memoir.utterance_editing_pipeline import (
     current_transcript_version_id,
@@ -127,21 +131,31 @@ def _ordered_materials(
 def _material_snapshots(
     chapter: MemoirBookPlanChapter,
 ) -> list[_MaterialSnapshot]:
-    return [
-        _MaterialSnapshot(
-            utterance_id=utterance.id,
-            text=text,
-            text_hash=source_text_hash(text),
-            transcript_version_id=current_transcript_version_id(utterance),
-            include_in_book=(
-                section.include_in_book and material.include_in_book
-            ),
+    snapshots: list[_MaterialSnapshot] = []
+    for section, material in _ordered_materials(chapter):
+        utterance = material.utterance
+        text = current_utterance_text(utterance) if utterance else ""
+        if (
+            utterance is None
+            or not is_narrator_material(utterance)
+            or not text
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="本章包含暂不能重排的讲述，原小节结构已保留",
+            )
+        snapshots.append(
+            _MaterialSnapshot(
+                utterance_id=utterance.id,
+                text=text,
+                text_hash=source_text_hash(text),
+                transcript_version_id=current_transcript_version_id(utterance),
+                include_in_book=(
+                    section.include_in_book and material.include_in_book
+                ),
+            )
         )
-        for section, material in _ordered_materials(chapter)
-        if (utterance := material.utterance)
-        if is_narrator_material(utterance)
-        and (text := current_utterance_text(utterance))
-    ]
+    return snapshots
 
 
 def _validate_material_snapshots(
@@ -170,8 +184,9 @@ async def _plan_section_regeneration(
     chapter_title: str,
     materials: list[_MaterialSnapshot],
     ai_model: str | None,
-) -> tuple[list[_PlannedSection], int]:
+) -> tuple[list[_PlannedSection], str | None]:
     client = get_ai_service(ai_model)
+    generated_model = getattr(client, "model_name", ai_model)
     chapters = [
         MaterialOrganizationChapterCandidate(
             id=chapter_id,
@@ -179,17 +194,19 @@ async def _plan_section_regeneration(
         )
     ]
     planned_sections: list[_PlannedSection] = []
-    unassigned_count = 0
     for material in materials:
         decision = await decide_material_organization(
             material_text=material.text,
             chapters=chapters,
             sections=[section.candidate for section in planned_sections],
             ai_client=client,
+            allow_leave_unassigned=False,
         )
         if decision.action == "leave_unassigned":
-            unassigned_count += 1
-            continue
+            raise HTTPException(
+                status_code=409,
+                detail="AI 未能为全部讲述安排小节，原小节结构已保留，请重试",
+            )
         if decision.action == "create_section":
             candidate = MaterialOrganizationSectionCandidate(
                 id=str(uuid.uuid4()),
@@ -219,7 +236,7 @@ async def _plan_section_regeneration(
             )
         )
         _append_candidate_example(target.candidate, material.text)
-    return planned_sections, unassigned_count
+    return planned_sections, generated_model
 
 
 async def regenerate_chapter_sections(
@@ -230,13 +247,16 @@ async def regenerate_chapter_sections(
     chapter_id: str,
     req: MemoirSectionRegenerateRequest,
     allow_admin: bool = False,
-) -> dict[str, int]:
-    await load_memoir_project(
+) -> dict[str, int | str | None]:
+    project = await load_memoir_project(
         db,
         project_id,
         user_id,
         allow_admin=allow_admin,
     )
+    requested_ai_model = (req.ai_model or "").strip()
+    selected_ai_model = requested_ai_model or project_ai_model(project)
+    remember_project_ai_model(project, requested_ai_model)
     chapter = await _load_chapter(
         db,
         project_id=project_id,
@@ -251,11 +271,11 @@ async def regenerate_chapter_sections(
     # LLM calls may take minutes. Release the read transaction and defer every
     # mutation until all decisions are ready, then replace the structure atomically.
     await db.commit()
-    planned_sections, unassigned_count = await _plan_section_regeneration(
+    planned_sections, generated_model = await _plan_section_regeneration(
         chapter_id=chapter_id,
         chapter_title=chapter_title,
         materials=materials,
-        ai_model=req.ai_model,
+        ai_model=selected_ai_model,
     )
     if not planned_sections:
         raise HTTPException(
@@ -291,6 +311,12 @@ async def regenerate_chapter_sections(
                 title=candidate.title,
                 section_type=candidate.section_type,
                 sort_order=index,
+                metadata_json={
+                    "generation": {
+                        "operation": "chapter_section_regeneration",
+                        "model": generated_model,
+                    }
+                },
             )
         )
     await db.flush()
@@ -315,6 +341,7 @@ async def regenerate_chapter_sections(
     return {
         "material_count": len(materials),
         "assigned_count": assigned_count,
-        "unassigned_count": unassigned_count,
+        "unassigned_count": 0,
         "section_count": len(planned_sections),
+        "ai_model": generated_model,
     }

@@ -139,6 +139,7 @@ def build_material_organization_prompt(
     material_text: str,
     chapters: list[MaterialOrganizationChapterCandidate],
     sections: list[MaterialOrganizationSectionCandidate],
+    allow_leave_unassigned: bool = True,
 ) -> str:
     chapter_titles = {chapter.id: chapter.title for chapter in chapters}
     candidates = [
@@ -156,15 +157,28 @@ def build_material_organization_prompt(
         {"chapter_id": chapter.id, "chapter_title": chapter.title}
         for chapter in chapters
     ]
+    organization_rule = (
+        "如果仅凭当前内容无法可靠归类，保留为未归类素材。"
+        if allow_leave_unassigned
+        else (
+            "这段讲述已经属于当前章节，必须归入一个已有小章节，"
+            "或在当前章节中新建小章节，不得保留为未归类素材。"
+        )
+    )
+    allowed_actions = (
+        "assign_existing|create_section|leave_unassigned"
+        if allow_leave_unassigned
+        else "assign_existing|create_section"
+    )
     return (
         "请判断下面这整段讲述应放在哪里。\n"
         "优先选择语义连贯的已有小章节；只有现有小章节都不合适时才新建；"
-        "如果仅凭当前内容无法可靠归类，保留为未归类素材。\n\n"
+        f"{organization_rule}\n\n"
         f"讲述：\n{material_text}\n\n"
         f"已有小章节：\n{json.dumps(candidates, ensure_ascii=False)}\n\n"
         f"可选章节：\n{json.dumps(chapter_candidates, ensure_ascii=False)}\n\n"
         "只返回 JSON："
-        '{"action":"assign_existing|create_section|leave_unassigned",'
+        f'{{"action":"{allowed_actions}",'
         '"section_id":null,"chapter_id":null,"title":"",'
         '"section_type":"event|life_fragment|person_portrait|life_stage_summary|viewpoint_reflection",'
         '"confidence":0.0,"reason":""}'
@@ -215,11 +229,13 @@ async def decide_material_organization(
     chapters: list[MaterialOrganizationChapterCandidate],
     sections: list[MaterialOrganizationSectionCandidate],
     ai_client: AITextClient,
+    allow_leave_unassigned: bool = True,
 ) -> MaterialOrganizationDecision:
     prompt = build_material_organization_prompt(
         material_text=material_text,
         chapters=chapters,
         sections=sections,
+        allow_leave_unassigned=allow_leave_unassigned,
     )
     content = await ai_client._call_llm(
         SYSTEM_PROMPT,

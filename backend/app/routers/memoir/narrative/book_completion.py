@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
@@ -6,10 +6,15 @@ from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
+    MemoirChapterAIRequest,
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir.narrative import book_completion
 from app.services.memoir import completion_read_model
+from app.services.memoir.project_ai_preferences import (
+    project_ai_model,
+    remember_project_ai_model,
+)
 
 from .common import authorize_project, decision_error
 
@@ -58,16 +63,27 @@ async def get_memoir_book_completion_overview(
 async def prepare_memoir_book_completion_chapter(
     project_id: str,
     chapter_id: str,
+    req: MemoirChapterAIRequest = Body(
+        default=MemoirChapterAIRequest(),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
+    project = await authorize_project(
+        db,
+        project_id=project_id,
+        current_user=current_user,
+    )
+    requested_ai_model = (req.ai_model or "").strip()
+    selected_ai_model = requested_ai_model or project_ai_model(project)
+    remember_project_ai_model(project, requested_ai_model)
     try:
         workspace = await book_completion.prepare_chapter(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
             user_id=current_user.id,
+            ai_model=selected_ai_model,
         )
         await db.commit()
         return workspace
@@ -83,16 +99,27 @@ async def prepare_memoir_book_completion_chapter(
 async def rewrite_memoir_book_completion_chapter(
     project_id: str,
     chapter_id: str,
+    req: MemoirChapterAIRequest = Body(
+        default=MemoirChapterAIRequest(),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
+    project = await authorize_project(
+        db,
+        project_id=project_id,
+        current_user=current_user,
+    )
+    requested_ai_model = (req.ai_model or "").strip()
+    selected_ai_model = requested_ai_model or project_ai_model(project)
+    remember_project_ai_model(project, requested_ai_model)
     try:
         workspace = await book_completion.rewrite_chapter(
             db,
             project_id=project_id,
             chapter_id=chapter_id,
             user_id=current_user.id,
+            ai_model=selected_ai_model,
         )
         await db.commit()
         return workspace

@@ -31,6 +31,10 @@ MemoirChapterCompletionNextActionKind = Literal[
 ]
 
 
+class MemoirChapterAIRequest(BaseModel):
+    ai_model: str | None = Field(default=None, max_length=120)
+
+
 class MemoirChapterPreparationJobResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

@@ -3,6 +3,7 @@ from .book_completion import (
     MemoirChapterCompletionIssue,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
+    MemoirChapterAIRequest,
     MemoirChapterPreparationJobResponse,
     MemoirChapterWorkspaceResponse,
 )
@@ -12,6 +13,7 @@ __all__ = [
     "MemoirChapterCompletionIssue",
     "MemoirChapterCompletionNextAction",
     "MemoirChapterCompletionSummary",
+    "MemoirChapterAIRequest",
     "MemoirChapterPreparationJobResponse",
     "MemoirChapterWorkspaceResponse",
 ]

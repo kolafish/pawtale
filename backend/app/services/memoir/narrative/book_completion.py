@@ -64,6 +64,7 @@ async def prepare_chapter(
     project_id: str,
     chapter_id: str,
     user_id: str,
+    ai_model: str | None = None,
 ) -> MemoirChapterWorkspaceResponse:
     await _ensure_sections(
         db,
@@ -75,6 +76,7 @@ async def prepare_chapter(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
+        ai_model=ai_model,
         force_regenerate=True,
     )
     if digest.status != MemoirSemanticCacheStatus.READY.value:
@@ -116,6 +118,7 @@ async def prepare_chapter(
                 db,
                 project_id=project_id,
                 chapter_id=chapter_id,
+                ai_model=ai_model,
                 editorial_guidance=list(
                     digest.digest_json.get("structure_guidance", [])
                 ),
@@ -133,6 +136,7 @@ async def rewrite_chapter(
     project_id: str,
     chapter_id: str,
     user_id: str,
+    ai_model: str | None = None,
 ) -> MemoirChapterWorkspaceResponse:
     await _ensure_sections(
         db,
@@ -144,6 +148,7 @@ async def rewrite_chapter(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
+        ai_model=ai_model,
         force_regenerate=False,
     )
     if digest.status != MemoirSemanticCacheStatus.READY.value:
@@ -173,6 +178,7 @@ async def rewrite_chapter(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
+        ai_model=ai_model,
         editorial_guidance=list(
             digest.digest_json.get("structure_guidance", [])
         ),

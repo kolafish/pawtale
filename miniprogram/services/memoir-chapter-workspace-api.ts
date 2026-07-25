@@ -45,7 +45,6 @@ export function regenerateMemoirChapterSections(
         expected_sections: expectedSections,
         ai_model: null,
       }),
-      timeoutMs: 300000,
     },
   );
 }

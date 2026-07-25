@@ -24,6 +24,7 @@ from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirEditingJob,
 )
+from app.models.projects import Project
 from app.schemas.memoir_narrative import (
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
@@ -216,8 +217,16 @@ def _prompt_section_materials(prompt: str) -> list[tuple[str, list[str]]]:
     return result
 
 
-def _install_ai(monkeypatch, fake: LayeredBookAI) -> None:
-    factory = lambda _model=None: fake
+def _install_ai(
+    monkeypatch,
+    fake: LayeredBookAI,
+    requested_models: list[str | None] | None = None,
+) -> None:
+    def factory(model=None):
+        if requested_models is not None:
+            requested_models.append(model)
+        return fake
+
     monkeypatch.setattr(section_digests, "get_ai_service", factory)
     monkeypatch.setattr(chapter_digests, "get_ai_service", factory)
     monkeypatch.setattr(chapter_generation, "get_ai_service", factory)
@@ -361,6 +370,41 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
         .where(MemoirBookChapterDraftVersion.chapter_id == chapter.id)
     )
     assert version_count == 1
+
+
+async def test_prepare_uses_and_remembers_the_selected_ai_model(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    fake = LayeredBookAI()
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
+
+    first = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare",
+        json={"ai_model": "claude-opus-4-8"},
+    )
+
+    assert first.status_code == 200, first.text
+    assert requested_models
+    assert set(requested_models) == {"claude-opus-4-8"}
+    project = await test_db.get(Project, project_id)
+    assert project is not None
+    assert project.metadata_json["ai_model"] == "claude-opus-4-8"
+
+    requested_models.clear()
+    second = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/prepare"
+    )
+
+    assert second.status_code == 200, second.text
+    assert requested_models
+    assert set(requested_models) == {"claude-opus-4-8"}
 
 
 async def test_chapter_workspace_exposes_section_structure(

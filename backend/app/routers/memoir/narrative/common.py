@@ -2,6 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import is_admin_user
+from app.models.projects import Project
 from app.models.users import User
 from app.services.memoir.access import load_memoir_project
 
@@ -11,8 +12,8 @@ async def authorize_project(
     *,
     project_id: str,
     current_user: User,
-) -> None:
-    await load_memoir_project(
+) -> Project:
+    return await load_memoir_project(
         db,
         project_id,
         current_user.id,
