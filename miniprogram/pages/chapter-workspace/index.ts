@@ -100,6 +100,7 @@ interface ChapterWorkspacePageData {
   rewriteDraftActionText: string;
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
+  structureExpanded: boolean;
   sectionViews: ChapterSectionView[];
   draftSectionViews: ChapterDraftSectionView[];
   expandedSectionIds: Record<string, boolean>;
@@ -142,6 +143,7 @@ definePage<ChapterWorkspacePageData>()({
     rewriteDraftActionText: "重新生成全部小节正文",
     rewriteDraftBusyText: "正在生成全部小节正文…",
     rewriteDraftScopeDetail: "",
+    structureExpanded: false,
     sectionViews: [],
     draftSectionViews: [],
     expandedSectionIds: {},
@@ -283,15 +285,13 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     const loadSequence = ++this.workspaceLoadSequence;
-    const cached = this.data.workspace
-      ? { status: "miss" as const }
-      : readCachedMemoirChapterWorkspace(
-        this.data.projectId,
-        this.data.chapterId,
-      );
-    const showedCachedData = Boolean(cached.payload);
+    const cached = readCachedMemoirChapterWorkspace(
+      this.data.projectId,
+      this.data.chapterId,
+    );
+    const showedCachedData = Boolean(this.data.workspace || cached.payload);
     const localInvalidationRevision = cached.localInvalidationRevision || 0;
-    if (cached.payload) {
+    if (!this.data.workspace && cached.payload) {
       this.applyWorkspace(cached.payload);
     } else if (!silent) {
       this.setData({ loading: true, error: "" });
@@ -343,6 +343,10 @@ definePage<ChapterWorkspacePageData>()({
         this.data.expandedSectionIds,
         this.data.expandedDraftSectionIds,
       ),
+      structureExpanded:
+        Boolean(workspace.pending_assignment_material_count)
+        || !workspace.draft_sections.length
+        || this.data.structureExpanded,
       loading: false,
       error: "",
     });
@@ -351,6 +355,18 @@ definePage<ChapterWorkspacePageData>()({
     } else {
       this.stopPreparationPolling();
     }
+  },
+
+  toggleStructure() {
+    if (
+      this.data.workspace?.pending_assignment_material_count
+      && this.data.structureExpanded
+    ) {
+      return;
+    }
+    this.setData({
+      structureExpanded: !this.data.structureExpanded,
+    });
   },
 
   toggleSection(event: PageDatasetEvent<{ id?: string }>) {
@@ -438,7 +454,10 @@ definePage<ChapterWorkspacePageData>()({
           version: section.version,
         })),
       );
-      this.setData({ expandedSectionIds: {} });
+      this.setData({
+        expandedSectionIds: {},
+        structureExpanded: result.unassigned_count > 0,
+      });
       await this.loadPageData(true);
       if (result.unassigned_count > 0) {
         wx.showModal({
@@ -448,7 +467,7 @@ definePage<ChapterWorkspacePageData>()({
           confirmText: "去选择",
           success: (modalResult) => {
             if (modalResult.confirm) {
-              void this.runNextAction();
+              this.revealPendingAssignments();
             }
           },
         });
@@ -468,6 +487,30 @@ definePage<ChapterWorkspacePageData>()({
     } finally {
       this.finishOperation("regenerate_sections");
     }
+  },
+
+  revealPendingAssignments() {
+    const pendingSection = this.data.sectionViews.find(
+      (section) => section.requires_user_assignment,
+    );
+    if (pendingSection) {
+      const expandedSectionIds = {
+        ...this.data.expandedSectionIds,
+        [pendingSection.id]: true,
+      };
+      this.setData({
+        structureExpanded: true,
+        expandedSectionIds,
+        ...(this.data.workspace
+          ? chapterWorkspaceViewPatch(
+            this.data.workspace,
+            expandedSectionIds,
+            this.data.expandedDraftSectionIds,
+          )
+          : {}),
+      });
+    }
+    scrollToSection("#chapter-structure");
   },
 
   async runNextAction() {
@@ -492,26 +535,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     if (action.kind === "review_sections") {
-      const pendingSection = this.data.sectionViews.find(
-        (section) => section.requires_user_assignment,
-      );
-      if (pendingSection) {
-        const expandedSectionIds = {
-          ...this.data.expandedSectionIds,
-          [pendingSection.id]: true,
-        };
-        this.setData({
-          expandedSectionIds,
-          ...(this.data.workspace
-            ? chapterWorkspaceViewPatch(
-              this.data.workspace,
-              expandedSectionIds,
-              this.data.expandedDraftSectionIds,
-            )
-            : {}),
-        });
-      }
-      scrollToSection("#chapter-structure");
+      this.revealPendingAssignments();
       return;
     }
     if (action.kind === "review_draft" || action.kind === "complete") {

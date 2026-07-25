@@ -80,6 +80,51 @@ function workspace(overrides = {}) {
   };
 }
 
+function workspaceWithPendingMaterial(overrides = {}) {
+  const base = workspace();
+  return workspace({
+    pending_assignment_material_count: 1,
+    can_rewrite_draft: false,
+    completion_summary: summary({
+      state: "needs_input",
+      next_action: {
+        kind: "review_sections",
+        title: "还有 1 条讲述待选择小节",
+        detail: "AI 没有强行归类。",
+        action_text: "去选择",
+        disabled: false,
+        issue_id: null,
+      },
+      headline: "请先整理待归类素材",
+      detail: "全部选择完成后，才能按新的小节结构生成正文。",
+    }),
+    sections: [
+      ...base.sections,
+      {
+        id: "section-pending",
+        title: "待归类素材",
+        section_type: "life_fragment",
+        sort_order: 1,
+        status: "active",
+        include_in_book: false,
+        requires_user_assignment: true,
+        version: 1,
+        material_count: 1,
+        included_material_count: 1,
+        materials: [
+          {
+            utterance_id: "utterance-pending",
+            sort_order: 0,
+            text: "这段讲述和前后几个小节都有关系。",
+            include_in_book: true,
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  });
+}
+
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
@@ -122,6 +167,7 @@ function installWx() {
   const toasts = [];
   const modals = [];
   const navigationTitles = [];
+  const scrolls = [];
   global.wx = {
     getStorageSync(key) {
       if (key === "pawtale_memoir_tts_settings") {
@@ -134,7 +180,7 @@ function installWx() {
     navigateTo(options) { navigations.push(options.url); },
     navigateBack() {},
     setNavigationBarTitle(options) { navigationTitles.push(options.title); },
-    pageScrollTo() {},
+    pageScrollTo(options) { scrolls.push(options.selector); },
     stopPullDownRefresh() {},
     showToast(options) { toasts.push(options); },
     showModal(options) {
@@ -142,7 +188,7 @@ function installWx() {
       options.success?.({ confirm: true, cancel: false });
     },
   };
-  return { navigations, navigationTitles, toasts, modals };
+  return { navigations, navigationTitles, toasts, modals, scrolls };
 }
 
 test("chapter workspace row actions avoid native button shrink wrapping", () => {
@@ -156,6 +202,8 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /<view\s+class="primary-action/);
   assert.doesNotMatch(template, /<button\s+class="primary-action/);
   assert.match(template, /<view\s+class="structure-regenerate-action/);
+  assert.match(template, /bindtap="toggleStructure"/);
+  assert.match(template, /wx:if="{{structureExpanded}}"/);
   assert.match(template, /<view\s+class="rewrite-action/);
   assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
@@ -192,6 +240,7 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   assert.equal(context.data.draftSectionViews[0].expanded, false);
   assert.equal(context.data.draftSectionViews[0].metaText, "1 条讲述整理 · 14 字");
   assert.equal(context.data.sectionStructureSummary, "1 个小节 · 1 条讲述");
+  assert.equal(context.data.structureExpanded, false);
   assert.equal(context.data.sectionViews[0].title, "离家前的准备");
   assert.equal(context.data.sectionViews[0].typeText, "一段经历");
   assert.equal(context.data.canConfirmChapter, true);
@@ -200,6 +249,41 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
   );
+  delete global.wx;
+});
+
+test("chapter workspace accepts a refresh started after cache invalidation", async () => {
+  installWx();
+  let invalidationRevision = 0;
+  let loadCount = 0;
+  const freshWorkspace = workspaceWithPendingMaterial();
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => {
+        loadCount += 1;
+        return loadCount === 1 ? workspace() : freshWorkspace;
+      },
+    },
+    cacheExports: {
+      readCachedMemoirChapterWorkspace: () => ({
+        status: "stale",
+        payload: workspace(),
+        localInvalidationRevision: invalidationRevision,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  invalidationRevision = 1;
+  await page.loadPageData.call(context, true);
+
+  assert.equal(loadCount, 2);
+  assert.equal(context.data.workspace.pending_assignment_material_count, 1);
+  assert.equal(context.data.nextAction.kind, "review_sections");
   delete global.wx;
 });
 
@@ -375,49 +459,57 @@ test("chapter workspace regenerates the current section structure after confirma
   delete global.wx;
 });
 
+test("section regeneration opens pending material instead of running a stale next action", async () => {
+  const { modals, scrolls } = installWx();
+  const prepareCalls = [];
+  let loadCount = 0;
+  const pendingWorkspace = workspaceWithPendingMaterial({
+    draft_needs_rewrite: true,
+  });
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirChapterWorkspace: async () => {
+        loadCount += 1;
+        return loadCount === 1 ? workspace() : pendingWorkspace;
+      },
+      regenerateMemoirChapterSections: async () => ({
+        project_id: "project-1",
+        chapter_id: "chapter-1",
+        material_count: 2,
+        assigned_count: 1,
+        unassigned_count: 1,
+        section_count: 1,
+      }),
+      prepareMemoirBookChapter: async (...args) => prepareCalls.push(args),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  page.regenerateSections.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(
+    modals.map((modal) => modal.title),
+    ["重新整理小节分组", "有讲述需要选择小节"],
+  );
+  assert.deepEqual(prepareCalls, []);
+  assert.equal(context.data.nextAction.kind, "review_sections");
+  assert.equal(context.data.structureExpanded, true);
+  assert.equal(context.data.sectionViews.at(-1).expanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-structure");
+  delete global.wx;
+});
+
 test("chapter workspace exposes pending materials and moves one after confirmation", async () => {
   const { toasts } = installWx();
   const calls = [];
-  const pendingWorkspace = workspace({
-    pending_assignment_material_count: 1,
-    can_rewrite_draft: false,
-    completion_summary: summary({
-      state: "needs_input",
-      next_action: {
-        kind: "review_sections",
-        title: "还有 1 条讲述待选择小节",
-        detail: "AI 没有强行归类。",
-        action_text: "去选择",
-        disabled: false,
-        issue_id: null,
-      },
-      headline: "请先整理待归类素材",
-      detail: "全部选择完成后，才能按新的小节结构生成正文。",
-    }),
-    sections: [
-      ...workspace().sections,
-      {
-        id: "section-pending",
-        title: "待归类素材",
-        section_type: "life_fragment",
-        sort_order: 1,
-        status: "active",
-        include_in_book: false,
-        requires_user_assignment: true,
-        version: 1,
-        material_count: 1,
-        included_material_count: 1,
-        materials: [
-          {
-            utterance_id: "utterance-pending",
-            sort_order: 0,
-            text: "这段讲述和前后几个小节都有关系。",
-            include_in_book: true,
-          },
-        ],
-      },
-    ],
-  });
+  const pendingWorkspace = workspaceWithPendingMaterial();
   const { page } = loadWorkspacePage({
     currentWorkspace: pendingWorkspace,
     voiceApiExports: {
@@ -432,6 +524,7 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   });
 
   const pendingSection = context.data.sectionViews[1];
+  assert.equal(context.data.structureExpanded, true);
   assert.equal(pendingSection.title, "待归类素材");
   assert.equal(pendingSection.expanded, true);
   assert.equal(pendingSection.visibleMaterials[0].assignmentOptions[0].id, "section-1");
@@ -808,6 +901,33 @@ test("chapter workspace does not confirm a draft after its section structure cha
   });
 
   assert.equal(context.data.canConfirmChapter, false);
+  delete global.wx;
+});
+
+test("chapter workspace explains that an old draft is preserved after regrouping", async () => {
+  installWx();
+  const changedSection = {
+    ...workspace().sections[0],
+    id: "section-new",
+    title: "重新整理后的小节",
+  };
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+      sections: [changedSection],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.rewriteNoticeTitle, "现有正文仍按原来的小节保留");
+  assert.match(context.data.rewriteNoticeDetail, /旧正文没有丢失/);
+  assert.match(context.data.rewriteNoticeDetail, /当前 1 个小节/);
   delete global.wx;
 });
 

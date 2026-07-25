@@ -134,11 +134,29 @@
 }
 
 .structure-heading {
+  width: 100%;
+  min-height: 88rpx;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 20rpx;
+  transition-property: opacity;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.structure-heading:active {
+  opacity: 0.72;
+}
+
+.structure-heading-meta {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12rpx 18rpx;
 }
 
 .section-structure-summary {
@@ -149,6 +167,14 @@
   font-size: 23rpx;
   line-height: 34rpx;
   font-variant-numeric: tabular-nums;
+}
+
+.structure-expand-mark {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 36rpx;
 }
 
 .structure-tools {

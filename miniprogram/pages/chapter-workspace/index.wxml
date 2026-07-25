@@ -21,68 +21,78 @@
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
 
-    <view wx:if="{{sectionViews.length}}" class="content-card structure-card" id="chapter-structure">
-      <view class="structure-heading">
+    <view wx:if="{{sectionViews.length}}" class="content-card structure-card {{structureExpanded ? 'is-expanded' : 'is-collapsed'}}" id="chapter-structure">
+      <view
+        class="structure-heading"
+        aria-role="button"
+        aria-label="{{structureExpanded ? '收起' : '查看'}}小节分组与对应讲述"
+        bindtap="toggleStructure"
+      >
         <view>
-          <text class="section-kicker">本章结构</text>
+          <text class="section-kicker">素材分组</text>
           <text class="section-title">小节与对应讲述</text>
         </view>
-        <text class="section-structure-summary">{{sectionStructureSummary}}</text>
+        <view class="structure-heading-meta">
+          <text class="section-structure-summary">{{sectionStructureSummary}}</text>
+          <text class="structure-expand-mark">{{workspace.pending_assignment_material_count ? "待处理" : (structureExpanded ? "收起" : "查看")}}</text>
+        </view>
       </view>
 
-      <view class="structure-tools">
-        <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
-        <view
-          class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-          bindtap="regenerateSections"
-        >{{operationKind === "regenerate_sections" ? "正在重新整理…" : "重新整理小节分组"}}</view>
-      </view>
-
-      <view class="section-list">
-        <view wx:for="{{sectionViews}}" wx:key="id" class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}">
+      <block wx:if="{{structureExpanded}}">
+        <view class="structure-tools">
+          <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
           <view
-            class="section-toggle"
-            data-id="{{item.id}}"
+            class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}"
-            bindtap="toggleSection"
-          >
-            <view class="section-index">
-              <text>{{item.indexText}}</text>
-            </view>
-            <view class="section-copy">
-              <text class="section-name">{{item.title}}</text>
-              <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
-            </view>
-            <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
-          </view>
+            aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+            bindtap="regenerateSections"
+          >{{operationKind === "regenerate_sections" ? "正在重新整理…" : "重新整理小节分组"}}</view>
+        </view>
 
-          <view wx:if="{{item.expanded}}" class="section-material-list">
-            <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
-            <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
-              <text class="section-material-index">{{material.indexText}}</text>
-              <text class="section-material-text" selectable>{{material.text}}</text>
-              <picker
-                wx:if="{{item.requires_user_assignment}}"
-                mode="selector"
-                range="{{material.assignmentOptions}}"
-                range-key="title"
-                data-utterance-id="{{material.utterance_id}}"
-                disabled="{{operationKind !== ''}}"
-                bindchange="moveUnassignedMaterial"
-              >
-                <view
-                  class="material-assignment-action {{operationKind !== '' ? 'is-disabled' : ''}}"
-                  aria-role="button"
-                  aria-disabled="{{operationKind !== ''}}"
-                >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
-              </picker>
+        <view class="section-list">
+          <view wx:for="{{sectionViews}}" wx:key="id" class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}">
+            <view
+              class="section-toggle"
+              data-id="{{item.id}}"
+              aria-role="button"
+              aria-label="{{item.expanded ? '收起' : '展开'}}小节 {{item.title}}"
+              bindtap="toggleSection"
+            >
+              <view class="section-index">
+                <text>{{item.indexText}}</text>
+              </view>
+              <view class="section-copy">
+                <text class="section-name">{{item.title}}</text>
+                <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
+              </view>
+              <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
+            </view>
+
+            <view wx:if="{{item.expanded}}" class="section-material-list">
+              <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
+              <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
+                <text class="section-material-index">{{material.indexText}}</text>
+                <text class="section-material-text" selectable>{{material.text}}</text>
+                <picker
+                  wx:if="{{item.requires_user_assignment}}"
+                  mode="selector"
+                  range="{{material.assignmentOptions}}"
+                  range-key="title"
+                  data-utterance-id="{{material.utterance_id}}"
+                  disabled="{{operationKind !== ''}}"
+                  bindchange="moveUnassignedMaterial"
+                >
+                  <view
+                    class="material-assignment-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+                    aria-role="button"
+                    aria-disabled="{{operationKind !== ''}}"
+                  >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
+                </picker>
+              </view>
             </view>
           </view>
         </view>
-      </view>
+      </block>
     </view>
 
     <view class="content-card draft-card" id="chapter-draft">
