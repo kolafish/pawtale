@@ -222,6 +222,81 @@ def test_chapter_generation_rejects_cross_section_material():
         )
 
 
+async def test_chapter_generation_retries_only_the_invalid_section():
+    class RetryingSectionAI:
+        provider_name = "test"
+        model_name = "test-section-retry"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+            self.section_attempts: dict[str, int] = {}
+
+        async def _call_llm(
+            self,
+            system_prompt,
+            user_prompt,
+            temperature=0.7,
+            max_tokens=4000,
+            timeout=60.0,
+            return_raw=False,
+        ):
+            self.prompts.append(user_prompt)
+            section_id = next(
+                line.removeprefix("section_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("section_id: ")
+            )
+            material_id = next(
+                line.removeprefix("material_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("material_id: ")
+            )
+            attempt = self.section_attempts.get(section_id, 0) + 1
+            self.section_attempts[section_id] = attempt
+            used_material_ids = [material_id]
+            if section_id == "section-2" and attempt == 1:
+                used_material_ids = []
+            return json.dumps(
+                {
+                    "sections": [
+                        {
+                            "section_id": section_id,
+                            "content": (
+                                "第一小节的正文"
+                                if section_id == "section-1"
+                                else "第二小节的正文"
+                            ),
+                            "used_material_ids": used_material_ids,
+                        }
+                    ],
+                    "missing_source_candidates": [],
+                    "editor_notes": [],
+                },
+                ensure_ascii=False,
+            )
+
+    context = _two_section_context()
+    fake = RetryingSectionAI()
+
+    generated = await chapter_generation.generate_chapter(
+        context,
+        editorial_guidance=[],
+        ai_client=fake,
+    )
+
+    assert [section.section_id for section in generated.sections] == [
+        "section-1",
+        "section-2",
+    ]
+    assert fake.section_attempts == {"section-1": 1, "section-2": 2}
+    assert len(fake.prompts) == 3
+    assert "material-1" in fake.prompts[0]
+    assert "material-2" not in fake.prompts[0]
+    assert "material-2" in fake.prompts[1]
+    assert "material-1" not in fake.prompts[1]
+    assert "上次输出未通过校验" in fake.prompts[2]
+
+
 async def _chapter(client, test_db):
     project_id = await ensure_mobile_memoir_project(client)
     first = await create_test_voice_transcript(

@@ -110,6 +110,7 @@ function loadWorkspacePage({
 function installWx() {
   const navigations = [];
   const toasts = [];
+  const modals = [];
   const navigationTitles = [];
   global.wx = {
     navigateTo(options) { navigations.push(options.url); },
@@ -119,10 +120,11 @@ function installWx() {
     stopPullDownRefresh() {},
     showToast(options) { toasts.push(options); },
     showModal(options) {
+      modals.push(options);
       options.success?.({ confirm: true, cancel: false });
     },
   };
-  return { navigations, navigationTitles, toasts };
+  return { navigations, navigationTitles, toasts, modals };
 }
 
 test("chapter workspace row actions avoid native button shrink wrapping", () => {
@@ -137,6 +139,7 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.doesNotMatch(template, /<button\s+class="primary-action/);
   assert.match(template, /<view\s+class="structure-regenerate-action/);
   assert.match(template, /<view\s+class="rewrite-action/);
+  assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
 });
 
@@ -529,7 +532,10 @@ test("legacy flat draft brings the required next step into the empty state", asy
   assert.equal(context.data.draftRecoveryTitle, "先完成本章当前一步");
   assert.match(context.data.draftRecoveryDetail, /完成当前步骤/);
   assert.match(context.data.draftRecoveryDetail, /全部完成后/);
-  assert.match(context.data.draftRecoveryDetail, /重新生成小节正文/);
+  assert.match(
+    context.data.draftRecoveryDetail,
+    /重新生成全部 1 个小节正文/,
+  );
   assert.match(context.data.draftRecoveryDetail, /不是当前必做步骤/);
   assert.equal(context.data.draftRecoveryActionText, "去补充");
   assert.equal(context.data.draftRecoveryActionKind, "next");
@@ -563,9 +569,12 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.equal(
     context.data.draftRecoveryTitle,
-    "现在可以重新生成小节正文",
+    "现在可以重新生成全部 1 个小节正文",
   );
-  assert.equal(context.data.draftRecoveryActionText, "重新生成小节正文");
+  assert.equal(
+    context.data.draftRecoveryActionText,
+    "重新生成全部 1 个小节正文",
+  );
   assert.equal(context.data.draftRecoveryActionKind, "rewrite");
 
   await page.runDraftRecoveryAction.call(context);
@@ -646,12 +655,27 @@ test("open completion work keeps an existing draft from being confirmed", async 
 });
 
 test("chapter workspace can rewrite with completion answers instead of forcing another interview", async () => {
-  const { toasts } = installWx();
+  const { toasts, modals } = installWx();
   const calls = [];
+  const baseWorkspace = workspace();
+  const currentSections = Array.from({ length: 4 }, (_, index) => ({
+    ...baseWorkspace.sections[0],
+    id: `section-${index + 1}`,
+    title: `当前小节 ${index + 1}`,
+    sort_order: index,
+    materials: [
+      {
+        ...baseWorkspace.sections[0].materials[0],
+        utterance_id: `utterance-${index + 1}`,
+        text: `第 ${index + 1} 个小节的讲述。`,
+      },
+    ],
+  }));
   const staleWorkspace = workspace({
     draft_needs_rewrite: true,
     can_rewrite_draft: true,
     pending_completion_source_count: 2,
+    sections: currentSections,
     completion_summary: summary({
       state: "needs_input",
       next_action: {
@@ -686,6 +710,17 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
     context.data.rewriteNoticeTitle,
     "2 条补充回答尚未写入正文",
   );
+  assert.equal(context.data.narrativeSectionCount, 4);
+  assert.equal(
+    context.data.rewriteDraftActionText,
+    "重新生成全部 4 个小节正文",
+  );
+  assert.equal(
+    context.data.rewriteDraftBusyText,
+    "正在生成 4 个小节正文…",
+  );
+  assert.match(context.data.rewriteNoticeDetail, /上方当前 4 个小节/);
+  assert.match(context.data.rewriteNoticeDetail, /不会重新划分小节/);
   context.data.processBusy = true;
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
@@ -695,6 +730,9 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1"]]);
+  assert.equal(modals.at(-1).title, "重新生成全部 4 个小节正文");
+  assert.match(modals.at(-1).content, /上方当前 4 个小节/);
+  assert.equal(modals.at(-1).confirmText, "生成全部");
   assert.equal(toasts.at(-1).title, "小节正文已更新");
   delete global.wx;
 });

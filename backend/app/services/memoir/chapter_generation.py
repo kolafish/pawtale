@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import logging
 from typing import Any
 
 from fastapi import HTTPException
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -46,6 +48,8 @@ CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
 )
+CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
+logger = logging.getLogger(__name__)
 
 
 async def _ensure_no_pending_assignment(
@@ -243,7 +247,22 @@ def build_chapter_generation_prompt(
     context: ChapterGenerationContext,
     *,
     editorial_guidance: list[str],
+    chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
+    previous_section_ending: str = "",
 ) -> str:
+    outline_sections = chapter_sections or context.sections
+    target_section_id = (
+        context.sections[0].section_id
+        if len(context.sections) == 1
+        else ""
+    )
+    outline = "\n".join(
+        (
+            f"{index + 1}. {section.title}"
+            f"{'（本次生成）' if section.section_id == target_section_id else ''}"
+        )
+        for index, section in enumerate(outline_sections)
+    )
     blocks = "\n\n".join(
         "\n".join(
             [
@@ -267,8 +286,22 @@ def build_chapter_generation_prompt(
         for item in editorial_guidance[:8]
         if item.strip()
     ) or "（无额外编辑建议）"
+    continuity = (
+        f"\n上一小节结尾（仅用于自然衔接，不得改写其中事实）：\n"
+        f"{previous_section_ending}\n"
+        if previous_section_ending
+        else ""
+    )
+    generation_scope = (
+        "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项。\n"
+        if target_section_id
+        else "- 一次输出完整章节，并严格按输入顺序返回每个小节。\n"
+    )
     return f"""请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。
 
+本章完整小节顺序：
+{outline}
+{continuity}
 编辑建议：
 {guidance}
 
@@ -289,7 +322,7 @@ def build_chapter_generation_prompt(
 }}
 
 要求：
-- 一次输出完整章节，并严格按输入顺序返回每个小节。
+{generation_scope}- 严格按输入顺序返回小节。
 - 每个输入 section_id 必须出现且只能出现一次，不新增、删除、合并或改名小节。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
 - 小节之间要有自然承接，合起来应当是一篇完整章节。
@@ -298,6 +331,28 @@ def build_chapter_generation_prompt(
 - 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
 - 同一次讲述保持连续，不把一条 Material 拆散后穿插到多处。
 """
+
+
+def _single_section_context(
+    context: ChapterGenerationContext,
+    section: ChapterSectionInput,
+) -> ChapterGenerationContext:
+    return ChapterGenerationContext(
+        project_id=context.project_id,
+        chapter_id=context.chapter_id,
+        chapter_title=context.chapter_title,
+        sections=(section,),
+        materials=section.materials,
+        input_signature=context.input_signature,
+    )
+
+
+def _deduplicated_strings(
+    values: list[str],
+    *,
+    limit: int = 8,
+) -> tuple[str, ...]:
+    return tuple(dict.fromkeys(value for value in values if value))[:limit]
 
 
 def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
@@ -427,21 +482,78 @@ async def generate_chapter(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedChapter:
-    prompt = build_chapter_generation_prompt(
-        context,
-        editorial_guidance=editorial_guidance,
-    )
     client = ai_client or get_ai_service(ai_model)
-    raw = await client._call_llm(
-        CHAPTER_GENERATION_SYSTEM_PROMPT,
-        prompt,
-        temperature=0.3,
-        max_tokens=8000,
-        timeout=120.0,
-    )
-    return normalize_generated_chapter(
-        extract_json_payload(str(raw)),
-        context=context,
+    generated_sections: list[GeneratedChapterSection] = []
+    missing_source_candidates: list[str] = []
+    editor_notes: list[str] = []
+    previous_section_ending = ""
+    for section in context.sections:
+        section_context = _single_section_context(context, section)
+        prompt = build_chapter_generation_prompt(
+            section_context,
+            editorial_guidance=editorial_guidance,
+            chapter_sections=context.sections,
+            previous_section_ending=previous_section_ending,
+        )
+        generated_section: GeneratedChapter | None = None
+        last_error: Exception | None = None
+        for attempt in range(CHAPTER_SECTION_GENERATION_ATTEMPTS):
+            try:
+                attempt_prompt = prompt
+                if last_error is not None:
+                    attempt_prompt += (
+                        "\n上次输出未通过校验："
+                        f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
+                    )
+                raw = await client._call_llm(
+                    CHAPTER_GENERATION_SYSTEM_PROMPT,
+                    attempt_prompt,
+                    temperature=0.3,
+                    max_tokens=5000,
+                    timeout=120.0,
+                )
+                generated_section = normalize_generated_chapter(
+                    extract_json_payload(str(raw)),
+                    context=section_context,
+                    model=getattr(client, "model_name", ai_model),
+                )
+                break
+            except (ValueError, httpx.HTTPError) as exc:
+                last_error = exc
+                logger.warning(
+                    "memoir chapter section generation attempt failed "
+                    "chapter_id=%s section_id=%s attempt=%s/%s error=%s",
+                    context.chapter_id,
+                    section.section_id,
+                    attempt + 1,
+                    CHAPTER_SECTION_GENERATION_ATTEMPTS,
+                    exc,
+                )
+        if generated_section is None:
+            raise ValueError(
+                f"小节“{section.title}”正文生成失败：{last_error}"
+            ) from last_error
+        current = generated_section.sections[0]
+        generated_sections.append(current)
+        missing_source_candidates.extend(
+            generated_section.missing_source_candidates
+        )
+        editor_notes.extend(generated_section.editor_notes)
+        previous_section_ending = current.content[-300:]
+    return GeneratedChapter(
+        sections=tuple(generated_sections),
+        content="\n\n".join(
+            section.content for section in generated_sections
+        ),
+        used_material_ids=tuple(
+            material_id
+            for section in generated_sections
+            for material_id in section.used_material_ids
+        ),
+        missing_source_candidates=_deduplicated_strings(
+            missing_source_candidates
+        ),
+        editor_notes=_deduplicated_strings(editor_notes),
         model=getattr(client, "model_name", ai_model),
     )
 

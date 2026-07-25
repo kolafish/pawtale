@@ -31,7 +31,7 @@
       </view>
 
       <view class="structure-tools">
-        <text class="structure-tools-detail">仅在讲述分组不合适时使用；这一步不会直接生成正文，可能需要几分钟。</text>
+        <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
         <view
           class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
@@ -102,7 +102,7 @@
           aria-role="button"
           aria-disabled="{{!workspace.can_rewrite_draft || rewritingDraft || processBusy || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
           bindtap="rewriteChapter"
-        >{{rewritingDraft ? "正在生成…" : "重新生成小节正文"}}</view>
+        >{{rewritingDraft ? rewriteDraftBusyText : rewriteDraftActionText}}</view>
       </view>
 
       <view wx:if="{{workspace.draft_sections.length}}" class="draft-section-list">
@@ -162,7 +162,7 @@
             aria-role="button"
             aria-disabled="{{draftRecoveryActionDisabled || processBusy || rewritingDraft || startingIssueId !== '' || confirmingChapter || savingDraft || editingSectionId !== ''}}"
             bindtap="runDraftRecoveryAction"
-          >{{processBusy || rewritingDraft || startingIssueId !== "" ? "正在处理…" : draftRecoveryActionText}}</view>
+          >{{rewritingDraft ? rewriteDraftBusyText : (processBusy || startingIssueId !== "" ? "正在处理…" : draftRecoveryActionText)}}</view>
         </block>
         <block wx:else>
           <text class="empty-title">正文还没有准备好</text>

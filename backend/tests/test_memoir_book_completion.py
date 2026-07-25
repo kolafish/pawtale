@@ -23,6 +23,8 @@ from app.models.memoir import (
     MemoirBookReview,
     MemoirCompletionIssue,
     MemoirEditingJob,
+    MemoirSection,
+    MemoirSectionMaterial,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
@@ -533,6 +535,83 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     assert issue is not None
     assert issue.outcome == MemoirCompletionIssueOutcome.DEFERRED.value
     assert issue.outcome_note == "用户选择先按现有素材重新生成正文"
+
+
+async def test_rewrite_directly_generates_all_current_sections_without_digest(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    chapter_id = chapter.id
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    added_sources = [
+        await create_test_voice_transcript(
+            client,
+            test_db,
+            f"这是第 {index + 2} 个小节的讲述。",
+            project_id=project_id,
+        )
+        for index in range(3)
+    ]
+    for index, source in enumerate(added_sources, start=1):
+        section = MemoirSection(
+            project_id=project_id,
+            chapter_id=chapter_id,
+            title=f"新小节 {index + 1}",
+            section_type="event",
+            sort_order=index,
+        )
+        test_db.add(section)
+        await test_db.flush()
+        test_db.add(
+            MemoirSectionMaterial(
+                project_id=project_id,
+                section_id=section.id,
+                utterance_id=source["utterance_id"],
+                transcript_version_id=source["transcript_version_id"],
+                sort_order=0,
+                assignment_reason="four_section_rewrite_regression",
+            )
+        )
+    await test_db.commit()
+    test_db.expire_all()
+    fake = LayeredBookAI()
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
+
+    rewritten = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter_id}/rewrite",
+        json={"ai_model": "claude-opus-4-8"},
+    )
+
+    assert rewritten.status_code == 200, rewritten.text
+    body = rewritten.json()
+    assert body["completion_summary"]["state"] == "draft_ready"
+    assert len(body["sections"]) == 4
+    assert len(body["draft_sections"]) == 4
+    assert [
+        item["section_id"] for item in body["draft_sections"]
+    ] == [
+        item["id"] for item in body["sections"]
+    ]
+    assert len(fake.prompts) == 4
+    assert all(
+        "请把下面的原始讲述整理为回忆录章节" in prompt
+        for prompt in fake.prompts
+    )
+    assert all(
+        prompt.count("material_id: ") == 1
+        for prompt in fake.prompts
+    )
+    assert requested_models == ["claude-opus-4-8"]
 
 
 async def test_book_overview_counts_all_unfinished_chapter_states(

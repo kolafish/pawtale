@@ -211,7 +211,16 @@ async def chapter_summary(
         digest
         and digest.status == MemoirSemanticCacheStatus.READY.value
     )
-    if not digest_ready:
+    review_ready = bool(
+        digest_ready
+        or (
+            draft_current
+            and version is not None
+            and version.prompt_snapshot
+            == chapter_generation.CHAPTER_GENERATION_ENGINE
+        )
+    )
+    if not review_ready:
         if (
             digest is not None
             and digest.status == MemoirSemanticCacheStatus.FAILED.value

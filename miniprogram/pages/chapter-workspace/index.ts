@@ -69,7 +69,11 @@ interface ChapterWorkspacePageData {
   draftRecoveryActionText: string;
   draftRecoveryActionKind: "none" | "next" | "rewrite" | "status";
   draftRecoveryActionDisabled: boolean;
+  narrativeSectionCount: number;
   sectionStructureSummary: string;
+  rewriteDraftActionText: string;
+  rewriteDraftBusyText: string;
+  rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
   expandedSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
@@ -105,7 +109,11 @@ definePage<ChapterWorkspacePageData>()({
     draftRecoveryActionText: "",
     draftRecoveryActionKind: "none",
     draftRecoveryActionDisabled: true,
+    narrativeSectionCount: 0,
     sectionStructureSummary: "",
+    rewriteDraftActionText: "重新生成全部小节正文",
+    rewriteDraftBusyText: "正在生成全部小节正文…",
+    rewriteDraftScopeDetail: "",
     sectionViews: [],
     expandedSectionIds: {},
     canConfirmChapter: false,
@@ -705,9 +713,9 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "重新生成小节正文",
-      content: "会重新生成一版完整章节，当前正文会保留在历史版本中。",
-      confirmText: "开始生成",
+      title: this.data.rewriteDraftActionText,
+      content: this.data.rewriteDraftScopeDetail,
+      confirmText: "生成全部",
       cancelText: "暂不生成",
       success: (result) => {
         if (result.confirm) {
