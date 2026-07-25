@@ -89,6 +89,9 @@ async def prepare_chapter(
         force_regenerate=True,
     )
     if digest.status != MemoirSemanticCacheStatus.READY.value:
+        # Keep provider diagnostics and the failed cache row available after
+        # the API returns an error instead of losing them to the route rollback.
+        await db.commit()
         raise ValueError(digest.error_message or "章节审阅失败")
     issues = await completion_issues.list_issues(
         db,

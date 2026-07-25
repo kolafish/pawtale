@@ -78,6 +78,9 @@ async def prepare_memoir_book_completion_chapter(
     requested_ai_model = (req.ai_model or "").strip()
     selected_ai_model = requested_ai_model or project_ai_model(project)
     remember_project_ai_model(project, requested_ai_model)
+    # Persist the model preference before provider calls so this request does
+    # not hold SQLite's write lock throughout multi-step chapter preparation.
+    await db.commit()
     try:
         workspace = await book_completion.prepare_chapter(
             db,

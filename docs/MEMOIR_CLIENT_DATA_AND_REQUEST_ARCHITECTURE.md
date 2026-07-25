@@ -157,6 +157,12 @@ provider deadline < backend operation deadline < proxy deadline < client deadlin
 
 默认模型只用于请求确实没有模型上下文的后台任务。不得因为某一层忘记传参而静默改用另一个模型；新增 AI 入口时必须检查整条调用链。
 
+### 5.1 结构化输出和多阶段生成
+
+要求 JSON 等结构化输出时，provider 的 completion token 预算必须同时容纳模型隐藏推理和最终结构，不能只按可见 JSON 长度设置。解析失败至少记录 requested / resolved model、provider、finish reason 和响应长度，但不持久化包含用户素材的原始响应。
+
+多阶段生成中的小节摘要、章节摘要等可复用中间结果，应在每个昂贵阶段成功后独立提交。后续阶段失败不能回滚已经付费生成的缓存；重试只重做失败阶段，同时避免在 provider 调用期间持有数据库写锁。
+
 ## 六、可观测性与测试
 
 诊断性能时区分：
