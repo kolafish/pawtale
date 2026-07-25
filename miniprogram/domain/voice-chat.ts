@@ -431,6 +431,7 @@ export interface MemoirVoiceTranscriptItem {
   current_guidance_module?: string | null;
   is_included_in_book?: boolean;
   included_chapters?: MemoirBookSourceIncludedChapter[];
+  section_assignment?: MemoirVoiceTranscriptSectionAssignment | null;
   offline_asr: MemoirMaterialOfflineASRState;
   created_at: string;
   session_created_at: string;
@@ -720,6 +721,16 @@ export interface MemoirBookSourceIncludedChapter {
   title: string;
   sort_order: number;
   include_in_book?: boolean;
+}
+
+export interface MemoirVoiceTranscriptSectionAssignment {
+  chapter_id: string;
+  chapter_title: string;
+  chapter_sort_order: number;
+  section_id: string;
+  section_title: string;
+  section_sort_order: number;
+  requires_user_assignment: boolean;
 }
 
 export interface MemoirBookPlanChapterInput {

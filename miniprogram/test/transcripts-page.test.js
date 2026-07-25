@@ -63,6 +63,7 @@ function sampleTranscript(id, createdAt = "2026-06-17T00:00:00.000Z") {
     current_guidance_module: null,
     is_included_in_book: false,
     included_chapters: [],
+    section_assignment: null,
     created_at: createdAt,
     session_created_at: "2026-06-17T00:00:00.000Z",
   };
@@ -226,6 +227,52 @@ test("transcripts page uses summary fields for browse cards", async () => {
   assert.equal(context.data.items[0].detailActionText, "查看详情");
   assert.match(context.data.items[0].cardAriaLabel, /爷爷退休后仍帮公司做事/);
   assert.equal("transcript_raw" in context.data.items[0], false);
+});
+
+test("transcripts page shows the assigned section on a material card", async () => {
+  const { page } = loadTranscriptsPage({
+    authExports: {
+      getMemoirIdentity: async () => ({
+        id: "user-1",
+        active_project_id: "project-1",
+        active_project: { id: "project-1", title: "我的回忆录" },
+        projects: [],
+      }),
+    },
+    voiceApiExports: {
+      listMemoirVoiceTranscripts: async () => ({
+        items: [{
+          ...sampleTranscript("utterance-assigned"),
+          is_included_in_book: true,
+          included_chapters: [{
+            chapter_id: "chapter-1",
+            title: "家里的人",
+            sort_order: 0,
+          }],
+          section_assignment: {
+            chapter_id: "chapter-1",
+            chapter_title: "家里的人",
+            chapter_sort_order: 0,
+            section_id: "section-2",
+            section_title: "她给我送胡豆",
+            section_sort_order: 1,
+            requires_user_assignment: false,
+          },
+        }],
+        total: 1,
+        limit: 30,
+        offset: 0,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.loadTranscripts.call(context, true);
+
+  assert.equal(
+    context.data.items[0].bookInclusionText,
+    "已放入第 1 章：家里的人 · 小节 2：她给我送胡豆",
+  );
 });
 
 test("transcripts page shows saved audio awaiting transcription", async () => {

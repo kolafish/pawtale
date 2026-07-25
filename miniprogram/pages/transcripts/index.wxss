@@ -239,7 +239,8 @@
 
 .book-status {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   max-width: 100%;
   color: var(--ui-warning-text);
   font-size: 24rpx;
@@ -328,7 +329,7 @@
   padding-top: 18rpx;
   border-top: 1rpx solid var(--ui-divider);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 18rpx;
 }

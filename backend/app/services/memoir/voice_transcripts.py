@@ -38,6 +38,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptCleanupRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
+    MemoirVoiceTranscriptSectionAssignmentResponse,
     MemoirVoiceTranscriptUpdateRequest,
 )
 from app.services.ai_factory import get_ai_service
@@ -49,6 +50,7 @@ from app.services.memoir.book_source_links import (
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
@@ -559,6 +561,7 @@ async def _included_utterance_ids_for_filter(
 def _item_response(
     utterance: MemoirVoiceUtterance,
     included_chapters: list[MemoirVoiceTranscriptIncludedChapterResponse] | None = None,
+    section_assignment: MemoirVoiceTranscriptSectionAssignmentResponse | None = None,
     offline_asr: MemoirMaterialOfflineASRStateResponse | None = None,
 ) -> MemoirVoiceTranscriptItemResponse:
     voice_session = utterance.voice_session
@@ -614,6 +617,7 @@ def _item_response(
         current_guidance_module=voice_session.current_guidance_module,
         is_included_in_book=bool(inclusions),
         included_chapters=inclusions,
+        section_assignment=section_assignment,
         offline_asr=offline_asr or MemoirMaterialOfflineASRStateResponse(),
         created_at=_utc_datetime(utterance.created_at),
         session_created_at=_utc_datetime(voice_session.created_at),
@@ -693,6 +697,76 @@ async def _book_inclusions_by_utterance_ids(
                 if utterance_id in utterance_id_set:
                     inclusions.setdefault(utterance_id, []).append(included_chapter)
     return inclusions
+
+
+async def _section_assignments_by_utterance_ids(
+    db: AsyncSession,
+    utterance_ids: list[str],
+    *,
+    project_ids: list[str] | None = None,
+) -> dict[str, MemoirVoiceTranscriptSectionAssignmentResponse]:
+    clean_utterance_ids = list(dict.fromkeys(item for item in utterance_ids if item))
+    if not clean_utterance_ids:
+        return {}
+    query = (
+        select(
+            MemoirSectionMaterial.utterance_id,
+            MemoirBookPlanChapter.id,
+            MemoirBookPlanChapter.title,
+            MemoirBookPlanChapter.sort_order,
+            MemoirSection.id,
+            MemoirSection.title,
+            MemoirSection.sort_order,
+            MemoirSection.metadata_json,
+        )
+        .join(
+            MemoirSection,
+            MemoirSection.id == MemoirSectionMaterial.section_id,
+        )
+        .join(
+            MemoirBookPlanChapter,
+            MemoirBookPlanChapter.id == MemoirSection.chapter_id,
+        )
+        .where(MemoirSectionMaterial.utterance_id.in_(clean_utterance_ids))
+        .order_by(
+            MemoirBookPlanChapter.sort_order,
+            MemoirSection.sort_order,
+            MemoirSectionMaterial.sort_order,
+        )
+    )
+    if project_ids:
+        query = query.where(
+            MemoirSectionMaterial.project_id.in_(
+                list(dict.fromkeys(project_ids))
+            )
+        )
+    assignments: dict[str, MemoirVoiceTranscriptSectionAssignmentResponse] = {}
+    for row in (await db.execute(query)).all():
+        (
+            utterance_id,
+            chapter_id,
+            chapter_title,
+            chapter_sort_order,
+            section_id,
+            section_title,
+            section_sort_order,
+            section_metadata,
+        ) = row
+        assignments.setdefault(
+            utterance_id,
+            MemoirVoiceTranscriptSectionAssignmentResponse(
+                chapter_id=chapter_id,
+                chapter_title=chapter_title,
+                chapter_sort_order=chapter_sort_order,
+                section_id=section_id,
+                section_title=section_title,
+                section_sort_order=section_sort_order,
+                requires_user_assignment=requires_user_assignment(
+                    section_metadata
+                ),
+            ),
+        )
+    return assignments
 
 
 async def manual_corrections_by_utterance_ids(
@@ -839,11 +913,17 @@ async def list_voice_transcripts(
         [utterance.id for utterance in utterances],
         project_ids=[utterance.voice_session.project_id for utterance in utterances],
     )
+    assignments = await _section_assignments_by_utterance_ids(
+        db,
+        [utterance.id for utterance in utterances],
+        project_ids=[utterance.voice_session.project_id for utterance in utterances],
+    )
     offline_asr_states = await material_offline_asr_states(db, utterances)
     items = [
         _item_response(
             utterance,
             inclusions.get(utterance.id, []),
+            assignments.get(utterance.id),
             offline_asr_states.get(utterance.id),
         )
         for utterance in utterances
@@ -878,10 +958,16 @@ async def get_voice_transcript(
         [utterance.id],
         project_ids=[utterance.voice_session.project_id],
     )
+    assignments = await _section_assignments_by_utterance_ids(
+        db,
+        [utterance.id],
+        project_ids=[utterance.voice_session.project_id],
+    )
     offline_asr_states = await material_offline_asr_states(db, [utterance])
     return _item_response(
         utterance,
         inclusions.get(utterance.id, []),
+        assignments.get(utterance.id),
         offline_asr_states.get(utterance.id),
     )
 
@@ -980,10 +1066,16 @@ async def _apply_edited_text(
         [utterance.id],
         project_ids=[utterance.voice_session.project_id],
     )
+    assignments = await _section_assignments_by_utterance_ids(
+        db,
+        [utterance.id],
+        project_ids=[utterance.voice_session.project_id],
+    )
     offline_asr_states = await material_offline_asr_states(db, [utterance])
     return _item_response(
         utterance,
         inclusions.get(utterance.id, []),
+        assignments.get(utterance.id),
         offline_asr=offline_asr_states.get(utterance.id),
     )
 

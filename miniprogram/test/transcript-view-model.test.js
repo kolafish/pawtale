@@ -7,6 +7,8 @@ const {
   transcriptAudioText,
   transcriptBookInclusionText,
   transcriptDurationText,
+  transcriptMaterialChapterText,
+  transcriptMaterialSectionText,
   transcriptVoiceEditPreviewView,
   transcriptVoiceEditStateView,
 } = require("../services/transcript-view-model.ts");
@@ -25,6 +27,27 @@ test("transcript view model formats duration and audio text consistently", () =>
 });
 
 test("transcript view model derives book inclusion text", () => {
+  const assigned = {
+    is_included_in_book: true,
+    included_chapters: [
+      { chapter_id: "chapter-1", title: "退休后的日子", sort_order: 0 },
+    ],
+    section_assignment: {
+      chapter_id: "chapter-1",
+      chapter_title: "退休后的日子",
+      chapter_sort_order: 0,
+      section_id: "section-2",
+      section_title: "退休不下岗",
+      section_sort_order: 1,
+      requires_user_assignment: false,
+    },
+  };
+  assert.equal(
+    transcriptBookInclusionText(assigned),
+    "已放入第 1 章：退休后的日子 · 小节 2：退休不下岗",
+  );
+  assert.equal(transcriptMaterialChapterText(assigned), "第 1 章：退休后的日子");
+  assert.equal(transcriptMaterialSectionText(assigned), "小节 2：退休不下岗");
   assert.equal(
     transcriptBookInclusionText({
       included_chapters: [
@@ -48,6 +71,15 @@ test("transcript view model derives book inclusion text", () => {
     "已整理到第 2 章：暂不成书的补记（不收入本书）",
   );
   assert.equal(transcriptBookInclusionText({ included_chapters: [] }), "尚未入章");
+  assert.equal(
+    transcriptMaterialSectionText({
+      section_assignment: {
+        ...assigned.section_assignment,
+        requires_user_assignment: true,
+      },
+    }),
+    "待归类素材（请选择小节）",
+  );
 });
 
 test("transcript view model builds voice edit preview diff", () => {

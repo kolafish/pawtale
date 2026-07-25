@@ -2160,12 +2160,16 @@ async def test_mobile_memoir_deletes_voice_transcript_and_user_message(client, t
 async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, test_db):
     created = await create_test_voice_transcript(client, test_db, text="我小时候常在外婆家的院子里晒太阳。")
     project_id = created["session"]["project_id"]
-    await create_test_book_plan(
+    _, chapter = await create_test_book_plan(
         test_db,
         project_id=project_id,
         source_ref=memoir_source_ref(created),
         chapter_title="院子里的童年",
     )
+    section = await test_db.scalar(
+        select(MemoirSection).where(MemoirSection.chapter_id == chapter.id)
+    )
+    assert section is not None
 
     response = await client.get(f"/api/mobile/memoir/voice-transcripts?project_id={project_id}")
 
@@ -2176,6 +2180,21 @@ async def test_mobile_memoir_lists_book_inclusion_for_voice_transcripts(client, 
     assert len(item["included_chapters"]) == 1
     assert item["included_chapters"][0]["title"] == "院子里的童年"
     assert item["included_chapters"][0]["sort_order"] == 0
+    assert item["section_assignment"] == {
+        "chapter_id": chapter.id,
+        "chapter_title": "院子里的童年",
+        "chapter_sort_order": 0,
+        "section_id": section.id,
+        "section_title": section.title,
+        "section_sort_order": 0,
+        "requires_user_assignment": False,
+    }
+
+    detail_response = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}"
+    )
+    assert detail_response.status_code == 200
+    assert detail_response.json()["section_assignment"] == item["section_assignment"]
 
 
 async def test_mobile_memoir_filters_voice_transcripts_by_book_inclusion(client, test_db):
