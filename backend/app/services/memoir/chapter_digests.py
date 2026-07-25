@@ -27,7 +27,7 @@ from app.services.memoir.semantic_state import semantic_json_signature
 
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
-CHAPTER_DIGEST_MAX_TOKENS = 4800
+CHAPTER_DIGEST_MAX_TOKENS = 8000
 CHAPTER_DIGEST_TIMEOUT_SECONDS = 120.0
 CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录主编。"
