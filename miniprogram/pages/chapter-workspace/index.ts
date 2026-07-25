@@ -6,6 +6,7 @@ import {
   confirmMemoirBookChapterDraft,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
+  moveMemoirChapterMaterial,
   prepareMemoirBookChapter,
   regenerateMemoirChapterSections,
   rewriteMemoirBookChapter,
@@ -15,8 +16,10 @@ import { routeAuthError } from "../../services/navigation";
 import {
   pageUrl,
   datasetString,
+  pickerIndex,
   queryParam,
   type PageDatasetEvent,
+  type PagePickerEvent,
   type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
@@ -76,6 +79,7 @@ interface ChapterWorkspacePageData {
   startingIssueId: string;
   confirmingChapter: boolean;
   savingDraft: boolean;
+  movingMaterialId: string;
   editingSectionId: string;
   editingSectionContent: string;
 }
@@ -111,6 +115,7 @@ definePage<ChapterWorkspacePageData>()({
     startingIssueId: "",
     confirmingChapter: false,
     savingDraft: false,
+    movingMaterialId: "",
     editingSectionId: "",
     editingSectionContent: "",
   },
@@ -238,9 +243,12 @@ definePage<ChapterWorkspacePageData>()({
     if (!sectionId || !workspace) {
       return;
     }
+    const currentExpanded = this.data.sectionViews.find(
+      (section) => section.id === sectionId,
+    )?.expanded || false;
     const expandedSectionIds = {
       ...this.data.expandedSectionIds,
-      [sectionId]: !this.data.expandedSectionIds[sectionId],
+      [sectionId]: !currentExpanded,
     };
     this.setData({
       expandedSectionIds,
@@ -257,6 +265,7 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.rewritingDraft
       || this.data.confirmingChapter
       || this.data.savingDraft
+      || Boolean(this.data.movingMaterialId)
       || Boolean(this.data.editingSectionId)
     ) {
       return;
@@ -293,10 +302,15 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       if (result.unassigned_count > 0) {
         wx.showModal({
-          title: "小节分组已重新整理",
-          content: `生成了 ${result.section_count} 个小节；另有 ${result.unassigned_count} 条讲述暂未归类，可以到记录页继续处理。`,
+          title: "有讲述需要选择小节",
+          content: `已整理为 ${result.section_count} 个小节；另有 ${result.unassigned_count} 条讲述放在“待归类素材”中，请在本页逐条选择。`,
           showCancel: false,
-          confirmText: "知道了",
+          confirmText: "去选择",
+          success: (modalResult) => {
+            if (modalResult.confirm) {
+              void this.runNextAction();
+            }
+          },
         });
       } else {
         wx.showToast({
@@ -333,8 +347,96 @@ definePage<ChapterWorkspacePageData>()({
       this.confirmCurrentIssue();
       return;
     }
+    if (action.kind === "review_sections") {
+      const pendingSection = this.data.sectionViews.find(
+        (section) => section.requires_user_assignment,
+      );
+      if (pendingSection) {
+        const expandedSectionIds = {
+          ...this.data.expandedSectionIds,
+          [pendingSection.id]: true,
+        };
+        this.setData({
+          expandedSectionIds,
+          ...(this.data.workspace
+            ? chapterWorkspaceViewPatch(
+              this.data.workspace,
+              expandedSectionIds,
+            )
+            : {}),
+        });
+      }
+      scrollToSection("#chapter-structure");
+      return;
+    }
     if (action.kind === "review_draft" || action.kind === "complete") {
       scrollToSection("#chapter-draft");
+    }
+  },
+
+  moveUnassignedMaterial(
+    event: PagePickerEvent<{ utteranceId?: string }>,
+  ) {
+    const utteranceId = datasetString(event, "utteranceId");
+    const targetIndex = pickerIndex(event);
+    const targets = this.data.sectionViews.filter(
+      (section) => (
+        !section.requires_user_assignment
+        && section.status === "active"
+        && section.include_in_book !== false
+      ),
+    );
+    const target = targets[targetIndex];
+    if (
+      !utteranceId
+      || !target
+      || this.data.movingMaterialId
+      || this.data.processBusy
+      || this.data.regeneratingSections
+      || this.data.rewritingDraft
+    ) {
+      return;
+    }
+    wx.showModal({
+      title: "确认素材归属",
+      content: `把这条讲述移到“${target.title}”？`,
+      confirmText: "确认移动",
+      cancelText: "再想想",
+      success: (result) => {
+        if (result.confirm) {
+          void this.performMaterialMove(utteranceId, target.id);
+        }
+      },
+    });
+  },
+
+  async performMaterialMove(
+    utteranceId: string,
+    targetSectionId: string,
+  ) {
+    if (!utteranceId || !targetSectionId || this.data.movingMaterialId) {
+      return;
+    }
+    this.setData({ movingMaterialId: utteranceId, error: "" });
+    try {
+      await moveMemoirChapterMaterial(
+        this.data.projectId,
+        utteranceId,
+        targetSectionId,
+      );
+      await this.loadPageData(true);
+      wx.showToast({ title: "已选择小节", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error
+          ? error.message
+          : "素材移动失败",
+      });
+    } finally {
+      this.setData({ movingMaterialId: "" });
     }
   },
 
@@ -348,6 +450,7 @@ definePage<ChapterWorkspacePageData>()({
       || this.data.rewritingDraft
       || this.data.confirmingChapter
       || this.data.savingDraft
+      || Boolean(this.data.movingMaterialId)
       || Boolean(this.data.startingIssueId)
       || Boolean(this.data.editingSectionId)
     ) {
@@ -524,6 +627,7 @@ definePage<ChapterWorkspacePageData>()({
       !workspace?.draft_version_id
       || !currentSection
       || this.data.savingDraft
+      || Boolean(this.data.movingMaterialId)
     ) {
       return;
     }

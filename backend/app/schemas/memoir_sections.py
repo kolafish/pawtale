@@ -35,6 +35,7 @@ class MemoirChapterSectionSummary(BaseModel):
     sort_order: int
     status: MemoirSectionStatus
     include_in_book: bool
+    requires_user_assignment: bool = False
     version: int
     material_count: int
     included_material_count: int
@@ -63,6 +64,7 @@ class MemoirSectionResponse(BaseModel):
     sort_order: int
     status: MemoirSectionStatus
     include_in_book: bool
+    requires_user_assignment: bool = False
     version: int
     materials: list[MemoirSectionMaterialResponse] = Field(default_factory=list)
     created_at: datetime

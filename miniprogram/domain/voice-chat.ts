@@ -708,6 +708,7 @@ export interface MemoirChapterSectionSummary {
   sort_order: number;
   status: MemoirSectionStatus;
   include_in_book: boolean;
+  requires_user_assignment: boolean;
   version: number;
   material_count: number;
   included_material_count: number;

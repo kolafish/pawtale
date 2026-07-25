@@ -156,6 +156,26 @@ async def chapter_summary(
         )
         is not None
     )
+    pending_assignment_count = await sections.pending_assignment_material_count(
+        db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    if pending_assignment_count:
+        return MemoirChapterCompletionSummary(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="needs_input",
+            next_action=MemoirChapterCompletionNextAction(
+                kind="review_sections",
+                title=f"还有 {pending_assignment_count} 条讲述待选择小节",
+                detail="AI 没有强行归类，请逐条选择最合适的小节。",
+                action_text="去选择",
+            ),
+            headline="请先整理待归类素材",
+            detail="全部选择完成后，才能按新的小节结构生成正文。",
+        )
     issue = await _active_issue(
         db,
         project_id=project_id,
@@ -427,18 +447,29 @@ async def chapter_workspace(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    chapter_sections = sections_by_chapter.get(chapter_id, [])
+    pending_assignment_count = sum(
+        section.material_count
+        for section in chapter_sections
+        if section.requires_user_assignment
+    )
     return MemoirChapterWorkspaceResponse(
         project_id=project_id,
         chapter_id=chapter_id,
         chapter_title=chapter.title,
         completion_summary=summary,
         draft_needs_rewrite=draft_needs_rewrite,
-        can_rewrite_draft=draft_needs_rewrite and not has_manual_review,
+        can_rewrite_draft=(
+            draft_needs_rewrite
+            and not has_manual_review
+            and not pending_assignment_count
+        ),
+        pending_assignment_material_count=pending_assignment_count,
         pending_completion_source_count=(
             source_changes.pending_completion_source_count
         ),
         pending_new_source_count=source_changes.pending_new_source_count,
-        sections=sections_by_chapter.get(chapter_id, []),
+        sections=chapter_sections,
         draft_id=draft.id if draft else None,
         draft_version_id=version.id if version else None,
         draft_version=version.version if version else None,

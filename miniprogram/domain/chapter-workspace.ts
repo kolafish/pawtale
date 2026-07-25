@@ -11,6 +11,7 @@ export interface MemoirChapterWorkspace {
   completion_summary: MemoirChapterCompletionSummary;
   draft_needs_rewrite: boolean;
   can_rewrite_draft: boolean;
+  pending_assignment_material_count: number;
   pending_completion_source_count: number;
   pending_new_source_count: number;
   sections: MemoirChapterSectionSummary[];
