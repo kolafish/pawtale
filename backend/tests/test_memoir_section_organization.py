@@ -406,6 +406,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
         client,
         test_db,
     )
+    chapter_id = chapters[0].id
     original_section = data["sections"][0]
     excluded = await test_db.scalar(
         select(MemoirSectionMaterial).where(
@@ -431,7 +432,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     )
 
     response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
         json={
             "expected_sections": [
                 {
@@ -446,7 +447,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     assert response.status_code == 200, response.text
     assert response.json() == {
         "project_id": project_id,
-        "chapter_id": chapters[0].id,
+        "chapter_id": chapter_id,
         "material_count": 2,
         "assigned_count": 2,
         "unassigned_count": 0,
@@ -458,7 +459,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     chapter_sections = [
         section
         for section in listed.json()["sections"]
-        if section["chapter_id"] == chapters[0].id
+        if section["chapter_id"] == chapter_id
     ]
     assert len(chapter_sections) == 1
     assert chapter_sections[0]["id"] != original_section["id"]
@@ -477,8 +478,8 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     ] == [False, True]
     assert len(fake.prompts) == 2
     assert requested_models == ["deepseek-v4-flash"]
-    assert "不得保留为未归类素材" in fake.prompts[0]
-    assert "assign_existing|create_section|leave_unassigned" not in fake.prompts[0]
+    assert "保留为未归类素材" in fake.prompts[0]
+    assert "assign_existing|create_section|leave_unassigned" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
     assert "山桃花里的重逢" in fake.prompts[1]
     untouched = [
@@ -490,7 +491,7 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     assert "工作这些年" not in fake.prompts[0]
 
 
-async def test_regenerate_chapter_sections_preserves_every_material_or_rolls_back(
+async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choice(
     client,
     test_db,
     monkeypatch,
@@ -499,6 +500,7 @@ async def test_regenerate_chapter_sections_preserves_every_material_or_rolls_bac
         client,
         test_db,
     )
+    chapter_id = chapters[0].id
     original_section = data["sections"][0]
     fake = PartiallyUnassignedReplayMaterialOrganizationAI()
     monkeypatch.setattr(
@@ -508,7 +510,137 @@ async def test_regenerate_chapter_sections_preserves_every_material_or_rolls_bac
     )
 
     response = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapters[0].id}/sections/regenerate",
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/sections/regenerate",
+        json={
+            "expected_sections": [
+                {
+                    "id": original_section["id"],
+                    "version": original_section["version"],
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "project_id": project_id,
+        "chapter_id": chapter_id,
+        "material_count": 2,
+        "assigned_count": 1,
+        "unassigned_count": 1,
+        "section_count": 1,
+        "ai_model": "fake-section-organizer",
+    }
+    assert len(fake.prompts) == 2
+    listed = await client.get(f"/api/memoir/projects/{project_id}/sections")
+    assert listed.status_code == 200, listed.text
+    chapter_sections = [
+        section
+        for section in listed.json()["sections"]
+        if section["chapter_id"] == chapter_id
+    ]
+    normal_section = next(
+        section
+        for section in chapter_sections
+        if not section["requires_user_assignment"]
+    )
+    pending_section = next(
+        section
+        for section in chapter_sections
+        if section["requires_user_assignment"]
+    )
+    assert normal_section["title"] == "山桃花里的重逢"
+    assert [
+        item["utterance_id"] for item in normal_section["materials"]
+    ] == [created[0]["utterance_id"]]
+    assert pending_section["title"] == "待归类素材"
+    assert pending_section["include_in_book"] is False
+    assert [
+        item["utterance_id"] for item in pending_section["materials"]
+    ] == [created[1]["utterance_id"]]
+    assert pending_section["materials"][0]["include_in_book"] is True
+    assert {
+        item["utterance_id"]
+        for section in chapter_sections
+        for item in section["materials"]
+    } == {created[0]["utterance_id"], created[1]["utterance_id"]}
+
+    workspace = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/"
+        f"{chapter_id}/workspace"
+    )
+    assert workspace.status_code == 200, workspace.text
+    assert workspace.json()["pending_assignment_material_count"] == 1
+    assert workspace.json()["can_rewrite_draft"] is False
+    assert (
+        workspace.json()["completion_summary"]["next_action"]["kind"]
+        == "review_sections"
+    )
+    blocked = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter_id}/prepare",
+        json={},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "请先为 1 条待归类素材选择小节"
+    direct_generate = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
+        "layered-draft/generate",
+        json={},
+    )
+    assert direct_generate.status_code == 409
+    assert (
+        direct_generate.json()["detail"]
+        == "请先为 1 条待归类素材选择小节"
+    )
+    direct_confirm = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
+        "layered-draft/confirm",
+    )
+    assert direct_confirm.status_code == 409
+    assert (
+        direct_confirm.json()["detail"]
+        == "请先为 1 条待归类素材选择小节"
+    )
+
+    moved = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[1]['utterance_id']}/move",
+        json={"target_section_id": normal_section["id"]},
+    )
+    assert moved.status_code == 200, moved.text
+    refreshed = await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/"
+        f"{chapter_id}/workspace"
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["pending_assignment_material_count"] == 0
+    assert (
+        refreshed.json()["completion_summary"]["next_action"]["kind"]
+        != "review_sections"
+    )
+
+
+async def test_regenerate_chapter_sections_preserves_structure_when_all_pending(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, created, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    original_section = data["sections"][0]
+    fake = ReplayMaterialOrganizationAI(leave_unassigned=True)
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+
+    response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/"
+        f"{chapters[0].id}/sections/regenerate",
         json={
             "expected_sections": [
                 {
@@ -520,25 +652,22 @@ async def test_regenerate_chapter_sections_preserves_every_material_or_rolls_bac
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "AI 未能为全部讲述安排小节，原小节结构已保留，请重试"
-    )
-    assert len(fake.prompts) == 2
+    assert response.json()["detail"] == "AI 未能为本章生成任何小节，请重试"
     await test_db.rollback()
     persisted = await test_db.get(MemoirSection, original_section["id"])
     assert persisted is not None
     memberships = list(
         (
-            await test_db.execute(
+            await test_db.scalars(
                 select(MemoirSectionMaterial).where(
-                    MemoirSectionMaterial.section_id == original_section["id"]
+                    MemoirSectionMaterial.section_id
+                    == original_section["id"]
                 )
             )
-        ).scalars().all()
+        ).all()
     )
     assert {
-        material.utterance_id
-        for material in memberships
+        material.utterance_id for material in memberships
     } == {created[0]["utterance_id"], created[1]["utterance_id"]}
 
 

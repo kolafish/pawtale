@@ -55,6 +55,7 @@ test("chapter completion API exposes workspace, section regeneration, prepare, a
   resetModules();
   const {
     getMemoirChapterWorkspace,
+    moveMemoirChapterMaterial,
     regenerateMemoirChapterSections,
   } = require("../services/memoir-chapter-workspace-api.ts");
   const {
@@ -68,6 +69,7 @@ test("chapter completion API exposes workspace, section regeneration, prepare, a
     "chapter/1",
     [{ id: "section/1", version: 3 }],
   );
+  await moveMemoirChapterMaterial("project/1", "utterance/1", "section/2");
   await prepareMemoirBookChapter("project/1", "chapter/1");
   await rewriteMemoirBookChapter("project/1", "chapter/1");
 
@@ -80,12 +82,15 @@ test("chapter completion API exposes workspace, section regeneration, prepare, a
     ai_model: "deepseek-v4-flash",
   });
   assert.equal(apiRequests[1].timeout, 600000);
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
-  assert.deepEqual(apiRequests[2].data, { ai_model: "deepseek-v4-flash" });
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/move");
+  assert.deepEqual(apiRequests[2].data, { target_section_id: "section/2" });
   assert.equal(apiRequests[2].timeout, 600000);
-  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
   assert.deepEqual(apiRequests[3].data, { ai_model: "deepseek-v4-flash" });
   assert.equal(apiRequests[3].timeout, 600000);
-  assert.equal(apiRequests.length, 4);
+  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.deepEqual(apiRequests[4].data, { ai_model: "deepseek-v4-flash" });
+  assert.equal(apiRequests[4].timeout, 600000);
+  assert.equal(apiRequests.length, 5);
   delete global.wx;
 });

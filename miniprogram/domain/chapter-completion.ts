@@ -9,6 +9,7 @@ export type MemoirChapterCompletionState =
 export type MemoirChapterCompletionNextActionKind =
   | "prepare"
   | "wait"
+  | "review_sections"
   | "start_interview"
   | "confirm"
   | "review_draft"

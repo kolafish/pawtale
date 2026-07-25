@@ -8,12 +8,14 @@ import { chapterNextAction, type ChapterNextAction } from "./chapter-next-action
 
 export interface ChapterSectionMaterialView extends MemoirChapterSectionMaterialSummary {
   indexText: string;
+  assignmentOptions: Array<{ id: string; title: string }>;
 }
 
 export interface ChapterSectionView extends MemoirChapterSectionSummary {
   indexText: string;
   typeText: string;
   metaText: string;
+  assignmentHint: string;
   expanded: boolean;
   visibleMaterials: ChapterSectionMaterialView[];
 }
@@ -46,26 +48,62 @@ function visibleSectionViews(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean>,
 ): ChapterSectionView[] {
-  return [...(workspace.sections || [])]
+  const assignmentOptions = [...(workspace.sections || [])]
     .filter((section) => (
       section.status === "active"
       && section.include_in_book !== false
+      && !section.requires_user_assignment
     ))
     .sort((left, right) => left.sort_order - right.sort_order)
+    .map((section, index) => ({
+      id: section.id,
+      title: `${index + 1}. ${section.title}`,
+    }));
+  return [...(workspace.sections || [])]
+    .filter((section) => (
+      section.status === "active"
+      && (
+        section.include_in_book !== false
+        || (
+          section.requires_user_assignment
+          && section.material_count > 0
+        )
+      )
+    ))
+    .sort((left, right) => (
+      Number(left.requires_user_assignment)
+      - Number(right.requires_user_assignment)
+      || left.sort_order - right.sort_order
+    ))
     .map((section, sectionIndex) => {
       const visibleMaterials = [...(section.materials || [])]
-        .filter((material) => material.include_in_book !== false)
+        .filter((material) => (
+          section.requires_user_assignment
+          || material.include_in_book !== false
+        ))
         .sort((left, right) => left.sort_order - right.sort_order)
         .map((material, materialIndex) => ({
           ...material,
           indexText: `讲述 ${materialIndex + 1}`,
+          assignmentOptions: section.requires_user_assignment
+            ? assignmentOptions
+            : [],
         }));
       return {
         ...section,
-        indexText: `${sectionIndex + 1}`,
-        typeText: SECTION_TYPE_TEXT[section.section_type] || "内容小节",
+        indexText: section.requires_user_assignment
+          ? "待"
+          : `${sectionIndex + 1}`,
+        typeText: section.requires_user_assignment
+          ? "需要选择小节"
+          : SECTION_TYPE_TEXT[section.section_type] || "内容小节",
         metaText: `${visibleMaterials.length} 条讲述`,
-        expanded: Boolean(expandedSectionIds[section.id]),
+        assignmentHint: section.requires_user_assignment
+          ? "这些讲述都还保留在本章中。请选择最合适的小节，完成后才能生成正文。"
+          : "",
+        expanded: section.requires_user_assignment
+          ? expandedSectionIds[section.id] !== false
+          : Boolean(expandedSectionIds[section.id]),
         visibleMaterials,
       };
     });
@@ -140,6 +178,11 @@ export function chapterWorkspaceViewPatch(
   const summary = workspace.completion_summary;
   const nextAction = chapterNextAction(summary);
   const sectionViews = visibleSectionViews(workspace, expandedSectionIds);
+  const pendingAssignmentCount =
+    workspace.pending_assignment_material_count || 0;
+  const narrativeSectionCount = sectionViews.filter(
+    (section) => !section.requires_user_assignment,
+  ).length;
   const materialCount = sectionViews.reduce(
     (total, section) => total + section.visibleMaterials.length,
     0,
@@ -153,7 +196,13 @@ export function chapterWorkspaceViewPatch(
       ? "可以继续补充，也可以先用本章全部现有素材重新生成完整正文；旧版本仍会保留。"
       : "请先完成本章当前步骤，再重新生成正文。",
     ...draftRecoveryPatch(workspace, nextAction),
-    sectionStructureSummary: `${sectionViews.length} 个小节 · ${materialCount} 条讲述`,
+    sectionStructureSummary: [
+      `${narrativeSectionCount} 个小节`,
+      `${materialCount} 条讲述`,
+      ...(pendingAssignmentCount
+        ? [`${pendingAssignmentCount} 条待归类`]
+        : []),
+    ].join(" · "),
     sectionViews,
     canConfirmChapter:
       summary.state === "draft_ready"
@@ -162,6 +211,7 @@ export function chapterWorkspaceViewPatch(
       && workspace.draft_sections.length > 0
       && workspace.draft_sections.every(
         (section) => Boolean(section.content.trim()),
-      ),
+      )
+      && !pendingAssignmentCount,
   };
 }

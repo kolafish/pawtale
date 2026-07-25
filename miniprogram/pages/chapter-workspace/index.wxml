@@ -21,7 +21,7 @@
       >{{processBusy || startingIssueId !== "" ? "正在处理…" : nextAction.actionText}}</view>
     </view>
 
-    <view wx:if="{{sectionViews.length}}" class="content-card structure-card">
+    <view wx:if="{{sectionViews.length}}" class="content-card structure-card" id="chapter-structure">
       <view class="structure-heading">
         <view>
           <text class="section-kicker">本章结构</text>
@@ -33,15 +33,15 @@
       <view class="structure-tools">
         <text class="structure-tools-detail">仅在讲述分组不合适时使用；这一步不会直接生成正文，可能需要几分钟。</text>
         <view
-          class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== '' ? 'is-disabled' : ''}}"
+          class="structure-regenerate-action {{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
-          aria-disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || editingSectionId !== ''}}"
+          aria-disabled="{{regeneratingSections || processBusy || rewritingDraft || confirmingChapter || savingDraft || movingMaterialId !== '' || editingSectionId !== ''}}"
           bindtap="regenerateSections"
         >{{regeneratingSections ? "正在重新整理…" : "重新整理小节分组"}}</view>
       </view>
 
       <view class="section-list">
-        <view wx:for="{{sectionViews}}" wx:key="id" class="section-item">
+        <view wx:for="{{sectionViews}}" wx:key="id" class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}">
           <view
             class="section-toggle"
             data-id="{{item.id}}"
@@ -60,9 +60,25 @@
           </view>
 
           <view wx:if="{{item.expanded}}" class="section-material-list">
+            <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
             <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
               <text class="section-material-index">{{material.indexText}}</text>
               <text class="section-material-text" selectable>{{material.text}}</text>
+              <picker
+                wx:if="{{item.requires_user_assignment}}"
+                mode="selector"
+                range="{{material.assignmentOptions}}"
+                range-key="title"
+                data-utterance-id="{{material.utterance_id}}"
+                disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft}}"
+                bindchange="moveUnassignedMaterial"
+              >
+                <view
+                  class="material-assignment-action {{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft ? 'is-disabled' : ''}}"
+                  aria-role="button"
+                  aria-disabled="{{movingMaterialId !== '' || processBusy || regeneratingSections || rewritingDraft}}"
+                >{{movingMaterialId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
+              </picker>
             </view>
           </view>
         </view>

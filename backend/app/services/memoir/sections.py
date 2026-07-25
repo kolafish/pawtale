@@ -41,6 +41,7 @@ from app.services.memoir.material_roles import (
     narrator_material_clause,
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.section_roles import requires_user_assignment
 
 
 def _utcnow() -> datetime:
@@ -173,6 +174,9 @@ def _section_response(
         sort_order=section.sort_order,
         status=section.status,
         include_in_book=section.include_in_book,
+        requires_user_assignment=requires_user_assignment(
+            section.metadata_json
+        ),
         version=section.version,
         materials=[
             MemoirSectionMaterialResponse(
@@ -207,6 +211,9 @@ def _section_summary(section: MemoirSection) -> MemoirChapterSectionSummary:
         sort_order=section.sort_order,
         status=section.status,
         include_in_book=section.include_in_book,
+        requires_user_assignment=requires_user_assignment(
+            section.metadata_json
+        ),
         version=section.version,
         material_count=len(materials),
         included_material_count=sum(
@@ -221,6 +228,40 @@ def _section_summary(section: MemoirSection) -> MemoirChapterSectionSummary:
             )
             for material in materials
         ],
+    )
+
+
+async def pending_assignment_material_count(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> int:
+    section_rows = (
+        await db.execute(
+            select(MemoirSection.id, MemoirSection.metadata_json).where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.chapter_id == chapter_id,
+            )
+        )
+    ).all()
+    pending_section_ids = [
+        section_id
+        for section_id, metadata_json in section_rows
+        if requires_user_assignment(metadata_json)
+    ]
+    if not pending_section_ids:
+        return 0
+    return int(
+        await db.scalar(
+            select(func.count())
+            .select_from(MemoirSectionMaterial)
+            .where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSectionMaterial.section_id.in_(pending_section_ids),
+            )
+        )
+        or 0
     )
 
 

@@ -34,6 +34,12 @@ from app.services.memoir.project_ai_preferences import (
     project_ai_model,
     remember_project_ai_model,
 )
+from app.services.memoir.section_roles import (
+    PENDING_ASSIGNMENT_SECTION_ROLE,
+    PENDING_ASSIGNMENT_SECTION_TITLE,
+    SECTION_SYSTEM_ROLE_KEY,
+    requires_user_assignment,
+)
 from app.services.memoir.sections import assign_material_to_section
 from app.services.memoir.utterance_editing_pipeline import (
     current_transcript_version_id,
@@ -151,7 +157,9 @@ def _material_snapshots(
                 text_hash=source_text_hash(text),
                 transcript_version_id=current_transcript_version_id(utterance),
                 include_in_book=(
-                    section.include_in_book and material.include_in_book
+                    material.include_in_book
+                    if requires_user_assignment(section.metadata_json)
+                    else section.include_in_book and material.include_in_book
                 ),
             )
         )
@@ -178,13 +186,45 @@ def _append_candidate_example(
         ][-2:]
 
 
+def _validate_planned_coverage(
+    *,
+    materials: list[_MaterialSnapshot],
+    planned_sections: list[_PlannedSection],
+    pending_assignments: list[_PlannedAssignment],
+) -> None:
+    expected_ids = [material.utterance_id for material in materials]
+    planned_ids = [
+        assignment.material.utterance_id
+        for section in planned_sections
+        for assignment in section.assignments
+    ]
+    pending_ids = [
+        assignment.material.utterance_id
+        for assignment in pending_assignments
+    ]
+    output_ids = [*planned_ids, *pending_ids]
+    if (
+        len(output_ids) != len(expected_ids)
+        or len(output_ids) != len(set(output_ids))
+        or set(output_ids) != set(expected_ids)
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="AI 小节结果没有完整覆盖本章讲述，原小节结构已保留，请重试",
+        )
+
+
 async def _plan_section_regeneration(
     *,
     chapter_id: str,
     chapter_title: str,
     materials: list[_MaterialSnapshot],
     ai_model: str | None,
-) -> tuple[list[_PlannedSection], str | None]:
+) -> tuple[
+    list[_PlannedSection],
+    list[_PlannedAssignment],
+    str | None,
+]:
     client = get_ai_service(ai_model)
     generated_model = getattr(client, "model_name", ai_model)
     chapters = [
@@ -194,19 +234,22 @@ async def _plan_section_regeneration(
         )
     ]
     planned_sections: list[_PlannedSection] = []
+    pending_assignments: list[_PlannedAssignment] = []
     for material in materials:
         decision = await decide_material_organization(
             material_text=material.text,
             chapters=chapters,
             sections=[section.candidate for section in planned_sections],
             ai_client=client,
-            allow_leave_unassigned=False,
         )
         if decision.action == "leave_unassigned":
-            raise HTTPException(
-                status_code=409,
-                detail="AI 未能为全部讲述安排小节，原小节结构已保留，请重试",
+            pending_assignments.append(
+                _PlannedAssignment(
+                    material=material,
+                    decision=decision,
+                )
             )
+            continue
         if decision.action == "create_section":
             candidate = MaterialOrganizationSectionCandidate(
                 id=str(uuid.uuid4()),
@@ -236,7 +279,7 @@ async def _plan_section_regeneration(
             )
         )
         _append_candidate_example(target.candidate, material.text)
-    return planned_sections, generated_model
+    return planned_sections, pending_assignments, generated_model
 
 
 async def regenerate_chapter_sections(
@@ -271,7 +314,11 @@ async def regenerate_chapter_sections(
     # LLM calls may take minutes. Release the read transaction and defer every
     # mutation until all decisions are ready, then replace the structure atomically.
     await db.commit()
-    planned_sections, generated_model = await _plan_section_regeneration(
+    (
+        planned_sections,
+        pending_assignments,
+        generated_model,
+    ) = await _plan_section_regeneration(
         chapter_id=chapter_id,
         chapter_title=chapter_title,
         materials=materials,
@@ -282,6 +329,11 @@ async def regenerate_chapter_sections(
             status_code=409,
             detail="AI 未能为本章生成任何小节，请重试",
         )
+    _validate_planned_coverage(
+        materials=materials,
+        planned_sections=planned_sections,
+        pending_assignments=pending_assignments,
+    )
 
     chapter = await _load_chapter(
         db,
@@ -301,6 +353,10 @@ async def regenerate_chapter_sections(
     await db.flush()
 
     assigned_count = 0
+    generation_metadata = {
+        "operation": "chapter_section_regeneration",
+        "model": generated_model,
+    }
     for index, planned_section in enumerate(planned_sections):
         candidate = planned_section.candidate
         db.add(
@@ -312,10 +368,25 @@ async def regenerate_chapter_sections(
                 section_type=candidate.section_type,
                 sort_order=index,
                 metadata_json={
-                    "generation": {
-                        "operation": "chapter_section_regeneration",
-                        "model": generated_model,
-                    }
+                    "generation": generation_metadata,
+                },
+            )
+        )
+    pending_section_id: str | None = None
+    if pending_assignments:
+        pending_section_id = str(uuid.uuid4())
+        db.add(
+            MemoirSection(
+                id=pending_section_id,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                title=PENDING_ASSIGNMENT_SECTION_TITLE,
+                section_type="life_fragment",
+                sort_order=len(planned_sections),
+                include_in_book=False,
+                metadata_json={
+                    "generation": generation_metadata,
+                    SECTION_SYSTEM_ROLE_KEY: PENDING_ASSIGNMENT_SECTION_ROLE,
                 },
             )
         )
@@ -338,10 +409,26 @@ async def regenerate_chapter_sections(
             db.add(material)
             assigned_count += 1
 
+    if pending_section_id is not None:
+        for assignment in pending_assignments:
+            material = await assign_material_to_section(
+                db,
+                project_id=project_id,
+                section_id=pending_section_id,
+                utterance_id=assignment.material.utterance_id,
+                assigned_by=MemoirSectionMaterialAssignedBy.AI,
+                assignment_reason=(
+                    assignment.decision.reason or "llm_left_unassigned"
+                ),
+            )
+            material.assignment_confidence = assignment.decision.confidence
+            material.include_in_book = assignment.material.include_in_book
+            db.add(material)
+
     return {
         "material_count": len(materials),
         "assigned_count": assigned_count,
-        "unassigned_count": 0,
+        "unassigned_count": len(pending_assignments),
         "section_count": len(planned_sections),
         "ai_model": generated_model,
     }

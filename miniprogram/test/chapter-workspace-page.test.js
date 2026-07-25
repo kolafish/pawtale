@@ -35,6 +35,7 @@ function workspace(overrides = {}) {
     completion_summary: summary(),
     draft_needs_rewrite: false,
     can_rewrite_draft: false,
+    pending_assignment_material_count: 0,
     pending_completion_source_count: 0,
     pending_new_source_count: 0,
     sections: [
@@ -45,6 +46,7 @@ function workspace(overrides = {}) {
         sort_order: 0,
         status: "active",
         include_in_book: true,
+        requires_user_assignment: false,
         version: 1,
         material_count: 1,
         included_material_count: 1,
@@ -87,6 +89,7 @@ function loadWorkspacePage({
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
     regenerateMemoirChapterSections: async () => {},
+    moveMemoirChapterMaterial: async () => {},
     rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
@@ -134,6 +137,7 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.doesNotMatch(template, /<button\s+class="primary-action/);
   assert.match(template, /<view\s+class="structure-regenerate-action/);
   assert.match(template, /<view\s+class="rewrite-action/);
+  assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
 });
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
@@ -254,6 +258,96 @@ test("chapter workspace regenerates the current section structure after confirma
   ]]);
   assert.equal(toasts.at(-1).title, "已整理为2个小节");
   assert.equal(context.data.regeneratingSections, false);
+  delete global.wx;
+});
+
+test("chapter workspace exposes pending materials and moves one after confirmation", async () => {
+  const { toasts } = installWx();
+  const calls = [];
+  const pendingWorkspace = workspace({
+    pending_assignment_material_count: 1,
+    can_rewrite_draft: false,
+    completion_summary: summary({
+      state: "needs_input",
+      next_action: {
+        kind: "review_sections",
+        title: "还有 1 条讲述待选择小节",
+        detail: "AI 没有强行归类。",
+        action_text: "去选择",
+        disabled: false,
+        issue_id: null,
+      },
+      headline: "请先整理待归类素材",
+      detail: "全部选择完成后，才能按新的小节结构生成正文。",
+    }),
+    sections: [
+      ...workspace().sections,
+      {
+        id: "section-pending",
+        title: "待归类素材",
+        section_type: "life_fragment",
+        sort_order: 1,
+        status: "active",
+        include_in_book: false,
+        requires_user_assignment: true,
+        version: 1,
+        material_count: 1,
+        included_material_count: 1,
+        materials: [
+          {
+            utterance_id: "utterance-pending",
+            sort_order: 0,
+            text: "这段讲述和前后几个小节都有关系。",
+            include_in_book: true,
+          },
+        ],
+      },
+    ],
+  });
+  const { page } = loadWorkspacePage({
+    currentWorkspace: pendingWorkspace,
+    voiceApiExports: {
+      moveMemoirChapterMaterial: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  const pendingSection = context.data.sectionViews[1];
+  assert.equal(pendingSection.title, "待归类素材");
+  assert.equal(pendingSection.expanded, true);
+  assert.equal(pendingSection.visibleMaterials[0].assignmentOptions[0].id, "section-1");
+  assert.equal(
+    context.data.sectionStructureSummary,
+    "1 个小节 · 2 条讲述 · 1 条待归类",
+  );
+  assert.equal(context.data.canConfirmChapter, false);
+
+  page.toggleSection.call(context, {
+    currentTarget: { dataset: { id: "section-pending" } },
+  });
+  assert.equal(context.data.sectionViews[1].expanded, false);
+
+  page.moveUnassignedMaterial.call(context, {
+    currentTarget: {
+      dataset: { utteranceId: "utterance-pending" },
+    },
+    detail: { value: 0 },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "utterance-pending",
+    "section-1",
+  ]]);
+  assert.equal(toasts.at(-1).title, "已选择小节");
+  assert.equal(context.data.movingMaterialId, "");
   delete global.wx;
 });
 

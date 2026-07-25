@@ -34,6 +34,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.sections import pending_assignment_material_count
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -45,6 +46,24 @@ CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
 )
+
+
+async def _ensure_no_pending_assignment(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> None:
+    pending_count = await pending_assignment_material_count(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    if pending_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"请先为 {pending_count} 条待归类素材选择小节",
+        )
 
 
 @dataclass(frozen=True)
@@ -507,6 +526,11 @@ async def generate_and_save_chapter_draft(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await _ensure_no_pending_assignment(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     before = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -601,6 +625,11 @@ async def confirm_chapter_draft(
     project_id: str,
     chapter_id: str,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await _ensure_no_pending_assignment(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     context = await load_chapter_generation_context(
         db,
         project_id=project_id,

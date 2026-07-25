@@ -24,6 +24,7 @@ MemoirChapterCompletionIssueStatus = Literal["pending", "in_progress"]
 MemoirChapterCompletionNextActionKind = Literal[
     "prepare",
     "wait",
+    "review_sections",
     "start_interview",
     "confirm",
     "review_draft",
@@ -87,6 +88,7 @@ class MemoirChapterWorkspaceResponse(BaseModel):
     completion_summary: MemoirChapterCompletionSummary
     draft_needs_rewrite: bool = False
     can_rewrite_draft: bool = False
+    pending_assignment_material_count: int = 0
     pending_completion_source_count: int = 0
     pending_new_source_count: int = 0
     sections: list[MemoirChapterSectionSummary] = Field(default_factory=list)

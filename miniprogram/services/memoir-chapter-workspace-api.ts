@@ -48,3 +48,22 @@ export function regenerateMemoirChapterSections(
     },
   );
 }
+
+export function moveMemoirChapterMaterial(
+  projectId: string,
+  utteranceId: string,
+  targetSectionId: string,
+): Promise<unknown> {
+  return memoirRequest<unknown>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/section-materials/${encodeURIComponent(utteranceId)}/move`,
+    ),
+    {
+      method: "POST",
+      data: {
+        target_section_id: targetSectionId,
+      },
+    },
+  );
+}
