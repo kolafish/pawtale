@@ -48,6 +48,11 @@ CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
 )
+CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
+    "你是一位谨慎的中文回忆录编辑。"
+    "只使用允许的原始讲述和用户明确给出的事实更正修改当前小节，"
+    "不自行创造事实。"
+)
 CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
 logger = logging.getLogger(__name__)
 
@@ -249,6 +254,8 @@ def build_chapter_generation_prompt(
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     previous_section_ending: str = "",
+    current_section_content: str = "",
+    revision_instruction: str = "",
 ) -> str:
     outline_sections = chapter_sections or context.sections
     target_section_id = (
@@ -297,11 +304,30 @@ def build_chapter_generation_prompt(
         if target_section_id
         else "- 一次输出完整章节，并严格按输入顺序返回每个小节。\n"
     )
+    revision = ""
+    if revision_instruction:
+        revision = f"""
+本次是按用户要求修改现有小节，不是脱离原稿重新创作。
+当前小节正文：
+{current_section_content}
+
+用户修改要求：
+{revision_instruction}
+
+修改规则：
+- 先理解用户要调整的对象、范围和表达效果，再输出修改后的完整小节正文。
+- 指令未涉及的事实和段落尽量保持不变。
+- 可以按要求调整措辞、语气、详略、顺序和段落结构。
+- 用户在指令中明确给出的事实更正可以采用；除此之外仍只能使用下方原始讲述中的事实。
+- 用户只要求“补充更多细节”却没有说出具体事实、且原始讲述也不支持时，不得自行虚构，应放入 missing_source_candidates。
+- 不要在正文里复述用户指令，也不要解释修改过程。
+"""
     return f"""请把下面的原始讲述整理为回忆录章节“{context.chapter_title}”。
 
 本章完整小节顺序：
 {outline}
 {continuity}
+{revision}
 编辑建议：
 {guidance}
 
@@ -529,6 +555,8 @@ async def generate_chapter_section(
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...],
     previous_section_ending: str = "",
+    current_section_content: str = "",
+    revision_instruction: str = "",
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedChapter:
@@ -539,6 +567,8 @@ async def generate_chapter_section(
         editorial_guidance=editorial_guidance,
         chapter_sections=chapter_sections,
         previous_section_ending=previous_section_ending,
+        current_section_content=current_section_content,
+        revision_instruction=revision_instruction,
     )
     last_error: Exception | None = None
     for attempt in range(CHAPTER_SECTION_GENERATION_ATTEMPTS):
@@ -550,9 +580,13 @@ async def generate_chapter_section(
                     f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
                 )
             raw = await client._call_llm(
-                CHAPTER_GENERATION_SYSTEM_PROMPT,
+                (
+                    CHAPTER_SECTION_REVISION_SYSTEM_PROMPT
+                    if revision_instruction
+                    else CHAPTER_GENERATION_SYSTEM_PROMPT
+                ),
                 attempt_prompt,
-                temperature=0.3,
+                temperature=0.2 if revision_instruction else 0.3,
                 max_tokens=5000,
                 timeout=120.0,
             )
@@ -750,13 +784,14 @@ async def generate_and_save_chapter_draft(
     return draft, version
 
 
-async def regenerate_and_save_chapter_draft_section(
+async def revise_and_save_chapter_draft_section_with_ai(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
     section_id: str,
     expected_version_id: str,
+    instruction_text: str,
     editorial_guidance: list[str],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
@@ -795,7 +830,7 @@ async def regenerate_and_save_chapter_draft_section(
     if draft is None or latest is None:
         raise HTTPException(status_code=404, detail="章节稿不存在")
     if latest.id != expected_version_id:
-        raise HTTPException(status_code=409, detail="正文已更新，请刷新后再重新生成")
+        raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
     if latest.input_signature != before.input_signature:
         raise HTTPException(status_code=409, detail="本章素材已变化，请先重新生成全部正文")
     latest_sections = [
@@ -811,13 +846,14 @@ async def regenerate_and_save_chapter_draft_section(
             for section in latest_sections
         ] != expected_section_ids
     ):
-        raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再重新生成")
+        raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再修改")
     previous_section_ending = ""
     if target_index > 0:
         previous_section_ending = str(
             latest_sections[target_index - 1].get("content") or ""
         ).strip()[-300:]
     target = before.sections[target_index]
+    revision_instruction = instruction_text.strip()
     await db.commit()
     generated = await generate_chapter_section(
         before,
@@ -825,6 +861,10 @@ async def regenerate_and_save_chapter_draft_section(
         editorial_guidance=editorial_guidance,
         chapter_sections=before.sections,
         previous_section_ending=previous_section_ending,
+        current_section_content=str(
+            latest_sections[target_index].get("content") or ""
+        ).strip(),
+        revision_instruction=revision_instruction,
         ai_model=ai_model,
         ai_client=ai_client,
     )
@@ -889,8 +929,11 @@ async def regenerate_and_save_chapter_draft_section(
         content=revised_content,
         created_by=MemoirCreatedBy.AI.value,
         model=generated.model,
-        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section",
-        feedback=f"AI 重新生成小节《{target_input.title}》正文",
+        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section_ai_revision",
+        feedback=(
+            f"AI 按要求修改小节《{target_input.title}》："
+            f"{revision_instruction}"
+        ),
         input_signature=after.input_signature,
         used_material_ids_json=used_material_ids,
         material_snapshot_json=_snapshot(
@@ -905,7 +948,9 @@ async def regenerate_and_save_chapter_draft_section(
     draft.metadata_json = {
         **(draft.metadata_json or {}),
         "source": CHAPTER_GENERATION_ENGINE,
-        "last_regenerated_section_id": section_id,
+        "last_ai_revised_section_id": section_id,
+        "last_requested_ai_model": ai_model,
+        "last_resolved_ai_model": generated.model,
     }
     db.add(draft)
     output = await db.scalar(

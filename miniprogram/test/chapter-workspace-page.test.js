@@ -128,13 +128,14 @@ function workspaceWithPendingMaterial(overrides = {}) {
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
+  voiceSearchExports = {},
   consent = true,
   cacheExports = {},
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
     prepareMemoirBookChapter: async () => {},
-    regenerateMemoirChapterDraftSection: async () => currentWorkspace,
+    reviseMemoirChapterDraftSectionWithAI: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
     moveMemoirChapterMaterial: async () => {},
     rewriteMemoirBookChapter: async () => {},
@@ -158,6 +159,13 @@ function loadWorkspacePage({
     readVoiceAuthorizationConsent: () => consent,
     syncVoiceAuthorizationConsent: async () => {},
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+  });
+  mockModule("../services/memoir-voice-search.ts", {
+    recordMemoirVoiceSearchQuery: async () => {
+      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
+    },
+    stopMemoirVoiceSearchRecording: () => {},
+    ...voiceSearchExports,
   });
   return loadPageModule("../pages/chapter-workspace/index.ts");
 }
@@ -209,7 +217,9 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
   assert.match(template, /wx:for="{{draftSectionViews}}"/);
   assert.match(template, /bindtap="toggleDraftSection"/);
-  assert.match(template, /bindtap="regenerateDraftSection"/);
+  assert.match(template, /bindtap="startDraftSectionAIEdit"/);
+  assert.match(template, /bindtap="toggleDraftSectionVoiceInstruction"/);
+  assert.match(template, /bindtap="submitDraftSectionAIInstruction"/);
   assert.match(template, /bindtap="playDraftSection"/);
   assert.match(template, /operationKind !== ''/);
   assert.match(template, /audioPhase === "preparing"/);
@@ -327,13 +337,30 @@ test("chapter workspace serializes mutations through one operation state", () =>
   page.finishOperation.call(context, "regenerate_sections");
   assert.equal(context.data.operationKind, "");
   assert.equal(context.data.operationTargetId, "");
-  context.setData({ editingSectionId: "section-1" });
+  context.setData({
+    editingMode: "manual",
+    editingSectionId: "section-1",
+  });
   assert.equal(page.beginOperation.call(context, "prepare"), false);
   assert.equal(
     page.beginOperation.call(context, "save_draft_section", "section-1"),
     true,
   );
   page.finishOperation.call(context, "save_draft_section", "section-1");
+  context.setData({ editingMode: "ai" });
+  assert.equal(
+    page.beginOperation.call(
+      context,
+      "revise_draft_section_with_ai",
+      "section-1",
+    ),
+    true,
+  );
+  page.finishOperation.call(
+    context,
+    "revise_draft_section_with_ai",
+    "section-1",
+  );
   delete global.wx;
 });
 
@@ -359,7 +386,6 @@ test("chapter workspace blocks row actions while another operation is active", a
   };
 
   page.startDraftSectionEdit.call(context, sectionEvent);
-  page.regenerateDraftSection.call(context, sectionEvent);
   await page.playDraftSection.call(context, sectionEvent);
 
   assert.equal(context.data.editingSectionId, "");
@@ -688,14 +714,22 @@ test("chapter workspace edits one small section with optimistic version control"
   delete global.wx;
 });
 
-test("chapter workspace regenerates one draft section with the current version", async () => {
-  const { toasts, modals } = installWx();
+test("chapter workspace sends a typed instruction to edit one draft section", async () => {
+  const { toasts } = installWx();
   const calls = [];
+  const ttsCalls = [];
   const { page } = loadWorkspacePage({
     voiceApiExports: {
-      regenerateMemoirChapterDraftSection: async (...args) => {
+      reviseMemoirChapterDraftSectionWithAI: async (...args) => {
         calls.push(args);
-        return workspace();
+        return workspace({
+          draft_version_id: "version-2",
+          draft_version: 2,
+        });
+      },
+      createMemoirBookChapterDraftSectionTTS: async (...args) => {
+        ttsCalls.push(args);
+        return { audio_file_ids: ["audio-1"] };
       },
     },
   });
@@ -705,23 +739,125 @@ test("chapter workspace regenerates one draft section with the current version",
     chapterId: "chapter-1",
   });
 
-  page.regenerateDraftSection.call(context, {
+  page.startDraftSectionAIEdit.call(context, {
     currentTarget: { dataset: { id: "section-1" } },
   });
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.editingMode, "ai");
+  assert.equal(context.data.editingSectionId, "section-1");
+  await page.playDraftSection.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  assert.deepEqual(ttsCalls, []);
+  page.changeDraftSectionAIInstruction.call(context, {
+    detail: { value: "保留离家的事实，把语气写得更平实。" },
+  });
+  await page.submitDraftSectionAIInstruction.call(context);
 
   assert.deepEqual(calls, [[
     "project-1",
     "chapter-1",
     "section-1",
     "version-1",
+    "保留离家的事实，把语气写得更平实。",
   ]]);
-  assert.equal(modals.at(-1).title, "重新生成“离家前的准备”？");
-  assert.match(modals.at(-1).content, /其他小节保持不变/);
-  assert.equal(toasts.at(-1).title, "这一小节已更新");
-  assert.equal(context.data.draftSectionViews[0].expanded, true);
+  assert.equal(toasts.at(-1).title, "已按要求修改");
+  assert.equal(context.data.editingMode, "");
+  assert.equal(context.data.editingSectionId, "");
+  assert.equal(context.data.draftSectionAIInstruction, "");
+  assert.equal(context.data.draftSectionVoicePhase, "idle");
+  delete global.wx;
+});
+
+test("chapter workspace keeps the instruction when AI makes no change", async () => {
+  const { toasts } = installWx();
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      reviseMemoirChapterDraftSectionWithAI: async () => workspace(),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  page.startDraftSectionAIEdit.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+  page.changeDraftSectionAIInstruction.call(context, {
+    detail: { value: "再多写一些没有提供的细节" },
+  });
+
+  await page.submitDraftSectionAIInstruction.call(context);
+
+  assert.equal(context.data.editingMode, "ai");
+  assert.equal(
+    context.data.draftSectionAIInstruction,
+    "再多写一些没有提供的细节",
+  );
+  assert.equal(context.data.draftSectionVoicePhase, "idle");
+  assert.match(context.data.error, /没有改动/);
+  assert.deepEqual(toasts, []);
   assert.equal(context.data.operationKind, "");
+  delete global.wx;
+});
+
+test("chapter workspace transcribes a voice instruction before editing one section", async () => {
+  installWx();
+  const calls = [];
+  const phases = [];
+  let recordOptions;
+  let context;
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      reviseMemoirChapterDraftSectionWithAI: async (...args) => {
+        calls.push(args);
+        return workspace({
+          draft_version_id: "version-2",
+          draft_version: 2,
+        });
+      },
+    },
+    voiceSearchExports: {
+      recordMemoirVoiceSearchQuery: async (options) => {
+        recordOptions = options;
+        phases.push(context.data.draftSectionVoicePhase);
+        options.onRecordingEnd();
+        phases.push(context.data.draftSectionVoicePhase);
+        return "删掉重复的句子，结尾写得克制一点。";
+      },
+    },
+  });
+  context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  page.startDraftSectionAIEdit.call(context, {
+    currentTarget: { dataset: { id: "section-1" } },
+  });
+
+  await page.toggleDraftSectionVoiceInstruction.call(context);
+
+  assert.equal(recordOptions.stopMode, "manual");
+  assert.equal(recordOptions.maxDurationMs, 30000);
+  assert.deepEqual(phases, ["listening", "transcribing"]);
+  assert.equal(
+    context.data.draftSectionAIInstruction,
+    "删掉重复的句子，结尾写得克制一点。",
+  );
+  assert.deepEqual(calls, []);
+
+  await page.submitDraftSectionAIInstruction.call(context);
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "chapter-1",
+    "section-1",
+    "version-1",
+    "删掉重复的句子，结尾写得克制一点。",
+  ]]);
+  assert.equal(context.data.editingMode, "");
+  assert.equal(context.data.draftSectionVoicePhase, "idle");
   delete global.wx;
 });
 

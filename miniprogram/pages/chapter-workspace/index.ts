@@ -13,7 +13,7 @@ import {
   getMemoirChapterWorkspace,
   moveMemoirChapterMaterial,
   prepareMemoirBookChapter,
-  regenerateMemoirChapterDraftSection,
+  reviseMemoirChapterDraftSectionWithAI,
   regenerateMemoirChapterSections,
   rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
@@ -31,6 +31,10 @@ import {
 } from "../../services/page-input";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
+import {
+  recordMemoirVoiceSearchQuery,
+  stopMemoirVoiceSearchRecording,
+} from "../../services/memoir-voice-search";
 import {
   readVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -53,6 +57,7 @@ import {
 export { chapterWorkspaceViewPatch };
 
 const PREPARATION_POLL_INTERVAL_MS = 1500;
+const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
 
 type ChapterWorkspaceOperationKind =
   | ""
@@ -63,10 +68,23 @@ type ChapterWorkspaceOperationKind =
   | "confirm_issue"
   | "save_draft_section"
   | "confirm_chapter"
-  | "regenerate_draft_section"
+  | "revise_draft_section_with_ai"
   | "rewrite_chapter";
 
 type ChapterWorkspaceAudioPhase = "idle" | "preparing" | "playing";
+type DraftSectionEditingMode = "" | "manual" | "ai";
+type DraftSectionVoicePhase =
+  | "idle"
+  | "listening"
+  | "transcribing";
+
+const CLOSED_DRAFT_SECTION_EDITOR = {
+  editingMode: "" as DraftSectionEditingMode,
+  editingSectionId: "",
+  editingSectionContent: "",
+  draftSectionVoicePhase: "idle" as DraftSectionVoicePhase,
+  draftSectionAIInstruction: "",
+};
 
 type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: (options: { selector: string; duration?: number }) => void;
@@ -110,8 +128,11 @@ interface ChapterWorkspacePageData {
   operationTargetId: string;
   audioPhase: ChapterWorkspaceAudioPhase;
   audioSectionId: string;
+  editingMode: DraftSectionEditingMode;
   editingSectionId: string;
   editingSectionContent: string;
+  draftSectionVoicePhase: DraftSectionVoicePhase;
+  draftSectionAIInstruction: string;
 }
 
 definePage<ChapterWorkspacePageData>()({
@@ -121,6 +142,7 @@ definePage<ChapterWorkspacePageData>()({
   pageVisible: false,
   loadedOnce: false,
   workspaceLoadSequence: 0,
+  draftSectionVoiceInstructionToken: 0,
 
   data: {
     loading: true,
@@ -153,8 +175,7 @@ definePage<ChapterWorkspacePageData>()({
     operationTargetId: "",
     audioPhase: "idle",
     audioSectionId: "",
-    editingSectionId: "",
-    editingSectionContent: "",
+    ...CLOSED_DRAFT_SECTION_EDITOR,
   },
 
   async onLoad(query: PageQuery = {}) {
@@ -181,12 +202,14 @@ definePage<ChapterWorkspacePageData>()({
     this.pageVisible = false;
     this.stopPreparationPolling();
     this.stopDraftSectionPlayback();
+    this.cancelDraftSectionVoiceInstruction();
   },
 
   onUnload() {
     this.pageVisible = false;
     this.stopPreparationPolling();
     this.stopDraftSectionPlayback();
+    this.cancelDraftSectionVoiceInstruction();
   },
 
   async onPullDownRefresh() {
@@ -198,12 +221,19 @@ definePage<ChapterWorkspacePageData>()({
     kind: ChapterWorkspaceOperationKind,
     targetId = "",
   ): boolean {
+    const editingAllowsOperation = (
+      kind === "save_draft_section"
+      && this.data.editingMode === "manual"
+    ) || (
+      kind === "revise_draft_section_with_ai"
+      && this.data.editingMode === "ai"
+    );
     if (
       !kind
       || this.data.operationKind
       || (
         this.data.editingSectionId
-        && kind !== "save_draft_section"
+        && !editingAllowsOperation
       )
     ) {
       return false;
@@ -237,6 +267,12 @@ definePage<ChapterWorkspacePageData>()({
     if (!this.data.editingSectionId || !this.data.workspace) {
       return false;
     }
+    if (this.data.editingMode === "ai") {
+      return Boolean(
+        this.data.draftSectionAIInstruction.trim()
+        || this.data.draftSectionVoicePhase !== "idle"
+      );
+    }
     const section = this.data.workspace.draft_sections.find(
       (item) => item.section_id === this.data.editingSectionId,
     );
@@ -252,8 +288,8 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     wx.showModal({
-      title: "放弃未保存的修改？",
-      content: "当前小节的文字还没有保存，离开后这些修改会丢失。",
+      title: "放弃当前修改？",
+      content: "当前小节的修改还没有完成，离开后这些内容会丢失。",
       confirmText: "放弃修改",
       cancelText: "继续编辑",
       success: (result) => {
@@ -560,6 +596,7 @@ definePage<ChapterWorkspacePageData>()({
       !utteranceId
       || !target
       || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }
@@ -767,13 +804,23 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
+  openDraftSectionEditor(
+    event: PageDatasetEvent<{ id?: string }>,
+    editingMode: Exclude<DraftSectionEditingMode, "">,
+  ) {
     const workspace = this.data.workspace;
     const sectionId = datasetString(event, "id");
     const section = workspace?.draft_sections.find(
       (item) => item.section_id === sectionId,
     );
     if (!workspace?.draft_version_id || !section) {
+      return;
+    }
+    if (editingMode === "ai" && workspace.draft_needs_rewrite) {
+      wx.showToast({
+        title: "请先更新全部小节正文",
+        icon: "none",
+      });
       return;
     }
     if (
@@ -794,17 +841,134 @@ definePage<ChapterWorkspacePageData>()({
         this.data.expandedSectionIds,
         expandedDraftSectionIds,
       ),
+      editingMode,
       editingSectionId: section.section_id,
       editingSectionContent: section.content,
+      draftSectionVoicePhase: "idle",
+      draftSectionAIInstruction: "",
+      error: "",
     });
   },
 
+  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
+    this.openDraftSectionEditor(event, "manual");
+  },
+
   changeDraftSectionContent(event: PageTextInputEvent) {
+    if (this.data.editingMode !== "manual") {
+      return;
+    }
     this.setData({ editingSectionContent: event.detail.value });
   },
 
   cancelDraftSectionEdit() {
-    this.setData({ editingSectionId: "", editingSectionContent: "" });
+    if (this.data.operationKind) {
+      return;
+    }
+    this.cancelDraftSectionVoiceInstruction();
+    this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+  },
+
+  startDraftSectionAIEdit(event: PageDatasetEvent<{ id?: string }>) {
+    this.openDraftSectionEditor(event, "ai");
+  },
+
+  changeDraftSectionAIInstruction(event: PageTextInputEvent) {
+    if (
+      this.data.editingMode !== "ai"
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    this.setData({ draftSectionAIInstruction: event.detail.value });
+  },
+
+  cancelDraftSectionVoiceInstruction() {
+    if (
+      this.data.draftSectionVoicePhase !== "listening"
+      && this.data.draftSectionVoicePhase !== "transcribing"
+    ) {
+      return;
+    }
+    this.draftSectionVoiceInstructionToken += 1;
+    if (this.data.draftSectionVoicePhase === "listening") {
+      stopMemoirVoiceSearchRecording();
+    }
+    this.setData({ draftSectionVoicePhase: "idle" });
+  },
+
+  async toggleDraftSectionVoiceInstruction() {
+    if (this.data.draftSectionVoicePhase === "listening") {
+      stopMemoirVoiceSearchRecording();
+      return;
+    }
+    const sectionId = this.data.editingSectionId;
+    if (
+      this.data.editingMode !== "ai"
+      || !sectionId
+      || this.data.operationKind
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    this.draftSectionVoiceInstructionToken += 1;
+    const requestToken = this.draftSectionVoiceInstructionToken;
+    this.setData({
+      draftSectionVoicePhase: "listening",
+      error: "",
+    });
+    try {
+      const instructionText = await recordMemoirVoiceSearchQuery({
+        stopMode: "manual",
+        maxDurationMs: DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
+        onRecordingEnd: () => {
+          if (requestToken === this.draftSectionVoiceInstructionToken) {
+            this.setData({ draftSectionVoicePhase: "transcribing" });
+          }
+        },
+        emptyTranscriptMessage: "没有识别到修改要求，请再说一次",
+        noVoiceTranscriptMessage: "没有听到修改要求，请再说一次",
+      });
+      if (requestToken !== this.draftSectionVoiceInstructionToken) {
+        return;
+      }
+      this.setData({
+        draftSectionAIInstruction: instructionText,
+        draftSectionVoicePhase: "idle",
+      });
+      wx.showToast({ title: "已识别修改要求", icon: "none" });
+    } catch (error) {
+      if (requestToken !== this.draftSectionVoiceInstructionToken) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "语音修改失败",
+        draftSectionVoicePhase: "idle",
+      });
+    }
+  },
+
+  async submitDraftSectionAIInstruction() {
+    const sectionId = this.data.editingSectionId;
+    const instructionText = this.data.draftSectionAIInstruction.trim();
+    if (
+      this.data.editingMode !== "ai"
+      || !sectionId
+      || this.data.operationKind
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    if (!instructionText) {
+      wx.showToast({ title: "请先说出或输入修改要求", icon: "none" });
+      return;
+    }
+    this.setData({ error: "" });
+    await this.performDraftSectionAIRevision(
+      sectionId,
+      instructionText,
+    );
   },
 
   async saveDraftSectionEdit() {
@@ -817,6 +981,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !workspace?.draft_version_id
       || !currentSection
+      || this.data.editingMode !== "manual"
       || Boolean(this.data.operationKind)
     ) {
       return;
@@ -846,7 +1011,7 @@ definePage<ChapterWorkspacePageData>()({
           })),
         },
       );
-      this.setData({ editingSectionId: "", editingSectionContent: "" });
+      this.setData(CLOSED_DRAFT_SECTION_EDITOR);
       await this.loadPageData(true);
       wx.showToast({ title: "小节已保存", icon: "success" });
     } catch (error) {
@@ -883,64 +1048,54 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  regenerateDraftSection(event: PageDatasetEvent<{ id?: string }>) {
-    const sectionId = datasetString(event, "id");
+  async performDraftSectionAIRevision(
+    sectionId: string,
+    instructionText: string,
+  ) {
     const workspace = this.data.workspace;
-    const section = workspace?.draft_sections.find(
-      (item) => item.section_id === sectionId,
-    );
-    if (!workspace?.draft_version_id || !section) {
-      return;
-    }
-    if (workspace.draft_needs_rewrite) {
-      wx.showToast({
-        title: "请先更新全部小节正文",
-        icon: "none",
-      });
-      return;
-    }
-    if (
-      this.data.operationKind
-      || Boolean(this.data.editingSectionId)
-    ) {
-      return;
-    }
-    wx.showModal({
-      title: `重新生成“${section.title}”？`,
-      content: "只会替换这一小节的正文，其他小节保持不变；当前正文仍会保留在历史版本中。",
-      confirmText: "重新生成",
-      cancelText: "暂不生成",
-      success: (result) => {
-        if (result.confirm) {
-          void this.performDraftSectionRegeneration(section.section_id);
-        }
-      },
-    });
-  },
-
-  async performDraftSectionRegeneration(sectionId: string) {
-    const workspace = this.data.workspace;
+    const normalizedInstruction = instructionText.trim();
     if (
       !workspace?.draft_version_id
       || !sectionId
-      || !this.beginOperation("regenerate_draft_section", sectionId)
+      || !normalizedInstruction
+      || !this.beginOperation("revise_draft_section_with_ai", sectionId)
     ) {
       return;
     }
     try {
-      await regenerateMemoirChapterDraftSection(
+      const revisedWorkspace = await reviseMemoirChapterDraftSectionWithAI(
         this.data.projectId,
         this.data.chapterId,
         sectionId,
         workspace.draft_version_id,
+        normalizedInstruction,
       );
+      if (
+        revisedWorkspace.draft_version_id === workspace.draft_version_id
+      ) {
+        this.setData({
+          error: "AI 没有改动这一小节，请把修改要求说得更具体一些",
+        });
+        return;
+      }
       const expandedDraftSectionIds = {
         ...this.data.expandedDraftSectionIds,
         [sectionId]: true,
       };
-      this.setData({ expandedDraftSectionIds });
+      this.setData({
+        expandedDraftSectionIds,
+        ...CLOSED_DRAFT_SECTION_EDITOR,
+      });
       await this.loadPageData(true);
-      wx.showToast({ title: "这一小节已更新", icon: "success" });
+      wx.showToast({
+        title: "已按要求修改",
+        icon: "success",
+      });
+      trackAuditAction(
+        "chapter_workspace.section_ai_instruction_edit",
+        {},
+        { projectId: this.data.projectId },
+      );
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -948,10 +1103,10 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         error: error instanceof Error
           ? error.message
-          : "小节正文重新生成失败",
+          : "小节 AI 修改失败",
       });
     } finally {
-      this.finishOperation("regenerate_draft_section", sectionId);
+      this.finishOperation("revise_draft_section_with_ai", sectionId);
     }
   },
 
@@ -973,6 +1128,7 @@ definePage<ChapterWorkspacePageData>()({
     if (
       this.data.audioPhase !== "idle"
       || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
     ) {
       return;
     }

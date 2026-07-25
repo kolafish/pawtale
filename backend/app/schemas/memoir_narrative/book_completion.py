@@ -36,8 +36,9 @@ class MemoirChapterAIRequest(BaseModel):
     ai_model: str | None = Field(default=None, max_length=120)
 
 
-class MemoirChapterDraftSectionRegenerateRequest(MemoirChapterAIRequest):
+class MemoirChapterDraftSectionAIRevisionRequest(MemoirChapterAIRequest):
     expected_version_id: str = Field(min_length=1, max_length=36)
+    instruction_text: str = Field(min_length=1, max_length=800)
 
     @field_validator("expected_version_id")
     @classmethod
@@ -45,6 +46,17 @@ class MemoirChapterDraftSectionRegenerateRequest(MemoirChapterAIRequest):
         normalized = value.strip()
         if not normalized:
             raise ValueError("expected_version_id 不能为空")
+        return normalized
+
+    @field_validator("instruction_text")
+    @classmethod
+    def _strip_instruction_text(
+        cls,
+        value: str,
+    ) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("instruction_text 不能为空")
         return normalized
 
 

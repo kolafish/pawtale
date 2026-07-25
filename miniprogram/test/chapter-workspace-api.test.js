@@ -49,14 +49,14 @@ function installWx(requests) {
   };
 }
 
-test("chapter completion API exposes workspace, section regeneration, prepare, and rewrite actions", async () => {
+test("chapter completion API exposes workspace, section AI revision, prepare, and rewrite actions", async () => {
   const requests = [];
   installWx(requests);
   resetModules();
   const {
     getMemoirChapterWorkspace,
     moveMemoirChapterMaterial,
-    regenerateMemoirChapterDraftSection,
+    reviseMemoirChapterDraftSectionWithAI,
     regenerateMemoirChapterSections,
   } = require("../services/memoir-chapter-workspace-api.ts");
   const {
@@ -70,11 +70,12 @@ test("chapter completion API exposes workspace, section regeneration, prepare, a
     "chapter/1",
     [{ id: "section/1", version: 3 }],
   );
-  await regenerateMemoirChapterDraftSection(
+  await reviseMemoirChapterDraftSectionWithAI(
     "project/1",
     "chapter/1",
     "section/1",
     "version/1",
+    "写得更平实一些",
   );
   await moveMemoirChapterMaterial("project/1", "utterance/1", "section/2");
   await prepareMemoirBookChapter("project/1", "chapter/1");
@@ -89,9 +90,10 @@ test("chapter completion API exposes workspace, section regeneration, prepare, a
     ai_model: "deepseek-v4-flash",
   });
   assert.equal(apiRequests[1].timeout, 600000);
-  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/draft-sections/section%2F1/regenerate");
+  assert.equal(apiRequests[2].url, "http://backend.local:8000/api/memoir/projects/project%2F1/chapters/chapter%2F1/draft-sections/section%2F1/ai-revise");
   assert.deepEqual(apiRequests[2].data, {
     expected_version_id: "version/1",
+    instruction_text: "写得更平实一些",
     ai_model: "deepseek-v4-flash",
   });
   assert.equal(apiRequests[2].timeout, 600000);

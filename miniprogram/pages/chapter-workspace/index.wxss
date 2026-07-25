@@ -657,6 +657,86 @@ button[disabled] {
   margin-top: 0;
 }
 
+.draft-ai-editor-title,
+.draft-ai-editor-hint {
+  display: block;
+}
+
+.draft-ai-editor-title {
+  color: var(--ui-text-primary);
+  font-size: 29rpx;
+  font-weight: 700;
+  line-height: 42rpx;
+  text-wrap: balance;
+}
+
+.draft-ai-editor-hint {
+  margin-top: 8rpx;
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  line-height: 38rpx;
+  text-wrap: pretty;
+}
+
+.draft-ai-instruction {
+  min-height: 160rpx;
+  margin-top: 20rpx;
+  background: var(--ui-surface-subtle);
+  font-size: 27rpx;
+  line-height: 42rpx;
+}
+
+.draft-ai-status {
+  min-height: 80rpx;
+  margin-top: 18rpx;
+  padding: 14rpx 18rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+  border-radius: 16rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+}
+
+.draft-ai-status-dot {
+  width: 16rpx;
+  height: 16rpx;
+  flex: 0 0 16rpx;
+  border-radius: 999rpx;
+  background: currentColor;
+  opacity: 0.8;
+}
+
+.edit-actions.draft-ai-actions {
+  align-items: stretch;
+  margin-top: 20rpx;
+}
+
+.draft-ai-actions .secondary-action {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.voice-instruction-action.is-listening {
+  background: var(--ui-accent-surface);
+  color: var(--ui-danger-text);
+}
+
+.edit-actions.draft-ai-secondary-actions {
+  margin-top: 12rpx;
+  justify-content: space-between;
+}
+
+.draft-ai-text-action {
+  min-width: 0;
+  flex: 1 1 0;
+  font-size: 23rpx;
+}
+
 .draft-content {
   color: var(--ui-text-primary);
   font-size: 29rpx;
