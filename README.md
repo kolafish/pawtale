@@ -112,4 +112,5 @@ cd backend && venv/bin/python -m pytest -q
 - [回忆录事实、素材与成书架构](./docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)
 - [回忆录访谈与成书协作架构](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
 - [回忆录实时语音架构](./docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
+- [回忆录重要数据结构、来源、展示与编辑指南](./docs/MEMOIR_DATA_MODEL_AND_EDITING_GUIDE.md)
 - [AI provider 架构](./backend/docs/AI_ARCHITECTURE.md)
