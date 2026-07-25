@@ -27,14 +27,13 @@ import type {
 import {
   memoirNarrativeProjectPath,
   memoirProjectPath,
+  memoirAIRequest,
   memoirRequest,
-  withSelectedAIModel,
 } from "./memoir-api-client";
 import { downloadAuthenticatedFile } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 
 const BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS = 120000;
-const BOOK_TTS_TIMEOUT_MS = 180000;
 
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
@@ -57,12 +56,9 @@ export function generateMemoirBookPlan(
   projectId: string,
   data: MemoirBookPlanGenerateRequest = {},
 ): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
+  return memoirAIRequest<MemoirBookPlan, MemoirBookPlanGenerateRequest>(
     bookPlanPath(projectId, "/generate"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
+    data,
   );
 }
 
@@ -196,12 +192,9 @@ export function generateMemoirBookChapterTitle(
   chapterId: string,
   data: MemoirBookChapterTitleGenerateRequest = {},
 ): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
+  return memoirAIRequest<MemoirBookPlan, MemoirBookChapterTitleGenerateRequest>(
     bookPlanChapterPath(projectId, chapterId, "/title/generate"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
+    data,
   );
 }
 
@@ -260,7 +253,7 @@ export function createMemoirBookChapterDraftTTS(
     {
       method: "POST",
       data,
-      timeoutMs: BOOK_TTS_TIMEOUT_MS,
+      timeoutProfile: "generation",
     },
   );
 }
@@ -274,7 +267,7 @@ export function createMemoirBookPlanOutlineTTS(
     {
       method: "POST",
       data,
-      timeoutMs: BOOK_TTS_TIMEOUT_MS,
+      timeoutProfile: "generation",
     },
   );
 }
@@ -300,12 +293,10 @@ export function enqueueMemoirBookOutputEditorialCopyGeneration(
   projectId: string,
   data: MemoirBookOutputEditorialCopyRegenerateRequest = {},
 ): Promise<MemoirAutomationEvent> {
-  return memoirRequest<MemoirAutomationEvent>(
+  return memoirAIRequest<MemoirAutomationEvent, MemoirBookOutputEditorialCopyRegenerateRequest>(
     memoirProjectPath(projectId, "/book-output/editorial-copy/regenerate/jobs"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
+    data,
+    { timeoutProfile: "mutation" },
   );
 }
 
@@ -313,12 +304,9 @@ export function suggestMemoirBookOutputTitles(
   projectId: string,
   data: MemoirBookTitleSuggestionRequest = {},
 ): Promise<MemoirBookTitleSuggestionResponse> {
-  return memoirRequest<MemoirBookTitleSuggestionResponse>(
+  return memoirAIRequest<MemoirBookTitleSuggestionResponse, MemoirBookTitleSuggestionRequest>(
     memoirProjectPath(projectId, "/book-output/title-suggestions"),
-    {
-      method: "POST",
-      data: withSelectedAIModel(data),
-    },
+    data,
   );
 }
 

@@ -7,10 +7,15 @@ import {
 } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+export type RequestTimeoutProfile = "interactive" | "mutation" | "generation";
 
 const BACKEND_COOKIE_KEY = "pawtale_backend_cookie";
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
-const REQUEST_TIMEOUT_MS = 10000;
+const REQUEST_TIMEOUT_MS: Record<RequestTimeoutProfile, number> = {
+  interactive: 30000,
+  mutation: 60000,
+  generation: 600000,
+};
 
 export interface BackendRuntimeConfig {
   httpBaseUrl: string;
@@ -28,10 +33,11 @@ export interface BackendRuntimeConfigInput {
   devDisplayName?: string;
 }
 
-interface RequestOptions {
+export interface RequestOptions {
   method?: HttpMethod;
   data?: unknown;
   header?: Record<string, string>;
+  timeoutProfile?: RequestTimeoutProfile;
   timeoutMs?: number;
 }
 
@@ -51,6 +57,10 @@ export class ApiError extends Error {
 
 export function cleanBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "");
+}
+
+export function requestTimeoutMs(profile: RequestTimeoutProfile = "interactive"): number {
+  return REQUEST_TIMEOUT_MS[profile];
 }
 
 function stringFromConfig(value: unknown): string {
@@ -182,7 +192,7 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
       url: `${cleanBaseUrl(config.httpBaseUrl)}${path}`,
       method: options.method || "GET",
       data: options.data ?? {},
-      timeout: options.timeoutMs ?? REQUEST_TIMEOUT_MS,
+      timeout: options.timeoutMs ?? requestTimeoutMs(options.timeoutProfile),
       header: {
         "content-type": "application/json",
         ...(cookie ? { Cookie: cookie } : {}),

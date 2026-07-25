@@ -1,5 +1,4 @@
-import { readSelectedAIModel } from "./ai-model-settings";
-import { memoirRequest } from "./memoir-api-client";
+import { memoirAIRequest } from "./memoir-api-client";
 
 export interface SpeakerProofreadContextLine {
   speakerId?: string | null;
@@ -21,10 +20,21 @@ export function proofreadSpeakerTranscriptLine(
   contextLines: SpeakerProofreadContextLine[] = [],
   aiModel?: string,
 ): Promise<SpeakerProofreadResponse> {
-  const selectedModel = aiModel?.trim() || readSelectedAIModel();
-  return memoirRequest<SpeakerProofreadResponse>("/api/mobile/memoir/speaker-transcription/proofread", {
-    method: "POST",
-    data: {
+  return memoirAIRequest<
+    SpeakerProofreadResponse,
+    {
+      text: string;
+      context_lines: Array<{
+        speaker_id: string | null;
+        text: string;
+        start_ms: number | null;
+        end_ms: number | null;
+      }>;
+      ai_model: string | null;
+    }
+  >(
+    "/api/mobile/memoir/speaker-transcription/proofread",
+    {
       text,
       context_lines: contextLines
         .map((line) => ({
@@ -34,7 +44,7 @@ export function proofreadSpeakerTranscriptLine(
           end_ms: typeof line.endMs === "number" ? line.endMs : null,
         }))
         .filter((line) => line.text),
-      ...(selectedModel ? { ai_model: selectedModel } : {}),
+      ai_model: aiModel?.trim() || null,
     },
-  });
+  );
 }

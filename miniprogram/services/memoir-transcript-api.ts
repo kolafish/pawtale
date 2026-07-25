@@ -11,6 +11,7 @@ import type {
   MemoirVoiceTranscriptVoiceEditPreviewResponse,
 } from "../domain/voice-chat";
 import {
+  memoirAIRequest,
   memoirRequest,
   queryString,
 } from "./memoir-api-client";
@@ -18,7 +19,6 @@ import {
   downloadAuthenticatedFile,
   uploadAuthenticatedFile,
 } from "./authenticated-media";
-import { readSelectedAIModel } from "./ai-model-settings";
 import {
   ApiError,
   cleanBaseUrl,
@@ -70,13 +70,10 @@ export function startMemoirMaterialOfflineASR(
   utteranceId: string,
   aiModel?: string,
 ): Promise<MemoirMaterialOfflineASRState> {
-  const selectedModel = aiModel?.trim() || readSelectedAIModel();
-  return memoirRequest<MemoirMaterialOfflineASRState>(
+  return memoirAIRequest<MemoirMaterialOfflineASRState, { ai_model: string | null }>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/offline-asr`,
-    {
-      method: "POST",
-      data: selectedModel ? { ai_model: selectedModel } : {},
-    },
+    { ai_model: aiModel?.trim() || null },
+    { timeoutProfile: "mutation" },
   );
 }
 
@@ -232,6 +229,7 @@ export function recoverMemoirVoiceTranscript(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/recover-transcription`,
     {
       method: "POST",
+      timeoutProfile: "generation",
     },
   );
 }
@@ -241,15 +239,14 @@ export function previewMemoirVoiceTranscriptVoiceEdit(
   instructionText: string,
   aiModel?: string,
 ): Promise<MemoirVoiceTranscriptVoiceEditPreviewResponse> {
-  const selectedModel = aiModel?.trim() || readSelectedAIModel();
-  return memoirRequest<MemoirVoiceTranscriptVoiceEditPreviewResponse>(
+  return memoirAIRequest<
+    MemoirVoiceTranscriptVoiceEditPreviewResponse,
+    { instruction_text: string; ai_model: string | null }
+  >(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/voice-edit/preview`,
     {
-      method: "POST",
-      data: {
-        instruction_text: instructionText,
-        ...(selectedModel ? { ai_model: selectedModel } : {}),
-      },
+      instruction_text: instructionText,
+      ai_model: aiModel?.trim() || null,
     },
   );
 }
@@ -271,6 +268,7 @@ export function transcribeMemoirVoiceSearchAudio(
 ): Promise<MemoirVoiceSearchTranscriptionResponse> {
   return memoirRequest<MemoirVoiceSearchTranscriptionResponse>("/api/mobile/memoir/search-query/transcribe", {
     method: "POST",
+    timeoutProfile: "generation",
     data: {
       audio_base64: audioBase64,
       mime_type: mimeType,
@@ -282,12 +280,14 @@ export function parseMemoirVoiceSearchQuery(
   text: string,
   aiModel?: string,
 ): Promise<MemoirVoiceSearchQueryParseResponse> {
-  const selectedModel = aiModel?.trim() || readSelectedAIModel();
-  return memoirRequest<MemoirVoiceSearchQueryParseResponse>("/api/mobile/memoir/search-query/parse", {
-    method: "POST",
-    data: {
+  return memoirAIRequest<
+    MemoirVoiceSearchQueryParseResponse,
+    { text: string; ai_model: string | null }
+  >(
+    "/api/mobile/memoir/search-query/parse",
+    {
       text,
-      ...(selectedModel ? { ai_model: selectedModel } : {}),
+      ai_model: aiModel?.trim() || null,
     },
-  });
+  );
 }
