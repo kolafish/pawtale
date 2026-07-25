@@ -130,11 +130,13 @@ function loadBookPage({
   authExports = {},
   voiceApiExports = {},
   ttsExports = {},
+  cacheExports = {},
 } = {}) {
+  const getMemoirIdentity = authExports.getMemoirIdentity || (async () => {
+    throw new Error("getMemoirIdentity was not mocked");
+  });
   mockModule("../services/auth.ts", {
-    getMemoirIdentity: async () => {
-      throw new Error("getMemoirIdentity was not mocked");
-    },
+    getMemoirIdentity,
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
@@ -167,6 +169,24 @@ function loadBookPage({
     },
     getMemoirBookChapterDraft: async () => null,
     getMemoirBookOutput: async () => null,
+    getMemoirBookSnapshot: async () => {
+      const identity = await getMemoirIdentity();
+      return {
+        server_revision: 1,
+        identity,
+        plan: null,
+        drafts_by_chapter_id: {},
+        output: null,
+        automation_events: { items: [], total: 0, limit: 8 },
+        image_assets: {
+          items: [],
+          total: 0,
+          ready_count: 0,
+          included_count: 0,
+          unused_count: 0,
+        },
+      };
+    },
     getMemoirBookPlan: async () => {
       throw new Error("getMemoirBookPlan was not mocked");
     },
@@ -177,6 +197,11 @@ function loadBookPage({
       throw new Error("updateMemoirBookPlan was not mocked");
     },
     ...voiceApiExports,
+  });
+  mockModule("../stores/memoir-read-cache.ts", {
+    readCachedMemoirBook: () => ({ status: "miss" }),
+    writeCachedMemoirBook: () => {},
+    ...cacheExports,
   });
   mockModule("../services/tts-settings.ts", {
     readBookTTSSettings: () => ({ voice: "", speedRatio: 1 }),

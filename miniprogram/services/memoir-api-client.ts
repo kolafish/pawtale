@@ -7,6 +7,7 @@ import {
   type HttpMethod,
   type RequestTimeoutProfile,
 } from "./request";
+import { markCurrentUserMemoirSnapshotsStale } from "../stores/memoir-read-cache";
 
 interface MemoirRequestOptions {
   method?: HttpMethod;
@@ -30,10 +31,14 @@ export async function memoirRequest<T>(
   options: MemoirRequestOptions = {},
 ): Promise<T> {
   const method = options.method || "GET";
-  return requestWithBackendSession<T>(path, {
+  const response = await requestWithBackendSession<T>(path, {
     ...options,
     timeoutProfile: options.timeoutProfile ?? (method === "GET" ? "interactive" : "mutation"),
   });
+  if (method !== "GET") {
+    markCurrentUserMemoirSnapshotsStale();
+  }
+  return response;
 }
 
 export function memoirAIRequest<T, D extends { ai_model?: string | null }>(

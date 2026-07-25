@@ -4,8 +4,8 @@ import type {
   MemoirSessionGoal,
   MemoirVoiceTranscriptItem,
 } from "../../domain/voice-chat";
+import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage } from "../../services/page-definition";
-import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   memoirHomePrompt,
@@ -14,7 +14,7 @@ import {
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
-  listMemoirVoiceTranscripts,
+  getMemoirHomeSnapshot,
 } from "../../services/memoir-voice-api";
 import {
   dismissHomeLaunch,
@@ -38,6 +38,11 @@ import {
   homeShareAppMessage,
   homeShareTimeline,
 } from "../../services/share";
+import {
+  readCachedMemoirIdentity,
+  readCachedMemoirHome,
+  writeCachedMemoirHome,
+} from "../../stores/memoir-read-cache";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
@@ -314,20 +319,44 @@ function setHomeData(context: HomeContext, patch: Partial<HomeData>): void {
   });
 }
 
-async function loadLastStoryHint(projectId: string): Promise<string> {
-  if (!projectId) {
-    return "";
-  }
-  try {
-    const response = await listMemoirVoiceTranscripts({ projectId, limit: 1 });
-    return homeResumeHint(response.items[0]);
-  } catch (error) {
-    console.warn("load latest memoir transcript failed", error);
-    return "";
-  }
+function applyHomeSnapshotData(
+  context: HomeContext,
+  snapshot: MemoirHomeSnapshot,
+): void {
+  const identity = snapshot.identity;
+  const hasProject = Boolean(identity.active_project_id && identity.active_project);
+  const profile = memoirProjectProfile(identity.active_project);
+  const projectDisplayTitle = hasProject
+    ? memoirStoryTitle(identity.active_project?.title || "")
+    : "还没有回忆录";
+  const latestHint = hasProject ? homeResumeHint(snapshot.latest_transcript) : "";
+  const launchVariant = resolveHomeLaunch(identity.id, {
+    projectId: identity.active_project_id,
+    hasProject,
+  });
+  setHomeData(context, {
+    loading: false,
+    error: "",
+    needsLogin: false,
+    userId: identity.id,
+    displayName: userDisplayName(identity.display_name, identity.email),
+    projectId: identity.active_project_id,
+    projectTitle: identity.active_project?.title || "还没有回忆录",
+    projectDisplayTitle,
+    projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
+    lastStoryHint: latestHint,
+    lastStoryText: lastStoryText(latestHint),
+    hasLastStoryHint: Boolean(latestHint),
+    launchVariant,
+    ...launchCopy(launchVariant, projectDisplayTitle),
+    hasProject,
+    ...guidancePatch(profile.defaultGuidanceMode),
+  });
 }
 
 definePage<HomeData>()({
+  homeLoadSequence: 0,
+
   data: {
     loading: false,
     creatingVoice: false,
@@ -404,35 +433,46 @@ definePage<HomeData>()({
   },
 
   async loadHome() {
-    setHomeData(this, { loading: true, error: "" });
+    const loadSequence = (this.homeLoadSequence || 0) + 1;
+    this.homeLoadSequence = loadSequence;
+    const cached = readCachedMemoirHome();
+    const localInvalidationRevision = cached.localInvalidationRevision || 0;
+    let showedCachedData = false;
+    if (cached.payload) {
+      applyHomeSnapshotData(this, cached.payload);
+      showedCachedData = true;
+    } else {
+      const cachedIdentity = readCachedMemoirIdentity();
+      if (cachedIdentity) {
+        applyHomeSnapshotData(this, {
+          server_revision: 0,
+          identity: cachedIdentity,
+          latest_transcript: null,
+        });
+        showedCachedData = true;
+      }
+    }
+    if (!showedCachedData) {
+      setHomeData(this, { loading: true, error: "" });
+    }
     try {
-      const identity = await getMemoirIdentity();
-      const hasProject = Boolean(identity.active_project_id && identity.active_project);
-      const profile = memoirProjectProfile(identity.active_project);
-      const projectDisplayTitle = hasProject ? memoirStoryTitle(identity.active_project?.title || "") : "还没有回忆录";
-      const latestHint = hasProject ? await loadLastStoryHint(identity.active_project_id) : "";
-      const launchVariant = resolveHomeLaunch(identity.id, {
-        projectId: identity.active_project_id,
-        hasProject,
-      });
-      setHomeData(this, {
-        needsLogin: false,
-        userId: identity.id,
-        displayName: userDisplayName(identity.display_name, identity.email),
-        projectId: identity.active_project_id,
-        projectTitle: identity.active_project?.title || "还没有回忆录",
-        projectDisplayTitle,
-        projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
-        lastStoryHint: latestHint,
-        lastStoryText: lastStoryText(latestHint),
-        hasLastStoryHint: Boolean(latestHint),
-        launchVariant,
-        ...launchCopy(launchVariant, projectDisplayTitle),
-        hasProject,
-        showMoreActions: false,
-        ...guidancePatch(profile.defaultGuidanceMode),
-      });
+      const snapshot = await getMemoirHomeSnapshot();
+      if (loadSequence !== this.homeLoadSequence) {
+        return;
+      }
+      const currentCache = readCachedMemoirHome();
+      if (
+        currentCache.status !== "miss"
+        && (currentCache.localInvalidationRevision || 0) !== localInvalidationRevision
+      ) {
+        return;
+      }
+      writeCachedMemoirHome(snapshot);
+      applyHomeSnapshotData(this, snapshot);
     } catch (error) {
+      if (loadSequence !== this.homeLoadSequence) {
+        return;
+      }
       if (isAuthError(error)) {
         setHomeData(this, {
           needsLogin: true,
@@ -453,9 +493,15 @@ definePage<HomeData>()({
         });
         return;
       }
-      setHomeData(this, { error: error instanceof Error ? error.message : "首页加载失败" });
+      if (showedCachedData) {
+        console.warn("refresh memoir home snapshot failed", error);
+      } else {
+        setHomeData(this, { error: error instanceof Error ? error.message : "首页加载失败" });
+      }
     } finally {
-      setHomeData(this, { loading: false });
+      if (loadSequence === this.homeLoadSequence) {
+        setHomeData(this, { loading: false });
+      }
     }
   },
 

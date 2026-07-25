@@ -5,6 +5,7 @@ import type {
 } from "./voice-chat";
 
 export interface MemoirChapterWorkspace {
+  server_revision: number;
   project_id: string;
   chapter_id: string;
   chapter_title: string;

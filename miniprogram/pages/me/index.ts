@@ -27,6 +27,7 @@ import {
   resolveBackendAvatarUrl,
   uploadBackendAvatar,
 } from "../../services/user-profile";
+import { clearCurrentUserMemoirSnapshots } from "../../stores/memoir-read-cache";
 import { replaceMemoirStore } from "../../stores/session";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
@@ -470,6 +471,7 @@ definePage<MeData>()({
     } catch (error) {
       console.warn("backend logout failed", error);
     } finally {
+      clearCurrentUserMemoirSnapshots();
       replaceMemoirStore({});
       this.setData({
         ...loggedOutData(),

@@ -42,6 +42,10 @@ import {
   type ChapterDraftSectionView,
   type ChapterSectionView,
 } from "./chapter-workspace-view";
+import {
+  readCachedMemoirChapterWorkspace,
+  writeCachedMemoirChapterWorkspace,
+} from "../../stores/memoir-read-cache";
 
 export { chapterWorkspaceViewPatch };
 
@@ -104,6 +108,7 @@ definePage<ChapterWorkspacePageData>()({
   preparationPollTimer: null as ReturnType<typeof setTimeout> | null,
   pageVisible: false,
   loadedOnce: false,
+  workspaceLoadSequence: 0,
 
   data: {
     loading: true,
@@ -233,7 +238,18 @@ definePage<ChapterWorkspacePageData>()({
     if (!this.data.projectId || !this.data.chapterId) {
       return;
     }
-    if (!silent) {
+    const loadSequence = ++this.workspaceLoadSequence;
+    const cached = this.data.workspace
+      ? { status: "miss" as const }
+      : readCachedMemoirChapterWorkspace(
+        this.data.projectId,
+        this.data.chapterId,
+      );
+    const showedCachedData = Boolean(cached.payload);
+    const localInvalidationRevision = cached.localInvalidationRevision || 0;
+    if (cached.payload) {
+      this.applyWorkspace(cached.payload);
+    } else if (!silent) {
       this.setData({ loading: true, error: "" });
     }
     try {
@@ -241,30 +257,55 @@ definePage<ChapterWorkspacePageData>()({
         this.data.projectId,
         this.data.chapterId,
       );
-      setPageNavigationTitle(workspace.chapter_title || "本章正文");
-      this.setData({
-        workspace,
-        ...chapterWorkspaceViewPatch(
-          workspace,
-          this.data.expandedSectionIds,
-          this.data.expandedDraftSectionIds,
-        ),
-        loading: false,
-        error: "",
-      });
-      if (workspace.completion_summary.state === "preparing") {
-        this.schedulePreparationPolling();
-      } else {
-        this.stopPreparationPolling();
+      if (loadSequence !== this.workspaceLoadSequence) {
+        return;
       }
+      const currentCache = readCachedMemoirChapterWorkspace(
+        this.data.projectId,
+        this.data.chapterId,
+      );
+      if (
+        currentCache.status !== "miss"
+        && (currentCache.localInvalidationRevision || 0) !== localInvalidationRevision
+      ) {
+        return;
+      }
+      writeCachedMemoirChapterWorkspace(workspace);
+      this.applyWorkspace(workspace);
     } catch (error) {
+      if (loadSequence !== this.workspaceLoadSequence) {
+        return;
+      }
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({
-        loading: false,
-        error: error instanceof Error ? error.message : "本章内容加载失败",
-      });
+      if (showedCachedData) {
+        console.warn("refresh memoir chapter workspace failed", error);
+      } else {
+        this.setData({
+          loading: false,
+          error: error instanceof Error ? error.message : "本章内容加载失败",
+        });
+      }
+    }
+  },
+
+  applyWorkspace(workspace: MemoirChapterWorkspace) {
+    setPageNavigationTitle(workspace.chapter_title || "本章正文");
+    this.setData({
+      workspace,
+      ...chapterWorkspaceViewPatch(
+        workspace,
+        this.data.expandedSectionIds,
+        this.data.expandedDraftSectionIds,
+      ),
+      loading: false,
+      error: "",
+    });
+    if (workspace.completion_summary.state === "preparing") {
+      this.schedulePreparationPolling();
+    } else {
+      this.stopPreparationPolling();
     }
   },
 

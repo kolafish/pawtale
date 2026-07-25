@@ -10,17 +10,29 @@ const {
   memoirStoryTitle,
 } = require("../services/memoir-display-copy.ts");
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 function loadHomePage({
   authExports = {},
   voiceApiExports = {},
   voiceAuthorizationExports = {},
   launchStateExports = {},
   accessibilityExports = {},
+  cacheExports = {},
 } = {}) {
+  const getMemoirIdentity = authExports.getMemoirIdentity || (async () => {
+    throw new Error("getMemoirIdentity was not mocked");
+  });
+  const listMemoirVoiceTranscripts = voiceApiExports.listMemoirVoiceTranscripts
+    || (async () => ({ items: [], total: 0, limit: 1, offset: 0 }));
   mockModule("../services/auth.ts", {
-    getMemoirIdentity: async () => {
-      throw new Error("getMemoirIdentity was not mocked");
-    },
+    getMemoirIdentity,
     logoutBackendSession: async () => {},
     ...authExports,
   });
@@ -28,8 +40,28 @@ function loadHomePage({
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
     },
-    listMemoirVoiceTranscripts: async () => ({ items: [], total: 0, limit: 1, offset: 0 }),
+    listMemoirVoiceTranscripts,
+    getMemoirHomeSnapshot: async () => {
+      const identity = await getMemoirIdentity();
+      const latest = identity.active_project_id
+        ? await listMemoirVoiceTranscripts({
+          projectId: identity.active_project_id,
+          limit: 1,
+        })
+        : { items: [] };
+      return {
+        server_revision: 1,
+        identity,
+        latest_transcript: latest.items[0] || null,
+      };
+    },
     ...voiceApiExports,
+  });
+  mockModule("../stores/memoir-read-cache.ts", {
+    readCachedMemoirIdentity: () => null,
+    readCachedMemoirHome: () => ({ status: "miss" }),
+    writeCachedMemoirHome: () => {},
+    ...cacheExports,
   });
   mockModule("../services/voice-authorization.ts", {
     readVoiceAuthorizationConsent: () => true,
@@ -394,6 +426,70 @@ test("home refreshes guidance mode from current project on load", async () => {
   assert.equal(context.data.lastStoryHint, "爷爷退休后还在忙公司的事");
   assert.equal(context.data.lastStoryText, "上次您说到：爷爷退休后还在忙公司的事。");
   assert.equal(context.data.hasLastStoryHint, true);
+});
+
+test("home paints cached memoir data before the aggregate refresh completes", async () => {
+  const refresh = deferred();
+  const cachedSnapshot = {
+    server_revision: 2,
+    identity: {
+      id: "user-1",
+      email: "memoir-author@example.com",
+      password_login_enabled: true,
+      display_name: "作者",
+      created_at: "2026-06-15T00:00:00",
+      active_project_id: "project-1",
+      active_project: {
+        id: "project-1",
+        title: "缓存里的回忆录",
+        metadata_json: {},
+      },
+      projects: [],
+    },
+    latest_transcript: null,
+  };
+  const refreshedSnapshot = {
+    ...cachedSnapshot,
+    server_revision: 3,
+    identity: {
+      ...cachedSnapshot.identity,
+      active_project: {
+        ...cachedSnapshot.identity.active_project,
+        title: "服务器上的回忆录",
+      },
+    },
+  };
+  const writes = [];
+  const { page } = loadHomePage({
+    voiceApiExports: {
+      getMemoirHomeSnapshot: () => refresh.promise,
+    },
+    cacheExports: {
+      readCachedMemoirHome: () => ({
+        status: "fresh",
+        payload: cachedSnapshot,
+        localInvalidationRevision: 0,
+      }),
+      writeCachedMemoirHome: (snapshot) => writes.push(snapshot.server_revision),
+    },
+  });
+  const context = {
+    ...page,
+    data: { ...page.data },
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+  };
+
+  const loading = page.loadHome.call(context);
+  assert.equal(context.data.projectTitle, "缓存里的回忆录");
+  assert.equal(context.data.loading, false);
+
+  refresh.resolve(refreshedSnapshot);
+  await loading;
+
+  assert.equal(context.data.projectTitle, "服务器上的回忆录");
+  assert.deepEqual(writes, [3]);
 });
 
 test("home shows explicit project creation state for logged-in users without projects", async () => {

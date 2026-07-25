@@ -5,12 +5,13 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
   MemoirAutomationEvent,
+  MemoirImageAssetListResponse,
 } from "../../domain/voice-chat";
+import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookHomeData } from "./book-view-model";
-import { getMemoirIdentity } from "../../services/auth";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 
 import {
@@ -24,9 +25,8 @@ import {
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
+  getMemoirBookSnapshot,
   getMemoirBookOutput,
-  getMemoirBookPlan,
-  listMemoirImageAssets,
   listMemoirAutomationEvents,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
@@ -92,6 +92,10 @@ import {
 import {
   bookGenerationSettings,
 } from "./book-design-model";
+import {
+  readCachedMemoirBook,
+  writeCachedMemoirBook,
+} from "../../stores/memoir-read-cache";
 export {
   bookChapterDetailUrl,
   bookExportPageUrl,
@@ -150,6 +154,7 @@ definePage<BookPageData>()({
   bookGenerationPollTimer: null as number | null,
   bookGenerationPollAttempts: 0,
   automationEvents: [] as MemoirAutomationEvent[],
+  bookLoadSequence: 0,
 
   data: {
     pageClass: "book-page",
@@ -225,63 +230,75 @@ definePage<BookPageData>()({
   },
 
   async loadBookHome() {
-    if (this.data.loading) {
-      return;
+    const loadSequence = ++this.bookLoadSequence;
+    const cached = readCachedMemoirBook();
+    const localInvalidationRevision = cached.localInvalidationRevision || 0;
+    const showedCachedData = Boolean(cached.payload);
+    if (cached.payload) {
+      this.applyBookSnapshot(cached.payload);
+    } else {
+      this.setData({ loading: true, error: "" });
     }
-    this.setData({ loading: true, error: "" });
     try {
-      const identity = await getMemoirIdentity();
-      const projectId = identity.active_project_id;
-      const projectTitle = identity.active_project?.title || "尚未创建回忆录";
-      const projectNarratorName = memoirProjectProfile(identity.active_project).narratorName;
-      this.setData({ needsLogin: false, projectId, projectTitle, projectNarratorName });
-      if (!projectId) {
-        this.applyPlan(null);
-        this.applyBookOutput(null);
-        this.applyAutomationEvents([]);
-        this.applyImageAssetSummary(null);
+      const snapshot = await getMemoirBookSnapshot();
+      if (loadSequence !== this.bookLoadSequence) {
         return;
       }
-      await this.loadPlanForProject(projectId);
+      const currentCache = readCachedMemoirBook();
+      if (
+        currentCache.status !== "miss"
+        && (currentCache.localInvalidationRevision || 0) !== localInvalidationRevision
+      ) {
+        return;
+      }
+      writeCachedMemoirBook(snapshot);
+      this.applyBookSnapshot(snapshot);
     } catch (error) {
+      if (loadSequence !== this.bookLoadSequence) {
+        return;
+      }
       if (isAuthError(error)) {
         this.setData(guestBookData());
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "书稿页面加载失败" });
+      if (showedCachedData) {
+        console.warn("refresh memoir book snapshot failed", error);
+      } else {
+        this.setData({ error: error instanceof Error ? error.message : "书稿页面加载失败" });
+      }
     } finally {
-      this.setData({ loading: false });
+      if (loadSequence === this.bookLoadSequence) {
+        this.setData({ loading: false });
+      }
     }
   },
 
   async loadPlanForProject(projectId: string) {
-    try {
-      const automationEvents = await this.loadAutomationEvents(projectId);
-      const imageAssets = await this.loadImageAssetSummary(projectId);
-      this.applyAutomationEvents(automationEvents);
-      this.applyImageAssetSummary(imageAssets);
-      const plan = await getMemoirBookPlan(projectId);
-      let draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {};
-      let output: MemoirBookOutput | null = null;
-      if (plan.status === "confirmed") {
-        [draftsByChapterId, output] = await Promise.all([
-          this.loadDraftsForPlan(plan),
-          this.loadBookOutput(projectId),
-        ]);
-      }
-      this.applyPlan(plan, draftsByChapterId);
-      this.applyBookOutput(output);
-      this.applyAutomationEvents(automationEvents);
-      this.applyImageAssetSummary(imageAssets);
-    } catch (error) {
-      if (error instanceof ApiError && error.statusCode === 404) {
-        this.applyPlan(null);
-        this.applyBookOutput(null);
-        this.applyImageAssetSummary(null);
-        return;
-      }
-      throw error;
+    const snapshot = await getMemoirBookSnapshot();
+    if (snapshot.identity.active_project_id !== projectId) {
+      return;
     }
+    writeCachedMemoirBook(snapshot);
+    this.applyBookSnapshot(snapshot);
+  },
+
+  applyBookSnapshot(snapshot: MemoirBookSnapshot) {
+    const identity = snapshot.identity;
+    const projectId = identity.active_project_id;
+    const projectTitle = identity.active_project?.title || "尚未创建回忆录";
+    const projectNarratorName = memoirProjectProfile(identity.active_project).narratorName;
+    this.setData({
+      loading: false,
+      error: "",
+      needsLogin: false,
+      projectId,
+      projectTitle,
+      projectNarratorName,
+    });
+    this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});
+    this.applyBookOutput(snapshot.output || null);
+    this.applyAutomationEvents(snapshot.automation_events.items || []);
+    this.applyImageAssetSummary(snapshot.image_assets);
   },
 
   async loadAutomationEvents(projectId: string) {
@@ -381,18 +398,7 @@ definePage<BookPageData>()({
     }
   },
 
-  async loadImageAssetSummary(projectId: string) {
-    this.setData({ imageAssetLoading: true });
-    try {
-      return await listMemoirImageAssets(projectId);
-    } catch (_error) {
-      return null;
-    } finally {
-      this.setData({ imageAssetLoading: false });
-    }
-  },
-
-  applyImageAssetSummary(response: Awaited<ReturnType<typeof listMemoirImageAssets>> | null) {
+  applyImageAssetSummary(response: MemoirImageAssetListResponse | null) {
     const total = response?.total || 0;
     const included = response?.included_count || 0;
     const unused = response?.unused_count || 0;

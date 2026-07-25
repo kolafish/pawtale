@@ -14,6 +14,7 @@ function loadMePage({
   accessibilityExports = {},
   voiceAuthorizationExports = {},
   profileExports = {},
+  cacheExports = {},
 } = {}) {
   mockModule("../services/auth.ts", {
     isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
@@ -113,6 +114,10 @@ function loadMePage({
       throw new Error("uploadBackendAvatar was not mocked");
     },
     ...profileExports,
+  });
+  mockModule("../stores/memoir-read-cache.ts", {
+    clearCurrentUserMemoirSnapshots: () => {},
+    ...cacheExports,
   });
 
   return loadPageModule("../pages/me/index.ts");
@@ -587,5 +592,30 @@ test("me does not open voice progress before a memoir exists", () => {
   page.openVoiceProgress.call(context);
 
   assert.deepEqual(navigations, []);
+  delete global.wx;
+});
+
+test("me clears the current user's memoir snapshots on logout", async () => {
+  let cacheClearCount = 0;
+  global.wx = {
+    setStorageSync() {},
+    showToast() {},
+  };
+  const { page } = loadMePage({
+    cacheExports: {
+      clearCurrentUserMemoirSnapshots: () => {
+        cacheClearCount += 1;
+      },
+    },
+  });
+  const context = pageContext(page, {
+    loading: false,
+    loggedIn: true,
+  });
+
+  await page.logout.call(context);
+
+  assert.equal(cacheClearCount, 1);
+  assert.equal(context.data.loggedIn, false);
   delete global.wx;
 });
