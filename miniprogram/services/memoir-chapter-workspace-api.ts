@@ -22,6 +22,22 @@ export interface MemoirChapterSectionRegenerationResult {
   section_count: number;
 }
 
+export interface MemoirSectionMaterialPlacementRequest {
+  target_section_id?: string;
+  target_chapter_id?: string;
+  new_chapter_title?: string;
+  new_section_title?: string;
+}
+
+export interface MemoirSectionMaterialPlacementResult {
+  project_id: string;
+  utterance_id: string;
+  chapter_id: string;
+  section_id: string;
+  created_chapter: boolean;
+  created_section: boolean;
+}
+
 export function getMemoirChapterWorkspace(
   projectId: string,
   chapterId: string,
@@ -94,6 +110,23 @@ export function moveMemoirChapterMaterial(
       data: {
         target_section_id: targetSectionId,
       },
+    },
+  );
+}
+
+export function placeMemoirChapterMaterial(
+  projectId: string,
+  utteranceId: string,
+  placement: MemoirSectionMaterialPlacementRequest,
+): Promise<MemoirSectionMaterialPlacementResult> {
+  return memoirRequest<MemoirSectionMaterialPlacementResult>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/section-materials/${encodeURIComponent(utteranceId)}/place`,
+    ),
+    {
+      method: "POST",
+      data: placement,
     },
   );
 }

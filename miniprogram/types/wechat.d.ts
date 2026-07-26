@@ -308,12 +308,14 @@ declare namespace WechatMiniprogram {
   interface ModalOption {
     title?: string;
     content?: string;
+    editable?: boolean;
+    placeholderText?: string;
     confirmText?: string;
     confirmColor?: string;
     cancelText?: string;
     cancelColor?: string;
     showCancel?: boolean;
-    success?(result: { confirm: boolean; cancel: boolean; errMsg?: string }): void;
+    success?(result: { confirm: boolean; cancel: boolean; content?: string; errMsg?: string }): void;
     fail?(result: GeneralCallbackResult): void;
     complete?(result: GeneralCallbackResult): void;
   }

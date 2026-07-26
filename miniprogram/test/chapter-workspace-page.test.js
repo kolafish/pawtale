@@ -137,7 +137,7 @@ function loadWorkspacePage({
     prepareMemoirBookChapter: async () => {},
     reviseMemoirChapterDraftSectionWithAI: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
-    moveMemoirChapterMaterial: async () => {},
+    placeMemoirChapterMaterial: async () => {},
     rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
@@ -170,7 +170,7 @@ function loadWorkspacePage({
   return loadPageModule("../pages/chapter-workspace/index.ts");
 }
 
-function installWx() {
+function installWx({ editableContent = "新小节" } = {}) {
   const navigations = [];
   const toasts = [];
   const modals = [];
@@ -193,7 +193,11 @@ function installWx() {
     showToast(options) { toasts.push(options); },
     showModal(options) {
       modals.push(options);
-      options.success?.({ confirm: true, cancel: false });
+      options.success?.({
+        confirm: true,
+        cancel: false,
+        content: options.editable ? editableContent : undefined,
+      });
     },
   };
   return { navigations, navigationTitles, toasts, modals, scrolls };
@@ -539,7 +543,7 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   const { page } = loadWorkspacePage({
     currentWorkspace: pendingWorkspace,
     voiceApiExports: {
-      moveMemoirChapterMaterial: async (...args) => calls.push(args),
+      placeMemoirChapterMaterial: async (...args) => calls.push(args),
     },
   });
   const context = pageContext(page);
@@ -554,6 +558,10 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   assert.equal(pendingSection.title, "待归类素材");
   assert.equal(pendingSection.expanded, true);
   assert.equal(pendingSection.visibleMaterials[0].assignmentOptions[0].id, "section-1");
+  assert.equal(
+    pendingSection.visibleMaterials[0].assignmentOptions.at(-1).action,
+    "create_section",
+  );
   assert.equal(
     context.data.sectionStructureSummary,
     "1 个小节 · 2 条讲述 · 1 条待归类",
@@ -577,10 +585,50 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   assert.deepEqual(calls, [[
     "project-1",
     "utterance-pending",
-    "section-1",
+    { target_section_id: "section-1" },
   ]]);
   assert.equal(toasts.at(-1).title, "已选择小节");
   assert.equal(context.data.operationKind, "");
+  delete global.wx;
+});
+
+test("chapter workspace creates a small section while assigning pending material", async () => {
+  const { toasts } = installWx({ editableContent: "山桃花开的心动" });
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspaceWithPendingMaterial(),
+    voiceApiExports: {
+      placeMemoirChapterMaterial: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  const options = context.data.sectionViews[1]
+    .visibleMaterials[0]
+    .assignmentOptions;
+  page.moveUnassignedMaterial.call(context, {
+    currentTarget: {
+      dataset: { utteranceId: "utterance-pending" },
+    },
+    detail: { value: options.length - 1 },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "utterance-pending",
+    {
+      target_chapter_id: "chapter-1",
+      new_section_title: "山桃花开的心动",
+    },
+  ]]);
+  assert.equal(toasts.at(-1).title, "已新建小节");
   delete global.wx;
 });
 

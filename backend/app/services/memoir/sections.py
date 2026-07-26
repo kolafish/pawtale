@@ -8,11 +8,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
+    MemoirBookChapterDraftStatus,
+    MemoirCreatedBy,
     MemoirSectionMaterialAssignedBy,
     MemoirSectionStatus,
     MemoirSectionType,
 )
 from app.models.memoir import (
+    MemoirBookChapterDraft,
+    MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirSection,
@@ -28,6 +32,8 @@ from app.schemas.memoir_sections import (
     MemoirSectionCreateRequest,
     MemoirSectionMaterialAssignmentRequest,
     MemoirSectionMaterialMoveRequest,
+    MemoirSectionMaterialPlacementRequest,
+    MemoirSectionMaterialPlacementResponse,
     MemoirSectionMaterialResponse,
     MemoirSectionMergeRequest,
     MemoirSectionReorderRequest,
@@ -36,6 +42,7 @@ from app.schemas.memoir_sections import (
     MemoirSectionUpdateRequest,
 )
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.material_roles import (
     is_countable_material,
     narrator_material_clause,
@@ -837,6 +844,261 @@ async def move_material(
     )
     await db.commit()
     return await _collection_response(db, project_id=project_id)
+
+
+async def _create_section_for_placement(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    title: str,
+) -> MemoirSection:
+    sections = await _load_sections(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    section = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        title=title,
+        section_type=MemoirSectionType.EVENT.value,
+        sort_order=len(sections),
+    )
+    db.add(section)
+    await db.flush()
+    insert_at = next(
+        (
+            index
+            for index, existing in enumerate(sections)
+            if requires_user_assignment(existing.metadata_json)
+        ),
+        len(sections),
+    )
+    sections.insert(insert_at, section)
+    await _set_section_order(db, sections=sections)
+    return section
+
+
+async def _mark_material_placement_changed(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    plan: MemoirBookPlan,
+    chapter_ids: set[str],
+    operation: str,
+) -> None:
+    drafts = list(
+        (
+            await db.scalars(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id.in_(chapter_ids),
+                )
+            )
+        ).all()
+    )
+    for draft in drafts:
+        draft.status = MemoirBookChapterDraftStatus.DRAFT.value
+        draft.metadata_json = {
+            **(draft.metadata_json or {}),
+            "status_reason": "section_material_reassigned",
+        }
+        db.add(draft)
+
+    output = await db.scalar(
+        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+    )
+    if output is not None:
+        invalidate_book_output(output)
+        db.add(output)
+
+    now = datetime.now(UTC).isoformat()
+    plan.created_by = MemoirCreatedBy.USER.value
+    plan.metadata_json = {
+        **(plan.metadata_json or {}),
+        "structure_updated_at": now,
+        "structure_updated_by": "user",
+        "structure_operation": operation,
+    }
+    db.add(plan)
+
+
+async def place_material(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    utterance_id: str,
+    req: MemoirSectionMaterialPlacementRequest,
+    allow_admin: bool = False,
+) -> MemoirSectionMaterialPlacementResponse:
+    await load_memoir_project(
+        db,
+        project_id,
+        user_id,
+        allow_admin=allow_admin,
+    )
+    plan = await _load_plan(db, project_id=project_id)
+    await _load_project_utterances(
+        db,
+        project_id=project_id,
+        utterance_ids=[utterance_id],
+    )
+    current_material = await db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id == utterance_id,
+        )
+    )
+    current_section = (
+        await _load_section(
+            db,
+            project_id=project_id,
+            section_id=current_material.section_id,
+        )
+        if current_material is not None
+        else None
+    )
+
+    target: MemoirSection | None = None
+    target_chapter_id: str | None = None
+    if req.target_section_id:
+        target = await _load_section(
+            db,
+            project_id=project_id,
+            section_id=req.target_section_id,
+        )
+        target_chapter_id = target.chapter_id
+    elif req.target_chapter_id:
+        await _load_chapter(
+            db,
+            project_id=project_id,
+            chapter_id=req.target_chapter_id,
+        )
+        target_chapter_id = req.target_chapter_id
+
+    moves_included_source = bool(
+        current_material is not None
+        and current_material.include_in_book
+        and current_section is not None
+        and current_section.status == MemoirSectionStatus.ACTIVE.value
+        and current_section.include_in_book
+    )
+    if moves_included_source and current_section is not None and (
+        target_chapter_id is None
+        or current_section.chapter_id != target_chapter_id
+    ):
+        remaining_material_count = await db.scalar(
+            select(func.count(MemoirSectionMaterial.id))
+            .join(
+                MemoirSection,
+                MemoirSection.id == MemoirSectionMaterial.section_id,
+            )
+            .where(
+                MemoirSection.project_id == project_id,
+                MemoirSection.chapter_id == current_section.chapter_id,
+                MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+                MemoirSection.include_in_book.is_(True),
+                MemoirSectionMaterial.include_in_book.is_(True),
+                MemoirSectionMaterial.utterance_id != utterance_id,
+            )
+        )
+        if not remaining_material_count:
+            raise HTTPException(
+                status_code=409,
+                detail="原章节至少需要保留 1 条素材",
+            )
+
+    created_chapter = False
+    created_section = False
+    if target is None and target_chapter_id is not None:
+        target = await _create_section_for_placement(
+            db,
+            project_id=project_id,
+            chapter_id=target_chapter_id,
+            title=req.new_section_title or "",
+        )
+        created_section = True
+    elif target is None:
+        chapters = list(
+            (
+                await db.scalars(
+                    select(MemoirBookPlanChapter)
+                    .where(
+                        MemoirBookPlanChapter.project_id == project_id,
+                        MemoirBookPlanChapter.plan_id == plan.id,
+                    )
+                    .order_by(
+                        MemoirBookPlanChapter.sort_order,
+                        MemoirBookPlanChapter.id,
+                    )
+                )
+            ).all()
+        )
+        chapter = MemoirBookPlanChapter(
+            plan_id=plan.id,
+            project_id=project_id,
+            title=req.new_chapter_title or "",
+            sort_order=max(
+                (item.sort_order for item in chapters),
+                default=-1,
+            ) + 1,
+            include_in_book=True,
+            metadata_json={
+                "created_from_material_assignment_at": datetime.now(UTC).isoformat(),
+            },
+        )
+        db.add(chapter)
+        await db.flush()
+        target = await _create_section_for_placement(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            title=req.new_section_title or "",
+        )
+        created_chapter = True
+        created_section = True
+
+    await _move_materials(
+        db,
+        project_id=project_id,
+        target=target,
+        utterance_ids=[utterance_id],
+        assigned_by=MemoirSectionMaterialAssignedBy.USER,
+        assignment_reason=(
+            "manual_create_chapter"
+            if created_chapter
+            else "manual_create_section"
+            if created_section
+            else "manual_assignment"
+        ),
+    )
+    affected_chapter_ids = {target.chapter_id}
+    if current_section is not None:
+        affected_chapter_ids.add(current_section.chapter_id)
+    await _mark_material_placement_changed(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter_ids=affected_chapter_ids,
+        operation=(
+            "create_chapter_from_material"
+            if created_chapter
+            else "create_section_from_material"
+            if created_section
+            else "place_material"
+        ),
+    )
+    await db.commit()
+    return MemoirSectionMaterialPlacementResponse(
+        project_id=project_id,
+        utterance_id=utterance_id,
+        chapter_id=target.chapter_id,
+        section_id=target.id,
+        created_chapter=created_chapter,
+        created_section=created_section,
+    )
 
 
 async def merge_sections(

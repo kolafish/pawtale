@@ -287,6 +287,109 @@ async def test_split_move_merge_and_reorder_sections(client, test_db):
     } == {created[0]["utterance_id"], created[1]["utterance_id"]}
 
 
+async def test_material_placement_can_create_section_and_chapter_atomically(
+    client,
+    test_db,
+):
+    project_id, chapters, created, _ = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+
+    created_section = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[1]['utterance_id']}/place",
+        json={
+            "target_chapter_id": chapters[0].id,
+            "new_section_title": "第一次一起爬山",
+        },
+    )
+    assert created_section.status_code == 200, created_section.text
+    assert created_section.json()["chapter_id"] == chapters[0].id
+    assert created_section.json()["created_chapter"] is False
+    assert created_section.json()["created_section"] is True
+
+    created_chapter = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[0]['utterance_id']}/place",
+        json={
+            "new_chapter_title": "山桃花开的春天",
+            "new_section_title": "照片里的邀约",
+        },
+    )
+    assert created_chapter.status_code == 200, created_chapter.text
+    assert created_chapter.json()["created_chapter"] is True
+    assert created_chapter.json()["created_section"] is True
+
+    plan_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-plan"
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    plan = plan_response.json()
+    new_chapter = plan["chapters"][-1]
+    assert new_chapter["title"] == "山桃花开的春天"
+    assert [
+        ref["utterance_id"] for ref in new_chapter["source_refs"]
+    ] == [created[0]["utterance_id"]]
+    assert new_chapter["sections"][0]["title"] == "照片里的邀约"
+
+    sections_response = await client.get(
+        f"/api/memoir/projects/{project_id}/sections"
+    )
+    assert sections_response.status_code == 200, sections_response.text
+    sections = sections_response.json()["sections"]
+    new_section = next(
+        section
+        for section in sections
+        if section["id"] == created_section.json()["section_id"]
+    )
+    assert new_section["title"] == "第一次一起爬山"
+    assert [
+        material["utterance_id"] for material in new_section["materials"]
+    ] == [created[1]["utterance_id"]]
+
+    excluded_section_response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/sections",
+        json={"title": "不参与成书的小节"},
+    )
+    excluded_section = next(
+        section
+        for section in excluded_section_response.json()["sections"]
+        if section["title"] == "不参与成书的小节"
+    )
+    excluded_section_response = await client.patch(
+        f"/api/memoir/projects/{project_id}/sections/{excluded_section['id']}",
+        json={
+            "include_in_book": False,
+            "expected_version": excluded_section["version"],
+        },
+    )
+    assert excluded_section_response.status_code == 200
+    moved_to_excluded = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[1]['utterance_id']}/move",
+        json={"target_section_id": excluded_section["id"]},
+    )
+    assert moved_to_excluded.status_code == 200
+
+    rejected = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[2]['utterance_id']}/place",
+        json={
+            "new_chapter_title": "不应留下的空章节",
+            "new_section_title": "唯一素材",
+        },
+    )
+    assert rejected.status_code == 409
+    assert rejected.json()["detail"] == "原章节至少需要保留 1 条素材"
+    unchanged_plan = (
+        await client.get(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan"
+        )
+    ).json()
+    assert len(unchanged_plan["chapters"]) == 3
+
+
 async def test_section_api_rejects_cross_project_material(client, test_db):
     project_id, _, _, data = await _bootstrap_two_chapters(client, test_db)
     other_project = await client.post(

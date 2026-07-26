@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.memoir.types import MemoirSectionStatus, MemoirSectionType
 
@@ -165,6 +165,59 @@ class MemoirSectionMaterialAssignmentRequest(BaseModel):
 class MemoirSectionMaterialMoveRequest(BaseModel):
     target_section_id: str
     target_sort_order: int | None = Field(default=None, ge=0)
+
+
+class MemoirSectionMaterialPlacementRequest(BaseModel):
+    target_section_id: str | None = None
+    target_chapter_id: str | None = None
+    new_chapter_title: str | None = Field(default=None, max_length=80)
+    new_section_title: str | None = Field(default=None, max_length=200)
+
+    @field_validator(
+        "target_section_id",
+        "target_chapter_id",
+        "new_chapter_title",
+        "new_section_title",
+    )
+    @classmethod
+    def normalize_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def validate_target(self):
+        existing_section = bool(
+            self.target_section_id
+            and not self.target_chapter_id
+            and not self.new_chapter_title
+            and not self.new_section_title
+        )
+        new_section = bool(
+            self.target_chapter_id
+            and self.new_section_title
+            and not self.target_section_id
+            and not self.new_chapter_title
+        )
+        new_chapter = bool(
+            self.new_chapter_title
+            and self.new_section_title
+            and not self.target_section_id
+            and not self.target_chapter_id
+        )
+        if sum((existing_section, new_section, new_chapter)) != 1:
+            raise ValueError("请选择已有小节，或提供新章节/小节名称")
+        return self
+
+
+class MemoirSectionMaterialPlacementResponse(BaseModel):
+    project_id: str
+    utterance_id: str
+    chapter_id: str
+    section_id: str
+    created_chapter: bool = False
+    created_section: bool = False
 
 
 class MemoirSectionMergeRequest(BaseModel):

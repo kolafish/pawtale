@@ -9,7 +9,11 @@ import { chapterNextAction, type ChapterNextAction } from "./chapter-next-action
 
 export interface ChapterSectionMaterialView extends MemoirChapterSectionMaterialSummary {
   indexText: string;
-  assignmentOptions: Array<{ id: string; title: string }>;
+  assignmentOptions: Array<{
+    id: string;
+    title: string;
+    action?: "create_section";
+  }>;
 }
 
 export interface ChapterSectionView extends MemoirChapterSectionSummary {
@@ -60,7 +64,9 @@ function visibleSectionViews(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean>,
 ): ChapterSectionView[] {
-  const assignmentOptions = [...(workspace.sections || [])]
+  const assignmentOptions: ChapterSectionMaterialView["assignmentOptions"] = [
+    ...(workspace.sections || []),
+  ]
     .filter((section) => (
       section.status === "active"
       && section.include_in_book !== false
@@ -71,6 +77,11 @@ function visibleSectionViews(
       id: section.id,
       title: `${index + 1}. ${section.title}`,
     }));
+  assignmentOptions.push({
+    id: "",
+    title: "＋ 新建小节",
+    action: "create_section",
+  });
   return [...(workspace.sections || [])]
     .filter((section) => (
       section.status === "active"
