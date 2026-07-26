@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_plan_sources import SourceSegment
 
 
@@ -19,6 +22,27 @@ CHAPTER_TITLE_SYSTEM_PROMPT = "你是一位谨慎的中文回忆录目录编辑�
 AI_BOOK_PLAN_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 GENERIC_CHAPTER_TITLES = {"新收录转写", "新增转写", "转写记录", "新收录讲述", "新增讲述", "讲述记录", "新章节", "未命名章节"}
 logger = logging.getLogger(__name__)
+
+
+class _BookPlanChapterOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = ""
+    source_indices: list[int] = Field(default_factory=list)
+    evidence_quote: str = ""
+
+
+class _BookPlanOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = ""
+    chapters: list[_BookPlanChapterOutput] = Field(min_length=1)
+
+
+class _ChapterTitleOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
 
 
 @dataclass(frozen=True)
@@ -221,12 +245,17 @@ async def generate_book_plan_from_sources(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             SYSTEM_PROMPT,
             prompt,
+            output_model=_BookPlanOutput,
+            requested_model=ai_model,
             temperature=0.2,
-            max_tokens=2400,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -237,12 +266,15 @@ async def generate_book_plan_from_sources(
         logger.exception("AI memoir book plan failed provider=%s", getattr(client, "provider_name", "unknown"))
         raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
 
-    payload = extract_json_payload(str(content))
-    title, chapters = chapters_from_payload(payload, sources=sources, max_chapters=max_chapters)
+    title, chapters = chapters_from_payload(
+        generated.value.model_dump(),
+        sources=sources,
+        max_chapters=max_chapters,
+    )
     return GeneratedBookPlan(
         title=title,
         chapters=chapters,
-        model=getattr(client, "model_name", ai_model),
+        model=generated.response.resolved_model,
         prompt=prompt,
     )
 
@@ -258,12 +290,17 @@ async def generate_chapter_title_from_sources(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             CHAPTER_TITLE_SYSTEM_PROMPT,
             prompt,
+            output_model=_ChapterTitleOutput,
+            requested_model=ai_model,
             temperature=0.25,
-            max_tokens=160,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -275,7 +312,7 @@ async def generate_chapter_title_from_sources(
         raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
 
     return GeneratedChapterTitle(
-        title=clean_generated_chapter_title(str(content)),
-        model=getattr(client, "model_name", ai_model),
+        title=clean_generated_chapter_title(generated.response.content),
+        model=generated.response.resolved_model,
         prompt=prompt,
     )

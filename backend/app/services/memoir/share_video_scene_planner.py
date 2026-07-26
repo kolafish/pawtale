@@ -4,10 +4,13 @@ from dataclasses import dataclass
 from hashlib import sha256
 import re
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from app.config import get_settings
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
-from app.services.json_utils import extract_json_payload
+from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
 SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v2"
@@ -57,6 +60,22 @@ class ShareVideoScenePlan:
 
 class ShareVideoScenePlanningError(RuntimeError):
     pass
+
+
+class _ShareVideoSceneOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sentence_ids: list[int] = Field(default_factory=list)
+    title: str = ""
+    evidence_quote: str = ""
+    visual_summary: str = ""
+    image_prompt_content: str = ""
+
+
+class _ShareVideoScenePlanOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[_ShareVideoSceneOutput] = Field(min_length=1)
 
 
 def desired_share_video_scene_count(duration_ms: int) -> int:
@@ -510,16 +529,20 @@ async def plan_share_video_background_scenes(
     model = (ai_model or settings.memoir_share_video_scene_planner_model).strip() or None
     try:
         client = get_ai_service(model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             _system_prompt(),
             _user_prompt(selected_text, sentences, duration_ms, min_count, max_count),
+            output_model=_ShareVideoScenePlanOutput,
+            requested_model=model,
             temperature=0.2,
-            max_tokens=2200,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
-        payload = extract_json_payload(str(content))
         scenes = _normalize_llm_sentence_scenes(
-            payload,
+            generated.value.model_dump(),
             selected_text,
             sentences,
             char_timings,

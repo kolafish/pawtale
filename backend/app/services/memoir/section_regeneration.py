@@ -7,6 +7,7 @@ import re
 import uuid
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,10 +27,11 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_sections import MemoirSectionRegenerateRequest
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -77,6 +79,35 @@ class _PlannedAssignment:
 class _PlannedSection:
     candidate: MaterialOrganizationSectionCandidate
     assignments: list[_PlannedAssignment] = field(default_factory=list)
+
+
+class _SectionCandidateOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    section_type: str
+
+
+class _SectionStructureOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[_SectionCandidateOutput] = Field(min_length=1)
+
+
+class _MaterialAssignmentOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    utterance_id: str
+    action: str
+    section_id: str | None = None
+    confidence: float | None = None
+    reason: str = ""
+
+
+class _MaterialAssignmentsOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assignments: list[_MaterialAssignmentOutput] = Field(min_length=1)
 
 
 SECTION_STRUCTURE_SOURCE_CHAR_BUDGET = 8_000
@@ -309,15 +340,20 @@ async def _plan_section_candidates(
             status_code=422,
             detail="本章素材数量过多，无法安全规划小节结构",
         )
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         SECTION_REGENERATION_SYSTEM_PROMPT,
         prompt,
+        output_model=_SectionStructureOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.1,
-        max_tokens=2400,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
     return _normalize_section_candidates(
-        extract_json_payload(str(content)),
+        generated.value.model_dump(),
         chapter_id=chapter_id,
     )
 
@@ -409,17 +445,19 @@ async def _assign_material_batch(
             status_code=422,
             detail="单批讲述过长，无法安全完成小节归类",
         )
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.LONG_GENERATION_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         SECTION_REGENERATION_SYSTEM_PROMPT,
         prompt,
+        output_model=_MaterialAssignmentsOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.1,
-        max_tokens=min(6000, max(1200, 600 + len(materials) * 160)),
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
-    data = extract_json_payload(str(content))
-    raw_assignments = data.get("assignments") if isinstance(data, dict) else None
-    if not isinstance(raw_assignments, list):
-        raise ValueError("素材批量归类结果缺少 assignments")
+    raw_assignments = generated.value.model_dump()["assignments"]
 
     expected_ids = [material.utterance_id for material in materials]
     allowed_section_ids = {section.id for section in sections}

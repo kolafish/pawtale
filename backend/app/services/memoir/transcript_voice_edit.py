@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,10 +16,14 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptVoiceEditPreviewRequest,
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
 )
+from app.services.ai_calls import (
+    AIStructuredOutputError,
+    generate_structured_with_client,
+)
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 
@@ -39,6 +44,27 @@ class TranscriptVoiceEditContext:
     project: Project
     current_text: str
     included_chapter_titles: tuple[str, ...]
+
+
+class _TranscriptVoiceEditChangeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scope: str = ""
+    before: str = ""
+    after: str = ""
+
+
+class _TranscriptVoiceEditOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+    changes: list[_TranscriptVoiceEditChangeOutput] = Field(default_factory=list)
+    confidence: float = 0.0
+    # Provider output may echo these legacy fields. They are intentionally
+    # accepted but never trusted; the backend reconstructs text from changes.
+    edited_text: str | None = None
+    reason: str | None = None
+    reply_text: str | None = None
 
 
 def _current_text(utterance: MemoirVoiceUtterance) -> str:
@@ -302,13 +328,30 @@ async def preview_voice_transcript_edit(
     try:
         if client is None:
             client = get_ai_service(selected_ai_model)
-        raw = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             SYSTEM_PROMPT,
             _build_prompt(context, req.instruction_text),
+            output_model=_TranscriptVoiceEditOutput,
+            requested_model=selected_ai_model,
             temperature=0.1,
-            max_tokens=1600,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
+    except AIStructuredOutputError as exc:
+        logger.warning(
+            "AI transcript voice edit returned invalid structured output "
+            "provider=%s model=%s diagnostics=%s",
+            getattr(client, "provider_name", "unknown"),
+            getattr(client, "model_name", selected_ai_model or "default"),
+            exc.diagnostics,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=VOICE_EDIT_INVALID_RESPONSE_MESSAGE,
+        ) from exc
     except HTTPException as exc:
         if exc.status_code < 500:
             raise
@@ -326,18 +369,9 @@ async def preview_voice_transcript_edit(
         )
         raise HTTPException(status_code=503, detail=VOICE_EDIT_UNAVAILABLE_MESSAGE) from exc
 
-    payload = extract_json_payload(str(raw))
-    if not isinstance(payload, dict):
-        logger.warning(
-            "AI transcript voice edit returned invalid JSON provider=%s model=%s response_length=%s",
-            getattr(client, "provider_name", "unknown"),
-            getattr(client, "model_name", selected_ai_model or "default"),
-            len(str(raw)),
-        )
-        raise HTTPException(status_code=502, detail=VOICE_EDIT_INVALID_RESPONSE_MESSAGE)
     return _response_from_payload(
         context=context,
-        payload=payload,
-        provider=getattr(client, "provider_name", None),
-        model=getattr(client, "model_name", selected_ai_model),
+        payload=generated.value.model_dump(),
+        provider=generated.response.provider,
+        model=generated.response.resolved_model,
     )

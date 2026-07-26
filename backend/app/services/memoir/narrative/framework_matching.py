@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,10 +13,11 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import frameworks
 from app.services.memoir.project_ai_preferences import load_project_ai_model
@@ -29,6 +31,20 @@ MAX_MATCHES_PER_MATERIAL = 4
 
 class FrameworkMatchSelectionError(ValueError):
     pass
+
+
+class _FrameworkMatchOutputItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    utterance_id: str
+    item_key: str
+    confidence: float
+
+
+class _FrameworkMatchesOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    matches: list[_FrameworkMatchOutputItem] = Field(default_factory=list)
 
 
 def _normalized_material_ids(material_ids: list[object]) -> list[str]:
@@ -78,21 +94,22 @@ async def select_framework_matches(
     materials: list[MemoirVoiceUtterance],
     ai_client: AITextClient,
 ) -> tuple[frameworks.FrameworkMaterialMatch, ...]:
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         "你是回忆录话题地图匹配器，只返回素材与候选话题的受控关联。",
         _matching_prompt(
             project_framework=project_framework,
             materials=materials,
         ),
+        output_model=_FrameworkMatchesOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.0,
-        max_tokens=2500,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
-    payload = extract_json_payload(str(content))
-    if not isinstance(payload, dict) or not isinstance(
-        payload.get("matches"), list
-    ):
-        raise FrameworkMatchSelectionError("topic_map_match_invalid_json")
+    payload = generated.value.model_dump()
     material_ids = {material.id for material in materials}
     item_keys = {item.item_key for item in project_framework.items}
     accepted: dict[tuple[str, str], frameworks.FrameworkMaterialMatch] = {}

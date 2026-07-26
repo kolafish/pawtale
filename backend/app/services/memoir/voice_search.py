@@ -8,10 +8,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 
 
@@ -124,6 +127,24 @@ class ParsedVoiceSearchQuery:
     model: str | None = None
 
 
+class _VoiceSearchFiltersOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    included: str = "all"
+    guidance_mode: str | None = None
+    module: str | None = None
+
+
+class _VoiceSearchOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = ""
+    keywords: list[str] = Field(default_factory=list)
+    filters: _VoiceSearchFiltersOutput = Field(
+        default_factory=_VoiceSearchFiltersOutput
+    )
+
+
 class VoiceSearchTranscriptionError(RuntimeError):
     def __init__(self, code: str, message: str, status_code: int = 502) -> None:
         super().__init__(message)
@@ -206,25 +227,29 @@ async def parse_voice_search_query(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             VOICE_SEARCH_SYSTEM_PROMPT,
             VOICE_SEARCH_USER_PROMPT_TEMPLATE.format(text=original_text),
+            output_model=_VoiceSearchOutput,
+            requested_model=ai_model,
             temperature=0.1,
-            max_tokens=500,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
-        payload = extract_json_payload(str(content))
+        payload = generated.value.model_dump()
         parsed = _parsed_voice_search_payload(original_text, payload)
-        used_ai = isinstance(payload, dict)
         return ParsedVoiceSearchQuery(
             original_text=original_text,
             query=parsed.query,
             keywords=parsed.keywords,
             filters=parsed.filters,
             display_text=parsed.display_text,
-            used_ai=used_ai,
-            provider=getattr(client, "provider_name", None) if used_ai else None,
-            model=getattr(client, "model_name", ai_model) if used_ai else None,
+            used_ai=True,
+            provider=generated.response.provider,
+            model=generated.response.resolved_model,
         )
     except Exception:
         logger.warning(

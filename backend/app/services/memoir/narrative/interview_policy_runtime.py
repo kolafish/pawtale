@@ -5,6 +5,7 @@ import hashlib
 import json
 from typing import Mapping
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -36,10 +37,11 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import (
     interview_policy,
@@ -100,6 +102,13 @@ _PRIVACY_PHRASES = (
 
 class InterviewPolicySelectionError(ValueError):
     pass
+
+
+class _InterviewPolicySelectionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selected_action: str
+    framework_item_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -500,20 +509,22 @@ async def select_policy_action(
     context: InterviewPolicyContext,
     ai_client: AITextClient,
 ) -> InterviewPolicySelection:
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         (
             "你是回忆录访谈策略分类器。"
             "你只选择系统提供的受控动作，不生成问题，不修改事实或用户决定。"
         ),
         _selection_prompt(context),
+        output_model=_InterviewPolicySelectionOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.0,
-        max_tokens=160,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.REALTIME),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
-    payload = extract_json_payload(str(content))
-    if not isinstance(payload, dict):
-        raise InterviewPolicySelectionError("interview_policy_invalid_json")
-    raw_action = str(payload.get("selected_action") or "").strip()
+    raw_action = generated.value.selected_action.strip()
     try:
         selected_action = MemoirInterviewAction(raw_action)
     except ValueError as exc:
@@ -525,8 +536,8 @@ async def select_policy_action(
         raise InterviewPolicySelectionError(
             "interview_policy_action_outside_candidates"
         )
-    raw_framework_item_id = str(
-        payload.get("framework_item_id") or ""
+    raw_framework_item_id = (
+        generated.value.framework_item_id or ""
     ).strip() or None
     candidate_topic_ids = {
         candidate.item_id for candidate in context.topic_candidates
