@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,20 +23,30 @@ from app.models.memoir import (
     MemoirSection,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_calls import (
+    AIInvalidStructuredOutputError,
+    AIOutputTruncatedError,
+    generate_structured_with_client,
+)
 from app.services.ai_timeouts import (
-    AITextTimeoutProfile,
     ai_error_metadata,
     ai_text_timeout_seconds,
     ai_user_error_message,
 )
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import (
+    AITextWorkload,
+    ai_text_workload_policy,
+)
 from app.services.memoir import completion_issues, section_digests
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
-CHAPTER_DIGEST_MAX_TOKENS = 8000
+CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
+    AITextWorkload.LONG_GENERATION_STRUCTURED
+)
+CHAPTER_DIGEST_MAX_TOKENS = CHAPTER_DIGEST_POLICY.max_tokens
 CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录主编。"
     "你根据小章节摘要判断整章的结构和阅读体验，不创造新事实。"
@@ -68,6 +79,27 @@ class ChapterDigestContext:
     sections: tuple[ChapterDigestSection, ...]
     allowed_material_ids: frozenset[str]
     input_signature: str
+
+
+class _ChapterDigestIssueOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_type: str = ""
+    channel: str = ""
+    question: str = ""
+    reason: str = ""
+    priority: str = ""
+    section_ids: list[str] = Field(default_factory=list)
+    material_ids: list[str] = Field(default_factory=list)
+
+
+class _ChapterDigestOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    focus: str = ""
+    structure_guidance: list[str] = Field(default_factory=list)
+    candidate_issues: list[_ChapterDigestIssueOutput] = Field(default_factory=list)
 
 
 def _compact(value: object, *, limit: int) -> str:
@@ -345,30 +377,6 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 """
 
 
-def _llm_response_parts(
-    response: str | tuple[str, dict],
-) -> tuple[str, dict]:
-    if isinstance(response, tuple):
-        content, response_json = response
-        return str(content), response_json if isinstance(response_json, dict) else {}
-    return str(response), {}
-
-
-def _llm_finish_reason(response_json: dict) -> str:
-    choices = response_json.get("choices")
-    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        reason = choices[0].get("finish_reason")
-        if isinstance(reason, str):
-            return reason
-    incomplete = response_json.get("incomplete_details")
-    if isinstance(incomplete, dict):
-        reason = incomplete.get("reason")
-        if isinstance(reason, str):
-            return reason
-    status = response_json.get("status")
-    return status if isinstance(status, str) else ""
-
-
 def normalize_chapter_digest(
     payload: Any,
     *,
@@ -526,40 +534,26 @@ async def generate_or_reuse_chapter_digest(
                 "current_section_title": "",
             }
         )
-    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
+    timeout_seconds = ai_text_timeout_seconds(
+        CHAPTER_DIGEST_POLICY.timeout_profile
+    )
     response_diagnostics: dict[str, object] = {}
     started_at = time.monotonic()
     try:
-        response = await client._call_llm(
+        generated = await generate_structured_with_client(
+            client,
             CHAPTER_DIGEST_SYSTEM_PROMPT,
             prompt,
+            output_model=_ChapterDigestOutput,
+            requested_model=ai_model,
             temperature=0.2,
             max_tokens=CHAPTER_DIGEST_MAX_TOKENS,
             timeout=timeout_seconds,
-            return_raw=True,
+            max_attempts=CHAPTER_DIGEST_POLICY.max_attempts,
         )
-        content, response_json = _llm_response_parts(response)
-        finish_reason = _llm_finish_reason(response_json)
-        response_diagnostics = {
-            "finish_reason": finish_reason,
-            "response_char_count": len(content),
-        }
-        payload = extract_json_payload(content)
-        if not isinstance(payload, dict):
-            logger.warning(
-                "memoir chapter digest returned invalid JSON chapter_id=%s "
-                "provider=%s model=%s finish_reason=%s response_chars=%s",
-                chapter_id,
-                getattr(client, "provider_name", None),
-                getattr(client, "model_name", ai_model),
-                finish_reason or "<unknown>",
-                len(content),
-            )
-            if finish_reason in {"length", "max_tokens", "incomplete"}:
-                raise ValueError("章节审阅输出被截断，请重新检查本章")
-            raise ValueError("章节审阅没有返回可识别的结构，请重新检查本章")
+        response_diagnostics = generated.response.diagnostics()
         digest_json = normalize_chapter_digest(
-            payload,
+            generated.value.model_dump(),
             allowed_section_ids={
                 item.section_id for item in context.sections
             },
@@ -589,10 +583,15 @@ async def generate_or_reuse_chapter_digest(
         )
         digest_json = {}
         status = MemoirSemanticCacheStatus.FAILED
-        error = ai_user_error_message(
-            exc,
-            "章节审阅服务暂时不可用，请稍后重试",
-        )
+        if isinstance(exc, AIOutputTruncatedError):
+            error = "章节审阅输出被截断，请重新检查本章"
+        elif isinstance(exc, AIInvalidStructuredOutputError):
+            error = "章节审阅没有返回可识别的结构，请重新检查本章"
+        else:
+            error = ai_user_error_message(
+                exc,
+                "章节审阅服务暂时不可用，请稍后重试",
+            )
         response_diagnostics = {
             **response_diagnostics,
             **ai_error_metadata(

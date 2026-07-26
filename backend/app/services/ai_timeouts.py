@@ -66,7 +66,7 @@ def ai_error_metadata(
     timeout_seconds: float,
     elapsed_ms: int,
 ) -> dict[str, object]:
-    return {
+    metadata: dict[str, object] = {
         "requested_model": requested_model,
         "provider": provider,
         "model": resolved_model,
@@ -74,6 +74,12 @@ def ai_error_metadata(
         "elapsed_ms": elapsed_ms,
         "error_type": error.__class__.__name__,
     }
+    diagnostics = getattr(error, "diagnostics", None)
+    if isinstance(diagnostics, dict):
+        metadata.update(diagnostics)
+        metadata["timeout_seconds"] = timeout_seconds
+        metadata["error_type"] = error.__class__.__name__
+    return metadata
 
 
 def ai_user_error_message(error: Exception, fallback: str) -> str:
