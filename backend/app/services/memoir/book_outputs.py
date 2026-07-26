@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
@@ -591,6 +592,7 @@ async def export_book_output_file(
     version_id: str | None = None,
     show_source_appendix: bool | None = None,
     allow_admin: bool = False,
+    timeout_seconds: float | None = None,
 ) -> ExportFile:
     await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     output = await _load_output(db, project_id=project_id)
@@ -606,16 +608,32 @@ async def export_book_output_file(
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
     )
-    return await asyncio.to_thread(
-        render_book_output_export,
-        title=output.title,
-        version=version.version,
-        content=content,
-        manuscript=manuscript.model_dump(mode="json") if manuscript else {},
-        show_source_appendix=show_source_appendix,
-        export_format=export_format,
-        layout=layout,
+    deadline_seconds = max(
+        0.01,
+        timeout_seconds
+        if timeout_seconds is not None
+        else get_settings().memoir_book_export_deadline_seconds,
     )
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(
+                render_book_output_export,
+                title=output.title,
+                version=version.version,
+                content=content,
+                manuscript=manuscript.model_dump(mode="json") if manuscript else {},
+                show_source_appendix=show_source_appendix,
+                export_format=export_format,
+                layout=layout,
+            ),
+            timeout=deadline_seconds,
+        )
+    except TimeoutError as exc:
+        minutes = max(1, round(deadline_seconds / 60))
+        raise HTTPException(
+            status_code=504,
+            detail=f"书稿导出超过 {minutes} 分钟，请稍后重试。",
+        ) from exc
 
 
 async def synthesize_book_output_audio(

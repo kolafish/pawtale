@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
-from app.models.memoir import MemoirEditingJob
+from app.models.memoir import MemoirAutomationEvent, MemoirEditingJob
 from app.services.memoir.job_leases import (
     JobLease,
     JobLeaseLostError,
@@ -39,6 +40,10 @@ class EditingJobResult:
 
 
 _HANDLERS: dict[MemoirEditingJobType, EditingJobHandler] = {}
+
+
+class EditingJobDeadlineExceeded(RuntimeError):
+    pass
 
 
 def _utcnow() -> datetime:
@@ -362,11 +367,55 @@ async def _mark_job(
     return True
 
 
-async def run_editing_job(db: AsyncSession, lease: JobLease) -> bool:
+def _deadline_error_message(timeout_seconds: float) -> str:
+    minutes = max(1, round(timeout_seconds / 60))
+    return f"后台任务运行超过 {minutes} 分钟，已停止。已保存的进度会保留，请重新开始继续。"
+
+
+async def _mark_linked_events_timed_out(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+    *,
+    error_message: str,
+    timeout_seconds: float,
+) -> None:
+    events = (
+        await db.scalars(
+            select(MemoirAutomationEvent).where(
+                MemoirAutomationEvent.editing_job_id == job.id,
+                MemoirAutomationEvent.status == MemoirAutomationEventStatus.PENDING.value,
+            )
+        )
+    ).all()
+    label = str((job.payload_json or {}).get("target_label") or "").strip() or "后台任务"
+    for event in events:
+        event.status = MemoirAutomationEventStatus.FAILED.value
+        event.summary_text = f"{label}处理超时，请重试。"
+        event.metadata_json = {
+            **(event.metadata_json or {}),
+            "error_message": error_message,
+            "error_type": "job_deadline_exceeded",
+            "timeout_seconds": timeout_seconds,
+        }
+        db.add(event)
+
+
+async def run_editing_job(
+    db: AsyncSession,
+    lease: JobLease,
+    *,
+    timeout_seconds: float | None = None,
+) -> bool:
     job = await _load_leased_editing_job(db, lease)
     if job is None:
         return False
 
+    deadline_seconds = max(
+        0.01,
+        timeout_seconds
+        if timeout_seconds is not None
+        else get_settings().memoir_editing_job_deadline_seconds,
+    )
     try:
         job_type = MemoirEditingJobType(job.job_type)
         handler = _HANDLERS.get(job_type)
@@ -379,7 +428,19 @@ async def run_editing_job(db: AsyncSession, lease: JobLease) -> bool:
                 error_message=f"no handler registered for {job_type.value}",
             )
             return False
-        handler_result = await handler(db, job)
+        handler_task = asyncio.create_task(handler(db, job))
+        try:
+            done, _pending = await asyncio.wait(
+                {handler_task},
+                timeout=deadline_seconds,
+            )
+            if handler_task not in done:
+                raise EditingJobDeadlineExceeded
+            handler_result = await handler_task
+        finally:
+            if not handler_task.done():
+                handler_task.cancel()
+                await asyncio.gather(handler_task, return_exceptions=True)
         marked = await _mark_job(
             db,
             job,
@@ -389,6 +450,38 @@ async def run_editing_job(db: AsyncSession, lease: JobLease) -> bool:
             error_message=handler_result.error_message,
         )
         return marked and handler_result.status == MemoirEditingJobStatus.SUCCEEDED
+    except EditingJobDeadlineExceeded:
+        await db.rollback()
+        error_message = _deadline_error_message(deadline_seconds)
+        logger.warning(
+            "memoir editing job deadline exceeded job_id=%s timeout_seconds=%s",
+            lease.job_id,
+            deadline_seconds,
+        )
+        job = await _load_leased_editing_job(db, lease)
+        if job:
+            await _mark_linked_events_timed_out(
+                db,
+                job,
+                error_message=error_message,
+                timeout_seconds=deadline_seconds,
+            )
+            result_json = {
+                **(job.result_json or {}),
+                "error_type": "job_deadline_exceeded",
+                "timeout_seconds": deadline_seconds,
+                "elapsed_seconds": deadline_seconds,
+                "failed_at": _utcnow().isoformat(),
+            }
+            await _mark_job(
+                db,
+                job,
+                lease,
+                MemoirEditingJobStatus.FAILED,
+                result_json=result_json,
+                error_message=error_message,
+            )
+        return False
     except Exception as exc:
         await db.rollback()
         logger.exception("memoir editing job failed job_id=%s", lease.job_id)
@@ -429,7 +522,11 @@ async def _run_claimed_editing_job(
 
     async def work() -> bool:
         async with session_maker() as db:
-            return await run_editing_job(db, lease)
+            return await run_editing_job(
+                db,
+                lease,
+                timeout_seconds=max(0.01, settings.memoir_editing_job_deadline_seconds),
+            )
 
     try:
         return await run_with_lease_heartbeat(

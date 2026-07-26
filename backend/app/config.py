@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     memoir_editing_batch_size: int = 5
     memoir_editing_lease_seconds: int = 300
     memoir_editing_heartbeat_seconds: int = 30
+    memoir_editing_job_deadline_seconds: float = 3600.0
     memoir_interview_policy_shadow_enabled: bool = False
     memoir_interview_policy_shadow_model: str = ""
     memoir_interview_policy_active_enabled: bool = False
@@ -86,8 +87,10 @@ class Settings(BaseSettings):
     memoir_share_video_batch_size: int = 1
     memoir_share_video_lease_seconds: int = 900
     memoir_share_video_heartbeat_seconds: int = 30
+    memoir_share_video_job_deadline_seconds: float = 1800.0
     memoir_share_video_max_attempts: int = 3
     memoir_share_video_retry_seconds: int = 10
+    memoir_book_export_deadline_seconds: float = 240.0
 
     # GitHub App one-way project backup
     github_app_id: str = ""

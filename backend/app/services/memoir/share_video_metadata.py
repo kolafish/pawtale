@@ -92,6 +92,9 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     background_model: str | None = None
     background_cache_hit: bool | None = None
     background_error_message: str = ""
+    error_type: str = ""
+    timeout_seconds: float | None = None
+    elapsed_seconds: float | None = None
 
     @classmethod
     def from_json(cls, value: object) -> "ShareVideoJobMetadata":

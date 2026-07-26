@@ -1053,6 +1053,74 @@ async def test_share_video_worker_retries_and_removes_partial_output(client, tes
     assert target_path.read_bytes() == b"final mp4"
 
 
+async def test_share_video_worker_deadline_fails_without_retry(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
+        tmp_path / "share-videos",
+    )
+    render_cancelled = asyncio.Event()
+
+    async def stalled_render(request):
+        request.target_path.parent.mkdir(parents=True, exist_ok=True)
+        request.target_path.write_bytes(b"partial mp4")
+        try:
+            await asyncio.Event().wait()
+        finally:
+            render_cancelled.set()
+
+    monkeypatch.setattr(
+        "app.services.memoir.share_video_rendering.render_share_video_clip",
+        stalled_render,
+    )
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    end_char = text.index("。") + 1
+    create_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": end_char,
+            "background_source": "classic",
+        },
+    )
+    job_id = create_response.json()["id"]
+    lease = await share_video_jobs.claim_share_video_job(
+        test_db,
+        job_id,
+        lease_seconds=60,
+        max_attempts=3,
+    )
+    assert lease is not None
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    assert await share_video_jobs.run_share_video_job(
+        lease,
+        session_maker=session_maker,
+        timeout_seconds=0.02,
+    ) is False
+    assert render_cancelled.is_set()
+    await test_db.rollback()
+    stored_job = await test_db.get(MemoirMaterialShareVideo, job_id)
+    await test_db.refresh(stored_job)
+    target_path = share_video_jobs.share_video_file_path(stored_job)
+    assert stored_job.status == MemoirShareVideoJobStatus.FAILED.value
+    assert stored_job.attempts == 1
+    assert stored_job.run_after is None
+    assert stored_job.metadata_json["error_type"] == "job_deadline_exceeded"
+    assert stored_job.metadata_json["timeout_seconds"] == 0.02
+    assert "已停止，请重新生成" in stored_job.error_message
+    assert not target_path.exists()
+
+
 async def test_share_video_worker_recovers_when_completion_write_stalls(
     client,
     test_db,
@@ -1121,7 +1189,8 @@ async def test_share_video_worker_recovers_when_completion_write_stalls(
         share_video_jobs.run_share_video_job(
             lease,
             session_maker=session_maker,
-            completion_recovery_poll_seconds=0.01,
+            completion_recovery_poll_seconds=1.0,
+            timeout_seconds=0.05,
         ),
         timeout=2,
     )

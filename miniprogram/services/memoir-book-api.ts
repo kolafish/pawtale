@@ -33,8 +33,6 @@ import {
 import { downloadAuthenticatedFile } from "./authenticated-media";
 import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 
-const BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS = 120000;
-
 function bookPlanPath(projectId: string, suffix = ""): string {
   return memoirProjectPath(projectId, `/book-plan${suffix}`);
 }
@@ -361,7 +359,7 @@ export function downloadMemoirBookOutputExport(
 ): Promise<string> {
   const url = memoirBookOutputExportUrl(projectId, format, versionId, layout, showSourceAppendix);
   return downloadAuthenticatedFile(url, {
-    timeoutMs: BOOK_OUTPUT_EXPORT_DOWNLOAD_TIMEOUT_MS,
+    timeoutProfile: "export",
     failureMessage: "文件下载失败",
     domainLabel: "文件下载",
   });

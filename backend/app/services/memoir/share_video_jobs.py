@@ -649,6 +649,7 @@ async def _fail_share_video_job(
     error: Exception,
     max_attempts: int,
     retry_seconds: int,
+    metadata: ShareVideoJobMetadata | None = None,
 ) -> None:
     job = await db.scalar(
         select(MemoirMaterialShareVideo).where(
@@ -684,6 +685,7 @@ async def _fail_share_video_job(
                 lease_token=None,
                 lease_expires_at=None,
                 error_message=error_message,
+                **({"metadata_json": metadata.to_json()} if metadata else {}),
                 completed_at=None if should_retry else failed_at,
             )
         )
@@ -809,12 +811,19 @@ async def run_share_video_job(
     *,
     session_maker: async_sessionmaker[AsyncSession] = async_session_maker,
     completion_recovery_poll_seconds: float = _COMPLETION_RECOVERY_POLL_SECONDS,
+    timeout_seconds: float | None = None,
 ) -> bool:
     settings = get_settings()
     lease_seconds = max(1, settings.memoir_share_video_lease_seconds)
     heartbeat_seconds = min(
         max(1, settings.memoir_share_video_heartbeat_seconds),
         max(1, lease_seconds // 3),
+    )
+    deadline_seconds = max(
+        0.01,
+        timeout_seconds
+        if timeout_seconds is not None
+        else settings.memoir_share_video_job_deadline_seconds,
     )
 
     async def renew() -> bool:
@@ -859,7 +868,49 @@ async def run_share_video_job(
         done, _pending = await asyncio.wait(
             {work_task, recovery_task},
             return_when=asyncio.FIRST_COMPLETED,
+            timeout=deadline_seconds,
         )
+        if not done:
+            work_task.cancel()
+            recovery_task.cancel()
+            await asyncio.gather(work_task, recovery_task, return_exceptions=True)
+            if await _recover_published_share_video(session_maker, lease):
+                return True
+            error_message = (
+                f"分享视频生成超过 {max(1, round(deadline_seconds / 60))} 分钟，"
+                "已停止，请重新生成。"
+            )
+            logger.warning(
+                "share video job deadline exceeded job_id=%s timeout_seconds=%s",
+                lease.job_id,
+                deadline_seconds,
+            )
+            async with session_maker() as db:
+                job = await db.scalar(
+                    select(MemoirMaterialShareVideo).where(
+                        MemoirMaterialShareVideo.id == lease.job_id,
+                        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+                        MemoirMaterialShareVideo.lease_token == lease.token,
+                    )
+                )
+                if job is not None:
+                    metadata = ShareVideoJobMetadata.from_json(job.metadata_json)
+                    if metadata.background_status in {"pending", "planning", "generating"}:
+                        metadata.background_status = "failed"
+                        metadata.background_error_message = error_message
+                    metadata.error_type = "job_deadline_exceeded"
+                    metadata.timeout_seconds = deadline_seconds
+                    metadata.elapsed_seconds = deadline_seconds
+                    await _fail_share_video_job(
+                        db,
+                        lease,
+                        target_path=share_video_file_path(job),
+                        error=TimeoutError(error_message),
+                        max_attempts=1,
+                        retry_seconds=max(1, settings.memoir_share_video_retry_seconds),
+                        metadata=metadata,
+                    )
+            return False
         if recovery_task in done:
             await recovery_task
             work_task.cancel()

@@ -1,9 +1,17 @@
 import { ensureMemoirBackendSession } from "./memoir-api-client";
 import { ApiError, readSessionCookie } from "./request";
 
+export type MediaTransferTimeoutProfile = "media" | "export";
+
+const MEDIA_TRANSFER_TIMEOUT_MS: Record<MediaTransferTimeoutProfile, number> = {
+  media: 60000,
+  export: 300000,
+};
+
 interface AuthenticatedDownloadOptions {
   failureMessage: string;
   domainLabel: string;
+  timeoutProfile?: MediaTransferTimeoutProfile;
   timeoutMs?: number;
 }
 
@@ -15,7 +23,14 @@ interface AuthenticatedUploadOptions<T> {
   parseResponse: (data: string) => T;
   responseErrorMessage?: (data: string) => string;
   formData?: Record<string, string>;
+  timeoutProfile?: MediaTransferTimeoutProfile;
   timeoutMs?: number;
+}
+
+export function mediaTransferTimeoutMs(
+  profile: MediaTransferTimeoutProfile = "media",
+): number {
+  return MEDIA_TRANSFER_TIMEOUT_MS[profile];
 }
 
 function transferDomain(url: string): string {
@@ -36,6 +51,9 @@ function transferErrorMessage(
   if (message.toLowerCase().includes("url not in domain list")) {
     return `${domainLabel}域名未配置，请在微信公众平台把 ${transferDomain(url)} 添加到 ${apiName} 合法域名。`;
   }
+  if (message.toLowerCase().includes("timeout")) {
+    return `${domainLabel}超时，请检查网络后重试。`;
+  }
   return message || fallback;
 }
 
@@ -52,7 +70,7 @@ export async function downloadAuthenticatedFile(
   return new Promise((resolve, reject) => {
     wx.downloadFile({
       url,
-      ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+      timeout: options.timeoutMs ?? mediaTransferTimeoutMs(options.timeoutProfile),
       header: sessionHeader(),
       success: (result) => {
         if (result.statusCode >= 200 && result.statusCode < 300) {
@@ -88,7 +106,7 @@ export async function uploadAuthenticatedFile<T>(
       url,
       filePath: options.filePath,
       name: options.name,
-      ...(options.timeoutMs ? { timeout: options.timeoutMs } : {}),
+      timeout: options.timeoutMs ?? mediaTransferTimeoutMs(options.timeoutProfile),
       ...(options.formData ? { formData: options.formData } : {}),
       header: sessionHeader(),
       success: (result) => {

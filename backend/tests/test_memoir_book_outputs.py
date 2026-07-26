@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -28,6 +30,7 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.models.projects import Project
 from app.services.memoir import book_outputs
 from app.services.memoir.book_manuscript_ai import generate_manuscript_editorial_copy, generate_title_suggestions
 from app.services.memoir.book_manuscript_cleanup import sanitize_manuscript_payload
@@ -862,6 +865,36 @@ async def test_mobile_memoir_book_output_exports_txt_and_pdf(client, test_db):
     assert b"/Helvetica" not in fallback_pdf.content
     assert b"STSong-Light" not in fallback_pdf.content
     assert b"Adobe-GB1" not in fallback_pdf.content
+
+
+async def test_book_output_export_deadline_returns_retryable_timeout(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id = await ensure_mobile_memoir_project(client)
+    await _create_confirmed_book_plan(test_db, project_id=project_id)
+    await _seed_confirmed_book_output(test_db, project_id=project_id)
+
+    def slow_export(**_kwargs):
+        import time
+
+        time.sleep(0.05)
+
+    monkeypatch.setattr(book_outputs, "render_book_output_export", slow_export)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await book_outputs.export_book_output_file(
+            test_db,
+            user_id=(await test_db.get(Project, project_id)).user_id,
+            project_id=project_id,
+            export_format=book_outputs.MemoirBookOutputExportFormat.PDF,
+            timeout_seconds=0.01,
+        )
+
+    assert exc_info.value.status_code == 504
+    assert "请稍后重试" in str(exc_info.value.detail)
+    await asyncio.sleep(0.06)
 
 
 async def test_mobile_memoir_book_output_exports_selected_version(client, test_db):
