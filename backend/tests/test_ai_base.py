@@ -1,7 +1,10 @@
 """Tests for AI text provider contracts and use-case helpers."""
 import httpx
 import pytest
+from pydantic import BaseModel, ConfigDict
 from unittest.mock import AsyncMock, patch, MagicMock
+
+from app.services.ai_calls import AIOutputTruncatedError
 from app.services.ai_base import AITextServiceBase
 import app.services.ai_story as ai_story
 from app.services.ai_project_analysis import normalize_project_analysis
@@ -9,6 +12,12 @@ from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import ClaudeTextService
 from app.services.ai_volc import VolcArkTextService
+
+
+class _StructuredProbe(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool
 
 
 # ── Helper Unit Tests ──────────────────────────
@@ -348,6 +357,166 @@ class TestCallLlmContract:
         assert isinstance(result, tuple)
         assert result[0] == "hello"
         assert isinstance(result[1], dict)
+
+    @pytest.mark.asyncio
+    async def test_claude_structured_generation_uses_native_forced_tool(self):
+        service = ClaudeTextService(model="claude-opus-4-8")
+        raw = {
+            "model": "claude-opus-4-8",
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "emit_structured_result",
+                    "input": {"ok": True},
+                }
+            ],
+        }
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = raw
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            result = await service.generate_structured(
+                "system",
+                "user",
+                output_model=_StructuredProbe,
+                requested_model="claude-opus-4-8",
+                max_tokens=4000,
+                timeout=180,
+                max_attempts=2,
+            )
+
+        assert result.value.ok is True
+        assert result.response.finish_reason == "tool_use"
+        assert result.response.response_model == "claude-opus-4-8"
+        assert result.response.usage["output_tokens"] == 5
+        args, kwargs = inst.post.call_args
+        assert args[0] == "https://blankapi.com/v1/messages"
+        assert kwargs["json"]["system"] == "system"
+        assert kwargs["json"]["max_tokens"] == 4000
+        assert kwargs["json"]["tool_choice"] == {
+            "type": "tool",
+            "name": "emit_structured_result",
+        }
+        tool = kwargs["json"]["tools"][0]
+        assert tool["strict"] is True
+        assert tool["input_schema"]["properties"]["ok"]["type"] == "boolean"
+
+    @pytest.mark.asyncio
+    async def test_structured_generation_retries_truncated_response(self):
+        service = DeepSeekTextService()
+        truncated = (
+            '{"ok":',
+            {
+                "model": "deepseek-v4-flash",
+                "choices": [{"finish_reason": "length"}],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        )
+        complete = (
+            '{"ok": true}',
+            {
+                "model": "deepseek-v4-flash",
+                "choices": [{"finish_reason": "stop"}],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 3,
+                    "total_tokens": 15,
+                },
+            },
+        )
+        call = AsyncMock(side_effect=[truncated, complete])
+
+        with patch.object(service, "_call_llm", call):
+            result = await service.generate_structured(
+                "system",
+                "user",
+                output_model=_StructuredProbe,
+                requested_model="deepseek-v4-flash",
+                max_attempts=2,
+            )
+
+        assert result.value.ok is True
+        assert result.response.attempt_count == 2
+        assert result.response.usage == {
+            "prompt_tokens": 22,
+            "completion_tokens": 8,
+            "total_tokens": 30,
+        }
+        assert call.await_count == 2
+        assert "上次输出未通过结构校验" in call.await_args_list[1].args[1]
+
+    @pytest.mark.asyncio
+    async def test_structured_generation_retries_unescaped_quote_json(self):
+        service = DeepSeekTextService()
+        malformed = (
+            '{"ok": "目前"过年"部分"}',
+            {
+                "model": "deepseek-v4-flash",
+                "choices": [{"finish_reason": "stop"}],
+            },
+        )
+        complete = (
+            '{"ok": true}',
+            {
+                "model": "deepseek-v4-flash",
+                "choices": [{"finish_reason": "stop"}],
+            },
+        )
+        call = AsyncMock(side_effect=[malformed, complete])
+
+        with patch.object(service, "_call_llm", call):
+            result = await service.generate_structured(
+                "system",
+                "user",
+                output_model=_StructuredProbe,
+                requested_model="deepseek-v4-flash",
+                max_attempts=2,
+            )
+
+        assert result.value.ok is True
+        assert result.response.attempt_count == 2
+        assert call.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_structured_generation_reports_final_truncation(self):
+        service = DeepSeekTextService()
+        truncated = (
+            '{"ok":',
+            {
+                "model": "deepseek-v4-flash",
+                "choices": [{"finish_reason": "length"}],
+            },
+        )
+
+        with patch.object(
+            service,
+            "_call_llm",
+            AsyncMock(side_effect=[truncated, truncated]),
+        ):
+            with pytest.raises(AIOutputTruncatedError) as error:
+                await service.generate_structured(
+                    "system",
+                    "user",
+                    output_model=_StructuredProbe,
+                    requested_model="deepseek-v4-flash",
+                    max_attempts=2,
+                )
+
+        assert error.value.diagnostics["finish_reason"] == "length"
+        assert error.value.diagnostics["attempt_count"] == 2
 
     @pytest.mark.asyncio
     async def test_deepseek_returns_string(self):

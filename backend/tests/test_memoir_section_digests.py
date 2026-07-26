@@ -22,6 +22,7 @@ class FakeDigestAI:
         self.payload = payload
         self.calls = 0
         self.prompts: list[str] = []
+        self.max_tokens: list[int] = []
 
     async def _call_llm(
         self,
@@ -34,6 +35,7 @@ class FakeDigestAI:
     ):
         self.calls += 1
         self.prompts.append(user_prompt)
+        self.max_tokens.append(max_tokens)
         return json.dumps(self.payload, ensure_ascii=False)
 
 
@@ -123,6 +125,7 @@ async def test_section_digest_signature_reuses_same_material_input(client, test_
     assert second.id == first.id
     assert second.input_signature == first.input_signature
     assert fake.calls == 1
+    assert fake.max_tokens == [4000]
     assert created[0]["utterance_id"] in fake.prompts[0]
     assert "不要逐条检查时间、地点、人物" in fake.prompts[0]
     assert first.digest_json["candidate_issues"][0]["material_ids"] == [

@@ -1,5 +1,11 @@
+import json
+import time
+
 import httpx
+from pydantic import BaseModel
+
 from app.config import get_settings
+from app.services.ai_calls import AITextCallResult, build_text_call_result
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_timeouts import (
     AIProviderTimeoutError,
@@ -11,6 +17,7 @@ settings = get_settings()
 
 CLAUDE_FABLE_MODEL = "claude-fable-5"
 CLAUDE_OPUS_4_8_MODEL = "claude-opus-4-8"
+STRUCTURED_RESULT_TOOL_NAME = "emit_structured_result"
 
 
 class ClaudeTextService(AITextServiceBase):
@@ -98,6 +105,104 @@ class ClaudeTextService(AITextServiceBase):
         if base_url.endswith("/v1"):
             return f"{base_url}/chat/completions"
         return f"{base_url}/v1/chat/completions"
+
+    def _messages_url(self) -> str:
+        base_url = self.base_url.rstrip("/")
+        if base_url.endswith("/v1"):
+            return f"{base_url}/messages"
+        return f"{base_url}/v1/messages"
+
+    async def _generate_structured_once(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        output_model: type[BaseModel],
+        requested_model: str | None,
+        temperature: float,
+        max_tokens: int,
+        timeout: float | None,
+        attempt_count: int,
+    ) -> tuple[AITextCallResult, object | None]:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
+        payload: dict[str, object] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": user_prompt}],
+            "tools": [
+                {
+                    "name": STRUCTURED_RESULT_TOOL_NAME,
+                    "description": "提交最终结构化结果，不要把结果写成普通文本。",
+                    "strict": True,
+                    "input_schema": output_model.model_json_schema(),
+                }
+            ],
+            "tool_choice": {
+                "type": "tool",
+                "name": STRUCTURED_RESULT_TOOL_NAME,
+            },
+        }
+        if system_prompt.strip():
+            payload["system"] = system_prompt
+
+        async def request() -> dict:
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        self._messages_url(),
+                        headers={
+                            "Authorization": f"Bearer {self.auth_token}",
+                            "x-api-key": self.auth_token,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=request_timeout,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.TimeoutException as exc:
+                raise AIProviderTimeoutError(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    timeout_seconds=request_timeout,
+                ) from exc
+
+        started_at = time.monotonic()
+        response_json = await provider_concurrency_limiter.run(
+            "ai_text",
+            self.max_concurrent_requests,
+            request,
+        )
+        structured_payload: object | None = None
+        content_parts: list[str] = []
+        blocks = response_json.get("content")
+        if isinstance(blocks, list):
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if (
+                    block.get("type") == "tool_use"
+                    and block.get("name") == STRUCTURED_RESULT_TOOL_NAME
+                ):
+                    structured_payload = block.get("input")
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    content_parts.append(text.strip())
+        content = (
+            json.dumps(structured_payload, ensure_ascii=False)
+            if isinstance(structured_payload, dict)
+            else "\n".join(content_parts).strip()
+        )
+        result = build_text_call_result(
+            (content, response_json),
+            client=self,
+            requested_model=requested_model,
+            elapsed_ms=round((time.monotonic() - started_at) * 1000),
+            attempt_count=attempt_count,
+        )
+        return result, structured_payload
 
     def _extract_response_text(self, result: dict) -> str:
         """兼容不同代理/网关返回的 Claude 内容格式"""

@@ -740,7 +740,10 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
 
     assert response.status_code == 409
     assert response.json()["detail"] == "章节审阅输出被截断，请重新检查本章"
-    assert fake.chapter_max_tokens == [chapter_digests.CHAPTER_DIGEST_MAX_TOKENS]
+    assert fake.chapter_max_tokens == [
+        chapter_digests.CHAPTER_DIGEST_MAX_TOKENS,
+        chapter_digests.CHAPTER_DIGEST_MAX_TOKENS,
+    ]
     assert fake.chapter_max_tokens[0] == 8000
 
     section_digest = await test_db.scalar(
@@ -765,7 +768,8 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     assert generation["timeout_seconds"] == 180.0
     assert generation["finish_reason"] == "length"
     assert generation["response_char_count"] == 28
-    assert generation["error_type"] == "ValueError"
+    assert generation["attempt_count"] == 2
+    assert generation["error_type"] == "AIOutputTruncatedError"
 
 
 async def test_chapter_generation_saves_material_allowlist_snapshot(client, test_db):

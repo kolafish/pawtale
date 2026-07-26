@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,6 +20,11 @@ from app.models.memoir import (
     MemoirSectionMaterial,
 )
 from app.schemas.memoir_section_digests import MemoirSectionDigestResponse
+from app.services.ai_calls import (
+    AIInvalidStructuredOutputError,
+    AIOutputTruncatedError,
+    generate_structured_with_client,
+)
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import (
     AITextTimeoutProfile,
@@ -27,7 +33,10 @@ from app.services.ai_timeouts import (
     ai_user_error_message,
 )
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import (
+    AITextWorkload,
+    ai_text_workload_policy,
+)
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -67,11 +76,27 @@ class SectionDigestContext:
 @dataclass(frozen=True)
 class SectionDigestGeneration:
     digest_json: dict
-    provider: str | None
-    model: str | None
-    prompt: str
     timeout_seconds: float
-    elapsed_ms: int
+    response_diagnostics: dict[str, object]
+
+
+class _SectionDigestIssueOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_type: str = ""
+    question: str = ""
+    reason: str = ""
+    priority: str = ""
+    material_ids: list[str] = Field(default_factory=list)
+
+
+class _SectionDigestOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    focus: str = ""
+    covered_points: list[str] = Field(default_factory=list)
+    candidate_issues: list[_SectionDigestIssueOutput] = Field(default_factory=list)
 
 
 def _compact_text(value: object) -> str:
@@ -319,17 +344,19 @@ async def generate_section_digest_payload(
 ) -> SectionDigestGeneration:
     prompt = build_section_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
-    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
-    started_at = time.monotonic()
-    content = await client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
+    generated = await generate_structured_with_client(
+        client,
         SECTION_DIGEST_SYSTEM_PROMPT,
         prompt,
+        output_model=_SectionDigestOutput,
+        requested_model=ai_model,
         temperature=0.2,
-        max_tokens=1800,
+        max_tokens=policy.max_tokens,
         timeout=timeout_seconds,
+        max_attempts=policy.max_attempts,
     )
-    elapsed_ms = round((time.monotonic() - started_at) * 1000)
-    payload = extract_json_payload(str(content))
     included_ids = {
         material.material_id
         for material in context.materials
@@ -337,14 +364,11 @@ async def generate_section_digest_payload(
     }
     return SectionDigestGeneration(
         digest_json=normalize_section_digest_payload(
-            payload,
+            generated.value.model_dump(),
             allowed_material_ids=included_ids,
         ),
-        provider=getattr(client, "provider_name", None),
-        model=getattr(client, "model_name", ai_model),
-        prompt=prompt,
         timeout_seconds=timeout_seconds,
-        elapsed_ms=elapsed_ms,
+        response_diagnostics=generated.response.diagnostics(),
     )
 
 
@@ -505,6 +529,15 @@ async def generate_or_reuse_section_digest(
             "memoir section digest generation failed section_id=%s",
             section_id,
         )
+        if isinstance(exc, AIOutputTruncatedError):
+            error_message = "小节审阅输出被截断，请重试"
+        elif isinstance(exc, AIInvalidStructuredOutputError):
+            error_message = "小节审阅没有返回可识别的结构，请重试"
+        else:
+            error_message = ai_user_error_message(
+                exc,
+                "小节审阅服务暂时不可用，请稍后重试",
+            )
         return await _upsert_digest(
             db,
             context=context,
@@ -523,10 +556,7 @@ async def generate_or_reuse_section_digest(
                     "engine": engine,
                 }
             },
-            error_message=ai_user_error_message(
-                exc,
-                "小节审阅服务暂时不可用，请稍后重试",
-            ),
+            error_message=error_message,
         )
     return await _upsert_digest(
         db,
@@ -536,12 +566,9 @@ async def generate_or_reuse_section_digest(
         digest_json={
             **generated.digest_json,
             "generation": {
-                "requested_model": ai_model,
-                "provider": generated.provider,
-                "model": generated.model,
+                **generated.response_diagnostics,
                 "engine": engine,
                 "timeout_seconds": generated.timeout_seconds,
-                "elapsed_ms": generated.elapsed_ms,
             },
         },
     )
