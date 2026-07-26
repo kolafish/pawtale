@@ -85,19 +85,7 @@ function workspaceWithPendingMaterial(overrides = {}) {
   return workspace({
     pending_assignment_material_count: 1,
     can_rewrite_draft: false,
-    completion_summary: summary({
-      state: "needs_input",
-      next_action: {
-        kind: "review_sections",
-        title: "还有 1 条讲述待选择小节",
-        detail: "AI 没有强行归类。",
-        action_text: "去选择",
-        disabled: false,
-        issue_id: null,
-      },
-      headline: "请先整理待归类素材",
-      detail: "全部选择完成后，才能按新的小节结构生成正文。",
-    }),
+    completion_summary: summary(),
     sections: [
       ...base.sections,
       {
@@ -282,6 +270,8 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /<view\s+class="rewrite-action/);
   assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
+  assert.match(template, /bindtap="openMaterialEditor"/);
+  assert.match(template, /编辑或删除/);
   assert.match(template, /wx:for="{{draftSectionViews}}"/);
   assert.match(template, /bindtap="toggleDraftSection"/);
   assert.match(template, /bindtap="startDraftSectionAIEdit"/);
@@ -360,7 +350,7 @@ test("chapter workspace accepts a refresh started after cache invalidation", asy
 
   assert.equal(loadCount, 2);
   assert.equal(context.data.workspace.pending_assignment_material_count, 1);
-  assert.equal(context.data.nextAction.kind, "review_sections");
+  assert.equal(context.data.nextAction.kind, "review_draft");
   delete global.wx;
 });
 
@@ -659,18 +649,18 @@ test("section regeneration opens pending material instead of running a stale nex
 
   assert.deepEqual(
     modals.map((modal) => modal.title),
-    ["重新整理小节分组", "有讲述需要选择小节"],
+    ["重新整理小节分组", "有讲述暂未归类"],
   );
   assert.deepEqual(prepareCalls, []);
-  assert.equal(context.data.nextAction.kind, "review_sections");
+  assert.notEqual(context.data.nextAction.kind, "review_sections");
   assert.equal(context.data.structureExpanded, true);
   assert.equal(context.data.sectionViews.at(-1).expanded, true);
   assert.equal(scrolls.at(-1), "#chapter-structure");
   delete global.wx;
 });
 
-test("chapter workspace exposes pending materials and moves one after confirmation", async () => {
-  const { toasts } = installWx();
+test("chapter workspace keeps pending materials optional and opens their editor", async () => {
+  const { navigations, toasts } = installWx();
   const calls = [];
   const pendingWorkspace = workspaceWithPendingMaterial();
   const { page } = loadWorkspacePage({
@@ -687,9 +677,12 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   });
 
   const pendingSection = context.data.sectionViews[1];
-  assert.equal(context.data.structureExpanded, true);
+  assert.equal(context.data.structureExpanded, false);
   assert.equal(pendingSection.title, "待归类素材");
   assert.equal(pendingSection.expanded, true);
+  assert.equal(pendingSection.typeText, "暂不纳入正文");
+  assert.match(pendingSection.assignmentHint, /不会纳入本章正文/);
+  assert.match(pendingSection.assignmentHint, /编辑或删除/);
   assert.equal(pendingSection.visibleMaterials[0].assignmentOptions[0].id, "section-1");
   assert.equal(
     pendingSection.visibleMaterials[0].assignmentOptions.at(-1).action,
@@ -697,9 +690,19 @@ test("chapter workspace exposes pending materials and moves one after confirmati
   );
   assert.equal(
     context.data.sectionStructureSummary,
-    "1 个小节 · 2 条讲述 · 1 条待归类",
+    "1 个小节 · 1 条讲述 · 1 条暂未归类",
   );
-  assert.equal(context.data.canConfirmChapter, false);
+  assert.equal(context.data.canConfirmChapter, true);
+
+  page.openMaterialEditor.call(context, {
+    currentTarget: {
+      dataset: { utteranceId: "utterance/pending id" },
+    },
+  });
+  assert.equal(
+    navigations.at(-1),
+    "/pages/transcript-detail/index?id=utterance%2Fpending%20id",
+  );
 
   page.toggleSection.call(context, {
     currentTarget: { dataset: { id: "section-pending" } },

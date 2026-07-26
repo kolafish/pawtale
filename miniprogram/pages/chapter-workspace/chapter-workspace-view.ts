@@ -118,11 +118,11 @@ function visibleSectionViews(
           ? "待"
           : `${sectionIndex + 1}`,
         typeText: section.requires_user_assignment
-          ? "需要选择小节"
+          ? "暂不纳入正文"
           : SECTION_TYPE_TEXT[section.section_type] || "内容小节",
         metaText: `${visibleMaterials.length} 条讲述`,
         assignmentHint: section.requires_user_assignment
-          ? "这些讲述都还保留在本章中。请选择最合适的小节，完成后才能生成正文。"
+          ? "这些讲述暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击讲述进入编辑或删除。"
           : "",
         expanded: section.requires_user_assignment
           ? expandedSectionIds[section.id] !== false
@@ -262,8 +262,12 @@ export function chapterWorkspaceViewPatch(
   const rewriteDraftScopeDetail = narrativeSectionCount
     ? `会按照上方当前 ${narrativeSectionCount} 个小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。`
     : "会按照上方当前小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。";
-  const materialCount = sectionViews.reduce(
-    (total, section) => total + section.visibleMaterials.length,
+  const includedMaterialCount = sectionViews.reduce(
+    (total, section) => (
+      section.requires_user_assignment
+        ? total
+        : total + section.visibleMaterials.length
+    ),
     0,
   );
   const structureChanged = draftStructureChanged(workspace);
@@ -276,7 +280,7 @@ export function chapterWorkspaceViewPatch(
       ? (
         workspace.can_rewrite_draft
           ? `旧正文没有丢失。${rewriteDraftScopeDetail}`
-          : `旧正文没有丢失。请先完成待归类等当前步骤，再${rewriteDraftActionText}。`
+          : `旧正文没有丢失。请先完成当前必需步骤，再${rewriteDraftActionText}。`
       )
       : (
         workspace.can_rewrite_draft
@@ -292,9 +296,9 @@ export function chapterWorkspaceViewPatch(
     narrativeSectionCount,
     sectionStructureSummary: [
       `${narrativeSectionCount} 个小节`,
-      `${materialCount} 条讲述`,
+      `${includedMaterialCount} 条讲述`,
       ...(pendingAssignmentCount
-        ? [`${pendingAssignmentCount} 条待归类`]
+        ? [`${pendingAssignmentCount} 条暂未归类`]
         : []),
     ].join(" · "),
     rewriteDraftActionText,
@@ -312,7 +316,6 @@ export function chapterWorkspaceViewPatch(
       && workspace.draft_sections.length > 0
       && workspace.draft_sections.every(
         (section) => Boolean(section.content.trim()),
-      )
-      && !pendingAssignmentCount,
+      ),
   };
 }

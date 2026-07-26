@@ -20,10 +20,16 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirChapterDigest,
     MemoirCompletionIssue,
+    MemoirSection,
     MemoirSectionDigest,
     MemoirSectionMaterial,
 )
 from app.services.memoir import chapter_digests, chapter_generation, section_digests
+from app.services.memoir.section_roles import (
+    PENDING_ASSIGNMENT_SECTION_ROLE,
+    PENDING_ASSIGNMENT_SECTION_TITLE,
+    SECTION_SYSTEM_ROLE_KEY,
+)
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
@@ -847,6 +853,65 @@ async def test_excluded_material_is_not_sent_to_chapter_generator(client, test_d
 
     assert materials[1]["utterance_id"] not in fake.prompts[0]
     assert "那天六个人一起爬了西山" not in fake.prompts[0]
+
+
+async def test_pending_assignment_material_is_excluded_without_blocking_draft(
+    client,
+    test_db,
+):
+    project_id, chapter, section, materials = await _chapter(client, test_db)
+    pending_section = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        title=PENDING_ASSIGNMENT_SECTION_TITLE,
+        section_type="life_fragment",
+        sort_order=1,
+        include_in_book=False,
+        metadata_json={
+            SECTION_SYSTEM_ROLE_KEY: PENDING_ASSIGNMENT_SECTION_ROLE,
+        },
+    )
+    test_db.add(pending_section)
+    await test_db.flush()
+    pending_material = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id
+            == materials[1]["utterance_id"],
+        )
+    )
+    assert pending_material is not None
+    pending_material.section_id = pending_section.id
+    pending_material.sort_order = 0
+    test_db.add(pending_material)
+    await test_db.commit()
+    fake = FakeChapterAI(
+        section_material_id=materials[0]["utterance_id"],
+        chapter_section_id=section["id"],
+        chapter_material_id=materials[0]["utterance_id"],
+        draft_material_ids=[materials[0]["utterance_id"]],
+    )
+
+    draft, version = await chapter_generation.generate_and_save_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        editorial_guidance=[],
+        ai_client=fake,
+    )
+    await test_db.commit()
+
+    assert version.used_material_ids_json == [materials[0]["utterance_id"]]
+    assert materials[1]["utterance_id"] not in fake.prompts[0]
+    assert "那天六个人一起爬了西山" not in fake.prompts[0]
+
+    confirmed, _ = await chapter_generation.confirm_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
+    assert confirmed.id == draft.id
+    assert confirmed.status == MemoirBookChapterDraftStatus.CONFIRMED.value
 
 
 async def test_chapter_generator_rejects_material_outside_allowlist(
