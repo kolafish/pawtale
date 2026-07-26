@@ -667,8 +667,8 @@ async def prepare_active_policy_turn(
     if context is None:
         return None
     selected_model = (
-        settings.memoir_interview_policy_active_model.strip()
-        or (requested_ai_model or "").strip()
+        (requested_ai_model or "").strip()
+        or settings.memoir_interview_policy_active_model.strip()
     )
     client = ai_client_factory(selected_model or None)
     selection = await select_policy_action(
@@ -829,8 +829,8 @@ async def schedule_shadow_policy_evaluation(
         .limit(1)
     )
     selected_model = (
-        settings.memoir_interview_policy_shadow_model.strip()
-        or (requested_ai_model or "").strip()
+        (requested_ai_model or "").strip()
+        or settings.memoir_interview_policy_shadow_model.strip()
     )
     payload: dict[str, object] = {
         "session_id": session.id,

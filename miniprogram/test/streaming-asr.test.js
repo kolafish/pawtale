@@ -614,7 +614,7 @@ test("updates and deletes voice transcripts through backend API", async () => {
     original_text: "原文",
     current_text: "原文",
     edited_text: "校正文",
-    changes: [{ before: "原文", after: "校正文", reason: "用户语音修正" }],
+    changes: [{ before: "原文", after: "校正文" }],
     confidence: 0.91,
     requires_confirmation: true,
     reply_text: "已生成修正预览",

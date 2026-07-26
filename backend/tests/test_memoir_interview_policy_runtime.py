@@ -457,8 +457,10 @@ def test_active_reply_instruction_is_empty_without_an_active_turn():
 
 async def test_active_policy_response_outcome_is_scheduled_and_recorded(
     test_db,
+    monkeypatch,
 ):
     project, session, generated_message, _ = await _free_narration_turn(test_db)
+    project.metadata_json = {"ai_model": "deepseek-v4-pro"}
     await test_db.refresh(session, ["messages"])
     policy_turn = await prepare_active_policy_turn(
         test_db,
@@ -536,15 +538,20 @@ async def test_active_policy_response_outcome_is_scheduled_and_recorded(
     assert "河" not in str(jobs[0].payload_json)
 
     outcome_ai = FakePolicyOutcomeAI("continued_story")
+    requested_models: list[str | None] = []
+    monkeypatch.setattr(
+        "app.services.memoir.narrative.interview_policy_outcomes.get_ai_service",
+        lambda model=None: requested_models.append(model) or outcome_ai,
+    )
     result = await run_policy_outcome_evaluation_job(
         test_db,
         jobs[0],
-        ai_client=outcome_ai,
     )
     await test_db.commit()
     await test_db.refresh(decision)
 
     assert result.result_json["outcome"] == "continued_story"
+    assert requested_models == ["deepseek-v4-pro"]
     assert decision.user_response_outcome == "continued_story"
     assert first_message.content_text in str(outcome_ai.calls[0]["user_prompt"])
     assert second_message.content_text in str(outcome_ai.calls[0]["user_prompt"])

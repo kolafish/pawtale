@@ -29,6 +29,7 @@ from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import interview_policy
+from app.services.memoir.project_ai_preferences import load_project_ai_model
 
 
 OUTCOME_POLICY_VERSION = "interview-policy-outcome-1"
@@ -212,7 +213,8 @@ async def run_policy_outcome_evaluation_job(
     if client is None:
         settings = get_settings()
         selected_model = (
-            settings.memoir_interview_policy_outcome_model.strip()
+            await load_project_ai_model(db, job.project_id)
+            or settings.memoir_interview_policy_outcome_model.strip()
             or settings.memoir_interview_policy_active_model.strip()
         )
         client = get_ai_service(selected_model or None)
