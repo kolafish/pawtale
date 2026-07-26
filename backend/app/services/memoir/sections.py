@@ -880,7 +880,7 @@ async def _create_section_for_placement(
     return section
 
 
-async def _mark_material_placement_changed(
+async def mark_section_structure_changed(
     db: AsyncSession,
     *,
     project_id: str,
@@ -902,7 +902,7 @@ async def _mark_material_placement_changed(
         draft.status = MemoirBookChapterDraftStatus.DRAFT.value
         draft.metadata_json = {
             **(draft.metadata_json or {}),
-            "status_reason": "section_material_reassigned",
+            "status_reason": "section_structure_changed",
         }
         db.add(draft)
 
@@ -1077,7 +1077,7 @@ async def place_material(
     affected_chapter_ids = {target.chapter_id}
     if current_section is not None:
         affected_chapter_ids.add(current_section.chapter_id)
-    await _mark_material_placement_changed(
+    await mark_section_structure_changed(
         db,
         project_id=project_id,
         plan=plan,
@@ -1116,6 +1116,7 @@ async def merge_sections(
         user_id,
         allow_admin=allow_admin,
     )
+    plan = await _load_plan(db, project_id=project_id)
     if target_section_id in req.source_section_ids:
         raise HTTPException(status_code=400, detail="目标小章节不能同时作为来源")
     target = await _load_section(
@@ -1167,6 +1168,13 @@ async def merge_sections(
         chapter_id=target.chapter_id,
     )
     await _set_section_order(db, sections=remaining)
+    await mark_section_structure_changed(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter_ids={target.chapter_id},
+        operation="merge_sections",
+    )
     await db.commit()
     return await _collection_response(db, project_id=project_id)
 

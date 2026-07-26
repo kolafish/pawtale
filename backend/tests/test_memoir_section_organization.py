@@ -20,6 +20,7 @@ from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.utterance_editing_pipeline import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
+    create_test_chapter_draft,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
@@ -309,6 +310,11 @@ async def test_split_move_merge_and_reorder_sections(client, test_db):
         for section in moved.json()["sections"]
         if section["title"] == "第一次一起爬山"
     )
+    confirmed_draft = await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+    )
     merged = await client.post(
         f"/api/memoir/projects/{project_id}/sections/{first_section['id']}/merge",
         json={
@@ -328,6 +334,11 @@ async def test_split_move_merge_and_reorder_sections(client, test_db):
         material["utterance_id"]
         for material in chapter_sections[0]["materials"]
     } == {created[0]["utterance_id"], created[1]["utterance_id"]}
+    await test_db.refresh(confirmed_draft)
+    assert confirmed_draft.status == "draft"
+    assert confirmed_draft.metadata_json["status_reason"] == (
+        "section_structure_changed"
+    )
 
 
 async def test_material_placement_can_create_section_and_chapter_atomically(
@@ -660,6 +671,11 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     excluded.include_in_book = False
     test_db.add(excluded)
     await test_db.commit()
+    confirmed_draft = await create_test_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
     fake = ReplayMaterialOrganizationAI()
     requested_models: list[str | None] = []
 
@@ -687,6 +703,8 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     )
 
     assert response.status_code == 200, response.text
+    await test_db.refresh(confirmed_draft)
+    assert confirmed_draft.status == "draft"
     assert response.json() == {
         "project_id": project_id,
         "chapter_id": chapter_id,

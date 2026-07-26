@@ -188,6 +188,7 @@ function loadWorkspacePage({
     }),
     reviseMemoirChapterDraftSectionWithAI: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
+    mergeMemoirChapterSections: async () => {},
     cancelMemoirChapterSectionRegenerationJob: async () => {},
     placeMemoirChapterMaterial: async () => {},
     closeMemoirCompletionIssue: async () => {},
@@ -270,6 +271,8 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.doesNotMatch(template, /<button\s+class="primary-action/);
   assert.match(template, /<view\s+class="structure-regenerate-action/);
   assert.match(template, /bindtap="toggleStructure"/);
+  assert.match(template, /bindtap="openSectionStructure"/);
+  assert.match(template, /bindtap="mergeSectionIntoPrevious"/);
   assert.match(template, /wx:if="{{structureExpanded}}"/);
   assert.match(template, /<view\s+class="rewrite-action/);
   assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
@@ -515,6 +518,66 @@ test("chapter workspace expands materials under their section", async () => {
     context.data.sectionViews[0].visibleMaterials[0].text,
     "十八岁那年，我第一次离开家。",
   );
+  delete global.wx;
+});
+
+test("confirmed chapter can reopen its structure and merge with the previous section", async () => {
+  const { modals, scrolls, toasts } = installWx();
+  const calls = [];
+  const base = workspace();
+  const confirmedWorkspace = workspace({
+    completion_summary: summary({
+      state: "confirmed",
+      headline: "本章已经确认",
+    }),
+    draft_status: "confirmed",
+    sections: [
+      ...base.sections,
+      {
+        ...base.sections[0],
+        id: "section-2",
+        title: "抵达陌生城市",
+        sort_order: 1,
+        materials: [{
+          ...base.sections[0].materials[0],
+          utterance_id: "utterance-2",
+          text: "到站以后，我第一次看见那么大的城市。",
+        }],
+      },
+    ],
+  });
+  const { page } = loadWorkspacePage({
+    currentWorkspace: confirmedWorkspace,
+    voiceApiExports: {
+      mergeMemoirChapterSections: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.sectionViews[1].mergeTargetId, "section-1");
+  page.openSectionStructure.call(context);
+  assert.equal(context.data.structureExpanded, true);
+  assert.equal(scrolls.at(-1), "#chapter-structure");
+
+  page.mergeSectionIntoPrevious.call(context, {
+    currentTarget: {
+      dataset: {
+        sourceId: "section-2",
+        sourceTitle: "抵达陌生城市",
+        targetId: "section-1",
+        targetTitle: "离家前的准备",
+      },
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [["project-1", "section-1", "section-2"]]);
+  assert.equal(modals.at(-1).title, "与上一小节合并？");
+  assert.equal(toasts.at(-1).title, "小节已合并");
   delete global.wx;
 });
 

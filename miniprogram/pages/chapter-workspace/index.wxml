@@ -30,6 +30,13 @@
         aria-disabled="{{nextAction.disabled || operationKind !== '' || editingSectionId !== ''}}"
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
+      <view
+        wx:if="{{workspace.completion_summary.state === 'confirmed'}}"
+        class="structure-regenerate-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== ''}}"
+        bindtap="openSectionStructure"
+      >调整小节结构</view>
     </view>
 
     <view wx:if="{{sectionViews.length}}" class="content-card structure-card {{structureExpanded ? 'is-expanded' : 'is-collapsed'}}" id="chapter-structure">
@@ -51,7 +58,7 @@
 
       <block wx:if="{{structureExpanded}}">
         <view class="structure-tools">
-          <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
+          <text class="structure-tools-detail">可以让 AI 重新划分全部讲述，也可以展开后把相邻小节手动合并。调整结构不会丢失现有正文，但需要重新生成并再次确认。</text>
           <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
             <ai-task-progress
               title="{{sectionRegenerationTitle}}"
@@ -126,6 +133,20 @@
                     aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
                   >{{operationKind === "move_material" && operationTargetId === material.utterance_id ? "正在移动…" : "选择归属小节"}}</view>
                 </picker>
+              </view>
+              <view
+                wx:if="{{item.mergeTargetId}}"
+                class="section-merge-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+                data-source-id="{{item.id}}"
+                data-source-title="{{item.title}}"
+                data-target-id="{{item.mergeTargetId}}"
+                data-target-title="{{item.mergeTargetTitle}}"
+                aria-role="button"
+                aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+                bindtap="mergeSectionIntoPrevious"
+              >
+                <text class="section-merge-action-title">与上一小节合并</text>
+                <text class="section-merge-action-detail">并入“{{item.mergeTargetTitle}}”</text>
               </view>
             </view>
           </view>
@@ -334,9 +355,9 @@
       >{{operationKind === "confirm_chapter" ? "正在确认…" : "确认本章正文"}}</view>
 
       <view wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="chapter-finished">
-        <text class="chapter-finished-title">本章已完成</text>
-        <text class="chapter-finished-detail">正文已经收入书稿，可以返回查看其他章节或生成全书。</text>
-        <view class="primary-action" aria-role="button" bindtap="returnToBookFlow">完成，返回全书进度</view>
+        <text class="chapter-finished-title">本章已确认</text>
+        <text class="chapter-finished-detail">正文已经收入书稿。仍可重新分组或手动合并小节；调整后本章会回到待生成状态，需要重新确认。</text>
+        <view class="primary-action" aria-role="button" bindtap="returnToBookFlow">返回全书进度</view>
       </view>
     </view>
   </block>
