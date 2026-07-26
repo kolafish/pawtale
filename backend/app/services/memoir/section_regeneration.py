@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import re
 import uuid
 
 from fastapi import HTTPException
@@ -21,13 +23,14 @@ from app.models.memoir import (
 )
 from app.schemas.memoir_sections import MemoirSectionRegenerateRequest
 from app.services.ai_factory import get_ai_service
+from app.services.ai_types import AITextClient
+from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_organization import (
-    MaterialOrganizationChapterCandidate,
+    ALLOWED_SECTION_TYPES,
     MaterialOrganizationDecision,
     MaterialOrganizationSectionCandidate,
-    decide_material_organization,
-    material_organization_excerpt,
+    normalize_material_organization_decision,
 )
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import (
@@ -67,6 +70,15 @@ class _PlannedAssignment:
 class _PlannedSection:
     candidate: MaterialOrganizationSectionCandidate
     assignments: list[_PlannedAssignment] = field(default_factory=list)
+
+
+SECTION_STRUCTURE_SOURCE_CHAR_BUDGET = 8_000
+MATERIAL_BATCH_CHAR_BUDGET = 8_000
+LLM_PROMPT_CHAR_LIMIT = 16_000
+SECTION_REGENERATION_SYSTEM_PROMPT = (
+    "你是一位克制的中文回忆录结构编辑。"
+    "从全章理解素材关系，并保持每条讲述完整，不拆分或虚构内容。"
+)
 
 
 async def _load_chapter(
@@ -174,16 +186,251 @@ def _validate_material_snapshots(
         raise HTTPException(status_code=409, detail="本章讲述已经变化，请刷新后重试")
 
 
-def _append_candidate_example(
-    candidate: MaterialOrganizationSectionCandidate,
-    material_text: str,
-) -> None:
-    excerpt = material_organization_excerpt(material_text)
-    if excerpt:
-        candidate.existing_material_examples = [
-            *candidate.existing_material_examples,
-            excerpt,
-        ][-2:]
+def _compact_excerpt(value: str, *, limit: int) -> str:
+    text = re.sub(r"\s+", " ", value).strip()
+    if len(text) <= limit:
+        return text
+    head_length = max(1, int(limit * 0.7))
+    tail_length = max(1, limit - head_length - 1)
+    return f"{text[:head_length]}…{text[-tail_length:]}"
+
+
+def _build_section_structure_prompt(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    materials: list[_MaterialSnapshot],
+) -> str:
+    excerpt_limit = max(
+        120,
+        min(
+            600,
+            SECTION_STRUCTURE_SOURCE_CHAR_BUDGET // max(1, len(materials)),
+        ),
+    )
+    material_outlines = [
+        {
+            "utterance_id": material.utterance_id,
+            "excerpt": _compact_excerpt(material.text, limit=excerpt_limit),
+        }
+        for material in materials
+    ]
+    chapter_json = json.dumps(
+        {"chapter_id": chapter_id, "title": chapter_title},
+        ensure_ascii=False,
+    )
+    outlines_json = json.dumps(material_outlines, ensure_ascii=False)
+    return (
+        "任务：先从全章视角设计一组语义清晰、互不重复的小节。\n"
+        "按事件、人物、阶段或反思主题自然分组，不强制小节数量；"
+        "标题要具体，避免用空泛的“回忆”“经历”。"
+        "这里只设计候选小节，不做逐条归类。\n\n"
+        f"章节：\n{chapter_json}\n\n"
+        f"讲述概览：\n{outlines_json}\n\n"
+        "只返回 JSON："
+        '{"sections":[{"title":"","section_type":'
+        '"event|life_fragment|person_portrait|life_stage_summary|'
+        'viewpoint_reflection"}]}'
+    )
+
+
+def _normalize_section_candidates(
+    payload: object,
+    *,
+    chapter_id: str,
+) -> list[MaterialOrganizationSectionCandidate]:
+    data = payload if isinstance(payload, dict) else {}
+    raw_sections = data.get("sections")
+    if not isinstance(raw_sections, list) or not raw_sections:
+        raise ValueError("小节结构规划结果缺少 sections")
+    if len(raw_sections) > 30:
+        raise ValueError("小节结构规划结果数量过多")
+
+    candidates: list[MaterialOrganizationSectionCandidate] = []
+    seen_titles: set[str] = set()
+    for raw in raw_sections:
+        item = raw if isinstance(raw, dict) else {}
+        title = re.sub(r"\s+", " ", str(item.get("title") or "")).strip()[:200]
+        section_type = str(item.get("section_type") or "").strip()
+        if not title or section_type not in ALLOWED_SECTION_TYPES:
+            raise ValueError("小节结构规划结果包含无效标题或类型")
+        normalized_title = title.casefold()
+        if normalized_title in seen_titles:
+            continue
+        seen_titles.add(normalized_title)
+        candidates.append(
+            MaterialOrganizationSectionCandidate(
+                id=str(uuid.uuid4()),
+                chapter_id=chapter_id,
+                title=title,
+                section_type=section_type,
+                existing_material_examples=[],
+            )
+        )
+    if not candidates:
+        raise ValueError("小节结构规划结果没有可用小节")
+    return candidates
+
+
+async def _plan_section_candidates(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    materials: list[_MaterialSnapshot],
+    ai_client: AITextClient,
+) -> list[MaterialOrganizationSectionCandidate]:
+    prompt = _build_section_structure_prompt(
+        chapter_id=chapter_id,
+        chapter_title=chapter_title,
+        materials=materials,
+    )
+    if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail="本章素材数量过多，无法安全规划小节结构",
+        )
+    content = await ai_client._call_llm(
+        SECTION_REGENERATION_SYSTEM_PROMPT,
+        prompt,
+        temperature=0.1,
+        max_tokens=2400,
+        timeout=120.0,
+    )
+    return _normalize_section_candidates(
+        extract_json_payload(str(content)),
+        chapter_id=chapter_id,
+    )
+
+
+def _material_batches(
+    materials: list[_MaterialSnapshot],
+) -> list[list[_MaterialSnapshot]]:
+    batches: list[list[_MaterialSnapshot]] = []
+    current: list[_MaterialSnapshot] = []
+    current_text_chars = 0
+    for material in materials:
+        if (
+            current
+            and current_text_chars + len(material.text)
+            > MATERIAL_BATCH_CHAR_BUDGET
+        ):
+            batches.append(current)
+            current = []
+            current_text_chars = 0
+        current.append(material)
+        current_text_chars += len(material.text)
+    if current:
+        batches.append(current)
+    return batches
+
+
+def _build_material_assignment_prompt(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    sections: list[MaterialOrganizationSectionCandidate],
+    materials: list[_MaterialSnapshot],
+) -> str:
+    chapter = json.dumps(
+        {"chapter_id": chapter_id, "title": chapter_title},
+        ensure_ascii=False,
+    )
+    candidates = json.dumps(
+        [
+            {
+                "section_id": section.id,
+                "title": section.title,
+                "section_type": section.section_type,
+            }
+            for section in sections
+        ],
+        ensure_ascii=False,
+    )
+    material_items = json.dumps(
+        [
+            {
+                "utterance_id": material.utterance_id,
+                "text": material.text,
+            }
+            for material in materials
+        ],
+        ensure_ascii=False,
+    )
+    return (
+        "任务：将下面多条讲述逐条归入当前章节的候选小节。"
+        "确实无法可靠归类时才标记为 leave_unassigned；"
+        "不得遗漏、重复或改写 utterance_id。\n\n"
+        f"当前章节：\n{chapter}\n\n"
+        f"候选小节：\n{candidates}\n\n"
+        f"待归类讲述：\n{material_items}\n\n"
+        "只返回 JSON："
+        '{"assignments":[{"utterance_id":"",'
+        '"action":"assign_existing|leave_unassigned",'
+        '"section_id":null,"confidence":0.0,"reason":""}]}'
+    )
+
+
+async def _assign_material_batch(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    sections: list[MaterialOrganizationSectionCandidate],
+    materials: list[_MaterialSnapshot],
+    ai_client: AITextClient,
+) -> list[MaterialOrganizationDecision]:
+    prompt = _build_material_assignment_prompt(
+        chapter_id=chapter_id,
+        chapter_title=chapter_title,
+        sections=sections,
+        materials=materials,
+    )
+    if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
+        raise HTTPException(
+            status_code=422,
+            detail="单批讲述过长，无法安全完成小节归类",
+        )
+    content = await ai_client._call_llm(
+        SECTION_REGENERATION_SYSTEM_PROMPT,
+        prompt,
+        temperature=0.1,
+        max_tokens=min(6000, max(1200, 600 + len(materials) * 160)),
+        timeout=120.0,
+    )
+    data = extract_json_payload(str(content))
+    raw_assignments = data.get("assignments") if isinstance(data, dict) else None
+    if not isinstance(raw_assignments, list):
+        raise ValueError("素材批量归类结果缺少 assignments")
+
+    expected_ids = [material.utterance_id for material in materials]
+    allowed_section_ids = {section.id for section in sections}
+    decisions: dict[str, MaterialOrganizationDecision] = {}
+    for raw in raw_assignments:
+        item = raw if isinstance(raw, dict) else {}
+        utterance_id = str(item.get("utterance_id") or "").strip()
+        action = str(item.get("action") or "").strip()
+        if utterance_id not in expected_ids or utterance_id in decisions:
+            raise ValueError("素材批量归类结果包含未知或重复的 utterance_id")
+        if action not in {"assign_existing", "leave_unassigned"}:
+            raise ValueError("素材批量归类结果包含不支持的 action")
+        normalized_item = {
+            **item,
+            "section_id": (
+                item.get("section_id")
+                if action == "assign_existing"
+                else None
+            ),
+        }
+        decision = normalize_material_organization_decision(
+            normalized_item,
+            allowed_section_ids=allowed_section_ids,
+            allowed_chapter_ids={chapter_id},
+        )
+        if decision.action != action:
+            raise ValueError("素材批量归类结果引用了未知小节")
+        decisions[utterance_id] = decision
+    if set(decisions) != set(expected_ids):
+        raise ValueError("素材批量归类结果没有完整覆盖本批讲述")
+    return [decisions[utterance_id] for utterance_id in expected_ids]
 
 
 def _validate_planned_coverage(
@@ -227,58 +474,43 @@ async def _plan_section_regeneration(
 ]:
     client = get_ai_service(ai_model)
     generated_model = getattr(client, "model_name", ai_model)
-    chapters = [
-        MaterialOrganizationChapterCandidate(
-            id=chapter_id,
-            title=chapter_title,
-        )
-    ]
-    planned_sections: list[_PlannedSection] = []
+    candidates = await _plan_section_candidates(
+        chapter_id=chapter_id,
+        chapter_title=chapter_title,
+        materials=materials,
+        ai_client=client,
+    )
+    planned_by_id = {
+        candidate.id: _PlannedSection(candidate=candidate)
+        for candidate in candidates
+    }
     pending_assignments: list[_PlannedAssignment] = []
-    for material in materials:
-        decision = await decide_material_organization(
-            material_text=material.text,
-            chapters=chapters,
-            sections=[section.candidate for section in planned_sections],
+    for batch in _material_batches(materials):
+        decisions = await _assign_material_batch(
+            chapter_id=chapter_id,
+            chapter_title=chapter_title,
+            sections=candidates,
+            materials=batch,
             ai_client=client,
         )
-        if decision.action == "leave_unassigned":
-            pending_assignments.append(
-                _PlannedAssignment(
-                    material=material,
-                    decision=decision,
-                )
-            )
-            continue
-        if decision.action == "create_section":
-            candidate = MaterialOrganizationSectionCandidate(
-                id=str(uuid.uuid4()),
-                chapter_id=chapter_id,
-                title=decision.title,
-                section_type=decision.section_type,
-                existing_material_examples=[],
-            )
-            planned_sections.append(_PlannedSection(candidate=candidate))
-
-        target = next(
-            (
-                section
-                for section in planned_sections
-                if section.candidate.id == decision.section_id
-            ),
-            None,
-        )
-        if decision.action == "create_section":
-            target = planned_sections[-1]
-        if target is None:
-            raise RuntimeError("素材整理结果缺少目标小章节")
-        target.assignments.append(
-            _PlannedAssignment(
+        for material, decision in zip(batch, decisions, strict=True):
+            assignment = _PlannedAssignment(
                 material=material,
                 decision=decision,
             )
-        )
-        _append_candidate_example(target.candidate, material.text)
+            if decision.action == "leave_unassigned":
+                pending_assignments.append(assignment)
+                continue
+            target = planned_by_id.get(decision.section_id or "")
+            if target is None:
+                raise RuntimeError("素材整理结果缺少目标小章节")
+            target.assignments.append(assignment)
+
+    planned_sections = [
+        section
+        for section in planned_by_id.values()
+        if section.assignments
+    ]
     return planned_sections, pending_assignments, generated_model
 
 
