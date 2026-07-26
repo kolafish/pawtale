@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,15 +23,15 @@ from app.models.memoir import (
     MemoirBookReview,
     MemoirChapterDigest,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import (
-    AITextTimeoutProfile,
     ai_error_metadata,
     ai_text_timeout_seconds,
     ai_user_error_message,
 )
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import chapter_digests, completion_issues
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -67,6 +68,26 @@ class BookReviewContext:
     chapters: tuple[BookReviewChapter, ...]
     input_signature: str
 
+
+class _BookReviewIssueOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    issue_type: str = ""
+    channel: str = ""
+    question: str = ""
+    reason: str = ""
+    priority: str = ""
+    chapter_ids: list[str] = Field(default_factory=list)
+    material_ids: list[str] = Field(default_factory=list)
+
+
+class _BookReviewOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str
+    strengths: list[str] = Field(default_factory=list)
+    structure_guidance: list[str] = Field(default_factory=list)
+    candidate_issues: list[_BookReviewIssueOutput] = Field(default_factory=list)
 
 def _compact(value: object, *, limit: int) -> str:
     return " ".join(value.split())[:limit] if isinstance(value, str) else ""
@@ -431,19 +452,24 @@ async def generate_or_reuse_book_review(
         return existing
     client = ai_client or get_ai_service(ai_model)
     prompt = build_book_review_prompt(context)
-    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
     started_at = time.monotonic()
     generation: dict[str, object]
     try:
-        raw = await client._call_llm(
+        generated = await generate_structured_with_client(
+            client,
             BOOK_REVIEW_SYSTEM_PROMPT,
             prompt,
+            output_model=_BookReviewOutput,
+            requested_model=ai_model,
             temperature=0.2,
-            max_tokens=2400,
+            max_tokens=policy.max_tokens,
             timeout=timeout_seconds,
+            max_attempts=policy.max_attempts,
         )
         review_json = normalize_book_review(
-            extract_json_payload(str(raw)),
+            generated.value.model_dump(),
             allowed_chapter_ids={
                 chapter.chapter_id for chapter in context.chapters
             },
@@ -465,12 +491,9 @@ async def generate_or_reuse_book_review(
         status = MemoirSemanticCacheStatus.READY
         error = ""
         generation = {
-            "requested_model": ai_model,
-            "provider": getattr(client, "provider_name", None),
-            "model": getattr(client, "model_name", ai_model),
+            **generated.response.diagnostics(),
             "engine": BOOK_REVIEW_ENGINE,
             "timeout_seconds": timeout_seconds,
-            "elapsed_ms": round((time.monotonic() - started_at) * 1000),
         }
     except HTTPException:
         raise

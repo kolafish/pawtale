@@ -5,21 +5,62 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import (
     DEEPSEEK_V4_FLASH_MODEL,
     DEEPSEEK_V4_PRO_MODEL,
     VOLC_DOUBAO_PRO_MODEL,
     get_ai_service,
 )
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文家庭回忆录编辑，只把已有口述材料整理成适合成书阅读的前置文案。"
 logger = logging.getLogger(__name__)
+
+
+class _ChapterIntroOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_id: str = ""
+    intro: str = ""
+    pull_quote: str = ""
+    pull_quote_source_ref_id: str = ""
+
+
+class _ManuscriptCopyOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    book_title: str = ""
+    cover_subtitle: str = ""
+    preface: str = ""
+    afterword: str = ""
+    chapter_intros: list[_ChapterIntroOutput] = Field(default_factory=list)
+    back_cover_quote: str = ""
+
+    @model_validator(mode="after")
+    def require_copy(self) -> "_ManuscriptCopyOutput":
+        if not (
+            self.book_title
+            or self.cover_subtitle
+            or self.preface
+            or self.afterword
+            or self.chapter_intros
+            or self.back_cover_quote
+        ):
+            raise ValueError("manuscript copy is empty")
+        return self
+
+
+class _TitleSuggestionsOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    suggestions: list[str] = Field(min_length=1)
 
 
 @dataclass(frozen=True)
@@ -452,12 +493,17 @@ async def generate_manuscript_editorial_copy(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             SYSTEM_PROMPT,
             prompt,
+            output_model=_ManuscriptCopyOutput,
+            requested_model=ai_model,
             temperature=0.35,
-            max_tokens=1800,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -468,12 +514,11 @@ async def generate_manuscript_editorial_copy(
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
-    payload = extract_json_payload(str(content))
     return _copy_from_payload(
-        payload,
+        generated.value.model_dump(),
         snapshot=snapshot,
         prompt=prompt,
-        model=getattr(client, "model_name", ai_model),
+        model=generated.response.resolved_model,
     )
 
 
@@ -492,12 +537,17 @@ async def generate_title_suggestions(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
+        generated = await generate_structured_with_client(
+            client,
             SYSTEM_PROMPT,
             prompt,
+            output_model=_TitleSuggestionsOutput,
+            requested_model=ai_model,
             temperature=0.55,
-            max_tokens=800,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
+            max_attempts=policy.max_attempts,
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -508,8 +558,7 @@ async def generate_title_suggestions(
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
-    payload = extract_json_payload(str(content))
-    raw_suggestions = payload.get("suggestions") if isinstance(payload, dict) else []
+    raw_suggestions = generated.value.suggestions
     suggestions: list[str] = []
     if isinstance(raw_suggestions, list):
         for item in raw_suggestions:
@@ -520,6 +569,6 @@ async def generate_title_suggestions(
         return None
     return GeneratedTitleSuggestions(
         suggestions=suggestions[:count],
-        model=getattr(client, "model_name", ai_model),
+        model=generated.response.resolved_model,
         prompt=prompt,
     )

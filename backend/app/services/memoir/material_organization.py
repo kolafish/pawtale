@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import json
 import re
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -24,10 +25,11 @@ from app.models.memoir import (
     MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
@@ -72,6 +74,18 @@ class MaterialOrganizationSectionCandidate:
     title: str
     section_type: str
     existing_material_examples: list[str]
+
+
+class _MaterialOrganizationOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: str
+    section_id: str | None = None
+    chapter_id: str | None = None
+    title: str = ""
+    section_type: str = ""
+    confidence: float | None = None
+    reason: str = ""
 
 
 def _compact(value: object, *, limit: int) -> str:
@@ -239,15 +253,20 @@ async def decide_material_organization(
         sections=sections,
         allow_leave_unassigned=allow_leave_unassigned,
     )
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         SYSTEM_PROMPT,
         prompt,
+        output_model=_MaterialOrganizationOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.1,
-        max_tokens=800,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
     return normalize_material_organization_decision(
-        extract_json_payload(str(content)),
+        generated.value.model_dump(),
         allowed_section_ids={section.id for section in sections},
         allowed_chapter_ids={chapter.id for chapter in chapters},
     )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,10 +24,11 @@ from app.models.memoir import (
 from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import interview_policy
 from app.services.memoir.project_ai_preferences import load_project_ai_model
@@ -40,6 +42,12 @@ MAX_OUTCOME_TEXT_CHARS = 6000
 
 class PolicyOutcomeSelectionError(ValueError):
     pass
+
+
+class _PolicyOutcomeOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: str
 
 
 async def schedule_policy_outcome_evaluation(
@@ -107,7 +115,9 @@ async def select_response_outcome(
     response_text: str,
     ai_client: AITextClient,
 ) -> MemoirInterviewResponseOutcome:
-    content = await ai_client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
+    generated = await generate_structured_with_client(
+        ai_client,
         (
             "你是回忆录访谈结果分类器。"
             "你只返回受控结果，不评价用户，不修改任何事实或业务状态。"
@@ -117,16 +127,15 @@ async def select_response_outcome(
             generated_message=generated_message,
             response_text=response_text,
         ),
+        output_model=_PolicyOutcomeOutput,
+        requested_model=getattr(ai_client, "model_name", None),
         temperature=0.0,
-        max_tokens=80,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.REALTIME),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
     )
-    payload = extract_json_payload(str(content))
-    if not isinstance(payload, dict):
-        raise PolicyOutcomeSelectionError("policy_outcome_invalid_json")
-    raw_outcome = str(payload.get("outcome") or "").strip()
     try:
-        return MemoirInterviewResponseOutcome(raw_outcome)
+        return MemoirInterviewResponseOutcome(generated.value.outcome.strip())
     except ValueError as exc:
         raise PolicyOutcomeSelectionError("policy_outcome_unknown_value") from exc
 

@@ -8,6 +8,7 @@ from typing import Any
 
 from fastapi import HTTPException
 import httpx
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -33,14 +34,14 @@ from app.schemas.memoir_chapter_pipeline import (
     MemoirLayeredChapterDraftResponse,
     MemoirLayeredChapterDraftVersionResponse,
 )
+from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import (
     AIProviderTimeoutError,
-    AITextTimeoutProfile,
     ai_text_timeout_seconds,
 )
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -112,6 +113,22 @@ class GeneratedChapter:
     missing_source_candidates: tuple[str, ...]
     editor_notes: tuple[str, ...]
     model: str | None
+
+
+class _GeneratedChapterSectionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    section_id: str
+    content: str
+    used_material_ids: list[str] = Field(default_factory=list)
+
+
+class _GeneratedChapterOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[_GeneratedChapterSectionOutput] = Field(min_length=1)
+    missing_source_candidates: list[str] = Field(default_factory=list)
+    editor_notes: list[str] = Field(default_factory=list)
 
 
 ChapterGenerationProgressCallback = Callable[
@@ -729,6 +746,9 @@ async def generate_chapter_section(
         revision_instruction=revision_instruction,
     )
     last_error: Exception | None = None
+    policy = ai_text_workload_policy(
+        AITextWorkload.LONG_GENERATION_STRUCTURED
+    )
     for attempt in range(CHAPTER_SECTION_GENERATION_ATTEMPTS):
         try:
             attempt_prompt = prompt
@@ -737,21 +757,25 @@ async def generate_chapter_section(
                     "\n上次输出未通过校验："
                     f"{last_error}。请补齐所有 JSON 字段并严格遵守输出格式。"
                 )
-            raw = await client._call_llm(
+            generated_result = await generate_structured_with_client(
+                client,
                 (
                     CHAPTER_SECTION_REVISION_SYSTEM_PROMPT
                     if revision_instruction
                     else CHAPTER_GENERATION_SYSTEM_PROMPT
                 ),
                 attempt_prompt,
+                output_model=_GeneratedChapterOutput,
+                requested_model=ai_model,
                 temperature=0.2 if revision_instruction else 0.3,
-                max_tokens=5000,
-                timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+                max_tokens=policy.max_tokens,
+                timeout=ai_text_timeout_seconds(policy.timeout_profile),
+                max_attempts=1,
             )
             generated = normalize_generated_chapter(
-                extract_json_payload(str(raw)),
+                generated_result.value.model_dump(),
                 context=section_context,
-                model=getattr(client, "model_name", ai_model),
+                model=generated_result.response.resolved_model,
             )
             _reject_repeated_section_boundary(
                 previous_section_content,

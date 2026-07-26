@@ -1,17 +1,54 @@
-import asyncio
-import logging
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.services.ai_calls import generate_structured_with_client
 from app.domain.references import coerce_setting_reference_type
-from app.services.ai_timeouts import (
-    AIProviderTimeoutError,
-    AITextTimeoutProfile,
-    ai_text_timeout_seconds,
+from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_workloads import (
+    AITextWorkload,
+    ai_text_workload_policy,
 )
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
 
 
-logger = logging.getLogger(__name__)
+class _ProjectAnalysisCharacterOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    gender: str | None = None
+    identity: str | None = None
+    personality: list[str] = Field(default_factory=list)
+    appearance: str | None = None
+    relationships: str | None = None
+    summary: str | None = None
+
+
+class _ProjectAnalysisOutlineOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    content: str = ""
+
+
+class _ProjectAnalysisSettingOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    type: str = "note"
+    content: str = ""
+
+
+class _ProjectAnalysisOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    characters: list[_ProjectAnalysisCharacterOutput] = Field(default_factory=list)
+    outlines: list[_ProjectAnalysisOutlineOutput] = Field(default_factory=list)
+    settings: list[_ProjectAnalysisSettingOutput] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_content(self) -> "_ProjectAnalysisOutput":
+        if not (self.characters or self.outlines or self.settings):
+            raise ValueError("project analysis is empty")
+        return self
 
 
 def normalize_project_analysis(parsed: object) -> dict:
@@ -74,77 +111,26 @@ async def analyze_project_content(
 {clipped}"""
     temp = 0.3
 
-    max_attempts = 3
-    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
-    raw_text = ""
-    response_json = None
-    parsed: dict = {}
-    last_error: Exception | None = None
-
-    for attempt in range(max_attempts):
-        try:
-            raw_response = await client._call_llm(
-                system_prompt,
-                user_prompt,
-                temperature=temp,
-                max_tokens=3000,
-                timeout=timeout_seconds,
-                return_raw=debug,
-            )
-        except AIProviderTimeoutError:
-            raise
-        except Exception as e:
-            last_error = e
-            err_detail = str(e)
-            if hasattr(e, "response") and e.response is not None:
-                err_detail += f" | status={e.response.status_code} body={e.response.text[:500]}"
-            logger.warning(
-                "analyze_project_content attempt %d/%d [%s/%s]: %s",
-                attempt + 1,
-                max_attempts,
-                client.provider_name,
-                client.model_name,
-                err_detail,
-            )
-            if attempt < max_attempts - 1:
-                await asyncio.sleep(3 + attempt * 2)
-            continue
-
-        if debug:
-            raw_text, response_json = raw_response  # type: ignore[misc]
-        else:
-            raw_text = raw_response  # type: ignore[assignment]
-            response_json = None
-
-        payload = extract_json_payload(raw_text)
-        parsed = payload if isinstance(payload, dict) else {}
-        has_data = bool(
-            parsed.get("characters") or parsed.get("outlines") or parsed.get("settings")
-        )
-        if has_data:
-            last_error = None
-            break
-
-        logger.warning(
-            "analyze_project_content attempt %d/%d: JSON parse yielded empty result. raw_text[:200]=%s",
-            attempt + 1,
-            max_attempts,
-            (raw_text or "")[:200],
-        )
-        if attempt < max_attempts - 1:
-            await asyncio.sleep(2)
-
-    if last_error is not None:
-        raise last_error
-
-    result = normalize_project_analysis(parsed)
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
+    generated = await generate_structured_with_client(
+        client,
+        system_prompt,
+        user_prompt,
+        output_model=_ProjectAnalysisOutput,
+        requested_model=getattr(client, "model_name", None),
+        temperature=temp,
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
+        max_attempts=policy.max_attempts,
+    )
+    result = normalize_project_analysis(generated.value.model_dump())
     if debug:
         result["debug_info"] = client._wrap_debug(
             system_prompt,
             user_prompt,
             temp,
-            4096,
-            raw_text,
-            response_json,
+            policy.max_tokens,
+            generated.response.content,
+            generated.response.response_json,
         )
     return result
