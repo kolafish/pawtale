@@ -152,6 +152,9 @@ REQUIRED_SQL_MARKERS = {
     "memoir_book_plan_chapters": (
         "uq_memoir_book_plan_chapters_project_id",
     ),
+    "memoir_editing_jobs": (
+        MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    ),
 }
 
 

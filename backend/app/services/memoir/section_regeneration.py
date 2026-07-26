@@ -1,22 +1,26 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
 import re
 import uuid
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
     MemoirSectionMaterialAssignedBy,
 )
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirEditingJob,
     MemoirSection,
     MemoirSectionMaterial,
     MemoirVoiceUtterance,
@@ -26,6 +30,8 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir import editing_jobs
+from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import (
     ALLOWED_SECTION_TYPES,
     MaterialOrganizationDecision,
@@ -79,6 +85,19 @@ SECTION_REGENERATION_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录结构编辑。"
     "从全章理解素材关系，并保持每条讲述完整，不拆分或虚构内容。"
 )
+ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
+
+
+class _SectionRegenerationCancelled(RuntimeError):
+    pass
+
+
+async def _report_progress(
+    callback: ProgressCallback | None,
+    **values: object,
+) -> None:
+    if callback is not None:
+        await callback(values)
 
 
 async def _load_chapter(
@@ -467,6 +486,7 @@ async def _plan_section_regeneration(
     chapter_title: str,
     materials: list[_MaterialSnapshot],
     ai_model: str | None,
+    progress_callback: ProgressCallback | None = None,
 ) -> tuple[
     list[_PlannedSection],
     list[_PlannedAssignment],
@@ -474,6 +494,14 @@ async def _plan_section_regeneration(
 ]:
     client = get_ai_service(ai_model)
     generated_model = getattr(client, "model_name", ai_model)
+    batches = _material_batches(materials)
+    total_chars = sum(len(material.text) for material in materials)
+    await _report_progress(
+        progress_callback,
+        stage="planning_sections",
+        batch_count=len(batches),
+        resolved_ai_model=generated_model,
+    )
     candidates = await _plan_section_candidates(
         chapter_id=chapter_id,
         chapter_title=chapter_title,
@@ -485,7 +513,13 @@ async def _plan_section_regeneration(
         for candidate in candidates
     }
     pending_assignments: list[_PlannedAssignment] = []
-    for batch in _material_batches(materials):
+    completed_chars = 0
+    processed_materials = 0
+    await _report_progress(
+        progress_callback,
+        stage="assigning_materials",
+    )
+    for batch_index, batch in enumerate(batches, start=1):
         decisions = await _assign_material_batch(
             chapter_id=chapter_id,
             chapter_title=chapter_title,
@@ -505,12 +539,22 @@ async def _plan_section_regeneration(
             if target is None:
                 raise RuntimeError("素材整理结果缺少目标小章节")
             target.assignments.append(assignment)
+        completed_chars += sum(len(material.text) for material in batch)
+        processed_materials += len(batch)
+        await _report_progress(
+            progress_callback,
+            stage="assigning_materials",
+            completed_batch_count=batch_index,
+            processed_char_count=min(completed_chars, total_chars),
+            processed_material_count=processed_materials,
+        )
 
     planned_sections = [
         section
         for section in planned_by_id.values()
         if section.assignments
     ]
+    await _report_progress(progress_callback, stage="saving")
     return planned_sections, pending_assignments, generated_model
 
 
@@ -522,6 +566,7 @@ async def regenerate_chapter_sections(
     chapter_id: str,
     req: MemoirSectionRegenerateRequest,
     allow_admin: bool = False,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, int | str | None]:
     project = await load_memoir_project(
         db,
@@ -555,6 +600,7 @@ async def regenerate_chapter_sections(
         chapter_title=chapter_title,
         materials=materials,
         ai_model=selected_ai_model,
+        progress_callback=progress_callback,
     )
     if not planned_sections:
         raise HTTPException(
@@ -664,3 +710,267 @@ async def regenerate_chapter_sections(
         "section_count": len(planned_sections),
         "ai_model": generated_model,
     }
+
+
+def _regeneration_job_dedupe_key(chapter_id: str) -> str:
+    return f"regenerate-chapter-sections:{chapter_id}"
+
+
+def _job_state(
+    *,
+    project_id: str,
+    chapter_id: str,
+    job: MemoirEditingJob | None,
+) -> dict[str, object]:
+    if job is None:
+        return {
+            "project_id": project_id,
+            "chapter_id": chapter_id,
+            "status": "idle",
+        }
+    result = dict(job.result_json or {})
+    cancelled = result.get("cancelled") is True
+    status = (
+        "cancelled"
+        if cancelled
+        else (
+            job.status
+            if job.status
+            in {
+                MemoirEditingJobStatus.PENDING.value,
+                MemoirEditingJobStatus.RUNNING.value,
+                MemoirEditingJobStatus.SUCCEEDED.value,
+                MemoirEditingJobStatus.FAILED.value,
+            }
+            else "failed"
+        )
+    )
+    return {
+        **result,
+        "job_id": job.id,
+        "project_id": project_id,
+        "chapter_id": chapter_id,
+        "status": status,
+        "can_cancel": status
+        in {
+            MemoirEditingJobStatus.PENDING.value,
+            MemoirEditingJobStatus.RUNNING.value,
+        },
+        "error_message": (
+            job.error_message
+            if status == MemoirEditingJobStatus.FAILED.value
+            else ""
+        ),
+    }
+
+
+async def enqueue_chapter_section_regeneration(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    req: MemoirSectionRegenerateRequest,
+    allow_admin: bool = False,
+) -> dict[str, object]:
+    project = await load_memoir_project(
+        db,
+        project_id,
+        user_id,
+        allow_admin=allow_admin,
+    )
+    chapter = await _load_chapter(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    _validate_expected_sections(chapter, req)
+    materials = _material_snapshots(chapter)
+    requested_ai_model = (req.ai_model or "").strip() or project_ai_model(
+        project
+    )
+    job = await editing_jobs.enqueue_editing_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_type=MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS,
+        dedupe_key=_regeneration_job_dedupe_key(chapter_id),
+        replace_completed=True,
+        payload_json={
+            "user_id": user_id,
+            "allow_admin": allow_admin,
+            "request": {
+                "expected_sections": [
+                    section.model_dump()
+                    for section in req.expected_sections
+                ],
+                "ai_model": requested_ai_model,
+            },
+        },
+    )
+    if job.status == MemoirEditingJobStatus.PENDING.value:
+        remember_project_ai_model(project, (req.ai_model or "").strip())
+        job.result_json = {
+            "stage": "queued",
+            "material_count": len(materials),
+            "total_char_count": sum(
+                len(material.text) for material in materials
+            ),
+            "batch_count": len(_material_batches(materials)),
+            "requested_ai_model": requested_ai_model,
+        }
+        db.add(job)
+    await db.commit()
+    await db.refresh(job)
+    return _job_state(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job=job,
+    )
+
+
+async def _load_regeneration_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+    job_id: str | None = None,
+) -> MemoirEditingJob | None:
+    statement = select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.chapter_id == chapter_id,
+        MemoirEditingJob.job_type
+        == MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
+    )
+    if job_id:
+        statement = statement.where(MemoirEditingJob.id == job_id)
+    else:
+        statement = statement.where(
+            MemoirEditingJob.dedupe_key
+            == _regeneration_job_dedupe_key(chapter_id)
+        )
+    return await db.scalar(statement)
+
+
+async def get_chapter_section_regeneration_job(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    allow_admin: bool = False,
+) -> dict[str, object]:
+    await load_memoir_project(
+        db,
+        project_id,
+        user_id,
+        allow_admin=allow_admin,
+    )
+    job = await _load_regeneration_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    return _job_state(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job=job,
+    )
+
+
+async def cancel_chapter_section_regeneration_job(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    chapter_id: str,
+    job_id: str,
+    allow_admin: bool = False,
+) -> dict[str, object]:
+    await load_memoir_project(
+        db,
+        project_id,
+        user_id,
+        allow_admin=allow_admin,
+    )
+    job = await _load_regeneration_job(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_id=job_id,
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="小节整理任务不存在")
+    result_json = dict(job.result_json or {})
+    result_json.update({"stage": "cancelled", "cancelled": True})
+    await db.execute(
+        update(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.id == job.id,
+            MemoirEditingJob.status.in_(
+                {
+                    MemoirEditingJobStatus.PENDING.value,
+                    MemoirEditingJobStatus.RUNNING.value,
+                }
+            ),
+        )
+        .values(
+            status=MemoirEditingJobStatus.SKIPPED.value,
+            locked_at=None,
+            lease_token=None,
+            lease_expires_at=None,
+            result_json=result_json,
+        )
+    )
+    await db.commit()
+    await db.refresh(job)
+    return _job_state(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job=job,
+    )
+
+
+async def run_chapter_section_regeneration_job(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+) -> EditingJobResult:
+    payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+    req = MemoirSectionRegenerateRequest.model_validate(payload.get("request"))
+    progress = dict(job.result_json or {})
+
+    async def update_progress(patch: dict[str, object]) -> None:
+        progress.update(patch)
+        if not await editing_jobs.update_editing_job_progress(
+            db,
+            job,
+            progress,
+        ):
+            raise _SectionRegenerationCancelled
+
+    try:
+        result = await regenerate_chapter_sections(
+            db,
+            user_id=str(payload.get("user_id") or ""),
+            project_id=job.project_id,
+            chapter_id=str(job.chapter_id or ""),
+            req=req,
+            allow_admin=payload.get("allow_admin") is True,
+            progress_callback=update_progress,
+        )
+    except _SectionRegenerationCancelled:
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={**progress, "stage": "cancelled", "cancelled": True},
+        )
+    progress.update(
+        {
+            **result,
+            "stage": "completed",
+            "processed_material_count": result["material_count"],
+            "processed_char_count": progress.get("total_char_count", 0),
+            "completed_batch_count": progress.get("batch_count", 0),
+            "resolved_ai_model": result.get("ai_model"),
+        }
+    )
+    return EditingJobResult(result_json=progress)

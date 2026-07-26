@@ -14,6 +14,7 @@ from app.schemas.memoir_sections import (
     MemoirSectionMergeRequest,
     MemoirSectionRegenerateRequest,
     MemoirSectionRegenerateResponse,
+    MemoirSectionRegenerationJobResponse,
     MemoirSectionReorderRequest,
     MemoirSectionSplitRequest,
     MemoirSectionUpdateRequest,
@@ -146,6 +147,71 @@ async def regenerate_memoir_chapter_sections(
         project_id=project_id,
         chapter_id=chapter_id,
         **result,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/"
+    "section-regeneration-jobs",
+    response_model=MemoirSectionRegenerationJobResponse,
+    status_code=202,
+)
+async def enqueue_memoir_chapter_section_regeneration(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirSectionRegenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await section_regeneration.enqueue_chapter_section_regeneration(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        req=req,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.get(
+    "/projects/{project_id}/chapters/{chapter_id}/"
+    "section-regeneration-jobs/current",
+    response_model=MemoirSectionRegenerationJobResponse,
+)
+async def get_memoir_chapter_section_regeneration(
+    project_id: str,
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await section_regeneration.get_chapter_section_regeneration_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/chapters/{chapter_id}/"
+    "section-regeneration-jobs/{job_id}",
+    response_model=MemoirSectionRegenerationJobResponse,
+)
+async def cancel_memoir_chapter_section_regeneration(
+    project_id: str,
+    chapter_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await section_regeneration.cancel_chapter_section_regeneration_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        job_id=job_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 

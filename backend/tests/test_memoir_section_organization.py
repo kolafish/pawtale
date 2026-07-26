@@ -12,12 +12,17 @@ from app.models.memoir import (
 )
 from app.services.memoir.material_organization import organize_material
 from app.services.memoir import section_regeneration
+from app.services.memoir.editing_job_handlers import (
+    register_memoir_editing_job_handlers,
+)
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.utterance_editing_pipeline import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -535,6 +540,102 @@ async def test_material_organization_appends_after_highest_section_order(
     assert result.result_json["section_id"] == section.id
     assert section.sort_order == 5
     assert ai.calls == 1
+
+
+async def test_section_regeneration_job_reports_progress_and_deduplicates(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    chapter_id = chapters[0].id
+    fake = ReplayMaterialOrganizationAI()
+    monkeypatch.setattr(
+        section_regeneration,
+        "get_ai_service",
+        lambda _model=None: fake,
+    )
+    url = (
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
+        "section-regeneration-jobs"
+    )
+    payload = {
+        "expected_sections": [
+            {
+                "id": data["sections"][0]["id"],
+                "version": data["sections"][0]["version"],
+            }
+        ],
+        "ai_model": "deepseek-v4-flash",
+    }
+
+    queued = await client.post(url, json=payload)
+    duplicate = await client.post(url, json=payload)
+
+    assert queued.status_code == 202, queued.text
+    assert duplicate.status_code == 202, duplicate.text
+    state = queued.json()
+    assert state["job_id"] == duplicate.json()["job_id"]
+    assert state["status"] == "pending"
+    assert state["material_count"] == 2
+    assert state["batch_count"] == 1
+    assert state["requested_ai_model"] == "deepseek-v4-flash"
+
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, state["job_id"]) is True
+    finally:
+        clear_editing_job_handlers()
+
+    completed = await client.get(f"{url}/current")
+    assert completed.status_code == 200, completed.text
+    result = completed.json()
+    assert result["status"] == "succeeded"
+    assert result["stage"] == "completed"
+    assert result["processed_material_count"] == 2
+    assert result["processed_char_count"] == result["total_char_count"]
+    assert result["completed_batch_count"] == 1
+    assert result["section_count"] == 1
+    assert result["resolved_ai_model"] == "fake-section-organizer"
+    assert len(fake.prompts) == 2
+
+
+async def test_section_regeneration_job_can_be_cancelled_before_run(
+    client,
+    test_db,
+):
+    project_id, chapters, _, data = await _bootstrap_two_chapters(
+        client,
+        test_db,
+    )
+    chapter_id = chapters[0].id
+    url = (
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
+        "section-regeneration-jobs"
+    )
+    queued = await client.post(
+        url,
+        json={
+            "expected_sections": [
+                {
+                    "id": data["sections"][0]["id"],
+                    "version": data["sections"][0]["version"],
+                }
+            ],
+        },
+    )
+    job_id = queued.json()["job_id"]
+
+    cancelled = await client.delete(f"{url}/{job_id}")
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["stage"] == "cancelled"
+    assert cancelled.json()["can_cancel"] is False
 
 
 async def test_regenerate_chapter_sections_replays_current_material_organizer(

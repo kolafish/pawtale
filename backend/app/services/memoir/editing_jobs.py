@@ -287,13 +287,31 @@ async def renew_editing_job_lease(
     return result.rowcount == 1
 
 
+async def update_editing_job_progress(
+    db: AsyncSession,
+    job: MemoirEditingJob,
+    result_json: dict,
+) -> bool:
+    result = await db.execute(
+        update(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.id == job.id,
+            MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            MemoirEditingJob.lease_token == job.lease_token,
+        )
+        .values(result_json=result_json)
+    )
+    await db.commit()
+    return result.rowcount == 1
+
+
 async def _load_leased_editing_job(db: AsyncSession, lease: JobLease) -> MemoirEditingJob | None:
     return await db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.id == lease.job_id,
             MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
             MemoirEditingJob.lease_token == lease.token,
-        )
+        ).execution_options(populate_existing=True)
     )
 
 
@@ -366,6 +384,7 @@ async def run_editing_job(db: AsyncSession, lease: JobLease) -> bool:
                 job,
                 lease,
                 MemoirEditingJobStatus.FAILED,
+                result_json=dict(job.result_json or {}),
                 error_message=str(exc),
             )
         return False
