@@ -4,8 +4,41 @@ export const HOME_PAGE_URL = "/pages/home/index";
 export const BOOK_PAGE_URL = "/pages/book/index";
 export const LOGIN_PAGE_URL = "/pages/login/index";
 export const ME_PAGE_URL = "/pages/me/index";
+export const CHAPTER_WORKSPACE_PAGE_URL = "/pages/chapter-workspace/index";
 
 export type AuthNavigationTarget = "login" | "me";
+export type PageNotFoundQuery = Record<string, string | undefined>;
+
+const LEGACY_PAGE_REDIRECTS: Record<string, string> = {
+  "pages/book-chapter/index": CHAPTER_WORKSPACE_PAGE_URL,
+};
+
+function appendQuery(url: string, query: PageNotFoundQuery): string {
+  const search = Object.entries(query)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+    .join("&");
+  return search ? `${url}?${search}` : url;
+}
+
+export function missingPageRecoveryUrl(
+  path: string,
+  query: PageNotFoundQuery = {},
+): string | null {
+  const normalizedPath = path.replace(/^\/+/, "").split("?")[0];
+  const legacyTarget = LEGACY_PAGE_REDIRECTS[normalizedPath];
+  if (legacyTarget) {
+    return appendQuery(legacyTarget, query);
+  }
+  return normalizedPath === HOME_PAGE_URL.slice(1) ? null : HOME_PAGE_URL;
+}
+
+export function recoverMissingPage(path: string, query: PageNotFoundQuery = {}): void {
+  const url = missingPageRecoveryUrl(path, query);
+  if (url) {
+    wx.reLaunch({ url });
+  }
+}
 
 export function isAuthError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
