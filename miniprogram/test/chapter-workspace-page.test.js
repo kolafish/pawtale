@@ -259,6 +259,10 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
     path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
     "utf8",
   );
+  const progressTemplate = fs.readFileSync(
+    path.join(__dirname, "../components/ai-task-progress/index.wxml"),
+    "utf8",
+  );
 
   assert.match(template, /<view\s+class="section-toggle"/);
   assert.doesNotMatch(template, /<button\s+class="section-toggle"/);
@@ -269,6 +273,16 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /wx:if="{{structureExpanded}}"/);
   assert.match(template, /<view\s+class="rewrite-action/);
   assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
+  assert.match(
+    template,
+    /chapterPreparationJob && chapterPreparationJob\.operation === 'rewrite'/,
+  );
+  assert.match(template, /<ai-task-progress/);
+  assert.match(template, /mode="{{chapterPreparationProgressMode}}"/);
+  assert.match(template, /cancel-text="取消生成"/);
+  assert.match(progressTemplate, /mode !== 'hidden'/);
+  assert.match(progressTemplate, /mode === 'determinate'/);
+  assert.match(progressTemplate, />{{cancelText}}<\/view>/);
   assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
   assert.match(template, /bindtap="openMaterialEditor"/);
   assert.match(template, /编辑或删除/);
@@ -581,6 +595,7 @@ test("chapter workspace resumes and cancels an active section regeneration job",
   });
   assert.equal(context.data.operationKind, "regenerate_sections");
   assert.equal(context.data.sectionRegenerationProgress, 50);
+  assert.equal(context.data.sectionRegenerationProgressMode, "determinate");
 
   await page.cancelSectionRegeneration.call(context);
 
@@ -1219,7 +1234,45 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
   assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
+  delete global.wx;
+});
+
+test("chapter rewrite reports persisted section progress at its action surface", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      draft_needs_rewrite: true,
+      can_rewrite_draft: true,
+    }),
+    voiceApiExports: {
+      getMemoirChapterPreparationJob: async () => chapterPreparationJob({
+        job_id: "chapter-job-1",
+        operation: "rewrite",
+        status: "running",
+        stage: "generating_sections",
+        total_section_count: 9,
+        completed_section_count: 3,
+        current_section_id: "section-4",
+        current_section_title: "院子里的雨声",
+        can_cancel: true,
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.operationKind, "rewrite_chapter");
+  assert.equal(context.data.chapterPreparationTitle, "正在逐节生成正文");
+  assert.match(context.data.chapterPreparationDetail, /已完成 3\/9 个小节/);
+  assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
+  assert.equal(context.data.chapterPreparationProgress, 33);
+  assert.equal(context.data.chapterPreparationProgressMode, "determinate");
   delete global.wx;
 });
 
@@ -1407,6 +1460,7 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   assert.match(modals.at(-1).content, /上方当前 4 个小节/);
   assert.equal(modals.at(-1).confirmText, "生成全部");
   assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
   delete global.wx;
 });

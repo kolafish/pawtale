@@ -1,0 +1,20 @@
+<view class="ai-task-status">
+  <text class="ai-task-title">{{title}}</text>
+  <text class="ai-task-detail">{{detail}}</text>
+  <view
+    wx:if="{{mode !== 'hidden'}}"
+    class="ai-task-track"
+    aria-label="{{mode === 'determinate' ? title + ' ' + progress + '%' : title}}"
+  >
+    <view
+      class="ai-task-progress {{mode === 'indeterminate' ? 'is-indeterminate' : ''}}"
+      style="width: {{progress}}%;"
+    ></view>
+  </view>
+  <view
+    wx:if="{{canCancel}}"
+    class="ai-task-cancel"
+    aria-role="button"
+    bindtap="cancelTask"
+  >{{cancelText}}</view>
+</view>

@@ -13,24 +13,15 @@
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
       <view wx:if="{{chapterPreparationJob}}" class="chapter-preparation-status">
-        <text class="section-regeneration-title">{{chapterPreparationTitle}}</text>
-        <text class="section-regeneration-detail">{{chapterPreparationDetail}}</text>
-        <view
-          wx:if="{{chapterPreparationJob.status === 'pending' || chapterPreparationJob.status === 'running'}}"
-          class="section-regeneration-track"
-          aria-label="章节处理进度 {{chapterPreparationProgress}}%"
-        >
-          <view
-            class="section-regeneration-progress"
-            style="width: {{chapterPreparationProgress}}%;"
-          ></view>
-        </view>
-        <view
-          wx:if="{{chapterPreparationJob.can_cancel}}"
-          class="section-regeneration-cancel"
-          aria-role="button"
-          bindtap="cancelChapterPreparation"
-        >取消处理</view>
+        <ai-task-progress
+          title="{{chapterPreparationTitle}}"
+          detail="{{chapterPreparationDetail}}"
+          mode="{{chapterPreparationProgressMode}}"
+          progress="{{chapterPreparationProgress}}"
+          can-cancel="{{chapterPreparationJob.can_cancel}}"
+          cancel-text="取消处理"
+          bindcancel="cancelChapterPreparation"
+        />
       </view>
       <view
         wx:if="{{nextAction.actionText}}"
@@ -62,24 +53,15 @@
         <view class="structure-tools">
           <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
           <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
-            <text class="section-regeneration-title">{{sectionRegenerationTitle}}</text>
-            <text class="section-regeneration-detail">{{sectionRegenerationDetail}}</text>
-            <view
-              wx:if="{{sectionRegenerationJob.status === 'pending' || sectionRegenerationJob.status === 'running'}}"
-              class="section-regeneration-track"
-              aria-label="小节整理进度 {{sectionRegenerationProgress}}%"
-            >
-              <view
-                class="section-regeneration-progress"
-                style="width: {{sectionRegenerationProgress}}%;"
-              ></view>
-            </view>
-            <view
-              wx:if="{{sectionRegenerationJob.can_cancel}}"
-              class="section-regeneration-cancel"
-              aria-role="button"
-              bindtap="cancelSectionRegeneration"
-            >取消整理</view>
+            <ai-task-progress
+              title="{{sectionRegenerationTitle}}"
+              detail="{{sectionRegenerationDetail}}"
+              mode="{{sectionRegenerationProgressMode}}"
+              progress="{{sectionRegenerationProgress}}"
+              can-cancel="{{sectionRegenerationJob.can_cancel}}"
+              cancel-text="取消整理"
+              bindcancel="cancelSectionRegeneration"
+            />
           </view>
           <view
             class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
@@ -163,6 +145,20 @@
       <view wx:if="{{workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
         <text class="rewrite-notice-title">{{rewriteNoticeTitle}}</text>
         <text class="rewrite-notice-detail">{{rewriteNoticeDetail}}</text>
+        <view
+          wx:if="{{chapterPreparationJob && chapterPreparationJob.operation === 'rewrite'}}"
+          class="rewrite-task-status"
+        >
+          <ai-task-progress
+            title="{{chapterPreparationTitle}}"
+            detail="{{chapterPreparationDetail}}"
+            mode="{{chapterPreparationProgressMode}}"
+            progress="{{chapterPreparationProgress}}"
+            can-cancel="{{chapterPreparationJob.can_cancel}}"
+            cancel-text="取消生成"
+            bindcancel="cancelChapterPreparation"
+          />
+        </view>
         <view
           class="rewrite-action {{!workspace.can_rewrite_draft || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
           aria-role="button"
@@ -302,6 +298,20 @@
         <block wx:if="{{workspace.draft_content}}">
           <text class="empty-title">{{draftRecoveryTitle}}</text>
           <text class="empty-detail">{{draftRecoveryDetail}}</text>
+          <view
+            wx:if="{{chapterPreparationJob && chapterPreparationJob.operation === 'rewrite'}}"
+            class="draft-recovery-task-status"
+          >
+            <ai-task-progress
+              title="{{chapterPreparationTitle}}"
+              detail="{{chapterPreparationDetail}}"
+              mode="{{chapterPreparationProgressMode}}"
+              progress="{{chapterPreparationProgress}}"
+              can-cancel="{{chapterPreparationJob.can_cancel}}"
+              cancel-text="取消生成"
+              bindcancel="cancelChapterPreparation"
+            />
+          </view>
           <view
             class="primary-action draft-recovery-action {{draftRecoveryActionDisabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"

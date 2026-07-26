@@ -60,6 +60,11 @@ import {
   writeCachedMemoirChapterWorkspace,
 } from "../../stores/memoir-read-cache";
 import { promptRequiredText } from "../../services/text-prompt";
+import {
+  aiTaskProgressPercent,
+  type AITaskProgressMode,
+  type AITaskProgressView,
+} from "../../services/ai-task-progress";
 
 export { chapterWorkspaceViewPatch };
 
@@ -98,7 +103,9 @@ function isActiveChapterPreparation(
   return job?.status === "pending" || job?.status === "running";
 }
 
-function chapterPreparationView(job: MemoirChapterPreparationJob) {
+function chapterPreparationView(
+  job: MemoirChapterPreparationJob,
+): AITaskProgressView {
   const model = job.resolved_ai_model || job.requested_ai_model;
   const modelDetail = model ? ` · 模型 ${model}` : "";
   if (job.status === "failed") {
@@ -109,6 +116,7 @@ function chapterPreparationView(job: MemoirChapterPreparationJob) {
       title: job.operation === "rewrite" ? "正文生成失败" : "本章检查失败",
       detail: `${job.error_message || "可以重新开始"}${savedDetail}${modelDetail}`,
       progress: 0,
+      progressMode: "hidden",
     };
   }
   if (job.status === "cancelled") {
@@ -116,16 +124,19 @@ function chapterPreparationView(job: MemoirChapterPreparationJob) {
       title: "已取消处理",
       detail: `原有章节和正文保持不变${modelDetail}`,
       progress: 0,
+      progressMode: "hidden",
     };
   }
   if (job.stage === "checking_sections") {
-    const progress = job.total_section_count
-      ? Math.round(job.checked_section_count * 35 / job.total_section_count)
-      : 0;
+    const progress = aiTaskProgressPercent(
+      job.checked_section_count,
+      job.total_section_count,
+    );
     return {
       title: "正在逐节检查素材",
       detail: `已检查 ${job.checked_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${modelDetail}`,
       progress,
+      progressMode: "determinate",
     };
   }
   if (job.stage === "checking_chapter") {
@@ -133,16 +144,14 @@ function chapterPreparationView(job: MemoirChapterPreparationJob) {
       title: "正在检查整章结构",
       detail: `小节检查已完成，正在判断是否需要补充${modelDetail}`,
       progress: 40,
+      progressMode: "indeterminate",
     };
   }
   if (job.stage === "generating_sections") {
-    const base = job.operation === "rewrite" ? 0 : 40;
-    const range = job.operation === "rewrite" ? 95 : 55;
-    const progress = job.total_section_count
-      ? base + Math.round(
-        job.completed_section_count * range / job.total_section_count,
-      )
-      : base;
+    const progress = aiTaskProgressPercent(
+      job.completed_section_count,
+      job.total_section_count,
+    );
     const resumed = job.resumed_section_count
       ? ` · 已恢复 ${job.resumed_section_count} 节`
       : "";
@@ -150,23 +159,28 @@ function chapterPreparationView(job: MemoirChapterPreparationJob) {
       title: "正在逐节生成正文",
       detail: `已完成 ${job.completed_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${resumed}${modelDetail}`,
       progress,
+      progressMode: "determinate",
     };
   }
   if (job.stage === "saving") {
     return {
       title: "正在保存本章正文",
       detail: `全部小节已经处理完成，正在更新章节版本${modelDetail}`,
-      progress: 98,
+      progress: 0,
+      progressMode: "indeterminate",
     };
   }
   return {
     title: job.operation === "rewrite" ? "正文生成任务已排队" : "本章检查任务已排队",
     detail: `即将处理 ${job.total_section_count} 个小节${modelDetail}`,
     progress: 0,
+    progressMode: "indeterminate",
   };
 }
 
-function sectionRegenerationView(job: MemoirChapterSectionRegenerationJob) {
+function sectionRegenerationView(
+  job: MemoirChapterSectionRegenerationJob,
+): AITaskProgressView {
   const model = job.resolved_ai_model || job.requested_ai_model;
   const modelDetail = model ? ` · 模型 ${model}` : "";
   if (job.status === "failed") {
@@ -174,39 +188,50 @@ function sectionRegenerationView(job: MemoirChapterSectionRegenerationJob) {
       title: "小节整理失败",
       detail: `${job.error_message || "请稍后重新整理"}${modelDetail}`,
       progress: 0,
+      progressMode: "hidden",
     };
   }
   if (job.status === "cancelled") {
-    return { title: "已取消整理", detail: "原小节结构保持不变", progress: 0 };
+    return {
+      title: "已取消整理",
+      detail: "原小节结构保持不变",
+      progress: 0,
+      progressMode: "hidden",
+    };
   }
   if (job.stage === "planning_sections") {
     return {
       title: "正在规划小节结构",
       detail: `正在理解全章 ${job.material_count} 条讲述${modelDetail}`,
       progress: 0,
+      progressMode: "indeterminate",
     };
   }
   if (job.stage === "assigning_materials") {
-    const progress = job.total_char_count
-      ? Math.round(job.processed_char_count * 100 / job.total_char_count)
-      : 0;
+    const progress = aiTaskProgressPercent(
+      job.processed_char_count,
+      job.total_char_count,
+    );
     return {
       title: "正在归类讲述",
       detail: `已处理 ${job.processed_material_count}/${job.material_count} 条 · ${job.completed_batch_count}/${job.batch_count} 批${modelDetail}`,
       progress,
+      progressMode: "determinate",
     };
   }
   if (job.stage === "saving") {
     return {
       title: "正在保存新的小节结构",
       detail: `全部讲述已归类，正在进行一致性检查${modelDetail}`,
-      progress: 95,
+      progress: 0,
+      progressMode: "indeterminate",
     };
   }
   return {
     title: "小节整理任务已排队",
     detail: `即将开始处理 ${job.material_count} 条讲述${modelDetail}`,
     progress: 0,
+    progressMode: "indeterminate",
   };
 }
 
@@ -262,10 +287,12 @@ interface ChapterWorkspacePageData {
   chapterPreparationTitle: string;
   chapterPreparationDetail: string;
   chapterPreparationProgress: number;
+  chapterPreparationProgressMode: AITaskProgressMode;
   sectionRegenerationJob: MemoirChapterSectionRegenerationJob | null;
   sectionRegenerationTitle: string;
   sectionRegenerationDetail: string;
   sectionRegenerationProgress: number;
+  sectionRegenerationProgressMode: AITaskProgressMode;
   audioPhase: ChapterWorkspaceAudioPhase;
   audioSectionId: string;
   editingMode: DraftSectionEditingMode;
@@ -320,10 +347,12 @@ definePage<ChapterWorkspacePageData>()({
     chapterPreparationTitle: "",
     chapterPreparationDetail: "",
     chapterPreparationProgress: 0,
+    chapterPreparationProgressMode: "hidden",
     sectionRegenerationJob: null,
     sectionRegenerationTitle: "",
     sectionRegenerationDetail: "",
     sectionRegenerationProgress: 0,
+    sectionRegenerationProgressMode: "hidden",
     audioPhase: "idle",
     audioSectionId: "",
     ...CLOSED_DRAFT_SECTION_EDITOR,
@@ -711,6 +740,7 @@ definePage<ChapterWorkspacePageData>()({
         chapterPreparationTitle: view.title,
         chapterPreparationDetail: view.detail,
         chapterPreparationProgress: view.progress,
+        chapterPreparationProgressMode: view.progressMode,
         error: "",
       });
       this.schedulePreparationPolling();
@@ -744,6 +774,7 @@ definePage<ChapterWorkspacePageData>()({
         chapterPreparationTitle: view.title,
         chapterPreparationDetail: view.detail,
         chapterPreparationProgress: view.progress,
+        chapterPreparationProgressMode: view.progressMode,
       });
       return;
     }
@@ -759,6 +790,7 @@ definePage<ChapterWorkspacePageData>()({
       chapterPreparationJob: { ...job, can_cancel: false },
       chapterPreparationTitle: "正在取消处理",
       chapterPreparationDetail: "正在停止后续模型调用，已保存的进度仍会保留",
+      chapterPreparationProgressMode: "indeterminate",
     });
     try {
       await cancelMemoirChapterPreparationJob(
@@ -837,6 +869,7 @@ definePage<ChapterWorkspacePageData>()({
         sectionRegenerationTitle: view.title,
         sectionRegenerationDetail: view.detail,
         sectionRegenerationProgress: view.progress,
+        sectionRegenerationProgressMode: view.progressMode,
         structureExpanded: true,
         error: "",
       });
@@ -888,6 +921,7 @@ definePage<ChapterWorkspacePageData>()({
         sectionRegenerationTitle: view.title,
         sectionRegenerationDetail: view.detail,
         sectionRegenerationProgress: view.progress,
+        sectionRegenerationProgressMode: view.progressMode,
         structureExpanded: true,
       });
       return;
@@ -904,6 +938,7 @@ definePage<ChapterWorkspacePageData>()({
       sectionRegenerationJob: { ...job, can_cancel: false },
       sectionRegenerationTitle: "正在取消整理",
       sectionRegenerationDetail: "正在停止后续处理，原小节结构会保持不变",
+      sectionRegenerationProgressMode: "indeterminate",
     });
     try {
       await cancelMemoirChapterSectionRegenerationJob(
