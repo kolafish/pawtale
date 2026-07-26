@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -149,6 +150,34 @@ class MemoirSectionRegenerateResponse(BaseModel):
     unassigned_count: int
     section_count: int
     ai_model: str | None = None
+
+
+class MemoirSectionRegenerationJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    chapter_id: str
+    status: Literal[
+        "idle",
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ] = "idle"
+    stage: str = "idle"
+    material_count: int = 0
+    processed_material_count: int = 0
+    total_char_count: int = 0
+    processed_char_count: int = 0
+    batch_count: int = 0
+    completed_batch_count: int = 0
+    section_count: int = 0
+    assigned_count: int = 0
+    unassigned_count: int = 0
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    can_cancel: bool = False
+    error_message: str = ""
 
 
 class MemoirSectionMaterialAssignmentRequest(BaseModel):
