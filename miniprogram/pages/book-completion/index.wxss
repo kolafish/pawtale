@@ -123,6 +123,29 @@
   text-wrap: pretty;
 }
 
+.bulk-check-progress {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  background: var(--ui-surface);
+  box-shadow: inset 4rpx 0 0 var(--ui-accent);
+}
+
+.bulk-check-progress.failed {
+  background: var(--ui-danger-surface);
+  box-shadow: inset 4rpx 0 0 var(--ui-danger-text);
+}
+
+.bulk-check-progress.cancelled {
+  background: var(--ui-surface-subtle);
+  box-shadow: inset 4rpx 0 0 var(--ui-text-muted);
+}
+
+.bulk-check-progress.succeeded {
+  background: var(--ui-success-surface);
+  box-shadow: inset 4rpx 0 0 var(--ui-success-text);
+}
+
 .book-ready-action,
 .recheck-book-action {
   min-height: 88rpx;

@@ -2,13 +2,18 @@ import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
+import { aiTaskProgressPercent, type AITaskProgressMode } from "../../services/ai-task-progress";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
+  cancelMemoirBookCompletionJob,
   closeMemoirCompletionIssue,
   createMemoirVoiceSession,
+  enqueueMemoirBookCompletionJob,
   enqueueMemoirChapterPreparationJob,
+  getMemoirBookCompletionJob,
   getMemoirBookCompletionOverview,
+  type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -48,6 +53,15 @@ interface BookCompletionData {
   bulkCheckActionText: string;
   bulkCheckTitle: string;
   bulkCheckDetail: string;
+  bulkCheckJob: MemoirBookCompletionJob | null;
+  bulkCheckProgressVisible: boolean;
+  bulkCheckProgressTitle: string;
+  bulkCheckProgressDetail: string;
+  bulkCheckProgressMode: AITaskProgressMode;
+  bulkCheckProgressPercent: number;
+  bulkCheckProgressClass: string;
+  bulkCheckCanCancel: boolean;
+  bulkCheckCancelling: boolean;
   preparingChapterId: string;
   recheckingAll: boolean;
   startingIssueId: string;
@@ -58,6 +72,86 @@ interface ChapterDataset {
 }
 
 type ChapterTapEvent = PageDatasetEvent<ChapterDataset>;
+
+function bookCompletionJobActive(job: MemoirBookCompletionJob): boolean {
+  return job.status === "pending" || job.status === "running";
+}
+
+export function bookCompletionJobView(
+  job: MemoirBookCompletionJob | null,
+): Pick<
+  BookCompletionData,
+  | "bulkCheckProgressVisible"
+  | "bulkCheckProgressTitle"
+  | "bulkCheckProgressDetail"
+  | "bulkCheckProgressMode"
+  | "bulkCheckProgressPercent"
+  | "bulkCheckProgressClass"
+  | "bulkCheckCanCancel"
+> {
+  if (!job || job.status === "idle") {
+    return {
+      bulkCheckProgressVisible: false,
+      bulkCheckProgressTitle: "",
+      bulkCheckProgressDetail: "",
+      bulkCheckProgressMode: "hidden",
+      bulkCheckProgressPercent: 0,
+      bulkCheckProgressClass: "",
+      bulkCheckCanCancel: false,
+    };
+  }
+  const processedText = `已处理 ${job.processed_chapter_count}/${job.total_chapter_count} 章`;
+  if (bookCompletionJobActive(job)) {
+    const failureText = job.failed_chapter_count
+      ? ` · ${job.failed_chapter_count} 章未完成`
+      : "";
+    return {
+      bulkCheckProgressVisible: true,
+      bulkCheckProgressTitle: job.current_chapter_title
+        ? `正在检查《${job.current_chapter_title}》`
+        : "正在准备全书检查",
+      bulkCheckProgressDetail: `${processedText}${failureText}，每章完成后都会保存`,
+      bulkCheckProgressMode: job.total_chapter_count ? "determinate" : "indeterminate",
+      bulkCheckProgressPercent: aiTaskProgressPercent(
+        job.processed_chapter_count,
+        job.total_chapter_count,
+      ),
+      bulkCheckProgressClass: "active",
+      bulkCheckCanCancel: job.can_cancel,
+    };
+  }
+  if (job.status === "failed") {
+    return {
+      bulkCheckProgressVisible: true,
+      bulkCheckProgressTitle: `${job.failed_chapter_count} 章检查未完成`,
+      bulkCheckProgressDetail: `${processedText}，已完成结果已保留，可以重新检查失败章节。`,
+      bulkCheckProgressMode: "hidden",
+      bulkCheckProgressPercent: 0,
+      bulkCheckProgressClass: "failed",
+      bulkCheckCanCancel: false,
+    };
+  }
+  if (job.status === "cancelled") {
+    return {
+      bulkCheckProgressVisible: true,
+      bulkCheckProgressTitle: "全书检查已停止",
+      bulkCheckProgressDetail: `${processedText}，已完成结果已保留。`,
+      bulkCheckProgressMode: "hidden",
+      bulkCheckProgressPercent: 0,
+      bulkCheckProgressClass: "cancelled",
+      bulkCheckCanCancel: false,
+    };
+  }
+  return {
+    bulkCheckProgressVisible: true,
+    bulkCheckProgressTitle: "全书检查已完成",
+    bulkCheckProgressDetail: `${processedText}，请查看各章当前最重要的一步。`,
+    bulkCheckProgressMode: "hidden",
+    bulkCheckProgressPercent: 0,
+    bulkCheckProgressClass: "succeeded",
+    bulkCheckCanCancel: false,
+  };
+}
 
 function chapterView(
   item: MemoirChapterCompletionSummary,
@@ -126,7 +220,7 @@ export function bookCompletionViewPatch(
       (item) => chapterView(item, preparingChapterId, recheckingAll),
     ),
     allChaptersConfirmed,
-    bulkCheckVisible: allChaptersConfirmed || hasCheckableChapters,
+    bulkCheckVisible: recheckingAll || allChaptersConfirmed || hasCheckableChapters,
     bulkCheckActionText: allChaptersConfirmed
       ? "重新检查全书"
       : "检查待检查章节",
@@ -157,6 +251,15 @@ definePage<BookCompletionData>()({
     bulkCheckActionText: "",
     bulkCheckTitle: "",
     bulkCheckDetail: "",
+    bulkCheckJob: null,
+    bulkCheckProgressVisible: false,
+    bulkCheckProgressTitle: "",
+    bulkCheckProgressDetail: "",
+    bulkCheckProgressMode: "hidden",
+    bulkCheckProgressPercent: 0,
+    bulkCheckProgressClass: "",
+    bulkCheckCanCancel: false,
+    bulkCheckCancelling: false,
     preparingChapterId: "",
     recheckingAll: false,
     startingIssueId: "",
@@ -202,36 +305,54 @@ definePage<BookCompletionData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
+      const bulkCheckJob = await getMemoirBookCompletionJob(this.data.projectId);
       const overview = await getMemoirBookCompletionOverview(this.data.projectId);
+      const batchActive = bookCompletionJobActive(bulkCheckJob);
+      const finishedChapterId = this.data.preparingChapterId;
+      const finishedWholeBook = (
+        this.data.recheckingAll
+        && !batchActive
+        && bulkCheckJob.status !== "idle"
+      );
       this.setData({
         ...bookCompletionViewPatch(
           overview,
           this.data.preparingChapterId,
-          this.data.recheckingAll,
+          batchActive,
         ),
+        ...bookCompletionJobView(bulkCheckJob),
+        bulkCheckJob: bulkCheckJob.status === "idle" ? null : bulkCheckJob,
+        recheckingAll: batchActive,
         loading: false,
         error: "",
       });
-      if (overview.chapters.some((item) => item.state === "preparing")) {
+      if (
+        batchActive
+        || overview.chapters.some((item) => item.state === "preparing")
+      ) {
         this.schedulePolling();
       } else {
         this.stopPolling();
-        const finishedChapterId = this.data.preparingChapterId;
-        const finishedWholeBook = this.data.recheckingAll;
         if (finishedChapterId || finishedWholeBook) {
           this.setData({
             preparingChapterId: "",
-            recheckingAll: false,
             chapters: overview.chapters.map((item) => chapterView(item, "")),
           });
-          const checkedChapters = finishedWholeBook
-            ? overview.chapters
-            : overview.chapters.filter((item) => item.chapter_id === finishedChapterId);
-          const toastTitle = checkedChapters.some((item) => item.state === "needs_input")
-            ? "发现需要补充的内容"
-            : (checkedChapters.every((item) => item.state === "confirmed")
-              ? "暂未发现待补内容"
-              : "检查完成，请查看结果");
+          const checkedChapters = overview.chapters.filter(
+            (item) => (
+              finishedWholeBook
+              || item.chapter_id === finishedChapterId
+            ),
+          );
+          const toastTitle = finishedWholeBook && bulkCheckJob.status === "failed"
+            ? "有章节检查未完成"
+            : (finishedWholeBook && bulkCheckJob.status === "cancelled"
+              ? "已停止全书检查"
+              : (checkedChapters.some((item) => item.state === "needs_input")
+                ? "发现需要补充的内容"
+                : (checkedChapters.every((item) => item.state === "confirmed")
+                  ? "暂未发现待补内容"
+                  : "检查完成，请查看结果")));
           wx.showToast({ title: toastTitle, icon: "none" });
         }
       }
@@ -317,42 +438,75 @@ definePage<BookCompletionData>()({
     if (
       !this.data.bulkCheckVisible
       || this.data.recheckingAll
+      || this.data.bulkCheckCancelling
       || this.data.preparingChapterId
       || !this.data.chapters.length
     ) {
       return;
     }
-    const targets = this.data.allChaptersConfirmed
-      ? this.data.chapters
-      : this.data.chapters.filter(
-        (chapter) => chapter.next_action.kind === "prepare",
-      );
-    if (!targets.length) {
-      return;
-    }
     this.setData({
       recheckingAll: true,
       error: "",
+      bulkCheckProgressVisible: true,
+      bulkCheckProgressTitle: "正在提交全书检查",
+      bulkCheckProgressDetail: "任务提交后可以离开页面，进度会继续保存",
+      bulkCheckProgressMode: "indeterminate",
+      bulkCheckProgressPercent: 0,
+      bulkCheckProgressClass: "active",
+      bulkCheckCanCancel: false,
       chapters: this.data.chapters.map((item) => chapterView(item, "", true)),
     });
     try {
-      for (const chapter of targets) {
-        await enqueueMemoirChapterPreparationJob(
-          this.data.projectId,
-          chapter.chapter_id,
-          "prepare",
-        );
+      await enqueueMemoirBookCompletionJob(
+        this.data.projectId,
+        this.data.allChaptersConfirmed ? "all" : "pending",
+      );
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
       }
+      const message = error instanceof Error ? error.message : "章节检查没有完成";
+      this.setData({ recheckingAll: false });
+      await this.loadOverview(true);
+      if (
+        !this.data.bulkCheckJob
+        || !bookCompletionJobActive(this.data.bulkCheckJob)
+      ) {
+        this.setData({ error: message });
+      }
+    }
+  },
+
+  async cancelBulkCheck() {
+    const job = this.data.bulkCheckJob;
+    if (
+      !job?.job_id
+      || !bookCompletionJobActive(job)
+      || this.data.bulkCheckCancelling
+    ) {
+      return;
+    }
+    this.setData({
+      bulkCheckCancelling: true,
+      bulkCheckCanCancel: false,
+      error: "",
+    });
+    try {
+      await cancelMemoirBookCompletionJob(
+        this.data.projectId,
+        job.job_id,
+      );
       await this.loadOverview(true);
     } catch (error) {
       if (routeAuthError(error)) {
         return;
       }
       this.setData({
-        recheckingAll: false,
-        error: error instanceof Error ? error.message : "章节检查没有完成",
-        chapters: this.data.chapters.map((item) => chapterView(item, "")),
+        error: error instanceof Error ? error.message : "停止全书检查失败",
       });
+    } finally {
+      this.setData({ bulkCheckCancelling: false });
     }
   },
 

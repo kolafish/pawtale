@@ -24,6 +24,8 @@ from app.database import Base
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
+    MemoirBookCompletionJobScope,
+    MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
@@ -1324,6 +1326,55 @@ class MemoirEditingJob(Base):
 
     project: Mapped["Project"] = orm_relationship("Project")
     chapter: Mapped[MemoirBookPlanChapter | None] = orm_relationship("MemoirBookPlanChapter")
+
+
+class MemoirBookCompletionJob(Base):
+    __tablename__ = "memoir_book_completion_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            f"scope IN ({_enum_values(MemoirBookCompletionJobScope)})",
+            name="ck_memoir_book_completion_jobs_scope",
+        ),
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirBookCompletionJobStatus)})",
+            name="ck_memoir_book_completion_jobs_status",
+        ),
+        UniqueConstraint(
+            "active_key",
+            name="uq_memoir_book_completion_jobs_active_key",
+        ),
+        Index(
+            "ix_memoir_book_completion_jobs_project_timeline",
+            "project_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    active_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirBookCompletionJobStatus.PENDING.value,
+        nullable=False,
+        index=True,
+    )
+    requested_ai_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    target_chapters_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    chapter_job_ids_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    enqueue_errors_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    project: Mapped["Project"] = orm_relationship("Project")
 
 
 class MemoirAutomationEvent(Base):

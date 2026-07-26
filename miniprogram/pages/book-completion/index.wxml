@@ -19,15 +19,29 @@
       <text class="completion-notice-title">{{bulkCheckTitle}}</text>
       <text class="completion-notice-detail">{{bulkCheckDetail}}</text>
       <view
+        wx:if="{{bulkCheckProgressVisible}}"
+        class="bulk-check-progress {{bulkCheckProgressClass}}"
+      >
+        <ai-task-progress
+          title="{{bulkCheckProgressTitle}}"
+          detail="{{bulkCheckProgressDetail}}"
+          mode="{{bulkCheckProgressMode}}"
+          progress="{{bulkCheckProgressPercent}}"
+          can-cancel="{{bulkCheckCanCancel && !bulkCheckCancelling}}"
+          cancel-text="停止后续检查"
+          bindcancel="cancelBulkCheck"
+        />
+      </view>
+      <view
         wx:if="{{allChaptersConfirmed}}"
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
       >返回书稿</view>
       <view
-        class="recheck-book-action ui-block-action ui-pressable {{recheckingAll ? 'is-disabled' : ''}}"
+        class="recheck-book-action ui-block-action ui-pressable {{recheckingAll || bulkCheckCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{recheckingAll}}"
+        aria-disabled="{{recheckingAll || bulkCheckCancelling}}"
         bindtap="recheckAllChapters"
       >{{recheckingAll ? "正在检查全书…" : (allChaptersConfirmed ? "重新检查全书" : bulkCheckActionText)}}</view>
     </view>

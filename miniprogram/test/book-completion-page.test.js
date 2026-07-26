@@ -8,8 +8,15 @@ const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
+    getMemoirBookCompletionJob: async () => bulkJob(),
     getMemoirBookCompletionOverview: async () => {
       throw new Error("getMemoirBookCompletionOverview was not mocked");
+    },
+    enqueueMemoirBookCompletionJob: async () => {
+      throw new Error("enqueueMemoirBookCompletionJob was not mocked");
+    },
+    cancelMemoirBookCompletionJob: async () => {
+      throw new Error("cancelMemoirBookCompletionJob was not mocked");
     },
     enqueueMemoirChapterPreparationJob: async () => {
       throw new Error("enqueueMemoirChapterPreparationJob was not mocked");
@@ -88,6 +95,28 @@ function readyOverview() {
   };
 }
 
+function bulkJob(overrides = {}) {
+  return {
+    job_id: null,
+    project_id: "project-1",
+    scope: "pending",
+    status: "idle",
+    total_chapter_count: 0,
+    processed_chapter_count: 0,
+    succeeded_chapter_count: 0,
+    failed_chapter_count: 0,
+    cancelled_chapter_count: 0,
+    current_chapter_id: null,
+    current_chapter_title: "",
+    requested_ai_model: null,
+    chapters: [],
+    can_cancel: false,
+    can_retry: false,
+    error_message: "",
+    ...overrides,
+  };
+}
+
 test("book completion overview page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-completion/index"));
@@ -98,6 +127,10 @@ test("book completion overview page is registered", () => {
     ),
   );
   assert.equal(pageJson.navigationBarTitleText, "整理这本书");
+  assert.equal(
+    pageJson.usingComponents["ai-task-progress"],
+    "/components/ai-task-progress/index",
+  );
 });
 
 test("book completion overview exposes confirmed chapter progress and one action per chapter", () => {
@@ -109,6 +142,38 @@ test("book completion overview exposes confirmed chapter progress and one action
   assert.equal(patch.chapters[1].actionText, "查看正文");
   assert.equal(patch.allChaptersConfirmed, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
+});
+
+test("book completion uses only persisted chapter counts for whole-book progress", () => {
+  const { bookCompletionJobView } = loadBookCompletionPage().mod;
+  const active = bookCompletionJobView(bulkJob({
+    job_id: "book-job-1",
+    status: "running",
+    total_chapter_count: 4,
+    processed_chapter_count: 2,
+    succeeded_chapter_count: 2,
+    current_chapter_id: "chapter-3",
+    current_chapter_title: "参加工作",
+    can_cancel: true,
+  }));
+  const failed = bookCompletionJobView(bulkJob({
+    job_id: "book-job-1",
+    status: "failed",
+    total_chapter_count: 4,
+    processed_chapter_count: 4,
+    succeeded_chapter_count: 3,
+    failed_chapter_count: 1,
+    can_retry: true,
+  }));
+
+  assert.equal(active.bulkCheckProgressTitle, "正在检查《参加工作》");
+  assert.equal(active.bulkCheckProgressDetail, "已处理 2/4 章，每章完成后都会保存");
+  assert.equal(active.bulkCheckProgressMode, "determinate");
+  assert.equal(active.bulkCheckProgressPercent, 50);
+  assert.equal(active.bulkCheckCanCancel, true);
+  assert.equal(failed.bulkCheckProgressTitle, "1 章检查未完成");
+  assert.match(failed.bulkCheckProgressDetail, /已完成结果已保留/);
+  assert.equal(failed.bulkCheckProgressMode, "hidden");
 });
 
 test("book completion returns to the book hub for generation and chapter management", () => {
@@ -128,7 +193,7 @@ test("book completion returns to the book hub for generation and chapter managem
 });
 
 test("book completion offers one whole-book recheck after all chapters are confirmed", async () => {
-  const prepared = [];
+  const batchRequests = [];
   const toasts = [];
   const overview = readyOverview();
   overview.completed_chapters = 2;
@@ -153,9 +218,26 @@ test("book completion offers one whole-book recheck after all chapters are confi
   };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
-        prepared.push([projectId, chapterId, operation]);
+      enqueueMemoirBookCompletionJob: async (projectId, scope) => {
+        batchRequests.push([projectId, scope]);
+        return bulkJob({
+          job_id: "book-job-1",
+          scope,
+          status: "running",
+          total_chapter_count: 2,
+          current_chapter_id: "chapter-1",
+          current_chapter_title: "学校里的比赛",
+          can_cancel: true,
+        });
       },
+      getMemoirBookCompletionJob: async () => bulkJob({
+        job_id: "book-job-1",
+        scope: "all",
+        status: "succeeded",
+        total_chapter_count: 2,
+        processed_chapter_count: 2,
+        succeeded_chapter_count: 2,
+      }),
       getMemoirBookCompletionOverview: async () => overview,
     },
   });
@@ -174,16 +256,13 @@ test("book completion offers one whole-book recheck after all chapters are confi
   });
   await page.recheckAllChapters.call(context);
 
-  assert.deepEqual(prepared, [
-    ["project-1", "chapter-1", "prepare"],
-    ["project-1", "chapter-2", "prepare"],
-  ]);
+  assert.deepEqual(batchRequests, [["project-1", "all"]]);
   assert.ok(toasts.every((title) => title === "暂未发现待补内容"));
   delete global.wx;
 });
 
 test("book completion can check only chapters that have not been checked", async () => {
-  const prepared = [];
+  const batchRequests = [];
   const overview = readyOverview();
   overview.completed_chapters = 1;
   overview.chapters[0] = completionChapter({
@@ -202,9 +281,26 @@ test("book completion can check only chapters that have not been checked", async
   global.wx = { showToast() {} };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
-        prepared.push([projectId, chapterId, operation]);
+      enqueueMemoirBookCompletionJob: async (projectId, scope) => {
+        batchRequests.push([projectId, scope]);
+        return bulkJob({
+          job_id: "book-job-1",
+          scope,
+          status: "running",
+          total_chapter_count: 1,
+          current_chapter_id: "chapter-1",
+          current_chapter_title: "学校里的比赛",
+          can_cancel: true,
+        });
       },
+      getMemoirBookCompletionJob: async () => bulkJob({
+        job_id: "book-job-1",
+        status: "running",
+        total_chapter_count: 1,
+        current_chapter_id: "chapter-1",
+        current_chapter_title: "学校里的比赛",
+        can_cancel: true,
+      }),
       getMemoirBookCompletionOverview: async () => overview,
     },
   });
@@ -221,7 +317,162 @@ test("book completion can check only chapters that have not been checked", async
   });
   await page.recheckAllChapters.call(context);
 
-  assert.deepEqual(prepared, [["project-1", "chapter-1", "prepare"]]);
+  assert.deepEqual(batchRequests, [["project-1", "pending"]]);
+  assert.equal(context.data.recheckingAll, true);
+  assert.equal(context.data.bulkCheckProgressMode, "determinate");
+  delete global.wx;
+});
+
+test("book completion keeps a submit error when only an older finished job exists", async () => {
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options.title);
+    },
+  };
+  const { page, mod } = loadBookCompletionPage({
+    voiceApiExports: {
+      enqueueMemoirBookCompletionJob: async () => {
+        throw new Error("network unavailable");
+      },
+      getMemoirBookCompletionJob: async () => bulkJob({
+        job_id: "old-book-job",
+        status: "succeeded",
+        total_chapter_count: 2,
+        processed_chapter_count: 2,
+        succeeded_chapter_count: 2,
+      }),
+      getMemoirBookCompletionOverview: async () => readyOverview(),
+    },
+  });
+  const patch = mod.bookCompletionViewPatch(readyOverview());
+  const context = pageContext(page, {
+    projectId: "project-1",
+    chapters: patch.chapters,
+    bulkCheckVisible: true,
+  });
+
+  await page.recheckAllChapters.call(context);
+
+  assert.equal(context.data.recheckingAll, false);
+  assert.equal(context.data.error, "network unavailable");
+  assert.deepEqual(toasts, []);
+  delete global.wx;
+});
+
+test("book completion restores and polls an active whole-book check after reopening", async () => {
+  const scheduled = [];
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = (callback, delay) => {
+    scheduled.push([callback, delay]);
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  global.wx = { showToast() {} };
+  const overview = readyOverview();
+  overview.chapters[0] = completionChapter({
+    state: "preparing",
+    next_action: {
+      kind: "wait",
+      title: "正在处理本章",
+      detail: "可以进入本章查看逐节进度。",
+      action_text: "查看进度",
+      disabled: false,
+    },
+    active_issue: null,
+  });
+  try {
+    const { page } = loadBookCompletionPage({
+      voiceApiExports: {
+        getMemoirBookCompletionJob: async () => bulkJob({
+          job_id: "book-job-1",
+          status: "running",
+          total_chapter_count: 2,
+          processed_chapter_count: 1,
+          succeeded_chapter_count: 1,
+          current_chapter_id: "chapter-1",
+          current_chapter_title: "学校里的比赛",
+          can_cancel: true,
+        }),
+        getMemoirBookCompletionOverview: async () => overview,
+      },
+    });
+    const context = pageContext(page, { projectId: "project-1" });
+
+    await page.onShow.call(context);
+
+    assert.equal(context.data.recheckingAll, true);
+    assert.equal(context.data.bulkCheckVisible, true);
+    assert.equal(context.data.bulkCheckProgressPercent, 50);
+    assert.equal(context.data.bulkCheckProgressTitle, "正在检查《学校里的比赛》");
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0][1], 1500);
+    page.onHide.call(context);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    delete global.wx;
+  }
+});
+
+test("book completion preserves partial results and can cancel remaining checks", async () => {
+  const cancellations = [];
+  const failedJob = bulkJob({
+    job_id: "book-job-1",
+    status: "failed",
+    total_chapter_count: 2,
+    processed_chapter_count: 2,
+    succeeded_chapter_count: 1,
+    failed_chapter_count: 1,
+    can_retry: true,
+    error_message: "第二章检查失败",
+  });
+  const cancelledJob = bulkJob({
+    job_id: "book-job-2",
+    status: "cancelled",
+    total_chapter_count: 2,
+    processed_chapter_count: 2,
+    succeeded_chapter_count: 1,
+    cancelled_chapter_count: 1,
+    can_retry: true,
+  });
+  let currentJob = failedJob;
+  global.wx = { showToast() {} };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionJob: async () => currentJob,
+      getMemoirBookCompletionOverview: async () => readyOverview(),
+      cancelMemoirBookCompletionJob: async (projectId, jobId) => {
+        cancellations.push([projectId, jobId]);
+        currentJob = cancelledJob;
+        return currentJob;
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1" });
+
+  await page.loadOverview.call(context);
+  assert.equal(context.data.recheckingAll, false);
+  assert.equal(context.data.bulkCheckProgressTitle, "1 章检查未完成");
+  assert.match(context.data.bulkCheckProgressDetail, /已完成结果已保留/);
+
+  currentJob = bulkJob({
+    job_id: "book-job-2",
+    status: "running",
+    total_chapter_count: 2,
+    processed_chapter_count: 1,
+    succeeded_chapter_count: 1,
+    current_chapter_id: "chapter-2",
+    current_chapter_title: "参加工作",
+    can_cancel: true,
+  });
+  await page.loadOverview.call(context, true);
+  await page.cancelBulkCheck.call(context);
+
+  assert.deepEqual(cancellations, [["project-1", "book-job-2"]]);
+  assert.equal(context.data.bulkCheckProgressTitle, "全书检查已停止");
+  assert.match(context.data.bulkCheckProgressDetail, /已完成结果已保留/);
   delete global.wx;
 });
 

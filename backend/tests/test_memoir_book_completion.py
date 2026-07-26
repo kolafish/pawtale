@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
+    MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
 from app.migrations.memoir_books import (
@@ -20,6 +21,7 @@ from app.migrations.memoir_books import (
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirBookCompletionJob,
     MemoirBookReview,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -498,6 +500,132 @@ async def test_chapter_preparation_job_reports_progress_and_selected_model(
     assert current_body["resolved_ai_model"] == fake.model_name
     assert current_body["can_cancel"] is False
     assert set(requested_models) == {"claude-opus-4-8"}
+
+
+async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
+
+    idle = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/current"
+    )
+    assert idle.status_code == 200, idle.text
+    assert idle.json()["status"] == "idle"
+    assert idle.json()["job_id"] is None
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={
+            "scope": "pending",
+            "ai_model": "claude-opus-4-8",
+        },
+    )
+
+    assert queued.status_code == 202, queued.text
+    queued_body = queued.json()
+    assert queued_body["status"] == "running"
+    assert queued_body["total_chapter_count"] == 2
+    assert queued_body["processed_chapter_count"] == 0
+    assert queued_body["current_chapter_id"] == chapters[0].id
+    assert queued_body["requested_ai_model"] == "claude-opus-4-8"
+    assert queued_body["can_cancel"] is True
+    child_job_ids = [item["job_id"] for item in queued_body["chapters"]]
+    assert all(child_job_ids)
+
+    duplicate = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={"scope": "pending"},
+    )
+
+    assert duplicate.status_code == 202, duplicate.text
+    assert duplicate.json()["job_id"] == queued_body["job_id"]
+    assert [item["job_id"] for item in duplicate.json()["chapters"]] == child_job_ids
+    batch_count = await test_db.scalar(
+        select(func.count()).select_from(MemoirBookCompletionJob)
+    )
+    assert batch_count == 1
+
+    resumed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/current"
+    )
+
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["job_id"] == queued_body["job_id"]
+    assert [item["job_id"] for item in resumed.json()["chapters"]] == child_job_ids
+
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, child_job_ids[0]) is True
+    finally:
+        clear_editing_job_handlers()
+
+    partial = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/current"
+    )
+
+    assert partial.status_code == 200, partial.text
+    assert partial.json()["status"] == "running"
+    assert partial.json()["processed_chapter_count"] == 1
+    assert partial.json()["succeeded_chapter_count"] == 1
+    assert partial.json()["current_chapter_id"] == chapters[1].id
+
+    failed_child = await test_db.get(MemoirEditingJob, child_job_ids[1])
+    assert failed_child is not None
+    failed_child.status = MemoirEditingJobStatus.FAILED.value
+    failed_child.error_message = "provider unavailable"
+    test_db.add(failed_child)
+    await test_db.commit()
+
+    failed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/current"
+    )
+
+    assert failed.status_code == 200, failed.text
+    failed_body = failed.json()
+    assert failed_body["status"] == "failed"
+    assert failed_body["processed_chapter_count"] == 2
+    assert failed_body["succeeded_chapter_count"] == 1
+    assert failed_body["failed_chapter_count"] == 1
+    assert failed_body["can_cancel"] is False
+    assert failed_body["can_retry"] is True
+    assert failed_body["error_message"] == "provider unavailable"
+    assert failed_body["chapters"][1]["error_message"] == "provider unavailable"
+
+    retried = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={"scope": "pending"},
+    )
+
+    assert retried.status_code == 202, retried.text
+    retried_body = retried.json()
+    assert retried_body["job_id"] != queued_body["job_id"]
+    assert retried_body["status"] == "running"
+    assert retried_body["total_chapter_count"] == 1
+    assert retried_body["chapters"][0]["chapter_id"] == chapters[1].id
+
+    cancelled = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/"
+        f"{retried_body['job_id']}"
+    )
+
+    assert cancelled.status_code == 200, cancelled.text
+    cancelled_body = cancelled.json()
+    assert cancelled_body["status"] == "cancelled"
+    assert cancelled_body["processed_chapter_count"] == 1
+    assert cancelled_body["cancelled_chapter_count"] == 1
+    assert cancelled_body["can_retry"] is True
+    stored_batch = await test_db.get(
+        MemoirBookCompletionJob,
+        retried_body["job_id"],
+    )
+    assert stored_batch is not None
+    assert stored_batch.active_key is None
 
 
 async def test_chapter_workspace_exposes_section_structure(
