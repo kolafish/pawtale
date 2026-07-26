@@ -211,7 +211,7 @@
         disabled="{{loading || generatingPlan || !projectId}}"
         bindtap="generatePlan"
       >
-        生成章节规划
+        {{generatingPlan ? "正在规划章节…" : "生成章节规划"}}
       </button>
       <button class="ghost-button" disabled="{{generatingPlan}}" bindtap="openTranscripts">
         查看记录
@@ -358,7 +358,7 @@
         disabled="{{generatingPlan || confirmingPlan}}"
         bindtap="generatePlan"
       >
-        重新规划
+        {{generatingPlan ? "正在重新规划…" : "重新规划"}}
       </button>
       <button
         class="primary-button"

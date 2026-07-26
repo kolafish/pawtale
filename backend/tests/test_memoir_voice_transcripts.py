@@ -504,6 +504,49 @@ async def test_mobile_memoir_voice_transcript_share_video_context_aligns_edited_
     assert alignment.segments_json[0]["text"] == "说我们的心不平的嘛。"
 
 
+async def test_share_video_context_returns_latest_job_only_for_current_text(client, test_db):
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+
+    initial_context = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/context"
+    )
+
+    assert initial_context.status_code == 200
+    assert initial_context.json()["latest_job_id"] is None
+
+    create_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={
+            "start_char": 0,
+            "end_char": len(text),
+            "background_source": "classic",
+        },
+    )
+
+    assert create_response.status_code == 201
+    job_id = create_response.json()["id"]
+
+    resumable_context = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/context"
+    )
+
+    assert resumable_context.status_code == 200
+    assert resumable_context.json()["latest_job_id"] == job_id
+
+    utterance = await test_db.get(MemoirVoiceUtterance, created["utterance_id"])
+    assert utterance is not None
+    utterance.transcript_edited = f"{text}这是后来补充的内容。"
+    await test_db.commit()
+
+    changed_context = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/context"
+    )
+
+    assert changed_context.status_code == 200
+    assert changed_context.json()["latest_job_id"] is None
+
+
 def test_share_video_subtitles_use_memoir_page_layout_and_packaged_font(tmp_path):
     text = "对孙女的偏爱与心平之辩"
     request = share_video_rendering.ShareVideoRenderRequest(

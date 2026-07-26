@@ -238,10 +238,14 @@ test("book export page saves full-book metadata and cover style", async () => {
 test("book export page suggests titles and queues book-level editorial copy", async () => {
   const titleRequests = [];
   const editorialRequests = [];
+  const navigations = [];
   const toasts = [];
   global.wx = {
     showToast(options) {
       toasts.push(options);
+    },
+    switchTab(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadBookExportPage({
@@ -275,8 +279,14 @@ test("book export page suggests titles and queues book-level editorial copy", as
     projectId: "project/1",
     payload: { targets: ["afterword"] },
   });
-  assert.equal(toasts[0].title, "已后台生成");
+  assert.equal(toasts[0].title, "已开始后台生成");
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  assert.equal(
+    context.data.bookEditorialCopyNotice,
+    "后记已转为后台生成，可到书稿首页查看任务进度和结果。",
+  );
+  page.openBookHome.call(context);
+  assert.deepEqual(navigations, ["/pages/book/index"]);
   delete global.wx;
 });
 

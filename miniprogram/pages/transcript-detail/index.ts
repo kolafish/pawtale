@@ -1000,7 +1000,7 @@ definePage<TranscriptDetailData>()({
       });
       const job = this.data.shareVideoJob;
       if (job && (job.status === "pending" || job.status === "running")) {
-        this.shareVideoController.resume(job.id);
+        await this.shareVideoController.refresh(job.id);
       }
       return;
     }
@@ -1017,6 +1017,29 @@ definePage<TranscriptDetailData>()({
         ...shareVideoSelectionPatch(context, -1, -1),
         ...shareVideoBackgroundPatch(context),
       });
+      if (context.latest_job_id) {
+        await this.shareVideoController.refresh(context.latest_job_id);
+        const job = this.data.shareVideoJob;
+        if (job) {
+          const firstSegmentIndex = context.segments.findIndex(
+            (segment) => segment.end_char > job.start_char,
+          );
+          let lastSegmentIndex = -1;
+          for (let index = context.segments.length - 1; index >= 0; index -= 1) {
+            if (context.segments[index].start_char < job.end_char) {
+              lastSegmentIndex = index;
+              break;
+            }
+          }
+          const statusText = this.data.shareVideoStatusText;
+          const statusClass = this.data.shareVideoStatusClass;
+          this.setData({
+            ...shareVideoSelectionPatch(context, firstSegmentIndex, lastSegmentIndex),
+            shareVideoStatusText: statusText,
+            shareVideoStatusClass: statusClass,
+          });
+        }
+      }
       trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
     } catch (error) {
       this.setData({
@@ -1748,10 +1771,19 @@ definePage<TranscriptDetailData>()({
   onShow() {
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
     this.startOfflineAsrPollingIfNeeded();
+    const job = this.data.shareVideoJob;
+    if (
+      this.data.shareVideoPanelOpen
+      && job
+      && (job.status === "pending" || job.status === "running")
+    ) {
+      void this.shareVideoController.refresh(job.id);
+    }
   },
 
   onHide() {
     this.stopOfflineAsrPolling();
+    this.shareVideoController.cancel();
   },
 
   onUnload() {

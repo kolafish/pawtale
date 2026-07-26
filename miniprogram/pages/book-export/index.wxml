@@ -154,6 +154,15 @@
           </view>
           <text class="book-design-save-status {{bookTitleSaving ? 'saving' : ''}}">{{bookDesignSaveStatusText}}</text>
         </view>
+        <view
+          wx:if="{{bookEditorialCopyNotice}}"
+          class="book-editorial-copy-notice"
+          aria-role="button"
+          bindtap="openBookHome"
+        >
+          <text class="book-editorial-copy-notice-text">{{bookEditorialCopyNotice}}</text>
+          <text class="book-editorial-copy-notice-action">查看进度</text>
+        </view>
 
         <view class="book-title-editor">
           <input
@@ -235,7 +244,7 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'preface' || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea
@@ -260,7 +269,7 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'afterword' || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea
@@ -285,7 +294,7 @@
               disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'back_cover_quote' || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea

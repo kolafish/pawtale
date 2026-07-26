@@ -450,7 +450,13 @@
               {{shareVideoSharing ? "分享中" : "分享给微信"}}
             </button>
           </view>
-          <view wx:if="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
+          <ai-task-progress
+            wx:if="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+            title="{{shareVideoStatusText || '正在生成视频'}}"
+            detail="{{shareVideoSelectedMetaText}}"
+            mode="indeterminate"
+          />
+          <view wx:elif="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
             <text class="share-video-job-title">{{shareVideoStatusText}}</text>
             <text wx:if="{{shareVideoSelectedMetaText}}" class="share-video-job-meta">{{shareVideoSelectedMetaText}}</text>
           </view>
