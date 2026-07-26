@@ -19,7 +19,7 @@ class AITextClient(Protocol):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
         ...
@@ -41,6 +41,6 @@ class AITextClient(Protocol):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ) -> AsyncIterator[AITextStreamChunk]:
         ...

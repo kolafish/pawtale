@@ -25,6 +25,19 @@ def ai_text_timeout_seconds(
     return max(1.0, float(values[profile]))
 
 
+def effective_ai_text_timeout_seconds(
+    timeout_seconds: float | None,
+    *,
+    settings: Settings | None = None,
+) -> float:
+    if timeout_seconds is None:
+        return ai_text_timeout_seconds(
+            AITextTimeoutProfile.INTERACTIVE,
+            settings=settings,
+        )
+    return max(1.0, float(timeout_seconds))
+
+
 class AIProviderTimeoutError(TimeoutError):
     def __init__(
         self,

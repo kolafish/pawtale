@@ -82,7 +82,7 @@
 - 回忆录小程序实时语音架构以 `docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md` 为准。
 - 回忆录事实来源、素材归属、项目级访谈、成书、缓存、请求和 AI 模型上下文统一以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准；当前物理数据结构和编辑入口见 `docs/MEMOIR_DATA_MODEL_AND_EDITING_GUIDE.md`。
 - 后端数据库始终是事实源；本地缓存必须按用户和项目隔离，持久化结构变化时明确提升缓存 schema、迁移或失效，不能宽泛合并未知旧数据。
-- 小程序 HTTP 只使用共享 `interactive / mutation / generation` timeout profile；后端文本模型只使用共享 `realtime / interactive / generation` profile。业务页面和业务 service 不得复制秒数。
+- 小程序 HTTP 只使用共享 `telemetry / interactive / mutation / generation` timeout profile；后端文本模型只使用共享 `realtime / interactive / generation` profile。业务页面和业务 service 不得复制秒数。
 - Provider timeout 必须短于后端操作、代理和客户端 deadline；超时后的生成结果属于未知，不能自动重复高成本调用。成本高、分多阶段、耗时长或不能安全重试的生成默认设计为可恢复的异步任务，并持久化阶段和进度。
 - 后台任务总截止时间统一由后端 Settings 管理：通用编辑任务 60 分钟、分享视频 30 分钟、书稿导出 4 分钟；小程序媒体传输统一由 transport 管理，普通媒体 1 分钟、书稿导出 5 分钟。租约心跳不能替代任务总截止时间，业务代码不得复制这些数值。
 - 超时或失败记录至少包含 requested model、resolved model、provider、timeout、elapsed 和 error type；用户看到明确中文状态，不能用空错误或英文兜底掩盖根因。

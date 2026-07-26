@@ -4,7 +4,10 @@ import httpx
 
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
-from app.services.ai_timeouts import AIProviderTimeoutError
+from app.services.ai_timeouts import (
+    AIProviderTimeoutError,
+    effective_ai_text_timeout_seconds,
+)
 from app.services.ai_streaming import (
     AITextStreamChunk,
     iter_sse_json_events,
@@ -39,9 +42,10 @@ class VolcArkTextService(AITextServiceBase):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
         payload = {
             "model": self.model,
             "input": [
@@ -73,7 +77,7 @@ class VolcArkTextService(AITextServiceBase):
                             "Content-Type": "application/json",
                         },
                         json=payload,
-                        timeout=timeout,
+                        timeout=request_timeout,
                     )
                     response.raise_for_status()
                     return response.json()
@@ -81,7 +85,7 @@ class VolcArkTextService(AITextServiceBase):
                 raise AIProviderTimeoutError(
                     provider=self.provider_name,
                     model=self.model_name,
-                    timeout_seconds=timeout,
+                    timeout_seconds=request_timeout,
                 ) from exc
 
         result = await provider_concurrency_limiter.run(
@@ -104,8 +108,9 @@ class VolcArkTextService(AITextServiceBase):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ) -> AsyncIterator[AITextStreamChunk]:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
         payload = {
             "model": self.model,
             "input": [
@@ -139,7 +144,7 @@ class VolcArkTextService(AITextServiceBase):
                             "Content-Type": "application/json",
                         },
                         json=payload,
-                        timeout=timeout,
+                        timeout=request_timeout,
                     ) as response:
                         response.raise_for_status()
                         async for event in iter_sse_json_events(response.aiter_lines()):
@@ -150,7 +155,7 @@ class VolcArkTextService(AITextServiceBase):
             raise AIProviderTimeoutError(
                 provider=self.provider_name,
                 model=self.model_name,
-                timeout_seconds=timeout,
+                timeout_seconds=request_timeout,
             ) from exc
 
     def _extract_response_text(self, result: dict) -> str:

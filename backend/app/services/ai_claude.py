@@ -1,7 +1,10 @@
 import httpx
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
-from app.services.ai_timeouts import AIProviderTimeoutError
+from app.services.ai_timeouts import (
+    AIProviderTimeoutError,
+    effective_ai_text_timeout_seconds,
+)
 from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
@@ -38,7 +41,7 @@ class ClaudeTextService(AITextServiceBase):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 90.0,
+        timeout: float | None = None,
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
         """调用 Claude API（通过 OpenAI 兼容代理）
@@ -46,6 +49,7 @@ class ClaudeTextService(AITextServiceBase):
         代理忽略 system role，所以将 system_prompt 合并到 user message。
         """
         merged = f"{system_prompt}\n\n{user_prompt}" if system_prompt.strip() else user_prompt
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
 
         async def request() -> dict:
             try:
@@ -64,7 +68,7 @@ class ClaudeTextService(AITextServiceBase):
                                 {"role": "user", "content": merged},
                             ],
                         },
-                        timeout=timeout,
+                        timeout=request_timeout,
                     )
                     response.raise_for_status()
                     return response.json()
@@ -72,7 +76,7 @@ class ClaudeTextService(AITextServiceBase):
                 raise AIProviderTimeoutError(
                     provider=self.provider_name,
                     model=self.model_name,
-                    timeout_seconds=timeout,
+                    timeout_seconds=request_timeout,
                 ) from exc
 
         result = await provider_concurrency_limiter.run(

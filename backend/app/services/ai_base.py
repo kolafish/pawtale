@@ -35,7 +35,7 @@ class AITextServiceBase(ABC):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
         return_raw: bool = False,
     ) -> str | tuple[str, dict]:
         ...
@@ -46,7 +46,7 @@ class AITextServiceBase(ABC):
         user_prompt: str,
         temperature: float = 0.7,
         max_tokens: int = 4000,
-        timeout: float = 60.0,
+        timeout: float | None = None,
     ) -> AsyncIterator[AITextStreamChunk]:
         raise NotImplementedError(f"{self.provider_name} does not support streaming text generation")
 

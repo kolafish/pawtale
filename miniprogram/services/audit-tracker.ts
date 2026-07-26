@@ -199,7 +199,7 @@ export function flushAuditEvents(): Promise<void> {
       platform: "miniprogram",
       events,
     },
-    timeoutMs: 8000,
+    timeoutProfile: "telemetry",
   })
     .then(() => undefined)
     .catch((error) => {

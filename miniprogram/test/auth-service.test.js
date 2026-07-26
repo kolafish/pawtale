@@ -176,3 +176,16 @@ test("updateBackendProfile patches current user display name", async () => {
   assert.equal(user.display_name, "新昵称");
   delete global.wx;
 });
+
+test("mutation timeout warns that the server result may be unknown", async () => {
+  installWxMock((options) => {
+    options.fail({ errMsg: "request:fail timeout" });
+  });
+  const { updateBackendProfile } = authModule();
+
+  await assert.rejects(
+    updateBackendProfile({ display_name: "新昵称" }),
+    /结果可能仍在处理中，请刷新后确认，不要立即重复提交/,
+  );
+  delete global.wx;
+});

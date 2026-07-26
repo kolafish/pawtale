@@ -319,6 +319,7 @@ class TestCallLlmContract:
         args, kwargs = inst.post.call_args
         assert args[0] == "https://blankapi.com/v1/chat/completions"
         assert kwargs["json"]["model"] == "claude-fable-5"
+        assert kwargs["timeout"] == 60.0
 
     def test_claude_accepts_base_url_with_or_without_v1(self):
         service = ClaudeTextService()
