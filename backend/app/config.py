@@ -47,7 +47,6 @@ class Settings(BaseSettings):
     memoir_share_video_ai_background_enabled: bool = False
     memoir_share_video_scene_planner_enabled: bool = True
     memoir_share_video_scene_planner_model: str = "doubao-seed-2-0-pro-260215"
-    memoir_share_video_scene_planner_timeout_seconds: float = 45.0
 
     # Claude API Keys
     anthropic_auth_token: str = ""
@@ -56,6 +55,9 @@ class Settings(BaseSettings):
     # Default AI Model
     default_ai_model: str = "claude-fable-5"
     ai_text_max_concurrent_requests: int = 3
+    ai_text_realtime_timeout_seconds: float = 15.0
+    ai_text_interactive_timeout_seconds: float = 60.0
+    ai_text_generation_timeout_seconds: float = 180.0
 
     # StepFun batch ASR for user-triggered material reprocessing and offline tools.
     stepfun_api_key: str = ""

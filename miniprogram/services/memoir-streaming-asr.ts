@@ -7,6 +7,7 @@ import type {
   VoiceGatewayServerEvent,
 } from "../domain/voice-chat";
 import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-api";
+import { readSelectedAIModel } from "./ai-model-settings";
 import {
   arrayBufferToBase64,
   classifyVoiceClientConnectionError,
@@ -499,6 +500,7 @@ export class MemoirStreamingAsrClient {
       current_guidance_module: this.options.currentGuidanceModule,
       speaker_role: this.currentSpeakerRole,
       parent_message_id: this.currentParentMessageId || undefined,
+      ai_model: readSelectedAIModel(),
     });
     this.options.callbacks.onStatus("listening");
     this.emitCaptureStats("recording");

@@ -73,10 +73,7 @@ from app.services.memoir.book_output_export import (
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.project_ai_preferences import (
-    project_ai_model as _project_ai_model,
-    remember_project_ai_model as _remember_project_ai_model,
-)
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_tts_types import TTSClient
 
 
@@ -448,9 +445,7 @@ async def regenerate_book_output_editorial_copy(
     if not manuscript:
         raise HTTPException(status_code=400, detail="全书稿结构不可用")
 
-    requested_ai_model = (req.ai_model or "").strip()
-    ai_model = requested_ai_model or _project_ai_model(project)
-    _remember_project_ai_model(project, req.ai_model)
+    ai_model = select_project_ai_model(project, req.ai_model)
     targets = _target_set(req.targets)
     chapter_ids = _chapter_id_set(req.chapter_ids)
     editorial_copy = await generate_manuscript_editorial_copy(
@@ -551,9 +546,7 @@ async def suggest_book_output_titles(
         chapters=chapters,
         source_refs_by_chapter=refs_by_chapter,
     )
-    requested_ai_model = (req.ai_model or "").strip()
-    ai_model = requested_ai_model or _project_ai_model(project)
-    _remember_project_ai_model(project, req.ai_model)
+    ai_model = select_project_ai_model(project, req.ai_model)
     generated = await generate_title_suggestions(
         title=base_title,
         snapshot=snapshot,

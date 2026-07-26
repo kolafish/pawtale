@@ -42,6 +42,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptUpdateRequest,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
@@ -49,6 +50,7 @@ from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
@@ -262,7 +264,7 @@ async def generate_cleaned_transcript_text(
             _build_cleanup_prompt(source_text, context=context),
             temperature=0.2,
             max_tokens=1200,
-            timeout=90.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         )
     except HTTPException as exc:
         if strict and exc.status_code < 500:
@@ -1147,9 +1149,13 @@ async def cleanup_voice_transcript(
 ) -> MemoirVoiceTranscriptItemResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
     source_text = _current_text(utterance)
+    selected_ai_model = select_project_ai_model(
+        utterance.voice_session.project,
+        req.ai_model,
+    )
     cleaned = await generate_cleaned_transcript_text(
         source_text,
-        ai_model=req.ai_model,
+        ai_model=selected_ai_model,
         ai_client=ai_client,
         strict=True,
     )
@@ -1160,7 +1166,7 @@ async def cleanup_voice_transcript(
         version_type=MemoirTranscriptVersionType.DIALECT_CORRECTED,
         created_by=cleaned.created_by,
         provider=cleaned.provider,
-        ai_model=req.ai_model,
+        ai_model=selected_ai_model,
     )
 
 

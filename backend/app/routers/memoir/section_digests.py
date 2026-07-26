@@ -10,6 +10,7 @@ from app.schemas.memoir_section_digests import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import section_digests
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 router = APIRouter(tags=["memoir-section-digests"])
@@ -52,7 +53,7 @@ async def generate_memoir_section_digest(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await load_memoir_project(
+    project = await load_memoir_project(
         db,
         project_id,
         current_user.id,
@@ -62,7 +63,7 @@ async def generate_memoir_section_digest(
         db,
         project_id=project_id,
         section_id=section_id,
-        ai_model=req.ai_model,
+        ai_model=select_project_ai_model(project, req.ai_model),
         force_regenerate=req.force_regenerate,
     )
     await db.commit()

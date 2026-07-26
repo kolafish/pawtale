@@ -6,6 +6,7 @@ import re
 
 from app.config import get_settings
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.json_utils import extract_json_payload
 
 
@@ -493,6 +494,7 @@ async def plan_share_video_background_scenes(
     duration_ms: int,
     *,
     max_scene_count: int | None = None,
+    ai_model: str | None = None,
 ) -> ShareVideoScenePlan:
     settings = get_settings()
     sentences = share_video_sentence_units(selected_text, char_timings, duration_ms)
@@ -505,7 +507,7 @@ async def plan_share_video_background_scenes(
             max_scene_count=max_count,
         )
 
-    model = settings.memoir_share_video_scene_planner_model.strip() or None
+    model = (ai_model or settings.memoir_share_video_scene_planner_model).strip() or None
     try:
         client = get_ai_service(model)
         content = await client._call_llm(
@@ -513,7 +515,7 @@ async def plan_share_video_background_scenes(
             _user_prompt(selected_text, sentences, duration_ms, min_count, max_count),
             temperature=0.2,
             max_tokens=2200,
-            timeout=settings.memoir_share_video_scene_planner_timeout_seconds,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
         )
         payload = extract_json_payload(str(content))
         scenes = _normalize_llm_sentence_scenes(

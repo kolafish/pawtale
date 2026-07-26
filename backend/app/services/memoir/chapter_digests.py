@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import time
 from typing import Any
 
 from fastapi import HTTPException
@@ -20,6 +21,12 @@ from app.models.memoir import (
     MemoirSection,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import (
+    AITextTimeoutProfile,
+    ai_error_metadata,
+    ai_text_timeout_seconds,
+    ai_user_error_message,
+)
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir import completion_issues, section_digests
@@ -28,7 +35,6 @@ from app.services.memoir.semantic_state import semantic_json_signature
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
 CHAPTER_DIGEST_MAX_TOKENS = 8000
-CHAPTER_DIGEST_TIMEOUT_SECONDS = 120.0
 CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录主编。"
     "你根据小章节摘要判断整章的结构和阅读体验，不创造新事实。"
@@ -482,14 +488,16 @@ async def generate_or_reuse_chapter_digest(
         return existing
     prompt = build_chapter_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
+    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
     response_diagnostics: dict[str, object] = {}
+    started_at = time.monotonic()
     try:
         response = await client._call_llm(
             CHAPTER_DIGEST_SYSTEM_PROMPT,
             prompt,
             temperature=0.2,
             max_tokens=CHAPTER_DIGEST_MAX_TOKENS,
-            timeout=CHAPTER_DIGEST_TIMEOUT_SECONDS,
+            timeout=timeout_seconds,
             return_raw=True,
         )
         content, response_json = _llm_response_parts(response)
@@ -543,7 +551,21 @@ async def generate_or_reuse_chapter_digest(
         )
         digest_json = {}
         status = MemoirSemanticCacheStatus.FAILED
-        error = str(exc) or "chapter digest AI unavailable"
+        error = ai_user_error_message(
+            exc,
+            "章节审阅服务暂时不可用，请稍后重试",
+        )
+        response_diagnostics = {
+            **response_diagnostics,
+            **ai_error_metadata(
+                exc,
+                requested_model=ai_model,
+                provider=getattr(client, "provider_name", None),
+                resolved_model=getattr(client, "model_name", ai_model),
+                timeout_seconds=timeout_seconds,
+                elapsed_ms=round((time.monotonic() - started_at) * 1000),
+            ),
+        }
     digest = existing or MemoirChapterDigest(
         project_id=project_id,
         chapter_id=chapter_id,
@@ -556,6 +578,8 @@ async def generate_or_reuse_chapter_digest(
         "provider": getattr(client, "provider_name", None),
         "model": getattr(client, "model_name", ai_model),
         "engine": CHAPTER_DIGEST_ENGINE,
+        "timeout_seconds": timeout_seconds,
+        "elapsed_ms": round((time.monotonic() - started_at) * 1000),
         **response_diagnostics,
     }
     digest.digest_json = {

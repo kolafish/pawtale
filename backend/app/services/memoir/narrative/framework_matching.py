@@ -13,10 +13,12 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import frameworks
+from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.utterance_editing_pipeline import current_utterance_text
 
 
@@ -84,7 +86,7 @@ async def select_framework_matches(
         ),
         temperature=0.0,
         max_tokens=2500,
-        timeout=30.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
     )
     payload = extract_json_payload(str(content))
     if not isinstance(payload, dict) or not isinstance(
@@ -224,10 +226,10 @@ async def run_framework_matching_job(
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="topic_map_materials_unavailable",
         )
-    model = (
-        payload["ai_model"]
-        if isinstance(payload.get("ai_model"), str)
-        else None
+    model = await load_project_ai_model(
+        db,
+        job.project_id,
+        payload["ai_model"] if isinstance(payload.get("ai_model"), str) else None,
     )
     client = ai_client or get_ai_service(model)
     matches = await select_framework_matches(

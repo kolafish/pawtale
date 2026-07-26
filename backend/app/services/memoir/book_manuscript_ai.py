@@ -13,6 +13,7 @@ from app.services.ai_factory import (
     VOLC_DOUBAO_PRO_MODEL,
     get_ai_service,
 )
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 
@@ -456,7 +457,7 @@ async def generate_manuscript_editorial_copy(
             prompt,
             temperature=0.35,
             max_tokens=1800,
-            timeout=90.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -496,7 +497,7 @@ async def generate_title_suggestions(
             prompt,
             temperature=0.55,
             max_tokens=800,
-            timeout=60.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
         )
     except HTTPException as exc:
         if exc.status_code < 500:

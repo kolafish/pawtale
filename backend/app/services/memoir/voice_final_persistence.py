@@ -115,6 +115,7 @@ class VoiceFinalPersistenceService:
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
         speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
         parent_message_id: str | None = None,
+        ai_model: str | None = None,
     ) -> VoiceFinalPersistenceResult:
         owned_staged_audio = staged_audio
         try:
@@ -203,6 +204,7 @@ class VoiceFinalPersistenceService:
                     utterance_id=utterance.id,
                     voice_session_id=voice_session.id,
                     raw_transcript_version_id=transcript_version.id,
+                    ai_model=ai_model,
                 )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
@@ -224,6 +226,7 @@ class VoiceFinalPersistenceService:
         staged_audio: memoir_audio_files.StagedAudioFile | None = None,
         speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
         parent_message_id: str | None = None,
+        ai_model: str | None = None,
     ) -> VoiceFinalPersistenceResult:
         return await self.persist_segment(
             event,
@@ -231,6 +234,7 @@ class VoiceFinalPersistenceService:
             staged_audio=staged_audio,
             speaker_role=speaker_role,
             parent_message_id=parent_message_id,
+            ai_model=ai_model,
         )
 
     async def persist_unfinalized_audio(

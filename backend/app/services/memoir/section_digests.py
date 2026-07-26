@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
 import re
+import time
 from typing import Any
 
 from fastapi import HTTPException
@@ -19,6 +20,12 @@ from app.models.memoir import (
 )
 from app.schemas.memoir_section_digests import MemoirSectionDigestResponse
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import (
+    AITextTimeoutProfile,
+    ai_error_metadata,
+    ai_text_timeout_seconds,
+    ai_user_error_message,
+)
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.semantic_state import (
@@ -63,6 +70,8 @@ class SectionDigestGeneration:
     provider: str | None
     model: str | None
     prompt: str
+    timeout_seconds: float
+    elapsed_ms: int
 
 
 def _compact_text(value: object) -> str:
@@ -310,13 +319,16 @@ async def generate_section_digest_payload(
 ) -> SectionDigestGeneration:
     prompt = build_section_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
+    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
+    started_at = time.monotonic()
     content = await client._call_llm(
         SECTION_DIGEST_SYSTEM_PROMPT,
         prompt,
         temperature=0.2,
         max_tokens=1800,
-        timeout=60.0,
+        timeout=timeout_seconds,
     )
+    elapsed_ms = round((time.monotonic() - started_at) * 1000)
     payload = extract_json_payload(str(content))
     included_ids = {
         material.material_id
@@ -331,6 +343,8 @@ async def generate_section_digest_payload(
         provider=getattr(client, "provider_name", None),
         model=getattr(client, "model_name", ai_model),
         prompt=prompt,
+        timeout_seconds=timeout_seconds,
+        elapsed_ms=elapsed_ms,
     )
 
 
@@ -477,11 +491,14 @@ async def generate_or_reuse_section_digest(
             digest_json={},
             error_message="section has no included material",
         )
+    client = ai_client or get_ai_service(ai_model)
+    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
+    started_at = time.monotonic()
     try:
         generated = await generate_section_digest_payload(
             context,
             ai_model=ai_model,
-            ai_client=ai_client,
+            ai_client=client,
         )
     except Exception as exc:
         logger.exception(
@@ -493,8 +510,23 @@ async def generate_or_reuse_section_digest(
             context=context,
             engine=engine,
             status=MemoirSemanticCacheStatus.FAILED,
-            digest_json={},
-            error_message=str(exc) or "section digest AI unavailable",
+            digest_json={
+                "generation": {
+                    **ai_error_metadata(
+                        exc,
+                        requested_model=ai_model,
+                        provider=getattr(client, "provider_name", None),
+                        resolved_model=getattr(client, "model_name", ai_model),
+                        timeout_seconds=timeout_seconds,
+                        elapsed_ms=round((time.monotonic() - started_at) * 1000),
+                    ),
+                    "engine": engine,
+                }
+            },
+            error_message=ai_user_error_message(
+                exc,
+                "小节审阅服务暂时不可用，请稍后重试",
+            ),
         )
     return await _upsert_digest(
         db,
@@ -504,9 +536,12 @@ async def generate_or_reuse_section_digest(
         digest_json={
             **generated.digest_json,
             "generation": {
+                "requested_model": ai_model,
                 "provider": generated.provider,
                 "model": generated.model,
                 "engine": engine,
+                "timeout_seconds": generated.timeout_seconds,
+                "elapsed_ms": generated.elapsed_ms,
             },
         },
     )

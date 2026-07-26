@@ -7,7 +7,7 @@
 - [README.md](./README.md)：项目入口和常用命令；
 - [PRODUCT.md](./PRODUCT.md)：当前功能和用户动线；
 - [TECH.md](./TECH.md)：当前代码边界；
-- [回忆录架构文档](./docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)：回忆录事实与成书不变量。
+- [回忆录主架构文档](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)：回忆录事实、访谈、成书、缓存与请求不变量。
 
 常用验证：
 

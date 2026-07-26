@@ -16,9 +16,11 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述记录修正助手，只能按用户明确指出的细节错误修正当前这一条讲述记录。"
@@ -34,6 +36,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class TranscriptVoiceEditContext:
     utterance: MemoirVoiceUtterance
+    project: Project
     current_text: str
     included_chapter_titles: tuple[str, ...]
 
@@ -54,7 +57,9 @@ async def _load_owned_context(
         .join(Project, MemoirVoiceSession.project_id == Project.id)
         .where(MemoirVoiceUtterance.id == utterance_id, Project.user_id == user_id)
         .options(
-            selectinload(MemoirVoiceUtterance.voice_session),
+            selectinload(MemoirVoiceUtterance.voice_session).selectinload(
+                MemoirVoiceSession.project
+            ),
             selectinload(MemoirVoiceUtterance.chat_message).selectinload(MemoirChatMessage.parent_message),
         )
     )
@@ -70,6 +75,7 @@ async def _load_owned_context(
     )
     return TranscriptVoiceEditContext(
         utterance=utterance,
+        project=utterance.voice_session.project,
         current_text=current_text,
         included_chapter_titles=tuple(included_chapter_titles),
     )
@@ -298,16 +304,17 @@ async def preview_voice_transcript_edit(
     ai_client: AITextClient | None = None,
 ) -> MemoirVoiceTranscriptVoiceEditPreviewResponse:
     context = await _load_owned_context(db, utterance_id=utterance_id, user_id=user_id)
+    selected_ai_model = select_project_ai_model(context.project, req.ai_model)
     client = ai_client
     try:
         if client is None:
-            client = get_ai_service(req.ai_model)
+            client = get_ai_service(selected_ai_model)
         raw = await client._call_llm(
             SYSTEM_PROMPT,
             _build_prompt(context, req.instruction_text),
             temperature=0.1,
             max_tokens=1600,
-            timeout=90.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -315,23 +322,29 @@ async def preview_voice_transcript_edit(
         logger.exception(
             "AI transcript voice edit failed provider=%s model=%s",
             getattr(client, "provider_name", "unknown"),
-            getattr(client, "model_name", req.ai_model or "default"),
+            getattr(client, "model_name", selected_ai_model or "default"),
         )
         raise HTTPException(status_code=503, detail=VOICE_EDIT_UNAVAILABLE_MESSAGE) from exc
     except Exception as exc:
         logger.exception(
             "AI transcript voice edit failed provider=%s model=%s",
             getattr(client, "provider_name", "unknown"),
-            getattr(client, "model_name", req.ai_model or "default"),
+            getattr(client, "model_name", selected_ai_model or "default"),
         )
         raise HTTPException(status_code=503, detail=VOICE_EDIT_UNAVAILABLE_MESSAGE) from exc
 
     payload = extract_json_payload(str(raw))
     if not isinstance(payload, dict):
+        logger.warning(
+            "AI transcript voice edit returned invalid JSON provider=%s model=%s response_length=%s",
+            getattr(client, "provider_name", "unknown"),
+            getattr(client, "model_name", selected_ai_model or "default"),
+            len(str(raw)),
+        )
         raise HTTPException(status_code=502, detail=VOICE_EDIT_INVALID_RESPONSE_MESSAGE)
     return _response_from_payload(
         context=context,
         payload=payload,
         provider=getattr(client, "provider_name", None),
-        model=getattr(client, "model_name", req.ai_model),
+        model=getattr(client, "model_name", selected_ai_model),
     )

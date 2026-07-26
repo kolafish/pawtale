@@ -49,6 +49,7 @@ from app.services.memoir.share_video_alignment import (
     share_video_char_range_ms,
 )
 from app.services.memoir.share_video_metadata import ShareVideoJobMetadata
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 
@@ -192,6 +193,10 @@ async def create_share_video_job(
     allow_admin: bool = False,
 ) -> MemoirShareVideoJobResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
+    selected_ai_model = select_project_ai_model(
+        utterance.voice_session.project,
+        req.ai_model,
+    )
     alignment = build_share_video_alignment(utterance)
     start_char, end_char = _trim_selection(alignment.transcript_text, req.start_char, req.end_char)
     start_ms, end_ms = share_video_char_range_ms(alignment, start_char, end_char)
@@ -254,6 +259,7 @@ async def create_share_video_job(
             alignment_strategy=alignment.strategy,
             alignment_confidence=alignment.confidence,
             char_timings=alignment.char_timings[start_char:end_char],
+            ai_model=selected_ai_model,
             background_source=background_source,
             background_style=background_style,
             background_mode=background_mode,

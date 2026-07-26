@@ -80,10 +80,11 @@
 ## Memoir Product Architecture Context
 
 - 回忆录小程序实时语音架构以 `docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md` 为准。
-- 项目级访谈与成书协作架构以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准，并同时遵守 `docs/MEMOIR_NARRATIVE_ARCHITECTURE.md` 的事实与成书质量不变量。
-- 回忆录客户端缓存、服务端数据版本、认证请求、超时和 AI 模型上下文以 `docs/MEMOIR_CLIENT_DATA_AND_REQUEST_ARCHITECTURE.md` 为准。
+- 回忆录事实来源、素材归属、项目级访谈、成书、缓存、请求和 AI 模型上下文统一以 `docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md` 为准；当前物理数据结构和编辑入口见 `docs/MEMOIR_DATA_MODEL_AND_EDITING_GUIDE.md`。
 - 后端数据库始终是事实源；本地缓存必须按用户和项目隔离，持久化结构变化时明确提升缓存 schema、迁移或失效，不能宽泛合并未知旧数据。
-- 回忆录 HTTP 请求使用共享 timeout profile；新增生成能力不能在页面或业务 service 中复制毫秒数。成本高、耗时长或不能安全重试的生成默认设计为可恢复的异步任务。
+- 小程序 HTTP 只使用共享 `interactive / mutation / generation` timeout profile；后端文本模型只使用共享 `realtime / interactive / generation` profile。业务页面和业务 service 不得复制秒数。
+- Provider timeout 必须短于后端操作、代理和客户端 deadline；超时后的生成结果属于未知，不能自动重复高成本调用。成本高、分多阶段、耗时长或不能安全重试的生成默认设计为可恢复的异步任务，并持久化阶段和进度。
+- 超时或失败记录至少包含 requested model、resolved model、provider、timeout、elapsed 和 error type；用户看到明确中文状态，不能用空错误或英文兜底掩盖根因。
 - 用户选择的 AI 模型必须沿客户端、API schema、workflow 和 provider 完整传递，并记录 requested / resolved model；不能因中间层漏传而静默换用默认模型。
 - 产品形态是 `VAD + Streaming ASR + LLM Dynamic Follow-up + Streaming TTS`，以 voice session、chat message、realtime transcript、audio evidence 为核心。
 - 创建/开始访谈时要区分 `free_narration` 弱引导和 `guided_interview` 强引导：弱引导支持叙述者按时间线自主讲述，强引导由 AI 按人物、事件、地点、时间段、主题等模块推进。

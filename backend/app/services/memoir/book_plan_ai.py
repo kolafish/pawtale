@@ -8,6 +8,7 @@ from fastapi import HTTPException
 
 from app.schemas.memoir_book import MemoirBookChapterSourceRef, MemoirBookPlanChapterInput
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_plan_sources import SourceSegment
@@ -225,7 +226,7 @@ async def generate_book_plan_from_sources(
             prompt,
             temperature=0.2,
             max_tokens=2400,
-            timeout=120.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         )
     except HTTPException as exc:
         if exc.status_code < 500:
@@ -262,7 +263,7 @@ async def generate_chapter_title_from_sources(
             prompt,
             temperature=0.25,
             max_tokens=160,
-            timeout=60.0,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
         )
     except HTTPException as exc:
         if exc.status_code < 500:

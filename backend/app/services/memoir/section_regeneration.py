@@ -27,6 +27,7 @@ from app.models.memoir import (
 )
 from app.schemas.memoir_sections import MemoirSectionRegenerateRequest
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.access import load_memoir_project
@@ -39,10 +40,7 @@ from app.services.memoir.material_organization import (
     normalize_material_organization_decision,
 )
 from app.services.memoir.material_roles import is_narrator_material
-from app.services.memoir.project_ai_preferences import (
-    project_ai_model,
-    remember_project_ai_model,
-)
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.section_roles import (
     PENDING_ASSIGNMENT_SECTION_ROLE,
     PENDING_ASSIGNMENT_SECTION_TITLE,
@@ -313,7 +311,7 @@ async def _plan_section_candidates(
         prompt,
         temperature=0.1,
         max_tokens=2400,
-        timeout=120.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
     )
     return _normalize_section_candidates(
         extract_json_payload(str(content)),
@@ -413,7 +411,7 @@ async def _assign_material_batch(
         prompt,
         temperature=0.1,
         max_tokens=min(6000, max(1200, 600 + len(materials) * 160)),
-        timeout=120.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
     )
     data = extract_json_payload(str(content))
     raw_assignments = data.get("assignments") if isinstance(data, dict) else None
@@ -574,9 +572,7 @@ async def regenerate_chapter_sections(
         user_id,
         allow_admin=allow_admin,
     )
-    requested_ai_model = (req.ai_model or "").strip()
-    selected_ai_model = requested_ai_model or project_ai_model(project)
-    remember_project_ai_model(project, requested_ai_model)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     chapter = await _load_chapter(
         db,
         project_id=project_id,
@@ -786,9 +782,7 @@ async def enqueue_chapter_section_regeneration(
     )
     _validate_expected_sections(chapter, req)
     materials = _material_snapshots(chapter)
-    requested_ai_model = (req.ai_model or "").strip() or project_ai_model(
-        project
-    )
+    requested_ai_model = select_project_ai_model(project, req.ai_model)
     job = await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
@@ -809,7 +803,6 @@ async def enqueue_chapter_section_regeneration(
         },
     )
     if job.status == MemoirEditingJobStatus.PENDING.value:
-        remember_project_ai_model(project, (req.ai_model or "").strip())
         job.result_json = {
             "stage": "queued",
             "material_count": len(materials),

@@ -24,6 +24,7 @@ from app.models.memoir_narrative import (
     MemoirInterviewPolicyDecision,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
@@ -117,7 +118,7 @@ async def select_response_outcome(
         ),
         temperature=0.0,
         max_tokens=80,
-        timeout=15.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.REALTIME),
     )
     payload = extract_json_payload(str(content))
     if not isinstance(payload, dict):

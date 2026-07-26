@@ -184,6 +184,7 @@ async def prepare_share_video_background(
             job.selected_text,
             char_timings,
             duration_ms,
+            ai_model=metadata.ai_model,
         )
         metadata.background_status = "generating"
         metadata.background_scene_plan = ShareVideoScenePlanMetadata.model_validate(

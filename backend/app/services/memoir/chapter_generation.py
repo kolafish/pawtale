@@ -33,6 +33,11 @@ from app.schemas.memoir_chapter_pipeline import (
     MemoirLayeredChapterDraftVersionResponse,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import (
+    AIProviderTimeoutError,
+    AITextTimeoutProfile,
+    ai_text_timeout_seconds,
+)
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_output_state import invalidate_book_output
@@ -597,7 +602,7 @@ async def generate_chapter_section(
                 attempt_prompt,
                 temperature=0.2 if revision_instruction else 0.3,
                 max_tokens=5000,
-                timeout=120.0,
+                timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
             )
             generated = normalize_generated_chapter(
                 extract_json_payload(str(raw)),
@@ -609,6 +614,10 @@ async def generate_chapter_section(
                 generated.sections[0].content,
             )
             return generated
+        except AIProviderTimeoutError as exc:
+            raise ValueError(
+                f"小节“{section.title}”正文生成超时：{exc}"
+            ) from exc
         except (ValueError, httpx.HTTPError) as exc:
             last_error = exc
             logger.warning(

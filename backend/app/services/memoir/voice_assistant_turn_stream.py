@@ -18,12 +18,14 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
+from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.tts_alignment import alignment_segments_to_json
 from app.services.memoir.voice_followup_ai import (
     GUIDED_TOPIC_MENU,
@@ -66,7 +68,6 @@ from app.services.memoir.voice_tts_types import (
 
 STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v2"
 STREAM_TEXT_TEMPERATURE = 0.72
-STREAM_TEXT_TIMEOUT_SECONDS = 60.0
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
 
@@ -279,6 +280,14 @@ class VoiceAssistantTurnStreamSession:
         cancel_event: asyncio.Event,
     ) -> None:
         voice_session = await load_voice_session(self.db, self.voice_session_id, self.user_id)
+        req = replace(
+            req,
+            ai_model=await load_project_ai_model(
+                self.db,
+                voice_session.project_id,
+                req.ai_model,
+            ),
+        )
         previous_messages = await load_previous_project_messages(self.db, voice_session)
         messages = list(voice_session.messages)
         has_user_message = _has_user_message(messages)
@@ -634,7 +643,7 @@ class VoiceAssistantTurnStreamSession:
             prompt,
             temperature=req.temperature,
             max_tokens=max_tokens,
-            timeout=STREAM_TEXT_TIMEOUT_SECONDS,
+            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
         ):
             if cancel_event.is_set():
                 return

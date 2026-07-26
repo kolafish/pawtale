@@ -1,6 +1,7 @@
 import httpx
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
@@ -47,25 +48,32 @@ class ClaudeTextService(AITextServiceBase):
         merged = f"{system_prompt}\n\n{user_prompt}" if system_prompt.strip() else user_prompt
 
         async def request() -> dict:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    self._chat_completions_url(),
-                    headers={
-                        "Authorization": f"Bearer {self.auth_token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "max_tokens": max_tokens,
-                        "temperature": temperature,
-                        "messages": [
-                            {"role": "user", "content": merged},
-                        ],
-                    },
-                    timeout=timeout,
-                )
-                response.raise_for_status()
-                return response.json()
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        self._chat_completions_url(),
+                        headers={
+                            "Authorization": f"Bearer {self.auth_token}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "max_tokens": max_tokens,
+                            "temperature": temperature,
+                            "messages": [
+                                {"role": "user", "content": merged},
+                            ],
+                        },
+                        timeout=timeout,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.TimeoutException as exc:
+                raise AIProviderTimeoutError(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    timeout_seconds=timeout,
+                ) from exc
 
         result = await provider_concurrency_limiter.run(
             "ai_text",

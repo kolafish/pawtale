@@ -42,6 +42,16 @@ interface ShareVideoJobOptions {
   customBackgroundAssetId?: string;
 }
 
+interface ShareVideoJobRequest {
+  start_char: number;
+  end_char: number;
+  ai_model: string | null;
+  background_source?: string;
+  background_style?: string;
+  background_mode?: string;
+  custom_background_asset_id?: string;
+}
+
 export function listMemoirVoiceTranscripts(
   options: VoiceTranscriptListOptions = {},
 ): Promise<MemoirVoiceTranscriptListResponse> {
@@ -91,18 +101,16 @@ export function createMemoirTranscriptShareVideoJob(
   endChar: number,
   options: ShareVideoJobOptions = {},
 ): Promise<MemoirShareVideoJob> {
-  return memoirRequest<MemoirShareVideoJob>(
+  return memoirAIRequest<MemoirShareVideoJob, ShareVideoJobRequest>(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/share-video/jobs`,
     {
-      method: "POST",
-      data: {
-        start_char: startChar,
-        end_char: endChar,
-        ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
-        ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
-        ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
-        ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
-      },
+      start_char: startChar,
+      end_char: endChar,
+      ai_model: null,
+      ...(options.backgroundSource ? { background_source: options.backgroundSource } : {}),
+      ...(options.backgroundStyle ? { background_style: options.backgroundStyle } : {}),
+      ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
+      ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
     },
   );
 }

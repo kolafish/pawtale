@@ -11,8 +11,7 @@
 - voice session、消息和转写的持久化；
 - 自由讲述、主题讲述和成书补讲共用的语音状态机。
 
-素材、Section、章节正文和成书补全边界见
-`MEMOIR_NARRATIVE_ARCHITECTURE.md`；主题访谈和成书补全协作见
+素材、Section、章节正文、缓存、请求和成书补全边界统一见
 `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`。
 
 ## 一、产品形态

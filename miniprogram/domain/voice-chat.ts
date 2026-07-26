@@ -334,6 +334,7 @@ export type VoiceGatewayClientEvent =
       current_guidance_module?: string;
       speaker_role?: MemoirSpeakerRole;
       parent_message_id?: string;
+      ai_model?: string;
     }
   | { type: "audio.frame"; audio: string }
   | { type: "audio.end" }

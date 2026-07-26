@@ -105,6 +105,7 @@ class VoiceGatewayPersistence:
         self._turn_context = VoiceGatewayTurnContext(
             speaker_role=speaker_role,
             parent_message_id=context.parent_message_id,
+            ai_model=context.ai_model,
         )
 
     async def record_audio_frame(self, audio: bytes) -> None:
@@ -117,6 +118,7 @@ class VoiceGatewayPersistence:
             staged_audio=staged_audio,
             speaker_role=self._turn_context.speaker_role,
             parent_message_id=self._turn_context.parent_message_id,
+            ai_model=self._turn_context.ai_model,
         )
         await self._pending_audio.mark_committed()
         return result.as_gateway_payload()

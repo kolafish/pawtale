@@ -4,6 +4,7 @@ import httpx
 
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_streaming import (
     AITextStreamChunk,
     iter_sse_json_events,
@@ -63,18 +64,25 @@ class VolcArkTextService(AITextServiceBase):
             payload["thinking"] = {"type": self.thinking_type}
 
         async def request() -> dict:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/responses",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                    timeout=timeout,
-                )
-                response.raise_for_status()
-                return response.json()
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        f"{self.base_url}/responses",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=timeout,
+                    )
+                    response.raise_for_status()
+                    return response.json()
+            except httpx.TimeoutException as exc:
+                raise AIProviderTimeoutError(
+                    provider=self.provider_name,
+                    model=self.model_name,
+                    timeout_seconds=timeout,
+                ) from exc
 
         result = await provider_concurrency_limiter.run(
             "ai_text",
@@ -120,23 +128,30 @@ class VolcArkTextService(AITextServiceBase):
         if self.thinking_type:
             payload["thinking"] = {"type": self.thinking_type}
 
-        async with provider_concurrency_limiter.slot("ai_text", self.max_concurrent_requests):
-            async with httpx.AsyncClient() as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/responses",
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=payload,
-                    timeout=timeout,
-                ) as response:
-                    response.raise_for_status()
-                    async for event in iter_sse_json_events(response.aiter_lines()):
-                        chunk: AITextStreamChunk | None = volc_responses_stream_chunk(event)
-                        if chunk:
-                            yield chunk
+        try:
+            async with provider_concurrency_limiter.slot("ai_text", self.max_concurrent_requests):
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST",
+                        f"{self.base_url}/responses",
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for event in iter_sse_json_events(response.aiter_lines()):
+                            chunk: AITextStreamChunk | None = volc_responses_stream_chunk(event)
+                            if chunk:
+                                yield chunk
+        except httpx.TimeoutException as exc:
+            raise AIProviderTimeoutError(
+                provider=self.provider_name,
+                model=self.model_name,
+                timeout_seconds=timeout,
+            ) from exc
 
     def _extract_response_text(self, result: dict) -> str:
         output_text = result.get("output_text")
