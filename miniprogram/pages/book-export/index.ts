@@ -516,7 +516,7 @@ definePage<BookExportData>()({
     if (!isBookLevelEditorialCopyTarget(target)) {
       return;
     }
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === target || this.data.bookTitleSaving) {
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);

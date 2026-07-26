@@ -452,6 +452,7 @@
           </view>
           <ai-task-progress
             wx:if="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
+            class="share-video-task-progress"
             title="{{shareVideoStatusText || '正在生成视频'}}"
             detail="{{shareVideoSelectedMetaText}}"
             mode="indeterminate"

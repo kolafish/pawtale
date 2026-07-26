@@ -290,6 +290,44 @@ test("book export page suggests titles and queues book-level editorial copy", as
   delete global.wx;
 });
 
+test("book export page submits only one editorial copy task at a time", async () => {
+  const editorialRequests = [];
+  let resolveEnqueue;
+  global.wx = {
+    showToast() {},
+  };
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, payload) => {
+      editorialRequests.push({ projectId, payload });
+      await new Promise((resolve) => {
+        resolveEnqueue = resolve;
+      });
+      return { id: "event-1" };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  const firstSubmission = page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "preface" } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "afterword" } },
+  });
+
+  assert.deepEqual(editorialRequests, [{
+    projectId: "project/1",
+    payload: { targets: ["preface"] },
+  }]);
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "preface");
+
+  resolveEnqueue();
+  await firstSubmission;
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  delete global.wx;
+});
+
 test("book export page downloads selected PDF layout and source appendix setting", async () => {
   const exportCalls = [];
   const opened = [];

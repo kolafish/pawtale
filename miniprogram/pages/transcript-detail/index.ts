@@ -1771,19 +1771,10 @@ definePage<TranscriptDetailData>()({
   onShow() {
     this.setData({ pageClass: accessibilityPageClass("detail-page") });
     this.startOfflineAsrPollingIfNeeded();
-    const job = this.data.shareVideoJob;
-    if (
-      this.data.shareVideoPanelOpen
-      && job
-      && (job.status === "pending" || job.status === "running")
-    ) {
-      void this.shareVideoController.refresh(job.id);
-    }
   },
 
   onHide() {
     this.stopOfflineAsrPolling();
-    this.shareVideoController.cancel();
   },
 
   onUnload() {

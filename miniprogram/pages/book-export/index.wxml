@@ -241,7 +241,7 @@
               class="book-editorial-generate"
               data-target="preface"
               loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'preface' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
               {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交" : "重写"}}
@@ -266,7 +266,7 @@
               class="book-editorial-generate"
               data-target="afterword"
               loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'afterword' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
               {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交" : "重写"}}
@@ -291,7 +291,7 @@
               class="book-editorial-generate"
               data-target="back_cover_quote"
               loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'back_cover_quote' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
               {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交" : "重写"}}

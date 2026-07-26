@@ -975,7 +975,7 @@ test("transcript detail page restores the latest matching share video job after 
   assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
   assert.equal(context.data.shareVideoStatusText, "视频任务已创建，等待生成");
 
-  page.onHide.call(context);
+  context.shareVideoController.cancel();
   assert.equal(context.data.shareVideoPolling, false);
 });
 
