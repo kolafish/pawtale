@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings, validate_runtime_settings
 from app.database import engine
@@ -9,6 +10,7 @@ from app.routers import audit_router, auth_router, github_router, memoir_router,
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop
 from app.services.memoir.share_video_jobs import share_video_worker_loop
+from app.services.ai_factory import UnsupportedAIModelError
 
 
 @asynccontextmanager
@@ -48,6 +50,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(UnsupportedAIModelError)
+async def unsupported_ai_model_handler(_request, exc: UnsupportedAIModelError):
+    return JSONResponse(status_code=422, content={"detail": str(exc)})
 
 # 注册路由
 app.include_router(auth_router)

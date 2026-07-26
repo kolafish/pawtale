@@ -17,6 +17,7 @@ from app.domain.memoir.types import (
     MemoirSessionGoal,
 )
 from app.models.memoir import MemoirChatMessage, MemoirVoiceSession
+from app.services.ai_calls import stream_text_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
@@ -121,6 +122,10 @@ class AssistantTurnArtifacts:
     text: str = ""
     finish_reason: str | None = None
     usage: dict = field(default_factory=dict)
+    ai_provider: str | None = None
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    response_ai_model: str | None = None
     audio_chunks: list[bytes] = field(default_factory=list)
     audio_mime_type: str | None = None
     tts_provider: str | None = None
@@ -146,6 +151,14 @@ class AssistantTurnArtifacts:
             self.tts_speed_ratio = chunk.speed_ratio
             self.tts_duration_seconds = chunk.duration_seconds
             self.tts_alignment.extend(chunk.alignment)
+
+    @property
+    def ai_model_mismatch(self) -> bool:
+        return bool(
+            self.resolved_ai_model
+            and self.response_ai_model
+            and self.resolved_ai_model != self.response_ai_model
+        )
 
     @property
     def audio(self) -> bytes:
@@ -326,7 +339,11 @@ class VoiceAssistantTurnStreamSession:
         tts_client = self.tts_client_factory()
         persona = interviewer_persona_for_voice(req.voice or tts_client.default_voice)
         ai_client = self.ai_client_factory(req.ai_model)
-        artifacts = AssistantTurnArtifacts()
+        artifacts = AssistantTurnArtifacts(
+            ai_provider=ai_client.provider_name,
+            requested_ai_model=req.ai_model,
+            resolved_ai_model=ai_client.model_name,
+        )
 
         await self.client.send_json(
             {
@@ -336,6 +353,8 @@ class VoiceAssistantTurnStreamSession:
                 "state": "streaming",
                 "ai_provider": ai_client.provider_name,
                 "ai_model": ai_client.model_name,
+                "requested_ai_model": req.ai_model,
+                "resolved_ai_model": ai_client.model_name,
                 "tts_provider": tts_client.provider_name,
                 "tts_model": tts_client.model_name,
                 "host_name": persona.host_name,
@@ -529,6 +548,10 @@ class VoiceAssistantTurnStreamSession:
                 "host_name": persona.host_name,
                 "finish_reason": artifacts.finish_reason,
                 "usage": artifacts.usage,
+                "requested_ai_model": artifacts.requested_ai_model,
+                "resolved_ai_model": artifacts.resolved_ai_model,
+                "response_ai_model": artifacts.response_ai_model,
+                "ai_model_mismatch": artifacts.ai_model_mismatch,
                 "progress_update": project_progress_context.progress_update,
                 "progress_update_used": project_progress_context.progress_update is not None,
                 "progress_spoken_text": project_progress_context.speech_prefix,
@@ -638,9 +661,11 @@ class VoiceAssistantTurnStreamSession:
     ) -> None:
         initial_text_buffer = ""
         initial_text_resolved = False
-        async for chunk in ai_client.stream_llm(
+        async for chunk in stream_text_with_client(
+            ai_client,
             system_prompt,
             prompt,
+            requested_model=req.ai_model,
             temperature=req.temperature,
             max_tokens=max_tokens,
             timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
@@ -649,7 +674,17 @@ class VoiceAssistantTurnStreamSession:
                 return
             artifacts.finish_reason = chunk.finish_reason or artifacts.finish_reason
             if chunk.usage:
-                artifacts.usage = chunk.usage
+                artifacts.usage.update(chunk.usage)
+            artifacts.ai_provider = chunk.provider or artifacts.ai_provider
+            artifacts.requested_ai_model = (
+                chunk.requested_model or artifacts.requested_ai_model
+            )
+            artifacts.resolved_ai_model = (
+                chunk.resolved_model or artifacts.resolved_ai_model
+            )
+            artifacts.response_ai_model = (
+                chunk.response_model or artifacts.response_ai_model
+            )
             if not chunk.text_delta:
                 continue
             text_delta = chunk.text_delta
@@ -757,8 +792,16 @@ class VoiceAssistantTurnStreamSession:
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
                     "parsed_json": turn.parsed_json,
-                    "provider": ai_client.provider_name,
-                    "model": ai_client.model_name,
+                    "provider": artifacts.ai_provider or ai_client.provider_name,
+                    "model": (
+                        artifacts.resolved_ai_model or ai_client.model_name
+                    ),
+                    "requested_model": artifacts.requested_ai_model,
+                    "resolved_model": (
+                        artifacts.resolved_ai_model or ai_client.model_name
+                    ),
+                    "response_model": artifacts.response_ai_model,
+                    "model_mismatch": artifacts.ai_model_mismatch,
                     "max_tokens": max_tokens,
                     "temperature": req.temperature,
                     "regenerate": req.regenerate,

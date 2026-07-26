@@ -47,13 +47,12 @@ def test_get_ai_service_uses_configured_default(monkeypatch, default_model, expe
     assert service.model_name == expected_model
 
 
-def test_get_ai_service_invalid_model_falls_back_to_configured_default(monkeypatch):
-    monkeypatch.setattr("app.services.ai_factory.settings.default_ai_model", "claude-fable-5")
-
-    service = ai_factory.get_ai_service("invalid-model")
-
-    assert isinstance(service, ClaudeTextService)
-    assert service.model_name == "claude-fable-5"
+def test_get_ai_service_rejects_invalid_model():
+    with pytest.raises(
+        ai_factory.UnsupportedAIModelError,
+        match="不支持的 AI 模型",
+    ):
+        ai_factory.get_ai_service("invalid-model")
 
 
 @pytest.mark.parametrize(

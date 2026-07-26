@@ -8,7 +8,7 @@ from app.services.ai_claude import (
     ClaudeTextService,
 )
 from app.services.ai_volc import VolcArkTextService
-from app.config import get_settings
+from app.config import DEFAULT_AI_TEXT_MODEL, VALID_AI_TEXT_MODELS, get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -18,12 +18,25 @@ DEEPSEEK_V4_PRO_MODEL = "deepseek-v4-pro"
 VOLC_DOUBAO_PRO_MODEL = "doubao-seed-2-0-pro-260215"
 
 
+class UnsupportedAIModelError(ValueError):
+    pass
+
+
+def ensure_supported_ai_model(model: str) -> str:
+    normalized = model.strip().lower()
+    if normalized not in VALID_AI_TEXT_MODELS:
+        raise UnsupportedAIModelError(f"不支持的 AI 模型：{model}")
+    return normalized
+
+
 class AIServiceFactory:
     """AI服务工厂"""
 
     @staticmethod
     def _get_default_service() -> AITextServiceBase:
-        default_model = (settings.default_ai_model or CLAUDE_FABLE_MODEL).lower()
+        default_model = ensure_supported_ai_model(
+            settings.default_ai_model or DEFAULT_AI_TEXT_MODEL
+        )
 
         if default_model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
             return DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
@@ -33,9 +46,13 @@ class AIServiceFactory:
             return VolcArkTextService()
         if default_model == CLAUDE_OPUS_4_8_MODEL:
             return ClaudeTextService(model=CLAUDE_OPUS_4_8_MODEL)
-        if default_model == "claude-sonnet-4":
+        if default_model in {"claude-sonnet-4", "claude-sonnet-4-6"}:
             return ClaudeTextService(model="claude-sonnet-4")
-        return ClaudeTextService(model=CLAUDE_FABLE_MODEL)
+        if default_model == CLAUDE_FABLE_MODEL:
+            return ClaudeTextService(model=CLAUDE_FABLE_MODEL)
+        raise UnsupportedAIModelError(
+            f"不支持的默认 AI 模型：{default_model}"
+        )
 
     @staticmethod
     def get_service(model: str | None = None) -> AITextServiceBase:
@@ -57,7 +74,7 @@ class AIServiceFactory:
             AIServiceFactory._log_resolution(requested_model, service)
             return service
 
-        normalized_model = requested_model.lower()
+        normalized_model = ensure_supported_ai_model(requested_model)
 
         if normalized_model in {"deepseek", DEEPSEEK_V4_FLASH_MODEL}:
             service = DeepSeekTextService(model=DEEPSEEK_V4_FLASH_MODEL)
@@ -69,10 +86,12 @@ class AIServiceFactory:
             service = ClaudeTextService(model=CLAUDE_FABLE_MODEL)
         elif normalized_model == CLAUDE_OPUS_4_8_MODEL:
             service = ClaudeTextService(model=CLAUDE_OPUS_4_8_MODEL)
-        elif normalized_model == "claude-sonnet-4":
+        elif normalized_model in {"claude-sonnet-4", "claude-sonnet-4-6"}:
             service = ClaudeTextService(model="claude-sonnet-4")
         else:
-            service = AIServiceFactory._get_default_service()
+            raise UnsupportedAIModelError(
+                f"不支持的 AI 模型：{requested_model}"
+            )
         AIServiceFactory._log_resolution(requested_model, service)
         return service
 
@@ -82,7 +101,7 @@ class AIServiceFactory:
             "AI model resolved requested=%s resolved=%s provider=%s",
             requested_model or "<default>",
             service.model_name,
-            type(service).__name__,
+            service.provider_name,
         )
 
 

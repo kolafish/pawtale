@@ -213,6 +213,9 @@ async def run_transcript_correction_job(
             "auto_corrected": True,
             "correction_status": "succeeded",
             "correction_provider": cleaned.provider,
+            "correction_requested_model": cleaned.requested_model,
+            "correction_resolved_model": cleaned.resolved_model,
+            "correction_response_model": cleaned.response_model,
             "correction_created_by": cleaned.created_by.value,
             "corrected_transcript_version_id": corrected_version.id,
         }
@@ -246,6 +249,9 @@ async def run_transcript_correction_job(
             "utterance_id": utterance.id,
             "transcript_version_id": corrected_version.id,
             "provider": cleaned.provider,
+            "requested_model": cleaned.requested_model,
+            "resolved_model": cleaned.resolved_model,
+            "response_model": cleaned.response_model,
             "created_by": cleaned.created_by.value,
             "organization_job_id": organization_job.id if organization_job else None,
         }

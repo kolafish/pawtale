@@ -10,7 +10,7 @@ export interface AIModelSettings {
 
 const STORAGE_KEY = "pawtale_ai_model_settings";
 
-export const DEFAULT_AI_MODEL = "deepseek-v4-pro";
+export const DEFAULT_AI_MODEL = "claude-opus-4-8";
 
 export const AI_MODEL_OPTIONS: AIModelOption[] = [
   {
@@ -61,7 +61,11 @@ export function normalizeAIModelSettings(value: unknown): AIModelSettings {
 }
 
 export function aiModelLabel(value: string): string {
-  return AI_MODEL_OPTIONS.find((option) => option.value === value)?.label || AI_MODEL_OPTIONS[0].label;
+  return (
+    AI_MODEL_OPTIONS.find((option) => option.value === value)?.label
+    || AI_MODEL_OPTIONS.find((option) => option.value === DEFAULT_AI_MODEL)?.label
+    || value
+  );
 }
 
 export function readAIModelSettings(): AIModelSettings {

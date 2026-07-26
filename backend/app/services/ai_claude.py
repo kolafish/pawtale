@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 import json
 import time
 
@@ -11,6 +12,11 @@ from app.services.ai_timeouts import (
     AIProviderTimeoutError,
     effective_ai_text_timeout_seconds,
 )
+from app.services.ai_streaming import (
+    AITextStreamChunk,
+    anthropic_messages_stream_chunk,
+    iter_sse_json_events,
+)
 from app.services.provider_limits import provider_concurrency_limiter
 
 settings = get_settings()
@@ -23,15 +29,18 @@ STRUCTURED_RESULT_TOOL_NAME = "emit_structured_result"
 class ClaudeTextService(AITextServiceBase):
     """Claude 文本生成服务（通过 OpenAI 兼容代理）"""
 
-    def __init__(self, model: str = CLAUDE_FABLE_MODEL):
+    def __init__(self, model: str = CLAUDE_OPUS_4_8_MODEL):
         self.auth_token = settings.anthropic_auth_token
         self.base_url = settings.anthropic_base_url
         model_map = {
             CLAUDE_FABLE_MODEL: CLAUDE_FABLE_MODEL,
             CLAUDE_OPUS_4_8_MODEL: CLAUDE_OPUS_4_8_MODEL,
             "claude-sonnet-4": "claude-sonnet-4-6",
+            "claude-sonnet-4-6": "claude-sonnet-4-6",
         }
-        self.model = model_map.get(model, CLAUDE_FABLE_MODEL)
+        if model not in model_map:
+            raise ValueError(f"不支持的 Claude 模型：{model}")
+        self.model = model_map[model]
         self.max_concurrent_requests = settings.ai_text_max_concurrent_requests
 
     @property
@@ -203,6 +212,56 @@ class ClaudeTextService(AITextServiceBase):
             attempt_count=attempt_count,
         )
         return result, structured_payload
+
+    async def stream_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
+        timeout: float | None = None,
+    ) -> AsyncIterator[AITextStreamChunk]:
+        request_timeout = effective_ai_text_timeout_seconds(timeout)
+        payload: dict[str, object] = {
+            "model": self.model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": user_prompt}],
+            "stream": True,
+        }
+        if system_prompt.strip():
+            payload["system"] = system_prompt
+        try:
+            async with provider_concurrency_limiter.slot(
+                "ai_text",
+                self.max_concurrent_requests,
+            ):
+                async with httpx.AsyncClient() as client:
+                    async with client.stream(
+                        "POST",
+                        self._messages_url(),
+                        headers={
+                            "Authorization": f"Bearer {self.auth_token}",
+                            "x-api-key": self.auth_token,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json",
+                        },
+                        json=payload,
+                        timeout=request_timeout,
+                    ) as response:
+                        response.raise_for_status()
+                        async for event in iter_sse_json_events(
+                            response.aiter_lines()
+                        ):
+                            chunk = anthropic_messages_stream_chunk(event)
+                            if chunk is not None:
+                                yield chunk
+        except httpx.TimeoutException as exc:
+            raise AIProviderTimeoutError(
+                provider=self.provider_name,
+                model=self.model_name,
+                timeout_seconds=request_timeout,
+            ) from exc
 
     def _extract_response_text(self, result: dict) -> str:
         """兼容不同代理/网关返回的 Claude 内容格式"""

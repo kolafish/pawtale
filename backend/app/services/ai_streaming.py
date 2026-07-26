@@ -11,6 +11,18 @@ class AITextStreamChunk:
     finish_reason: str | None = None
     usage: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
+    provider: str | None = None
+    requested_model: str | None = None
+    resolved_model: str | None = None
+    response_model: str | None = None
+
+    @property
+    def model_mismatch(self) -> bool:
+        return bool(
+            self.resolved_model
+            and self.response_model
+            and self.resolved_model != self.response_model
+        )
 
 
 async def iter_sse_json_events(lines: AsyncIterator[str]) -> AsyncIterator[dict]:
@@ -51,8 +63,20 @@ def _parse_sse_data_lines(data_lines: list[str]) -> dict | str | None:
 def openai_chat_stream_chunk(event: dict) -> AITextStreamChunk | None:
     choices = event.get("choices")
     usage = event.get("usage") if isinstance(event.get("usage"), dict) else {}
+    response_model = event.get("model")
+    response_model = (
+        response_model if isinstance(response_model, str) else None
+    )
     if not isinstance(choices, list) or not choices:
-        return AITextStreamChunk(usage=usage, raw=event) if usage else None
+        return (
+            AITextStreamChunk(
+                usage=usage,
+                raw=event,
+                response_model=response_model,
+            )
+            if usage
+            else None
+        )
 
     choice = choices[0] if isinstance(choices[0], dict) else {}
     delta = choice.get("delta") if isinstance(choice.get("delta"), dict) else {}
@@ -66,7 +90,55 @@ def openai_chat_stream_chunk(event: dict) -> AITextStreamChunk | None:
         finish_reason=finish_reason,
         usage=usage,
         raw=event,
+        response_model=response_model,
     )
+
+
+def anthropic_messages_stream_chunk(event: dict) -> AITextStreamChunk | None:
+    event_type = event.get("type")
+    if event_type == "message_start":
+        message = event.get("message")
+        if not isinstance(message, dict):
+            return None
+        response_model = message.get("model")
+        usage = message.get("usage")
+        return AITextStreamChunk(
+            usage=usage if isinstance(usage, dict) else {},
+            raw=event,
+            response_model=(
+                response_model if isinstance(response_model, str) else None
+            ),
+        )
+
+    if event_type == "content_block_delta":
+        delta = event.get("delta")
+        if not isinstance(delta, dict) or delta.get("type") != "text_delta":
+            return None
+        text = delta.get("text")
+        return AITextStreamChunk(
+            text_delta=text if isinstance(text, str) else "",
+            raw=event,
+        )
+
+    if event_type == "message_delta":
+        delta = event.get("delta")
+        usage = event.get("usage")
+        finish_reason = (
+            delta.get("stop_reason") if isinstance(delta, dict) else None
+        )
+        return AITextStreamChunk(
+            finish_reason=(
+                finish_reason if isinstance(finish_reason, str) else None
+            ),
+            usage=usage if isinstance(usage, dict) else {},
+            raw=event,
+        )
+
+    if event_type == "error":
+        error = event.get("error")
+        message = error.get("message") if isinstance(error, dict) else None
+        raise RuntimeError(message or "Claude streaming response failed")
+    return None
 
 
 def volc_responses_stream_chunk(event: dict) -> AITextStreamChunk | None:
@@ -92,7 +164,15 @@ def volc_responses_stream_chunk(event: dict) -> AITextStreamChunk | None:
                 finish_reason = incomplete["reason"]
         elif isinstance(response.get("status"), str):
             finish_reason = response["status"]
-        return AITextStreamChunk(finish_reason=finish_reason, usage=usage, raw=event)
+        response_model = response.get("model")
+        return AITextStreamChunk(
+            finish_reason=finish_reason,
+            usage=usage,
+            raw=event,
+            response_model=(
+                response_model if isinstance(response_model, str) else None
+            ),
+        )
 
     if event_type in {"response.failed", "error"}:
         message = event.get("message") or event.get("error") or "Volc Ark streaming response failed"

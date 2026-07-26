@@ -168,6 +168,7 @@ class TestAIRevise:
                     "meta": {"truncated": False},
                 },
             })
+            mock_service.model_name = "claude-opus-4-8"
             mock_get_service.return_value = mock_service
 
             response = await client.post(

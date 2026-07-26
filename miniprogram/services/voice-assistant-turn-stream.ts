@@ -27,6 +27,8 @@ export interface VoiceAssistantTurnStartedEvent {
   state: string;
   ai_provider?: string;
   ai_model?: string;
+  requested_ai_model?: string | null;
+  resolved_ai_model?: string | null;
   tts_provider?: string;
   tts_model?: string;
   max_tokens?: number;
@@ -94,6 +96,10 @@ export interface VoiceAssistantTurnCompletedEvent {
   expects_answer: boolean;
   finish_reason?: string | null;
   usage?: Record<string, unknown>;
+  requested_ai_model?: string | null;
+  resolved_ai_model?: string | null;
+  response_ai_model?: string | null;
+  ai_model_mismatch?: boolean;
   progress_update?: Record<string, unknown> | null;
   progress_update_used?: boolean;
   progress_voice_selected_event_ids?: string[];

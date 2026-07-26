@@ -1,5 +1,7 @@
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_calls import generate_text_with_client
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
 LENGTH_CONFIG = {
@@ -287,28 +289,24 @@ C. 选项描述（可选）
             user_prompt += f"\n用户希望的开篇方向：{custom_direction}\n"
 
     temp = 0.85
-    raw_response = await client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_TEXT)
+    generated = await generate_text_with_client(
+        client,
         system_prompt,
         user_prompt,
+        requested_model=getattr(client, "model_name", None),
         temperature=temp,
-        max_tokens=3000,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
-        return_raw=debug,
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
     )
-    if debug:
-        content, response_json = raw_response  # type: ignore[misc]
-    else:
-        content = raw_response  # type: ignore[assignment]
-        response_json = None
-
-    parsed_result = parse_story_response(content)
+    parsed_result = parse_story_response(generated.content)
     if debug:
         parsed_result["debug_info"] = client._wrap_debug(
             system_prompt,
             user_prompt,
             temp,
-            3000,
-            content,
-            response_json,
+            policy.max_tokens,
+            generated.content,
+            generated.response_json,
         )
     return parsed_result
