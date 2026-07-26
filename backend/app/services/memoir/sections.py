@@ -978,7 +978,14 @@ async def place_material(
         )
         target_chapter_id = req.target_chapter_id
 
-    if current_section is not None and (
+    moves_included_source = bool(
+        current_material is not None
+        and current_material.include_in_book
+        and current_section is not None
+        and current_section.status == MemoirSectionStatus.ACTIVE.value
+        and current_section.include_in_book
+    )
+    if moves_included_source and current_section is not None and (
         target_chapter_id is None
         or current_section.chapter_id != target_chapter_id
     ):
@@ -991,6 +998,9 @@ async def place_material(
             .where(
                 MemoirSection.project_id == project_id,
                 MemoirSection.chapter_id == current_section.chapter_id,
+                MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+                MemoirSection.include_in_book.is_(True),
+                MemoirSectionMaterial.include_in_book.is_(True),
                 MemoirSectionMaterial.utterance_id != utterance_id,
             )
         )

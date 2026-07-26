@@ -348,6 +348,30 @@ async def test_material_placement_can_create_section_and_chapter_atomically(
         material["utterance_id"] for material in new_section["materials"]
     ] == [created[1]["utterance_id"]]
 
+    excluded_section_response = await client.post(
+        f"/api/memoir/projects/{project_id}/chapters/{chapters[1].id}/sections",
+        json={"title": "不参与成书的小节"},
+    )
+    excluded_section = next(
+        section
+        for section in excluded_section_response.json()["sections"]
+        if section["title"] == "不参与成书的小节"
+    )
+    excluded_section_response = await client.patch(
+        f"/api/memoir/projects/{project_id}/sections/{excluded_section['id']}",
+        json={
+            "include_in_book": False,
+            "expected_version": excluded_section["version"],
+        },
+    )
+    assert excluded_section_response.status_code == 200
+    moved_to_excluded = await client.post(
+        f"/api/memoir/projects/{project_id}/section-materials/"
+        f"{created[1]['utterance_id']}/move",
+        json={"target_section_id": excluded_section["id"]},
+    )
+    assert moved_to_excluded.status_code == 200
+
     rejected = await client.post(
         f"/api/memoir/projects/{project_id}/section-materials/"
         f"{created[2]['utterance_id']}/place",
