@@ -1120,6 +1120,11 @@
   justify-content: flex-start;
 }
 
+.share-video-task-progress {
+  display: block;
+  margin-top: 18rpx;
+}
+
 .share-video-job {
   margin-top: 18rpx;
   padding: 18rpx 20rpx;

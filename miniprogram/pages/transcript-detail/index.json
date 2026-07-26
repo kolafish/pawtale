@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "这段讲述"
+  "navigationBarTitleText": "这段讲述",
+  "usingComponents": {
+    "ai-task-progress": "/components/ai-task-progress/index"
+  }
 }

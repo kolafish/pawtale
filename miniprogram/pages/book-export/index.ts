@@ -135,6 +135,7 @@ type BookExportData = Pick<
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;
+  bookEditorialCopyNotice: string;
   showBookSettings: boolean;
 };
 
@@ -160,6 +161,16 @@ function exportActionHint(action: string): string {
     return "导出纯文字，方便复制和继续编辑。";
   }
   return "适合微信分享和手机阅读。";
+}
+
+function editorialCopyTargetLabel(target: string): string {
+  if (target === "preface") {
+    return "前言";
+  }
+  if (target === "afterword") {
+    return "后记";
+  }
+  return "封底摘录";
 }
 
 function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): string {
@@ -196,6 +207,7 @@ definePage<BookExportData>()({
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     exportActionHintText: exportActionHint("reading_pdf"),
+    bookEditorialCopyNotice: "",
     showBookSettings: false,
     ...bookOutputData(null),
   },
@@ -504,7 +516,7 @@ definePage<BookExportData>()({
     if (!isBookLevelEditorialCopyTarget(target)) {
       return;
     }
-    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget === target || this.data.bookTitleSaving) {
+    if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
       return;
     }
     const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
@@ -515,10 +527,17 @@ definePage<BookExportData>()({
     if (!(await this.ensureBookDesignSavedForEditorialCopy())) {
       return;
     }
-    this.setData({ bookEditorialCopyBusyTarget: target, error: "" });
+    this.setData({
+      bookEditorialCopyBusyTarget: target,
+      bookEditorialCopyNotice: "",
+      error: "",
+    });
     try {
       await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
-      wx.showToast({ title: "已后台生成", icon: "success" });
+      this.setData({
+        bookEditorialCopyNotice: `${editorialCopyTargetLabel(target)}已转为后台生成，可到书稿首页查看任务进度和结果。`,
+      });
+      wx.showToast({ title: "已开始后台生成", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;

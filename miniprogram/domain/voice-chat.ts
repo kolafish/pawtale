@@ -477,6 +477,7 @@ export interface MemoirShareVideoBackgroundSource {
 export interface MemoirTranscriptShareVideoContext {
   utterance_id: string;
   audio_file_id: string;
+  latest_job_id?: string | null;
   transcript_source: string;
   transcript_text: string;
   text_hash: string;

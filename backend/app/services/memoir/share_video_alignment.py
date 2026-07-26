@@ -13,7 +13,11 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models.memoir import MemoirTranscriptAlignment, MemoirVoiceUtterance
+from app.models.memoir import (
+    MemoirMaterialShareVideo,
+    MemoirTranscriptAlignment,
+    MemoirVoiceUtterance,
+)
 from app.schemas.memoir_voice import (
     MemoirTranscriptShareVideoContextResponse,
     MemoirTranscriptShareVideoSegmentResponse,
@@ -445,6 +449,18 @@ async def get_share_video_context(
     )
     result = _build_alignment(utterance)
     response = _response(utterance, result)
+    response.latest_job_id = await db.scalar(
+        select(MemoirMaterialShareVideo.id)
+        .where(
+            MemoirMaterialShareVideo.utterance_id == utterance.id,
+            MemoirMaterialShareVideo.text_hash == result.text_hash,
+        )
+        .order_by(
+            MemoirMaterialShareVideo.created_at.desc(),
+            MemoirMaterialShareVideo.id.desc(),
+        )
+        .limit(1)
+    )
     alignment = await db.scalar(
         select(MemoirTranscriptAlignment).where(MemoirTranscriptAlignment.utterance_id == utterance.id)
     )

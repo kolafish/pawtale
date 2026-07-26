@@ -238,10 +238,14 @@ test("book export page saves full-book metadata and cover style", async () => {
 test("book export page suggests titles and queues book-level editorial copy", async () => {
   const titleRequests = [];
   const editorialRequests = [];
+  const navigations = [];
   const toasts = [];
   global.wx = {
     showToast(options) {
       toasts.push(options);
+    },
+    switchTab(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadBookExportPage({
@@ -275,7 +279,51 @@ test("book export page suggests titles and queues book-level editorial copy", as
     projectId: "project/1",
     payload: { targets: ["afterword"] },
   });
-  assert.equal(toasts[0].title, "已后台生成");
+  assert.equal(toasts[0].title, "已开始后台生成");
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  assert.equal(
+    context.data.bookEditorialCopyNotice,
+    "后记已转为后台生成，可到书稿首页查看任务进度和结果。",
+  );
+  page.openBookHome.call(context);
+  assert.deepEqual(navigations, ["/pages/book/index"]);
+  delete global.wx;
+});
+
+test("book export page submits only one editorial copy task at a time", async () => {
+  const editorialRequests = [];
+  let resolveEnqueue;
+  global.wx = {
+    showToast() {},
+  };
+  const { page } = loadBookExportPage({
+    enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, payload) => {
+      editorialRequests.push({ projectId, payload });
+      await new Promise((resolve) => {
+        resolveEnqueue = resolve;
+      });
+      return { id: "event-1" };
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+
+  const firstSubmission = page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "preface" } },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await page.regenerateBookEditorialCopy.call(context, {
+    currentTarget: { dataset: { target: "afterword" } },
+  });
+
+  assert.deepEqual(editorialRequests, [{
+    projectId: "project/1",
+    payload: { targets: ["preface"] },
+  }]);
+  assert.equal(context.data.bookEditorialCopyBusyTarget, "preface");
+
+  resolveEnqueue();
+  await firstSubmission;
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
   delete global.wx;
 });

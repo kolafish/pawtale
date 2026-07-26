@@ -937,6 +937,48 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 
+test("transcript detail page restores the latest matching share video job after reload", async () => {
+  const contextCalls = [];
+  const pollCalls = [];
+  const restoredJob = sampleShareVideoJob({
+    utterance_id: "utterance-resume",
+    audio_file_id: "audio-utterance-resume",
+    status: "pending",
+    output: null,
+    completed_at: null,
+  });
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirTranscriptShareVideoContext: async (id) => {
+        contextCalls.push(id);
+        return sampleShareVideoContext(id, { latest_job_id: restoredJob.id });
+      },
+      getMemoirShareVideoJob: async (jobId) => {
+        pollCalls.push(jobId);
+        return restoredJob;
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-resume" });
+  await page.toggleShareVideoPanel.call(context);
+
+  assert.deepEqual(contextCalls, ["utterance-resume"]);
+  assert.deepEqual(pollCalls, ["job-1"]);
+  assert.equal(context.data.shareVideoJob.id, "job-1");
+  assert.equal(context.data.shareVideoJob.status, "pending");
+  assert.equal(context.data.shareVideoPolling, true);
+  assert.equal(context.data.shareVideoSelectedStartIndex, 0);
+  assert.equal(context.data.shareVideoSelectedEndIndex, 1);
+  assert.equal(context.data.shareVideoSelectedMetaText, "已选 9 秒 · 23 字");
+  assert.equal(context.data.shareVideoStatusText, "视频任务已创建，等待生成");
+
+  context.shareVideoController.cancel();
+  assert.equal(context.data.shareVideoPolling, false);
+});
+
 test("transcript detail page uses backend background options as the configuration source", async () => {
   const baseContext = sampleShareVideoContext("utterance-share");
   const backendContext = {

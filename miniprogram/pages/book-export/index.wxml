@@ -154,6 +154,15 @@
           </view>
           <text class="book-design-save-status {{bookTitleSaving ? 'saving' : ''}}">{{bookDesignSaveStatusText}}</text>
         </view>
+        <view
+          wx:if="{{bookEditorialCopyNotice}}"
+          class="book-editorial-copy-notice"
+          aria-role="button"
+          bindtap="openBookHome"
+        >
+          <text class="book-editorial-copy-notice-text">{{bookEditorialCopyNotice}}</text>
+          <text class="book-editorial-copy-notice-action">查看进度</text>
+        </view>
 
         <view class="book-title-editor">
           <input
@@ -232,10 +241,10 @@
               class="book-editorial-generate"
               data-target="preface"
               loading="{{bookEditorialCopyBusyTarget === 'preface'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'preface' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'preface' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea
@@ -257,10 +266,10 @@
               class="book-editorial-generate"
               data-target="afterword"
               loading="{{bookEditorialCopyBusyTarget === 'afterword'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'afterword' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'afterword' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea
@@ -282,10 +291,10 @@
               class="book-editorial-generate"
               data-target="back_cover_quote"
               loading="{{bookEditorialCopyBusyTarget === 'back_cover_quote'}}"
-              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget === 'back_cover_quote' || !bookContent}}"
+              disabled="{{bookTitleSaving || bookViewingHistoricalVersion || bookEditorialCopyBusyTarget || !bookContent}}"
               bindtap="regenerateBookEditorialCopy"
             >
-              重写
+              {{bookEditorialCopyBusyTarget === 'back_cover_quote' ? "正在提交" : "重写"}}
             </button>
           </view>
           <textarea
