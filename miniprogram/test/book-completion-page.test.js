@@ -218,8 +218,8 @@ test("book completion offers one whole-book recheck after all chapters are confi
   };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      enqueueMemoirBookCompletionJob: async (projectId, scope) => {
-        batchRequests.push([projectId, scope]);
+      enqueueMemoirBookCompletionJob: async (projectId, scope, retryJobId) => {
+        batchRequests.push([projectId, scope, retryJobId]);
         return bulkJob({
           job_id: "book-job-1",
           scope,
@@ -256,7 +256,7 @@ test("book completion offers one whole-book recheck after all chapters are confi
   });
   await page.recheckAllChapters.call(context);
 
-  assert.deepEqual(batchRequests, [["project-1", "all"]]);
+  assert.deepEqual(batchRequests, [["project-1", "all", null]]);
   assert.ok(toasts.every((title) => title === "暂未发现待补内容"));
   delete global.wx;
 });
@@ -281,8 +281,8 @@ test("book completion can check only chapters that have not been checked", async
   global.wx = { showToast() {} };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      enqueueMemoirBookCompletionJob: async (projectId, scope) => {
-        batchRequests.push([projectId, scope]);
+      enqueueMemoirBookCompletionJob: async (projectId, scope, retryJobId) => {
+        batchRequests.push([projectId, scope, retryJobId]);
         return bulkJob({
           job_id: "book-job-1",
           scope,
@@ -317,9 +317,76 @@ test("book completion can check only chapters that have not been checked", async
   });
   await page.recheckAllChapters.call(context);
 
-  assert.deepEqual(batchRequests, [["project-1", "pending"]]);
+  assert.deepEqual(batchRequests, [["project-1", "pending", null]]);
   assert.equal(context.data.recheckingAll, true);
   assert.equal(context.data.bulkCheckProgressMode, "determinate");
+  delete global.wx;
+});
+
+test("book completion retries only the unfinished chapters from a failed batch", async () => {
+  const batchRequests = [];
+  const overview = readyOverview();
+  overview.completed_chapters = 2;
+  overview.chapters = overview.chapters.map((chapter) => ({
+    ...chapter,
+    state: "confirmed",
+    next_action: {
+      kind: "complete",
+      title: "本章已确认",
+      detail: "正文已经收入书稿。",
+      action_text: "",
+      disabled: true,
+      issue_id: null,
+    },
+    active_issue: null,
+  }));
+  const failedJob = bulkJob({
+    job_id: "failed-book-job",
+    scope: "all",
+    status: "failed",
+    total_chapter_count: 2,
+    processed_chapter_count: 2,
+    succeeded_chapter_count: 1,
+    failed_chapter_count: 1,
+    can_retry: true,
+  });
+  global.wx = { showToast() {} };
+  const { page, mod } = loadBookCompletionPage({
+    voiceApiExports: {
+      enqueueMemoirBookCompletionJob: async (
+        projectId,
+        scope,
+        retryJobId,
+      ) => {
+        batchRequests.push([projectId, scope, retryJobId]);
+      },
+      getMemoirBookCompletionJob: async () => bulkJob({
+        job_id: "retry-book-job",
+        status: "running",
+        total_chapter_count: 1,
+        current_chapter_id: "chapter-2",
+        current_chapter_title: "参加工作",
+        can_cancel: true,
+      }),
+      getMemoirBookCompletionOverview: async () => overview,
+    },
+  });
+  const patch = mod.bookCompletionViewPatch(overview);
+  const context = pageContext(page, {
+    projectId: "project-1",
+    chapters: patch.chapters,
+    allChaptersConfirmed: true,
+    bulkCheckVisible: true,
+    bulkCheckJob: failedJob,
+  });
+
+  await page.recheckAllChapters.call(context);
+
+  assert.deepEqual(
+    batchRequests,
+    [["project-1", "pending", "failed-book-job"]],
+  );
+  assert.equal(context.data.recheckingAll, true);
   delete global.wx;
 });
 

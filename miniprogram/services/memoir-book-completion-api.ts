@@ -77,13 +77,18 @@ export function getMemoirBookCompletionOverview(
 export function enqueueMemoirBookCompletionJob(
   projectId: string,
   scope: "pending" | "all",
+  retryJobId: string | null = null,
 ): Promise<MemoirBookCompletionJob> {
   return memoirAIRequest<
     MemoirBookCompletionJob,
-    { scope: "pending" | "all"; ai_model: null }
+    {
+      scope: "pending" | "all";
+      retry_job_id: string | null;
+      ai_model: null;
+    }
   >(
     bookCompletionPath(projectId, "/jobs"),
-    { scope, ai_model: null },
+    { scope, retry_job_id: retryJobId, ai_model: null },
     { timeoutProfile: "mutation" },
   );
 }

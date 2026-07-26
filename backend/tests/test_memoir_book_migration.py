@@ -136,6 +136,7 @@ async def test_runtime_schema_migration_creates_book_completion_jobs():
             "target_chapters_json",
             "chapter_job_ids_json",
             "enqueue_errors_json",
+            "chapter_results_json",
         } <= columns
         await assert_runtime_schema(
             engine,

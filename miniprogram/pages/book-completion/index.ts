@@ -457,9 +457,15 @@ definePage<BookCompletionData>()({
       chapters: this.data.chapters.map((item) => chapterView(item, "", true)),
     });
     try {
+      const retryJobId = this.data.bulkCheckJob?.can_retry
+        ? this.data.bulkCheckJob.job_id
+        : null;
       await enqueueMemoirBookCompletionJob(
         this.data.projectId,
-        this.data.allChaptersConfirmed ? "all" : "pending",
+        retryJobId
+          ? "pending"
+          : (this.data.allChaptersConfirmed ? "all" : "pending"),
+        retryJobId,
       );
       await this.loadOverview(true);
     } catch (error) {

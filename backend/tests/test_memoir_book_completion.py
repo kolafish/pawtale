@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.database import Base, register_models
 from app.domain.memoir.types import (
+    MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
@@ -36,7 +37,9 @@ from app.schemas.memoir_narrative import (
 )
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.services.memoir import (
+    book_completion_jobs,
     book_reviews,
+    chapter_preparation_jobs,
     chapter_digests,
     chapter_generation,
     completion_read_model,
@@ -596,10 +599,22 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert failed_body["can_retry"] is True
     assert failed_body["error_message"] == "provider unavailable"
     assert failed_body["chapters"][1]["error_message"] == "provider unavailable"
+    failed_batch = await test_db.get(
+        MemoirBookCompletionJob,
+        queued_body["job_id"],
+    )
+    assert failed_batch is not None
+    assert [item["status"] for item in failed_batch.chapter_results_json] == [
+        "succeeded",
+        "failed",
+    ]
 
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
-        json={"scope": "pending"},
+        json={
+            "scope": "pending",
+            "retry_job_id": queued_body["job_id"],
+        },
     )
 
     assert retried.status_code == 202, retried.text
@@ -608,6 +623,24 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert retried_body["status"] == "running"
     assert retried_body["total_chapter_count"] == 1
     assert retried_body["chapters"][0]["chapter_id"] == chapters[1].id
+
+    stale_cancel = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/"
+        f"{queued_body['job_id']}"
+    )
+    assert stale_cancel.status_code == 200, stale_cancel.text
+    assert stale_cancel.json()["status"] == "failed"
+    assert stale_cancel.json()["processed_chapter_count"] == 2
+    assert [item["status"] for item in stale_cancel.json()["chapters"]] == [
+        "succeeded",
+        "failed",
+    ]
+    current_retry = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/current"
+    )
+    assert current_retry.status_code == 200, current_retry.text
+    assert current_retry.json()["job_id"] == retried_body["job_id"]
+    assert current_retry.json()["status"] == "running"
 
     cancelled = await client.delete(
         f"/api/memoir/projects/{project_id}/book-completion/jobs/"
@@ -626,6 +659,61 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     )
     assert stored_batch is not None
     assert stored_batch.active_key is None
+
+
+async def test_book_completion_job_does_not_enqueue_after_concurrent_cancel(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, _, _ = await _book(client, test_db, chapter_count=2)
+    original_enqueue = (
+        chapter_preparation_jobs.enqueue_chapter_preparation_job
+    )
+    cancellation_injected = False
+
+    async def enqueue_then_cancel(*args, **kwargs):
+        nonlocal cancellation_injected
+        child = await original_enqueue(*args, **kwargs)
+        if not cancellation_injected:
+            cancellation_injected = True
+            batch = await test_db.scalar(
+                select(MemoirBookCompletionJob).where(
+                    MemoirBookCompletionJob.project_id == project_id,
+                )
+            )
+            assert batch is not None
+            batch.status = MemoirBookCompletionJobStatus.CANCELLED.value
+            batch.active_key = None
+            test_db.add(batch)
+            await test_db.commit()
+        return child
+
+    monkeypatch.setattr(
+        book_completion_jobs.chapter_preparation_jobs,
+        "enqueue_chapter_preparation_job",
+        enqueue_then_cancel,
+    )
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs",
+        json={"scope": "pending"},
+    )
+
+    assert queued.status_code == 202, queued.text
+    assert queued.json()["status"] == "cancelled"
+    assert queued.json()["cancelled_chapter_count"] == 2
+    child_jobs = (
+        await test_db.scalars(
+            select(MemoirEditingJob).where(
+                MemoirEditingJob.project_id == project_id,
+                MemoirEditingJob.job_type
+                == MemoirEditingJobType.PREPARE_CHAPTER.value,
+            )
+        )
+    ).all()
+    assert len(child_jobs) == 1
+    assert child_jobs[0].status == MemoirEditingJobStatus.SKIPPED.value
 
 
 async def test_chapter_workspace_exposes_section_structure(

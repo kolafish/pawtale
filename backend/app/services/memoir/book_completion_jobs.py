@@ -25,10 +25,16 @@ _ACTIVE_BATCH_STATUSES = {
     MemoirBookCompletionJobStatus.PENDING.value,
     MemoirBookCompletionJobStatus.RUNNING.value,
 }
+_TERMINAL_BATCH_STATUSES = {
+    MemoirBookCompletionJobStatus.SUCCEEDED.value,
+    MemoirBookCompletionJobStatus.FAILED.value,
+    MemoirBookCompletionJobStatus.CANCELLED.value,
+}
 _ACTIVE_CHAPTER_STATUSES = {
     MemoirEditingJobStatus.PENDING.value,
     MemoirEditingJobStatus.RUNNING.value,
 }
+_TERMINAL_CHAPTER_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
 def _utcnow() -> datetime:
@@ -52,6 +58,45 @@ def _targets(job: MemoirBookCompletionJob) -> list[dict[str, str]]:
             "title": str(item.get("title") or "").strip(),
         })
     return result
+
+
+def _stored_chapter_results(
+    job: MemoirBookCompletionJob,
+    targets: list[dict[str, str]],
+) -> list[dict[str, object]] | None:
+    if job.status not in _TERMINAL_BATCH_STATUSES:
+        return None
+    stored_by_chapter: dict[str, dict] = {}
+    for item in job.chapter_results_json or []:
+        if not isinstance(item, dict):
+            continue
+        chapter_id = str(item.get("chapter_id") or "").strip()
+        status = str(item.get("status") or "").strip()
+        if chapter_id and status in _TERMINAL_CHAPTER_STATUSES:
+            stored_by_chapter[chapter_id] = item
+    if (
+        len(stored_by_chapter) != len(targets)
+        or any(target["chapter_id"] not in stored_by_chapter for target in targets)
+    ):
+        return None
+    return [
+        {
+            **target,
+            "job_id": (
+                str(stored_by_chapter[target["chapter_id"]].get("job_id"))
+                if stored_by_chapter[target["chapter_id"]].get("job_id")
+                else None
+            ),
+            "status": str(
+                stored_by_chapter[target["chapter_id"]].get("status")
+            ),
+            "error_message": str(
+                stored_by_chapter[target["chapter_id"]].get("error_message")
+                or ""
+            ),
+        }
+        for target in targets
+    ]
 
 
 async def _chapter_jobs(
@@ -82,6 +127,7 @@ async def _job_response(
         }
 
     targets = _targets(job)
+    stored_chapter_items = _stored_chapter_results(job, targets)
     job_ids = {
         str(chapter_id): str(job_id)
         for chapter_id, job_id in dict(job.chapter_job_ids_json or {}).items()
@@ -92,7 +138,15 @@ async def _job_response(
         for chapter_id, error in dict(job.enqueue_errors_json or {}).items()
         if str(chapter_id).strip() and str(error).strip()
     }
-    child_jobs = await _chapter_jobs(db, list(job_ids.values()))
+    child_jobs = (
+        {}
+        if stored_chapter_items is not None
+        else await _chapter_jobs(db, list(job_ids.values()))
+    )
+    stored_by_chapter = {
+        str(item["chapter_id"]): item
+        for item in stored_chapter_items or []
+    }
     chapter_items: list[dict[str, object]] = []
     succeeded_count = 0
     failed_count = 0
@@ -102,13 +156,22 @@ async def _job_response(
 
     for target in targets:
         chapter_id = target["chapter_id"]
+        stored_item = stored_by_chapter.get(chapter_id)
         child_job_id = job_ids.get(chapter_id)
         child_job = child_jobs.get(child_job_id or "")
         error_message = enqueue_errors.get(chapter_id, "")
-        if job.status == MemoirBookCompletionJobStatus.CANCELLED.value and child_job is None:
-            status = "cancelled"
+        if stored_item is not None:
+            child_job_id = (
+                str(stored_item["job_id"])
+                if stored_item.get("job_id")
+                else None
+            )
+            status = str(stored_item["status"])
+            error_message = str(stored_item["error_message"])
         elif error_message:
             status = "failed"
+        elif job.status == MemoirBookCompletionJobStatus.CANCELLED.value and child_job is None:
+            status = "cancelled"
         elif child_job is None:
             status = (
                 "pending"
@@ -151,7 +214,9 @@ async def _job_response(
     total_count = len(chapter_items)
     processed_count = succeeded_count + failed_count + cancelled_count
     has_active = processed_count < total_count
-    if job.status == MemoirBookCompletionJobStatus.CANCELLED.value:
+    if stored_chapter_items is not None:
+        batch_status = job.status
+    elif job.status == MemoirBookCompletionJobStatus.CANCELLED.value:
         batch_status = MemoirBookCompletionJobStatus.CANCELLED.value
     elif has_active:
         batch_status = (
@@ -175,15 +240,19 @@ async def _job_response(
         ),
         "",
     )
+    chapter_results_changed = terminal and job.chapter_results_json != chapter_items
     if persist_status and (
         job.status != batch_status
         or job.error_message != error_message
         or (terminal and job.active_key is not None)
+        or chapter_results_changed
     ):
         job.status = batch_status
         job.error_message = error_message
         job.active_key = None if terminal else _active_key(project_id)
         job.completed_at = _utcnow() if terminal else None
+        if terminal:
+            job.chapter_results_json = chapter_items
         db.add(job)
         await db.commit()
 
@@ -255,9 +324,13 @@ async def _enqueue_missing_chapter_jobs(
     chapter_job_ids = dict(job.chapter_job_ids_json or {})
     enqueue_errors = dict(job.enqueue_errors_json or {})
     for target in _targets(job):
+        await db.refresh(job, attribute_names=["status"])
+        if job.status not in _ACTIVE_BATCH_STATUSES:
+            return
         chapter_id = target["chapter_id"]
         if chapter_job_ids.get(chapter_id) or enqueue_errors.get(chapter_id):
             continue
+        child_job_id = ""
         try:
             child = await chapter_preparation_jobs.enqueue_chapter_preparation_job(
                 db,
@@ -284,6 +357,20 @@ async def _enqueue_missing_chapter_jobs(
         job.enqueue_errors_json = dict(enqueue_errors)
         db.add(job)
         await db.commit()
+        await db.refresh(job, attribute_names=["status"])
+        if (
+            job.status not in _ACTIVE_BATCH_STATUSES
+            and child_job_id
+        ):
+            await chapter_preparation_jobs.cancel_chapter_preparation_job(
+                db,
+                user_id=user_id,
+                project_id=job.project_id,
+                chapter_id=chapter_id,
+                job_id=child_job_id,
+                allow_admin=allow_admin,
+            )
+            return
 
 
 async def enqueue_book_completion_job(
@@ -308,18 +395,51 @@ async def enqueue_book_completion_job(
         db,
         project_id=project_id,
     )
-    targets = [
-        {
-            "chapter_id": chapter.chapter_id,
-            "title": chapter.title,
-        }
-        for chapter in overview.chapters
-        if (
-            req.scope == MemoirBookCompletionJobScope.ALL.value
-            or chapter.state == "preparing"
-            or chapter.next_action.kind == "prepare"
+    if req.retry_job_id:
+        if req.scope != MemoirBookCompletionJobScope.PENDING.value:
+            raise ValueError("重试任务只能检查上次未完成的章节")
+        retry_source = await db.scalar(
+            select(MemoirBookCompletionJob).where(
+                MemoirBookCompletionJob.id == req.retry_job_id,
+                MemoirBookCompletionJob.project_id == project_id,
+            )
         )
-    ]
+        retry_response = await _job_response(
+            db,
+            project_id=project_id,
+            job=retry_source,
+        )
+        if retry_response["status"] not in {
+            MemoirBookCompletionJobStatus.FAILED.value,
+            MemoirBookCompletionJobStatus.CANCELLED.value,
+        }:
+            raise ValueError("这次全书检查没有可重试的章节")
+        retry_chapter_ids = {
+            str(item["chapter_id"])
+            for item in retry_response["chapters"]
+            if item["status"] != "succeeded"
+        }
+        targets = [
+            {
+                "chapter_id": chapter.chapter_id,
+                "title": chapter.title,
+            }
+            for chapter in overview.chapters
+            if chapter.chapter_id in retry_chapter_ids
+        ]
+    else:
+        targets = [
+            {
+                "chapter_id": chapter.chapter_id,
+                "title": chapter.title,
+            }
+            for chapter in overview.chapters
+            if (
+                req.scope == MemoirBookCompletionJobScope.ALL.value
+                or chapter.state == "preparing"
+                or chapter.next_action.kind == "prepare"
+            )
+        ]
     if not targets:
         raise ValueError("没有需要检查的章节")
 
