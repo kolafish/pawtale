@@ -658,7 +658,6 @@ export interface MemoirVoiceTranscriptVoiceEditChange {
   scope: MemoirVoiceTranscriptVoiceEditScope;
   before: string;
   after: string;
-  reason: string;
 }
 
 export interface MemoirVoiceTranscriptVoiceEditPreviewResponse {

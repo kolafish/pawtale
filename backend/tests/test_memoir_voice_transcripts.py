@@ -2341,17 +2341,14 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
         json.dumps(
             {
                 "action": "revise_transcript",
-                "edited_text": "他是我的儿子，名字叫刘凯风，今年10岁。",
                 "changes": [
                     {
                         "scope": "term",
                         "before": "刘凯峰",
                         "after": "刘凯风",
-                        "reason": "用户明确修正名字用字",
                     }
                 ],
                 "confidence": 0.97,
-                "reply_text": "已修改名字用字，请确认后保存。",
             },
             ensure_ascii=False,
         )
@@ -2390,7 +2387,6 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
             "scope": "term",
             "before": "刘凯峰",
             "after": "刘凯风",
-            "reason": "用户明确修正名字用字",
         }
     ]
     assert data["confidence"] == 0.97
@@ -2402,8 +2398,8 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     assert "只能改用户修正指令明确指出" in ai_client.prompt
     assert "passage 表示指定片段改写" in ai_client.prompt
     assert "changes 之外的文字和标点必须逐字保持不变" in ai_client.prompt
-    assert '"edited_text":' in ai_client.prompt
-    assert '"reason":' in ai_client.prompt
+    assert '"edited_text":' not in ai_client.prompt
+    assert '"reason":' not in ai_client.prompt
     assert "当前整理文字：他是我的儿子，名字叫刘凯峰，今年10岁。" in ai_client.prompt
     assert "用户语音修正指令：\n这里边的风是那个刮风的风，不是山峰的峰。" in ai_client.prompt
 
@@ -2434,17 +2430,14 @@ async def test_mobile_memoir_voice_edit_preview_rewrites_a_located_passage(clien
             json.dumps(
                 {
                     "action": "revise_transcript",
-                    "edited_text": f"{revised_passage}后来他每天去公园散步。",
                     "changes": [
                         {
                             "scope": "passage",
                             "before": "爷爷退休后还在公司做事。",
                             "after": revised_passage,
-                            "reason": "用户要求重写退休后的经历",
                         }
                     ],
                     "confidence": 0.91,
-                    "reply_text": "已改写讲退休经历的片段，请确认后保存。",
                 },
                 ensure_ascii=False,
             )
@@ -2465,12 +2458,11 @@ async def test_mobile_memoir_voice_edit_preview_rewrites_a_located_passage(clien
             "scope": "passage",
             "before": "爷爷退休后还在公司做事。",
             "after": revised_passage,
-            "reason": "用户要求重写退休后的经历",
         }
     ]
 
 
-async def test_mobile_memoir_voice_edit_preview_rejects_undeclared_rewriting(client, test_db, monkeypatch):
+async def test_mobile_memoir_voice_edit_preview_reconstructs_only_declared_changes(client, test_db, monkeypatch):
     original = "我小时候住在外婆家。"
     created = await create_test_voice_transcript(client, test_db, text=original)
     monkeypatch.setattr(
@@ -2485,7 +2477,6 @@ async def test_mobile_memoir_voice_edit_preview_rejects_undeclared_rewriting(cli
                             "scope": "term",
                             "before": "外婆",
                             "after": "奶奶",
-                            "reason": "用户要求修改称呼",
                         }
                     ],
                     "confidence": 0.92,
@@ -2503,11 +2494,17 @@ async def test_mobile_memoir_voice_edit_preview_rejects_undeclared_rewriting(cli
 
     assert response.status_code == 200
     data = response.json()
-    assert data["action"] == "clarify"
-    assert data["edited_text"] == original
-    assert data["changes"] == []
-    assert data["confidence"] == 0.0
-    assert data["reply_text"] == "我没能准确定位要改的原文，请说清原词、完整句子或具体片段。"
+    assert data["action"] == "revise_transcript"
+    assert data["edited_text"] == "我小时候住在奶奶家。"
+    assert data["changes"] == [
+        {
+            "scope": "term",
+            "before": "外婆",
+            "after": "奶奶",
+        }
+    ]
+    assert data["confidence"] == 0.92
+    assert data["reply_text"] == "我按你的说明生成了一版修正，请确认后保存。"
 
 
 async def test_mobile_memoir_voice_edit_preview_rejects_invalid_ai_payload(client, test_db, monkeypatch):
@@ -2527,17 +2524,18 @@ async def test_mobile_memoir_voice_edit_preview_rejects_invalid_ai_payload(clien
 
 
 async def test_mobile_memoir_voice_edit_preview_rejects_overlong_ai_result(client, test_db, monkeypatch):
-    created = await create_test_voice_transcript(client, test_db, text="我小时候住在外婆家。")
+    created = await create_test_voice_transcript(client, test_db, text="外婆和奶奶")
     monkeypatch.setattr(
         "app.services.memoir.transcript_voice_edit.get_ai_service",
         lambda model=None: CapturingAIClient(
             json.dumps(
                 {
                     "action": "revise_transcript",
-                    "edited_text": "这是一段被错误扩写的内容。" * 80,
-                    "changes": [],
+                    "changes": [
+                        {"scope": "term", "before": "外婆", "after": "甲" * 800},
+                        {"scope": "term", "before": "奶奶", "after": "乙" * 800},
+                    ],
                     "confidence": 0.4,
-                    "reply_text": "已修正。",
                 },
                 ensure_ascii=False,
             )

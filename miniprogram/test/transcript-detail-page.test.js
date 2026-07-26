@@ -411,7 +411,6 @@ test("transcript detail page shows every voice edit processing phase", async () 
       scope: "passage",
       before: "爷爷退休后还在帮公司做事。",
       after: "爷爷退休后经常去社区帮忙。",
-      reason: "用户要求重写退休后的经历",
     }],
   });
   await operation;

@@ -122,22 +122,20 @@ def _build_prompt(context: TranscriptVoiceEditContext, instruction_text: str) ->
 - 不要把章节标题、AI 问题或上下文补进正文
 - 没听清、指令不完整、目标在正文中不存在、或无法唯一确定改哪一处时，action 必须为 "clarify"
 - 指令明显不是修正当前记录时，action 必须为 "unsupported"
-- 如果 action 是 "revise_transcript"，edited_text 必须是完整修正后的记录正文
 - revise_transcript 的 changes 必须完整列出全部改动，按原文出现顺序排列
 - 每个 change.before 必须是当前整理文字中可精确定位的连续原文，不能概括、改写或留空；change.after 是替换后的完整文字，可以为空表示删除
-- edited_text 必须恰好等于依次将 changes 中 before 替换为 after 的结果，changes 之外的文字和标点必须逐字保持不变
+- 后端会根据 changes 重建完整正文，不要返回 edited_text、reason 或 reply_text
+- changes 之外的文字和标点必须逐字保持不变
 - 如果同一 before 在原文出现多次且指令没有说明具体位置，不要猜测，action 必须为 "clarify"
 - 直接返回 JSON，不要 Markdown，不要解释
 
 返回 JSON 格式：
 {{
   "action": "revise_transcript" | "clarify" | "unsupported",
-  "edited_text": "完整修正后的记录正文；clarify/unsupported 时保持当前正文",
   "changes": [
-    {{"scope": "term" | "sentence" | "passage", "before": "当前正文中的精确原文", "after": "替换后的文字", "reason": "修正原因"}}
+    {{"scope": "term" | "sentence" | "passage", "before": "当前正文中的精确原文", "after": "替换后的文字"}}
   ],
-  "confidence": 0.0,
-  "reply_text": "给用户看的简短说明"
+  "confidence": 0.0
 }}
 
 当前记录信息：
@@ -186,15 +184,13 @@ def _parse_changes(value: object) -> list[MemoirVoiceTranscriptVoiceEditChangeRe
             continue
         before = _clean_text(item.get("before"), limit=MAX_CHANGE_TEXT_LENGTH)
         after = _clean_text(item.get("after"), limit=MAX_CHANGE_TEXT_LENGTH)
-        reason = _clean_text(item.get("reason"), limit=180)
-        if not before and not after and not reason:
+        if not before and not after:
             continue
         changes.append(
             MemoirVoiceTranscriptVoiceEditChangeResponse(
                 scope=_inferred_scope(before, item.get("scope")),
                 before=before,
                 after=after,
-                reason=reason,
             )
         )
     return changes
@@ -256,20 +252,17 @@ def _response_from_payload(
     action = _normalize_action(payload.get("action"))
     current_text = context.current_text
     max_edited_text_length = max(len(current_text) * 2, len(current_text) + MAX_CHANGE_TEXT_LENGTH)
-    edited_text = _clean_text(payload.get("edited_text"), limit=max_edited_text_length + 1)
     changes = _parse_changes(payload.get("changes"))
     if action == "revise_transcript":
-        if not edited_text:
-            raise HTTPException(status_code=502, detail=VOICE_EDIT_INVALID_RESPONSE_MESSAGE)
-        if len(edited_text) > max_edited_text_length:
-            raise HTTPException(status_code=502, detail="AI 修正结果过长，请重新说明要改哪一处")
-        reconstructed_text = _edited_text_from_changes(current_text, changes)
-        if reconstructed_text is None or reconstructed_text == current_text or reconstructed_text != edited_text:
+        edited_text = _edited_text_from_changes(current_text, changes)
+        if edited_text is None or edited_text == current_text:
             return _invalid_revision_response(
                 context=context,
                 provider=provider,
                 model=model,
             )
+        if len(edited_text) > max_edited_text_length:
+            raise HTTPException(status_code=502, detail="AI 修正结果过长，请重新说明要改哪一处")
     else:
         edited_text = current_text
         changes = []
@@ -282,7 +275,7 @@ def _response_from_payload(
         changes=changes,
         confidence=_bounded_confidence(payload.get("confidence")),
         requires_confirmation=True,
-        reply_text=_clean_text(payload.get("reply_text"), limit=240) or _default_reply_text(action),
+        reply_text=_default_reply_text(action),
         provider=provider,
         model=model,
     )

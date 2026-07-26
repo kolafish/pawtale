@@ -15,7 +15,6 @@ export interface TranscriptVoiceEditChangeView {
   scopeLabel: string;
   before: string;
   after: string;
-  reason: string;
 }
 
 export type TranscriptVoiceEditPhase =
@@ -391,7 +390,6 @@ export function transcriptVoiceEditPreviewView(
     scopeLabel: voiceEditScopeLabel(item.scope),
     before: item.before,
     after: item.after,
-    reason: item.reason,
   }));
   return {
     action: response.action,

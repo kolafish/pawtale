@@ -265,7 +265,6 @@
         >
           <text class="voice-edit-change-scope">{{change.scopeLabel}}</text>
           <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
-          <text wx:if="{{change.reason}}" class="voice-edit-change-reason">{{change.reason}}</text>
         </view>
       </view>
       <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-inline-diff">

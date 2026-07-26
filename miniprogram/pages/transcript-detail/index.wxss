@@ -803,8 +803,7 @@
 }
 
 .voice-edit-label,
-.voice-edit-confidence,
-.voice-edit-change-reason {
+.voice-edit-confidence {
   display: block;
   color: var(--ui-section-title);
   font-size: 24rpx;
@@ -849,11 +848,6 @@
   font-weight: 800;
   line-height: 1.45;
   word-break: break-word;
-}
-
-.voice-edit-change-reason {
-  margin-top: 6rpx;
-  font-weight: 700;
 }
 
 .voice-edit-inline-diff {
@@ -1348,8 +1342,7 @@
 .detail-page.large-text .voice-edit-status-detail,
 .detail-page.large-text .voice-edit-change-scope,
 .detail-page.large-text .voice-edit-label,
-.detail-page.large-text .voice-edit-confidence,
-.detail-page.large-text .voice-edit-change-reason {
+.detail-page.large-text .voice-edit-confidence {
   font-size: 28rpx;
   line-height: 1.5;
 }

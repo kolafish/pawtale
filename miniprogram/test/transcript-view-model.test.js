@@ -89,7 +89,7 @@ test("transcript view model builds voice edit preview diff", () => {
     edited_text: "他叫李阅，我们是高中同学。",
     reply_text: "",
     confidence: 0.93,
-    changes: [{ scope: "term", before: "李月", after: "李阅", reason: "用户明确纠正名字" }],
+    changes: [{ scope: "term", before: "李月", after: "李阅" }],
   });
 
   assert.equal(preview.confidenceText, "93%");
