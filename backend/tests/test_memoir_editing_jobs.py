@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.database import Base, register_models
 from app.domain.memoir.types import (
+    MemoirAutomationEventStatus,
+    MemoirAutomationEventType,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
@@ -274,6 +276,75 @@ async def test_run_editing_job_records_failure_without_legacy_business_event(tes
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
     )
     assert event is None
+
+
+async def test_provider_timeout_is_not_misclassified_as_job_deadline(test_db):
+    project = await _create_project(test_db)
+    job = await enqueue_editing_job(
+        test_db,
+        project_id=project.id,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+    )
+    await test_db.commit()
+
+    async def handler(_db, _current_job):
+        raise TimeoutError("provider deadline exceeded")
+
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
+    lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+
+    assert await run_editing_job(test_db, lease, timeout_seconds=1) is False
+    await test_db.refresh(job)
+    assert job.status == MemoirEditingJobStatus.FAILED.value
+    assert job.error_message == "provider deadline exceeded"
+    assert "error_type" not in job.result_json
+
+
+async def test_run_editing_job_deadline_preserves_progress_and_fails_linked_event(test_db):
+    project = await _create_project(test_db)
+    job = await enqueue_editing_job(
+        test_db,
+        project_id=project.id,
+        job_type=MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
+        payload_json={"target_label": "前言"},
+    )
+    event = MemoirAutomationEvent(
+        project_id=project.id,
+        editing_job_id=job.id,
+        event_type=MemoirAutomationEventType.BOOK_EDITORIAL_COPY_GENERATED.value,
+        status=MemoirAutomationEventStatus.PENDING.value,
+        summary_text="前言已提交后台重生成。",
+    )
+    test_db.add(event)
+    await test_db.commit()
+    handler_cancelled = asyncio.Event()
+
+    async def handler(db, current_job):
+        current_job.result_json = {"completed_section_ids": ["section-1"]}
+        await db.commit()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            handler_cancelled.set()
+
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY,
+        handler,
+    )
+    lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+
+    assert await run_editing_job(test_db, lease, timeout_seconds=0.01) is False
+    assert handler_cancelled.is_set()
+    await test_db.refresh(job)
+    await test_db.refresh(event)
+    assert job.status == MemoirEditingJobStatus.FAILED.value
+    assert job.result_json["completed_section_ids"] == ["section-1"]
+    assert job.result_json["error_type"] == "job_deadline_exceeded"
+    assert job.result_json["timeout_seconds"] == 0.01
+    assert "已保存的进度会保留" in job.error_message
+    assert event.status == MemoirAutomationEventStatus.FAILED.value
+    assert event.metadata_json["error_type"] == "job_deadline_exceeded"
+    assert event.metadata_json["timeout_seconds"] == 0.01
 
 
 async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test_db):

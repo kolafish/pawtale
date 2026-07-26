@@ -144,7 +144,6 @@ export function uploadMemoirShareVideoCustomBackground(
   return uploadAuthenticatedFile(url, {
     filePath,
     name: "file",
-    timeoutMs: 60000,
     formData: {
       project_id: projectId,
       processing_preset: "memoir_soft",
@@ -180,7 +179,6 @@ export function downloadMemoirShareVideoJob(job: MemoirShareVideoJob): Promise<s
   }
   const url = memoirShareVideoDownloadUrl(downloadUrl);
   return downloadAuthenticatedFile(url, {
-    timeoutMs: 60000,
     failureMessage: "视频下载失败",
     domainLabel: "视频下载",
   });
@@ -194,7 +192,6 @@ export function downloadMemoirShareVideoCustomBackgroundPreview(
   }
   const url = memoirShareVideoDownloadUrl(asset.preview_url);
   return downloadAuthenticatedFile(url, {
-    timeoutMs: 60000,
     failureMessage: "背景图片预览下载失败",
     domainLabel: "图片预览",
   });
