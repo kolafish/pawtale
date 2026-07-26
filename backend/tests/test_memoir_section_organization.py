@@ -11,7 +11,8 @@ from app.models.memoir import (
     MemoirSectionMaterial,
 )
 from app.services.memoir.material_organization import organize_material
-from app.services.memoir import section_regeneration
+from app.services.memoir import chapter_generation, section_regeneration
+from app.services.memoir.narrative import book_completion
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
 )
@@ -815,34 +816,22 @@ async def test_regenerate_chapter_sections_keeps_pending_material_for_user_choic
     assert workspace.json()["can_rewrite_draft"] is False
     assert (
         workspace.json()["completion_summary"]["next_action"]["kind"]
-        == "review_sections"
+        != "review_sections"
     )
-    blocked = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/"
-        f"chapters/{chapter_id}/prepare",
-        json={},
+    await book_completion.ensure_chapter_sections(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        user_id="test-user",
     )
-    assert blocked.status_code == 409
-    assert blocked.json()["detail"] == "请先为 1 条待归类素材选择小节"
-    direct_generate = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
-        "layered-draft/generate",
-        json={},
+    generation_context = await chapter_generation.load_chapter_generation_context(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
     )
-    assert direct_generate.status_code == 409
-    assert (
-        direct_generate.json()["detail"]
-        == "请先为 1 条待归类素材选择小节"
-    )
-    direct_confirm = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/"
-        "layered-draft/confirm",
-    )
-    assert direct_confirm.status_code == 409
-    assert (
-        direct_confirm.json()["detail"]
-        == "请先为 1 条待归类素材选择小节"
-    )
+    assert [item.material_id for item in generation_context.materials] == [
+        created[0]["utterance_id"]
+    ]
 
     moved = await client.post(
         f"/api/memoir/projects/{project_id}/section-materials/"

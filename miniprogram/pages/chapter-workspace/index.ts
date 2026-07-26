@@ -545,8 +545,7 @@ definePage<ChapterWorkspacePageData>()({
         this.data.expandedDraftSectionIds,
       ),
       structureExpanded:
-        Boolean(workspace.pending_assignment_material_count)
-        || !workspace.draft_sections.length
+        !workspace.draft_sections.length
         || this.data.structureExpanded,
       loading: false,
       error: "",
@@ -557,12 +556,6 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   toggleStructure() {
-    if (
-      this.data.workspace?.pending_assignment_material_count
-      && this.data.structureExpanded
-    ) {
-      return;
-    }
     this.setData({
       structureExpanded: !this.data.structureExpanded,
     });
@@ -864,10 +857,11 @@ definePage<ChapterWorkspacePageData>()({
       await this.loadPageData(true);
       if (job.unassigned_count > 0) {
         wx.showModal({
-          title: "有讲述需要选择小节",
-          content: `已整理为 ${job.section_count} 个小节；另有 ${job.unassigned_count} 条讲述放在“待归类素材”中，请在本页逐条选择。`,
-          showCancel: false,
-          confirmText: "去选择",
+          title: "有讲述暂未归类",
+          content: `已整理为 ${job.section_count} 个小节；另有 ${job.unassigned_count} 条讲述暂不纳入本章正文。您可以稍后归类，也可以进入讲述详情编辑或删除。`,
+          showCancel: true,
+          confirmText: "查看素材",
+          cancelText: "稍后处理",
           success: (modalResult) => {
             if (modalResult.confirm) {
               this.revealPendingAssignments();
@@ -954,6 +948,18 @@ definePage<ChapterWorkspacePageData>()({
       });
     }
     scrollToSection("#chapter-structure");
+  },
+
+  openMaterialEditor(
+    event: PageDatasetEvent<{ utteranceId?: string }>,
+  ) {
+    const utteranceId = datasetString(event, "utteranceId");
+    if (!utteranceId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/transcript-detail/index", { id: utteranceId }),
+    });
   },
 
   async runNextAction() {

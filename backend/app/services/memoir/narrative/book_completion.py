@@ -63,17 +63,6 @@ async def ensure_chapter_sections(
             user_id=user_id,
             project_id=project_id,
         )
-    pending_assignment_count = await sections.pending_assignment_material_count(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if pending_assignment_count:
-        raise ValueError(
-            f"请先为 {pending_assignment_count} 条待归类素材选择小节"
-        )
-
-
 async def prepare_chapter(
     db: AsyncSession,
     *,

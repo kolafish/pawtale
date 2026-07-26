@@ -54,7 +54,7 @@
         </view>
         <view class="structure-heading-meta">
           <text class="section-structure-summary">{{sectionStructureSummary}}</text>
-          <text class="structure-expand-mark">{{workspace.pending_assignment_material_count ? "待处理" : (structureExpanded ? "收起" : "查看")}}</text>
+          <text class="structure-expand-mark">{{structureExpanded ? "收起" : "查看"}}</text>
         </view>
       </view>
 
@@ -111,8 +111,24 @@
             <view wx:if="{{item.expanded}}" class="section-material-list">
               <text wx:if="{{item.assignmentHint}}" class="pending-section-hint">{{item.assignmentHint}}</text>
               <view wx:for="{{item.visibleMaterials}}" wx:key="utterance_id" wx:for-item="material" class="section-material">
-                <text class="section-material-index">{{material.indexText}}</text>
-                <text class="section-material-text" selectable>{{material.text}}</text>
+                <view
+                  wx:if="{{item.requires_user_assignment}}"
+                  class="section-material-open"
+                  data-utterance-id="{{material.utterance_id}}"
+                  aria-role="button"
+                  aria-label="编辑或删除{{material.indexText}}"
+                  bindtap="openMaterialEditor"
+                >
+                  <view class="section-material-open-copy">
+                    <text class="section-material-index">{{material.indexText}}</text>
+                    <text class="section-material-text">{{material.text}}</text>
+                  </view>
+                  <text class="section-material-open-action">编辑或删除 ›</text>
+                </view>
+                <block wx:else>
+                  <text class="section-material-index">{{material.indexText}}</text>
+                  <text class="section-material-text" selectable>{{material.text}}</text>
+                </block>
                 <picker
                   wx:if="{{item.requires_user_assignment}}"
                   mode="selector"

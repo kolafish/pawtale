@@ -42,7 +42,6 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.sections import pending_assignment_material_count
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -63,24 +62,6 @@ CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
 CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS = 40
 CHAPTER_SECTION_BOUNDARY_LOOKBACK_CHARS = 300
 logger = logging.getLogger(__name__)
-
-
-async def _ensure_no_pending_assignment(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> None:
-    pending_count = await pending_assignment_material_count(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if pending_count:
-        raise HTTPException(
-            status_code=409,
-            detail=f"请先为 {pending_count} 条待归类素材选择小节",
-        )
 
 
 @dataclass(frozen=True)
@@ -293,6 +274,7 @@ async def load_chapter_generation_context(
             MemoirBookPlanChapter.project_id == project_id,
             MemoirBookPlanChapter.id == chapter_id,
         )
+        .execution_options(populate_existing=True)
         .options(
             selectinload(MemoirBookPlanChapter.plan),
             selectinload(MemoirBookPlanChapter.sections)
@@ -878,11 +860,6 @@ async def generate_and_save_chapter_draft(
     checkpoint: dict[str, object] | None = None,
     progress_callback: ChapterGenerationProgressCallback | None = None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
-    await _ensure_no_pending_assignment(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
     before = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -985,11 +962,6 @@ async def revise_and_save_chapter_draft_section_with_ai(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
-    await _ensure_no_pending_assignment(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
     before = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -1160,11 +1132,6 @@ async def confirm_chapter_draft(
     project_id: str,
     chapter_id: str,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
-    await _ensure_no_pending_assignment(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
     context = await load_chapter_generation_context(
         db,
         project_id=project_id,
