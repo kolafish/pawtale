@@ -13,13 +13,25 @@ function chapterWorkspacePath(projectId: string, chapterId: string): string {
   );
 }
 
-export interface MemoirChapterSectionRegenerationResult {
+export interface MemoirChapterSectionRegenerationJob {
+  job_id: string | null;
   project_id: string;
   chapter_id: string;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage: string;
   material_count: number;
+  processed_material_count: number;
+  total_char_count: number;
+  processed_char_count: number;
+  batch_count: number;
+  completed_batch_count: number;
   assigned_count: number;
   unassigned_count: number;
   section_count: number;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  can_cancel: boolean;
+  error_message: string;
 }
 
 export interface MemoirSectionMaterialPlacementRequest {
@@ -49,9 +61,9 @@ export function regenerateMemoirChapterSections(
   projectId: string,
   chapterId: string,
   expectedSections: Array<{ id: string; version: number }>,
-): Promise<MemoirChapterSectionRegenerationResult> {
+): Promise<MemoirChapterSectionRegenerationJob> {
   return memoirAIRequest<
-    MemoirChapterSectionRegenerationResult,
+    MemoirChapterSectionRegenerationJob,
     {
       expected_sections: Array<{ id: string; version: number }>;
       ai_model: null;
@@ -59,12 +71,39 @@ export function regenerateMemoirChapterSections(
   >(
     memoirNarrativeProjectPath(
       projectId,
-      `/chapters/${encodeURIComponent(chapterId)}/sections/regenerate`,
+      `/chapters/${encodeURIComponent(chapterId)}/section-regeneration-jobs`,
     ),
     {
       expected_sections: expectedSections,
       ai_model: null,
     },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirChapterSectionRegenerationJob(
+  projectId: string,
+  chapterId: string,
+): Promise<MemoirChapterSectionRegenerationJob> {
+  return memoirRequest<MemoirChapterSectionRegenerationJob>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/section-regeneration-jobs/current`,
+    ),
+  );
+}
+
+export function cancelMemoirChapterSectionRegenerationJob(
+  projectId: string,
+  chapterId: string,
+  jobId: string,
+): Promise<MemoirChapterSectionRegenerationJob> {
+  return memoirRequest<MemoirChapterSectionRegenerationJob>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/chapters/${encodeURIComponent(chapterId)}/section-regeneration-jobs/${encodeURIComponent(jobId)}`,
+    ),
+    { method: "DELETE" },
   );
 }
 

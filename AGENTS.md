@@ -38,6 +38,7 @@
 
 - 如果本次 PR 改动包含 `backend/` 下的后端代码、依赖、配置模板、数据库迁移或部署脚本，且 PR 已成功 merge 到 `main`，默认继续把最新 `main` 自动部署到 ECS 上的 Pawtale 后端。
 - 后端自动部署仅限 Pawtale 自己的部署目录、进程和端口；不得修改共享机器上已有项目、已有进程、Caddy 全局配置、防火墙、systemd、PM2 全局状态或其他服务，除非用户明确要求。
+- 后端启动只断言 runtime schema，不自动执行迁移。改动数据库结构、枚举 CHECK 约束或迁移代码时，备份后必须显式运行仓库的 `scripts/migrate_runtime_schema.py`，再重启并核对数据行数、约束和外键完整性。
 - 部署后必须做基础验证，至少包括后端健康检查、关键 API/OpenAPI 可访问性，以及本次后端改动相关的最小 smoke test；最终汇报要包含部署目标、验证结果和已部署的 commit SHA。
 - 如果本次 PR 改动包含 `miniprogram/` 下的小程序代码、配置或资源，且 PR 已成功 merge 到 `main`，默认继续把小程序项目更新到最新 `main` 对应代码，并重新执行小程序相关验证。
 - 小程序代码更新至少要确保本地小程序项目使用已 merge 的 commit，并执行 `miniprogram` 的类型检查和相关测试。

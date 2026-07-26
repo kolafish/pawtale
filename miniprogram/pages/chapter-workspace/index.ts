@@ -7,9 +7,11 @@ import {
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
+  cancelMemoirChapterSectionRegenerationJob,
   confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
   createMemoirVoiceSession,
+  getMemoirChapterSectionRegenerationJob,
   getMemoirChapterWorkspace,
   placeMemoirChapterMaterial,
   prepareMemoirBookChapter,
@@ -18,6 +20,7 @@ import {
   rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
   type MemoirSectionMaterialPlacementRequest,
+  type MemoirChapterSectionRegenerationJob,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -59,6 +62,7 @@ import { promptRequiredText } from "../../services/text-prompt";
 export { chapterWorkspaceViewPatch };
 
 const PREPARATION_POLL_INTERVAL_MS = 1500;
+const SECTION_REGENERATION_POLL_INTERVAL_MS = 1500;
 const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
 
 type ChapterWorkspaceOperationKind =
@@ -79,6 +83,56 @@ type DraftSectionVoicePhase =
   | "idle"
   | "listening"
   | "transcribing";
+
+function isActiveSectionRegeneration(
+  job: MemoirChapterSectionRegenerationJob | null,
+): boolean {
+  return job?.status === "pending" || job?.status === "running";
+}
+
+function sectionRegenerationView(job: MemoirChapterSectionRegenerationJob) {
+  const model = job.resolved_ai_model || job.requested_ai_model;
+  const modelDetail = model ? ` · 模型 ${model}` : "";
+  if (job.status === "failed") {
+    return {
+      title: "小节整理失败",
+      detail: `${job.error_message || "请稍后重新整理"}${modelDetail}`,
+      progress: 0,
+    };
+  }
+  if (job.status === "cancelled") {
+    return { title: "已取消整理", detail: "原小节结构保持不变", progress: 0 };
+  }
+  if (job.stage === "planning_sections") {
+    return {
+      title: "正在规划小节结构",
+      detail: `正在理解全章 ${job.material_count} 条讲述${modelDetail}`,
+      progress: 0,
+    };
+  }
+  if (job.stage === "assigning_materials") {
+    const progress = job.total_char_count
+      ? Math.round(job.processed_char_count * 100 / job.total_char_count)
+      : 0;
+    return {
+      title: "正在归类讲述",
+      detail: `已处理 ${job.processed_material_count}/${job.material_count} 条 · ${job.completed_batch_count}/${job.batch_count} 批${modelDetail}`,
+      progress,
+    };
+  }
+  if (job.stage === "saving") {
+    return {
+      title: "正在保存新的小节结构",
+      detail: `全部讲述已归类，正在进行一致性检查${modelDetail}`,
+      progress: 95,
+    };
+  }
+  return {
+    title: "小节整理任务已排队",
+    detail: `即将开始处理 ${job.material_count} 条讲述${modelDetail}`,
+    progress: 0,
+  };
+}
 
 const CLOSED_DRAFT_SECTION_EDITOR = {
   editingMode: "" as DraftSectionEditingMode,
@@ -128,6 +182,10 @@ interface ChapterWorkspacePageData {
   canConfirmChapter: boolean;
   operationKind: ChapterWorkspaceOperationKind;
   operationTargetId: string;
+  sectionRegenerationJob: MemoirChapterSectionRegenerationJob | null;
+  sectionRegenerationTitle: string;
+  sectionRegenerationDetail: string;
+  sectionRegenerationProgress: number;
   audioPhase: ChapterWorkspaceAudioPhase;
   audioSectionId: string;
   editingMode: DraftSectionEditingMode;
@@ -141,9 +199,11 @@ definePage<ChapterWorkspacePageData>()({
   audioPlayback: new AudioPlaybackController(),
   playToken: 0,
   preparationPollTimer: null as ReturnType<typeof setTimeout> | null,
+  sectionRegenerationPollTimer: null as ReturnType<typeof setTimeout> | null,
   pageVisible: false,
   loadedOnce: false,
   workspaceLoadSequence: 0,
+  sectionRegenerationLoadSequence: 0,
   draftSectionVoiceInstructionToken: 0,
 
   data: {
@@ -175,6 +235,10 @@ definePage<ChapterWorkspacePageData>()({
     canConfirmChapter: false,
     operationKind: "",
     operationTargetId: "",
+    sectionRegenerationJob: null,
+    sectionRegenerationTitle: "",
+    sectionRegenerationDetail: "",
+    sectionRegenerationProgress: 0,
     audioPhase: "idle",
     audioSectionId: "",
     ...CLOSED_DRAFT_SECTION_EDITOR,
@@ -189,20 +253,27 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     this.pageVisible = true;
-    await this.loadPageData();
+    await Promise.all([
+      this.loadPageData(),
+      this.refreshSectionRegenerationJob(true),
+    ]);
     this.loadedOnce = true;
   },
 
   async onShow() {
     this.pageVisible = true;
     if (this.loadedOnce) {
-      await this.loadPageData(true);
+      await Promise.all([
+        this.loadPageData(true),
+        this.refreshSectionRegenerationJob(true),
+      ]);
     }
   },
 
   onHide() {
     this.pageVisible = false;
     this.stopPreparationPolling();
+    this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
     this.cancelDraftSectionVoiceInstruction();
   },
@@ -210,12 +281,16 @@ definePage<ChapterWorkspacePageData>()({
   onUnload() {
     this.pageVisible = false;
     this.stopPreparationPolling();
+    this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
     this.cancelDraftSectionVoiceInstruction();
   },
 
   async onPullDownRefresh() {
-    await this.loadPageData(true);
+    await Promise.all([
+      this.loadPageData(true),
+      this.refreshSectionRegenerationJob(),
+    ]);
     wx.stopPullDownRefresh();
   },
 
@@ -484,7 +559,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     try {
-      const result = await regenerateMemoirChapterSections(
+      const job = await regenerateMemoirChapterSections(
         this.data.projectId,
         this.data.chapterId,
         workspace.sections.map((section) => ({
@@ -492,15 +567,91 @@ definePage<ChapterWorkspacePageData>()({
           version: section.version,
         })),
       );
+      await this.applySectionRegenerationJob(job);
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.finishOperation("regenerate_sections");
       this.setData({
-        expandedSectionIds: {},
-        structureExpanded: result.unassigned_count > 0,
+        error: error instanceof Error ? error.message : "小节重新生成失败",
       });
+    }
+  },
+
+  async refreshSectionRegenerationJob(initial = false) {
+    if (!this.data.projectId || !this.data.chapterId) {
+      return;
+    }
+    const loadSequence = ++this.sectionRegenerationLoadSequence;
+    try {
+      const job = await getMemoirChapterSectionRegenerationJob(
+        this.data.projectId,
+        this.data.chapterId,
+      );
+      if (
+        !this.pageVisible
+        || loadSequence !== this.sectionRegenerationLoadSequence
+      ) {
+        return;
+      }
+      await this.applySectionRegenerationJob(job, initial);
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (loadSequence !== this.sectionRegenerationLoadSequence) {
+        return;
+      }
+      if (!initial) {
+        this.setData({
+          error: error instanceof Error ? error.message : "整理进度读取失败",
+        });
+        this.scheduleSectionRegenerationPolling();
+      }
+    }
+  },
+
+  async applySectionRegenerationJob(
+    job: MemoirChapterSectionRegenerationJob,
+    initial = false,
+  ) {
+    const previous = this.data.sectionRegenerationJob;
+    const wasActive = (
+      previous?.job_id === job.job_id
+      && isActiveSectionRegeneration(previous)
+    );
+    if (isActiveSectionRegeneration(job)) {
+      const view = sectionRegenerationView(job);
+      this.setData({
+        operationKind: "regenerate_sections",
+        operationTargetId: "",
+        sectionRegenerationJob: job,
+        sectionRegenerationTitle: view.title,
+        sectionRegenerationDetail: view.detail,
+        sectionRegenerationProgress: view.progress,
+        structureExpanded: true,
+        error: "",
+      });
+      this.scheduleSectionRegenerationPolling();
+      return;
+    }
+
+    this.stopSectionRegenerationPolling();
+    this.finishOperation("regenerate_sections");
+    if (job.status === "succeeded") {
+      this.setData({
+        sectionRegenerationJob: null,
+        expandedSectionIds: {},
+      });
+      if (initial && !wasActive) {
+        return;
+      }
       await this.loadPageData(true);
-      if (result.unassigned_count > 0) {
+      if (job.unassigned_count > 0) {
         wx.showModal({
           title: "有讲述需要选择小节",
-          content: `已整理为 ${result.section_count} 个小节；另有 ${result.unassigned_count} 条讲述放在“待归类素材”中，请在本页逐条选择。`,
+          content: `已整理为 ${job.section_count} 个小节；另有 ${job.unassigned_count} 条讲述放在“待归类素材”中，请在本页逐条选择。`,
           showCancel: false,
           confirmText: "去选择",
           success: (modalResult) => {
@@ -511,19 +662,59 @@ definePage<ChapterWorkspacePageData>()({
         });
       } else {
         wx.showToast({
-          title: `已整理为${result.section_count}个小节`,
+          title: `已整理为${job.section_count}个小节`,
           icon: "success",
         });
       }
+      return;
+    }
+
+    if (job.status === "cancelled" && initial) {
+      this.setData({ sectionRegenerationJob: null });
+      return;
+    }
+    if (job.status === "failed" || job.status === "cancelled") {
+      const view = sectionRegenerationView(job);
+      this.setData({
+        sectionRegenerationJob: job,
+        sectionRegenerationTitle: view.title,
+        sectionRegenerationDetail: view.detail,
+        sectionRegenerationProgress: view.progress,
+        structureExpanded: true,
+      });
+      return;
+    }
+    this.setData({ sectionRegenerationJob: null });
+  },
+
+  async cancelSectionRegeneration() {
+    const job = this.data.sectionRegenerationJob;
+    if (!job?.job_id || !job.can_cancel) {
+      return;
+    }
+    this.setData({
+      sectionRegenerationJob: { ...job, can_cancel: false },
+      sectionRegenerationTitle: "正在取消整理",
+      sectionRegenerationDetail: "正在停止后续处理，原小节结构会保持不变",
+    });
+    try {
+      await cancelMemoirChapterSectionRegenerationJob(
+        this.data.projectId,
+        this.data.chapterId,
+        job.job_id,
+      );
+      this.stopSectionRegenerationPolling();
+      this.finishOperation("regenerate_sections");
+      this.setData({ sectionRegenerationJob: null });
+      wx.showToast({ title: "已取消整理", icon: "none" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "小节重新生成失败",
+        sectionRegenerationJob: job,
+        error: error instanceof Error ? error.message : "取消整理失败",
       });
-    } finally {
-      this.finishOperation("regenerate_sections");
     }
   },
 
@@ -1280,6 +1471,29 @@ definePage<ChapterWorkspacePageData>()({
     if (this.preparationPollTimer !== null) {
       clearTimeout(this.preparationPollTimer);
       this.preparationPollTimer = null;
+    }
+  },
+
+  scheduleSectionRegenerationPolling() {
+    if (
+      !this.pageVisible
+      || this.sectionRegenerationPollTimer !== null
+      || !isActiveSectionRegeneration(this.data.sectionRegenerationJob)
+    ) {
+      return;
+    }
+    this.sectionRegenerationPollTimer = setTimeout(() => {
+      this.sectionRegenerationPollTimer = null;
+      if (this.pageVisible) {
+        void this.refreshSectionRegenerationJob();
+      }
+    }, SECTION_REGENERATION_POLL_INTERVAL_MS);
+  },
+
+  stopSectionRegenerationPolling() {
+    if (this.sectionRegenerationPollTimer !== null) {
+      clearTimeout(this.sectionRegenerationPollTimer);
+      this.sectionRegenerationPollTimer = null;
     }
   },
 });

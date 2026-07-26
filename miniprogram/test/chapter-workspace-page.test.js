@@ -125,6 +125,30 @@ function workspaceWithPendingMaterial(overrides = {}) {
   });
 }
 
+function sectionRegenerationJob(overrides = {}) {
+  return {
+    job_id: "job-1",
+    project_id: "project-1",
+    chapter_id: "chapter-1",
+    status: "running",
+    stage: "assigning_materials",
+    material_count: 1,
+    processed_material_count: 0,
+    total_char_count: 14,
+    processed_char_count: 0,
+    batch_count: 1,
+    completed_batch_count: 0,
+    assigned_count: 0,
+    unassigned_count: 0,
+    section_count: 0,
+    requested_ai_model: "claude-opus-4-8",
+    resolved_ai_model: "claude-opus-4-8",
+    can_cancel: true,
+    error_message: "",
+    ...overrides,
+  };
+}
+
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
@@ -134,9 +158,16 @@ function loadWorkspacePage({
 } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirChapterWorkspace: async () => currentWorkspace,
+    getMemoirChapterSectionRegenerationJob: async () => ({
+      job_id: null,
+      project_id: "project-1",
+      chapter_id: "chapter-1",
+      status: "idle",
+    }),
     prepareMemoirBookChapter: async () => {},
     reviseMemoirChapterDraftSectionWithAI: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
+    cancelMemoirChapterSectionRegenerationJob: async () => {},
     placeMemoirChapterMaterial: async () => {},
     rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
@@ -454,19 +485,27 @@ test("chapter workspace expands materials under their section", async () => {
 test("chapter workspace regenerates the current section structure after confirmation", async () => {
   const { toasts } = installWx();
   const calls = [];
+  let jobReads = 0;
   const { page } = loadWorkspacePage({
     voiceApiExports: {
       regenerateMemoirChapterSections: async (...args) => {
         calls.push(args);
-        return {
-          project_id: "project-1",
-          chapter_id: "chapter-1",
-          material_count: 1,
-          assigned_count: 1,
-          unassigned_count: 0,
-          section_count: 2,
-        };
+        return sectionRegenerationJob();
       },
+      getMemoirChapterSectionRegenerationJob: async () => (
+        ++jobReads === 1
+          ? sectionRegenerationJob({ job_id: null, status: "idle" })
+          : sectionRegenerationJob({
+            status: "succeeded",
+            stage: "completed",
+            processed_material_count: 1,
+            processed_char_count: 14,
+            completed_batch_count: 1,
+            assigned_count: 1,
+            section_count: 2,
+            can_cancel: false,
+          })
+      ),
     },
   });
   const context = pageContext(page);
@@ -477,7 +516,9 @@ test("chapter workspace regenerates the current section structure after confirma
 
   page.regenerateSections.call(context);
   await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.operationKind, "regenerate_sections");
+  assert.equal(context.data.sectionRegenerationTitle, "正在归类讲述");
+  await page.refreshSectionRegenerationJob.call(context);
 
   assert.deepEqual(calls, [[
     "project-1",
@@ -486,6 +527,45 @@ test("chapter workspace regenerates the current section structure after confirma
   ]]);
   assert.equal(toasts.at(-1).title, "已整理为2个小节");
   assert.equal(context.data.operationKind, "");
+  assert.equal(context.data.sectionRegenerationJob, null);
+  delete global.wx;
+});
+
+test("chapter workspace resumes and cancels an active section regeneration job", async () => {
+  const { toasts } = installWx();
+  const cancelled = [];
+  const activeJob = sectionRegenerationJob({
+    processed_material_count: 1,
+    processed_char_count: 7,
+  });
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      getMemoirChapterSectionRegenerationJob: async () => activeJob,
+      cancelMemoirChapterSectionRegenerationJob: async (...args) => {
+        cancelled.push(args);
+        return sectionRegenerationJob({
+          status: "cancelled",
+          stage: "cancelled",
+          can_cancel: false,
+        });
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+  assert.equal(context.data.operationKind, "regenerate_sections");
+  assert.equal(context.data.sectionRegenerationProgress, 50);
+
+  await page.cancelSectionRegeneration.call(context);
+
+  assert.deepEqual(cancelled, [["project-1", "chapter-1", "job-1"]]);
+  assert.equal(context.data.operationKind, "");
+  assert.equal(context.data.sectionRegenerationJob, null);
+  assert.equal(toasts.at(-1).title, "已取消整理");
   delete global.wx;
 });
 
@@ -493,6 +573,7 @@ test("section regeneration opens pending material instead of running a stale nex
   const { modals, scrolls } = installWx();
   const prepareCalls = [];
   let loadCount = 0;
+  let jobReads = 0;
   const pendingWorkspace = workspaceWithPendingMaterial({
     draft_needs_rewrite: true,
   });
@@ -502,14 +583,27 @@ test("section regeneration opens pending material instead of running a stale nex
         loadCount += 1;
         return loadCount === 1 ? workspace() : pendingWorkspace;
       },
-      regenerateMemoirChapterSections: async () => ({
-        project_id: "project-1",
-        chapter_id: "chapter-1",
+      regenerateMemoirChapterSections: async () => sectionRegenerationJob({
         material_count: 2,
-        assigned_count: 1,
-        unassigned_count: 1,
-        section_count: 1,
+        total_char_count: 28,
       }),
+      getMemoirChapterSectionRegenerationJob: async () => (
+        ++jobReads === 1
+          ? sectionRegenerationJob({ job_id: null, status: "idle" })
+          : sectionRegenerationJob({
+            status: "succeeded",
+            stage: "completed",
+            material_count: 2,
+            processed_material_count: 2,
+            total_char_count: 28,
+            processed_char_count: 28,
+            completed_batch_count: 1,
+            assigned_count: 1,
+            unassigned_count: 1,
+            section_count: 1,
+            can_cancel: false,
+          })
+      ),
       prepareMemoirBookChapter: async (...args) => prepareCalls.push(args),
     },
   });
@@ -521,8 +615,7 @@ test("section regeneration opens pending material instead of running a stale nex
 
   page.regenerateSections.call(context);
   await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  await page.refreshSectionRegenerationJob.call(context);
 
   assert.deepEqual(
     modals.map((modal) => modal.title),
