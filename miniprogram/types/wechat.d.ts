@@ -12,6 +12,15 @@ declare function Page<TData extends object, TMethods extends object>(
   } & ThisType<TMethods & { data: TData; setData(data: Partial<TData>): void }>
 ): void;
 
+declare function Component<TProperties extends object, TMethods extends object>(
+  options: {
+    properties: TProperties;
+    methods: TMethods & ThisType<TMethods & {
+      triggerEvent(name: string, detail?: unknown): void;
+    }>;
+  },
+): void;
+
 declare namespace WechatMiniprogram {
   type RequestMethod = "OPTIONS" | "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
 

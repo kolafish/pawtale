@@ -1,4 +1,7 @@
 {
   "navigationBarTitleText": "本章正文",
-  "enablePullDownRefresh": true
+  "enablePullDownRefresh": true,
+  "usingComponents": {
+    "ai-task-progress": "/components/ai-task-progress/index"
+  }
 }
