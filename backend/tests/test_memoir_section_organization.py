@@ -39,37 +39,55 @@ class ReplayMaterialOrganizationAI:
         self.leave_unassigned = leave_unassigned
         self.prompts: list[str] = []
 
+    def _should_leave_unassigned(self, _index: int) -> bool:
+        return self.leave_unassigned
+
     async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
         self.prompts.append(user_prompt)
-        if self.leave_unassigned:
+        if "这里只设计候选小节" in user_prompt:
             return json.dumps(
                 {
-                    "action": "leave_unassigned",
-                    "reason": "暂不归章",
+                    "sections": [{
+                        "title": "山桃花里的重逢",
+                        "section_type": "event",
+                    }],
                 },
                 ensure_ascii=False,
             )
-        existing = re.search(r'"section_id": "([^"]+)"', user_prompt)
-        if existing:
-            return json.dumps(
-                {
-                    "action": "assign_existing",
-                    "section_id": existing.group(1),
-                    "confidence": 0.86,
-                    "reason": "延续同一次山桃花爬山经历",
-                },
-                ensure_ascii=False,
-            )
-        chapter = re.search(r'"chapter_id": "([^"]+)"', user_prompt)
-        assert chapter is not None
+
+        raw_materials = re.search(
+            r"待归类讲述：\n(\[.*\])\n\n只返回 JSON",
+            user_prompt,
+            re.DOTALL,
+        )
+        section = re.search(r'"section_id": "([^"]+)"', user_prompt)
+        assert raw_materials is not None
+        assert section is not None
+        materials = json.loads(raw_materials.group(1))
         return json.dumps(
             {
-                "action": "create_section",
-                "chapter_id": chapter.group(1),
-                "title": "山桃花里的重逢",
-                "section_type": "event",
-                "confidence": 0.9,
-                "reason": "围绕重新联系和第一次同行",
+                "assignments": [
+                    {
+                        "utterance_id": material["utterance_id"],
+                        "action": (
+                            "leave_unassigned"
+                            if self._should_leave_unassigned(index)
+                            else "assign_existing"
+                        ),
+                        "section_id": (
+                            None
+                            if self._should_leave_unassigned(index)
+                            else section.group(1)
+                        ),
+                        "confidence": 0.86,
+                        "reason": (
+                            "暂不归章"
+                            if self._should_leave_unassigned(index)
+                            else "延续同一次山桃花爬山经历"
+                        ),
+                    }
+                    for index, material in enumerate(materials)
+                ],
             },
             ensure_ascii=False,
         )
@@ -89,21 +107,40 @@ class FailingReplayMaterialOrganizationAI(ReplayMaterialOrganizationAI):
 class PartiallyUnassignedReplayMaterialOrganizationAI(
     ReplayMaterialOrganizationAI
 ):
-    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
-        if self.prompts:
-            self.prompts.append(user_prompt)
-            return json.dumps(
-                {
-                    "action": "leave_unassigned",
-                    "reason": "暂不归章",
-                },
-                ensure_ascii=False,
+    def _should_leave_unassigned(self, index: int) -> bool:
+        return index > 0
+
+
+def test_section_regeneration_batches_by_material_text_budget():
+    production_lengths = [
+        8, 15, 20, 24, 32, 33, 47, 64, 70, 78, 80, 83, 101,
+        108, 109, 112, 113, 114, 119, 126, 160, 164, 176, 199,
+        356, 600,
+    ]
+
+    def snapshots(lengths):
+        return [
+            section_regeneration._MaterialSnapshot(
+                utterance_id=str(index),
+                text="字" * length,
+                text_hash=str(length),
+                transcript_version_id=None,
+                include_in_book=True,
             )
-        return await super()._call_llm(
-            _system_prompt,
-            user_prompt,
-            **_kwargs,
-        )
+            for index, length in enumerate(lengths)
+        ]
+
+    production_materials = snapshots(production_lengths)
+    production_batches = section_regeneration._material_batches(
+        production_materials
+    )
+    assert [len(batch) for batch in production_batches] == [26]
+
+    oversized_combination = snapshots([5_000, 4_000])
+    split_batches = section_regeneration._material_batches(
+        oversized_combination
+    )
+    assert [len(batch) for batch in split_batches] == [1, 1]
 
 
 async def _bootstrap_two_chapters(client, test_db):
@@ -581,9 +618,9 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     ] == [False, True]
     assert len(fake.prompts) == 2
     assert requested_models == ["deepseek-v4-flash"]
-    assert "保留为未归类素材" in fake.prompts[0]
-    assert "assign_existing|create_section|leave_unassigned" in fake.prompts[0]
+    assert "先从全章视角设计" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
+    assert "assign_existing|leave_unassigned" in fake.prompts[1]
     assert "山桃花里的重逢" in fake.prompts[1]
     untouched = [
         section
