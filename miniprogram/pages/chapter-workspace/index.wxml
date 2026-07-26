@@ -41,6 +41,26 @@
       <block wx:if="{{structureExpanded}}">
         <view class="structure-tools">
           <text class="structure-tools-detail">这里只重新划分讲述属于哪个小节，不会生成正文；仅在分组不合适时使用，可能需要几分钟。</text>
+          <view wx:if="{{sectionRegenerationJob}}" class="section-regeneration-status">
+            <text class="section-regeneration-title">{{sectionRegenerationTitle}}</text>
+            <text class="section-regeneration-detail">{{sectionRegenerationDetail}}</text>
+            <view
+              wx:if="{{sectionRegenerationJob.status === 'pending' || sectionRegenerationJob.status === 'running'}}"
+              class="section-regeneration-track"
+              aria-label="小节整理进度 {{sectionRegenerationProgress}}%"
+            >
+              <view
+                class="section-regeneration-progress"
+                style="width: {{sectionRegenerationProgress}}%;"
+              ></view>
+            </view>
+            <view
+              wx:if="{{sectionRegenerationJob.can_cancel}}"
+              class="section-regeneration-cancel"
+              aria-role="button"
+              bindtap="cancelSectionRegeneration"
+            >取消整理</view>
+          </view>
           <view
             class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
