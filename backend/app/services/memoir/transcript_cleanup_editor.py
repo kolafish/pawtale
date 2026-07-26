@@ -19,6 +19,7 @@ from app.schemas.memoir_interview_editor import (
     MemoirDialectGlossaryUpdateRequest,
 )
 from app.services.memoir import voice_transcripts
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.utterance_editing_pipeline import (
@@ -180,6 +181,7 @@ async def preview_batch_cleanup(
     allow_admin: bool = False,
 ) -> MemoirBatchTranscriptCleanupPreviewResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     glossary_entries = _glossary_entries(project)
     glossary_lines = _glossary_context_lines(glossary_entries)
     utterances = await _load_project_utterances(
@@ -200,7 +202,7 @@ async def preview_batch_cleanup(
         )
         cleaned = await voice_transcripts.generate_cleaned_transcript_text(
             source_text,
-            ai_model=req.ai_model,
+            ai_model=selected_ai_model,
             context=context,
             strict=True,
         )
@@ -232,7 +234,8 @@ async def confirm_batch_cleanup(
     req: MemoirBatchTranscriptCleanupConfirmRequest,
     allow_admin: bool = False,
 ) -> MemoirBatchTranscriptCleanupConfirmResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     item_by_utterance_id = {item.utterance_id: item for item in req.items}
     utterances = await _load_project_utterances(
         db,
@@ -266,7 +269,7 @@ async def confirm_batch_cleanup(
                     item.cleaned_text,
                     created_by=item.created_by,
                     provider=item.provider,
-                    ai_model=req.ai_model,
+                    ai_model=selected_ai_model,
                     commit=False,
                 )
             )

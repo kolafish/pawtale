@@ -9,14 +9,12 @@
 3. 这些数据在产品中怎样使用和展示；
 4. 用户修改不同数据时，应该修改哪一层，以及会影响什么。
 
-本文描述的是当前实现，不是脱离代码的目标模型。更上层的不变量仍以以下文档为准：
+本文描述的是当前实现，不是脱离代码的目标模型。更上层的不变量以主架构文档为准：
 
 最后核对日期：2026-07-25。
 
-- `MEMOIR_NARRATIVE_ARCHITECTURE.md`：事实来源、素材归属和正文生成约束；
-- `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`：主题讲述、成书补全和分层审阅；
+- `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`：事实来源、素材归属、主题讲述、成书、缓存和请求边界；
 - `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`：实时录音、ASR、对话和 TTS；
-- `MEMOIR_CLIENT_DATA_AND_REQUEST_ARCHITECTURE.md`：客户端缓存、服务端版本和请求边界。
 
 主要实现入口：
 

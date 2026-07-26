@@ -555,6 +555,7 @@ test("share video APIs encode routes and download preview with session cookie", 
   assert.deepEqual(apiRequests[1].data, {
     start_char: 0,
     end_char: 13,
+    ai_model: "deepseek-v4-pro",
     background_style: "storybook",
     background_mode: "smart_multi",
   });

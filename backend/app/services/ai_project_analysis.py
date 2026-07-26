@@ -2,6 +2,11 @@ import asyncio
 import logging
 
 from app.domain.references import coerce_setting_reference_type
+from app.services.ai_timeouts import (
+    AIProviderTimeoutError,
+    AITextTimeoutProfile,
+    ai_text_timeout_seconds,
+)
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 
@@ -70,6 +75,7 @@ async def analyze_project_content(
     temp = 0.3
 
     max_attempts = 3
+    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
     raw_text = ""
     response_json = None
     parsed: dict = {}
@@ -82,9 +88,11 @@ async def analyze_project_content(
                 user_prompt,
                 temperature=temp,
                 max_tokens=3000,
-                timeout=120.0,
+                timeout=timeout_seconds,
                 return_raw=debug,
             )
+        except AIProviderTimeoutError:
+            raise
         except Exception as e:
             last_error = e
             err_detail = str(e)

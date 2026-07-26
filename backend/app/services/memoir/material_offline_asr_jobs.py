@@ -25,6 +25,7 @@ from app.services.memoir.offline_asr_reprocessing import (
     reprocess_offline_asr_utterance,
 )
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 async def _load_owned_material(
@@ -66,6 +67,7 @@ async def enqueue_material_offline_asr(
     )
     normalized_providers = normalize_offline_asr_providers(providers)
     project = utterance.voice_session.project
+    selected_ai_model = select_project_ai_model(project, ai_model)
     dialect_profile = resolve_memoir_dialect_profile(memoir_narrator_origin(project))
     await enqueue_editing_job(
         db,
@@ -74,7 +76,7 @@ async def enqueue_material_offline_asr(
         payload_json={
             "utterance_id": utterance.id,
             "providers": list(normalized_providers),
-            "ai_model": ai_model,
+            "ai_model": selected_ai_model,
             "source": "user_material_offline_asr",
             **dialect_profile.metadata(),
         },

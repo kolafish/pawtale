@@ -59,6 +59,7 @@ class VoiceGatewayState(str, Enum):
 class VoiceGatewayTurnContext:
     speaker_role: str = MemoirSpeakerRole.NARRATOR.value
     parent_message_id: str | None = None
+    ai_model: str | None = None
 
 
 class VoiceGatewaySession:
@@ -233,9 +234,14 @@ class VoiceGatewaySession:
             raise VoiceGatewayClientError("unsupported_speaker_role")
         raw_parent_message_id = message.get("parent_message_id")
         parent_message_id = str(raw_parent_message_id).strip() if raw_parent_message_id else None
+        raw_ai_model = message.get("ai_model")
+        ai_model = str(raw_ai_model).strip() if raw_ai_model else None
+        if ai_model and len(ai_model) > 120:
+            raise VoiceGatewayClientError("invalid_ai_model")
         return VoiceGatewayTurnContext(
             speaker_role=speaker_role,
             parent_message_id=parent_message_id,
+            ai_model=ai_model,
         )
 
     async def _send_audio_frame(self, message: dict[str, Any]) -> None:

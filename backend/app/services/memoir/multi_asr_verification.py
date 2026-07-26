@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.dialect_profile import (
@@ -102,7 +103,7 @@ async def verify_multi_asr_transcripts(
         build_multi_asr_verification_prompt(request),
         temperature=0.1,
         max_tokens=1800,
-        timeout=120.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
     )
     text = normalize_memoir_asr_text(_strip_llm_wrapping(str(content))).strip()
     if not text:

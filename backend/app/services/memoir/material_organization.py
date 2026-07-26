@@ -25,10 +25,12 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.sections import assign_material_to_section
 from app.services.memoir.utterance_editing_pipeline import (
     current_transcript_version_id,
@@ -242,7 +244,7 @@ async def decide_material_organization(
         prompt,
         temperature=0.1,
         max_tokens=800,
-        timeout=60.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.INTERACTIVE),
     )
     return normalize_material_organization_decision(
         extract_json_payload(str(content)),
@@ -450,6 +452,11 @@ async def run_material_organization_job(
             error_message="素材整理任务缺少讲述或文本版本",
         )
     transcript_version_id = payload.get("transcript_version_id")
+    ai_model = await load_project_ai_model(
+        db,
+        job.project_id,
+        payload["ai_model"] if isinstance(payload.get("ai_model"), str) else None,
+    )
     return await organize_material(
         db,
         project_id=job.project_id,
@@ -460,9 +467,5 @@ async def run_material_organization_job(
             if isinstance(transcript_version_id, str)
             else None
         ),
-        ai_model=(
-            payload["ai_model"]
-            if isinstance(payload.get("ai_model"), str)
-            else None
-        ),
+        ai_model=ai_model,
     )

@@ -1,3 +1,4 @@
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 
 
@@ -68,7 +69,7 @@ async def revise_chapter(
         user_prompt,
         temperature=temp,
         max_tokens=3000,
-        timeout=90.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         return_raw=debug,
     )
     if debug:

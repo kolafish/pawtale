@@ -1,9 +1,11 @@
 """Tests for AI text provider contracts and use-case helpers."""
+import httpx
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.ai_base import AITextServiceBase
 import app.services.ai_story as ai_story
 from app.services.ai_project_analysis import normalize_project_analysis
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_text import DeepSeekTextService
 from app.services.ai_claude import ClaudeTextService
 from app.services.ai_volc import VolcArkTextService
@@ -272,6 +274,30 @@ B. 转身离开"""
 
 class TestCallLlmContract:
     """Verify _call_llm implementations on both subclasses."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "service",
+        [
+            ClaudeTextService(),
+            DeepSeekTextService(),
+            VolcArkTextService(),
+        ],
+    )
+    async def test_provider_timeout_has_stable_metadata(self, service):
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            with pytest.raises(AIProviderTimeoutError) as error:
+                await service._call_llm("sys", "user", timeout=12)
+
+        assert error.value.provider == service.provider_name
+        assert error.value.model == service.model_name
+        assert error.value.timeout_seconds == 12
 
     @pytest.mark.asyncio
     async def test_claude_returns_string(self):

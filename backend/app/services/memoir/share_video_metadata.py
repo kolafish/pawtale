@@ -71,6 +71,7 @@ class ShareVideoJobMetadata(_ShareVideoMetadataModel):
     alignment_strategy: str = ""
     alignment_confidence: float | None = None
     char_timings: list[ShareVideoCharTiming] = Field(default_factory=list)
+    ai_model: str | None = None
     background_source: str = DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE
     background_style: str = DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     background_mode: str = DEFAULT_SHARE_VIDEO_BACKGROUND_MODE

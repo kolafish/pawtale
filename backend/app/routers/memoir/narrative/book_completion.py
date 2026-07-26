@@ -12,10 +12,7 @@ from app.schemas.memoir_narrative import (
 )
 from app.services.memoir.narrative import book_completion
 from app.services.memoir import completion_read_model
-from app.services.memoir.project_ai_preferences import (
-    project_ai_model,
-    remember_project_ai_model,
-)
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 from .common import authorize_project, decision_error
 
@@ -75,9 +72,7 @@ async def prepare_memoir_book_completion_chapter(
         project_id=project_id,
         current_user=current_user,
     )
-    requested_ai_model = (req.ai_model or "").strip()
-    selected_ai_model = requested_ai_model or project_ai_model(project)
-    remember_project_ai_model(project, requested_ai_model)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     # Persist the model preference before provider calls so this request does
     # not hold SQLite's write lock throughout multi-step chapter preparation.
     await db.commit()
@@ -114,9 +109,7 @@ async def rewrite_memoir_book_completion_chapter(
         project_id=project_id,
         current_user=current_user,
     )
-    requested_ai_model = (req.ai_model or "").strip()
-    selected_ai_model = requested_ai_model or project_ai_model(project)
-    remember_project_ai_model(project, requested_ai_model)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     try:
         workspace = await book_completion.rewrite_chapter(
             db,
@@ -149,9 +142,7 @@ async def revise_memoir_chapter_draft_section_with_ai(
         project_id=project_id,
         current_user=current_user,
     )
-    requested_ai_model = (req.ai_model or "").strip()
-    selected_ai_model = requested_ai_model or project_ai_model(project)
-    remember_project_ai_model(project, requested_ai_model)
+    selected_ai_model = select_project_ai_model(project, req.ai_model)
     try:
         workspace = await book_completion.revise_chapter_section_with_ai(
             db,

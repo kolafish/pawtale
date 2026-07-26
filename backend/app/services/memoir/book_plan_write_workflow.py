@@ -58,6 +58,7 @@ from app.services.memoir.book_plan_sources import (
     sorted_chapters as _sorted_plan_chapters,
     text_or_empty as _text_or_empty,
 )
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
 )
@@ -294,7 +295,7 @@ async def generate_book_plan(
         project_title=project.title,
         sources=sources,
         max_chapters=req.max_chapters,
-        ai_model=req.ai_model,
+        ai_model=select_project_ai_model(project, req.ai_model),
         ai_client=ai_client,
     )
     return await _replace_plan(
@@ -783,7 +784,7 @@ async def generate_book_chapter_title(
     ai_client: AITextClient | None = None,
     allow_admin: bool = False,
 ) -> MemoirBookPlanResponse:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     plan = await _load_plan(db, project_id)
     if not plan:
         raise HTTPException(status_code=404, detail="章节规划不存在")
@@ -801,7 +802,7 @@ async def generate_book_chapter_title(
             sources,
             source_refs=refs_by_chapter.get(chapter.id, []),
         ),
-        ai_model=req.ai_model,
+        ai_model=select_project_ai_model(project, req.ai_model),
         ai_client=ai_client,
     )
     return await _save_chapter_title(

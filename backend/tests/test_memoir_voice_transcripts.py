@@ -39,6 +39,7 @@ from app.models.memoir import (
     MemoirTranscriptVersion,
     MemoirVoiceUtterance,
 )
+from app.models.projects import Project
 from app.services.memoir import image_assets
 from app.services.memoir import share_video_backgrounds
 from app.services.memoir import share_video_custom_backgrounds
@@ -119,9 +120,11 @@ class CapturingAIClient:
     def __init__(self, response: str = "现在有几个章节啊？") -> None:
         self.response = response
         self.prompt = ""
+        self.call_kwargs: dict[str, object] = {}
 
-    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+    async def _call_llm(self, _system_prompt, user_prompt, **kwargs):
         self.prompt = user_prompt
+        self.call_kwargs = kwargs
         return self.response
 
 
@@ -1388,6 +1391,8 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
 
     text = "小时候一家人住在老房子里。后来去县城读书。再后来大家各自成家。"
     created = await create_test_voice_transcript(client, test_db, text=text)
+    project = await test_db.get(Project, created["session"]["project_id"])
+    project.metadata_json = {"ai_model": "claude-opus-4-8"}
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
     )
@@ -1401,10 +1406,11 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     first_end = text.index("。") + 1
     second_end = text.index("。", first_end) + 1
 
-    async def fake_plan(selected_text, char_timings, duration_ms):
+    async def fake_plan(selected_text, char_timings, duration_ms, *, ai_model=None):
         assert selected_text == text
         assert duration_ms == 36_000
         assert len(char_timings) == len(text)
+        assert ai_model == "claude-opus-4-8"
         return share_video_scene_planner.ShareVideoScenePlan(
             provider="fake_llm",
             model="fake-scene-planner",
@@ -2326,25 +2332,39 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     created = await create_test_voice_transcript(
         client,
         test_db,
-        text="我小时候住在外婆家。",
+        text="他是我的儿子，名字叫刘凯峰，今年10岁。",
     )
+    project = await test_db.get(Project, created["session"]["project_id"])
+    project.metadata_json = {"ai_model": "claude-opus-4-8"}
+    await test_db.commit()
     ai_client = CapturingAIClient(
         json.dumps(
             {
                 "action": "revise_transcript",
-                "edited_text": "我小时候住在奶奶家。",
+                "edited_text": "他是我的儿子，名字叫刘凯风，今年10岁。",
                 "changes": [
-                    {"before": "外婆", "after": "奶奶", "reason": "用户明确说人物识别错了"}
+                    {
+                        "scope": "term",
+                        "before": "刘凯峰",
+                        "after": "刘凯风",
+                        "reason": "用户明确修正名字用字",
+                    }
                 ],
-                "confidence": 0.93,
-                "reply_text": "已把外婆改成奶奶，请确认后保存。",
+                "confidence": 0.97,
+                "reply_text": "已修改名字用字，请确认后保存。",
             },
             ensure_ascii=False,
         )
     )
+    requested_models: list[str | None] = []
+
+    def capture_ai_service(model=None):
+        requested_models.append(model)
+        return ai_client
+
     monkeypatch.setattr(
         "app.services.memoir.transcript_voice_edit.get_ai_service",
-        lambda model=None: ai_client,
+        capture_ai_service,
     )
     utterance_before = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])
@@ -2355,28 +2375,37 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/voice-edit/preview",
-        json={"instruction_text": "这里不是外婆，是奶奶", "ai_model": "deepseek"},
+        json={"instruction_text": "这里边的风是那个刮风的风，不是山峰的峰。"},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["utterance_id"] == created["utterance_id"]
     assert data["action"] == "revise_transcript"
-    assert data["original_text"] == "我小时候住在外婆家。"
-    assert data["current_text"] == "我小时候住在外婆家。"
-    assert data["edited_text"] == "我小时候住在奶奶家。"
+    assert data["original_text"] == "他是我的儿子，名字叫刘凯峰，今年10岁。"
+    assert data["current_text"] == "他是我的儿子，名字叫刘凯峰，今年10岁。"
+    assert data["edited_text"] == "他是我的儿子，名字叫刘凯风，今年10岁。"
     assert data["changes"] == [
-        {"scope": "term", "before": "外婆", "after": "奶奶", "reason": "用户明确说人物识别错了"}
+        {
+            "scope": "term",
+            "before": "刘凯峰",
+            "after": "刘凯风",
+            "reason": "用户明确修正名字用字",
+        }
     ]
-    assert data["confidence"] == 0.93
+    assert data["confidence"] == 0.97
     assert data["requires_confirmation"] is True
     assert data["provider"] == "fake-ai"
     assert data["model"] == "fake-cleaner"
+    assert requested_models == ["claude-opus-4-8"]
+    assert ai_client.call_kwargs["timeout"] == 180.0
     assert "只能改用户修正指令明确指出" in ai_client.prompt
     assert "passage 表示指定片段改写" in ai_client.prompt
     assert "changes 之外的文字和标点必须逐字保持不变" in ai_client.prompt
-    assert "当前整理文字：我小时候住在外婆家。" in ai_client.prompt
-    assert "用户语音修正指令：\n这里不是外婆，是奶奶" in ai_client.prompt
+    assert '"edited_text":' in ai_client.prompt
+    assert '"reason":' in ai_client.prompt
+    assert "当前整理文字：他是我的儿子，名字叫刘凯峰，今年10岁。" in ai_client.prompt
+    assert "用户语音修正指令：\n这里边的风是那个刮风的风，不是山峰的峰。" in ai_client.prompt
 
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == created["utterance_id"])

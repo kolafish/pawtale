@@ -5,8 +5,7 @@
 当前语音和成书架构分别见：
 
 - [实时语音架构](../docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
-- [访谈与成书协作架构](../docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
-- [事实、素材与成书不变量](../docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)
+- [事实、访谈、成书与请求架构](../docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
 
 ## 当前用户动线
 

@@ -461,12 +461,19 @@ class MemoirShareVideoJobCreateRequest(BaseModel):
 
     start_char: int = Field(ge=0)
     end_char: int = Field(gt=0)
+    ai_model: str | None = Field(default=None, max_length=120)
     background_source: str | None = Field(default=None, max_length=40)
     background_style: str | None = Field(default=None, max_length=40)
     background_mode: str | None = Field(default=None, max_length=40)
     custom_background_asset_id: str | None = Field(default=None, max_length=36)
 
-    @field_validator("background_source", "background_style", "background_mode", "custom_background_asset_id")
+    @field_validator(
+        "ai_model",
+        "background_source",
+        "background_style",
+        "background_mode",
+        "custom_background_asset_id",
+    )
     @classmethod
     def _valid_optional_text(cls, value: str | None) -> str | None:
         if value is None:

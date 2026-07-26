@@ -4,6 +4,7 @@ from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirSemanticCacheStatus
 from app.models.memoir import MemoirSectionDigest, MemoirSectionMaterial
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.memoir import section_digests
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
@@ -34,6 +35,24 @@ class FakeDigestAI:
         self.calls += 1
         self.prompts.append(user_prompt)
         return json.dumps(self.payload, ensure_ascii=False)
+
+
+class TimeoutDigestAI(FakeDigestAI):
+    async def _call_llm(
+        self,
+        system_prompt,
+        user_prompt,
+        temperature=0.7,
+        max_tokens=4000,
+        timeout=60.0,
+        return_raw=False,
+    ):
+        self.calls += 1
+        raise AIProviderTimeoutError(
+            provider=self.provider_name,
+            model=self.model_name,
+            timeout_seconds=timeout,
+        )
 
 
 async def _bootstrapped_section(client, test_db):
@@ -159,8 +178,31 @@ async def test_section_digest_rejects_material_outside_allowlist(client, test_db
     await test_db.commit()
 
     assert digest.status == MemoirSemanticCacheStatus.FAILED.value
-    assert digest.digest_json == {}
-    assert "outside the allowlist" in digest.error_message
+    assert digest.digest_json["generation"]["error_type"] == "ValueError"
+    assert digest.error_message == "小节审阅服务暂时不可用，请稍后重试"
+
+
+async def test_section_digest_timeout_persists_model_and_deadline(client, test_db):
+    project_id, section, _ = await _bootstrapped_section(client, test_db)
+    fake = TimeoutDigestAI({})
+
+    digest = await section_digests.generate_or_reuse_section_digest(
+        test_db,
+        project_id=project_id,
+        section_id=section["id"],
+        ai_model="claude-opus-4-8",
+        ai_client=fake,
+    )
+    await test_db.commit()
+
+    generation = digest.digest_json["generation"]
+    assert digest.status == MemoirSemanticCacheStatus.FAILED.value
+    assert digest.error_message == "模型处理超过 180 秒，请稍后重试"
+    assert generation["requested_model"] == "claude-opus-4-8"
+    assert generation["provider"] == "test"
+    assert generation["model"] == "test-section-digest"
+    assert generation["timeout_seconds"] == 180.0
+    assert generation["error_type"] == "AIProviderTimeoutError"
 
 
 async def test_material_order_changes_section_digest_signature(client, test_db):

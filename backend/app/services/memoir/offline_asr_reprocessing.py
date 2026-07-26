@@ -41,6 +41,7 @@ from app.services.memoir.material_roles import (
     is_narrator_material,
     narrator_material_clause,
 )
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
@@ -435,6 +436,7 @@ async def reprocess_offline_asr_utterance(
         raise ValueError("user-edited transcript cannot be overwritten")
 
     project = utterance.voice_session.project
+    selected_ai_model = select_project_ai_model(project, ai_model)
     baseline_raw = utterance.transcript_raw or ""
     baseline_edited = utterance.transcript_edited or ""
     question_context = await _latest_question_context(db, utterance)
@@ -464,7 +466,7 @@ async def reprocess_offline_asr_utterance(
             narrator_origin=narrator_origin,
             dialect_glossary=dialect_glossary,
         ),
-        ai_model=ai_model,
+        ai_model=selected_ai_model,
         ai_client=ai_client,
     )
     db.expunge_all()
@@ -490,7 +492,7 @@ async def reprocess_offline_asr_utterance(
         asr_results=asr_results,
         corrected_text=verified.text,
         corrected_provider=verified.provider,
-        ai_model=ai_model,
+        ai_model=selected_ai_model,
         recognition_metadata=recognition_metadata,
     )
     await db.flush()

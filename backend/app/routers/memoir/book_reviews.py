@@ -10,6 +10,7 @@ from app.schemas.memoir_book_review import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import book_reviews
+from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 router = APIRouter(tags=["memoir-book-reviews"])
@@ -25,7 +26,7 @@ async def generate_memoir_book_review(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    await load_memoir_project(
+    project = await load_memoir_project(
         db,
         project_id,
         current_user.id,
@@ -34,7 +35,7 @@ async def generate_memoir_book_review(
     review = await book_reviews.generate_or_reuse_book_review(
         db,
         project_id=project_id,
-        ai_model=req.ai_model,
+        ai_model=select_project_ai_model(project, req.ai_model),
         force_regenerate=req.force_regenerate,
     )
     await db.commit()

@@ -1,3 +1,4 @@
+from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 
 
@@ -291,7 +292,7 @@ C. 选项描述（可选）
         user_prompt,
         temperature=temp,
         max_tokens=3000,
-        timeout=90.0,
+        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
         return_raw=debug,
     )
     if debug:

@@ -674,14 +674,15 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     )
     assert chapter_digest is not None
     assert chapter_digest.status == MemoirSemanticCacheStatus.FAILED.value
-    assert chapter_digest.digest_json["generation"] == {
-        "requested_model": "claude-opus-4-8",
-        "provider": "test",
-        "model": "test-chapter",
-        "engine": chapter_digests.CHAPTER_DIGEST_ENGINE,
-        "finish_reason": "length",
-        "response_char_count": 28,
-    }
+    generation = chapter_digest.digest_json["generation"]
+    assert generation["requested_model"] == "claude-opus-4-8"
+    assert generation["provider"] == "test"
+    assert generation["model"] == "test-chapter"
+    assert generation["engine"] == chapter_digests.CHAPTER_DIGEST_ENGINE
+    assert generation["timeout_seconds"] == 180.0
+    assert generation["finish_reason"] == "length"
+    assert generation["response_char_count"] == 28
+    assert generation["error_type"] == "ValueError"
 
 
 async def test_chapter_generation_saves_material_allowlist_snapshot(client, test_db):

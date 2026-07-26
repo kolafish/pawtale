@@ -165,8 +165,7 @@ Web 回忆录工作区由四个一级视图组成：
 
 详细约束见：
 
-- [回忆录事实、素材与成书架构](./docs/MEMOIR_NARRATIVE_ARCHITECTURE.md)
-- [回忆录访谈与成书协作架构](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
+- [回忆录事实、访谈、成书与请求架构](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)
 - [回忆录实时语音架构](./docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
 
 ## 交付边界

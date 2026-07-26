@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import time
 from typing import Any
 
 from fastapi import HTTPException
@@ -22,6 +23,12 @@ from app.models.memoir import (
     MemoirChapterDigest,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_timeouts import (
+    AITextTimeoutProfile,
+    ai_error_metadata,
+    ai_text_timeout_seconds,
+    ai_user_error_message,
+)
 from app.services.ai_types import AITextClient
 from app.services.json_utils import extract_json_payload
 from app.services.memoir import chapter_digests, completion_issues
@@ -424,13 +431,16 @@ async def generate_or_reuse_book_review(
         return existing
     client = ai_client or get_ai_service(ai_model)
     prompt = build_book_review_prompt(context)
+    timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
+    started_at = time.monotonic()
+    generation: dict[str, object]
     try:
         raw = await client._call_llm(
             BOOK_REVIEW_SYSTEM_PROMPT,
             prompt,
             temperature=0.2,
             max_tokens=2400,
-            timeout=60.0,
+            timeout=timeout_seconds,
         )
         review_json = normalize_book_review(
             extract_json_payload(str(raw)),
@@ -454,13 +464,35 @@ async def generate_or_reuse_book_review(
             await db.refresh(existing)
         status = MemoirSemanticCacheStatus.READY
         error = ""
+        generation = {
+            "requested_model": ai_model,
+            "provider": getattr(client, "provider_name", None),
+            "model": getattr(client, "model_name", ai_model),
+            "engine": BOOK_REVIEW_ENGINE,
+            "timeout_seconds": timeout_seconds,
+            "elapsed_ms": round((time.monotonic() - started_at) * 1000),
+        }
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("memoir book review generation failed project_id=%s", project_id)
         review_json = {}
         status = MemoirSemanticCacheStatus.FAILED
-        error = str(exc) or "book review AI unavailable"
+        error = ai_user_error_message(
+            exc,
+            "全书审阅服务暂时不可用，请稍后重试",
+        )
+        generation = {
+            **ai_error_metadata(
+                exc,
+                requested_model=ai_model,
+                provider=getattr(client, "provider_name", None),
+                resolved_model=getattr(client, "model_name", ai_model),
+                timeout_seconds=timeout_seconds,
+                elapsed_ms=round((time.monotonic() - started_at) * 1000),
+            ),
+            "engine": BOOK_REVIEW_ENGINE,
+        }
     review = existing or MemoirBookReview(
         project_id=project_id,
         input_signature=context.input_signature,
@@ -469,12 +501,8 @@ async def generate_or_reuse_book_review(
     review.status = status.value
     review.review_json = {
         **review_json,
-        "generation": {
-            "provider": getattr(client, "provider_name", None),
-            "model": getattr(client, "model_name", ai_model),
-            "engine": BOOK_REVIEW_ENGINE,
-        },
-    } if review_json else {}
+        "generation": generation,
+    }
     review.error_message = error
     review.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(review)
