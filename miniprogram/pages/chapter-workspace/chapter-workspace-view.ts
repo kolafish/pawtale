@@ -21,6 +21,8 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
   typeText: string;
   metaText: string;
   assignmentHint: string;
+  mergeTargetId: string;
+  mergeTargetTitle: string;
   expanded: boolean;
   visibleMaterials: ChapterSectionMaterialView[];
 }
@@ -82,7 +84,7 @@ function visibleSectionViews(
     title: "＋ 新建小节",
     action: "create_section",
   });
-  return [...(workspace.sections || [])]
+  const visibleSections = [...(workspace.sections || [])]
     .filter((section) => (
       section.status === "active"
       && (
@@ -97,8 +99,13 @@ function visibleSectionViews(
       Number(left.requires_user_assignment)
       - Number(right.requires_user_assignment)
       || left.sort_order - right.sort_order
-    ))
+    ));
+  let previousNarrativeSection: MemoirChapterSectionSummary | undefined;
+  return visibleSections
     .map((section, sectionIndex) => {
+      const mergeTarget = section.requires_user_assignment
+        ? undefined
+        : previousNarrativeSection;
       const visibleMaterials = [...(section.materials || [])]
         .filter((material) => (
           section.requires_user_assignment
@@ -112,6 +119,9 @@ function visibleSectionViews(
             ? assignmentOptions
             : [],
         }));
+      if (!section.requires_user_assignment) {
+        previousNarrativeSection = section;
+      }
       return {
         ...section,
         indexText: section.requires_user_assignment
@@ -124,6 +134,8 @@ function visibleSectionViews(
         assignmentHint: section.requires_user_assignment
           ? "这些讲述暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击讲述进入编辑或删除。"
           : "",
+        mergeTargetId: mergeTarget?.id || "",
+        mergeTargetTitle: mergeTarget?.title || "",
         expanded: section.requires_user_assignment
           ? expandedSectionIds[section.id] !== false
           : Boolean(expandedSectionIds[section.id]),

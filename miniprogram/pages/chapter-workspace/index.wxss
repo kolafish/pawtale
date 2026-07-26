@@ -357,6 +357,44 @@
     0 2rpx 6rpx rgba(0, 0, 0, 0.04);
 }
 
+.section-merge-action {
+  min-height: 88rpx;
+  margin: 14rpx 0 8rpx;
+  padding: 14rpx 18rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  border-radius: 12rpx;
+  background: var(--ui-surface);
+  color: var(--ui-accent-strong);
+  box-shadow: 0 0 0 1rpx rgba(143, 64, 55, 0.14);
+  transition-property: transform, opacity, box-shadow;
+  transition-duration: 120ms;
+  transition-timing-function: ease-out;
+}
+
+.section-merge-action:active {
+  transform: scale(0.96);
+}
+
+.section-merge-action-title {
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 36rpx;
+}
+
+.section-merge-action-detail {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ui-text-secondary);
+  font-size: 22rpx;
+  line-height: 34rpx;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .section-material {
   padding: 18rpx 0;
 }

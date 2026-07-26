@@ -81,6 +81,25 @@ export function regenerateMemoirChapterSections(
   );
 }
 
+export function mergeMemoirChapterSections(
+  projectId: string,
+  targetSectionId: string,
+  sourceSectionId: string,
+): Promise<unknown> {
+  return memoirRequest<unknown>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/sections/${encodeURIComponent(targetSectionId)}/merge`,
+    ),
+    {
+      method: "POST",
+      data: {
+        source_section_ids: [sourceSectionId],
+      },
+    },
+  );
+}
+
 export function getMemoirChapterSectionRegenerationJob(
   projectId: string,
   chapterId: string,

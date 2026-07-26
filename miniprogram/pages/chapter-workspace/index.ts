@@ -16,6 +16,7 @@ import {
   getMemoirChapterPreparationJob,
   getMemoirChapterSectionRegenerationJob,
   getMemoirChapterWorkspace,
+  mergeMemoirChapterSections,
   placeMemoirChapterMaterial,
   reviseMemoirChapterDraftSectionWithAI,
   regenerateMemoirChapterSections,
@@ -76,6 +77,7 @@ type ChapterWorkspaceOperationKind =
   | ""
   | "prepare"
   | "regenerate_sections"
+  | "merge_sections"
   | "move_material"
   | "start_interview"
   | "confirm_issue"
@@ -590,6 +592,20 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
+  openSectionStructure() {
+    if (this.data.operationKind) {
+      return;
+    }
+    this.leaveAfterEditConfirmation(() => {
+      this.cancelDraftSectionVoiceInstruction();
+      this.setData({
+        ...CLOSED_DRAFT_SECTION_EDITOR,
+        structureExpanded: true,
+      });
+      scrollToSection("#chapter-structure");
+    });
+  },
+
   toggleSection(event: PageDatasetEvent<{ id?: string }>) {
     const sectionId = datasetString(event, "id");
     const workspace = this.data.workspace;
@@ -656,6 +672,70 @@ definePage<ChapterWorkspacePageData>()({
         }
       },
     });
+  },
+
+  mergeSectionIntoPrevious(
+    event: PageDatasetEvent<{
+      sourceId?: string;
+      sourceTitle?: string;
+      targetId?: string;
+      targetTitle?: string;
+    }>,
+  ) {
+    const sourceId = datasetString(event, "sourceId");
+    const sourceTitle = datasetString(event, "sourceTitle");
+    const targetId = datasetString(event, "targetId");
+    const targetTitle = datasetString(event, "targetTitle");
+    if (
+      !sourceId
+      || !targetId
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    wx.showModal({
+      title: "与上一小节合并？",
+      content: `“${sourceTitle}”中的讲述会并入“${targetTitle}”。现有正文会保留为历史版本，合并后需要重新生成本章正文并再次确认。`,
+      confirmText: "确认合并",
+      cancelText: "暂不合并",
+      success: (result) => {
+        if (result.confirm) {
+          void this.performSectionMerge(sourceId, targetId);
+        }
+      },
+    });
+  },
+
+  async performSectionMerge(sourceId: string, targetId: string) {
+    if (!this.beginOperation("merge_sections", sourceId)) {
+      return;
+    }
+    try {
+      await mergeMemoirChapterSections(
+        this.data.projectId,
+        targetId,
+        sourceId,
+      );
+      this.setData({
+        structureExpanded: true,
+        expandedSectionIds: {
+          ...this.data.expandedSectionIds,
+          [targetId]: true,
+        },
+      });
+      await this.loadPageData(true);
+      wx.showToast({ title: "小节已合并", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "小节合并失败",
+      });
+    } finally {
+      this.finishOperation("merge_sections", sourceId);
+    }
   },
 
   async performSectionRegeneration() {

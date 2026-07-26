@@ -47,7 +47,10 @@ from app.services.memoir.section_roles import (
     SECTION_SYSTEM_ROLE_KEY,
     requires_user_assignment,
 )
-from app.services.memoir.sections import assign_material_to_section
+from app.services.memoir.sections import (
+    assign_material_to_section,
+    mark_section_structure_changed,
+)
 from app.services.memoir.utterance_editing_pipeline import (
     current_transcript_version_id,
     current_utterance_text,
@@ -698,6 +701,17 @@ async def regenerate_chapter_sections(
             material.assignment_confidence = assignment.decision.confidence
             material.include_in_book = assignment.material.include_in_book
             db.add(material)
+
+    plan = await db.get(MemoirBookPlan, chapter.plan_id)
+    if plan is None:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    await mark_section_structure_changed(
+        db,
+        project_id=project_id,
+        plan=plan,
+        chapter_ids={chapter_id},
+        operation="regenerate_chapter_sections",
+    )
 
     return {
         "material_count": len(materials),
