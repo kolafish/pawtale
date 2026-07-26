@@ -7,11 +7,12 @@ import {
 } from "../config";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
-export type RequestTimeoutProfile = "interactive" | "mutation" | "generation";
+export type RequestTimeoutProfile = "telemetry" | "interactive" | "mutation" | "generation";
 
 const BACKEND_COOKIE_KEY = "pawtale_backend_cookie";
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
 const REQUEST_TIMEOUT_MS: Record<RequestTimeoutProfile, number> = {
+  telemetry: 8000,
   interactive: 30000,
   mutation: 60000,
   generation: 600000,
@@ -180,6 +181,28 @@ function apiMessage(data: unknown): string {
   return "请求失败";
 }
 
+function requestFailureMessage(
+  error: WechatMiniprogram.GeneralCallbackResult,
+  method: HttpMethod,
+): string {
+  const message = String(error.errMsg || "");
+  const normalized = message.toLowerCase();
+  if (normalized.includes("url not in domain list")) {
+    return "后端请求域名未配置，请在微信公众平台添加 request 合法域名";
+  }
+  if (
+    normalized.includes("timeout")
+    || normalized.includes("timed out")
+    || normalized.includes("time out")
+    || message.includes("超时")
+  ) {
+    return method === "GET"
+      ? "请求超时，请检查网络后重试"
+      : "请求超时，操作结果可能仍在处理中，请刷新后确认，不要立即重复提交";
+  }
+  return "网络连接失败，请检查网络后重试";
+}
+
 export function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     const config = readBackendConfig();
@@ -188,9 +211,10 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
       return;
     }
     const cookie = readSessionCookie();
+    const method = options.method || "GET";
     wx.request<T>({
       url: `${cleanBaseUrl(config.httpBaseUrl)}${path}`,
-      method: options.method || "GET",
+      method,
       data: options.data ?? {},
       timeout: options.timeoutMs ?? requestTimeoutMs(options.timeoutProfile),
       header: {
@@ -210,7 +234,7 @@ export function request<T>(path: string, options: RequestOptions = {}): Promise<
         reject(new ApiError(result.statusCode, apiMessage(result.data), result.data));
       },
       fail: (error) => {
-        reject(new ApiError(0, error.errMsg || "后端请求失败", error));
+        reject(new ApiError(0, requestFailureMessage(error, method), error));
       },
     });
   });
