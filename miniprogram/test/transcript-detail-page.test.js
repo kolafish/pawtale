@@ -217,8 +217,8 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     getMemoirVoiceTranscript: async () => {
       throw new Error("getMemoirVoiceTranscript was not mocked");
     },
-    moveMemoirChapterMaterial: async () => {
-      throw new Error("moveMemoirChapterMaterial was not mocked");
+    placeMemoirChapterMaterial: async () => {
+      throw new Error("placeMemoirChapterMaterial was not mocked");
     },
     previewMemoirVoiceTranscriptVoiceEdit: async () => {
       throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
@@ -680,8 +680,8 @@ test("transcript detail page moves material to a selected chapter section", asyn
           },
         ],
       }),
-      moveMemoirChapterMaterial: async (projectId, utteranceId, sectionId) => {
-        moveCalls.push({ projectId, utteranceId, sectionId });
+      placeMemoirChapterMaterial: async (projectId, utteranceId, placement) => {
+        moveCalls.push({ projectId, utteranceId, placement });
       },
     },
   });
@@ -702,8 +702,18 @@ test("transcript detail page moves material to a selected chapter section", asyn
     "第 1 章 · 退休后的日子 · 小节 1 · 退休不下岗",
   );
   assert.equal(context.data.assignmentCanSave, false);
+  assert.deepEqual(
+    context.data.assignmentOptions.map((option) => option.kind),
+    [
+      "existing_section",
+      "create_section",
+      "existing_section",
+      "create_section",
+      "create_chapter",
+    ],
+  );
 
-  page.changeMaterialAssignment.call(context, { detail: { value: "1" } });
+  await page.changeMaterialAssignment.call(context, { detail: { value: "2" } });
   assert.equal(
     context.data.assignmentText,
     "第 2 章 · 家里的人 · 小节 1 · 她给我送胡豆",
@@ -715,13 +725,86 @@ test("transcript detail page moves material to a selected chapter section", asyn
   assert.deepEqual(moveCalls, [{
     projectId: "project-1",
     utteranceId: "utterance-assigned",
-    sectionId: "section-2",
+    placement: { target_section_id: "section-2" },
   }]);
   assert.equal(detailLoads, 2);
   assert.equal(context.data.assignmentEditorOpen, false);
   assert.equal(context.data.item.chapterLocationText, "第 2 章：家里的人");
   assert.equal(context.data.item.sectionLocationText, "小节 1：她给我送胡豆");
   assert.deepEqual(toasts, [{ title: "章节和小节已更新", icon: "success" }]);
+  delete global.wx;
+});
+
+test("transcript detail page creates a chapter while assigning material", async () => {
+  const placementCalls = [];
+  const modalValues = ["山桃花开的春天", "照片里的邀约"];
+  let detailLoads = 0;
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => {
+        detailLoads += 1;
+        return sampleTranscript(id, {
+          section_assignment: {
+            chapter_id: detailLoads > 1 ? "chapter-new" : "chapter-1",
+            chapter_title: detailLoads > 1 ? "山桃花开的春天" : "退休后的日子",
+            chapter_sort_order: detailLoads > 1 ? 1 : 0,
+            section_id: detailLoads > 1 ? "section-new" : "section-1",
+            section_title: detailLoads > 1 ? "照片里的邀约" : "退休不下岗",
+            section_sort_order: 0,
+            requires_user_assignment: false,
+          },
+        });
+      },
+      getMemoirBookPlan: async () => ({
+        chapters: [{
+          id: "chapter-1",
+          title: "退休后的日子",
+          sort_order: 0,
+          sections: [{
+            id: "section-1",
+            title: "退休不下岗",
+            sort_order: 0,
+            status: "active",
+            requires_user_assignment: false,
+          }],
+        }],
+      }),
+      placeMemoirChapterMaterial: async (projectId, utteranceId, placement) => {
+        placementCalls.push({ projectId, utteranceId, placement });
+      },
+    },
+  });
+  const context = pageContext(page);
+  global.wx = {
+    showModal(options) {
+      options.success?.({
+        confirm: true,
+        cancel: false,
+        content: modalValues.shift(),
+      });
+    },
+    showToast() {},
+  };
+
+  await page.onLoad.call(context, { id: "utterance-assigned" });
+  await page.toggleMaterialAssignmentEditor.call(context);
+  await page.changeMaterialAssignment.call(context, {
+    detail: { value: context.data.assignmentOptions.length - 1 },
+  });
+
+  assert.equal(
+    context.data.assignmentText,
+    "新建章节：山桃花开的春天 · 新建小节：照片里的邀约",
+  );
+  await page.saveMaterialAssignment.call(context);
+  assert.deepEqual(placementCalls, [{
+    projectId: "project-1",
+    utteranceId: "utterance-assigned",
+    placement: {
+      new_chapter_title: "山桃花开的春天",
+      new_section_title: "照片里的邀约",
+    },
+  }]);
   delete global.wx;
 });
 

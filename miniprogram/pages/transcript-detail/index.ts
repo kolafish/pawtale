@@ -17,12 +17,13 @@ import {
   getMemoirShareVideoJob,
   getMemoirTranscriptShareVideoContext,
   getMemoirVoiceTranscript,
-  moveMemoirChapterMaterial,
+  placeMemoirChapterMaterial,
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
   startMemoirMaterialOfflineASR,
   updateMemoirVoiceTranscript,
   uploadMemoirShareVideoCustomBackground,
+  type MemoirSectionMaterialPlacementRequest,
 } from "../../services/memoir-voice-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
@@ -71,6 +72,7 @@ import {
   type TranscriptShareVideoData,
 } from "../../services/transcript-share-video";
 import { materialOfflineASRView } from "../../services/material-offline-asr-view";
+import { promptRequiredText } from "../../services/text-prompt";
 
 type TextAreaEvent = PageTextInputEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
@@ -82,7 +84,9 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
 type MaterialAssignmentPickerEvent = PagePickerEvent;
 
 interface MaterialAssignmentOption {
-  sectionId: string;
+  kind: "existing_section" | "create_section" | "create_chapter";
+  sectionId?: string;
+  chapterId?: string;
   label: string;
 }
 
@@ -169,6 +173,7 @@ interface TranscriptDetailData extends TranscriptShareVideoData {
   assignmentIndex: number;
   assignmentText: string;
   assignmentCanSave: boolean;
+  assignmentPlacement: MemoirSectionMaterialPlacementRequest | null;
 }
 
 type VoiceEditStateData = Pick<
@@ -268,25 +273,44 @@ function answerPlaybackPatch(
 function materialAssignmentOptions(
   plan: MemoirBookPlan,
 ): MaterialAssignmentOption[] {
-  return [...(plan.chapters || [])]
+  const options = [...(plan.chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order)
-    .flatMap((chapter) => (
-      [...(chapter.sections || [])]
+    .flatMap((chapter) => {
+      const chapterLabel = [
+        `第 ${chapter.sort_order + 1} 章`,
+        chapter.title.trim() || "未命名章节",
+      ].join(" · ");
+      const sectionOptions: MaterialAssignmentOption[] = [
+        ...(chapter.sections || []),
+      ]
         .filter((section) => (
           section.status === "active"
           && !section.requires_user_assignment
         ))
         .sort((left, right) => left.sort_order - right.sort_order)
         .map((section) => ({
+          kind: "existing_section" as const,
           sectionId: section.id,
           label: [
-            `第 ${chapter.sort_order + 1} 章`,
-            chapter.title.trim() || "未命名章节",
+            chapterLabel,
             `小节 ${section.sort_order + 1}`,
             section.title.trim() || "未命名小节",
           ].join(" · "),
-        }))
-    ));
+        }));
+      return [
+        ...sectionOptions,
+        {
+          kind: "create_section" as const,
+          chapterId: chapter.id,
+          label: `${chapterLabel} · ＋ 新建小节`,
+        },
+      ];
+    });
+  options.push({
+    kind: "create_chapter",
+    label: "＋ 新建章节",
+  });
+  return options;
 }
 
 function materialAssignmentPatch(
@@ -299,9 +323,13 @@ function materialAssignmentPatch(
   | "assignmentIndex"
   | "assignmentText"
   | "assignmentCanSave"
+  | "assignmentPlacement"
 > {
   const matchedIndex = options.findIndex(
-    (option) => option.sectionId === item.section_assignment?.section_id,
+    (option) => (
+      option.kind === "existing_section"
+      && option.sectionId === item.section_assignment?.section_id
+    ),
   );
   const assignmentIndex = Math.min(
     Math.max(
@@ -311,14 +339,21 @@ function materialAssignmentPatch(
     Math.max(options.length - 1, 0),
   );
   const selected = options[assignmentIndex];
+  const placement = (
+    selected?.kind === "existing_section"
+    && selected.sectionId
+  )
+    ? { target_section_id: selected.sectionId }
+    : null;
   return {
     assignmentOptions: options,
     assignmentIndex,
     assignmentText: selected?.label || "没有可选择的小节",
     assignmentCanSave: Boolean(
-      selected
+      placement
       && selected.sectionId !== item.section_assignment?.section_id,
     ),
+    assignmentPlacement: placement,
   };
 }
 
@@ -539,6 +574,7 @@ definePage<TranscriptDetailData>()({
     assignmentIndex: 0,
     assignmentText: "",
     assignmentCanSave: false,
+    assignmentPlacement: null,
     ...voiceEditStateData("idle"),
     ...initialTranscriptShareVideoData(),
   },
@@ -778,12 +814,6 @@ definePage<TranscriptDetailData>()({
     try {
       const plan = await getMemoirBookPlan(item.project_id);
       const options = materialAssignmentOptions(plan);
-      if (!options.length) {
-        this.setData({
-          assignmentError: "还没有可选择的小节，请先在书稿中生成小节。",
-        });
-        return;
-      }
       this.setData(materialAssignmentPatch(options, item));
     } catch (error) {
       if (routeAuthError(error, "login")) {
@@ -806,27 +836,78 @@ definePage<TranscriptDetailData>()({
     this.setData({
       assignmentEditorOpen: false,
       assignmentError: "",
+      assignmentPlacement: null,
     });
   },
 
-  changeMaterialAssignment(event: MaterialAssignmentPickerEvent) {
+  async changeMaterialAssignment(event: MaterialAssignmentPickerEvent) {
     const item = this.data.item;
     if (!item || this.data.assignmentLoading || this.data.assignmentSaving) {
       return;
     }
-    this.setData(materialAssignmentPatch(
-      this.data.assignmentOptions,
-      item,
-      pickerIndex(event),
-    ));
+    const assignmentIndex = pickerIndex(event);
+    const target = this.data.assignmentOptions[assignmentIndex];
+    if (!target) {
+      return;
+    }
+    if (target.kind === "existing_section") {
+      this.setData(materialAssignmentPatch(
+        this.data.assignmentOptions,
+        item,
+        assignmentIndex,
+      ));
+      return;
+    }
+    if (target.kind === "create_section" && target.chapterId) {
+      const sectionTitle = await promptRequiredText(
+        "新建小节",
+        "请输入小节名称",
+      );
+      if (!sectionTitle) {
+        return;
+      }
+      this.setData({
+        assignmentIndex,
+        assignmentText: `${target.label.replace("＋ 新建小节", "")}新建小节：${sectionTitle}`,
+        assignmentCanSave: true,
+        assignmentPlacement: {
+          target_chapter_id: target.chapterId,
+          new_section_title: sectionTitle,
+        },
+      });
+      return;
+    }
+    const chapterTitle = await promptRequiredText(
+      "新建章节",
+      "请输入章节名称",
+    );
+    if (!chapterTitle) {
+      return;
+    }
+    const sectionTitle = await promptRequiredText(
+      "新建第一个小节",
+      "请输入小节名称",
+    );
+    if (!sectionTitle) {
+      return;
+    }
+    this.setData({
+      assignmentIndex,
+      assignmentText: `新建章节：${chapterTitle} · 新建小节：${sectionTitle}`,
+      assignmentCanSave: true,
+      assignmentPlacement: {
+        new_chapter_title: chapterTitle,
+        new_section_title: sectionTitle,
+      },
+    });
   },
 
   async saveMaterialAssignment() {
     const item = this.data.item;
-    const target = this.data.assignmentOptions[this.data.assignmentIndex];
+    const placement = this.data.assignmentPlacement;
     if (
       !item
-      || !target
+      || !placement
       || !this.data.assignmentCanSave
       || this.data.assignmentLoading
       || this.data.assignmentSaving
@@ -843,10 +924,10 @@ definePage<TranscriptDetailData>()({
       assignmentError: "",
     });
     try {
-      await moveMemoirChapterMaterial(
+      await placeMemoirChapterMaterial(
         item.project_id,
         item.id,
-        target.sectionId,
+        placement,
       );
       const updated = await getMemoirVoiceTranscript(item.id);
       this.setData({

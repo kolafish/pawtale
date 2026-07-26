@@ -9,6 +9,8 @@ from app.schemas.memoir_sections import (
     MemoirSectionCreateRequest,
     MemoirSectionMaterialAssignmentRequest,
     MemoirSectionMaterialMoveRequest,
+    MemoirSectionMaterialPlacementRequest,
+    MemoirSectionMaterialPlacementResponse,
     MemoirSectionMergeRequest,
     MemoirSectionRegenerateRequest,
     MemoirSectionRegenerateResponse,
@@ -180,6 +182,27 @@ async def move_memoir_section_material(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_sections.move_material(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        utterance_id=utterance_id,
+        req=req,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/projects/{project_id}/section-materials/{utterance_id}/place",
+    response_model=MemoirSectionMaterialPlacementResponse,
+)
+async def place_memoir_section_material(
+    project_id: str,
+    utterance_id: str,
+    req: MemoirSectionMaterialPlacementRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_sections.place_material(
         db,
         user_id=current_user.id,
         project_id=project_id,

@@ -56,6 +56,7 @@ test("chapter completion API exposes workspace, section AI revision, prepare, an
   const {
     getMemoirChapterWorkspace,
     moveMemoirChapterMaterial,
+    placeMemoirChapterMaterial,
     reviseMemoirChapterDraftSectionWithAI,
     regenerateMemoirChapterSections,
   } = require("../services/memoir-chapter-workspace-api.ts");
@@ -78,6 +79,10 @@ test("chapter completion API exposes workspace, section AI revision, prepare, an
     "写得更平实一些",
   );
   await moveMemoirChapterMaterial("project/1", "utterance/1", "section/2");
+  await placeMemoirChapterMaterial("project/1", "utterance/1", {
+    target_chapter_id: "chapter/1",
+    new_section_title: "新的小节",
+  });
   await prepareMemoirBookChapter("project/1", "chapter/1");
   await rewriteMemoirBookChapter("project/1", "chapter/1");
 
@@ -100,13 +105,19 @@ test("chapter completion API exposes workspace, section AI revision, prepare, an
   assert.equal(apiRequests[3].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/move");
   assert.deepEqual(apiRequests[3].data, { target_section_id: "section/2" });
   assert.equal(apiRequests[3].timeout, 60000);
-  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
-  assert.deepEqual(apiRequests[4].data, { ai_model: "deepseek-v4-flash" });
-  assert.equal(apiRequests[4].timeout, 600000);
-  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.equal(apiRequests[4].url, "http://backend.local:8000/api/memoir/projects/project%2F1/section-materials/utterance%2F1/place");
+  assert.deepEqual(apiRequests[4].data, {
+    target_chapter_id: "chapter/1",
+    new_section_title: "新的小节",
+  });
+  assert.equal(apiRequests[4].timeout, 60000);
+  assert.equal(apiRequests[5].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/prepare");
   assert.deepEqual(apiRequests[5].data, { ai_model: "deepseek-v4-flash" });
   assert.equal(apiRequests[5].timeout, 600000);
-  assert.equal(apiRequests.length, 6);
-  assert.equal(requests.length, 6);
+  assert.equal(apiRequests[6].url, "http://backend.local:8000/api/memoir/projects/project%2F1/book-completion/chapters/chapter%2F1/rewrite");
+  assert.deepEqual(apiRequests[6].data, { ai_model: "deepseek-v4-flash" });
+  assert.equal(apiRequests[6].timeout, 600000);
+  assert.equal(apiRequests.length, 7);
+  assert.equal(requests.length, 7);
   delete global.wx;
 });

@@ -11,12 +11,13 @@ import {
   createMemoirBookChapterDraftSectionTTS,
   createMemoirVoiceSession,
   getMemoirChapterWorkspace,
-  moveMemoirChapterMaterial,
+  placeMemoirChapterMaterial,
   prepareMemoirBookChapter,
   reviseMemoirChapterDraftSectionWithAI,
   regenerateMemoirChapterSections,
   rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
+  type MemoirSectionMaterialPlacementRequest,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -53,6 +54,7 @@ import {
   readCachedMemoirChapterWorkspace,
   writeCachedMemoirChapterWorkspace,
 } from "../../stores/memoir-read-cache";
+import { promptRequiredText } from "../../services/text-prompt";
 
 export { chapterWorkspaceViewPatch };
 
@@ -584,20 +586,20 @@ definePage<ChapterWorkspacePageData>()({
   ) {
     const utteranceId = datasetString(event, "utteranceId");
     const targetIndex = pickerIndex(event);
-    const targets = this.data.sectionViews.filter(
-      (section) => (
-        !section.requires_user_assignment
-        && section.status === "active"
-        && section.include_in_book !== false
-      ),
-    );
-    const target = targets[targetIndex];
+    const material = this.data.sectionViews
+      .flatMap((section) => section.visibleMaterials)
+      .find((candidate) => candidate.utterance_id === utteranceId);
+    const target = material?.assignmentOptions[targetIndex];
     if (
       !utteranceId
       || !target
       || Boolean(this.data.operationKind)
       || Boolean(this.data.editingSectionId)
     ) {
+      return;
+    }
+    if (target.action === "create_section") {
+      void this.createSectionForMaterial(utteranceId);
       return;
     }
     wx.showModal({
@@ -607,31 +609,50 @@ definePage<ChapterWorkspacePageData>()({
       cancelText: "再想想",
       success: (result) => {
         if (result.confirm) {
-          void this.performMaterialMove(utteranceId, target.id);
+          void this.performMaterialPlacement(
+            utteranceId,
+            { target_section_id: target.id },
+            "已选择小节",
+          );
         }
       },
     });
   },
 
-  async performMaterialMove(
+  async createSectionForMaterial(utteranceId: string) {
+    const title = await promptRequiredText("新建小节", "请输入小节名称");
+    if (!title) {
+      return;
+    }
+    await this.performMaterialPlacement(
+      utteranceId,
+      {
+        target_chapter_id: this.data.chapterId,
+        new_section_title: title,
+      },
+      "已新建小节",
+    );
+  },
+
+  async performMaterialPlacement(
     utteranceId: string,
-    targetSectionId: string,
+    placement: MemoirSectionMaterialPlacementRequest,
+    successTitle: string,
   ) {
     if (
       !utteranceId
-      || !targetSectionId
       || !this.beginOperation("move_material", utteranceId)
     ) {
       return;
     }
     try {
-      await moveMemoirChapterMaterial(
+      await placeMemoirChapterMaterial(
         this.data.projectId,
         utteranceId,
-        targetSectionId,
+        placement,
       );
       await this.loadPageData(true);
-      wx.showToast({ title: "已选择小节", icon: "success" });
+      wx.showToast({ title: successTitle, icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -639,7 +660,7 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         error: error instanceof Error
           ? error.message
-          : "素材移动失败",
+          : "素材位置更新失败",
       });
     } finally {
       this.finishOperation("move_material", utteranceId);
