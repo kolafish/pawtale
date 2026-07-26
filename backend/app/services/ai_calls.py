@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 import logging
 import time
@@ -8,6 +9,7 @@ from typing import Any, Generic, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from app.services.ai_types import AITextClient
+from app.services.ai_streaming import AITextStreamChunk
 from app.services.json_utils import extract_json_payload
 
 
@@ -193,6 +195,83 @@ def with_attempt_totals(
         elapsed_ms=elapsed_ms,
         attempt_count=len(attempts),
     )
+
+
+async def generate_text_with_client(
+    client: AITextClient,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    requested_model: str | None,
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
+) -> AITextCallResult:
+    generate_text = getattr(client, "generate_text", None)
+    if callable(generate_text):
+        return await generate_text(
+            system_prompt,
+            user_prompt,
+            requested_model=requested_model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+        )
+
+    started_at = time.monotonic()
+    raw = await client._call_llm(
+        system_prompt,
+        user_prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        return_raw=True,
+    )
+    return build_text_call_result(
+        raw,
+        client=client,
+        requested_model=requested_model,
+        elapsed_ms=round((time.monotonic() - started_at) * 1000),
+        attempt_count=1,
+    )
+
+
+async def stream_text_with_client(
+    client: AITextClient,
+    system_prompt: str,
+    user_prompt: str,
+    *,
+    requested_model: str | None,
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
+) -> AsyncIterator[AITextStreamChunk]:
+    provider = getattr(client, "provider_name", None)
+    resolved_model = getattr(client, "model_name", requested_model)
+    mismatch_logged = False
+    async for chunk in client.stream_llm(
+        system_prompt,
+        user_prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+    ):
+        enriched = replace(
+            chunk,
+            provider=provider,
+            requested_model=requested_model,
+            resolved_model=resolved_model,
+        )
+        if enriched.model_mismatch and not mismatch_logged:
+            logger.warning(
+                "AI streaming response model differs from resolved model "
+                "requested=%s resolved=%s response=%s",
+                requested_model or "<default>",
+                resolved_model,
+                enriched.response_model,
+            )
+            mismatch_logged = True
+        yield enriched
 
 
 def validate_structured_response(

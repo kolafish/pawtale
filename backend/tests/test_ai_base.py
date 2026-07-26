@@ -327,7 +327,7 @@ class TestCallLlmContract:
         assert result == "hello"
         args, kwargs = inst.post.call_args
         assert args[0] == "https://blankapi.com/v1/chat/completions"
-        assert kwargs["json"]["model"] == "claude-fable-5"
+        assert kwargs["json"]["model"] == "claude-opus-4-8"
         assert kwargs["timeout"] == 60.0
 
     def test_claude_accepts_base_url_with_or_without_v1(self):
@@ -409,6 +409,70 @@ class TestCallLlmContract:
         tool = kwargs["json"]["tools"][0]
         assert tool["strict"] is True
         assert tool["input_schema"]["properties"]["ok"]["type"] == "boolean"
+
+    @pytest.mark.asyncio
+    async def test_claude_streaming_uses_native_messages_endpoint(self):
+        service = ClaudeTextService(model="claude-opus-4-8")
+
+        async def response_lines():
+            yield (
+                'data: {"type":"message_start","message":'
+                '{"model":"claude-opus-4-8","usage":{"input_tokens":8}}}'
+            )
+            yield ""
+            yield (
+                'data: {"type":"content_block_delta","delta":'
+                '{"type":"thinking_delta","thinking":"分析中"}}'
+            )
+            yield ""
+            yield (
+                'data: {"type":"content_block_delta","delta":'
+                '{"type":"text_delta","text":"你好"}}'
+            )
+            yield ""
+            yield (
+                'data: {"type":"message_delta","delta":'
+                '{"stop_reason":"end_turn"},"usage":{"output_tokens":4}}'
+            )
+            yield ""
+
+        response = MagicMock()
+        response.raise_for_status = MagicMock()
+        response.aiter_lines = response_lines
+        stream_context = MagicMock()
+        stream_context.__aenter__ = AsyncMock(return_value=response)
+        stream_context.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("httpx.AsyncClient") as mock_client:
+            client = MagicMock()
+            client.stream = MagicMock(return_value=stream_context)
+            client.__aenter__ = AsyncMock(return_value=client)
+            client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = client
+
+            chunks = [
+                chunk
+                async for chunk in service.stream_llm(
+                    "system",
+                    "user",
+                    max_tokens=512,
+                    timeout=120,
+                )
+            ]
+
+        assert [chunk.text_delta for chunk in chunks] == ["", "你好", ""]
+        assert chunks[-1].finish_reason == "end_turn"
+        assert chunks[0].response_model == "claude-opus-4-8"
+        assert chunks[0].usage == {"input_tokens": 8}
+        assert chunks[-1].usage == {"output_tokens": 4}
+        args, kwargs = client.stream.call_args
+        assert args == ("POST", "https://blankapi.com/v1/messages")
+        assert kwargs["json"]["model"] == "claude-opus-4-8"
+        assert kwargs["json"]["stream"] is True
+        assert kwargs["json"]["messages"] == [
+            {"role": "user", "content": "user"}
+        ]
+        assert kwargs["json"]["system"] == "system"
 
     @pytest.mark.asyncio
     async def test_structured_generation_retries_truncated_response(self):

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.services.ai_calls import generate_text_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.dialect_profile import (
     dialect_verification_guidance,
@@ -30,6 +32,9 @@ class MultiASRVerificationRequest:
 class VerifiedASRTranscript:
     text: str
     provider: str
+    requested_model: str | None = None
+    resolved_model: str | None = None
+    response_model: str | None = None
 
 
 def _asr_results_block(results: tuple[OfflineASRResult, ...]) -> str:
@@ -98,14 +103,25 @@ async def verify_multi_asr_transcripts(
     if not any(result.text.strip() for result in request.asr_results):
         raise ValueError("at least one non-empty ASR result is required")
     client = ai_client or get_ai_service(ai_model)
-    content = await client._call_llm(
+    policy = ai_text_workload_policy(AITextWorkload.GENERATION_TEXT)
+    generated = await generate_text_with_client(
+        client,
         SYSTEM_PROMPT,
         build_multi_asr_verification_prompt(request),
+        requested_model=ai_model,
         temperature=0.1,
-        max_tokens=1800,
-        timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+        max_tokens=policy.max_tokens,
+        timeout=ai_text_timeout_seconds(policy.timeout_profile),
     )
-    text = normalize_memoir_asr_text(_strip_llm_wrapping(str(content))).strip()
+    text = normalize_memoir_asr_text(
+        _strip_llm_wrapping(generated.content)
+    ).strip()
     if not text:
         raise ValueError("LLM returned empty corrected transcript")
-    return VerifiedASRTranscript(text=text, provider=client.provider_name)
+    return VerifiedASRTranscript(
+        text=text,
+        provider=generated.provider or client.provider_name,
+        requested_model=generated.requested_model,
+        resolved_model=generated.resolved_model,
+        response_model=generated.response_model,
+    )

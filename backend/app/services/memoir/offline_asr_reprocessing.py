@@ -484,6 +484,14 @@ async def reprocess_offline_asr_utterance(
         "providers": list(normalized_providers),
         "asr_providers": [result.provider for result in asr_results],
         "verification_provider": verified.provider,
+        "verification_requested_model": verified.requested_model,
+        "verification_resolved_model": verified.resolved_model,
+        "verification_response_model": verified.response_model,
+        "verification_model_mismatch": bool(
+            verified.resolved_model
+            and verified.response_model
+            and verified.resolved_model != verified.response_model
+        ),
         "applied_at": applied_at,
     }
     await _apply_reprocessed_transcript(

@@ -19,6 +19,13 @@ def test_validate_runtime_settings_rejects_invalid_app_env():
         validate_runtime_settings(settings)
 
 
+def test_validate_runtime_settings_rejects_unknown_default_ai_model():
+    settings = Settings(default_ai_model="unknown-model")
+
+    with pytest.raises(RuntimeError, match="DEFAULT_AI_MODEL"):
+        validate_runtime_settings(settings)
+
+
 def test_validate_runtime_settings_rejects_default_production_secret():
     settings = Settings(app_env="production", app_secret_key=DEFAULT_APP_SECRET_KEY)
 
@@ -78,7 +85,7 @@ def test_non_sqlite_engine_connect_args_stay_empty():
 
 
 def test_small_concurrency_provider_limit_defaults():
-    settings = Settings()
+    settings = Settings(_env_file=None)
 
     assert settings.voice_gateway_max_active_sessions == 10
     assert settings.voice_gateway_max_active_sessions_per_user == 1
@@ -89,7 +96,7 @@ def test_small_concurrency_provider_limit_defaults():
     assert settings.volc_ark_model == "doubao-seed-2-0-pro-260215"
     assert settings.volc_ark_thinking_type == "disabled"
     assert settings.anthropic_base_url == "https://blankapi.com"
-    assert settings.default_ai_model == "claude-fable-5"
+    assert settings.default_ai_model == "claude-opus-4-8"
     assert settings.tts_max_concurrent_requests == 3
     assert settings.volc_tts_resource_id == "seed-tts-2.0"
     assert settings.volc_tts_speaker == "zh_female_vv_uranus_bigtts"

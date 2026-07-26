@@ -8,6 +8,18 @@ DATA_DIR = BACKEND_DIR.parent / "data"
 DEFAULT_APP_SECRET_KEY = "dev-secret-key-change-in-production"
 MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
+DEFAULT_AI_TEXT_MODEL = "claude-opus-4-8"
+VALID_AI_TEXT_MODELS = {
+    "deepseek",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro",
+    "volc-doubao-pro",
+    "doubao-seed-2-0-pro-260215",
+    "claude-fable-5",
+    "claude-opus-4-8",
+    "claude-sonnet-4",
+    "claude-sonnet-4-6",
+}
 
 
 class Settings(BaseSettings):
@@ -53,7 +65,7 @@ class Settings(BaseSettings):
     anthropic_base_url: str = "https://blankapi.com"
 
     # Default AI Model
-    default_ai_model: str = "claude-fable-5"
+    default_ai_model: str = DEFAULT_AI_TEXT_MODEL
     ai_text_max_concurrent_requests: int = 3
     ai_text_realtime_timeout_seconds: float = 15.0
     ai_text_interactive_timeout_seconds: float = 60.0
@@ -151,6 +163,12 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
     if app_env not in VALID_APP_ENVS:
         valid_envs = ", ".join(sorted(VALID_APP_ENVS))
         raise RuntimeError(f"APP_ENV must be one of: {valid_envs}")
+
+    default_ai_model = current_settings.default_ai_model.strip().lower()
+    if default_ai_model not in VALID_AI_TEXT_MODELS:
+        raise RuntimeError(
+            f"DEFAULT_AI_MODEL is not supported: {default_ai_model}"
+        )
 
     if app_env != "production":
         return

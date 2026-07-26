@@ -41,9 +41,11 @@ from app.schemas.memoir_voice import (
     MemoirVoiceTranscriptSectionAssignmentResponse,
     MemoirVoiceTranscriptUpdateRequest,
 )
+from app.services.ai_calls import generate_text_with_client
 from app.services.ai_factory import get_ai_service
-from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_seconds
+from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
+from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_source_links import (
@@ -91,6 +93,9 @@ class CleanedTranscriptText:
     content: str
     provider: str | None
     created_by: MemoirCreatedBy
+    requested_model: str | None = None
+    resolved_model: str | None = None
+    response_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -259,12 +264,15 @@ async def generate_cleaned_transcript_text(
     try:
         if client is None:
             client = get_ai_service(ai_model)
-        content = await client._call_llm(
+        policy = ai_text_workload_policy(AITextWorkload.GENERATION_TEXT)
+        generated = await generate_text_with_client(
+            client,
             SYSTEM_PROMPT,
             _build_cleanup_prompt(source_text, context=context),
+            requested_model=ai_model,
             temperature=0.2,
-            max_tokens=1200,
-            timeout=ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION),
+            max_tokens=policy.max_tokens,
+            timeout=ai_text_timeout_seconds(policy.timeout_profile),
         )
     except HTTPException as exc:
         if strict and exc.status_code < 500:
@@ -297,7 +305,7 @@ async def generate_cleaned_transcript_text(
             created_by=MemoirCreatedBy.SYSTEM,
         )
 
-    cleaned = _remove_obvious_oral_fillers(str(content))
+    cleaned = _remove_obvious_oral_fillers(generated.content)
     if cleaned == source_text:
         cleaned = _fallback_cleaned_transcript_text(source_text)
     if not cleaned:
@@ -306,8 +314,11 @@ async def generate_cleaned_transcript_text(
         cleaned = source_text
     return CleanedTranscriptText(
         content=cleaned,
-        provider=client.provider_name,
+        provider=generated.provider,
         created_by=MemoirCreatedBy.AI,
+        requested_model=generated.requested_model,
+        resolved_model=generated.resolved_model,
+        response_model=generated.response_model,
     )
 
 

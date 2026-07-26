@@ -85,8 +85,19 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
 
     assert ready["state"] == "ready"
     assert started["ai_provider"] == "fake-ai"
+    assert started["requested_ai_model"] == "fake-model"
+    assert started["resolved_ai_model"] == "fake-stream-model"
     assert started["audio_protocol"] == "pcm_frame"
     assert completed["state"] == "completed"
+    assert completed["requested_ai_model"] == "fake-model"
+    assert completed["resolved_ai_model"] == "fake-stream-model"
+    assert completed["response_ai_model"] == "fake-stream-model"
+    assert completed["ai_model_mismatch"] is False
+    assert completed["usage"] == {
+        "input_tokens": 10,
+        "output_tokens": 32,
+        "total_tokens": 42,
+    }
     assert completed["text"] == "好，那我们就接着聊工作。第一份工作里，最让您记到现在的是哪一件事？"
     assert completed["primary_intent"] == "follow_up"
     assert completed["audio_file_id"]
@@ -132,6 +143,10 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert assistant_message.metadata_json["source"] == "ai.streaming_assistant_turn"
     assert assistant_message.metadata_json["turn_pipeline"] == "streaming_llm_tts"
     assert assistant_message.metadata_json["provider"] == "fake-ai"
+    assert assistant_message.metadata_json["requested_model"] == "fake-model"
+    assert assistant_message.metadata_json["resolved_model"] == "fake-stream-model"
+    assert assistant_message.metadata_json["response_model"] == "fake-stream-model"
+    assert assistant_message.metadata_json["model_mismatch"] is False
     assert assistant_message.metadata_json["tts_provider"] == "fake-tts"
     assert assistant_message.metadata_json["tts_duration_seconds"] == 0.4
     assert assistant_message.metadata_json["tts_alignment"][0]["text"] == "好"
@@ -997,9 +1012,19 @@ class FakeStreamingAI:
                 "kwargs": kwargs,
             }
         )
+        yield AITextStreamChunk(
+            usage={"input_tokens": 10},
+            response_model=self.model_name,
+        )
         for chunk in self.chunks:
-            yield AITextStreamChunk(text_delta=chunk)
-        yield AITextStreamChunk(finish_reason="stop", usage={"total_tokens": 42})
+            yield AITextStreamChunk(
+                text_delta=chunk,
+                response_model=self.model_name,
+            )
+        yield AITextStreamChunk(
+            finish_reason="stop",
+            usage={"output_tokens": 32, "total_tokens": 42},
+        )
 
 
 class FakePolicyAI:
