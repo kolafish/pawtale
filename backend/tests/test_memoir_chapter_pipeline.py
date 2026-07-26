@@ -335,6 +335,83 @@ async def test_chapter_generation_retries_only_the_invalid_section():
     assert "上次输出未通过校验" in fake.prompts[2]
 
 
+async def test_chapter_generation_resumes_from_completed_section_checkpoint():
+    class SectionAI:
+        provider_name = "test"
+        model_name = "test-section-checkpoint"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            self.prompts.append(user_prompt)
+            section_id = next(
+                line.removeprefix("section_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("section_id: ")
+            )
+            material_id = next(
+                line.removeprefix("material_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("material_id: ")
+            )
+            return json.dumps(
+                {
+                    "sections": [{
+                        "section_id": section_id,
+                        "content": (
+                            "那天我从家里出发。"
+                            if section_id == "section-1"
+                            else "傍晚时我终于抵达。"
+                        ),
+                        "used_material_ids": [material_id],
+                    }],
+                    "missing_source_candidates": [],
+                    "editor_notes": [],
+                },
+                ensure_ascii=False,
+            )
+
+    checkpoint: dict[str, object] = {}
+
+    async def fail_after_first_section(patch: dict[str, object]) -> None:
+        checkpoint.update(patch)
+        if patch.get("completed_section_count") == 1:
+            raise RuntimeError("模拟任务在下一小节前中断")
+
+    first = SectionAI()
+    with pytest.raises(RuntimeError, match="模拟任务"):
+        await chapter_generation.generate_chapter(
+            _two_section_context(),
+            editorial_guidance=[],
+            ai_client=first,
+            progress_callback=fail_after_first_section,
+        )
+
+    assert len(first.prompts) == 1
+    assert checkpoint["completed_section_count"] == 1
+    assert [
+        section["section_id"]
+        for section in checkpoint["checkpoint_sections"]
+    ] == ["section-1"]
+
+    second = SectionAI()
+    completed = await chapter_generation.generate_chapter(
+        _two_section_context(),
+        editorial_guidance=[],
+        ai_client=second,
+        checkpoint=checkpoint,
+    )
+
+    assert len(second.prompts) == 1
+    assert "section_id: section-2" in second.prompts[0]
+    assert "section_id: section-1" not in second.prompts[0]
+    assert [section.section_id for section in completed.sections] == [
+        "section-1",
+        "section-2",
+    ]
+
+
 async def test_chapter_generation_does_not_copy_previous_section_boundary():
     repeated_boundary = (
         "就这样搞到二零零四年，不行了，已经太老了，七十几岁了。"

@@ -292,12 +292,27 @@ async def update_editing_job_progress(
     job: MemoirEditingJob,
     result_json: dict,
 ) -> bool:
+    return await update_editing_job_progress_for_lease(
+        db,
+        job_id=job.id,
+        lease_token=job.lease_token,
+        result_json=result_json,
+    )
+
+
+async def update_editing_job_progress_for_lease(
+    db: AsyncSession,
+    *,
+    job_id: str,
+    lease_token: str | None,
+    result_json: dict,
+) -> bool:
     result = await db.execute(
         update(MemoirEditingJob)
         .where(
-            MemoirEditingJob.id == job.id,
+            MemoirEditingJob.id == job_id,
             MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
-            MemoirEditingJob.lease_token == job.lease_token,
+            MemoirEditingJob.lease_token == lease_token,
         )
         .values(result_json=result_json)
     )

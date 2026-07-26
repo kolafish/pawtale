@@ -7,8 +7,8 @@ import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
   createMemoirVoiceSession,
+  enqueueMemoirChapterPreparationJob,
   getMemoirBookCompletionOverview,
-  prepareMemoirBookChapter,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import {
@@ -77,16 +77,19 @@ function chapterView(
     || preparingChapterId === item.chapter_id
     || item.state === "preparing"
   );
+  const progressAvailable = item.state === "preparing";
   return {
     ...item,
     stateText: busy ? "正在检查" : stateText,
-    actionText: busy
+    actionText: progressAvailable
+      ? "查看进度"
+      : (busy
       ? "正在检查"
       : (item.state === "confirmed"
         ? "查看正文"
-        : (item.next_action.action_text || "查看本章")),
+        : (item.next_action.action_text || "查看本章"))),
     chapterClass: `chapter-item ${item.state}`,
-    disabled: busy,
+    disabled: busy && !progressAvailable,
   };
 }
 
@@ -252,8 +255,10 @@ definePage<BookCompletionData>()({
     if (
       !chapter
       || chapter.disabled
-      || this.data.preparingChapterId
-      || this.data.recheckingAll
+      || (
+        (this.data.preparingChapterId || this.data.recheckingAll)
+        && chapter.state !== "preparing"
+      )
       || this.data.startingIssueId
     ) {
       return;
@@ -290,7 +295,11 @@ definePage<BookCompletionData>()({
       chapters: this.data.chapters.map((item) => chapterView(item, chapterId)),
     });
     try {
-      await prepareMemoirBookChapter(this.data.projectId, chapterId);
+      await enqueueMemoirChapterPreparationJob(
+        this.data.projectId,
+        chapterId,
+        "prepare",
+      );
       await this.loadOverview(true);
     } catch (error) {
       if (routeAuthError(error)) {
@@ -328,7 +337,11 @@ definePage<BookCompletionData>()({
     });
     try {
       for (const chapter of targets) {
-        await prepareMemoirBookChapter(this.data.projectId, chapter.chapter_id);
+        await enqueueMemoirChapterPreparationJob(
+          this.data.projectId,
+          chapter.chapter_id,
+          "prepare",
+        );
       }
       await this.loadOverview(true);
     } catch (error) {
@@ -424,7 +437,11 @@ definePage<BookCompletionData>()({
         outcome: "confirmed",
         note: "用户已确认当前处理方向",
       });
-      await prepareMemoirBookChapter(this.data.projectId, chapter.chapter_id);
+      await enqueueMemoirChapterPreparationJob(
+        this.data.projectId,
+        chapter.chapter_id,
+        "prepare",
+      );
       await this.loadOverview(true);
     } catch (error) {
       if (routeAuthError(error)) {

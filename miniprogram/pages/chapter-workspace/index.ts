@@ -7,18 +7,20 @@ import {
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
+  cancelMemoirChapterPreparationJob,
   cancelMemoirChapterSectionRegenerationJob,
   confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
   createMemoirVoiceSession,
+  enqueueMemoirChapterPreparationJob,
+  getMemoirChapterPreparationJob,
   getMemoirChapterSectionRegenerationJob,
   getMemoirChapterWorkspace,
   placeMemoirChapterMaterial,
-  prepareMemoirBookChapter,
   reviseMemoirChapterDraftSectionWithAI,
   regenerateMemoirChapterSections,
-  rewriteMemoirBookChapter,
   reviseMemoirBookChapterDraft,
+  type MemoirChapterPreparationJob,
   type MemoirSectionMaterialPlacementRequest,
   type MemoirChapterSectionRegenerationJob,
 } from "../../services/memoir-voice-api";
@@ -88,6 +90,80 @@ function isActiveSectionRegeneration(
   job: MemoirChapterSectionRegenerationJob | null,
 ): boolean {
   return job?.status === "pending" || job?.status === "running";
+}
+
+function isActiveChapterPreparation(
+  job: MemoirChapterPreparationJob | null,
+): boolean {
+  return job?.status === "pending" || job?.status === "running";
+}
+
+function chapterPreparationView(job: MemoirChapterPreparationJob) {
+  const model = job.resolved_ai_model || job.requested_ai_model;
+  const modelDetail = model ? ` · 模型 ${model}` : "";
+  if (job.status === "failed") {
+    const savedDetail = job.completed_section_count
+      ? ` · 已保留 ${job.completed_section_count}/${job.total_section_count} 个小节`
+      : "";
+    return {
+      title: job.operation === "rewrite" ? "正文生成失败" : "本章检查失败",
+      detail: `${job.error_message || "可以重新开始"}${savedDetail}${modelDetail}`,
+      progress: 0,
+    };
+  }
+  if (job.status === "cancelled") {
+    return {
+      title: "已取消处理",
+      detail: `原有章节和正文保持不变${modelDetail}`,
+      progress: 0,
+    };
+  }
+  if (job.stage === "checking_sections") {
+    const progress = job.total_section_count
+      ? Math.round(job.checked_section_count * 35 / job.total_section_count)
+      : 0;
+    return {
+      title: "正在逐节检查素材",
+      detail: `已检查 ${job.checked_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${modelDetail}`,
+      progress,
+    };
+  }
+  if (job.stage === "checking_chapter") {
+    return {
+      title: "正在检查整章结构",
+      detail: `小节检查已完成，正在判断是否需要补充${modelDetail}`,
+      progress: 40,
+    };
+  }
+  if (job.stage === "generating_sections") {
+    const base = job.operation === "rewrite" ? 0 : 40;
+    const range = job.operation === "rewrite" ? 95 : 55;
+    const progress = job.total_section_count
+      ? base + Math.round(
+        job.completed_section_count * range / job.total_section_count,
+      )
+      : base;
+    const resumed = job.resumed_section_count
+      ? ` · 已恢复 ${job.resumed_section_count} 节`
+      : "";
+    return {
+      title: "正在逐节生成正文",
+      detail: `已完成 ${job.completed_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${resumed}${modelDetail}`,
+      progress,
+    };
+  }
+  if (job.stage === "saving") {
+    return {
+      title: "正在保存本章正文",
+      detail: `全部小节已经处理完成，正在更新章节版本${modelDetail}`,
+      progress: 98,
+    };
+  }
+  return {
+    title: job.operation === "rewrite" ? "正文生成任务已排队" : "本章检查任务已排队",
+    detail: `即将处理 ${job.total_section_count} 个小节${modelDetail}`,
+    progress: 0,
+  };
 }
 
 function sectionRegenerationView(job: MemoirChapterSectionRegenerationJob) {
@@ -182,6 +258,10 @@ interface ChapterWorkspacePageData {
   canConfirmChapter: boolean;
   operationKind: ChapterWorkspaceOperationKind;
   operationTargetId: string;
+  chapterPreparationJob: MemoirChapterPreparationJob | null;
+  chapterPreparationTitle: string;
+  chapterPreparationDetail: string;
+  chapterPreparationProgress: number;
   sectionRegenerationJob: MemoirChapterSectionRegenerationJob | null;
   sectionRegenerationTitle: string;
   sectionRegenerationDetail: string;
@@ -203,6 +283,7 @@ definePage<ChapterWorkspacePageData>()({
   pageVisible: false,
   loadedOnce: false,
   workspaceLoadSequence: 0,
+  chapterPreparationLoadSequence: 0,
   sectionRegenerationLoadSequence: 0,
   draftSectionVoiceInstructionToken: 0,
 
@@ -235,6 +316,10 @@ definePage<ChapterWorkspacePageData>()({
     canConfirmChapter: false,
     operationKind: "",
     operationTargetId: "",
+    chapterPreparationJob: null,
+    chapterPreparationTitle: "",
+    chapterPreparationDetail: "",
+    chapterPreparationProgress: 0,
     sectionRegenerationJob: null,
     sectionRegenerationTitle: "",
     sectionRegenerationDetail: "",
@@ -255,6 +340,7 @@ definePage<ChapterWorkspacePageData>()({
     this.pageVisible = true;
     await Promise.all([
       this.loadPageData(),
+      this.refreshChapterPreparationJob(true),
       this.refreshSectionRegenerationJob(true),
     ]);
     this.loadedOnce = true;
@@ -265,6 +351,7 @@ definePage<ChapterWorkspacePageData>()({
     if (this.loadedOnce) {
       await Promise.all([
         this.loadPageData(true),
+        this.refreshChapterPreparationJob(true),
         this.refreshSectionRegenerationJob(true),
       ]);
     }
@@ -289,6 +376,7 @@ definePage<ChapterWorkspacePageData>()({
   async onPullDownRefresh() {
     await Promise.all([
       this.loadPageData(true),
+      this.refreshChapterPreparationJob(),
       this.refreshSectionRegenerationJob(),
     ]);
     wx.stopPullDownRefresh();
@@ -463,9 +551,7 @@ definePage<ChapterWorkspacePageData>()({
       loading: false,
       error: "",
     });
-    if (workspace.completion_summary.state === "preparing") {
-      this.schedulePreparationPolling();
-    } else {
+    if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }
   },
@@ -575,6 +661,134 @@ definePage<ChapterWorkspacePageData>()({
       this.finishOperation("regenerate_sections");
       this.setData({
         error: error instanceof Error ? error.message : "小节重新生成失败",
+      });
+    }
+  },
+
+  async refreshChapterPreparationJob(initial = false) {
+    if (!this.data.projectId || !this.data.chapterId) {
+      return;
+    }
+    const loadSequence = ++this.chapterPreparationLoadSequence;
+    try {
+      const job = await getMemoirChapterPreparationJob(
+        this.data.projectId,
+        this.data.chapterId,
+      );
+      if (
+        !this.pageVisible
+        || loadSequence !== this.chapterPreparationLoadSequence
+      ) {
+        return;
+      }
+      await this.applyChapterPreparationJob(job, initial);
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (loadSequence !== this.chapterPreparationLoadSequence) {
+        return;
+      }
+      if (!initial) {
+        this.setData({
+          error: error instanceof Error ? error.message : "章节处理进度读取失败",
+        });
+        this.schedulePreparationPolling();
+      }
+    }
+  },
+
+  async applyChapterPreparationJob(
+    job: MemoirChapterPreparationJob,
+    initial = false,
+  ) {
+    const previous = this.data.chapterPreparationJob;
+    const wasActive = (
+      previous?.job_id === job.job_id
+      && isActiveChapterPreparation(previous)
+    );
+    if (isActiveChapterPreparation(job)) {
+      const view = chapterPreparationView(job);
+      this.setData({
+        operationKind: job.operation === "rewrite"
+          ? "rewrite_chapter"
+          : "prepare",
+        operationTargetId: "",
+        chapterPreparationJob: job,
+        chapterPreparationTitle: view.title,
+        chapterPreparationDetail: view.detail,
+        chapterPreparationProgress: view.progress,
+        error: "",
+      });
+      this.schedulePreparationPolling();
+      return;
+    }
+
+    this.stopPreparationPolling();
+    this.finishOperation(
+      job.operation === "rewrite" ? "rewrite_chapter" : "prepare",
+    );
+    if (job.status === "succeeded") {
+      this.setData({ chapterPreparationJob: null });
+      if (!wasActive) {
+        return;
+      }
+      await this.loadPageData(true);
+      wx.showToast({
+        title: job.operation === "rewrite" ? "小节正文已更新" : "本章处理完成",
+        icon: "success",
+      });
+      return;
+    }
+    if (job.status === "cancelled" && initial) {
+      this.setData({ chapterPreparationJob: null });
+      return;
+    }
+    if (job.status === "failed" || job.status === "cancelled") {
+      const view = chapterPreparationView(job);
+      this.setData({
+        chapterPreparationJob: job,
+        chapterPreparationTitle: view.title,
+        chapterPreparationDetail: view.detail,
+        chapterPreparationProgress: view.progress,
+      });
+      return;
+    }
+    this.setData({ chapterPreparationJob: null });
+  },
+
+  async cancelChapterPreparation() {
+    const job = this.data.chapterPreparationJob;
+    if (!job?.job_id || !job.can_cancel) {
+      return;
+    }
+    this.setData({
+      chapterPreparationJob: { ...job, can_cancel: false },
+      chapterPreparationTitle: "正在取消处理",
+      chapterPreparationDetail: "正在停止后续模型调用，已保存的进度仍会保留",
+    });
+    try {
+      await cancelMemoirChapterPreparationJob(
+        this.data.projectId,
+        this.data.chapterId,
+        job.job_id,
+      );
+      this.stopPreparationPolling();
+      this.finishOperation(
+        job.operation === "rewrite" ? "rewrite_chapter" : "prepare",
+      );
+      this.setData({ chapterPreparationJob: null });
+      wx.showToast({ title: "已取消处理", icon: "none" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        this.finishOperation(
+          job.operation === "rewrite" ? "rewrite_chapter" : "prepare",
+        );
+        return;
+      }
+      this.setData({
+        chapterPreparationJob: job,
+        error: error instanceof Error ? error.message : "取消处理失败",
       });
     }
   },
@@ -888,16 +1102,18 @@ definePage<ChapterWorkspacePageData>()({
     }
     this.stopPreparationPolling();
     try {
-      await prepareMemoirBookChapter(this.data.projectId, this.data.chapterId);
-      await this.loadPageData(true);
-      this.schedulePreparationPolling();
+      const job = await enqueueMemoirChapterPreparationJob(
+        this.data.projectId,
+        this.data.chapterId,
+        "prepare",
+      );
+      await this.applyChapterPreparationJob(job);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "本章整理失败" });
-    } finally {
       this.finishOperation("prepare");
+      this.setData({ error: error instanceof Error ? error.message : "本章整理失败" });
     }
   },
 
@@ -1003,16 +1219,18 @@ definePage<ChapterWorkspacePageData>()({
         outcome: "confirmed",
         note: "用户已确认按当前建议处理",
       });
-      await prepareMemoirBookChapter(this.data.projectId, this.data.chapterId);
-      await this.loadPageData(true);
-      this.schedulePreparationPolling();
+      const job = await enqueueMemoirChapterPreparationJob(
+        this.data.projectId,
+        this.data.chapterId,
+        "prepare",
+      );
+      await this.applyChapterPreparationJob(job);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "确认失败" });
-    } finally {
       this.finishOperation("confirm_issue", issueId);
+      this.setData({ error: error instanceof Error ? error.message : "确认失败" });
     }
   },
 
@@ -1433,21 +1651,20 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     try {
-      await rewriteMemoirBookChapter(
+      const job = await enqueueMemoirChapterPreparationJob(
         this.data.projectId,
         this.data.chapterId,
+        "rewrite",
       );
-      await this.loadPageData(true);
-      wx.showToast({ title: "小节正文已更新", icon: "success" });
+      await this.applyChapterPreparationJob(job);
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
       }
+      this.finishOperation("rewrite_chapter");
       this.setData({
         error: error instanceof Error ? error.message : "本章重新生成失败",
       });
-    } finally {
-      this.finishOperation("rewrite_chapter");
     }
   },
 
@@ -1455,14 +1672,14 @@ definePage<ChapterWorkspacePageData>()({
     if (
       !this.pageVisible
       || this.preparationPollTimer !== null
-      || this.data.workspace?.completion_summary.state !== "preparing"
+      || !isActiveChapterPreparation(this.data.chapterPreparationJob)
     ) {
       return;
     }
     this.preparationPollTimer = setTimeout(() => {
       this.preparationPollTimer = null;
       if (this.pageVisible) {
-        void this.loadPageData(true);
+        void this.refreshChapterPreparationJob();
       }
     }, PREPARATION_POLL_INTERVAL_MS);
   },

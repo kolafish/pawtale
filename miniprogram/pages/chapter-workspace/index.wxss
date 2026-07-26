@@ -76,6 +76,13 @@
   border-left: 6rpx solid var(--ui-accent);
 }
 
+.chapter-preparation-status {
+  margin-top: 24rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 18rpx;
+  background: var(--ui-surface-subtle);
+}
+
 .chapter-finished {
   margin-top: 30rpx;
   padding-top: 28rpx;

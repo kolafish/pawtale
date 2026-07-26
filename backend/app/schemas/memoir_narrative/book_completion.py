@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
-from app.domain.memoir.types import MemoirEditingJobStatus
+from pydantic import BaseModel, Field, field_validator
 from app.schemas.memoir_sections import (
     MemoirChapterDraftSectionResponse,
     MemoirChapterSectionSummary,
@@ -60,13 +57,35 @@ class MemoirChapterDraftSectionAIRevisionRequest(MemoirChapterAIRequest):
         return normalized
 
 
-class MemoirChapterPreparationJobResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+class MemoirChapterPreparationJobRequest(MemoirChapterAIRequest):
+    operation: Literal["prepare", "rewrite"] = "prepare"
 
-    id: str
+
+class MemoirChapterPreparationJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
     chapter_id: str
-    status: MemoirEditingJobStatus
-    created_at: datetime
+    operation: Literal["prepare", "rewrite"] = "prepare"
+    status: Literal[
+        "idle",
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ] = "idle"
+    stage: str = "idle"
+    total_section_count: int = 0
+    checked_section_count: int = 0
+    completed_section_count: int = 0
+    resumed_section_count: int = 0
+    current_section_id: str | None = None
+    current_section_title: str = ""
+    outcome: str = ""
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    can_cancel: bool = False
+    error_message: str = ""
 
 
 class MemoirChapterCompletionNextAction(BaseModel):

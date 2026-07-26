@@ -12,6 +12,26 @@
       <text class="section-kicker">本章进度</text>
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
+      <view wx:if="{{chapterPreparationJob}}" class="chapter-preparation-status">
+        <text class="section-regeneration-title">{{chapterPreparationTitle}}</text>
+        <text class="section-regeneration-detail">{{chapterPreparationDetail}}</text>
+        <view
+          wx:if="{{chapterPreparationJob.status === 'pending' || chapterPreparationJob.status === 'running'}}"
+          class="section-regeneration-track"
+          aria-label="章节处理进度 {{chapterPreparationProgress}}%"
+        >
+          <view
+            class="section-regeneration-progress"
+            style="width: {{chapterPreparationProgress}}%;"
+          ></view>
+        </view>
+        <view
+          wx:if="{{chapterPreparationJob.can_cancel}}"
+          class="section-regeneration-cancel"
+          aria-role="button"
+          bindtap="cancelChapterPreparation"
+        >取消处理</view>
+      </view>
       <view
         wx:if="{{nextAction.actionText}}"
         class="primary-action {{nextAction.disabled || operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"

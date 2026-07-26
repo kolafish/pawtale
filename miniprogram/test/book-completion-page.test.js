@@ -11,8 +11,8 @@ function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
     getMemoirBookCompletionOverview: async () => {
       throw new Error("getMemoirBookCompletionOverview was not mocked");
     },
-    prepareMemoirBookChapter: async () => {
-      throw new Error("prepareMemoirBookChapter was not mocked");
+    enqueueMemoirChapterPreparationJob: async () => {
+      throw new Error("enqueueMemoirChapterPreparationJob was not mocked");
     },
     createMemoirVoiceSession: async () => {
       throw new Error("createMemoirVoiceSession was not mocked");
@@ -153,8 +153,8 @@ test("book completion offers one whole-book recheck after all chapters are confi
   };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      prepareMemoirBookChapter: async (projectId, chapterId) => {
-        prepared.push([projectId, chapterId]);
+      enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
+        prepared.push([projectId, chapterId, operation]);
       },
       getMemoirBookCompletionOverview: async () => overview,
     },
@@ -175,8 +175,8 @@ test("book completion offers one whole-book recheck after all chapters are confi
   await page.recheckAllChapters.call(context);
 
   assert.deepEqual(prepared, [
-    ["project-1", "chapter-1"],
-    ["project-1", "chapter-2"],
+    ["project-1", "chapter-1", "prepare"],
+    ["project-1", "chapter-2", "prepare"],
   ]);
   assert.ok(toasts.every((title) => title === "暂未发现待补内容"));
   delete global.wx;
@@ -202,8 +202,8 @@ test("book completion can check only chapters that have not been checked", async
   global.wx = { showToast() {} };
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      prepareMemoirBookChapter: async (projectId, chapterId) => {
-        prepared.push([projectId, chapterId]);
+      enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
+        prepared.push([projectId, chapterId, operation]);
       },
       getMemoirBookCompletionOverview: async () => overview,
     },
@@ -221,7 +221,7 @@ test("book completion can check only chapters that have not been checked", async
   });
   await page.recheckAllChapters.call(context);
 
-  assert.deepEqual(prepared, [["project-1", "chapter-1"]]);
+  assert.deepEqual(prepared, [["project-1", "chapter-1", "prepare"]]);
   delete global.wx;
 });
 
@@ -306,8 +306,8 @@ test("book completion prepares an untouched chapter in place", async () => {
   });
   const { page, mod } = loadBookCompletionPage({
     voiceApiExports: {
-      prepareMemoirBookChapter: async (projectId, chapterId) => {
-        prepared.push([projectId, chapterId]);
+      enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
+        prepared.push([projectId, chapterId, operation]);
       },
       getMemoirBookCompletionOverview: async () => overview,
     },
@@ -321,6 +321,6 @@ test("book completion prepares an untouched chapter in place", async () => {
     currentTarget: { dataset: { chapterId: "chapter-1" } },
   });
 
-  assert.deepEqual(prepared, [["project-1", "chapter-1"]]);
+  assert.deepEqual(prepared, [["project-1", "chapter-1", "prepare"]]);
   delete global.wx;
 });
