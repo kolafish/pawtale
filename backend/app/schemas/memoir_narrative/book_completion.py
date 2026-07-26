@@ -88,6 +88,51 @@ class MemoirChapterPreparationJobResponse(BaseModel):
     error_message: str = ""
 
 
+class MemoirBookCompletionJobRequest(MemoirChapterAIRequest):
+    scope: Literal["pending", "all"] = "pending"
+    retry_job_id: str | None = None
+
+
+class MemoirBookCompletionJobChapterResponse(BaseModel):
+    chapter_id: str
+    title: str
+    job_id: str | None = None
+    status: Literal[
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ]
+    error_message: str = ""
+
+
+class MemoirBookCompletionJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    scope: Literal["pending", "all"] = "pending"
+    status: Literal[
+        "idle",
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ] = "idle"
+    total_chapter_count: int = 0
+    processed_chapter_count: int = 0
+    succeeded_chapter_count: int = 0
+    failed_chapter_count: int = 0
+    cancelled_chapter_count: int = 0
+    current_chapter_id: str | None = None
+    current_chapter_title: str = ""
+    requested_ai_model: str | None = None
+    chapters: list[MemoirBookCompletionJobChapterResponse] = Field(default_factory=list)
+    can_cancel: bool = False
+    can_retry: bool = False
+    error_message: str = ""
+
+
 class MemoirChapterCompletionNextAction(BaseModel):
     kind: MemoirChapterCompletionNextActionKind
     title: str

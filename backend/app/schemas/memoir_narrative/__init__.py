@@ -1,4 +1,6 @@
 from .book_completion import (
+    MemoirBookCompletionJobRequest,
+    MemoirBookCompletionJobResponse,
     MemoirBookCompletionOverviewResponse,
     MemoirChapterCompletionIssue,
     MemoirChapterCompletionNextAction,
@@ -11,6 +13,8 @@ from .book_completion import (
 )
 
 __all__ = [
+    "MemoirBookCompletionJobRequest",
+    "MemoirBookCompletionJobResponse",
     "MemoirBookCompletionOverviewResponse",
     "MemoirChapterCompletionIssue",
     "MemoirChapterCompletionNextAction",

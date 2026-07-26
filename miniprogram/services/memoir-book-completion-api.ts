@@ -30,6 +30,33 @@ export interface MemoirChapterPreparationJob {
   error_message: string;
 }
 
+export interface MemoirBookCompletionJobChapter {
+  chapter_id: string;
+  title: string;
+  job_id: string | null;
+  status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  error_message: string;
+}
+
+export interface MemoirBookCompletionJob {
+  job_id: string | null;
+  project_id: string;
+  scope: "pending" | "all";
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  total_chapter_count: number;
+  processed_chapter_count: number;
+  succeeded_chapter_count: number;
+  failed_chapter_count: number;
+  cancelled_chapter_count: number;
+  current_chapter_id: string | null;
+  current_chapter_title: string;
+  requested_ai_model: string | null;
+  chapters: MemoirBookCompletionJobChapter[];
+  can_cancel: boolean;
+  can_retry: boolean;
+  error_message: string;
+}
+
 function chapterPreparationJobPath(
   projectId: string,
   chapterId: string,
@@ -45,6 +72,46 @@ export function getMemoirBookCompletionOverview(
   projectId: string,
 ): Promise<MemoirBookCompletionOverview> {
   return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
+}
+
+export function enqueueMemoirBookCompletionJob(
+  projectId: string,
+  scope: "pending" | "all",
+  retryJobId: string | null = null,
+): Promise<MemoirBookCompletionJob> {
+  return memoirAIRequest<
+    MemoirBookCompletionJob,
+    {
+      scope: "pending" | "all";
+      retry_job_id: string | null;
+      ai_model: null;
+    }
+  >(
+    bookCompletionPath(projectId, "/jobs"),
+    { scope, retry_job_id: retryJobId, ai_model: null },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookCompletionJob(
+  projectId: string,
+): Promise<MemoirBookCompletionJob> {
+  return memoirRequest<MemoirBookCompletionJob>(
+    bookCompletionPath(projectId, "/jobs/current"),
+  );
+}
+
+export function cancelMemoirBookCompletionJob(
+  projectId: string,
+  jobId: string,
+): Promise<MemoirBookCompletionJob> {
+  return memoirRequest<MemoirBookCompletionJob>(
+    bookCompletionPath(
+      projectId,
+      `/jobs/${encodeURIComponent(jobId)}`,
+    ),
+    { method: "DELETE" },
+  );
 }
 
 export function enqueueMemoirChapterPreparationJob(

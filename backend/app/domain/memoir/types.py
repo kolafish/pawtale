@@ -111,6 +111,19 @@ class MemoirEditingJobStatus(str, Enum):
     SKIPPED = "skipped"
 
 
+class MemoirBookCompletionJobScope(str, Enum):
+    PENDING = "pending"
+    ALL = "all"
+
+
+class MemoirBookCompletionJobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 class MemoirShareVideoJobStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"

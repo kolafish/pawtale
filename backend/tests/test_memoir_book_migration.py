@@ -117,6 +117,35 @@ async def test_runtime_schema_assert_reports_missing_columns():
         await engine.dispose()
 
 
+async def test_runtime_schema_migration_creates_book_completion_jobs():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TABLE memoir_book_completion_jobs"))
+
+        await migrate_runtime_schema(engine)
+
+        async with engine.begin() as conn:
+            assert "memoir_book_completion_jobs" in await _table_names(conn)
+            columns = await _table_columns(conn, "memoir_book_completion_jobs")
+        assert {
+            "project_id",
+            "active_key",
+            "target_chapters_json",
+            "chapter_job_ids_json",
+            "enqueue_errors_json",
+            "chapter_results_json",
+        } <= columns
+        await assert_runtime_schema(
+            engine,
+            require_sqlite_foreign_keys=False,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_cutover_drops_all_known_legacy_tables():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
