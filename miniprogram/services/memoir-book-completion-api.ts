@@ -1,5 +1,4 @@
 import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
-import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
 import {
   memoirNarrativeProjectPath,
   memoirAIRequest,
@@ -11,34 +10,78 @@ function bookCompletionPath(projectId: string, suffix = ""): string {
   return memoirNarrativeProjectPath(projectId, `/book-completion${suffix}`);
 }
 
+export interface MemoirChapterPreparationJob {
+  job_id: string | null;
+  project_id: string;
+  chapter_id: string;
+  operation: "prepare" | "rewrite";
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage: string;
+  total_section_count: number;
+  checked_section_count: number;
+  completed_section_count: number;
+  resumed_section_count: number;
+  current_section_id: string | null;
+  current_section_title: string;
+  outcome: string;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  can_cancel: boolean;
+  error_message: string;
+}
+
+function chapterPreparationJobPath(
+  projectId: string,
+  chapterId: string,
+  suffix = "",
+): string {
+  return bookCompletionPath(
+    projectId,
+    `/chapters/${encodeURIComponent(chapterId)}/jobs${suffix}`,
+  );
+}
+
 export function getMemoirBookCompletionOverview(
   projectId: string,
 ): Promise<MemoirBookCompletionOverview> {
   return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
 }
 
-export function prepareMemoirBookChapter(
+export function enqueueMemoirChapterPreparationJob(
   projectId: string,
   chapterId: string,
-): Promise<MemoirChapterWorkspace> {
-  return memoirAIRequest<MemoirChapterWorkspace, { ai_model: null }>(
-    memoirNarrativeProjectPath(
-      projectId,
-      `/book-completion/chapters/${encodeURIComponent(chapterId)}/prepare`,
-    ),
-    { ai_model: null },
+  operation: "prepare" | "rewrite",
+): Promise<MemoirChapterPreparationJob> {
+  return memoirAIRequest<
+    MemoirChapterPreparationJob,
+    { operation: "prepare" | "rewrite"; ai_model: null }
+  >(
+    chapterPreparationJobPath(projectId, chapterId),
+    { operation, ai_model: null },
+    { timeoutProfile: "mutation" },
   );
 }
 
-export function rewriteMemoirBookChapter(
+export function getMemoirChapterPreparationJob(
   projectId: string,
   chapterId: string,
-): Promise<MemoirChapterWorkspace> {
-  return memoirAIRequest<MemoirChapterWorkspace, { ai_model: null }>(
-    memoirNarrativeProjectPath(
+): Promise<MemoirChapterPreparationJob> {
+  return memoirRequest<MemoirChapterPreparationJob>(
+    chapterPreparationJobPath(projectId, chapterId, "/current"),
+  );
+}
+
+export function cancelMemoirChapterPreparationJob(
+  projectId: string,
+  chapterId: string,
+  jobId: string,
+): Promise<MemoirChapterPreparationJob> {
+  return memoirRequest<MemoirChapterPreparationJob>(
+    chapterPreparationJobPath(
       projectId,
-      `/book-completion/chapters/${encodeURIComponent(chapterId)}/rewrite`,
+      chapterId,
+      `/${encodeURIComponent(jobId)}`,
     ),
-    { ai_model: null },
+    { method: "DELETE" },
   );
 }

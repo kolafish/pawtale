@@ -40,6 +40,10 @@ from app.services.memoir import (
     completion_read_model,
     section_digests,
 )
+from app.services.memoir.editing_job_handlers import (
+    register_memoir_editing_job_handlers,
+)
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from tests.memoir_helpers import (
     add_test_section_materials,
     create_test_book_plan_with_chapters,
@@ -47,6 +51,7 @@ from tests.memoir_helpers import (
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -429,6 +434,69 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
 
     assert second.status_code == 200, second.text
     assert requested_models
+    assert set(requested_models) == {"claude-opus-4-8"}
+
+
+async def test_chapter_preparation_job_reports_progress_and_selected_model(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    chapter = chapters[0]
+    fake = LayeredBookAI()
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/jobs",
+        json={
+            "operation": "prepare",
+            "ai_model": "claude-opus-4-8",
+        },
+    )
+
+    assert queued.status_code == 202, queued.text
+    queued_body = queued.json()
+    assert queued_body["status"] == "pending"
+    assert queued_body["stage"] == "queued"
+    assert queued_body["total_section_count"] == 1
+    assert queued_body["requested_ai_model"] == "claude-opus-4-8"
+    assert queued_body["can_cancel"] is True
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["chapters"][0]["state"] == "preparing"
+    assert overview.json()["chapters"][0]["next_action"]["action_text"] == (
+        "查看进度"
+    )
+
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued_body["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+    current = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/jobs/current"
+    )
+
+    assert current.status_code == 200, current.text
+    current_body = current.json()
+    assert current_body["status"] == "succeeded"
+    assert current_body["stage"] == "completed"
+    assert current_body["completed_section_count"] == 1
+    assert current_body["outcome"] == "completed"
+    assert current_body["requested_ai_model"] == "claude-opus-4-8"
+    assert current_body["resolved_ai_model"] == fake.model_name
+    assert current_body["can_cancel"] is False
     assert set(requested_models) == {"claude-opus-4-8"}
 
 

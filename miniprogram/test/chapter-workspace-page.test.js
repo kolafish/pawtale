@@ -149,6 +149,29 @@ function sectionRegenerationJob(overrides = {}) {
   };
 }
 
+function chapterPreparationJob(overrides = {}) {
+  return {
+    job_id: null,
+    project_id: "project-1",
+    chapter_id: "chapter-1",
+    operation: "prepare",
+    status: "idle",
+    stage: "idle",
+    total_section_count: 1,
+    checked_section_count: 0,
+    completed_section_count: 0,
+    resumed_section_count: 0,
+    current_section_id: null,
+    current_section_title: "",
+    outcome: "",
+    requested_ai_model: null,
+    resolved_ai_model: null,
+    can_cancel: false,
+    error_message: "",
+    ...overrides,
+  };
+}
+
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
@@ -164,12 +187,21 @@ function loadWorkspacePage({
       chapter_id: "chapter-1",
       status: "idle",
     }),
-    prepareMemoirBookChapter: async () => {},
+    getMemoirChapterPreparationJob: async () => chapterPreparationJob(),
+    enqueueMemoirChapterPreparationJob: async () => chapterPreparationJob({
+      job_id: "chapter-job-1",
+      status: "pending",
+      stage: "queued",
+      can_cancel: true,
+    }),
+    cancelMemoirChapterPreparationJob: async () => chapterPreparationJob({
+      job_id: "chapter-job-1",
+      status: "cancelled",
+    }),
     reviseMemoirChapterDraftSectionWithAI: async () => currentWorkspace,
     regenerateMemoirChapterSections: async () => {},
     cancelMemoirChapterSectionRegenerationJob: async () => {},
     placeMemoirChapterMaterial: async () => {},
-    rewriteMemoirBookChapter: async () => {},
     closeMemoirCompletionIssue: async () => {},
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
@@ -604,7 +636,15 @@ test("section regeneration opens pending material instead of running a stale nex
             can_cancel: false,
           })
       ),
-      prepareMemoirBookChapter: async (...args) => prepareCalls.push(args),
+      enqueueMemoirChapterPreparationJob: async (...args) => {
+        prepareCalls.push(args);
+        return chapterPreparationJob({
+          job_id: "chapter-job-1",
+          status: "pending",
+          stage: "queued",
+          can_cancel: true,
+        });
+      },
     },
   });
   const context = pageContext(page);
@@ -748,7 +788,15 @@ test("chapter workspace confirms the current completion issue then prepares agai
     currentWorkspace: workspace({ completion_summary: confirmationSummary }),
     voiceApiExports: {
       closeMemoirCompletionIssue: async (...args) => calls.push(["confirm", ...args]),
-      prepareMemoirBookChapter: async (...args) => calls.push(["prepare", ...args]),
+      enqueueMemoirChapterPreparationJob: async (...args) => {
+        calls.push(["prepare", ...args]);
+        return chapterPreparationJob({
+          job_id: "chapter-job-1",
+          status: "pending",
+          stage: "queued",
+          can_cancel: true,
+        });
+      },
     },
   });
   const context = pageContext(page);
@@ -762,7 +810,7 @@ test("chapter workspace confirms the current completion issue then prepares agai
       outcome: "confirmed",
       note: "用户已确认按当前建议处理",
     }],
-    ["prepare", "project-1", "chapter-1"],
+    ["prepare", "project-1", "chapter-1", "prepare"],
   ]);
   delete global.wx;
 });
@@ -1133,7 +1181,16 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
       draft_sections: [],
     }),
     voiceApiExports: {
-      rewriteMemoirBookChapter: async (...args) => calls.push(args),
+      enqueueMemoirChapterPreparationJob: async (...args) => {
+        calls.push(args);
+        return chapterPreparationJob({
+          job_id: "chapter-job-1",
+          operation: "rewrite",
+          status: "pending",
+          stage: "queued",
+          can_cancel: true,
+        });
+      },
     },
   });
   const context = pageContext(page);
@@ -1157,8 +1214,9 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
-  assert.equal(toasts.at(-1).title, "小节正文已更新");
+  assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
+  assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(toasts.length, 0);
   delete global.wx;
 });
 
@@ -1300,7 +1358,16 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   const { page } = loadWorkspacePage({
     currentWorkspace: staleWorkspace,
     voiceApiExports: {
-      rewriteMemoirBookChapter: async (...args) => calls.push(args),
+      enqueueMemoirChapterPreparationJob: async (...args) => {
+        calls.push(args);
+        return chapterPreparationJob({
+          job_id: "chapter-job-1",
+          operation: "rewrite",
+          status: "pending",
+          stage: "queued",
+          can_cancel: true,
+        });
+      },
     },
   });
   const context = pageContext(page);
@@ -1332,10 +1399,11 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(calls, [["project-1", "chapter-1"]]);
+  assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
   assert.equal(modals.at(-1).title, "重新生成全部 4 个小节正文");
   assert.match(modals.at(-1).content, /上方当前 4 个小节/);
   assert.equal(modals.at(-1).confirmText, "生成全部");
-  assert.equal(toasts.at(-1).title, "小节正文已更新");
+  assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(toasts.length, 0);
   delete global.wx;
 });

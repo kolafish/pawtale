@@ -8,10 +8,12 @@ from app.schemas.memoir_narrative import (
     MemoirBookCompletionOverviewResponse,
     MemoirChapterAIRequest,
     MemoirChapterDraftSectionAIRevisionRequest,
+    MemoirChapterPreparationJobRequest,
+    MemoirChapterPreparationJobResponse,
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir.narrative import book_completion
-from app.services.memoir import completion_read_model
+from app.services.memoir import chapter_preparation_jobs, completion_read_model
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 from .common import authorize_project, decision_error
@@ -52,6 +54,71 @@ async def get_memoir_book_completion_overview(
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     return await book_completion.get_book_completion_overview(db, project_id=project_id)
+
+
+@router.post(
+    "/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs",
+    response_model=MemoirChapterPreparationJobResponse,
+    status_code=202,
+)
+async def enqueue_memoir_chapter_preparation_job(
+    project_id: str,
+    chapter_id: str,
+    req: MemoirChapterPreparationJobRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await chapter_preparation_jobs.enqueue_chapter_preparation_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            req=req,
+        )
+    except ValueError as exc:
+        raise decision_error(exc) from exc
+
+
+@router.get(
+    "/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/current",
+    response_model=MemoirChapterPreparationJobResponse,
+)
+async def get_memoir_chapter_preparation_job(
+    project_id: str,
+    chapter_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await chapter_preparation_jobs.get_chapter_preparation_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{job_id}",
+    response_model=MemoirChapterPreparationJobResponse,
+)
+async def cancel_memoir_chapter_preparation_job(
+    project_id: str,
+    chapter_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await chapter_preparation_jobs.cancel_chapter_preparation_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            job_id=job_id,
+        )
+    except ValueError as exc:
+        raise decision_error(exc) from exc
 
 
 @router.post(

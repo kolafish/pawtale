@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -40,6 +41,10 @@ CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你根据小章节摘要判断整章的结构和阅读体验，不创造新事实。"
 )
 logger = logging.getLogger(__name__)
+ChapterDigestProgressCallback = Callable[
+    [dict[str, object]],
+    Awaitable[None],
+]
 
 
 @dataclass(frozen=True)
@@ -112,6 +117,7 @@ async def ensure_section_digests(
     chapter_id: str,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    progress_callback: ChapterDigestProgressCallback | None = None,
 ) -> None:
     chapter = await _load_chapter(
         db,
@@ -129,7 +135,17 @@ async def ensure_section_digests(
     )
     if not sections:
         raise HTTPException(status_code=422, detail="章节没有可收录的小章节")
-    for section in sections:
+    for index, section in enumerate(sections):
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "stage": "checking_sections",
+                    "total_section_count": len(sections),
+                    "checked_section_count": index,
+                    "current_section_id": section.id,
+                    "current_section_title": section.title,
+                }
+            )
         try:
             await completion_issues.refresh_section_issues(
                 db,
@@ -159,6 +175,16 @@ async def ensure_section_digests(
                 detail=digest.error_message or f"小章节“{section.title}”审阅失败",
             )
         await db.commit()
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "stage": "checking_sections",
+                    "total_section_count": len(sections),
+                    "checked_section_count": index + 1,
+                    "current_section_id": section.id,
+                    "current_section_title": section.title,
+                }
+            )
 
 
 async def load_chapter_digest_context(
@@ -434,6 +460,7 @@ async def generate_or_reuse_chapter_digest(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     force_regenerate: bool = False,
+    progress_callback: ChapterDigestProgressCallback | None = None,
 ) -> MemoirChapterDigest:
     await ensure_section_digests(
         db,
@@ -441,6 +468,7 @@ async def generate_or_reuse_chapter_digest(
         chapter_id=chapter_id,
         ai_model=ai_model,
         ai_client=ai_client,
+        progress_callback=progress_callback,
     )
     context = await load_chapter_digest_context(
         db,
@@ -488,6 +516,16 @@ async def generate_or_reuse_chapter_digest(
         return existing
     prompt = build_chapter_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
+    if progress_callback is not None:
+        await progress_callback(
+            {
+                "stage": "checking_chapter",
+                "total_section_count": len(context.sections),
+                "checked_section_count": len(context.sections),
+                "current_section_id": None,
+                "current_section_title": "",
+            }
+        )
     timeout_seconds = ai_text_timeout_seconds(AITextTimeoutProfile.GENERATION)
     response_diagnostics: dict[str, object] = {}
     started_at = time.monotonic()

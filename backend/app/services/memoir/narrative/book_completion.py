@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,8 +28,13 @@ from app.services.memoir import (
     sections,
 )
 
+ChapterPreparationProgressCallback = Callable[
+    [dict[str, object]],
+    Awaitable[None],
+]
 
-async def _ensure_sections(
+
+async def ensure_chapter_sections(
     db: AsyncSession,
     *,
     project_id: str,
@@ -74,8 +81,10 @@ async def prepare_chapter(
     chapter_id: str,
     user_id: str,
     ai_model: str | None = None,
+    checkpoint: dict[str, object] | None = None,
+    progress_callback: ChapterPreparationProgressCallback | None = None,
 ) -> MemoirChapterWorkspaceResponse:
-    await _ensure_sections(
+    await ensure_chapter_sections(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -87,6 +96,7 @@ async def prepare_chapter(
         chapter_id=chapter_id,
         ai_model=ai_model,
         force_regenerate=True,
+        progress_callback=progress_callback,
     )
     if digest.status != MemoirSemanticCacheStatus.READY.value:
         # Keep provider diagnostics and the failed cache row available after
@@ -134,7 +144,17 @@ async def prepare_chapter(
                 editorial_guidance=list(
                     digest.digest_json.get("structure_guidance", [])
                 ),
+                checkpoint=checkpoint,
+                progress_callback=progress_callback,
             )
+    if progress_callback is not None:
+        await progress_callback(
+            {
+                "stage": "saving",
+                "current_section_id": None,
+                "current_section_title": "",
+            }
+        )
     return await completion_read_model.chapter_workspace(
         db,
         project_id=project_id,
@@ -149,8 +169,10 @@ async def rewrite_chapter(
     chapter_id: str,
     user_id: str,
     ai_model: str | None = None,
+    checkpoint: dict[str, object] | None = None,
+    progress_callback: ChapterPreparationProgressCallback | None = None,
 ) -> MemoirChapterWorkspaceResponse:
-    await _ensure_sections(
+    await ensure_chapter_sections(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -195,7 +217,17 @@ async def rewrite_chapter(
         chapter_id=chapter_id,
         ai_model=ai_model,
         editorial_guidance=editorial_guidance,
+        checkpoint=checkpoint,
+        progress_callback=progress_callback,
     )
+    if progress_callback is not None:
+        await progress_callback(
+            {
+                "stage": "saving",
+                "current_section_id": None,
+                "current_section_title": "",
+            }
+        )
     for issue_id in deferred_issue_ids:
         await completion_issues.close_issue(
             db,
@@ -223,7 +255,7 @@ async def revise_chapter_section_with_ai(
     user_id: str,
     ai_model: str | None = None,
 ) -> MemoirChapterWorkspaceResponse:
-    await _ensure_sections(
+    await ensure_chapter_sections(
         db,
         project_id=project_id,
         chapter_id=chapter_id,

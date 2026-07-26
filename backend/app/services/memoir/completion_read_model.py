@@ -8,6 +8,8 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
+    MemoirEditingJobStatus,
+    MemoirEditingJobType,
     MemoirSemanticCacheStatus,
     MemoirVoiceSessionStatus,
 )
@@ -17,6 +19,7 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirCompletionIssue,
+    MemoirEditingJob,
     MemoirSection,
     MemoirVoiceSession,
 )
@@ -146,6 +149,38 @@ async def chapter_summary(
     project_id: str,
     chapter: MemoirBookPlanChapter,
 ) -> MemoirChapterCompletionSummary:
+    active_job = await db.scalar(
+        select(MemoirEditingJob.id)
+        .where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.chapter_id == chapter.id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.PREPARE_CHAPTER.value,
+            MemoirEditingJob.status.in_(
+                {
+                    MemoirEditingJobStatus.PENDING.value,
+                    MemoirEditingJobStatus.RUNNING.value,
+                }
+            ),
+        )
+        .limit(1)
+    )
+    if active_job is not None:
+        return MemoirChapterCompletionSummary(
+            chapter_id=chapter.id,
+            title=chapter.title,
+            sort_order=chapter.sort_order,
+            state="preparing",
+            next_action=MemoirChapterCompletionNextAction(
+                kind="wait",
+                title="正在处理本章",
+                detail="可以进入本章查看逐节进度。",
+                action_text="查看进度",
+                disabled=False,
+            ),
+            headline="正在检查并整理本章",
+            detail="每个小节完成后都会保存进度。",
+        )
     section_exists = (
         await db.scalar(
             select(MemoirSection.id)

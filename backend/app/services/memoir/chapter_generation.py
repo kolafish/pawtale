@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -130,6 +131,139 @@ class GeneratedChapter:
     missing_source_candidates: tuple[str, ...]
     editor_notes: tuple[str, ...]
     model: str | None
+
+
+ChapterGenerationProgressCallback = Callable[
+    [dict[str, object]],
+    Awaitable[None],
+]
+
+
+def _partial_generated_chapter(
+    sections: list[GeneratedChapterSection],
+    *,
+    missing_source_candidates: list[str],
+    editor_notes: list[str],
+    model: str | None,
+) -> GeneratedChapter:
+    return GeneratedChapter(
+        sections=tuple(sections),
+        content="\n\n".join(section.content for section in sections),
+        used_material_ids=tuple(
+            material_id
+            for section in sections
+            for material_id in section.used_material_ids
+        ),
+        missing_source_candidates=tuple(
+            _deduplicated_strings(missing_source_candidates)
+        ),
+        editor_notes=tuple(_deduplicated_strings(editor_notes)),
+        model=model,
+    )
+
+
+def _generated_chapter_checkpoint(
+    context: ChapterGenerationContext,
+    generated: GeneratedChapter,
+    *,
+    current_section: ChapterSectionInput | None,
+) -> dict[str, object]:
+    inputs = {section.section_id: section for section in context.sections}
+    return {
+        "stage": "generating_sections",
+        "total_section_count": len(context.sections),
+        "completed_section_count": len(generated.sections),
+        "current_section_id": (
+            current_section.section_id if current_section is not None else None
+        ),
+        "current_section_title": (
+            current_section.title if current_section is not None else ""
+        ),
+        "checkpoint_input_signature": context.input_signature,
+        "checkpoint_sections": [
+            {
+                "section_id": section.section_id,
+                "title": inputs[section.section_id].title,
+                "section_version": inputs[section.section_id].section_version,
+                "content": section.content,
+                "used_material_ids": list(section.used_material_ids),
+            }
+            for section in generated.sections
+        ],
+        "checkpoint_missing_source_candidates": list(
+            generated.missing_source_candidates
+        ),
+        "checkpoint_editor_notes": list(generated.editor_notes),
+        "checkpoint_model": generated.model,
+        "resolved_ai_model": generated.model,
+    }
+
+
+def _generated_chapter_from_checkpoint(
+    context: ChapterGenerationContext,
+    checkpoint: dict[str, object] | None,
+) -> GeneratedChapter | None:
+    if not checkpoint:
+        return None
+    if checkpoint.get("checkpoint_input_signature") != context.input_signature:
+        return None
+    raw_sections = checkpoint.get("checkpoint_sections")
+    if not isinstance(raw_sections, list) or len(raw_sections) > len(context.sections):
+        return None
+    generated_sections: list[GeneratedChapterSection] = []
+    used_material_ids: set[str] = set()
+    for index, raw_section in enumerate(raw_sections):
+        if not isinstance(raw_section, dict):
+            return None
+        expected = context.sections[index]
+        if (
+            raw_section.get("section_id") != expected.section_id
+            or raw_section.get("section_version") != expected.section_version
+        ):
+            return None
+        content = str(raw_section.get("content") or "").strip()
+        raw_used = raw_section.get("used_material_ids")
+        if not content or not isinstance(raw_used, list):
+            return None
+        used = tuple(
+            material_id
+            for material_id in raw_used
+            if isinstance(material_id, str) and material_id
+        )
+        allowed = {material.material_id for material in expected.materials}
+        if (
+            not used
+            or len(used) != len(raw_used)
+            or set(used) - allowed
+            or used_material_ids.intersection(used)
+        ):
+            return None
+        generated_sections.append(
+            GeneratedChapterSection(
+                section_id=expected.section_id,
+                content=content,
+                used_material_ids=used,
+            )
+        )
+        used_material_ids.update(used)
+    return _partial_generated_chapter(
+        generated_sections,
+        missing_source_candidates=_string_list(
+            checkpoint.get("checkpoint_missing_source_candidates"),
+            limit=8,
+            item_limit=240,
+        ),
+        editor_notes=_string_list(
+            checkpoint.get("checkpoint_editor_notes"),
+            limit=8,
+            item_limit=240,
+        ),
+        model=(
+            checkpoint["checkpoint_model"]
+            if isinstance(checkpoint.get("checkpoint_model"), str)
+            else None
+        ),
+    )
 
 
 def _material_text(material: MemoirSectionMaterial) -> str:
@@ -522,13 +656,37 @@ async def generate_chapter(
     editorial_guidance: list[str],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    checkpoint: dict[str, object] | None = None,
+    progress_callback: ChapterGenerationProgressCallback | None = None,
 ) -> GeneratedChapter:
     client = ai_client or get_ai_service(ai_model)
-    generated_sections: list[GeneratedChapterSection] = []
-    missing_source_candidates: list[str] = []
-    editor_notes: list[str] = []
-    previous_section_content = ""
-    for section in context.sections:
+    resumed = _generated_chapter_from_checkpoint(context, checkpoint)
+    generated_sections = list(resumed.sections) if resumed is not None else []
+    missing_source_candidates = (
+        list(resumed.missing_source_candidates) if resumed is not None else []
+    )
+    editor_notes = list(resumed.editor_notes) if resumed is not None else []
+    previous_section_content = (
+        generated_sections[-1].content if generated_sections else ""
+    )
+    if progress_callback is not None:
+        await progress_callback(
+            _generated_chapter_checkpoint(
+                context,
+                _partial_generated_chapter(
+                    generated_sections,
+                    missing_source_candidates=missing_source_candidates,
+                    editor_notes=editor_notes,
+                    model=getattr(client, "model_name", ai_model),
+                ),
+                current_section=(
+                    context.sections[len(generated_sections)]
+                    if len(generated_sections) < len(context.sections)
+                    else None
+                ),
+            )
+        )
+    for section in context.sections[len(generated_sections):]:
         generated_section = await generate_chapter_section(
             context,
             section=section,
@@ -545,20 +703,24 @@ async def generate_chapter(
         )
         editor_notes.extend(generated_section.editor_notes)
         previous_section_content = current.content
-    return GeneratedChapter(
-        sections=tuple(generated_sections),
-        content="\n\n".join(
-            section.content for section in generated_sections
-        ),
-        used_material_ids=tuple(
-            material_id
-            for section in generated_sections
-            for material_id in section.used_material_ids
-        ),
-        missing_source_candidates=_deduplicated_strings(
-            missing_source_candidates
-        ),
-        editor_notes=_deduplicated_strings(editor_notes),
+        partial = _partial_generated_chapter(
+            generated_sections,
+            missing_source_candidates=missing_source_candidates,
+            editor_notes=editor_notes,
+            model=getattr(client, "model_name", ai_model),
+        )
+        if progress_callback is not None:
+            await progress_callback(
+                _generated_chapter_checkpoint(
+                    context,
+                    partial,
+                    current_section=section,
+                )
+            )
+    return _partial_generated_chapter(
+        generated_sections,
+        missing_source_candidates=missing_source_candidates,
+        editor_notes=editor_notes,
         model=getattr(client, "model_name", ai_model),
     )
 
@@ -713,6 +875,8 @@ async def generate_and_save_chapter_draft(
     editorial_guidance: list[str],
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
+    checkpoint: dict[str, object] | None = None,
+    progress_callback: ChapterGenerationProgressCallback | None = None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
     await _ensure_no_pending_assignment(
         db,
@@ -729,6 +893,8 @@ async def generate_and_save_chapter_draft(
         editorial_guidance=editorial_guidance,
         ai_model=ai_model,
         ai_client=ai_client,
+        checkpoint=checkpoint,
+        progress_callback=progress_callback,
     )
     db.expire_all()
     after = await load_chapter_generation_context(
