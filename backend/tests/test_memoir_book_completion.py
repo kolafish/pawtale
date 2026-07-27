@@ -859,7 +859,7 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     assert issue.outcome_note == "用户选择先按现有素材重新生成正文"
 
 
-async def test_rewrite_directly_generates_all_current_sections_without_digest(
+async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     client,
     test_db,
     monkeypatch,
@@ -924,7 +924,7 @@ async def test_rewrite_directly_generates_all_current_sections_without_digest(
     ] == [
         item["id"] for item in body["sections"]
     ]
-    assert len(fake.prompts) == 4
+    assert len(fake.prompts) == 3
     assert all(
         "请把下面的原始讲述整理为回忆录章节" in prompt
         for prompt in fake.prompts
@@ -932,6 +932,10 @@ async def test_rewrite_directly_generates_all_current_sections_without_digest(
     assert all(
         prompt.count("material_id: ") == 1
         for prompt in fake.prompts
+    )
+    assert (
+        body["draft_sections"][0]["content"]
+        == "这是已经存在的完整章节正文。"
     )
     assert requested_models == ["claude-opus-4-8"]
 
