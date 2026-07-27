@@ -25,6 +25,7 @@ from app.models.memoir import (
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import (
     ai_error_metadata,
     ai_text_timeout_seconds,
@@ -78,7 +79,6 @@ class _BookReviewIssueOutput(BaseModel):
     reason: str = ""
     priority: str = ""
     chapter_ids: list[str] = Field(default_factory=list)
-    material_ids: list[str] = Field(default_factory=list)
 
 
 class _BookReviewOutput(BaseModel):
@@ -270,10 +270,18 @@ async def load_book_review_context(
     )
 
 
+def _chapter_references(context: BookReviewContext) -> ModelReferenceMap:
+    return ModelReferenceMap(
+        "C",
+        (chapter.chapter_id for chapter in context.chapters),
+    )
+
+
 def build_book_review_prompt(context: BookReviewContext) -> str:
+    references = _chapter_references(context)
     chapters = "\n\n".join(
         (
-            f"chapter_id: {chapter.chapter_id}\n"
+            f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
             f"摘要: {chapter.digest.get('summary', '')}\n"
             f"重点: {chapter.digest.get('focus', '')}"
@@ -297,8 +305,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
-      "chapter_ids": ["相关 chapter_id"],
-      "material_ids": ["相关 material_id，可为空"]
+      "chapter_ids": ["相关 chapter_id"]
     }}
   ]
 }}
@@ -309,14 +316,14 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 纯编辑问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建摘要中没有的人生事实。
+- chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 """
 
 
 def normalize_book_review(
     payload: Any,
     *,
-    allowed_chapter_ids: set[str],
-    allowed_material_ids: set[str],
+    chapter_references: ModelReferenceMap,
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("book review AI did not return a JSON object")
@@ -345,20 +352,10 @@ def normalize_book_review(
         reason = _compact(candidate.get("reason"), limit=300)
         if not question or not reason:
             continue
-        chapter_ids = _string_list(
+        chapter_ids = chapter_references.decode_many(
             candidate.get("chapter_ids"),
             limit=8,
-            item_limit=36,
         )
-        material_ids = _string_list(
-            candidate.get("material_ids"),
-            limit=12,
-            item_limit=36,
-        )
-        if set(chapter_ids) - allowed_chapter_ids:
-            raise ValueError("book review referenced chapter outside allowlist")
-        if set(material_ids) - allowed_material_ids:
-            raise ValueError("book review referenced material outside allowlist")
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
@@ -380,7 +377,7 @@ def normalize_book_review(
                     else "medium"
                 ),
                 "chapter_ids": chapter_ids,
-                "material_ids": material_ids,
+                "material_ids": [],
             }
         )
     return {
@@ -471,14 +468,7 @@ async def generate_or_reuse_book_review(
         )
         review_json = normalize_book_review(
             generated.value.model_dump(),
-            allowed_chapter_ids={
-                chapter.chapter_id for chapter in context.chapters
-            },
-            allowed_material_ids={
-                material_id
-                for chapter in context.chapters
-                for material_id in chapter.material_ids
-            },
+            chapter_references=_chapter_references(context),
         )
         db.expire_all()
         current = await load_book_review_context(db, project_id=project_id)

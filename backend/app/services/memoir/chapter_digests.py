@@ -23,6 +23,7 @@ from app.models.memoir import (
     MemoirSection,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_calls import (
     AIInvalidStructuredOutputError,
     AIOutputTruncatedError,
@@ -90,7 +91,6 @@ class _ChapterDigestIssueOutput(BaseModel):
     reason: str = ""
     priority: str = ""
     section_ids: list[str] = Field(default_factory=list)
-    material_ids: list[str] = Field(default_factory=list)
 
 
 class _ChapterDigestOutput(BaseModel):
@@ -333,10 +333,18 @@ async def get_current_chapter_digest(
     )
 
 
+def _section_references(context: ChapterDigestContext) -> ModelReferenceMap:
+    return ModelReferenceMap(
+        "S",
+        (section.section_id for section in context.sections),
+    )
+
+
 def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
+    references = _section_references(context)
     sections = "\n\n".join(
         (
-            f"section_id: {item.section_id}\n"
+            f"section_id: {references.encode(item.section_id)}\n"
             f"标题: {item.title}\n"
             f"类型: {item.section_type}\n"
             f"摘要: {item.digest.get('summary', '')}\n"
@@ -364,8 +372,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么不处理会明显影响理解",
       "priority": "high|medium|low",
-      "section_ids": ["相关 section_id"],
-      "material_ids": ["相关 material_id，可为空"]
+      "section_ids": ["相关 section_id"]
     }}
   ]
 }}
@@ -375,6 +382,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
 - 已有素材足够、只需重排或改写的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
+- section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。
 """
@@ -383,8 +391,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 def normalize_chapter_digest(
     payload: Any,
     *,
-    allowed_section_ids: set[str],
-    allowed_material_ids: set[str],
+    section_references: ModelReferenceMap,
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("chapter digest AI did not return a JSON object")
@@ -413,20 +420,10 @@ def normalize_chapter_digest(
         reason = _compact(candidate.get("reason"), limit=300)
         if not question or not reason:
             continue
-        section_ids = _string_list(
+        section_ids = section_references.decode_many(
             candidate.get("section_ids"),
             limit=8,
-            item_limit=36,
         )
-        material_ids = _string_list(
-            candidate.get("material_ids"),
-            limit=12,
-            item_limit=36,
-        )
-        if set(section_ids) - allowed_section_ids:
-            raise ValueError("chapter digest referenced section outside allowlist")
-        if set(material_ids) - allowed_material_ids:
-            raise ValueError("chapter digest referenced material outside allowlist")
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
@@ -448,7 +445,7 @@ def normalize_chapter_digest(
                     else "medium"
                 ),
                 "section_ids": section_ids,
-                "material_ids": material_ids,
+                "material_ids": [],
             }
         )
     return {
@@ -557,10 +554,7 @@ async def generate_or_reuse_chapter_digest(
         response_diagnostics = generated.response.diagnostics()
         digest_json = normalize_chapter_digest(
             generated.value.model_dump(),
-            allowed_section_ids={
-                item.section_id for item in context.sections
-            },
-            allowed_material_ids=set(context.allowed_material_ids),
+            section_references=_section_references(context),
         )
         db.expire_all()
         current_context = await load_chapter_digest_context(

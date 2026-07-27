@@ -26,6 +26,7 @@ from app.services.ai_calls import (
     generate_structured_with_client,
 )
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import (
     AITextTimeoutProfile,
     ai_error_metadata,
@@ -222,10 +223,24 @@ _TYPE_GUIDANCE = {
 }
 
 
+def _material_references(
+    context: SectionDigestContext,
+) -> ModelReferenceMap:
+    return ModelReferenceMap(
+        "M",
+        (
+            material.material_id
+            for material in context.materials
+            if material.include_in_book
+        ),
+    )
+
+
 def build_section_digest_prompt(context: SectionDigestContext) -> str:
+    references = _material_references(context)
     materials = "\n\n".join(
         (
-            f"material_id: {material.material_id}\n"
+            f"material_id: {references.encode(material.material_id)}\n"
             f"原始讲述: {material.text}"
         )
         for material in context.materials
@@ -267,7 +282,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 - 只提出会明显改善读者理解的问题；内容已经自然成立时 candidate_issues 可以为空。
 - candidate_issues 最多三个，并按价值排序。
 - 不要要求讲述者证明事实，不要创造素材中没有的信息。
-- material_ids 只能使用输入中出现的 material_id。
+- material_ids 只能使用输入中出现的本次请求短编号 material_id。
 - 输入中只包含当前允许收录的素材。
 """
 
@@ -275,7 +290,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 def normalize_section_digest_payload(
     payload: Any,
     *,
-    allowed_material_ids: set[str],
+    material_references: ModelReferenceMap,
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("section digest AI did not return a JSON object")
@@ -304,16 +319,10 @@ def normalize_section_digest_payload(
         reason = _trim_text(item.get("reason"), limit=300)
         if not question or not reason:
             continue
-        material_ids = _string_list(
+        material_ids = material_references.decode_many(
             item.get("material_ids"),
             limit=8,
-            item_limit=36,
         )
-        unexpected = set(material_ids) - allowed_material_ids
-        if unexpected:
-            raise ValueError(
-                "section digest referenced material outside the allowlist"
-            )
         issue_type = _trim_text(item.get("issue_type"), limit=30)
         priority = _trim_text(item.get("priority"), limit=20)
         issues.append(
@@ -365,15 +374,10 @@ async def generate_section_digest_payload(
         timeout=timeout_seconds,
         max_attempts=policy.max_attempts,
     )
-    included_ids = {
-        material.material_id
-        for material in context.materials
-        if material.include_in_book
-    }
     return SectionDigestGeneration(
         digest_json=normalize_section_digest_payload(
             generated.value.model_dump(),
-            allowed_material_ids=included_ids,
+            material_references=_material_references(context),
         ),
         timeout_seconds=timeout_seconds,
         response_diagnostics=generated.response.diagnostics(),
