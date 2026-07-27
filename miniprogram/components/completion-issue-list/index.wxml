@@ -13,7 +13,7 @@
       bindtap="confirmRequired"
     >{{busyIssueId === item.id ? "处理中…" : "确认处理决定"}}</view>
     <text wx:else class="state">
-      {{index === 0 ? "请通过上方“本章进度”处理当前项" : "处理当前项后继续确认"}}
+      {{index === 0 ? "请点击上方“确认”按钮处理这一项" : "处理上一项后，上方会显示这一项"}}
     </text>
   </view>
 </view>

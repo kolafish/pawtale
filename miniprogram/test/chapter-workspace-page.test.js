@@ -910,8 +910,8 @@ test("chapter workspace separates optional suggestions from required decisions",
     chapter_id: "chapter-1",
     issue_type: "meaning",
     channel: "interview",
-    question: "离家后的第一晚是什么感受？",
-    reason: "补充感受会让这一段更丰富。",
+    question: "S1之后的第一晚是什么感受？",
+    reason: "补充S1之后的感受会让这一段更丰富。",
     priority: "medium",
     related_material_ids: [],
     input_signature: "signature-1",
@@ -921,6 +921,9 @@ test("chapter workspace separates optional suggestions from required decisions",
     updated_at: "2026-07-27T00:00:00",
   };
   const { page } = loadWorkspacePage({
+    currentWorkspace: workspace({
+      completion_summary: summary({ detail: "S1之后需要补充。" }),
+    }),
     voiceApiExports: {
       listMemoirCompletionIssues: async () => ({
         project_id: "project-1",
@@ -934,6 +937,18 @@ test("chapter workspace separates optional suggestions from required decisions",
 
   assert.equal(context.data.requiredIssues.length, 0);
   assert.equal(context.data.optionalIssues.length, 1);
+  assert.equal(
+    context.data.readinessDetail,
+    "第1小节“离家前的准备”之后需要补充。",
+  );
+  assert.equal(
+    context.data.optionalIssues[0].question,
+    "第1小节“离家前的准备”之后的第一晚是什么感受？",
+  );
+  assert.equal(
+    context.data.optionalIssues[0].reason,
+    "补充第1小节“离家前的准备”之后的感受会让这一段更丰富。",
+  );
   delete global.wx;
 });
 
