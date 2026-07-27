@@ -1275,6 +1275,11 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
             chapter_id=chapter.id,
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
+    unreviewed = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert unreviewed.status_code == 409
+    assert "完成当前版本的全书检查" in unreviewed.json()["detail"]
 
     generated = await client.post(
         f"/api/memoir/projects/{project_id}/book-review",
@@ -1302,6 +1307,7 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         )
     )
     assert issue is not None
+    issue_id = issue.id
     assert issue.channel == "manual_review"
     assert issue.related_material_ids_json
     current = await client.get(
@@ -1314,6 +1320,15 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     )
     assert blocked.status_code == 409
     assert "全书检查中需要确认的问题" in blocked.json()["detail"]
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
+        json={"outcome": "confirmed"},
+    )
+    assert closed.status_code == 200
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert assembled.status_code == 200
     assert await test_db.scalar(
         select(MemoirBookReview.id).where(
             MemoirBookReview.project_id == project_id

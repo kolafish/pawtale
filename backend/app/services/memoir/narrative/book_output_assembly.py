@@ -143,24 +143,22 @@ async def assemble_book_output(
         db,
         project_id=project_id,
     )
-    unresolved_decision = (
-        await db.scalar(
-            select(MemoirCompletionIssue.id)
-            .where(
-                MemoirCompletionIssue.project_id == project_id,
-                MemoirCompletionIssue.scope
-                == MemoirCompletionIssueScope.BOOK.value,
-                MemoirCompletionIssue.channel
-                == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
-                MemoirCompletionIssue.status
-                != MemoirCompletionIssueStatus.CLOSED.value,
-                MemoirCompletionIssue.input_signature
-                == current_review.input_signature,
-            )
-            .limit(1)
+    if current_review is None or current_review.status != "ready":
+        raise ValueError("book output requires a current book review")
+    unresolved_decision = await db.scalar(
+        select(MemoirCompletionIssue.id)
+        .where(
+            MemoirCompletionIssue.project_id == project_id,
+            MemoirCompletionIssue.scope
+            == MemoirCompletionIssueScope.BOOK.value,
+            MemoirCompletionIssue.channel
+            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+            MemoirCompletionIssue.status
+            != MemoirCompletionIssueStatus.CLOSED.value,
+            MemoirCompletionIssue.input_signature
+            == current_review.input_signature,
         )
-        if current_review and current_review.status == "ready"
-        else None
+        .limit(1)
     )
     if unresolved_decision:
         raise ValueError("book output requires resolving book review decisions")
