@@ -164,6 +164,9 @@ function loadBookPage({
     generateMemoirBookChapterTitle: async () => {
       throw new Error("generateMemoirBookChapterTitle was not mocked");
     },
+    updateMemoirBookChapterTitle: async () => {
+      throw new Error("updateMemoirBookChapterTitle was not mocked");
+    },
     generateMemoirBookPlan: async () => {
       throw new Error("generateMemoirBookPlan was not mocked");
     },
@@ -321,7 +324,7 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   const navigations = [];
   const actionSheets = [];
   const audioCalls = [];
-  const tapIndexes = [0, 1, 99];
+  const tapIndexes = [0, 3, 99];
   global.wx = {
     navigateTo(options) {
       navigations.push(options.url);
@@ -350,9 +353,9 @@ test("book page opens secondary chapter actions from the more sheet", () => {
   page.openChapterMoreActions.call(context, { currentTarget: { dataset: { id: "chapter-1" } } });
 
   assert.deepEqual(actionSheets, [
-    ["整理本章", "朗读", "不收入本书"],
-    ["整理本章", "朗读", "不收入本书"],
-    ["整理本章", "不收入本书"],
+    ["整理本章", "修改章名", "AI 重新起名", "朗读", "不收入本书"],
+    ["整理本章", "修改章名", "AI 重新起名", "朗读", "不收入本书"],
+    ["整理本章", "修改章名", "AI 重新起名", "不收入本书"],
   ]);
   assert.deepEqual(navigations, [
     "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter-1",
@@ -391,7 +394,7 @@ test("book page hides and restores a chapter without deleting its content", asyn
   });
   await flushAsyncWork();
 
-  assert.deepEqual(actionSheets[0], ["整理本章", "不收入本书"]);
+  assert.deepEqual(actionSheets[0], ["整理本章", "修改章名", "AI 重新起名", "不收入本书"]);
   assert.deepEqual(calls[0], {
     projectId: "project/1",
     data: {
@@ -409,7 +412,7 @@ test("book page hides and restores a chapter without deleting its content", asyn
   });
   await flushAsyncWork();
 
-  assert.deepEqual(actionSheets[1], ["整理本章", "恢复收入本书"]);
+  assert.deepEqual(actionSheets[1], ["整理本章", "修改章名", "AI 重新起名", "恢复收入本书"]);
   assert.equal(calls[1].data.include_in_book, true);
   assert.equal(context.data.chapters[1].include_in_book, true);
   assert.equal(context.data.totalChapterCount, 2);
@@ -734,16 +737,33 @@ test("book page confirms chapters with trimmed user edits and original source re
   delete global.wx;
 });
 
-test("book page regenerates confirmed chapter title through AI", async () => {
-  const calls = [];
-  global.wx = { showToast() {}, switchTab() {} };
-  const updatedPlan = samplePlan("confirmed");
-  updatedPlan.chapters[0].title = "外婆院中的日子";
+test("book page renames a confirmed chapter manually or through AI", async () => {
+  const manualCalls = [];
+  const aiCalls = [];
+  const actionLabels = ["修改章名", "AI 重新起名"];
+  global.wx = {
+    showActionSheet(options) {
+      options.success({ tapIndex: options.itemList.indexOf(actionLabels.shift()) });
+    },
+    showModal(options) {
+      options.success({ confirm: true, content: "  院子里的童年  " });
+    },
+    showToast() {},
+    switchTab() {},
+  };
+  const manualPlan = samplePlan("confirmed");
+  manualPlan.chapters[0].title = "院子里的童年";
+  const aiPlan = samplePlan("confirmed");
+  aiPlan.chapters[0].title = "外婆院中的日子";
   const { page } = loadBookPage({
     voiceApiExports: {
       generateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
-        calls.push({ projectId, chapterId, data });
-        return updatedPlan;
+        aiCalls.push({ projectId, chapterId, data });
+        return aiPlan;
+      },
+      updateMemoirBookChapterTitle: async (projectId, chapterId, data) => {
+        manualCalls.push({ projectId, chapterId, data });
+        return manualPlan;
       },
       getMemoirBookChapterDraft: async () => sampleDraft(1, "confirmed"),
       getMemoirBookOutput: async () => sampleBookOutput(),
@@ -752,11 +772,24 @@ test("book page regenerates confirmed chapter title through AI", async () => {
   const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
   page.applyPlan.call(context, samplePlan("confirmed"));
 
-  await page.generateChapterTitle.call(context, {
+  page.openChapterMoreActions.call(context, {
     currentTarget: { dataset: { id: "chapter-1" } },
   });
+  await flushAsyncWork(12);
 
-  assert.deepEqual(calls[0], {
+  assert.deepEqual(manualCalls[0], {
+    projectId: "project/1",
+    chapterId: "chapter-1",
+    data: { title: "院子里的童年" },
+  });
+  assert.equal(context.data.chapters[0].title, "院子里的童年");
+
+  page.openChapterMoreActions.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+  await flushAsyncWork(12);
+
+  assert.deepEqual(aiCalls[0], {
     projectId: "project/1",
     chapterId: "chapter-1",
     data: {},

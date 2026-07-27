@@ -13,6 +13,7 @@ import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookHomeData } from "./book-view-model";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
+import { promptRequiredText } from "../../services/text-prompt";
 
 import {
   acknowledgeMemoirAutomationEvent,
@@ -28,6 +29,7 @@ import {
   getMemoirBookSnapshot,
   getMemoirBookOutput,
   listMemoirAutomationEvents,
+  updateMemoirBookChapterTitle,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
@@ -676,10 +678,21 @@ definePage<BookPageData>()({
       this.setData({ error: "缺少章节信息" });
       return;
     }
-    const actions: Array<{ label: string; run: () => void | Promise<void> }> = [];
+    if (this.data.titleBusyTarget) {
+      return;
+    }
+    const actions: Array<{ label: string; run: () => unknown }> = [];
     actions.push({
       label: "整理本章",
       run: () => wx.navigateTo({ url: bookChapterDetailUrl(this.data.projectId, chapterId) }),
+    });
+    actions.push({
+      label: "修改章名",
+      run: () => this.editChapterTitleById(chapterId),
+    });
+    actions.push({
+      label: "AI 重新起名",
+      run: () => this.generateChapterTitleById(chapterId),
     });
     const canShowAudioAction = Boolean(chapter.draft?.latest_version)
       && (!this.data.ttsBusyTarget || this.data.playingTarget === chapter.ttsTarget);
@@ -745,6 +758,50 @@ definePage<BookPageData>()({
       editingTitle: event.detail.value,
       titleChanged: chapter ? trimText(event.detail.value) !== trimText(chapter.title) : false,
     });
+  },
+
+  async editChapterTitleById(chapterId: string) {
+    const chapter = findBookChapter(this.data.chapters, chapterId);
+    if (!chapter || !this.data.projectId || this.data.titleBusyTarget || this.data.updatingPlanStructure) {
+      return false;
+    }
+    this.stopPlayback();
+    const title = await promptRequiredText(
+      "修改章名",
+      `当前：${chapter.title}`,
+    );
+    if (title === null) {
+      return false;
+    }
+    if (title.length > 80) {
+      wx.showToast({ title: "章名不能超过 80 字", icon: "none" });
+      return false;
+    }
+    if (title === trimText(chapter.title)) {
+      return false;
+    }
+    this.setData({ titleBusyTarget: chapterId, error: "" });
+    this.patchChapter(chapterId, { draftError: "" });
+    try {
+      const plan = await updateMemoirBookChapterTitle(
+        this.data.projectId,
+        chapterId,
+        { title },
+      );
+      await this.applyUpdatedPlan(plan, "章名已修改");
+      trackAuditAction("book.chapter_title_update", {}, { projectId: this.data.projectId });
+      return true;
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return false;
+      }
+      this.patchChapter(chapterId, {
+        draftError: error instanceof Error ? error.message : "章名修改失败",
+      });
+      return false;
+    } finally {
+      this.setData({ titleBusyTarget: "" });
+    }
   },
 
   async generateChapterTitle(event: DatasetEvent) {
