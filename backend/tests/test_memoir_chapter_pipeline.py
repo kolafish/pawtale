@@ -1,4 +1,6 @@
 import json
+from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -8,6 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirSectionMaterialAssignedBy,
     MemoirSemanticCacheStatus,
 )
 from app.migrations.memoir_chapters import (
@@ -24,7 +27,12 @@ from app.models.memoir import (
     MemoirSectionDigest,
     MemoirSectionMaterial,
 )
-from app.services.memoir import chapter_digests, chapter_generation, section_digests
+from app.services.memoir import (
+    chapter_digests,
+    chapter_generation,
+    section_digests,
+    sections,
+)
 from app.services.memoir.section_roles import (
     PENDING_ASSIGNMENT_SECTION_ROLE,
     PENDING_ASSIGNMENT_SECTION_TITLE,
@@ -415,6 +423,109 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
     assert [section.section_id for section in completed.sections] == [
         "section-1",
         "section-2",
+    ]
+
+
+async def test_chapter_generation_reuses_unchanged_draft_sections():
+    class ChangedSectionAI:
+        provider_name = "test"
+        model_name = "test-incremental-section"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            self.prompts.append(user_prompt)
+            section_id = next(
+                line.removeprefix("section_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("section_id: ")
+            )
+            material_ids = [
+                line.removeprefix("material_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("material_id: ")
+            ]
+            return json.dumps(
+                {
+                    "sections": [{
+                        "section_id": section_id,
+                        "content": "这是补充素材整理后的第二小节正文。",
+                        "used_material_ids": material_ids,
+                    }],
+                    "missing_source_candidates": [],
+                    "editor_notes": [],
+                },
+                ensure_ascii=False,
+            )
+
+    context = _two_section_context()
+    latest = SimpleNamespace(
+        model="previous-model",
+        section_snapshot_json=[
+            {
+                "section_id": "section-1",
+                "title": "出发",
+                "section_type": "event",
+                "section_version": 1,
+                "sort_order": 0,
+                "input_signature": (
+                    chapter_generation._section_input_signature(
+                        context,
+                        context.sections[0]
+                    )
+                ),
+                "content": "保留用户已经通读过的第一小节正文。",
+                "used_material_ids": ["material-1"],
+            },
+            {
+                "section_id": "section-2",
+                "title": "抵达",
+                "section_type": "event",
+                "section_version": 1,
+                "sort_order": 1,
+                "content": "素材变化前的第二小节正文。",
+                "used_material_ids": ["material-2"],
+            },
+        ],
+    )
+    plan = chapter_generation.chapter_draft_generation_plan(
+        context,
+        latest,
+    )
+
+    assert [
+        section.section_id for section in plan.target_context.sections
+    ] == ["section-2"]
+    assert [
+        section.section_id for section in plan.preserved_sections
+    ] == ["section-1"]
+    renamed_plan = chapter_generation.chapter_draft_generation_plan(
+        replace(context, chapter_title="新的章节标题"),
+        latest,
+    )
+    assert [
+        section.section_id
+        for section in renamed_plan.target_context.sections
+    ] == ["section-1", "section-2"]
+
+    fake = ChangedSectionAI()
+    generated = await chapter_generation.generate_chapter(
+        plan.target_context,
+        editorial_guidance=[],
+        ai_client=fake,
+        chapter_sections=context.sections,
+        preserved_sections=plan.preserved_sections,
+        preserved_model=plan.previous_model,
+    )
+
+    assert len(fake.prompts) == 1
+    assert "section_id: section-2" in fake.prompts[0]
+    assert "material_id: material-2" in fake.prompts[0]
+    assert "material_id: material-1" not in fake.prompts[0]
+    assert [section.content for section in generated.sections] == [
+        "保留用户已经通读过的第一小节正文。",
+        "这是补充素材整理后的第二小节正文。",
     ]
 
 
@@ -809,6 +920,9 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
             "section_type": section["section_type"],
             "section_version": section["version"],
             "sort_order": section["sort_order"],
+            "input_signature": version.section_snapshot_json[0][
+                "input_signature"
+            ],
             "content": (
                 "朋友发来一张山桃花照片，后来我们一起去爬山。"
                 "这次见面让一段疏远的关系重新有了联系。"
@@ -827,6 +941,136 @@ async def test_chapter_generation_saves_material_allowlist_snapshot(client, test
     )
     assert persisted is not None
     assert persisted.input_signature == version.input_signature
+
+
+async def test_chapter_draft_update_generates_only_section_with_new_material(
+    client,
+    test_db,
+):
+    class PerSectionAI:
+        provider_name = "test"
+        model_name = "test-incremental-save"
+
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        async def _call_llm(self, system_prompt, user_prompt, **kwargs):
+            self.prompts.append(user_prompt)
+            section_id = next(
+                line.removeprefix("section_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("section_id: ")
+            )
+            material_ids = [
+                line.removeprefix("material_id: ").strip()
+                for line in user_prompt.splitlines()
+                if line.startswith("material_id: ")
+            ]
+            return json.dumps(
+                {
+                    "sections": [{
+                        "section_id": section_id,
+                        "content": (
+                            f"这一小节使用了 {len(material_ids)} 条素材。"
+                        ),
+                        "used_material_ids": material_ids,
+                    }],
+                    "missing_source_candidates": [],
+                    "editor_notes": [],
+                },
+                ensure_ascii=False,
+            )
+
+    project_id, chapter, first_data, materials = await _chapter(
+        client,
+        test_db,
+    )
+    first = await test_db.get(MemoirSection, first_data["id"])
+    assert first is not None
+    second = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter.id,
+        title="一起爬山",
+        section_type="event",
+        sort_order=1,
+    )
+    test_db.add(second)
+    await test_db.flush()
+    second_material = await test_db.scalar(
+        select(MemoirSectionMaterial).where(
+            MemoirSectionMaterial.project_id == project_id,
+            MemoirSectionMaterial.utterance_id
+            == materials[1]["utterance_id"],
+        )
+    )
+    assert second_material is not None
+    second_material.section_id = second.id
+    second_material.sort_order = 0
+    first.version += 1
+    test_db.add_all([first, second_material])
+    await test_db.commit()
+
+    initial_ai = PerSectionAI()
+    _, initial_version = await chapter_generation.generate_and_save_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        editorial_guidance=[],
+        ai_client=initial_ai,
+    )
+    await test_db.commit()
+    assert len(initial_ai.prompts) == 2
+    initial_sections = {
+        item["section_id"]: item
+        for item in initial_version.section_snapshot_json
+    }
+
+    added = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来我又想起了爬山路上的一件小事。",
+        project_id=project_id,
+    )
+    await sections.assign_material_to_section(
+        test_db,
+        project_id=project_id,
+        section_id=second.id,
+        utterance_id=added["utterance_id"],
+        assigned_by=MemoirSectionMaterialAssignedBy.USER,
+        assignment_reason="completion_issue_answer",
+    )
+    await test_db.commit()
+
+    progress: list[dict[str, object]] = []
+
+    async def record_progress(patch: dict[str, object]) -> None:
+        progress.append(patch)
+
+    update_ai = PerSectionAI()
+    _, updated_version = await chapter_generation.generate_and_save_chapter_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        editorial_guidance=[],
+        ai_client=update_ai,
+        progress_callback=record_progress,
+    )
+    await test_db.commit()
+
+    assert len(update_ai.prompts) == 1
+    assert f"section_id: {second.id}" in update_ai.prompts[0]
+    assert f"section_id: {first.id}" not in update_ai.prompts[0]
+    updated_sections = {
+        item["section_id"]: item
+        for item in updated_version.section_snapshot_json
+    }
+    assert (
+        updated_sections[first.id]["content"]
+        == initial_sections[first.id]["content"]
+    )
+    assert updated_sections[second.id]["content"].endswith("使用了 2 条素材。")
+    assert {patch["total_section_count"] for patch in progress} == {1}
+    assert progress[-1]["completed_section_count"] == 1
 
 
 async def test_excluded_material_is_not_sent_to_chapter_generator(client, test_db):

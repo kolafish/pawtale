@@ -182,6 +182,29 @@ function draftStructureChanged(workspace: MemoirChapterWorkspace): boolean {
     );
 }
 
+function changedDraftSectionCount(
+  workspace: MemoirChapterWorkspace,
+): number {
+  const draftsBySectionId = new Map(
+    workspace.draft_sections.map((section) => [section.section_id, section]),
+  );
+  return workspace.sections.filter((section) => {
+    if (
+      section.status !== "active"
+      || section.include_in_book === false
+      || section.requires_user_assignment
+    ) {
+      return false;
+    }
+    const draft = draftsBySectionId.get(section.id);
+    return !draft
+      || draft.title !== section.title
+      || draft.section_type !== section.section_type
+      || draft.section_version !== section.version
+      || draft.sort_order !== section.sort_order;
+  }).length;
+}
+
 function rewriteNoticeTitle(
   workspace: MemoirChapterWorkspace,
   structureChanged: boolean,
@@ -265,15 +288,16 @@ export function chapterWorkspaceViewPatch(
   const narrativeSectionCount = sectionViews.filter(
     (section) => !section.requires_user_assignment,
   ).length;
-  const rewriteDraftActionText = narrativeSectionCount
-    ? `重新生成全部 ${narrativeSectionCount} 个小节正文`
-    : "重新生成全部小节正文";
-  const rewriteDraftBusyText = narrativeSectionCount
-    ? `正在生成 ${narrativeSectionCount} 个小节正文…`
-    : "正在生成全部小节正文…";
-  const rewriteDraftScopeDetail = narrativeSectionCount
-    ? `会按照上方当前 ${narrativeSectionCount} 个小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。`
-    : "会按照上方当前小节逐个生成正文，全部成功后更新整章；不会重新划分小节，旧正文会保留在历史版本中。";
+  const affectedSectionCount = changedDraftSectionCount(workspace);
+  const rewriteDraftActionText = affectedSectionCount
+    ? `更新 ${affectedSectionCount} 个有变化的小节正文`
+    : "按当前小节更新正文";
+  const rewriteDraftBusyText = affectedSectionCount
+    ? `正在更新 ${affectedSectionCount} 个小节正文…`
+    : "正在更新本章正文…";
+  const rewriteDraftScopeDetail = affectedSectionCount
+    ? `只重新生成当前 ${affectedSectionCount} 个素材或结构发生变化的小节，其他小节沿用现有正文；完成后保存一个新的整章版本，旧正文仍保留在历史版本中。`
+    : "沿用没有变化的小节正文，按当前小节结构保存一个新的整章版本；旧正文仍保留在历史版本中。";
   const includedMaterialCount = sectionViews.reduce(
     (total, section) => (
       section.requires_user_assignment

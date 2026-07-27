@@ -133,6 +133,10 @@ async def enqueue_chapter_preparation_job(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    generation_plan = await chapter_generation.load_chapter_draft_generation_plan(
+        db,
+        context=context,
+    )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     existing = await _load_job(
         db,
@@ -157,7 +161,7 @@ async def enqueue_chapter_preparation_job(
         and previous_result.get("checkpoint_input_signature")
         == context.input_signature
     )
-    checkpoint = (
+    candidate_checkpoint = (
         {
             key: previous_result[key]
             for key in _CHECKPOINT_KEYS
@@ -167,9 +171,16 @@ async def enqueue_chapter_preparation_job(
         else {}
     )
     resumed_section_count = (
-        len(checkpoint.get("checkpoint_sections", []))
-        if isinstance(checkpoint.get("checkpoint_sections"), list)
-        else 0
+        chapter_generation.chapter_generation_checkpoint_section_count(
+            generation_plan.target_context,
+            candidate_checkpoint,
+        )
+    )
+    checkpoint = candidate_checkpoint if resumed_section_count else {}
+    queued_section_count = (
+        len(generation_plan.target_context.sections)
+        if req.operation == "rewrite"
+        else len(context.sections)
     )
     job = await editing_jobs.enqueue_editing_job(
         db,
@@ -189,7 +200,7 @@ async def enqueue_chapter_preparation_job(
     job.result_json = {
         "stage": "queued",
         "operation": req.operation,
-        "total_section_count": len(context.sections),
+        "total_section_count": queued_section_count,
         "checked_section_count": 0,
         "completed_section_count": resumed_section_count,
         "resumed_section_count": resumed_section_count,

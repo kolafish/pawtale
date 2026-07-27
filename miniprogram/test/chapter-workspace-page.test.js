@@ -1257,7 +1257,7 @@ test("legacy flat draft brings the required next step into the empty state", asy
   assert.match(context.data.draftRecoveryDetail, /全部完成后/);
   assert.match(
     context.data.draftRecoveryDetail,
-    /重新生成全部 1 个小节正文/,
+    /更新 1 个有变化的小节正文/,
   );
   assert.match(context.data.draftRecoveryDetail, /不是当前必做步骤/);
   assert.equal(context.data.draftRecoveryActionText, "去补充");
@@ -1301,11 +1301,11 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
 
   assert.equal(
     context.data.draftRecoveryTitle,
-    "现在可以重新生成全部 1 个小节正文",
+    "现在可以更新 1 个有变化的小节正文",
   );
   assert.equal(
     context.data.draftRecoveryActionText,
-    "重新生成全部 1 个小节正文",
+    "更新 1 个有变化的小节正文",
   );
   assert.equal(context.data.draftRecoveryActionKind, "rewrite");
 
@@ -1314,7 +1314,7 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
-  assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
   delete global.wx;
@@ -1349,8 +1349,8 @@ test("chapter rewrite reports persisted section progress at its action surface",
   });
 
   assert.equal(context.data.operationKind, "rewrite_chapter");
-  assert.equal(context.data.chapterPreparationTitle, "正在逐节生成正文");
-  assert.match(context.data.chapterPreparationDetail, /已完成 3\/9 个小节/);
+  assert.equal(context.data.chapterPreparationTitle, "正在更新有变化的小节");
+  assert.match(context.data.chapterPreparationDetail, /已更新 3\/9 个小节/);
   assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
   assert.equal(context.data.chapterPreparationProgress, 33);
   assert.equal(context.data.chapterPreparationProgressMode, "determinate");
@@ -1399,7 +1399,10 @@ test("chapter workspace explains that an old draft is preserved after regrouping
 
   assert.equal(context.data.rewriteNoticeTitle, "现有正文仍按原来的小节保留");
   assert.match(context.data.rewriteNoticeDetail, /旧正文没有丢失/);
-  assert.match(context.data.rewriteNoticeDetail, /当前 1 个小节/);
+  assert.match(
+    context.data.rewriteNoticeDetail,
+    /当前 1 个素材或结构发生变化的小节/,
+  );
   delete global.wx;
 });
 
@@ -1461,6 +1464,7 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
     id: `section-${index + 1}`,
     title: `当前小节 ${index + 1}`,
     sort_order: index,
+    version: index === 2 ? 2 : 1,
     materials: [
       {
         ...baseWorkspace.sections[0].materials[0],
@@ -1469,11 +1473,21 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
       },
     ],
   }));
+  const draftSections = currentSections.map((section) => ({
+    section_id: section.id,
+    title: section.title,
+    section_type: section.section_type,
+    section_version: 1,
+    sort_order: section.sort_order,
+    content: `${section.title}原有正文。`,
+    used_material_ids: [section.materials[0].utterance_id],
+  }));
   const staleWorkspace = workspace({
     draft_needs_rewrite: true,
     can_rewrite_draft: true,
-    pending_completion_source_count: 2,
+    pending_completion_source_count: 1,
     sections: currentSections,
+    draft_sections: draftSections,
     completion_summary: summary({
       state: "needs_input",
       next_action: {
@@ -1515,19 +1529,19 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
 
   assert.equal(
     context.data.rewriteNoticeTitle,
-    "2 条补充回答尚未写入正文",
+    "1 条补充回答尚未写入正文",
   );
   assert.equal(context.data.narrativeSectionCount, 4);
   assert.equal(
     context.data.rewriteDraftActionText,
-    "重新生成全部 4 个小节正文",
+    "更新 1 个有变化的小节正文",
   );
   assert.equal(
     context.data.rewriteDraftBusyText,
-    "正在生成 4 个小节正文…",
+    "正在更新 1 个小节正文…",
   );
-  assert.match(context.data.rewriteNoticeDetail, /上方当前 4 个小节/);
-  assert.match(context.data.rewriteNoticeDetail, /不会重新划分小节/);
+  assert.match(context.data.rewriteNoticeDetail, /只重新生成当前 1 个/);
+  assert.match(context.data.rewriteNoticeDetail, /其他小节沿用现有正文/);
   context.data.operationKind = "prepare";
   page.rewriteChapter.call(context);
   await new Promise((resolve) => setImmediate(resolve));
@@ -1537,10 +1551,10 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [["project-1", "chapter-1", "rewrite"]]);
-  assert.equal(modals.at(-1).title, "重新生成全部 4 个小节正文");
-  assert.match(modals.at(-1).content, /上方当前 4 个小节/);
-  assert.equal(modals.at(-1).confirmText, "生成全部");
-  assert.equal(context.data.chapterPreparationTitle, "正文生成任务已排队");
+  assert.equal(modals.at(-1).title, "更新 1 个有变化的小节正文");
+  assert.match(modals.at(-1).content, /只重新生成当前 1 个/);
+  assert.equal(modals.at(-1).confirmText, "更新正文");
+  assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
   delete global.wx;

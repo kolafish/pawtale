@@ -158,8 +158,10 @@ function chapterPreparationView(
       ? ` · 已恢复 ${job.resumed_section_count} 节`
       : "";
     return {
-      title: "正在逐节生成正文",
-      detail: `已完成 ${job.completed_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${resumed}${modelDetail}`,
+      title: job.operation === "rewrite"
+        ? "正在更新有变化的小节"
+        : "正在逐节生成正文",
+      detail: `${job.operation === "rewrite" ? "已更新" : "已完成"} ${job.completed_section_count}/${job.total_section_count} 个小节${job.current_section_title ? ` · ${job.current_section_title}` : ""}${resumed}${modelDetail}`,
       progress,
       progressMode: "determinate",
     };
@@ -167,14 +169,14 @@ function chapterPreparationView(
   if (job.stage === "saving") {
     return {
       title: "正在保存本章正文",
-      detail: `全部小节已经处理完成，正在更新章节版本${modelDetail}`,
+      detail: `小节正文已经处理完成，正在更新章节版本${modelDetail}`,
       progress: 0,
       progressMode: "indeterminate",
     };
   }
   return {
-    title: job.operation === "rewrite" ? "正文生成任务已排队" : "本章检查任务已排队",
-    detail: `即将处理 ${job.total_section_count} 个小节${modelDetail}`,
+    title: job.operation === "rewrite" ? "正文更新任务已排队" : "本章检查任务已排队",
+    detail: `${job.operation === "rewrite" ? "即将更新" : "即将处理"} ${job.total_section_count} 个小节${modelDetail}`,
     progress: 0,
     progressMode: "indeterminate",
   };
@@ -334,8 +336,8 @@ definePage<ChapterWorkspacePageData>()({
     draftRecoveryActionDisabled: true,
     narrativeSectionCount: 0,
     sectionStructureSummary: "",
-    rewriteDraftActionText: "重新生成全部小节正文",
-    rewriteDraftBusyText: "正在生成全部小节正文…",
+    rewriteDraftActionText: "更新有变化的小节正文",
+    rewriteDraftBusyText: "正在更新小节正文…",
     rewriteDraftScopeDetail: "",
     structureExpanded: false,
     sectionViews: [],
@@ -1393,7 +1395,7 @@ definePage<ChapterWorkspacePageData>()({
     }
     if (editingMode === "ai" && workspace.draft_needs_rewrite) {
       wx.showToast({
-        title: "请先更新全部小节正文",
+        title: "请先更新有变化的小节正文",
         icon: "none",
       });
       return;
@@ -1781,8 +1783,8 @@ definePage<ChapterWorkspacePageData>()({
     wx.showModal({
       title: this.data.rewriteDraftActionText,
       content: this.data.rewriteDraftScopeDetail,
-      confirmText: "生成全部",
-      cancelText: "暂不生成",
+      confirmText: "更新正文",
+      cancelText: "暂不更新",
       success: (result) => {
         if (result.confirm) {
           void this.performChapterRewrite();
@@ -1808,7 +1810,7 @@ definePage<ChapterWorkspacePageData>()({
       }
       this.finishOperation("rewrite_chapter");
       this.setData({
-        error: error instanceof Error ? error.message : "本章重新生成失败",
+        error: error instanceof Error ? error.message : "本章正文更新失败",
       });
     }
   },

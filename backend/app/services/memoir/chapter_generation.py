@@ -117,6 +117,13 @@ class GeneratedChapter:
     model: str | None
 
 
+@dataclass(frozen=True)
+class ChapterDraftGenerationPlan:
+    target_context: ChapterGenerationContext
+    preserved_sections: tuple[GeneratedChapterSection, ...]
+    previous_model: str | None
+
+
 class _GeneratedChapterSectionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -266,6 +273,164 @@ def _generated_chapter_from_checkpoint(
             else None
         ),
     )
+
+
+def chapter_generation_checkpoint_section_count(
+    context: ChapterGenerationContext,
+    checkpoint: dict[str, object] | None,
+) -> int:
+    generated = _generated_chapter_from_checkpoint(context, checkpoint)
+    return len(generated.sections) if generated is not None else 0
+
+
+def _preserved_draft_section(
+    context: ChapterGenerationContext,
+    section: ChapterSectionInput,
+    snapshot: object,
+    *,
+    legacy_material_snapshot: list[dict[str, object]],
+) -> GeneratedChapterSection | None:
+    if not isinstance(snapshot, dict):
+        return None
+    if (
+        snapshot.get("section_id") != section.section_id
+        or snapshot.get("title") != section.title
+        or snapshot.get("section_type") != section.section_type
+        or snapshot.get("section_version") != section.section_version
+        or snapshot.get("sort_order") != section.sort_order
+    ):
+        return None
+    content = str(snapshot.get("content") or "").strip()
+    raw_used = snapshot.get("used_material_ids")
+    if not content or not isinstance(raw_used, list):
+        return None
+    used_material_ids = tuple(
+        value
+        for value in raw_used
+        if isinstance(value, str) and value
+    )
+    current_material_ids = tuple(
+        material.material_id for material in section.materials
+    )
+    allowed_material_ids = {
+        *current_material_ids,
+    }
+    if (
+        not used_material_ids
+        or len(used_material_ids) != len(raw_used)
+        or set(used_material_ids) - allowed_material_ids
+    ):
+        return None
+    stored_input_signature = str(
+        snapshot.get("input_signature") or ""
+    )
+    if stored_input_signature:
+        if stored_input_signature != _section_input_signature(
+            context,
+            section,
+        ):
+            return None
+    elif (
+        len(used_material_ids) != len(current_material_ids)
+        or set(used_material_ids) != set(current_material_ids)
+        or legacy_material_snapshot != _section_source_snapshot(section)
+    ):
+        # Legacy snapshots did not store a per-section source signature.
+        # Reuse them only when they prove complete coverage of the current
+        # material set; otherwise regenerate conservatively.
+        return None
+    return GeneratedChapterSection(
+        section_id=section.section_id,
+        title=section.title,
+        content=content,
+        used_material_ids=used_material_ids,
+    )
+
+
+def chapter_draft_generation_plan(
+    context: ChapterGenerationContext,
+    latest: MemoirBookChapterDraftVersion | None,
+) -> ChapterDraftGenerationPlan:
+    snapshots = (
+        list(latest.section_snapshot_json)
+        if latest is not None and isinstance(latest.section_snapshot_json, list)
+        else []
+    )
+    snapshots_by_id: dict[str, object] = {}
+    material_snapshots_by_section: dict[str, list[dict[str, object]]] = {}
+    if latest is not None:
+        for item in getattr(latest, "material_snapshot_json", []):
+            if not isinstance(item, dict):
+                continue
+            section_id = str(item.get("section_id") or "")
+            if section_id:
+                material_snapshots_by_section.setdefault(
+                    section_id,
+                    [],
+                ).append(dict(item))
+    duplicate_ids: set[str] = set()
+    for snapshot in snapshots:
+        if not isinstance(snapshot, dict):
+            continue
+        section_id = str(snapshot.get("section_id") or "")
+        if not section_id:
+            continue
+        if section_id in snapshots_by_id:
+            duplicate_ids.add(section_id)
+            continue
+        snapshots_by_id[section_id] = snapshot
+
+    preserved_sections: list[GeneratedChapterSection] = []
+    target_sections: list[ChapterSectionInput] = []
+    for section in context.sections:
+        preserved = (
+            None
+            if section.section_id in duplicate_ids
+            else _preserved_draft_section(
+                context,
+                section,
+                snapshots_by_id.get(section.section_id),
+                legacy_material_snapshot=material_snapshots_by_section.get(
+                    section.section_id,
+                    [],
+                ),
+            )
+        )
+        if preserved is None:
+            target_sections.append(section)
+        else:
+            preserved_sections.append(preserved)
+
+    target_materials = tuple(
+        material
+        for section in target_sections
+        for material in section.materials
+    )
+    return ChapterDraftGenerationPlan(
+        target_context=ChapterGenerationContext(
+            project_id=context.project_id,
+            chapter_id=context.chapter_id,
+            chapter_title=context.chapter_title,
+            sections=tuple(target_sections),
+            materials=target_materials,
+            input_signature=context.input_signature,
+        ),
+        preserved_sections=tuple(preserved_sections),
+        previous_model=latest.model if latest is not None else None,
+    )
+
+
+async def load_chapter_draft_generation_plan(
+    db: AsyncSession,
+    *,
+    context: ChapterGenerationContext,
+) -> ChapterDraftGenerationPlan:
+    latest = await _latest_version(
+        db,
+        project_id=context.project_id,
+        chapter_id=context.chapter_id,
+    )
+    return chapter_draft_generation_plan(context, latest)
 
 
 def _material_text(material: MemoirSectionMaterial) -> str:
@@ -686,70 +851,112 @@ async def generate_chapter(
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,
     progress_callback: ChapterGenerationProgressCallback | None = None,
+    chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
+    preserved_sections: tuple[GeneratedChapterSection, ...] = (),
+    preserved_model: str | None = None,
 ) -> GeneratedChapter:
-    client = ai_client or get_ai_service(ai_model)
+    client = (
+        ai_client or get_ai_service(ai_model)
+    ) if context.sections else None
+    full_sections = chapter_sections or context.sections
+    target_section_ids = {section.section_id for section in context.sections}
+    preserved_by_id = {
+        section.section_id: section for section in preserved_sections
+    }
+    full_section_ids = [section.section_id for section in full_sections]
+    if (
+        len(target_section_ids) != len(context.sections)
+        or len(preserved_by_id) != len(preserved_sections)
+        or target_section_ids.intersection(preserved_by_id)
+        or target_section_ids | set(preserved_by_id) != set(full_section_ids)
+        or len(set(full_section_ids)) != len(full_section_ids)
+    ):
+        raise ValueError("chapter generation plan does not cover current sections")
     resumed = _generated_chapter_from_checkpoint(context, checkpoint)
-    generated_sections = list(resumed.sections) if resumed is not None else []
+    generated_target_sections = (
+        list(resumed.sections) if resumed is not None else []
+    )
+    generated_targets_by_id = {
+        section.section_id: section
+        for section in generated_target_sections
+    }
     missing_source_candidates = (
         list(resumed.missing_source_candidates) if resumed is not None else []
     )
     editor_notes = list(resumed.editor_notes) if resumed is not None else []
-    previous_section_content = (
-        generated_sections[-1].content if generated_sections else ""
+    resolved_model = (
+        getattr(client, "model_name", ai_model)
+        if client is not None
+        else preserved_model
     )
+    pending_sections = [
+        section
+        for section in context.sections
+        if section.section_id not in generated_targets_by_id
+    ]
     if progress_callback is not None:
         await progress_callback(
             _generated_chapter_checkpoint(
                 context,
                 _partial_generated_chapter(
-                    generated_sections,
+                    generated_target_sections,
                     missing_source_candidates=missing_source_candidates,
                     editor_notes=editor_notes,
-                    model=getattr(client, "model_name", ai_model),
+                    model=resolved_model,
                 ),
                 current_section=(
-                    context.sections[len(generated_sections)]
-                    if len(generated_sections) < len(context.sections)
-                    else None
+                    pending_sections[0] if pending_sections else None
                 ),
             )
         )
-    for section in context.sections[len(generated_sections):]:
-        generated_section = await generate_chapter_section(
-            context,
-            section=section,
-            editorial_guidance=editorial_guidance,
-            chapter_sections=context.sections,
-            previous_section_content=previous_section_content,
-            ai_model=ai_model,
-            ai_client=client,
-        )
-        current = generated_section.sections[0]
-        generated_sections.append(current)
-        missing_source_candidates.extend(
-            generated_section.missing_source_candidates
-        )
-        editor_notes.extend(generated_section.editor_notes)
-        previous_section_content = current.content
-        partial = _partial_generated_chapter(
-            generated_sections,
-            missing_source_candidates=missing_source_candidates,
-            editor_notes=editor_notes,
-            model=getattr(client, "model_name", ai_model),
-        )
-        if progress_callback is not None:
-            await progress_callback(
-                _generated_chapter_checkpoint(
-                    context,
-                    partial,
-                    current_section=section,
-                )
+    completed_sections: list[GeneratedChapterSection] = []
+    for section in full_sections:
+        current = preserved_by_id.get(section.section_id)
+        if current is None:
+            current = generated_targets_by_id.get(section.section_id)
+        if current is None:
+            if client is None:
+                raise ValueError("chapter generation client is missing")
+            generated_section = await generate_chapter_section(
+                context,
+                section=section,
+                editorial_guidance=editorial_guidance,
+                chapter_sections=full_sections,
+                previous_section_content=(
+                    completed_sections[-1].content
+                    if completed_sections
+                    else ""
+                ),
+                ai_model=ai_model,
+                ai_client=client,
             )
+            current = generated_section.sections[0]
+            generated_target_sections.append(current)
+            generated_targets_by_id[current.section_id] = current
+            missing_source_candidates.extend(
+                generated_section.missing_source_candidates
+            )
+            editor_notes.extend(generated_section.editor_notes)
+            partial = _partial_generated_chapter(
+                generated_target_sections,
+                missing_source_candidates=missing_source_candidates,
+                editor_notes=editor_notes,
+                model=resolved_model,
+            )
+            if progress_callback is not None:
+                await progress_callback(
+                    _generated_chapter_checkpoint(
+                        context,
+                        partial,
+                        current_section=section,
+                    )
+                )
+        completed_sections.append(current)
     return _partial_generated_chapter(
-        generated_sections,
+        completed_sections,
         missing_source_candidates=missing_source_candidates,
         editor_notes=editor_notes,
-        model=getattr(client, "model_name", ai_model),
+        model=resolved_model,
     )
 
 
@@ -881,6 +1088,53 @@ def _snapshot(
     ]
 
 
+def _section_source_snapshot(
+    section: ChapterSectionInput,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "material_id": material.material_id,
+            "section_id": material.section_id,
+            "transcript_version_id": material.transcript_version_id,
+            "text_hash": semantic_text_hash(material.text),
+            "section_order": material.section_order,
+            "material_order": material.material_order,
+        }
+        for material in section.materials
+    ]
+
+
+def _section_input_signature(
+    context: ChapterGenerationContext,
+    section: ChapterSectionInput,
+) -> str:
+    return semantic_json_signature(
+        {
+            "engine": CHAPTER_GENERATION_ENGINE,
+            "chapter": {
+                "id": context.chapter_id,
+                "title": context.chapter_title,
+            },
+            "section": {
+                "id": section.section_id,
+                "title": section.title,
+                "type": section.section_type,
+                "version": section.section_version,
+                "sort_order": section.sort_order,
+            },
+            "materials": [
+                {
+                    "material_id": material.material_id,
+                    "transcript_version_id": material.transcript_version_id,
+                    "text_hash": semantic_text_hash(material.text),
+                    "material_order": material.material_order,
+                }
+                for material in section.materials
+            ],
+        }
+    )
+
+
 def _section_snapshot(
     context: ChapterGenerationContext,
     *,
@@ -896,6 +1150,10 @@ def _section_snapshot(
             "section_type": inputs[section.section_id].section_type,
             "section_version": inputs[section.section_id].section_version,
             "sort_order": inputs[section.section_id].sort_order,
+            "input_signature": _section_input_signature(
+                context,
+                inputs[section.section_id]
+            ),
             "content": section.content,
             "used_material_ids": list(section.used_material_ids),
         }
@@ -919,13 +1177,22 @@ async def generate_and_save_chapter_draft(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    latest_before = await _latest_version(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    plan = chapter_draft_generation_plan(before, latest_before)
     generated = await generate_chapter(
-        before,
+        plan.target_context,
         editorial_guidance=editorial_guidance,
         ai_model=ai_model,
         ai_client=ai_client,
         checkpoint=checkpoint,
         progress_callback=progress_callback,
+        chapter_sections=before.sections,
+        preserved_sections=plan.preserved_sections,
+        preserved_model=plan.previous_model,
     )
     db.expire_all()
     after = await load_chapter_generation_context(
@@ -1047,7 +1314,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
     if latest.id != expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
     if latest.input_signature != before.input_signature:
-        raise HTTPException(status_code=409, detail="本章素材已变化，请先重新生成全部正文")
+        raise HTTPException(status_code=409, detail="本章素材已变化，请先更新相关小节正文")
     latest_sections = [
         dict(section)
         for section in latest.section_snapshot_json

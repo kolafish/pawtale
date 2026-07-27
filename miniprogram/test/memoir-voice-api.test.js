@@ -455,6 +455,9 @@ test("share video APIs encode routes and download preview with session cookie", 
       if (key === "pawtale_backend_cookie") {
         return "pawtale_session=abc";
       }
+      if (key === "pawtale_ai_model_settings") {
+        return { model: "deepseek-v4-pro" };
+      }
       return "";
     },
     getExtConfigSync() {
