@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueScope,
     MemoirCompletionIssueStatus,
     MemoirCompletionIssueType,
+    MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
     MemoirCompletionIssue,
@@ -88,7 +89,11 @@ def _disambiguate_issue_values(values: list[dict]) -> list[dict]:
     return result
 
 
-def _response(issue: MemoirCompletionIssue) -> MemoirCompletionIssueResponse:
+def _response(
+    issue: MemoirCompletionIssue,
+    *,
+    active_session_id: str | None = None,
+) -> MemoirCompletionIssueResponse:
     return MemoirCompletionIssueResponse(
         id=issue.id,
         project_id=issue.project_id,
@@ -103,6 +108,7 @@ def _response(issue: MemoirCompletionIssue) -> MemoirCompletionIssueResponse:
         related_material_ids=list(issue.related_material_ids_json),
         input_signature=issue.input_signature,
         status=issue.status,
+        active_session_id=active_session_id,
         outcome=issue.outcome or None,
         outcome_note=issue.outcome_note,
         answered_material_id=issue.answered_material_id,
@@ -360,10 +366,49 @@ async def collection_response(
         ),
         None,
     )
+    active_sessions: dict[str, str] = {}
+    if issues:
+        rows = await db.execute(
+            select(
+                MemoirVoiceSession.current_completion_issue_id,
+                MemoirVoiceSession.id,
+            )
+            .where(
+                MemoirVoiceSession.project_id == project_id,
+                MemoirVoiceSession.current_completion_issue_id.in_(
+                    [issue.id for issue in issues]
+                ),
+                MemoirVoiceSession.status.not_in(
+                    {
+                        MemoirVoiceSessionStatus.STOPPED.value,
+                        MemoirVoiceSessionStatus.FAILED.value,
+                    }
+                ),
+            )
+            .order_by(
+                MemoirVoiceSession.updated_at.desc(),
+                MemoirVoiceSession.id.desc(),
+            )
+        )
+        for issue_id, session_id in rows:
+            active_sessions.setdefault(issue_id, session_id)
     return MemoirCompletionIssueCollectionResponse(
         project_id=project_id,
-        current_issue=_response(current) if current is not None else None,
-        issues=[_response(issue) for issue in issues],
+        current_issue=(
+            _response(
+                current,
+                active_session_id=active_sessions.get(current.id),
+            )
+            if current is not None
+            else None
+        ),
+        issues=[
+            _response(
+                issue,
+                active_session_id=active_sessions.get(issue.id),
+            )
+            for issue in issues
+        ],
     )
 
 

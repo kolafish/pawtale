@@ -43,7 +43,7 @@ from app.services.memoir import completion_issues, section_digests
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v2"
+CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v3"
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -382,6 +382,8 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
 - 已有素材足够、只需重排或改写的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
+- interview 只用于可选补充：不补也不影响正文生成、通读和确认。
+- manual_review 只用于必须由用户决定的隐私、事实冲突或取舍，未处理时会阻止章节确认。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。

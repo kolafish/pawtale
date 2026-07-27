@@ -1,5 +1,3 @@
-import type { MemoirChapterCompletionState } from "./chapter-completion";
-
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirInterviewType = "ai_interview" | "human_interview";
 export type MemoirSessionGoal = "open_narration" | "book_completion";
@@ -50,25 +48,6 @@ export type MemoirCompletionIssueType =
   | "conflict";
 export type MemoirCompletionIssuePriority = "high" | "medium" | "low";
 
-export type MemoirBookCompletionState = MemoirChapterCompletionState;
-export type MemoirBookCompletionAction =
-  | "start_interview"
-  | "wait"
-  | "prepare"
-  | "open_chapter"
-  | "retry"
-  | "none";
-
-export interface MemoirBookCompletion {
-  project_id: string;
-  state: MemoirBookCompletionState;
-  action: MemoirBookCompletionAction;
-  headline: string;
-  detail: string;
-  item_id?: string | null;
-  chapter_id?: string | null;
-}
-
 export interface MemoirCompletionIssue {
   id: string;
   project_id: string;
@@ -83,6 +62,7 @@ export interface MemoirCompletionIssue {
   related_material_ids: string[];
   input_signature: string;
   status: MemoirCompletionIssueStatus;
+  active_session_id?: string | null;
   outcome?: MemoirCompletionIssueOutcome | null;
   outcome_note: string;
   answered_material_id?: string | null;

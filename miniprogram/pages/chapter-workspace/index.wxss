@@ -184,6 +184,78 @@
   line-height: 36rpx;
 }
 
+.suggestion-count {
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 34rpx;
+  font-variant-numeric: tabular-nums;
+}
+
+.suggestion-group {
+  margin-top: 24rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.suggestion-group-title,
+.suggestion-group-detail,
+.suggestion-question,
+.suggestion-reason,
+.suggestion-state {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.suggestion-group-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.suggestion-group-detail,
+.suggestion-reason,
+.suggestion-state {
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  line-height: 38rpx;
+  text-wrap: pretty;
+  margin-top: 8rpx;
+}
+
+.suggestion-item {
+  margin-top: 18rpx;
+  padding: 22rpx;
+  border-radius: 18rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.suggestion-item.is-required {
+  background: var(--ui-warning-surface);
+}
+
+.suggestion-question {
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 42rpx;
+  text-wrap: balance;
+}
+
+.suggestion-state {
+  color: var(--ui-warning-text);
+  font-weight: 700;
+}
+
+.suggestion-actions {
+  align-items: stretch;
+  flex-wrap: wrap;
+}
+
+.suggestion-actions .secondary-action {
+  min-width: 160rpx;
+  flex: 1 1 160rpx;
+  font-size: 24rpx;
+}
+
 .structure-tools {
   margin-top: 24rpx;
   padding: 22rpx 24rpx;

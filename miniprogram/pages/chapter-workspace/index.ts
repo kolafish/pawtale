@@ -1,4 +1,5 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import type { MemoirCompletionIssue } from "../../domain/voice-chat";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   AudioPlaybackController,
@@ -16,6 +17,7 @@ import {
   getMemoirChapterPreparationJob,
   getMemoirChapterSectionRegenerationJob,
   getMemoirChapterWorkspace,
+  listMemoirCompletionIssues,
   mergeMemoirChapterSections,
   placeMemoirChapterMaterial,
   reviseMemoirChapterDraftSectionWithAI,
@@ -280,6 +282,9 @@ interface ChapterWorkspacePageData {
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
   structureExpanded: boolean;
+  suggestionsExpanded: boolean;
+  requiredIssues: MemoirCompletionIssue[];
+  optionalIssues: MemoirCompletionIssue[];
   sectionViews: ChapterSectionView[];
   draftSectionViews: ChapterDraftSectionView[];
   expandedSectionIds: Record<string, boolean>;
@@ -340,6 +345,9 @@ definePage<ChapterWorkspacePageData>()({
     rewriteDraftBusyText: "正在更新小节正文…",
     rewriteDraftScopeDetail: "",
     structureExpanded: false,
+    suggestionsExpanded: false,
+    requiredIssues: [],
+    optionalIssues: [],
     sectionViews: [],
     draftSectionViews: [],
     expandedSectionIds: {},
@@ -531,10 +539,15 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
-      const workspace = await getMemoirChapterWorkspace(
-        this.data.projectId,
-        this.data.chapterId,
-      );
+      const [workspace, issueCollection] = await Promise.all([
+        getMemoirChapterWorkspace(
+          this.data.projectId,
+          this.data.chapterId,
+        ),
+        listMemoirCompletionIssues(this.data.projectId, {
+          chapterId: this.data.chapterId,
+        }),
+      ]);
       if (loadSequence !== this.workspaceLoadSequence) {
         return;
       }
@@ -550,6 +563,14 @@ definePage<ChapterWorkspacePageData>()({
       }
       writeCachedMemoirChapterWorkspace(workspace);
       this.applyWorkspace(workspace);
+      this.setData({
+        requiredIssues: issueCollection.issues.filter(
+          (issue) => issue.channel === "manual_review",
+        ),
+        optionalIssues: issueCollection.issues.filter(
+          (issue) => issue.channel === "interview",
+        ),
+      });
     } catch (error) {
       if (loadSequence !== this.workspaceLoadSequence) {
         return;
@@ -586,6 +607,12 @@ definePage<ChapterWorkspacePageData>()({
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }
+  },
+
+  toggleSuggestions() {
+    this.setData({
+      suggestionsExpanded: !this.data.suggestionsExpanded,
+    });
   },
 
   toggleStructure() {
@@ -1092,10 +1119,6 @@ definePage<ChapterWorkspacePageData>()({
       await this.prepareChapter();
       return;
     }
-    if (action.kind === "start_interview") {
-      await this.beginCompletionInterview();
-      return;
-    }
     if (action.kind === "confirm") {
       this.confirmCurrentIssue();
       return;
@@ -1240,8 +1263,13 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  async beginCompletionInterview() {
-    const issue = this.data.workspace?.completion_summary.active_issue;
+  async beginCompletionInterview(
+    event: PageDatasetEvent<{ issueId?: string }>,
+  ) {
+    const issueId = datasetString(event, "issueId");
+    const issue = this.data.optionalIssues.find(
+      (candidate) => candidate.id === issueId,
+    );
     if (!issue) {
       this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
       return;
@@ -1330,25 +1358,85 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
-  resolveCurrentIssueAfterEdit() {
-    const issue = this.data.workspace?.completion_summary.active_issue;
-    if (!issue || this.data.operationKind) {
+  resolveOptionalIssueAfterEdit(
+    event: PageDatasetEvent<{ issueId?: string }>,
+  ) {
+    const issueId = datasetString(event, "issueId");
+    if (!issueId || this.data.operationKind) {
       return;
     }
     wx.showModal({
-      title: "这条意见已经处理？",
-      content: "如果你已经修改了相关小节的标题或正文，可以标记为已处理；系统会继续检查下一项。",
+      title: "这条建议已经处理？",
+      content: "如果已经通过修改标题或正文处理，可以把它从待办建议中收起。",
       confirmText: "标记已处理",
-      cancelText: "暂不处理",
+      cancelText: "再看看",
       success: (result) => {
         if (result.confirm) {
-          void this.applyCurrentIssueConfirmation(
-            issue.id,
+          void this.closeOptionalIssue(
+            issueId,
+            "confirmed",
             "用户已通过修改处理",
           );
         }
       },
     });
+  },
+
+  skipOptionalIssue(
+    event: PageDatasetEvent<{ issueId?: string }>,
+  ) {
+    const issueId = datasetString(event, "issueId");
+    if (!issueId || this.data.operationKind) {
+      return;
+    }
+    const choices: Array<{
+      outcome: "deferred" | "not_remembered" | "declined";
+      note: string;
+    }> = [
+      { outcome: "deferred", note: "用户选择暂时不补" },
+      { outcome: "not_remembered", note: "用户表示想不起来" },
+      { outcome: "declined", note: "用户选择不补充这项内容" },
+    ];
+    wx.showActionSheet({
+      itemList: ["暂时不补", "想不起来", "不想补充"],
+      success: ({ tapIndex }) => {
+        const choice = choices[tapIndex];
+        if (choice) {
+          void this.closeOptionalIssue(
+            issueId,
+            choice.outcome,
+            choice.note,
+          );
+        }
+      },
+    });
+  },
+
+  async closeOptionalIssue(
+    issueId: string,
+    outcome: "confirmed" | "deferred" | "not_remembered" | "declined",
+    note: string,
+  ) {
+    if (!this.beginOperation("confirm_issue", issueId)) {
+      return;
+    }
+    try {
+      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
+        outcome,
+        note,
+      });
+      await this.loadPageData(true);
+      wx.showToast({ title: "建议已处理", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "建议处理失败",
+      });
+    } finally {
+      this.finishOperation("confirm_issue", issueId);
+    }
   },
 
   async applyCurrentIssueConfirmation(

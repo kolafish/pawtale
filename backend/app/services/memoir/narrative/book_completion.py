@@ -7,8 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
     MemoirCompletionIssueChannel,
-    MemoirCompletionIssueOutcome,
-    MemoirCompletionIssueStatus,
     MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
@@ -101,7 +99,8 @@ async def prepare_chapter(
         (
             issue
             for issue in issues
-            if issue.status != MemoirCompletionIssueStatus.CLOSED.value
+            if issue.channel
+            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
         ),
         None,
     )
@@ -177,11 +176,6 @@ async def rewrite_chapter(
         for issue in issues
     ):
         raise ValueError("本章还有一项需要您先确认")
-    deferred_issue_ids = [
-        issue.id
-        for issue in issues
-        if issue.status != MemoirCompletionIssueStatus.CLOSED.value
-    ]
     digest = await chapter_digests.get_current_chapter_digest(
         db,
         project_id=project_id,
@@ -216,15 +210,6 @@ async def rewrite_chapter(
                 "current_section_id": None,
                 "current_section_title": "",
             }
-        )
-    for issue_id in deferred_issue_ids:
-        await completion_issues.close_issue(
-            db,
-            project_id=project_id,
-            issue_id=issue_id,
-            outcome=MemoirCompletionIssueOutcome.DEFERRED,
-            note="用户选择先按现有素材重新生成正文",
-            answered_material_id=None,
         )
     return await completion_read_model.chapter_workspace(
         db,

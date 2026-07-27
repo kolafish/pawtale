@@ -31,19 +31,76 @@
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
       <view
-        wx:if="{{nextAction.kind === 'start_interview'}}"
-        class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
-        aria-role="button"
-        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
-        bindtap="resolveCurrentIssueAfterEdit"
-      >已通过修改处理</view>
-      <view
         wx:if="{{workspace.completion_summary.state === 'confirmed'}}"
         class="structure-regenerate-action {{operationKind !== '' ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{operationKind !== ''}}"
         bindtap="openSectionStructure"
       >调整小节结构</view>
+    </view>
+
+    <view
+      wx:if="{{requiredIssues.length || optionalIssues.length}}"
+      class="content-card suggestions-card"
+      id="chapter-suggestions"
+    >
+      <view
+        class="structure-heading"
+        aria-role="button"
+        aria-label="{{suggestionsExpanded ? '收起' : '展开'}}审阅建议"
+        bindtap="toggleSuggestions"
+      >
+        <view>
+          <text class="section-kicker">审阅建议</text>
+          <text class="section-title">必须确认与可选补充</text>
+        </view>
+        <view class="structure-heading-meta">
+          <text class="suggestion-count">必须 {{requiredIssues.length}} · 可选 {{optionalIssues.length}}</text>
+          <text class="structure-expand-mark">{{suggestionsExpanded ? "收起" : "查看全部"}}</text>
+        </view>
+      </view>
+
+      <block wx:if="{{suggestionsExpanded}}">
+        <view wx:if="{{requiredIssues.length}}" class="suggestion-group">
+          <text class="suggestion-group-title">必须确认</text>
+          <text class="suggestion-group-detail">这类问题涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。</text>
+          <view wx:for="{{requiredIssues}}" wx:key="id" class="suggestion-item is-required">
+            <text class="suggestion-question">{{item.question}}</text>
+            <text class="suggestion-reason">{{item.reason}}</text>
+            <text class="suggestion-state">{{index === 0 ? "请通过上方“本章进度”处理当前项" : "处理当前项后继续确认"}}</text>
+          </view>
+        </view>
+
+        <view wx:if="{{optionalIssues.length}}" class="suggestion-group">
+          <text class="suggestion-group-title">可选补充</text>
+          <text class="suggestion-group-detail">可以补讲来丰富正文，也可以跳过；不会阻止正文生成、修改和确认。</text>
+          <view wx:for="{{optionalIssues}}" wx:key="id" class="suggestion-item">
+            <text class="suggestion-question">{{item.question}}</text>
+            <text class="suggestion-reason">{{item.reason}}</text>
+            <view class="edit-actions suggestion-actions">
+              <button
+                class="secondary-action strong"
+                data-issue-id="{{item.id}}"
+                loading="{{operationKind === 'start_interview' && operationTargetId === item.id}}"
+                disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+                bindtap="beginCompletionInterview"
+              >{{item.active_session_id ? "继续语音补充" : "语音补充"}}</button>
+              <button
+                class="secondary-action"
+                data-issue-id="{{item.id}}"
+                disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+                bindtap="resolveOptionalIssueAfterEdit"
+              >已修改处理</button>
+              <button
+                class="secondary-action"
+                data-issue-id="{{item.id}}"
+                disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+                bindtap="skipOptionalIssue"
+              >不补了</button>
+            </view>
+          </view>
+        </view>
+      </block>
     </view>
 
     <view wx:if="{{sectionViews.length}}" class="content-card structure-card {{structureExpanded ? 'is-expanded' : 'is-collapsed'}}" id="chapter-structure">
