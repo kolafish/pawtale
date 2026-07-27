@@ -23,10 +23,17 @@ class _StructuredProbe(BaseModel):
     ok: bool
 
 
+class _StructuredIssueProbe(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str
+    reason: str
+
+
 class _StructuredListProbe(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    candidate_issues: list[str]
+    candidate_issues: list[_StructuredIssueProbe]
 
 
 # ── Helper Unit Tests ──────────────────────────
@@ -465,7 +472,11 @@ class TestCallLlmContract:
             inst = AsyncMock()
             inst.post = AsyncMock(side_effect=[
                 response('{"candidate_issues": "不是数组"}'),
-                response('{"candidate_issues": []}'),
+                response(
+                    '{"candidate_issues": [{'
+                    '"question": "测试问题", "reason": "测试原因"'
+                    '}]}'
+                ),
             ])
             inst.__aenter__ = AsyncMock(return_value=inst)
             inst.__aexit__ = AsyncMock(return_value=None)
@@ -479,8 +490,14 @@ class TestCallLlmContract:
                 max_attempts=2,
             )
 
-        assert result.value.candidate_issues == []
+        assert result.value.candidate_issues[0].question == "测试问题"
         assert result.response.attempt_count == 2
+        first_payload = inst.post.await_args_list[0].kwargs["json"]
+        parameters = first_payload["tools"][0]["function"]["parameters"]
+        assert "_StructuredIssueProbe" in parameters["$defs"]
+        assert parameters["properties"]["candidate_issues"]["items"] == {
+            "$ref": "#/$defs/_StructuredIssueProbe",
+        }
         second_payload = inst.post.await_args_list[1].kwargs["json"]
         assert "上次输出未通过结构校验" in (
             second_payload["messages"][0]["content"]
