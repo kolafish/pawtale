@@ -151,14 +151,18 @@ class LayeredBookAI:
             }
         else:
             section_materials = _prompt_section_materials(user_prompt)
+            is_revision = "用户修改要求：" in user_prompt
             payload = {
                 "sections": [
                     {
                         "section_id": section_id,
+                        "title": "比赛后的回想风" if is_revision else "",
                         "content": (
-                            "那年，我参加了学校比赛。"
-                            "这段经历让我一直记得，也让我第一次认真看待输赢。"
-                        ),
+                            "那天刮着风，我参加了学校比赛。"
+                            if is_revision
+                            else "那年，我参加了学校比赛。"
+                        )
+                        + "这段经历让我一直记得，也让我第一次认真看待输赢。",
                         "used_material_ids": allowed_material_ids,
                     }
                     for section_id, allowed_material_ids in section_materials
@@ -939,7 +943,7 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
     target_section = MemoirSection(
         project_id=project_id,
         chapter_id=chapter.id,
-        title="比赛后的回想",
+        title="比赛后的回想峰",
         section_type="viewpoint_reflection",
         sort_order=1,
     )
@@ -972,7 +976,7 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
         json={
             "expected_version_id": version.id,
             "ai_model": "claude-opus-4-8",
-            "instruction_text": "保留比赛结果，把回想写得更克制一些。",
+            "instruction_text": "把山峰的峰改成刮风的风。",
         },
     )
 
@@ -984,17 +988,17 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
         "这是已经存在的完整章节正文。"
     )
     assert body["draft_sections"][1]["section_id"] == target_section.id
-    assert body["draft_sections"][1]["content"].startswith(
-        "那年，我参加了学校比赛"
-    )
+    assert body["draft_sections"][1]["title"] == "比赛后的回想风"
+    assert body["draft_sections"][1]["content"].startswith("那天刮着风")
     assert len(fake.prompts) == 1
     assert sources[0]["utterance_id"] not in fake.prompts[0]
     assert added_source["utterance_id"] in fake.prompts[0]
     assert "学校里的比赛1" in fake.prompts[0]
-    assert "比赛后的回想" in fake.prompts[0]
+    assert "当前小节标题：\n比赛后的回想峰" in fake.prompts[0]
     assert "当前小节正文：" in fake.prompts[0]
     assert "这是已经存在的完整章节正文。" in fake.prompts[0]
-    assert "保留比赛结果，把回想写得更克制一些。" in fake.prompts[0]
+    assert "把山峰的峰改成刮风的风。" in fake.prompts[0]
+    assert "同时出现在标题和正文时，两处必须同步修正" in fake.prompts[0]
     assert "用户明确给出的事实更正" in fake.system_prompts[0]
     assert requested_models == ["claude-opus-4-8"]
     latest = await test_db.scalar(
@@ -1005,9 +1009,12 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
     assert latest is not None
     assert latest.prompt_snapshot.endswith(":section_ai_revision")
     assert latest.feedback == (
-        "AI 按要求修改小节《比赛后的回想》："
-        "保留比赛结果，把回想写得更克制一些。"
+        "AI 按要求修改小节《比赛后的回想风》："
+        "把山峰的峰改成刮风的风。"
     )
+    await test_db.refresh(target_section)
+    assert target_section.title == "比赛后的回想风"
+    assert target_section.version == 2
     draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
     assert draft is not None
     assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"

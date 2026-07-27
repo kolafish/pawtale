@@ -43,6 +43,7 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -101,6 +102,7 @@ class ChapterGenerationContext:
 @dataclass(frozen=True)
 class GeneratedChapterSection:
     section_id: str
+    title: str
     content: str
     used_material_ids: tuple[str, ...]
 
@@ -119,6 +121,7 @@ class _GeneratedChapterSectionOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     section_id: str
+    title: str | None = Field(default=None, max_length=200)
     content: str
     used_material_ids: list[str] = Field(default_factory=list)
 
@@ -239,6 +242,7 @@ def _generated_chapter_from_checkpoint(
         generated_sections.append(
             GeneratedChapterSection(
                 section_id=expected.section_id,
+                title=expected.title,
                 content=content,
                 used_material_ids=used,
             )
@@ -442,6 +446,9 @@ def build_chapter_generation_prompt(
     if revision_instruction:
         revision = f"""
 本次是按用户要求修改现有小节，不是脱离原稿重新创作。
+当前小节标题：
+{context.sections[0].title}
+
 当前小节正文：
 {current_section_content}
 
@@ -449,7 +456,9 @@ def build_chapter_generation_prompt(
 {revision_instruction}
 
 修改规则：
-- 先理解用户要调整的对象、范围和表达效果，再输出修改后的完整小节正文。
+- 先理解用户要调整的对象、范围和表达效果，再输出修改后的标题和完整正文。
+- 如果修改要求涉及标题中的错字或表达，必须同步修改标题；否则标题保持不变。
+- 同一个错字或名称同时出现在标题和正文时，两处必须同步修正。
 - 指令未涉及的事实和段落尽量保持不变。
 - 可以按要求调整措辞、语气、详略、顺序和段落结构。
 - 用户在指令中明确给出的事实更正可以采用；除此之外仍只能使用下方原始讲述中的事实。
@@ -472,6 +481,7 @@ def build_chapter_generation_prompt(
   "sections": [
     {{
       "section_id": "输入中的 section_id",
+      "title": "小节完整标题，修改要求未涉及标题时保持输入标题",
       "content": "这一小节完整、连贯、第一人称的正文",
       "used_material_ids": ["这一小节正文实际使用的 material_id"]
     }}
@@ -482,7 +492,8 @@ def build_chapter_generation_prompt(
 
 要求：
 {generation_scope}- 严格按输入顺序返回小节。
-- 每个输入 section_id 必须出现且只能出现一次，不新增、删除、合并或改名小节。
+- 每个输入 section_id 必须出现且只能出现一次，不新增、删除或合并小节。
+- 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
 - 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡。
 - 只能使用输入中的事实和感受，可以调整顺序、合并重复。
@@ -547,6 +558,7 @@ def normalize_generated_chapter(
     *,
     context: ChapterGenerationContext,
     model: str | None,
+    allow_title_revision: bool = False,
 ) -> GeneratedChapter:
     if not isinstance(payload, dict):
         raise ValueError("chapter generation AI did not return a JSON object")
@@ -573,6 +585,18 @@ def normalize_generated_chapter(
             raise ValueError("chapter generation used section outside allowlist")
         if section_id in seen_sections:
             raise ValueError("chapter generation returned duplicate section")
+        title_value = raw_section.get("title")
+        if allow_title_revision and not isinstance(title_value, str):
+            raise ValueError("chapter section title is missing")
+        title = (
+            title_value.strip()
+            if allow_title_revision and isinstance(title_value, str)
+            else section.title
+        )
+        if allow_title_revision and not title:
+            raise ValueError("chapter section title is empty")
+        if len(title) > 200:
+            raise ValueError("chapter section title is too long")
         content_value = raw_section.get("content")
         content = (
             content_value.strip() if isinstance(content_value, str) else ""
@@ -600,13 +624,18 @@ def normalize_generated_chapter(
         internal_ids = set(allowed_sections) | {
             material.material_id for material in context.materials
         }
-        if any(internal_id in content for internal_id in internal_ids):
+        if any(
+            internal_id in value
+            for internal_id in internal_ids
+            for value in (title, content)
+        ):
             raise ValueError("chapter section exposed internal id")
         seen_sections.add(section_id)
         seen_materials.update(used)
         generated_sections.append(
             GeneratedChapterSection(
                 section_id=section_id,
+                title=title,
                 content=content,
                 used_material_ids=tuple(used),
             )
@@ -776,6 +805,7 @@ async def generate_chapter_section(
                 generated_result.value.model_dump(),
                 context=section_context,
                 model=generated_result.response.resolved_model,
+                allow_title_revision=bool(revision_instruction),
             )
             _reject_repeated_section_boundary(
                 previous_section_content,
@@ -1077,9 +1107,39 @@ async def revise_and_save_chapter_draft_section_with_ai(
         raise HTTPException(status_code=404, detail="章节稿不存在")
     current = generated.sections[0]
     target_input = after.sections[target_index]
+    if current.title != target_input.title:
+        target_section = await db.get(
+            MemoirSection,
+            section_id,
+            populate_existing=True,
+        )
+        if (
+            target_section is None
+            or target_section.version != target_input.section_version
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="生成期间小节标题已更新，请刷新后重试",
+            )
+        target_section.title = current.title
+        target_section.version += 1
+        target_section.updated_at = datetime.now(UTC).replace(tzinfo=None)
+        db.add(target_section)
+        await mark_section_digests_stale(
+            db,
+            project_id=project_id,
+            section_ids={section_id},
+        )
+        await db.flush()
+        after = await load_chapter_generation_context(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+        )
+        target_input = after.sections[target_index]
     replacement = {
         "section_id": target_input.section_id,
-        "title": target_input.title,
+        "title": current.title,
         "section_type": target_input.section_type,
         "section_version": target_input.section_version,
         "sort_order": target_input.sort_order,
