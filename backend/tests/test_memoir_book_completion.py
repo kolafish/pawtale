@@ -120,7 +120,6 @@ class LayeredBookAI:
                         "reason": "这是用户需要决定的隐私边界。",
                         "priority": "high",
                         "section_ids": section_ids[:1],
-                        "material_ids": material_ids[:1],
                     }
                 ]
             payload = {
@@ -140,7 +139,6 @@ class LayeredBookAI:
                         "reason": "两章主题接近，需要用户决定取舍。",
                         "priority": "medium",
                         "chapter_ids": chapter_ids[:2],
-                        "material_ids": [],
                     }
                 ]
             payload = {
@@ -1005,7 +1003,8 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
     assert body["draft_sections"][1]["content"].startswith("那天刮着风")
     assert len(fake.prompts) == 1
     assert sources[0]["utterance_id"] not in fake.prompts[0]
-    assert added_source["utterance_id"] in fake.prompts[0]
+    assert added_source["utterance_id"] not in fake.prompts[0]
+    assert "material_id: M1" in fake.prompts[0]
     assert "学校里的比赛1" in fake.prompts[0]
     assert "当前小节标题：\n比赛后的回想峰" in fake.prompts[0]
     assert "当前小节正文：" in fake.prompts[0]
@@ -1297,7 +1296,7 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     test_db,
     monkeypatch,
 ):
-    project_id, _, _ = await _book(client, test_db, chapter_count=2)
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
     fake = LayeredBookAI(book_issue=True)
     _install_ai(monkeypatch, fake)
     bootstrapped = await client.post(
@@ -1313,6 +1312,11 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     review = generated.json()
 
     assert review["status"] == "ready"
+    book_prompt = next(
+        prompt for prompt in fake.prompts if "请审阅回忆录“" in prompt
+    )
+    assert all(chapter.id not in book_prompt for chapter in chapters)
+    assert "chapter_id: C1" in book_prompt
     assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
     issue = await test_db.scalar(
         select(MemoirCompletionIssue).where(

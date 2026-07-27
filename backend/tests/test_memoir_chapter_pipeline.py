@@ -74,6 +74,16 @@ class FakeChapterAI:
         return_raw=False,
     ):
         self.prompts.append(user_prompt)
+        prompt_section_ids = [
+            line.removeprefix("section_id: ").strip()
+            for line in user_prompt.splitlines()
+            if line.startswith("section_id: ")
+        ]
+        prompt_material_ids = [
+            line.removeprefix("material_id: ").strip()
+            for line in user_prompt.splitlines()
+            if line.startswith("material_id: ")
+        ]
         if "请审阅下面这个回忆录小章节" in user_prompt:
             payload = {
                 "summary": "朋友发来山桃花照片，随后一起参加爬山。",
@@ -93,8 +103,7 @@ class FakeChapterAI:
                         "question": "这次见面对你意味着什么？",
                         "reason": "会让章节重点更清楚。",
                         "priority": "high",
-                        "section_ids": [self.chapter_section_id],
-                        "material_ids": [self.chapter_material_id],
+                        "section_ids": prompt_section_ids[:1],
                     }
                 ],
             }
@@ -102,12 +111,18 @@ class FakeChapterAI:
             payload = {
                 "sections": [
                     {
-                        "section_id": self.chapter_section_id,
+                        "section_id": prompt_section_ids[0],
                         "content": (
                             "朋友发来一张山桃花照片，后来我们一起去爬山。"
                             "这次见面让一段疏远的关系重新有了联系。"
                         ),
-                        "used_material_ids": self.draft_material_ids,
+                        "used_material_ids": (
+                            ["M99"]
+                            if self.draft_material_ids == ["foreign-material"]
+                            else prompt_material_ids[
+                                :len(self.draft_material_ids)
+                            ]
+                        ),
                     }
                 ],
                 "missing_source_candidates": [],
@@ -207,14 +222,14 @@ def test_chapter_generation_preserves_explicit_section_boundaries():
         {
             "sections": [
                 {
-                    "section_id": "section-1",
+                    "section_id": "S1",
                     "content": "那天我从家里出发。",
-                    "used_material_ids": ["material-1"],
+                    "used_material_ids": ["M1"],
                 },
                 {
-                    "section_id": "section-2",
+                    "section_id": "S2",
                     "content": "傍晚时我终于抵达。",
-                    "used_material_ids": ["material-2"],
+                    "used_material_ids": ["M2"],
                 },
             ]
         },
@@ -236,14 +251,14 @@ def test_chapter_generation_rejects_reordered_sections():
             {
                 "sections": [
                     {
-                        "section_id": "section-2",
+                        "section_id": "S2",
                         "content": "傍晚时我终于抵达。",
-                        "used_material_ids": ["material-2"],
+                        "used_material_ids": ["M2"],
                     },
                     {
-                        "section_id": "section-1",
+                        "section_id": "S1",
                         "content": "那天我从家里出发。",
-                        "used_material_ids": ["material-1"],
+                        "used_material_ids": ["M1"],
                     },
                 ]
             },
@@ -258,14 +273,14 @@ def test_chapter_generation_rejects_cross_section_material():
             {
                 "sections": [
                     {
-                        "section_id": "section-1",
+                        "section_id": "S1",
                         "content": "傍晚时我终于抵达。",
-                        "used_material_ids": ["material-2"],
+                        "used_material_ids": ["M2"],
                     },
                     {
-                        "section_id": "section-2",
+                        "section_id": "S2",
                         "content": "那天我从家里出发。",
-                        "used_material_ids": ["material-1"],
+                        "used_material_ids": ["M1"],
                     },
                 ]
             },
@@ -303,10 +318,15 @@ async def test_chapter_generation_retries_only_the_invalid_section():
                 for line in user_prompt.splitlines()
                 if line.startswith("material_id: ")
             )
-            attempt = self.section_attempts.get(section_id, 0) + 1
-            self.section_attempts[section_id] = attempt
+            target = (
+                "section-2"
+                if "小节标题: 抵达" in user_prompt
+                else "section-1"
+            )
+            attempt = self.section_attempts.get(target, 0) + 1
+            self.section_attempts[target] = attempt
             used_material_ids = [material_id]
-            if section_id == "section-2" and attempt == 1:
+            if target == "section-2" and attempt == 1:
                 used_material_ids = []
             return json.dumps(
                 {
@@ -315,7 +335,7 @@ async def test_chapter_generation_retries_only_the_invalid_section():
                             "section_id": section_id,
                             "content": (
                                 "第一小节的正文"
-                                if section_id == "section-1"
+                                if target == "section-1"
                                 else "第二小节的正文"
                             ),
                             "used_material_ids": used_material_ids,
@@ -342,10 +362,10 @@ async def test_chapter_generation_retries_only_the_invalid_section():
     ]
     assert fake.section_attempts == {"section-1": 1, "section-2": 2}
     assert len(fake.prompts) == 3
-    assert "material-1" in fake.prompts[0]
-    assert "material-2" not in fake.prompts[0]
-    assert "material-2" in fake.prompts[1]
-    assert "material-1" not in fake.prompts[1]
+    assert "material-1" not in fake.prompts[0]
+    assert "material-2" not in fake.prompts[1]
+    assert "material_id: M1" in fake.prompts[0]
+    assert "material_id: M1" in fake.prompts[1]
     assert "上次输出未通过校验" in fake.prompts[2]
 
 
@@ -375,7 +395,7 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
                         "section_id": section_id,
                         "content": (
                             "那天我从家里出发。"
-                            if section_id == "section-1"
+                            if "小节标题: 出发" in user_prompt
                             else "傍晚时我终于抵达。"
                         ),
                         "used_material_ids": [material_id],
@@ -418,8 +438,9 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
     )
 
     assert len(second.prompts) == 1
-    assert "section_id: section-2" in second.prompts[0]
-    assert "section_id: section-1" not in second.prompts[0]
+    assert "小节标题: 抵达" in second.prompts[0]
+    assert "小节标题: 出发" not in second.prompts[0]
+    assert "section_id: S1" in second.prompts[0]
     assert [section.section_id for section in completed.sections] == [
         "section-1",
         "section-2",
@@ -520,9 +541,11 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     )
 
     assert len(fake.prompts) == 1
-    assert "section_id: section-2" in fake.prompts[0]
-    assert "material_id: material-2" in fake.prompts[0]
-    assert "material_id: material-1" not in fake.prompts[0]
+    assert "小节标题: 抵达" in fake.prompts[0]
+    assert "section_id: S1" in fake.prompts[0]
+    assert "material_id: M1" in fake.prompts[0]
+    assert "material-1" not in fake.prompts[0]
+    assert "material-2" not in fake.prompts[0]
     assert [section.content for section in generated.sections] == [
         "保留用户已经通读过的第一小节正文。",
         "这是补充素材整理后的第二小节正文。",
@@ -561,7 +584,7 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
             )
             content = (
                 repeated_boundary
-                if section_id == "section-1"
+                if "小节标题: 出发" in user_prompt
                 else (
                     f"{repeated_boundary_with_newline}\n\n"
                     if "上次输出未通过校验" not in user_prompt
@@ -814,6 +837,8 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     assert len(fake.prompts) == 2
     assert "原始讲述" in fake.prompts[0]
     assert "摘要:" in fake.prompts[1]
+    assert section["id"] not in fake.prompts[1]
+    assert "section_id: S1" in fake.prompts[1]
     assert digest.digest_json["candidate_issues"][0]["section_ids"] == [
         section["id"]
     ]
@@ -1058,8 +1083,9 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
     await test_db.commit()
 
     assert len(update_ai.prompts) == 1
-    assert f"section_id: {second.id}" in update_ai.prompts[0]
-    assert f"section_id: {first.id}" not in update_ai.prompts[0]
+    assert "section_id: S1" in update_ai.prompts[0]
+    assert first.id not in update_ai.prompts[0]
+    assert second.id not in update_ai.prompts[0]
     updated_sections = {
         item["section_id"]: item
         for item in updated_version.section_snapshot_json
@@ -1174,7 +1200,7 @@ async def test_chapter_generator_rejects_material_outside_allowlist(
         draft_material_ids=["foreign-material"],
     )
 
-    with pytest.raises(ValueError, match="outside allowlist"):
+    with pytest.raises(ValueError, match="unknown reference"):
         await chapter_generation.generate_and_save_chapter_draft(
             test_db,
             project_id=project_id,

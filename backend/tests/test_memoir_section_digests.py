@@ -105,7 +105,7 @@ def _valid_digest_payload(material_id: str) -> dict:
 
 async def test_section_digest_signature_reuses_same_material_input(client, test_db):
     project_id, section, created = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload(created[0]["utterance_id"]))
+    fake = FakeDigestAI(_valid_digest_payload("M1"))
 
     first = await section_digests.generate_or_reuse_section_digest(
         test_db,
@@ -126,7 +126,8 @@ async def test_section_digest_signature_reuses_same_material_input(client, test_
     assert second.input_signature == first.input_signature
     assert fake.calls == 1
     assert fake.max_tokens == [4000]
-    assert created[0]["utterance_id"] in fake.prompts[0]
+    assert created[0]["utterance_id"] not in fake.prompts[0]
+    assert "material_id: M1" in fake.prompts[0]
     assert "不要逐条检查时间、地点、人物" in fake.prompts[0]
     assert first.digest_json["candidate_issues"][0]["material_ids"] == [
         created[0]["utterance_id"]
@@ -141,7 +142,7 @@ async def test_section_digest_signature_reuses_same_material_input(client, test_
 
 async def test_section_change_marks_previous_digest_stale(client, test_db):
     project_id, section, created = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload(created[0]["utterance_id"]))
+    fake = FakeDigestAI(_valid_digest_payload("M1"))
     digest = await section_digests.generate_or_reuse_section_digest(
         test_db,
         project_id=project_id,
@@ -170,7 +171,7 @@ async def test_section_change_marks_previous_digest_stale(client, test_db):
 
 async def test_section_digest_rejects_material_outside_allowlist(client, test_db):
     project_id, section, _ = await _bootstrapped_section(client, test_db)
-    fake = FakeDigestAI(_valid_digest_payload("foreign-material"))
+    fake = FakeDigestAI(_valid_digest_payload("M99"))
 
     digest = await section_digests.generate_or_reuse_section_digest(
         test_db,
@@ -250,7 +251,7 @@ async def test_excluded_material_is_not_sent_to_digest_model(client, test_db):
     excluded.include_in_book = False
     await test_db.flush()
 
-    fake = FakeDigestAI(_valid_digest_payload(created[0]["utterance_id"]))
+    fake = FakeDigestAI(_valid_digest_payload("M1"))
     digest = await section_digests.generate_or_reuse_section_digest(
         test_db,
         project_id=project_id,
@@ -260,7 +261,8 @@ async def test_excluded_material_is_not_sent_to_digest_model(client, test_db):
     await test_db.commit()
 
     assert digest.status == MemoirSemanticCacheStatus.READY.value
-    assert created[0]["utterance_id"] in fake.prompts[0]
+    assert created[0]["utterance_id"] not in fake.prompts[0]
+    assert "material_id: M1" in fake.prompts[0]
     assert "朋友发来一张山桃花照片" in fake.prompts[0]
     assert created[1]["utterance_id"] not in fake.prompts[0]
     assert "那天六个人一起爬了西山" not in fake.prompts[0]
