@@ -384,6 +384,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
 - manual_review 只用于必须由用户决定的隐私、事实冲突或取舍，未处理时会阻止章节确认。
+- question 和 reason 会直接展示给用户；引用小章节时使用标题或“第几小节＋标题”，不得出现 S1、S2 等内部短编号。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。

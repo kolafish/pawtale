@@ -69,6 +69,39 @@ const PREPARATION_POLL_INTERVAL_MS = 1500;
 const SECTION_REGENERATION_POLL_INTERVAL_MS = 1500;
 const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
 
+function readableReviewText(
+  text: string,
+  workspace: MemoirChapterWorkspace,
+): string {
+  return workspace.sections
+    .filter((section) => (
+      section.status === "active"
+      && section.include_in_book !== false
+    ))
+    .sort((left, right) => (
+      left.sort_order - right.sort_order
+      || left.id.localeCompare(right.id)
+    ))
+    .reduce(
+      (value, section, index) => value.replace(
+        new RegExp(`S${index + 1}(?!\\d)`, "g"),
+        () => `第${index + 1}小节“${section.title}”`,
+      ),
+      text,
+    );
+}
+
+function readableIssue(
+  issue: MemoirCompletionIssue,
+  workspace: MemoirChapterWorkspace,
+): MemoirCompletionIssue {
+  return {
+    ...issue,
+    question: readableReviewText(issue.question, workspace),
+    reason: readableReviewText(issue.reason, workspace),
+  };
+}
+
 type ChapterWorkspaceOperationKind =
   | ""
   | "prepare"
@@ -559,10 +592,10 @@ definePage<ChapterWorkspacePageData>()({
       this.setData({
         requiredIssues: issueCollection.issues.filter(
           (issue) => issue.channel === "manual_review",
-        ),
+        ).map((issue) => readableIssue(issue, workspace)),
         optionalIssues: issueCollection.issues.filter(
           (issue) => issue.channel === "interview",
-        ),
+        ).map((issue) => readableIssue(issue, workspace)),
       });
     } catch (error) {
       if (loadSequence !== this.workspaceLoadSequence) {
@@ -583,6 +616,18 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
+    const summary = workspace.completion_summary;
+    summary.detail = readableReviewText(summary.detail, workspace);
+    summary.next_action.detail = readableReviewText(
+      summary.next_action.detail,
+      workspace,
+    );
+    if (summary.active_issue) {
+      summary.active_issue.question = readableReviewText(
+        summary.active_issue.question,
+        workspace,
+      );
+    }
     setPageNavigationTitle(workspace.chapter_title || "本章正文");
     this.setData({
       workspace,
