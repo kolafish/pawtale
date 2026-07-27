@@ -3,12 +3,9 @@ import type {
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
 import { aiTaskProgressPercent, type AITaskProgressMode } from "../../services/ai-task-progress";
-import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
   cancelMemoirBookCompletionJob,
-  closeMemoirCompletionIssue,
-  createMemoirVoiceSession,
   enqueueMemoirBookCompletionJob,
   enqueueMemoirChapterPreparationJob,
   getMemoirBookCompletionJob,
@@ -23,11 +20,6 @@ import {
   type PageDatasetEvent,
   type PageQuery,
 } from "../../services/page-input";
-import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
-} from "../../services/voice-authorization";
 
 
 const POLL_INTERVAL_MS = 1500;
@@ -64,7 +56,6 @@ interface BookCompletionData {
   bulkCheckCancelling: boolean;
   preparingChapterId: string;
   recheckingAll: boolean;
-  startingIssueId: string;
 }
 
 interface ChapterDataset {
@@ -262,7 +253,6 @@ definePage<BookCompletionData>()({
     bulkCheckCancelling: false,
     preparingChapterId: "",
     recheckingAll: false,
-    startingIssueId: "",
   },
 
   onLoad(options: PageQuery) {
@@ -380,22 +370,11 @@ definePage<BookCompletionData>()({
         (this.data.preparingChapterId || this.data.recheckingAll)
         && chapter.state !== "preparing"
       )
-      || this.data.startingIssueId
     ) {
       return;
     }
     if (chapter.next_action.kind === "prepare") {
       await this.prepareChapter(chapter.chapter_id);
-      return;
-    }
-    if (
-      chapter.next_action.kind === "start_interview"
-    ) {
-      await this.beginCompletionInterview(chapter);
-      return;
-    }
-    if (chapter.next_action.kind === "confirm") {
-      this.confirmCompletionIssue(chapter);
       return;
     }
     wx.navigateTo({
@@ -514,117 +493,6 @@ definePage<BookCompletionData>()({
     } finally {
       this.setData({ bulkCheckCancelling: false });
     }
-  },
-
-  async beginCompletionInterview(chapter: ChapterView) {
-    const issue = chapter.active_issue;
-    if (!issue) {
-      this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
-      return;
-    }
-    if (issue.status === "in_progress" && issue.active_session_id) {
-      this.openVoiceChat(issue.active_session_id, chapter.title);
-      return;
-    }
-    if (!readVoiceAuthorizationConsent()) {
-      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
-      return;
-    }
-    this.setData({ startingIssueId: issue.id, error: "" });
-    try {
-      await syncVoiceAuthorizationConsent();
-      const detail = await createMemoirVoiceSession({
-        guidance_mode: "guided_interview",
-        interview_type: "ai_interview",
-        session_goal: "book_completion",
-        current_completion_issue_id: issue.id,
-        provider: "volc_streaming_asr",
-        input_format: "pcm_s16le_16000_mono",
-        metadata_json: {
-          entry: "miniprogram_book_completion",
-          chapter_id: chapter.chapter_id,
-          completion_issue_id: issue.id,
-        },
-      }, { projectId: this.data.projectId });
-      trackAuditAction(
-        "voice_chat.start",
-        {
-          guidance_mode: "guided_interview",
-          interview_type: "ai_interview",
-          session_goal: "book_completion",
-          entry: "book_completion",
-        },
-        { projectId: this.data.projectId, voiceSessionId: detail.session.id },
-      );
-      this.openVoiceChat(detail.session.id, chapter.title);
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "AI 访谈创建失败",
-      });
-    } finally {
-      this.setData({ startingIssueId: "" });
-    }
-  },
-
-  confirmCompletionIssue(chapter: ChapterView) {
-    const issue = chapter.active_issue;
-    if (!issue || this.data.startingIssueId) {
-      return;
-    }
-    wx.showModal({
-      title: "请确认这一点",
-      content: issue.question,
-      confirmText: "确认",
-      cancelText: "先不处理",
-      success: (result) => {
-        if (result.confirm) {
-          void this.applyCompletionIssueConfirmation(chapter, issue.id);
-        }
-      },
-    });
-  },
-
-  async applyCompletionIssueConfirmation(chapter: ChapterView, issueId: string) {
-    if (this.data.startingIssueId) {
-      return;
-    }
-    this.setData({ startingIssueId: issueId, error: "" });
-    try {
-      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
-        outcome: "confirmed",
-        note: "用户已确认当前处理方向",
-      });
-      await enqueueMemoirChapterPreparationJob(
-        this.data.projectId,
-        chapter.chapter_id,
-        "prepare",
-      );
-      await this.loadOverview(true);
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "确认失败",
-      });
-    } finally {
-      this.setData({ startingIssueId: "" });
-    }
-  },
-
-  openVoiceChat(voiceSessionId: string, chapterTitle: string) {
-    wx.navigateTo({
-      url: pageUrl("/pages/voice-chat/index", {
-        voiceSessionId,
-        mode: "guided_interview",
-        interviewType: "ai_interview",
-        sessionGoal: "book_completion",
-        projectTitle: chapterTitle || this.data.projectTitle,
-      }),
-    });
   },
 
   schedulePolling() {

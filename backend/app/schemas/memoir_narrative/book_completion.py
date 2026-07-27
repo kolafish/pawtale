@@ -22,7 +22,6 @@ MemoirChapterCompletionNextActionKind = Literal[
     "prepare",
     "wait",
     "review_sections",
-    "start_interview",
     "confirm",
     "review_draft",
     "complete",
@@ -146,7 +145,6 @@ class MemoirChapterCompletionIssue(BaseModel):
     id: str
     question: str
     status: MemoirChapterCompletionIssueStatus
-    active_session_id: str | None = None
 
 
 class MemoirChapterCompletionSummary(BaseModel):

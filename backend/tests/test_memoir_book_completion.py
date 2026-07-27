@@ -67,10 +67,12 @@ class LayeredBookAI:
         self,
         *,
         section_issue: bool = False,
+        chapter_interview_issue: bool = False,
         chapter_manual_issue: bool = False,
         book_issue: bool = False,
     ):
         self.section_issue = section_issue
+        self.chapter_interview_issue = chapter_interview_issue
         self.chapter_manual_issue = chapter_manual_issue
         self.book_issue = book_issue
         self.system_prompts: list[str] = []
@@ -110,7 +112,18 @@ class LayeredBookAI:
             }
         elif "请审阅回忆录章节" in user_prompt:
             candidates = []
-            if self.chapter_manual_issue:
+            if self.chapter_interview_issue:
+                candidates = [
+                    {
+                        "issue_type": "meaning",
+                        "channel": "interview",
+                        "question": "这段经历后来对你有什么影响？",
+                        "reason": "补充个人影响会让这一章更丰富。",
+                        "priority": "medium",
+                        "section_ids": section_ids[:1],
+                    }
+                ]
+            elif self.chapter_manual_issue:
                 candidates = [
                     {
                         "issue_type": "privacy",
@@ -382,7 +395,7 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
         chapter_id=chapter.id,
         status=MemoirBookChapterDraftStatus.DRAFT,
     )
-    fake = LayeredBookAI()
+    fake = LayeredBookAI(chapter_interview_issue=True)
     _install_ai(monkeypatch, fake)
 
     prepared = await client.post(
@@ -1076,7 +1089,7 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
 ):
     project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
-    fake = LayeredBookAI()
+    fake = LayeredBookAI(chapter_interview_issue=True)
     _install_ai(monkeypatch, fake)
 
     initial = await client.get(
@@ -1138,6 +1151,14 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     )
     assert confirmed.status_code == 200, confirmed.text
     assert confirmed.json()["status"] == "confirmed"
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirCompletionIssue)
+        .where(
+            MemoirCompletionIssue.project_id == project_id,
+            MemoirCompletionIssue.status == "open",
+        )
+    ) == 1
     overview = await client.get(
         f"/api/memoir/projects/{project_id}/book-completion/overview"
     )

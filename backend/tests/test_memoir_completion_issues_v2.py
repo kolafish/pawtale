@@ -261,6 +261,10 @@ async def test_completion_voice_session_appends_every_answer_segment_to_section(
     assert created.status_code == 201
     session_id = created.json()["session"]["id"]
     assert created.json()["session"]["current_completion_issue_id"] == issue.id
+    listed = await client.get(
+        f"/api/memoir/projects/{project_id}/completion-issues"
+    )
+    assert listed.json()["issues"][0]["active_session_id"] == session_id
     persistence = VoiceFinalPersistenceService(
         db=test_db,
         voice_session_id=session_id,

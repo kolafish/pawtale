@@ -16,6 +16,7 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
     MemoirCreatedBy,
     MemoirSectionStatus,
@@ -1522,13 +1523,15 @@ async def confirm_chapter_draft(
         .where(
             MemoirCompletionIssue.project_id == project_id,
             MemoirCompletionIssue.chapter_id == chapter_id,
+            MemoirCompletionIssue.channel
+            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
             MemoirCompletionIssue.status
             != MemoirCompletionIssueStatus.CLOSED.value,
         )
         .limit(1)
     )
     if blocking_issue is not None:
-        raise HTTPException(status_code=409, detail="本章还有一个补全问题待处理")
+        raise HTTPException(status_code=409, detail="本章还有一项需要确认")
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
     draft.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(draft)

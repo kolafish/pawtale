@@ -10,7 +10,6 @@ export type MemoirChapterCompletionNextActionKind =
   | "prepare"
   | "wait"
   | "review_sections"
-  | "start_interview"
   | "confirm"
   | "review_draft"
   | "complete";
@@ -28,7 +27,6 @@ export interface MemoirChapterCompletionIssue {
   id: string;
   question: string;
   status: "pending" | "in_progress";
-  active_session_id?: string | null;
 }
 
 export interface MemoirChapterCompletionSummary {

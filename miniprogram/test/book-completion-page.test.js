@@ -6,7 +6,7 @@ const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
+function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookCompletionJob: async () => bulkJob(),
     getMemoirBookCompletionOverview: async () => {
@@ -21,21 +21,9 @@ function loadBookCompletionPage({ voiceApiExports = {}, consent = true } = {}) {
     enqueueMemoirChapterPreparationJob: async () => {
       throw new Error("enqueueMemoirChapterPreparationJob was not mocked");
     },
-    createMemoirVoiceSession: async () => {
-      throw new Error("createMemoirVoiceSession was not mocked");
-    },
-    closeMemoirCompletionIssue: async () => {
-      throw new Error("closeMemoirCompletionIssue was not mocked");
-    },
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
-  mockModule("../services/audit-tracker.ts", { trackAuditAction() {} });
-  mockModule("../services/voice-authorization.ts", {
-    readVoiceAuthorizationConsent: () => consent,
-    syncVoiceAuthorizationConsent: async () => {},
-    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
-  });
   return loadPageModule("../pages/book-completion/index.ts");
 }
 
@@ -46,18 +34,17 @@ function completionChapter(overrides = {}) {
     sort_order: 0,
     state: "needs_input",
     next_action: {
-      kind: "start_interview",
-      title: "这段回忆为什么重要？",
-      detail: "讲完后会自动继续整理。",
-      action_text: "开始讲",
+      kind: "confirm",
+      title: "需要确认真实姓名是否保留",
+      detail: "涉及隐私边界。",
+      action_text: "确认",
       disabled: false,
       issue_id: "issue-1",
     },
     active_issue: {
       id: "issue-1",
-      question: "这段回忆为什么重要？",
+      question: "是否保留真实姓名？",
       status: "pending",
-      active_session_id: null,
     },
     headline: "还需要讲一件事",
     detail: "讲完后会自动继续整理。",
@@ -138,7 +125,7 @@ test("book completion overview exposes confirmed chapter progress and one action
   const patch = bookCompletionViewPatch(readyOverview());
 
   assert.equal(patch.progressText, "1 / 2 章正文已确认");
-  assert.equal(patch.chapters[0].actionText, "开始讲");
+  assert.equal(patch.chapters[0].actionText, "确认");
   assert.equal(patch.chapters[1].actionText, "查看正文");
   assert.equal(patch.allChaptersConfirmed, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
@@ -577,34 +564,6 @@ test("book completion resumes polling after a transient recheck refresh failure"
     global.clearTimeout = originalClearTimeout;
     delete global.wx;
   }
-});
-
-test("book completion starts the selected completion directly", async () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const overview = readyOverview();
-  const { page, mod } = loadBookCompletionPage({
-    voiceApiExports: {
-      createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project-1",
-    projectTitle: "爷爷的故事",
-    chapters: mod.bookCompletionViewPatch(overview).chapters,
-  });
-
-  await page.tapChapter.call(context, {
-    currentTarget: { dataset: { chapterId: "chapter-1" } },
-  });
-
-  assert.match(navigations[0], /pages\/voice-chat\/index/);
-  assert.match(navigations[0], /voiceSessionId=session-1/);
-  delete global.wx;
 });
 
 test("book completion prepares an untouched chapter in place", async () => {

@@ -11,17 +11,14 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirSemanticCacheStatus,
-    MemoirVoiceSessionStatus,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
-    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirSection,
-    MemoirVoiceSession,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
@@ -96,70 +93,6 @@ async def _latest_version(
     return draft, version
 
 
-async def _active_issue(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> MemoirCompletionIssue | None:
-    issues = await completion_issues.list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    return next(
-        (
-            issue
-            for issue in issues
-            if issue.status != MemoirCompletionIssueStatus.CLOSED.value
-        ),
-        None,
-    )
-
-
-async def _active_issue_session_id(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    issue_id: str,
-) -> str | None:
-    return await db.scalar(
-        select(MemoirVoiceSession.id)
-        .where(
-            MemoirVoiceSession.project_id == project_id,
-            MemoirVoiceSession.current_completion_issue_id == issue_id,
-            MemoirVoiceSession.status.not_in(
-                {
-                    MemoirVoiceSessionStatus.STOPPED.value,
-                    MemoirVoiceSessionStatus.FAILED.value,
-                }
-            ),
-        )
-        .order_by(
-            MemoirVoiceSession.updated_at.desc(),
-            MemoirVoiceSession.id.desc(),
-        )
-        .limit(1)
-    )
-
-
-async def _issue_target_label(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    issue: MemoirCompletionIssue,
-) -> str:
-    if issue.section_id is None:
-        return ""
-    title = await db.scalar(
-        select(MemoirSection.title).where(
-            MemoirSection.project_id == project_id,
-            MemoirSection.id == issue.section_id,
-        )
-    )
-    return f"小节《{title}》" if title else "当前小节"
-
-
 async def chapter_summary(
     db: AsyncSession,
     *,
@@ -209,10 +142,19 @@ async def chapter_summary(
         )
         is not None
     )
-    issue = await _active_issue(
+    issues = await completion_issues.list_issues(
         db,
         project_id=project_id,
         chapter_id=chapter.id,
+    )
+    issue = next(
+        (
+            issue
+            for issue in issues
+            if issue.channel
+            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
+        ),
+        None,
     )
     draft, version = await _latest_version(
         db,
@@ -287,48 +229,30 @@ async def chapter_summary(
             detail="检查后只会给出一个明确的下一步。",
         )
     if issue is not None:
-        manual = (
-            issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
-        )
-        target_label = await _issue_target_label(
-            db,
-            project_id=project_id,
-            issue=issue,
-        )
         item_status = (
             "in_progress"
             if issue.status == MemoirCompletionIssueStatus.IN_PROGRESS.value
             else "pending"
         )
-        headline = "需要确认" if manual else "还需要补充一点"
-        detail = issue.reason
-        if target_label:
-            headline = f"{target_label}{headline}"
-            detail = f"针对{target_label}：{detail}"
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
             title=chapter.title,
             sort_order=chapter.sort_order,
             state="needs_input",
             next_action=MemoirChapterCompletionNextAction(
-                kind="confirm" if manual else "start_interview",
-                title="需要您确认一件事" if manual else "建议补讲一件事",
+                kind="confirm",
+                title="需要您确认一件事",
                 detail=issue.question,
-                action_text="确认" if manual else "去补充",
+                action_text="确认",
                 issue_id=issue.id,
             ),
             active_issue=MemoirChapterCompletionIssue(
                 id=issue.id,
                 question=issue.question,
                 status=item_status,
-                active_session_id=await _active_issue_session_id(
-                    db,
-                    project_id=project_id,
-                    issue_id=issue.id,
-                ),
             ),
-            headline=headline,
-            detail=detail,
+            headline="需要确认",
+            detail=issue.reason,
         )
     if (
         draft is not None

@@ -192,6 +192,11 @@ function loadWorkspacePage({
     cancelMemoirChapterSectionRegenerationJob: async () => {},
     placeMemoirChapterMaterial: async () => {},
     closeMemoirCompletionIssue: async () => {},
+    listMemoirCompletionIssues: async () => ({
+      project_id: "project-1",
+      current_issue: null,
+      issues: [],
+    }),
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
     reviseMemoirBookChapterDraft: async () => ({}),
     confirmMemoirBookChapterDraft: async () => ({}),
@@ -896,44 +901,51 @@ test("chapter workspace confirms the current completion issue then prepares agai
   delete global.wx;
 });
 
-test("chapter workspace can speak or close a completion issue after editing", async () => {
+test("chapter workspace lists optional suggestions and reuses their actions", async () => {
   const { navigations } = installWx();
   const calls = [];
-  const interviewSummary = summary({
-    state: "needs_input",
-    next_action: {
-      kind: "start_interview",
-      title: "离家后的第一晚是什么感受？",
-      detail: "讲完后会自动继续整理。",
-      action_text: "开始讲",
-      disabled: false,
-      issue_id: "issue-1",
-    },
-    active_issue: {
-      id: "issue-1",
-      question: "离家后的第一晚是什么感受？",
-      status: "pending",
-      active_session_id: null,
-    },
-  });
+  const optionalIssue = {
+    id: "issue-1",
+    project_id: "project-1",
+    scope: "chapter",
+    chapter_id: "chapter-1",
+    issue_type: "meaning",
+    channel: "interview",
+    question: "离家后的第一晚是什么感受？",
+    reason: "补充感受会让这一段更丰富。",
+    priority: "medium",
+    related_material_ids: [],
+    input_signature: "signature-1",
+    status: "open",
+    outcome_note: "",
+    created_at: "2026-07-27T00:00:00",
+    updated_at: "2026-07-27T00:00:00",
+  };
   const { page } = loadWorkspacePage({
-    currentWorkspace: workspace({ completion_summary: interviewSummary }),
     voiceApiExports: {
+      listMemoirCompletionIssues: async () => ({
+        project_id: "project-1",
+        current_issue: optionalIssue,
+        issues: [optionalIssue],
+      }),
       closeMemoirCompletionIssue: async (...args) => calls.push(["close", ...args]),
-      enqueueMemoirChapterPreparationJob: async (...args) => {
-        calls.push(["prepare", ...args]);
-        return chapterPreparationJob({ job_id: "chapter-job-1", status: "pending" });
-      },
     },
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
-  await page.runNextAction.call(context);
+  assert.equal(context.data.requiredIssues.length, 0);
+  assert.equal(context.data.optionalIssues.length, 1);
+
+  await page.beginCompletionInterview.call(context, {
+    currentTarget: { dataset: { issueId: "issue-1" } },
+  });
   assert.match(navigations[0], /pages\/voice-chat\/index/);
   assert.match(navigations[0], /voiceSessionId=session-1/);
 
-  page.resolveCurrentIssueAfterEdit.call(context);
+  page.resolveOptionalIssueAfterEdit.call(context, {
+    currentTarget: { dataset: { issueId: "issue-1" } },
+  });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls, [
@@ -941,7 +953,6 @@ test("chapter workspace can speak or close a completion issue after editing", as
       outcome: "confirmed",
       note: "用户已通过修改处理",
     }],
-    ["prepare", "project-1", "chapter-1", "prepare"],
   ]);
   delete global.wx;
 });
@@ -1218,58 +1229,6 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
   delete global.wx;
 });
 
-test("legacy flat draft brings the required next step into the empty state", async () => {
-  const { navigations } = installWx();
-  const interviewSummary = summary({
-    state: "needs_input",
-    next_action: {
-      kind: "start_interview",
-      title: "建议补讲一件事",
-      detail: "再补充一次见面的细节。",
-      action_text: "去补充",
-      disabled: false,
-      issue_id: "issue-legacy",
-    },
-    active_issue: {
-      id: "issue-legacy",
-      question: "第一次见面还有哪些细节？",
-      status: "pending",
-      active_session_id: null,
-    },
-  });
-  const { page } = loadWorkspacePage({
-    currentWorkspace: workspace({
-      completion_summary: interviewSummary,
-      draft_needs_rewrite: true,
-      can_rewrite_draft: false,
-      draft_sections: [],
-    }),
-  });
-  const context = pageContext(page);
-
-  await page.onLoad.call(context, {
-    projectId: "project-1",
-    chapterId: "chapter-1",
-  });
-
-  assert.equal(context.data.draftRecoveryTitle, "先完成本章当前一步");
-  assert.match(context.data.draftRecoveryDetail, /完成当前步骤/);
-  assert.match(context.data.draftRecoveryDetail, /全部完成后/);
-  assert.match(
-    context.data.draftRecoveryDetail,
-    /更新 1 个有变化的小节正文/,
-  );
-  assert.match(context.data.draftRecoveryDetail, /不是当前必做步骤/);
-  assert.equal(context.data.draftRecoveryActionText, "去补充");
-  assert.equal(context.data.draftRecoveryActionKind, "next");
-
-  await page.runDraftRecoveryAction.call(context);
-
-  assert.match(navigations[0], /pages\/voice-chat\/index/);
-  assert.match(navigations[0], /voiceSessionId=session-1/);
-  delete global.wx;
-});
-
 test("legacy flat draft exposes direct section draft regeneration when ready", async () => {
   const { toasts } = installWx();
   const calls = [];
@@ -1424,27 +1383,26 @@ test("chapter workspace confirms the current structured draft without an assembl
   delete global.wx;
 });
 
-test("open completion work keeps an existing draft from being confirmed", async () => {
+test("required review keeps an existing draft from being confirmed", async () => {
   installWx();
-  const interviewSummary = summary({
+  const reviewSummary = summary({
     state: "needs_input",
     next_action: {
-      kind: "start_interview",
-      title: "离家后的第一晚是什么感受？",
-      detail: "讲完后会自动继续整理。",
-      action_text: "开始讲",
+      kind: "confirm",
+      title: "需要确认真实姓名是否保留",
+      detail: "涉及隐私边界。",
+      action_text: "确认",
       disabled: false,
       issue_id: "issue-1",
     },
     active_issue: {
       id: "issue-1",
-      question: "离家后的第一晚是什么感受？",
+      question: "是否保留真实姓名？",
       status: "pending",
-      active_session_id: null,
     },
   });
   const { page } = loadWorkspacePage({
-    currentWorkspace: workspace({ completion_summary: interviewSummary }),
+    currentWorkspace: workspace({ completion_summary: reviewSummary }),
   });
   const context = pageContext(page);
 
@@ -1455,7 +1413,7 @@ test("open completion work keeps an existing draft from being confirmed", async 
   delete global.wx;
 });
 
-test("chapter workspace can rewrite with completion answers instead of forcing another interview", async () => {
+test("chapter workspace can rewrite while optional suggestions remain open", async () => {
   const { toasts, modals } = installWx();
   const calls = [];
   const baseWorkspace = workspace();
@@ -1488,23 +1446,7 @@ test("chapter workspace can rewrite with completion answers instead of forcing a
     pending_completion_source_count: 1,
     sections: currentSections,
     draft_sections: draftSections,
-    completion_summary: summary({
-      state: "needs_input",
-      next_action: {
-        kind: "start_interview",
-        title: "还可以继续补充",
-        detail: "也可以先按现有素材整理。",
-        action_text: "继续补充",
-        disabled: false,
-        issue_id: "issue-3",
-      },
-      active_issue: {
-        id: "issue-3",
-        question: "还记得更多细节吗？",
-        status: "pending",
-        active_session_id: null,
-      },
-    }),
+    completion_summary: summary(),
   });
   const { page } = loadWorkspacePage({
     currentWorkspace: staleWorkspace,
