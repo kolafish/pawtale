@@ -7,7 +7,9 @@ export interface RecorderResourceHandlers {
   onStart?: () => void;
   onFrame?: (result: RecorderFrameResult) => void;
   onError?: (message: string) => void;
-  onStop?: () => void;
+  onStop?: (
+    result?: WechatMiniprogram.RecorderManagerStopCallbackResult,
+  ) => void;
 }
 
 type RecorderManagerFactory = () => WechatMiniprogram.RecorderManager;
@@ -128,8 +130,8 @@ export class WechatRecorderResource {
     this.manager.onError?.((error) => {
       this.handleError(error.errMsg || "录音失败");
     });
-    this.manager.onStop?.(() => {
-      this.handleStop();
+    this.manager.onStop?.((result) => {
+      this.handleStop(result);
     });
     this.eventsBound = true;
   }
@@ -140,10 +142,12 @@ export class WechatRecorderResource {
     onError?.(message);
   }
 
-  private handleStop(): void {
+  private handleStop(
+    result?: WechatMiniprogram.RecorderManagerStopCallbackResult,
+  ): void {
     const onStop = this.handlers?.onStop;
     this.releaseOwner();
-    onStop?.();
+    onStop?.(result);
   }
 
   private waitForStop(): Promise<void> {

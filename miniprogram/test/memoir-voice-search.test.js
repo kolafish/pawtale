@@ -7,10 +7,12 @@ function loadVoiceSearchService({ voiceApiExports = {}, privacyExports = {}, aut
   const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
   const privacyPath = require.resolve("../services/wechat-privacy.ts");
   const authorizationPath = require.resolve("../services/voice-authorization.ts");
+  const recorderResourcePath = require.resolve("../services/recorder-resource.ts");
   const voiceSearchPath = require.resolve("../services/memoir-voice-search.ts");
   delete require.cache[voiceApiPath];
   delete require.cache[privacyPath];
   delete require.cache[authorizationPath];
+  delete require.cache[recorderResourcePath];
   delete require.cache[voiceSearchPath];
   require.cache[voiceApiPath] = {
     id: voiceApiPath,
@@ -44,7 +46,10 @@ function loadVoiceSearchService({ voiceApiExports = {}, privacyExports = {}, aut
       ...authorizationExports,
     },
   };
-  return require(voiceSearchPath);
+  return {
+    ...require(voiceSearchPath),
+    sharedRecorderResource: require(recorderResourcePath).sharedRecorderResource,
+  };
 }
 
 async function flushAsyncSetup() {
@@ -231,8 +236,9 @@ test("voice search service auto-stops when no speech is detected", async () => {
 });
 
 test("voice input manual mode waits for the user to stop despite initial silence", async () => {
-  let onStop = null;
-  let onFrameRecorded = null;
+  const onStarts = [];
+  const onStops = [];
+  const onFrames = [];
   const starts = [];
   const stops = [];
   global.wx = {
@@ -244,12 +250,14 @@ test("voice input manual mode waits for the user to stop despite initial silence
         stop() {
           stops.push("stop");
         },
-        onStart() {},
+        onStart(callback) {
+          onStarts.push(callback);
+        },
         onStop(callback) {
-          onStop = callback;
+          onStops.push(callback);
         },
         onFrameRecorded(callback) {
-          onFrameRecorded = callback;
+          onFrames.push(callback);
         },
         onError() {},
       };
@@ -264,6 +272,7 @@ test("voice input manual mode waits for the user to stop despite initial silence
   };
   const {
     recordMemoirVoiceSearchQuery,
+    sharedRecorderResource,
     stopMemoirVoiceSearchRecording,
   } = loadVoiceSearchService({
     voiceApiExports: {
@@ -271,20 +280,39 @@ test("voice input manual mode waits for the user to stop despite initial silence
     },
   });
 
+  sharedRecorderResource.start("previous-voice-session", {}, {});
+  onStarts.forEach((callback) => callback());
+  const previousStop = sharedRecorderResource.stopAndWait(
+    "previous-voice-session",
+  );
+  onStops.forEach((callback) => callback({}));
+  await previousStop;
+  starts.length = 0;
+  stops.length = 0;
+
   const promise = recordMemoirVoiceSearchQuery({
     stopMode: "manual",
     maxDurationMs: 30000,
   });
   await flushAsyncSetup();
+  onStarts.forEach((callback) => callback());
+  assert.deepEqual(stops, []);
   for (let index = 0; index < 40; index += 1) {
-    onFrameRecorded({ frameBuffer: pcmFrame(0), isLastFrame: false });
+    onFrames.forEach((callback) => callback({
+      frameBuffer: pcmFrame(0),
+      isLastFrame: false,
+    }));
   }
 
   assert.equal(starts[0].duration, 30000);
   assert.deepEqual(stops, []);
   stopMemoirVoiceSearchRecording();
   assert.deepEqual(stops, ["stop"]);
-  onStop({ tempFilePath: "/tmp/voice-edit.pcm", duration: 5000, fileSize: 20000 });
+  onStops.forEach((callback) => callback({
+    tempFilePath: "/tmp/voice-edit.pcm",
+    duration: 5000,
+    fileSize: 20000,
+  }));
   assert.equal(await promise, "把外婆改成奶奶");
   delete global.wx;
 });
@@ -308,7 +336,8 @@ test("voice search service navigates to authorization before recording", async (
   delete global.wx;
 });
 
-test("voice search service rejects pending recording when stop fails", async () => {
+test("voice search service finishes a recording when native stop fails", async () => {
+  let onStart = null;
   global.wx = {
     getRecorderManager() {
       return {
@@ -316,7 +345,9 @@ test("voice search service rejects pending recording when stop fails", async () 
         stop() {
           throw new Error("operateRecorder:fail already stopped");
         },
-        onStart() {},
+        onStart(callback) {
+          onStart = callback;
+        },
         onStop() {},
         onFrameRecorded() {},
         onError() {},
@@ -330,8 +361,9 @@ test("voice search service rejects pending recording when stop fails", async () 
 
   const promise = recordMemoirVoiceSearchQuery();
   await flushAsyncSetup();
+  onStart();
   stopMemoirVoiceSearchRecording();
 
-  await assert.rejects(promise, /already stopped/);
+  await assert.rejects(promise, /没有生成可识别的语音/);
   delete global.wx;
 });
