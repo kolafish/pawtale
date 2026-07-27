@@ -27,6 +27,7 @@ from app.models.memoir import (
     MemoirSectionDigest,
     MemoirSectionMaterial,
 )
+from app.services.ai_references import ModelReferenceMap
 from app.services.memoir import (
     chapter_digests,
     chapter_generation,
@@ -89,7 +90,16 @@ class FakeChapterAI:
                 "summary": "朋友发来山桃花照片，随后一起参加爬山。",
                 "focus": "一段疏远的关系重新搭上线。",
                 "covered_points": ["重新联系", "第一次共同活动"],
-                "candidate_issues": [],
+                "editorial_guidance": ["删掉重复的爬山经过。"],
+                "candidate_issues": [
+                    {
+                        "issue_type": "meaning",
+                        "question": "这次重新联系为什么重要？",
+                        "reason": "有助于理解这段关系。",
+                        "priority": "medium",
+                        "material_ids": prompt_material_ids[:1],
+                    }
+                ],
             }
         elif "请审阅回忆录章节" in user_prompt:
             payload = {
@@ -837,6 +847,8 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     assert len(fake.prompts) == 2
     assert "原始讲述" in fake.prompts[0]
     assert "摘要:" in fake.prompts[1]
+    assert "删掉重复的爬山经过" in fake.prompts[1]
+    assert "这次重新联系为什么重要" in fake.prompts[1]
     assert section["id"] not in fake.prompts[1]
     assert "section_id: S1" in fake.prompts[1]
     assert digest.digest_json["candidate_issues"][0]["section_ids"] == [
@@ -851,6 +863,44 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
     )
     assert issue is not None
     assert issue.question == "这次见面对你意味着什么？"
+    issues = list(
+        (
+            await test_db.scalars(
+                select(MemoirCompletionIssue).where(
+                    MemoirCompletionIssue.project_id == project_id,
+                    MemoirCompletionIssue.chapter_id == chapter.id,
+                )
+            )
+        ).all()
+    )
+    assert len(issues) == 1
+    assert issues[0].scope == "chapter"
+
+
+def test_chapter_digest_keeps_all_independent_user_questions():
+    candidates = [
+        {
+            "issue_type": "clarity",
+            "channel": "interview",
+            "question": f"需要确认的独立问题{i}",
+            "reason": f"问题{i}会影响整章理解。",
+            "priority": "medium",
+            "section_ids": ["S1"],
+        }
+        for i in range(5)
+    ]
+
+    normalized = chapter_digests.normalize_chapter_digest(
+        {
+            "summary": "章节摘要",
+            "focus": "章节重点",
+            "structure_guidance": [],
+            "candidate_issues": candidates,
+        },
+        section_references=ModelReferenceMap("S", ["section-1"]),
+    )
+
+    assert len(normalized["candidate_issues"]) == 5
 
 
 async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(

@@ -43,7 +43,7 @@ from app.services.memoir import completion_issues, section_digests
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v1"
+CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v2"
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -179,7 +179,7 @@ async def ensure_section_digests(
                 }
             )
         try:
-            await completion_issues.refresh_section_issues(
+            await section_digests.generate_or_reuse_section_digest(
                 db,
                 project_id=project_id,
                 section_id=section.id,
@@ -349,7 +349,9 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
             f"类型: {item.section_type}\n"
             f"摘要: {item.digest.get('summary', '')}\n"
             f"重点: {item.digest.get('focus', '')}\n"
-            f"已讲清: {item.digest.get('covered_points', [])}"
+            f"已讲清: {item.digest.get('covered_points', [])}\n"
+            f"编辑建议: {item.digest.get('editorial_guidance', [])}\n"
+            f"候选补充: {item.digest.get('candidate_issues', [])}"
         )
         for item in context.sections
     )
@@ -377,8 +379,9 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 
 要求：
 - 先判断整章是否自然成立，不按固定模板逐项找缺口。
+- 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
 - 已有素材足够、只需重排或改写的问题写入 structure_guidance，不要求用户补讲。
-- candidate_issues 最多三个；只保留用户回答或确认后会明显改善结果的问题。
+- candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。
@@ -410,7 +413,7 @@ def normalize_chapter_digest(
     candidate_values = payload.get("candidate_issues")
     if not isinstance(candidate_values, list):
         candidate_values = []
-    for candidate in candidate_values[:3]:
+    for candidate in candidate_values:
         if not isinstance(candidate, dict):
             continue
         question = _compact(candidate.get("question"), limit=180)

@@ -44,7 +44,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-SECTION_DIGEST_ENGINE = "llm_section_digest_v1"
+SECTION_DIGEST_ENGINE = "llm_section_digest_v2"
 SECTION_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制、敏锐的中文回忆录编辑。"
     "你只根据给定小章节和原始讲述判断读者是否容易理解，不补写事实。"
@@ -97,6 +97,7 @@ class _SectionDigestOutput(BaseModel):
     summary: str
     focus: str = ""
     covered_points: list[str] = Field(default_factory=list)
+    editorial_guidance: list[str] = Field(default_factory=list)
     candidate_issues: list[_SectionDigestIssueOutput] = Field(default_factory=list)
 
 
@@ -263,6 +264,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
   "summary": "一到三句话概括已经讲述的内容",
   "focus": "这个小章节真正想表达的重点",
   "covered_points": ["已经讲清楚的要点"],
+  "editorial_guidance": ["只用现有素材即可处理的去重、顺序、衔接、标题或表达建议"],
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity",
@@ -276,6 +278,7 @@ def build_section_digest_prompt(context: SectionDigestContext) -> str:
 
 要求：
 - 先理解这一段真正想表达什么，不要逐条检查时间、地点、人物、起因和结果。
+- 能通过编辑现有素材解决的问题写入 editorial_guidance，不要向用户提问。
 - 只提出会明显改善读者理解的问题；内容已经自然成立时 candidate_issues 可以为空。
 - candidate_issues 最多三个，并按价值排序。
 - 不要要求讲述者证明事实，不要创造素材中没有的信息。
@@ -340,6 +343,11 @@ def normalize_section_digest_payload(
             payload.get("covered_points"),
             limit=8,
             item_limit=120,
+        ),
+        "editorial_guidance": _string_list(
+            payload.get("editorial_guidance"),
+            limit=6,
+            item_limit=240,
         ),
         "candidate_issues": issues,
     }

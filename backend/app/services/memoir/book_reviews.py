@@ -40,7 +40,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v1"
+BOOK_REVIEW_ENGINE = "llm_book_review_v2"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据章节摘要审阅全书层面的结构，不创造人生经历。"
@@ -314,7 +314,8 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
 - 纯编辑问题写入 structure_guidance，不要求用户补讲。
-- candidate_issues 最多三个；不能创建摘要中没有的人生事实。
+- candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
+- 不能创建摘要中没有的人生事实。
 - chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 """
 
@@ -344,7 +345,7 @@ def normalize_book_review(
         "privacy",
         "conflict",
     }
-    for candidate in candidates[:3]:
+    for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
         question = _compact(candidate.get("question"), limit=180)

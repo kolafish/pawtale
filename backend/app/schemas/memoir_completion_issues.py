@@ -43,11 +43,6 @@ class MemoirCompletionIssueCollectionResponse(BaseModel):
     issues: list[MemoirCompletionIssueResponse] = Field(default_factory=list)
 
 
-class MemoirSectionIssueRefreshRequest(BaseModel):
-    ai_model: str | None = None
-    force_digest: bool = False
-
-
 class MemoirCompletionIssueCloseRequest(BaseModel):
     outcome: MemoirCompletionIssueOutcome
     note: str = Field(default="", max_length=1000)

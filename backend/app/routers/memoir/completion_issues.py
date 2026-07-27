@@ -9,11 +9,9 @@ from app.schemas.memoir_completion_issues import (
     MemoirCompletionIssueCloseRequest,
     MemoirCompletionIssueCollectionResponse,
     MemoirCompletionIssueResponse,
-    MemoirSectionIssueRefreshRequest,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import completion_issues
-from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 router = APIRouter(tags=["memoir-completion-issues"])
@@ -50,38 +48,6 @@ async def list_memoir_completion_issues(
         project_id=project_id,
         chapter_id=chapter_id,
         include_closed=include_closed,
-    )
-
-
-@router.post(
-    "/projects/{project_id}/sections/{section_id}/completion-issues/refresh",
-    response_model=MemoirCompletionIssueCollectionResponse,
-)
-async def refresh_memoir_section_completion_issues(
-    project_id: str,
-    section_id: str,
-    req: MemoirSectionIssueRefreshRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    project = await _authorize(db, project_id=project_id, current_user=current_user)
-    await completion_issues.refresh_section_issues(
-        db,
-        project_id=project_id,
-        section_id=section_id,
-        ai_model=select_project_ai_model(project, req.ai_model),
-        force_digest=req.force_digest,
-    )
-    await db.commit()
-    section = await completion_issues.load_section(
-        db,
-        project_id=project_id,
-        section_id=section_id,
-    )
-    return await completion_issues.collection_response(
-        db,
-        project_id=project_id,
-        chapter_id=section.chapter_id,
     )
 
 
