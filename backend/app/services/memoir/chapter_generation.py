@@ -36,6 +36,7 @@ from app.schemas.memoir_chapter_pipeline import (
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import (
     AIProviderTimeoutError,
     ai_text_timeout_seconds,
@@ -565,6 +566,14 @@ def build_chapter_generation_prompt(
     current_section_content: str = "",
     revision_instruction: str = "",
 ) -> str:
+    section_refs = ModelReferenceMap(
+        "S",
+        (section.section_id for section in context.sections),
+    )
+    material_refs = ModelReferenceMap(
+        "M",
+        (material.material_id for material in context.materials),
+    )
     outline_sections = chapter_sections or context.sections
     target_section_id = (
         context.sections[0].section_id
@@ -581,13 +590,13 @@ def build_chapter_generation_prompt(
     blocks = "\n\n".join(
         "\n".join(
             [
-                f"section_id: {section.section_id}",
+                f"section_id: {section_refs.encode(section.section_id)}",
                 f"小节标题: {section.title}",
                 f"小节类型: {section.section_type}",
                 "允许素材：",
                 *[
                     (
-                        f"material_id: {material.material_id}\n"
+                        f"material_id: {material_refs.encode(material.material_id)}\n"
                         f"原始讲述: {material.text}"
                     )
                     for material in section.materials
@@ -657,6 +666,7 @@ def build_chapter_generation_prompt(
 
 要求：
 {generation_scope}- 严格按输入顺序返回小节。
+- section_id 和 material_id 都是本次请求内的短编号，必须原样返回。
 - 每个输入 section_id 必须出现且只能出现一次，不新增、删除或合并小节。
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
@@ -733,18 +743,18 @@ def normalize_generated_chapter(
     allowed_sections = {
         section.section_id: section for section in context.sections
     }
+    section_refs = ModelReferenceMap("S", allowed_sections)
+    material_refs = ModelReferenceMap(
+        "M",
+        (material.material_id for material in context.materials),
+    )
     seen_sections: set[str] = set()
     seen_materials: set[str] = set()
     generated_sections: list[GeneratedChapterSection] = []
     for raw_section in raw_sections:
         if not isinstance(raw_section, dict):
             raise ValueError("chapter generation returned invalid section")
-        section_id_value = raw_section.get("section_id")
-        section_id = (
-            section_id_value.strip()
-            if isinstance(section_id_value, str)
-            else ""
-        )
+        section_id = section_refs.decode(raw_section.get("section_id"))
         section = allowed_sections.get(section_id)
         if section is None:
             raise ValueError("chapter generation used section outside allowlist")
@@ -771,10 +781,9 @@ def normalize_generated_chapter(
         allowed_material_ids = {
             material.material_id for material in section.materials
         }
-        used = _string_list(
+        used = material_refs.decode_many(
             raw_section.get("used_material_ids"),
             limit=len(allowed_material_ids),
-            item_limit=36,
         )
         if not used:
             raise ValueError("chapter section returned no used material")

@@ -229,7 +229,7 @@ async def test_voice_migration_adds_layered_completion_targets_idempotently():
 
 async def test_section_digest_creates_reusable_ranked_issues(client, test_db):
     project_id, section, materials = await _section(client, test_db)
-    fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))
+    fake = FakeDigestAI(_digest_payload("M1"))
 
     first = await completion_issues.refresh_section_issues(
         test_db,
@@ -272,22 +272,21 @@ async def test_section_digest_keeps_distinct_questions_for_same_material(
     test_db,
 ):
     project_id, section, materials = await _section(client, test_db)
-    material_id = materials[0]["utterance_id"]
-    payload = _digest_payload(material_id)
+    payload = _digest_payload("M1")
     payload["candidate_issues"] = [
         {
             "issue_type": "sequence",
             "question": "从发现包块到最后做手术，大概过了多久？",
             "reason": "补充就医过程的时间顺序。",
             "priority": "high",
-            "material_ids": [material_id],
+            "material_ids": ["M1"],
         },
         {
             "issue_type": "sequence",
             "question": "从手术到发现扩散，中间过了多久？",
             "reason": "补充病情变化的时间顺序。",
             "priority": "high",
-            "material_ids": [material_id],
+            "material_ids": ["M1"],
         },
     ]
 
@@ -329,7 +328,7 @@ async def test_section_digest_keeps_distinct_questions_for_same_material(
 
 async def test_closed_issue_is_not_reopened_or_rephrased(client, test_db):
     project_id, section, materials = await _section(client, test_db)
-    fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))
+    fake = FakeDigestAI(_digest_payload("M1"))
     issues = await completion_issues.refresh_section_issues(
         test_db,
         project_id=project_id,
@@ -371,7 +370,7 @@ async def test_closed_issue_is_not_reopened_or_rephrased(client, test_db):
 
 async def test_stale_active_issues_are_closed_as_superseded(client, test_db):
     project_id, section, materials = await _section(client, test_db)
-    fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))
+    fake = FakeDigestAI(_digest_payload("M1"))
     issues = await completion_issues.refresh_section_issues(
         test_db,
         project_id=project_id,
@@ -419,7 +418,7 @@ async def test_stale_active_issues_are_closed_as_superseded(client, test_db):
 
 async def test_answered_issue_requires_material_from_same_project(client, test_db):
     project_id, section, materials = await _section(client, test_db)
-    fake = FakeDigestAI(_digest_payload(materials[0]["utterance_id"]))
+    fake = FakeDigestAI(_digest_payload("M1"))
     issue = (
         await completion_issues.refresh_section_issues(
             test_db,
@@ -461,7 +460,7 @@ async def test_completion_voice_session_appends_every_answer_segment_to_section(
             project_id=project_id,
             section_id=section["id"],
             ai_client=FakeDigestAI(
-                _digest_payload(materials[0]["utterance_id"])
+                _digest_payload("M1")
             ),
         )
     )[0]
@@ -554,7 +553,7 @@ async def test_stopping_completion_session_without_answer_reopens_issue(
             project_id=project_id,
             section_id=section["id"],
             ai_client=FakeDigestAI(
-                _digest_payload(materials[0]["utterance_id"])
+                _digest_payload("M1")
             ),
         )
     )[0]
@@ -603,7 +602,7 @@ async def test_completion_answer_correction_refreshes_layered_material_version(
             project_id=project_id,
             section_id=section["id"],
             ai_client=FakeDigestAI(
-                _digest_payload(materials[0]["utterance_id"])
+                _digest_payload("M1")
             ),
         )
     )[0]
