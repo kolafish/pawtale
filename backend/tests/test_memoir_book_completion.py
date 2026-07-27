@@ -1262,20 +1262,37 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
 ):
     project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
     fake = LayeredBookAI(book_issue=True)
-    _install_ai(monkeypatch, fake)
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
     bootstrapped = await client.post(
         f"/api/memoir/projects/{project_id}/sections/bootstrap"
     )
     assert bootstrapped.status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+    unreviewed = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert unreviewed.status_code == 409
+    assert "完成当前版本的全书检查" in unreviewed.json()["detail"]
 
     generated = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/generate",
-        json={"force_regenerate": False},
+        f"/api/memoir/projects/{project_id}/book-review",
+        json={
+            "force_regenerate": False,
+            "ai_model": "claude-opus-4-8",
+        },
     )
     assert generated.status_code == 200
     review = generated.json()
 
     assert review["status"] == "ready"
+    assert set(requested_models) == {"claude-opus-4-8"}
     book_prompt = next(
         prompt for prompt in fake.prompts if "请审阅回忆录“" in prompt
     )
@@ -1290,7 +1307,28 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         )
     )
     assert issue is not None
+    issue_id = issue.id
     assert issue.channel == "manual_review"
+    assert issue.related_material_ids_json
+    current = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review"
+    )
+    assert current.status_code == 200
+    assert current.json()["id"] == review["id"]
+    blocked = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert blocked.status_code == 409
+    assert "全书检查中需要确认的问题" in blocked.json()["detail"]
+    closed = await client.post(
+        f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
+        json={"outcome": "confirmed"},
+    )
+    assert closed.status_code == 200
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert assembled.status_code == 200
     assert await test_db.scalar(
         select(MemoirBookReview.id).where(
             MemoirBookReview.project_id == project_id

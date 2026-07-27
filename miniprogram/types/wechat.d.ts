@@ -12,10 +12,27 @@ declare function Page<TData extends object, TMethods extends object>(
   } & ThisType<TMethods & { data: TData; setData(data: Partial<TData>): void }>
 ): void;
 
-declare function Component<TProperties extends object, TMethods extends object>(
+type ComponentPropertyValue<T> =
+  T extends { type: StringConstructor } ? string
+  : T extends { type: BooleanConstructor } ? boolean
+  : T extends { type: NumberConstructor } ? number
+  : T extends { type: ArrayConstructor } ? unknown[]
+  : unknown;
+
+declare function Component<
+  TProperties extends object,
+  TData extends object = object,
+  TMethods extends object = object,
+>(
   options: {
     properties: TProperties;
+    data?: TData;
     methods: TMethods & ThisType<TMethods & {
+      data: TData;
+      properties: {
+        [TKey in keyof TProperties]: ComponentPropertyValue<TProperties[TKey]>;
+      };
+      setData(data: Partial<TData>): void;
       triggerEvent(name: string, detail?: unknown): void;
     }>;
   },

@@ -88,7 +88,7 @@ class MemoirChapterPreparationJobResponse(BaseModel):
 
 
 class MemoirBookCompletionJobRequest(MemoirChapterAIRequest):
-    scope: Literal["pending", "all"] = "pending"
+    scope: Literal["pending"] = "pending"
     retry_job_id: str | None = None
 
 

@@ -367,7 +367,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
   "structure_guidance": ["只需编辑处理的顺序、去重、过渡、开头或结尾建议"],
   "candidate_issues": [
     {{
-      "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure",
+      "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure|privacy|conflict",
       "channel": "interview|manual_review",
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么不处理会明显影响理解",
@@ -411,6 +411,8 @@ def normalize_chapter_digest(
         "meaning",
         "clarity",
         "structure",
+        "privacy",
+        "conflict",
     }
     candidate_values = payload.get("candidate_issues")
     if not isinstance(candidate_values, list):
@@ -429,14 +431,14 @@ def normalize_chapter_digest(
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
+        issue_type = issue_type if issue_type in allowed_types else "clarity"
         issues.append(
             {
-                "issue_type": (
-                    issue_type if issue_type in allowed_types else "clarity"
-                ),
+                "issue_type": issue_type,
                 "channel": (
-                    channel
-                    if channel in {"interview", "manual_review"}
+                    "manual_review"
+                    if channel == "manual_review"
+                    and issue_type in {"privacy", "conflict", "structure"}
                     else "interview"
                 ),
                 "question": question,

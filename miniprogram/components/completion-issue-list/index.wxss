@@ -1,0 +1,93 @@
+.group-title,
+.group-detail,
+.question,
+.reason,
+.state {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.issue-group {
+  margin-top: 24rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.group-title {
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.required .group-title {
+  color: var(--ui-danger-text);
+}
+
+.optional .group-title {
+  color: var(--ui-accent);
+}
+
+.group-detail,
+.reason,
+.state {
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  line-height: 38rpx;
+}
+
+.group-detail,
+.reason {
+  margin-top: 6rpx;
+}
+
+.issue {
+  margin-top: 18rpx;
+  padding: 20rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.question {
+  font-size: 28rpx;
+  font-weight: 650;
+  line-height: 42rpx;
+}
+
+.state {
+  margin-top: 12rpx;
+  color: var(--ui-accent-strong);
+}
+
+.actions {
+  display: flex;
+  gap: 12rpx;
+}
+
+.action {
+  min-height: 76rpx;
+  margin-top: 18rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1rpx solid var(--ui-accent);
+  color: var(--ui-accent);
+  font-size: 25rpx;
+  font-weight: 700;
+}
+
+.action.compact {
+  flex: 1;
+}
+
+.action.subtle {
+  border-color: var(--ui-border);
+  color: var(--ui-text-secondary);
+}
+
+.action.is-disabled {
+  opacity: 0.48;
+}
+
+.action:active {
+  transform: scale(0.97);
+  background: var(--ui-accent-surface-subtle);
+}

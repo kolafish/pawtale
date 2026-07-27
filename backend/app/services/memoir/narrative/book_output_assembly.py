@@ -9,6 +9,9 @@ from sqlalchemy.orm import selectinload
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
+    MemoirCompletionIssueChannel,
+    MemoirCompletionIssueScope,
+    MemoirCompletionIssueStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
@@ -19,9 +22,11 @@ from app.models.memoir import (
     MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirCompletionIssue,
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
+from app.services.memoir import book_reviews
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     formal_book_title,
@@ -35,8 +40,8 @@ from app.services.memoir.book_output_snapshots import (
 )
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
-from app.services.memoir.image_assets import manuscript_image_snapshots
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.image_assets import manuscript_image_snapshots
 
 
 def _utcnow() -> datetime:
@@ -134,6 +139,29 @@ async def assemble_book_output(
             "book output requires structured chapter drafts: "
             + ", ".join(unstructured_titles)
         )
+    current_review = await book_reviews.get_current_book_review(
+        db,
+        project_id=project_id,
+    )
+    if current_review is None or current_review.status != "ready":
+        raise ValueError("book output requires a current book review")
+    unresolved_decision = await db.scalar(
+        select(MemoirCompletionIssue.id)
+        .where(
+            MemoirCompletionIssue.project_id == project_id,
+            MemoirCompletionIssue.scope
+            == MemoirCompletionIssueScope.BOOK.value,
+            MemoirCompletionIssue.channel
+            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+            MemoirCompletionIssue.status
+            != MemoirCompletionIssueStatus.CLOSED.value,
+            MemoirCompletionIssue.input_signature
+            == current_review.input_signature,
+        )
+        .limit(1)
+    )
+    if unresolved_decision:
+        raise ValueError("book output requires resolving book review decisions")
 
     project = await db.get(Project, project_id)
     if project is None:

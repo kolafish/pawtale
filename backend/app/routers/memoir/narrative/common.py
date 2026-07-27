@@ -28,6 +28,8 @@ def decision_error(exc: ValueError) -> HTTPException:
         "chapter does not belong to the project": "章节不存在",
         "confirm the book plan before assembling the book output": "请先确认全书章节目录",
         "book plan has no chapters": "请先添加至少一个章节",
+        "book output requires a current book review": "请先完成当前版本的全书检查",
+        "book output requires resolving book review decisions": "请先处理全书检查中需要确认的问题",
     }.get(message, message)
     if message.startswith("book output requires confirmed chapter drafts:"):
         titles = message.split(":", 1)[1].strip()

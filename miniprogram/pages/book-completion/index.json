@@ -2,6 +2,7 @@
   "navigationBarTitleText": "整理这本书",
   "enablePullDownRefresh": true,
   "usingComponents": {
-    "ai-task-progress": "/components/ai-task-progress/index"
+    "ai-task-progress": "/components/ai-task-progress/index",
+    "completion-issue-list": "/components/completion-issue-list/index"
   }
 }

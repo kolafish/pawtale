@@ -901,9 +901,8 @@ test("chapter workspace confirms the current completion issue then prepares agai
   delete global.wx;
 });
 
-test("chapter workspace lists optional suggestions and reuses their actions", async () => {
-  const { navigations } = installWx();
-  const calls = [];
+test("chapter workspace separates optional suggestions from required decisions", async () => {
+  installWx();
   const optionalIssue = {
     id: "issue-1",
     project_id: "project-1",
@@ -928,7 +927,6 @@ test("chapter workspace lists optional suggestions and reuses their actions", as
         current_issue: optionalIssue,
         issues: [optionalIssue],
       }),
-      closeMemoirCompletionIssue: async (...args) => calls.push(["close", ...args]),
     },
   });
   const context = pageContext(page);
@@ -936,24 +934,6 @@ test("chapter workspace lists optional suggestions and reuses their actions", as
 
   assert.equal(context.data.requiredIssues.length, 0);
   assert.equal(context.data.optionalIssues.length, 1);
-
-  await page.beginCompletionInterview.call(context, {
-    currentTarget: { dataset: { issueId: "issue-1" } },
-  });
-  assert.match(navigations[0], /pages\/voice-chat\/index/);
-  assert.match(navigations[0], /voiceSessionId=session-1/);
-
-  page.resolveOptionalIssueAfterEdit.call(context, {
-    currentTarget: { dataset: { issueId: "issue-1" } },
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(calls, [
-    ["close", "project-1", "issue-1", {
-      outcome: "confirmed",
-      note: "用户已通过修改处理",
-    }],
-  ]);
   delete global.wx;
 });
 

@@ -94,6 +94,74 @@
   padding-top: 10rpx;
 }
 
+.book-review {
+  margin: 28rpx 0 12rpx;
+  padding: 30rpx 26rpx;
+  border-left: 6rpx solid var(--ui-accent);
+  background: var(--ui-surface);
+}
+
+.book-review-kicker,
+.book-review-title,
+.book-review-summary,
+.review-group-title,
+.review-list-item,
+.review-complete {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.book-review-kicker {
+  color: var(--ui-accent);
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 34rpx;
+}
+
+.book-review-title {
+  margin-top: 8rpx;
+  font-size: 34rpx;
+  font-weight: 700;
+  line-height: 46rpx;
+}
+
+.book-review-summary {
+  color: var(--ui-text-secondary);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
+.book-review-summary {
+  margin-top: 16rpx;
+}
+
+.review-group {
+  margin-top: 26rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.review-group-title {
+  color: var(--ui-text-primary);
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 40rpx;
+}
+
+.review-list-item {
+  margin-top: 12rpx;
+  color: var(--ui-text-secondary);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
+.review-complete {
+  margin-top: 24rpx;
+  color: var(--ui-success-text);
+  font-size: 26rpx;
+  line-height: 40rpx;
+}
+
 .completion-notice {
   margin: 28rpx 0 12rpx;
   padding: 28rpx 26rpx;
@@ -174,6 +242,12 @@
   background: transparent;
   color: var(--ui-success-text);
   box-shadow: inset 0 0 0 1rpx rgba(94, 119, 88, 0.28);
+}
+
+.book-review .book-ready-action + .recheck-book-action {
+  background: transparent;
+  color: var(--ui-accent);
+  box-shadow: inset 0 0 0 1rpx rgba(143, 64, 55, 0.28);
 }
 
 .book-ready-action:active,
