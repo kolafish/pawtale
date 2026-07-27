@@ -22,7 +22,11 @@ class FakeBookPlanAI:
     provider_name = "fake-ai"
     model_name = "fake-book-plan"
 
-    async def _call_llm(self, *_args, **_kwargs):
+    def __init__(self):
+        self.prompts: list[str] = []
+
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.prompts.append(user_prompt)
         return json.dumps(
             {
                 "title": "外婆回忆录章节规划",
@@ -100,9 +104,10 @@ async def test_generate_plan_creates_single_section_material_ownership(
         "后来我第一次离家去县城读书。",
     )
     project_id = first["session"]["project_id"]
+    fake_ai = FakeBookPlanAI()
     monkeypatch.setattr(
         "app.services.memoir.book_plan_ai.get_ai_service",
-        lambda _model=None: FakeBookPlanAI(),
+        lambda _model=None: fake_ai,
     )
 
     response = await client.post(
@@ -113,6 +118,9 @@ async def test_generate_plan_creates_single_section_material_ownership(
     assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["status"] == "draft"
+    assert first["utterance_id"] not in fake_ai.prompts[0]
+    assert first["message_id"] not in fake_ai.prompts[0]
+    assert "source_index: 1" in fake_ai.prompts[0]
     assert [item["title"] for item in payload["chapters"]] == [
         "外婆家的童年",
         "离家求学",

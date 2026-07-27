@@ -103,6 +103,14 @@ class FakeEditorialAI:
         marker = "chapter_id: "
         if marker in user_prompt:
             chapter_id = user_prompt.split(marker, 1)[1].splitlines()[0].strip()
+        source_ref_id = "M1"
+        source_marker = "source_ref_id: "
+        if source_marker in user_prompt:
+            source_ref_id = (
+                user_prompt.split(source_marker, 1)[1]
+                .split(";", 1)[0]
+                .strip()
+            )
         return f"""
         {{
           "book_title": "外婆慢慢说",
@@ -114,7 +122,7 @@ class FakeEditorialAI:
               "chapter_id": "{chapter_id}",
               "intro": "记忆先回到外婆家的院子，阳光和旧日子的声音都在那里。",
               "pull_quote": "我小时候常在外婆家的院子里晒太阳。",
-              "pull_quote_source_ref_id": "u1"
+              "pull_quote_source_ref_id": "{source_ref_id}"
             }}
           ],
           "back_cover_quote": "我小时候常在外婆家的院子里晒太阳。"
@@ -207,11 +215,13 @@ async def test_memoir_book_manuscript_editorial_copy_uses_llm_context():
     assert copy.chapter_intros[0].pull_quote == "我小时候常在外婆家的院子里晒太阳。"
     assert copy.chapter_intros[0].pull_quote_source_ref_id == "u1"
     assert copy.back_cover_quote == "我小时候常在外婆家的院子里晒太阳。"
-    assert "chapter_id: chapter-1" in fake_ai.calls[0]["user_prompt"]
+    assert "chapter_id: C1" in fake_ai.calls[0]["user_prompt"]
     assert "chapter_summary: 这一章围绕外婆家的院子和第一次离家的记忆展开。" in fake_ai.calls[0]["user_prompt"]
     assert "source_summaries: 讲述小时候在院子里晒太阳，也记得外婆忙碌的身影。" in fake_ai.calls[0]["user_prompt"]
     assert "representative_quotes: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
-    assert "source_ref_id: u1; quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
+    assert "source_ref_id: M1; quote: 我小时候常在外婆家的院子里晒太阳。" in fake_ai.calls[0]["user_prompt"]
+    assert "chapter-1" not in fake_ai.calls[0]["user_prompt"]
+    assert "u1" not in fake_ai.calls[0]["user_prompt"]
 
 
 async def test_memoir_book_title_suggestions_filter_internal_names():

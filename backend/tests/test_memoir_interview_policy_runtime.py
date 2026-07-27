@@ -286,16 +286,17 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     selected_item = project_framework.items[start]
     await test_db.commit()
     await test_db.refresh(session, ["messages"])
+    fake_ai = FakePolicyAI(
+        "offer_new_topic",
+        framework_item_id="F1",
+    )
 
     policy_turn = await prepare_active_policy_turn(
         test_db,
         session=session,
         completion_issue_id=None,
         requested_ai_model=None,
-        ai_client_factory=lambda model=None: FakePolicyAI(
-            "offer_new_topic",
-            framework_item_id=selected_item.id,
-        ),
+        ai_client_factory=lambda model=None: fake_ai,
         enabled=True,
         rollout_percent=100,
     )
@@ -307,6 +308,8 @@ async def test_guided_policy_offers_controlled_topic_and_freezes_acceptance(
     assert selected_item.id in str(
         policy_turn.context.brief.target_id
     )
+    assert selected_item.id not in fake_ai.calls[0]["user_prompt"]
+    assert '"framework_item_id": "F1"' in fake_ai.calls[0]["user_prompt"]
     assert "可拒绝的问题" in active_reply_instruction(policy_turn)
 
     generated = MemoirChatMessage(
