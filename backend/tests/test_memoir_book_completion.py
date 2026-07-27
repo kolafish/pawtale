@@ -1262,7 +1262,8 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
 ):
     project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
     fake = LayeredBookAI(book_issue=True)
-    _install_ai(monkeypatch, fake)
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
     bootstrapped = await client.post(
         f"/api/memoir/projects/{project_id}/sections/bootstrap"
     )
@@ -1277,12 +1278,16 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
 
     generated = await client.post(
         f"/api/memoir/projects/{project_id}/book-review",
-        json={"force_regenerate": False},
+        json={
+            "force_regenerate": False,
+            "ai_model": "claude-opus-4-8",
+        },
     )
     assert generated.status_code == 200
     review = generated.json()
 
     assert review["status"] == "ready"
+    assert set(requested_models) == {"claude-opus-4-8"}
     book_prompt = next(
         prompt for prompt in fake.prompts if "请审阅回忆录“" in prompt
     )

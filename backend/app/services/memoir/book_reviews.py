@@ -368,14 +368,14 @@ def normalize_book_review(
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
+        issue_type = issue_type if issue_type in allowed_types else "clarity"
         issues.append(
             {
-                "issue_type": (
-                    issue_type if issue_type in allowed_types else "clarity"
-                ),
+                "issue_type": issue_type,
                 "channel": (
-                    channel
-                    if channel in {"interview", "manual_review"}
+                    "manual_review"
+                    if channel == "manual_review"
+                    and issue_type in {"privacy", "conflict", "structure"}
                     else "interview"
                 ),
                 "question": question,

@@ -18,7 +18,7 @@ export interface MemoirBookReview {
   id: string;
   project_id: string;
   input_signature: string;
-  status: "pending" | "ready" | "failed" | "stale";
+  status: "ready" | "failed" | "stale";
   review: {
     summary: string;
     strengths: string[];
