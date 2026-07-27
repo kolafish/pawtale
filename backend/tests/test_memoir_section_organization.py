@@ -32,9 +32,11 @@ class FakeMaterialOrganizationAI:
     def __init__(self, payload: dict[str, object]):
         self.payload = payload
         self.calls = 0
+        self.prompts: list[str] = []
 
-    async def _call_llm(self, *_args, **_kwargs):
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
         self.calls += 1
+        self.prompts.append(user_prompt)
         return json.dumps(self.payload, ensure_ascii=False)
 
 
@@ -526,7 +528,7 @@ async def test_material_organization_appends_after_highest_section_order(
     ai = FakeMaterialOrganizationAI(
         {
             "action": "create_section",
-            "chapter_id": chapters[0].id,
+            "chapter_id": "C1",
             "title": "再次同行",
             "section_type": "event",
             "confidence": 0.9,
@@ -552,6 +554,8 @@ async def test_material_organization_appends_after_highest_section_order(
     assert result.result_json["section_id"] == section.id
     assert section.sort_order == 5
     assert ai.calls == 1
+    assert chapters[0].id not in ai.prompts[0]
+    assert '"chapter_id": "C1"' in ai.prompts[0]
 
 
 async def test_section_regeneration_job_reports_progress_and_deduplicates(
@@ -740,8 +744,15 @@ async def test_regenerate_chapter_sections_replays_current_material_organizer(
     assert requested_models == ["deepseek-v4-flash"]
     assert "先从全章视角设计" in fake.prompts[0]
     assert "朋友发来山桃花的照片" in fake.prompts[0]
+    assert chapter_id not in fake.prompts[0]
+    assert created[0]["utterance_id"] not in fake.prompts[0]
+    assert '"source_index": 1' in fake.prompts[0]
     assert "assign_existing|leave_unassigned" in fake.prompts[1]
     assert "山桃花里的重逢" in fake.prompts[1]
+    assert chapter_id not in fake.prompts[1]
+    assert created[0]["utterance_id"] not in fake.prompts[1]
+    assert '"section_id": "S1"' in fake.prompts[1]
+    assert '"utterance_id": "M1"' in fake.prompts[1]
     untouched = [
         section
         for section in listed.json()["sections"]

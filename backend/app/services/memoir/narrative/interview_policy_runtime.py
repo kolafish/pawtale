@@ -39,6 +39,7 @@ from app.models.memoir_narrative import (
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
@@ -458,8 +459,42 @@ def _conversation_prompt(messages: tuple[MemoirChatMessage, ...]) -> str:
     return "\n".join(lines)
 
 
-def _selection_prompt(context: InterviewPolicyContext) -> str:
+def _selection_prompt(
+    context: InterviewPolicyContext,
+    *,
+    framework_refs: ModelReferenceMap,
+) -> str:
     snapshot = brief_context_snapshot(context.brief)
+    snapshot.pop("brief_fingerprint", None)
+    material_refs = ModelReferenceMap(
+        "M",
+        context.brief.existing_material,
+    )
+    issue_ids = list(context.brief.unresolved_issue_ids)
+    completion_issue_id = snapshot.get("completion_issue_id")
+    if isinstance(completion_issue_id, str) and completion_issue_id:
+        issue_ids.append(completion_issue_id)
+    issue_refs = ModelReferenceMap("I", issue_ids)
+    if snapshot.get("framework_item_id"):
+        snapshot["framework_item_id"] = framework_refs.encode(
+            str(snapshot["framework_item_id"])
+        )
+    if completion_issue_id:
+        snapshot["completion_issue_id"] = issue_refs.encode(
+            str(completion_issue_id)
+        )
+    snapshot["existing_material_refs"] = [
+        material_refs.encode(identifier)
+        for identifier in context.brief.existing_material
+    ]
+    snapshot["unresolved_issue_ids"] = [
+        issue_refs.encode(identifier)
+        for identifier in context.brief.unresolved_issue_ids
+    ]
+    snapshot["candidate_framework_item_ids"] = [
+        framework_refs.encode(identifier)
+        for identifier in context.brief.candidate_topic_ids
+    ]
     candidates = [candidate.action for candidate in context.brief.candidate_actions]
     candidate_lines = "\n".join(
         f"- {action.value}: {_ACTION_GUIDANCE[action]}"
@@ -468,7 +503,7 @@ def _selection_prompt(context: InterviewPolicyContext) -> str:
     completion_context = context.completion_context or "本轮不是成书补访。"
     topic_candidates = [
         {
-            "framework_item_id": candidate.item_id,
+            "framework_item_id": framework_refs.encode(candidate.item_id),
             "title": candidate.title,
             "intent": candidate.intent,
         }
@@ -509,6 +544,16 @@ async def select_policy_action(
     context: InterviewPolicyContext,
     ai_client: AITextClient,
 ) -> InterviewPolicySelection:
+    framework_ids = [
+        candidate.item_id for candidate in context.topic_candidates
+    ]
+    framework_ids.extend(context.brief.candidate_topic_ids)
+    if (
+        context.brief.source_kind.value == "framework"
+        and context.brief.target_id
+    ):
+        framework_ids.append(context.brief.target_id)
+    framework_refs = ModelReferenceMap("F", framework_ids)
     policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
     generated = await generate_structured_with_client(
         ai_client,
@@ -516,7 +561,7 @@ async def select_policy_action(
             "你是回忆录访谈策略分类器。"
             "你只选择系统提供的受控动作，不生成问题，不修改事实或用户决定。"
         ),
-        _selection_prompt(context),
+        _selection_prompt(context, framework_refs=framework_refs),
         output_model=_InterviewPolicySelectionOutput,
         requested_model=getattr(ai_client, "model_name", None),
         temperature=0.0,
@@ -536,24 +581,31 @@ async def select_policy_action(
         raise InterviewPolicySelectionError(
             "interview_policy_action_outside_candidates"
         )
-    raw_framework_item_id = (
+    raw_framework_item_ref = (
         generated.value.framework_item_id or ""
     ).strip() or None
     candidate_topic_ids = {
         candidate.item_id for candidate in context.topic_candidates
     }
     if selected_action == MemoirInterviewAction.OFFER_NEW_TOPIC:
-        if (
-            not raw_framework_item_id
-            or raw_framework_item_id not in candidate_topic_ids
-        ):
+        try:
+            raw_framework_item_id = framework_refs.decode(
+                raw_framework_item_ref
+            )
+        except ValueError as exc:
+            raise InterviewPolicySelectionError(
+                "interview_policy_topic_outside_candidates"
+            ) from exc
+        if raw_framework_item_id not in candidate_topic_ids:
             raise InterviewPolicySelectionError(
                 "interview_policy_topic_outside_candidates"
             )
-    elif raw_framework_item_id is not None:
+    elif raw_framework_item_ref is not None:
         raise InterviewPolicySelectionError(
             "interview_policy_unexpected_topic_selection"
         )
+    else:
+        raw_framework_item_id = None
     return InterviewPolicySelection(
         action=selected_action,
         framework_item_id=raw_framework_item_id,

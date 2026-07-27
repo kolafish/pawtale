@@ -29,6 +29,7 @@ from app.models.memoir import (
 from app.schemas.memoir_sections import MemoirSectionRegenerateRequest
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
@@ -248,7 +249,6 @@ def _compact_excerpt(value: str, *, limit: int) -> str:
 
 def _build_section_structure_prompt(
     *,
-    chapter_id: str,
     chapter_title: str,
     materials: list[_MaterialSnapshot],
 ) -> str:
@@ -261,13 +261,13 @@ def _build_section_structure_prompt(
     )
     material_outlines = [
         {
-            "utterance_id": material.utterance_id,
+            "source_index": index,
             "excerpt": _compact_excerpt(material.text, limit=excerpt_limit),
         }
-        for material in materials
+        for index, material in enumerate(materials, start=1)
     ]
     chapter_json = json.dumps(
-        {"chapter_id": chapter_id, "title": chapter_title},
+        {"title": chapter_title},
         ensure_ascii=False,
     )
     outlines_json = json.dumps(material_outlines, ensure_ascii=False)
@@ -331,7 +331,6 @@ async def _plan_section_candidates(
     ai_client: AITextClient,
 ) -> list[MaterialOrganizationSectionCandidate]:
     prompt = _build_section_structure_prompt(
-        chapter_id=chapter_id,
         chapter_title=chapter_title,
         materials=materials,
     )
@@ -382,19 +381,20 @@ def _material_batches(
 
 def _build_material_assignment_prompt(
     *,
-    chapter_id: str,
     chapter_title: str,
     sections: list[MaterialOrganizationSectionCandidate],
     materials: list[_MaterialSnapshot],
+    section_refs: ModelReferenceMap,
+    material_refs: ModelReferenceMap,
 ) -> str:
     chapter = json.dumps(
-        {"chapter_id": chapter_id, "title": chapter_title},
+        {"title": chapter_title},
         ensure_ascii=False,
     )
     candidates = json.dumps(
         [
             {
-                "section_id": section.id,
+                "section_id": section_refs.encode(section.id),
                 "title": section.title,
                 "section_type": section.section_type,
             }
@@ -405,7 +405,7 @@ def _build_material_assignment_prompt(
     material_items = json.dumps(
         [
             {
-                "utterance_id": material.utterance_id,
+                "utterance_id": material_refs.encode(material.utterance_id),
                 "text": material.text,
             }
             for material in materials
@@ -434,11 +434,17 @@ async def _assign_material_batch(
     materials: list[_MaterialSnapshot],
     ai_client: AITextClient,
 ) -> list[MaterialOrganizationDecision]:
+    section_refs = ModelReferenceMap("S", (section.id for section in sections))
+    material_refs = ModelReferenceMap(
+        "M",
+        (material.utterance_id for material in materials),
+    )
     prompt = _build_material_assignment_prompt(
-        chapter_id=chapter_id,
         chapter_title=chapter_title,
         sections=sections,
         materials=materials,
+        section_refs=section_refs,
+        material_refs=material_refs,
     )
     if len(prompt) > LLM_PROMPT_CHAR_LIMIT:
         raise HTTPException(
@@ -464,7 +470,7 @@ async def _assign_material_batch(
     decisions: dict[str, MaterialOrganizationDecision] = {}
     for raw in raw_assignments:
         item = raw if isinstance(raw, dict) else {}
-        utterance_id = str(item.get("utterance_id") or "").strip()
+        utterance_id = material_refs.decode(item.get("utterance_id"))
         action = str(item.get("action") or "").strip()
         if utterance_id not in expected_ids or utterance_id in decisions:
             raise ValueError("素材批量归类结果包含未知或重复的 utterance_id")
@@ -473,7 +479,7 @@ async def _assign_material_batch(
         normalized_item = {
             **item,
             "section_id": (
-                item.get("section_id")
+                section_refs.decode(item.get("section_id"))
                 if action == "assign_existing"
                 else None
             ),
