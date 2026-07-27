@@ -464,11 +464,11 @@
             <button
               class="ghost-button small"
               data-id="{{item.id}}"
-              loading="{{ttsBusyTarget === item.ttsTarget}}"
+              loading="{{ttsBusyTarget === item.ttsTarget || titleBusyTarget === item.id}}"
               bindtap="openChapterMoreActions"
-              disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget}}"
+              disabled="{{updatingPlanStructure || ttsBusyTarget === item.ttsTarget || titleBusyTarget === item.id}}"
             >
-              {{ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "章节操作")}}
+              {{titleBusyTarget === item.id ? "正在改名" : (ttsBusyTarget === item.ttsTarget ? "准备朗读" : (playingTarget === item.ttsTarget ? "朗读中" : "章节操作"))}}
             </button>
           </view>
         </view>
