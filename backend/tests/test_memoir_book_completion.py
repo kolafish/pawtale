@@ -1267,9 +1267,16 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
         f"/api/memoir/projects/{project_id}/sections/bootstrap"
     )
     assert bootstrapped.status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
 
     generated = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/generate",
+        f"/api/memoir/projects/{project_id}/book-review",
         json={"force_regenerate": False},
     )
     assert generated.status_code == 200
@@ -1291,6 +1298,17 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     )
     assert issue is not None
     assert issue.channel == "manual_review"
+    assert issue.related_material_ids_json
+    current = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review"
+    )
+    assert current.status_code == 200
+    assert current.json()["id"] == review["id"]
+    blocked = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert blocked.status_code == 409
+    assert "全书检查中需要确认的问题" in blocked.json()["detail"]
     assert await test_db.scalar(
         select(MemoirBookReview.id).where(
             MemoirBookReview.project_id == project_id

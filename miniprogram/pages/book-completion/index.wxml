@@ -15,6 +15,69 @@
   <view wx:if="{{loading}}" class="loading-state">正在查看全书...</view>
 
   <view wx:else class="chapter-list">
+    <view wx:if="{{allChaptersConfirmed}}" class="book-review">
+      <text class="book-review-kicker">全书审阅</text>
+      <text class="book-review-title">
+        {{bookReview && bookReview.status === "ready" ? "检查跨章衔接与取舍" : "章节已确认，再看全书"}}
+      </text>
+
+      <block wx:if="{{bookReview && bookReview.status === 'ready'}}">
+        <text class="book-review-summary">{{bookReview.review.summary}}</text>
+
+        <view wx:if="{{bookReview.review.strengths.length}}" class="review-group">
+          <text class="review-group-title">已经成立的部分</text>
+          <text
+            wx:for="{{bookReview.review.strengths}}"
+            wx:key="*this"
+            class="review-list-item"
+          >{{index + 1}}. {{item}}</text>
+        </view>
+
+        <view wx:if="{{bookReview.review.structure_guidance.length}}" class="review-group">
+          <text class="review-group-title">编辑建议，可自行取舍</text>
+          <text
+            wx:for="{{bookReview.review.structure_guidance}}"
+            wx:key="*this"
+            class="review-list-item"
+          >{{index + 1}}. {{item}}</text>
+        </view>
+
+        <completion-issue-list
+          project-id="{{projectId}}"
+          project-title="{{projectTitle}}"
+          required-issues="{{requiredBookIssues}}"
+          optional-issues="{{optionalBookIssues}}"
+          allow-required-confirmation="{{true}}"
+          bindrefresh="loadOverview"
+        />
+
+        <text
+          wx:if="{{!requiredBookIssues.length && !optionalBookIssues.length}}"
+          class="review-complete"
+        >没有需要用户处理的跨章问题。</text>
+      </block>
+
+      <text wx:elif="{{bookReview}}" class="book-review-summary">
+        {{bookReview.error_message || "本次全书检查没有完成，可以重新检查。"}}
+      </text>
+      <text wx:else class="book-review-summary">
+        检查跨章重复、断裂、人物突现、篇幅失衡和需要您决定的取舍，不会按固定数量凑问题。
+      </text>
+
+      <view
+        wx:if="{{bookReview && bookReview.status === 'ready' && !requiredBookIssues.length}}"
+        class="book-ready-action ui-block-action ui-pressable"
+        aria-role="button"
+        bindtap="openBookHome"
+      >返回书稿</view>
+      <view
+        class="recheck-book-action ui-block-action ui-pressable {{checkingBook ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{checkingBook}}"
+        bindtap="reviewBook"
+      >{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</view>
+    </view>
+
     <view wx:if="{{bulkCheckVisible}}" class="completion-notice">
       <text class="completion-notice-title">{{bulkCheckTitle}}</text>
       <text class="completion-notice-detail">{{bulkCheckDetail}}</text>
@@ -33,17 +96,11 @@
         />
       </view>
       <view
-        wx:if="{{allChaptersConfirmed}}"
-        class="book-ready-action ui-block-action ui-pressable"
-        aria-role="button"
-        bindtap="openBookHome"
-      >返回书稿</view>
-      <view
         class="recheck-book-action ui-block-action ui-pressable {{recheckingAll || bulkCheckCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{recheckingAll || bulkCheckCancelling}}"
-        bindtap="recheckAllChapters"
-      >{{recheckingAll ? "正在检查全书…" : (allChaptersConfirmed ? "重新检查全书" : bulkCheckActionText)}}</view>
+        bindtap="checkPendingChapters"
+      >{{recheckingAll ? "正在检查章节…" : bulkCheckActionText}}</view>
     </view>
 
     <view

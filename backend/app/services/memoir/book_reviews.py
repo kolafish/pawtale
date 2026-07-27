@@ -40,7 +40,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v2"
+BOOK_REVIEW_ENGINE = "llm_book_review_v3"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据章节摘要审阅全书层面的结构，不创造人生经历。"
@@ -314,16 +314,17 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
 - 纯编辑问题写入 structure_guidance，不要求用户补讲。
+- interview 只用于用户可选择补讲的信息，不阻塞成书；manual_review 只用于隐私、冲突、收录取舍等必须由用户确认的决定。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建摘要中没有的人生事实。
-- chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
+- 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 """
 
 
 def normalize_book_review(
     payload: Any,
     *,
-    chapter_references: ModelReferenceMap,
+    context: BookReviewContext,
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("book review AI did not return a JSON object")
@@ -352,10 +353,18 @@ def normalize_book_review(
         reason = _compact(candidate.get("reason"), limit=300)
         if not question or not reason:
             continue
-        chapter_ids = chapter_references.decode_many(
+        chapter_ids = _chapter_references(context).decode_many(
             candidate.get("chapter_ids"),
             limit=8,
         )
+        if not chapter_ids:
+            continue
+        material_ids = [
+            min(chapter.material_ids)
+            for chapter in context.chapters
+            if chapter.chapter_id in chapter_ids
+            and chapter.material_ids
+        ]
         issue_type = _compact(candidate.get("issue_type"), limit=24)
         channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
@@ -377,7 +386,7 @@ def normalize_book_review(
                     else "medium"
                 ),
                 "chapter_ids": chapter_ids,
-                "material_ids": [],
+                "material_ids": material_ids,
             }
         )
     return {
@@ -394,6 +403,32 @@ def normalize_book_review(
         ),
         "candidate_issues": issues,
     }
+
+
+async def get_current_book_review(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> MemoirBookReview | None:
+    try:
+        context = await load_book_review_context(db, project_id=project_id)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return None
+        raise
+    return await db.scalar(
+        select(MemoirBookReview)
+        .where(
+            MemoirBookReview.project_id == project_id,
+            MemoirBookReview.engine == BOOK_REVIEW_ENGINE,
+            MemoirBookReview.input_signature == context.input_signature,
+        )
+        .order_by(
+            MemoirBookReview.updated_at.desc(),
+            MemoirBookReview.id.desc(),
+        )
+        .limit(1)
+    )
 
 
 async def generate_or_reuse_book_review(
@@ -468,7 +503,7 @@ async def generate_or_reuse_book_review(
         )
         review_json = normalize_book_review(
             generated.value.model_dump(),
-            chapter_references=_chapter_references(context),
+            context=context,
         )
         db.expire_all()
         current = await load_book_review_context(db, project_id=project_id)

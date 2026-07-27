@@ -10,6 +10,23 @@ function bookCompletionPath(projectId: string, suffix = ""): string {
   return memoirNarrativeProjectPath(projectId, `/book-completion${suffix}`);
 }
 
+function bookReviewPath(projectId: string): string {
+  return memoirNarrativeProjectPath(projectId, "/book-review");
+}
+
+export interface MemoirBookReview {
+  id: string;
+  project_id: string;
+  input_signature: string;
+  status: "pending" | "ready" | "failed" | "stale";
+  review: {
+    summary: string;
+    strengths: string[];
+    structure_guidance: string[];
+  };
+  error_message: string;
+}
+
 export interface MemoirChapterPreparationJob {
   job_id: string | null;
   project_id: string;
@@ -74,21 +91,35 @@ export function getMemoirBookCompletionOverview(
   return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
 }
 
+export function getMemoirBookReview(
+  projectId: string,
+): Promise<MemoirBookReview | null> {
+  return memoirRequest<MemoirBookReview | null>(bookReviewPath(projectId));
+}
+
+export function generateMemoirBookReview(
+  projectId: string,
+  forceRegenerate: boolean,
+): Promise<MemoirBookReview> {
+  return memoirAIRequest<
+    MemoirBookReview,
+    { force_regenerate: boolean; ai_model: null }
+  >(bookReviewPath(projectId), {
+    force_regenerate: forceRegenerate,
+    ai_model: null,
+  });
+}
+
 export function enqueueMemoirBookCompletionJob(
   projectId: string,
-  scope: "pending" | "all",
   retryJobId: string | null = null,
 ): Promise<MemoirBookCompletionJob> {
   return memoirAIRequest<
     MemoirBookCompletionJob,
-    {
-      scope: "pending" | "all";
-      retry_job_id: string | null;
-      ai_model: null;
-    }
+    { scope: "pending"; retry_job_id: string | null; ai_model: null }
   >(
     bookCompletionPath(projectId, "/jobs"),
-    { scope, retry_job_id: retryJobId, ai_model: null },
+    { scope: "pending", retry_job_id: retryJobId, ai_model: null },
     { timeoutProfile: "mutation" },
   );
 }

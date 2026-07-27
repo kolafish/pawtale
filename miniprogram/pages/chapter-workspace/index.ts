@@ -1,10 +1,10 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import type { MemoirCompletionIssue } from "../../domain/voice-chat";
-import { trackAuditAction } from "../../services/audit-tracker";
 import {
   AudioPlaybackController,
   playAudioFileSequence,
 } from "../../services/audio-playback";
+import { trackAuditAction } from "../../services/audit-tracker";
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
@@ -12,7 +12,6 @@ import {
   cancelMemoirChapterSectionRegenerationJob,
   confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
-  createMemoirVoiceSession,
   enqueueMemoirChapterPreparationJob,
   getMemoirChapterPreparationJob,
   getMemoirChapterSectionRegenerationJob,
@@ -45,11 +44,6 @@ import {
   stopMemoirVoiceSearchRecording,
 } from "../../services/memoir-voice-search";
 import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
-} from "../../services/voice-authorization";
-import {
   LOADING_NEXT_ACTION,
   type ChapterNextAction,
 } from "./chapter-next-action";
@@ -81,7 +75,6 @@ type ChapterWorkspaceOperationKind =
   | "regenerate_sections"
   | "merge_sections"
   | "move_material"
-  | "start_interview"
   | "confirm_issue"
   | "save_draft_section"
   | "confirm_chapter"
@@ -1263,79 +1256,6 @@ definePage<ChapterWorkspacePageData>()({
     }
   },
 
-  async beginCompletionInterview(
-    event: PageDatasetEvent<{ issueId?: string }>,
-  ) {
-    const issueId = datasetString(event, "issueId");
-    const issue = this.data.optionalIssues.find(
-      (candidate) => candidate.id === issueId,
-    );
-    if (!issue) {
-      this.setData({ error: "补充问题还没有准备好，请下拉刷新" });
-      return;
-    }
-    if (this.data.operationKind) {
-      return;
-    }
-    if (issue.status === "in_progress" && issue.active_session_id) {
-      this.openVoiceChat(issue.active_session_id);
-      return;
-    }
-    if (!readVoiceAuthorizationConsent()) {
-      wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
-      return;
-    }
-    if (!this.beginOperation("start_interview", issue.id)) {
-      return;
-    }
-    try {
-      await syncVoiceAuthorizationConsent();
-      const detail = await createMemoirVoiceSession({
-        guidance_mode: "guided_interview",
-        interview_type: "ai_interview",
-        session_goal: "book_completion",
-        current_completion_issue_id: issue.id,
-        provider: "volc_streaming_asr",
-        input_format: "pcm_s16le_16000_mono",
-        metadata_json: {
-          entry: "miniprogram_chapter_workspace",
-          chapter_id: this.data.chapterId,
-          completion_issue_id: issue.id,
-        },
-      }, { projectId: this.data.projectId });
-      trackAuditAction(
-        "voice_chat.start",
-        {
-          guidance_mode: "guided_interview",
-          interview_type: "ai_interview",
-          session_goal: "book_completion",
-          entry: "chapter_workspace",
-        },
-        { projectId: this.data.projectId, voiceSessionId: detail.session.id },
-      );
-      this.openVoiceChat(detail.session.id);
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "AI 访谈创建失败" });
-    } finally {
-      this.finishOperation("start_interview", issue.id);
-    }
-  },
-
-  openVoiceChat(voiceSessionId: string) {
-    wx.navigateTo({
-      url: pageUrl("/pages/voice-chat/index", {
-        voiceSessionId,
-        mode: "guided_interview",
-        interviewType: "ai_interview",
-        sessionGoal: "book_completion",
-        projectTitle: this.data.workspace?.chapter_title || "",
-      }),
-    });
-  },
-
   confirmCurrentIssue() {
     const issue = this.data.workspace?.completion_summary.active_issue;
     if (
@@ -1356,87 +1276,6 @@ definePage<ChapterWorkspacePageData>()({
         }
       },
     });
-  },
-
-  resolveOptionalIssueAfterEdit(
-    event: PageDatasetEvent<{ issueId?: string }>,
-  ) {
-    const issueId = datasetString(event, "issueId");
-    if (!issueId || this.data.operationKind) {
-      return;
-    }
-    wx.showModal({
-      title: "这条建议已经处理？",
-      content: "如果已经通过修改标题或正文处理，可以把它从待办建议中收起。",
-      confirmText: "标记已处理",
-      cancelText: "再看看",
-      success: (result) => {
-        if (result.confirm) {
-          void this.closeOptionalIssue(
-            issueId,
-            "confirmed",
-            "用户已通过修改处理",
-          );
-        }
-      },
-    });
-  },
-
-  skipOptionalIssue(
-    event: PageDatasetEvent<{ issueId?: string }>,
-  ) {
-    const issueId = datasetString(event, "issueId");
-    if (!issueId || this.data.operationKind) {
-      return;
-    }
-    const choices: Array<{
-      outcome: "deferred" | "not_remembered" | "declined";
-      note: string;
-    }> = [
-      { outcome: "deferred", note: "用户选择暂时不补" },
-      { outcome: "not_remembered", note: "用户表示想不起来" },
-      { outcome: "declined", note: "用户选择不补充这项内容" },
-    ];
-    wx.showActionSheet({
-      itemList: ["暂时不补", "想不起来", "不想补充"],
-      success: ({ tapIndex }) => {
-        const choice = choices[tapIndex];
-        if (choice) {
-          void this.closeOptionalIssue(
-            issueId,
-            choice.outcome,
-            choice.note,
-          );
-        }
-      },
-    });
-  },
-
-  async closeOptionalIssue(
-    issueId: string,
-    outcome: "confirmed" | "deferred" | "not_remembered" | "declined",
-    note: string,
-  ) {
-    if (!this.beginOperation("confirm_issue", issueId)) {
-      return;
-    }
-    try {
-      await closeMemoirCompletionIssue(this.data.projectId, issueId, {
-        outcome,
-        note,
-      });
-      await this.loadPageData(true);
-      wx.showToast({ title: "建议已处理", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "建议处理失败",
-      });
-    } finally {
-      this.finishOperation("confirm_issue", issueId);
-    }
   },
 
   async applyCurrentIssueConfirmation(

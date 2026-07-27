@@ -8,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
-    MemoirBookCompletionJobScope,
     MemoirBookCompletionJobStatus,
     MemoirEditingJobStatus,
 )
@@ -396,8 +395,6 @@ async def enqueue_book_completion_job(
         project_id=project_id,
     )
     if req.retry_job_id:
-        if req.scope != MemoirBookCompletionJobScope.PENDING.value:
-            raise ValueError("重试任务只能检查上次未完成的章节")
         retry_source = await db.scalar(
             select(MemoirBookCompletionJob).where(
                 MemoirBookCompletionJob.id == req.retry_job_id,
@@ -435,8 +432,7 @@ async def enqueue_book_completion_job(
             }
             for chapter in overview.chapters
             if (
-                req.scope == MemoirBookCompletionJobScope.ALL.value
-                or chapter.state == "preparing"
+                chapter.state == "preparing"
                 or chapter.next_action.kind == "prepare"
             )
         ]
