@@ -15,6 +15,7 @@ from app.models.memoir import (
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
@@ -57,16 +58,23 @@ def _normalized_material_ids(material_ids: list[object]) -> list[str]:
     )
 
 
-def _matching_prompt(*, project_framework, materials) -> str:
+def _matching_prompt(
+    *,
+    project_framework,
+    materials,
+    material_refs: ModelReferenceMap,
+    item_refs: ModelReferenceMap,
+) -> str:
     item_lines = "\n".join(
         (
-            f"- {item['item_key']} | {item['title']} | "
+            f"- {item_refs.encode(item['item_key'])} | {item['title']} | "
             f"{item['intent']} | 提示：{'、'.join(item['evidence_hints'])}"
         )
         for item in project_framework.template_snapshot_json["items"]
     )
     material_lines = "\n".join(
-        f"- {material.id} | {current_utterance_text(material)[:800]}"
+        f"- {material_refs.encode(material.id)} | "
+        f"{current_utterance_text(material)[:800]}"
         for material in materials
     )
     return f"""把每段回忆录讲述整体匹配到话题地图。
@@ -94,6 +102,14 @@ async def select_framework_matches(
     materials: list[MemoirVoiceUtterance],
     ai_client: AITextClient,
 ) -> tuple[frameworks.FrameworkMaterialMatch, ...]:
+    material_refs = ModelReferenceMap("M", (material.id for material in materials))
+    item_refs = ModelReferenceMap(
+        "F",
+        (
+            item["item_key"]
+            for item in project_framework.template_snapshot_json["items"]
+        ),
+    )
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     generated = await generate_structured_with_client(
         ai_client,
@@ -101,6 +117,8 @@ async def select_framework_matches(
         _matching_prompt(
             project_framework=project_framework,
             materials=materials,
+            material_refs=material_refs,
+            item_refs=item_refs,
         ),
         output_model=_FrameworkMatchesOutput,
         requested_model=getattr(ai_client, "model_name", None),
@@ -116,8 +134,13 @@ async def select_framework_matches(
     for raw in payload["matches"]:
         if not isinstance(raw, dict):
             raise FrameworkMatchSelectionError("topic_map_match_invalid_shape")
-        material_id = str(raw.get("utterance_id") or "").strip()
-        item_key = str(raw.get("item_key") or "").strip()
+        try:
+            material_id = material_refs.decode(raw.get("utterance_id"))
+            item_key = item_refs.decode(raw.get("item_key"))
+        except ValueError as exc:
+            raise FrameworkMatchSelectionError(
+                "topic_map_match_outside_candidates"
+            ) from exc
         try:
             raw_confidence = raw.get("confidence")
             if isinstance(raw_confidence, bool):

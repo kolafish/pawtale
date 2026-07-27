@@ -15,6 +15,7 @@ from app.services.ai_factory import (
     VOLC_DOUBAO_PRO_MODEL,
     get_ai_service,
 )
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
@@ -181,7 +182,35 @@ def _representative_quotes(item: dict[str, object], content: str) -> list[str]:
     return quotes[:5]
 
 
-def _source_quote_lines(raw_refs: object) -> list[str]:
+def _manuscript_reference_maps(
+    snapshot: list[dict[str, object]],
+) -> tuple[ModelReferenceMap, ModelReferenceMap]:
+    chapter_ids = [
+        chapter_id
+        for item in snapshot
+        if (chapter_id := _string(item.get("chapter_id")))
+    ]
+    source_ids = [
+        source_id
+        for item in snapshot
+        for raw_ref in (
+            item.get("source_refs")
+            if isinstance(item.get("source_refs"), list)
+            else []
+        )
+        if isinstance(raw_ref, dict)
+        and (source_id := _string(raw_ref.get("utterance_id")))
+    ]
+    return (
+        ModelReferenceMap("C", chapter_ids),
+        ModelReferenceMap("M", source_ids),
+    )
+
+
+def _source_quote_lines(
+    raw_refs: object,
+    source_refs: ModelReferenceMap,
+) -> list[str]:
     if not isinstance(raw_refs, list):
         return []
     lines: list[str] = []
@@ -195,13 +224,20 @@ def _source_quote_lines(raw_refs: object) -> list[str]:
         )
         if not utterance_id or not quote:
             continue
-        lines.append(f"- source_ref_id: {utterance_id}; quote: {quote}")
+        lines.append(
+            f"- source_ref_id: {source_refs.encode(utterance_id)}; quote: {quote}"
+        )
         if len(lines) >= 6:
             break
     return lines
 
 
-def _chapter_context(snapshot: list[dict[str, object]]) -> str:
+def _chapter_context(
+    snapshot: list[dict[str, object]],
+    *,
+    chapter_refs: ModelReferenceMap,
+    source_refs: ModelReferenceMap,
+) -> str:
     parts: list[str] = []
     for fallback_index, item in enumerate(snapshot, start=1):
         chapter_id = _string(item.get("chapter_id"))
@@ -209,11 +245,14 @@ def _chapter_context(snapshot: list[dict[str, object]]) -> str:
         content = _string(item.get("content"))
         if not chapter_id or not content:
             continue
-        source_quote_lines = _source_quote_lines(item.get("source_refs"))
+        source_quote_lines = _source_quote_lines(
+            item.get("source_refs"),
+            source_refs,
+        )
         parts.append(
             "\n".join(
                 [
-                    f"chapter_id: {chapter_id}",
+                    f"chapter_id: {chapter_refs.encode(chapter_id)}",
                     f"chapter_index: {_int(item.get('chapter_index')) or fallback_index}",
                     f"title: {title}",
                     f"source_count: {_int(item.get('source_count'))}",
@@ -237,9 +276,18 @@ def build_manuscript_copy_prompt(
     chapter_ids: list[str] | None = None,
     feedback: str | None = None,
 ) -> str:
-    chapters = _chapter_context(snapshot)
+    chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
+    chapters = _chapter_context(
+        snapshot,
+        chapter_refs=chapter_refs,
+        source_refs=source_refs,
+    )
     target_text = "、".join(targets or []) or "全部成书文案"
-    chapter_text = "、".join(chapter_ids or []) or "全部章节"
+    chapter_text = (
+        "、".join(chapter_refs.encode(identifier) for identifier in chapter_ids)
+        if chapter_ids
+        else "全部章节"
+    )
     feedback_text = f"\n用户本次反馈：{feedback.strip()}" if feedback and feedback.strip() else ""
     return f"""请根据下面已经确认的回忆录章节，生成适合 PDF 成书的前置文案。
 
@@ -281,7 +329,12 @@ def build_manuscript_copy_prompt(
 
 
 def build_title_suggestion_prompt(*, title: str, snapshot: list[dict[str, object]], count: int) -> str:
-    chapters = _chapter_context(snapshot)
+    chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
+    chapters = _chapter_context(
+        snapshot,
+        chapter_refs=chapter_refs,
+        source_refs=source_refs,
+    )
     return f"""请根据下面已经确认的回忆录章节，为这本家庭回忆录拟 {count} 个候选主书名。
 
 当前暂定书名：{title}
@@ -425,18 +478,31 @@ def _copy_from_payload(
     if not isinstance(payload, dict):
         return None
     quote_candidates = _quote_candidates_by_chapter(snapshot)
+    chapter_refs, source_refs = _manuscript_reference_maps(snapshot)
     raw_intros = payload.get("chapter_intros")
     chapter_intros: list[GeneratedChapterIntro] = []
     if isinstance(raw_intros, list):
         for raw_intro in raw_intros:
             if not isinstance(raw_intro, dict):
                 continue
-            chapter_id = _string(raw_intro.get("chapter_id"))
+            try:
+                chapter_id = chapter_refs.decode(raw_intro.get("chapter_id"))
+            except ValueError:
+                continue
             intro = _clean_copy_text(raw_intro.get("intro"), max_chars=120)
+            source_ref = raw_intro.get("pull_quote_source_ref_id")
+            try:
+                source_ref = (
+                    source_refs.decode(source_ref)
+                    if _string(source_ref)
+                    else ""
+                )
+            except ValueError:
+                source_ref = ""
             pull_quote, pull_quote_source_ref_id = _validated_original_quote(
                 chapter_id=chapter_id,
                 value=raw_intro.get("pull_quote"),
-                source_ref_id=raw_intro.get("pull_quote_source_ref_id"),
+                source_ref_id=source_ref,
                 quote_candidates=quote_candidates,
             )
             if chapter_id and (intro or pull_quote):

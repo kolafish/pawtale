@@ -84,8 +84,6 @@ def build_plan_prompt(project_title: str, sources: list[SourceSegment], max_chap
     source_text = "\n\n".join(
         (
             f"source_index: {source.source_index}\n"
-            f"utterance_id: {source.utterance_id}\n"
-            f"message_id: {source.message_id}\n"
             f"text: {source.text}"
         )
         for source in sources
@@ -185,7 +183,6 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
     source_text = "\n\n".join(
         (
             f"source {source.source_number}\n"
-            f"utterance_id: {source.utterance_id}\n"
             f"created_at: {source.created_at}\n"
             f"record_summary: {_compact_text(source.summary, 140)}\n"
             f"representative_quote: {_compact_text(source.representative_quote or source.summary, 90)}"

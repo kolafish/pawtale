@@ -33,8 +33,10 @@ class FakeFrameworkAI:
 
     def __init__(self, payload: dict[str, object]):
         self.payload = payload
+        self.prompts: list[str] = []
 
-    async def _call_llm(self, *_args, **_kwargs):
+    async def _call_llm(self, _system_prompt, user_prompt, **_kwargs):
+        self.prompts.append(user_prompt)
         return json.dumps(self.payload, ensure_ascii=False)
 
 
@@ -167,8 +169,8 @@ async def test_framework_matcher_rejects_unknown_topic(client, test_db):
         {
             "matches": [
                 {
-                    "utterance_id": material.id,
-                    "item_key": "not-a-topic",
+                    "utterance_id": "M1",
+                    "item_key": "F999",
                     "confidence": 0.9,
                 }
             ]
@@ -184,6 +186,8 @@ async def test_framework_matcher_rejects_unknown_topic(client, test_db):
             materials=[material],
             ai_client=ai,
         )
+    assert material.id not in ai.prompts[0]
+    assert "childhood_and_growth" not in ai.prompts[0]
 
 
 async def test_topic_map_job_uses_material_ids_and_updates_state(
@@ -210,8 +214,8 @@ async def test_topic_map_job_uses_material_ids_and_updates_state(
             {
                 "matches": [
                     {
-                        "utterance_id": created["utterance_id"],
-                        "item_key": "work_and_career",
+                        "utterance_id": "M1",
+                        "item_key": "F3",
                         "confidence": 0.88,
                     }
                 ]

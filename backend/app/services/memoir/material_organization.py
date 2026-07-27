@@ -27,6 +27,7 @@ from app.models.memoir import (
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
+from app.services.ai_references import ModelReferenceMap
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
@@ -157,11 +158,13 @@ def build_material_organization_prompt(
     sections: list[MaterialOrganizationSectionCandidate],
     allow_leave_unassigned: bool = True,
 ) -> str:
+    chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
+    section_refs = ModelReferenceMap("S", (section.id for section in sections))
     chapter_titles = {chapter.id: chapter.title for chapter in chapters}
     candidates = [
         {
-            "section_id": section.id,
-            "chapter_id": section.chapter_id,
+            "section_id": section_refs.encode(section.id),
+            "chapter_id": chapter_refs.encode(section.chapter_id),
             "chapter_title": chapter_titles.get(section.chapter_id, ""),
             "section_title": section.title,
             "section_type": section.section_type,
@@ -170,7 +173,10 @@ def build_material_organization_prompt(
         for section in sections
     ]
     chapter_candidates = [
-        {"chapter_id": chapter.id, "chapter_title": chapter.title}
+        {
+            "chapter_id": chapter_refs.encode(chapter.id),
+            "chapter_title": chapter.title,
+        }
         for chapter in chapters
     ]
     organization_rule = (
@@ -247,6 +253,8 @@ async def decide_material_organization(
     ai_client: AITextClient,
     allow_leave_unassigned: bool = True,
 ) -> MaterialOrganizationDecision:
+    chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
+    section_refs = ModelReferenceMap("S", (section.id for section in sections))
     prompt = build_material_organization_prompt(
         material_text=material_text,
         chapters=chapters,
@@ -265,8 +273,13 @@ async def decide_material_organization(
         timeout=ai_text_timeout_seconds(policy.timeout_profile),
         max_attempts=policy.max_attempts,
     )
+    payload = generated.value.model_dump()
+    if payload["action"] == "assign_existing":
+        payload["section_id"] = section_refs.decode(payload["section_id"])
+    elif payload["action"] == "create_section":
+        payload["chapter_id"] = chapter_refs.decode(payload["chapter_id"])
     return normalize_material_organization_decision(
-        generated.value.model_dump(),
+        payload,
         allowed_section_ids={section.id for section in sections},
         allowed_chapter_ids={chapter.id for chapter in chapters},
     )
