@@ -896,8 +896,9 @@ test("chapter workspace confirms the current completion issue then prepares agai
   delete global.wx;
 });
 
-test("chapter workspace starts completion interview in the existing voice chat", async () => {
+test("chapter workspace can speak or close a completion issue after editing", async () => {
   const { navigations } = installWx();
+  const calls = [];
   const interviewSummary = summary({
     state: "needs_input",
     next_action: {
@@ -917,14 +918,31 @@ test("chapter workspace starts completion interview in the existing voice chat",
   });
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({ completion_summary: interviewSummary }),
+    voiceApiExports: {
+      closeMemoirCompletionIssue: async (...args) => calls.push(["close", ...args]),
+      enqueueMemoirChapterPreparationJob: async (...args) => {
+        calls.push(["prepare", ...args]);
+        return chapterPreparationJob({ job_id: "chapter-job-1", status: "pending" });
+      },
+    },
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { projectId: "project-1", chapterId: "chapter-1" });
 
   await page.runNextAction.call(context);
-
   assert.match(navigations[0], /pages\/voice-chat\/index/);
   assert.match(navigations[0], /voiceSessionId=session-1/);
+
+  page.resolveCurrentIssueAfterEdit.call(context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls, [
+    ["close", "project-1", "issue-1", {
+      outcome: "confirmed",
+      note: "用户已通过修改处理",
+    }],
+    ["prepare", "project-1", "chapter-1", "prepare"],
+  ]);
   delete global.wx;
 });
 

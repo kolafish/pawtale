@@ -31,6 +31,13 @@
         bindtap="runNextAction"
       >{{operationKind !== "" ? "正在处理…" : nextAction.actionText}}</view>
       <view
+        wx:if="{{nextAction.kind === 'start_interview'}}"
+        class="structure-regenerate-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
+        bindtap="resolveCurrentIssueAfterEdit"
+      >已通过修改处理</view>
+      <view
         wx:if="{{workspace.completion_summary.state === 'confirmed'}}"
         class="structure-regenerate-action {{operationKind !== '' ? 'is-disabled' : ''}}"
         aria-role="button"

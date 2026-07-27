@@ -1328,7 +1328,31 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
-  async applyCurrentIssueConfirmation(issueId: string) {
+  resolveCurrentIssueAfterEdit() {
+    const issue = this.data.workspace?.completion_summary.active_issue;
+    if (!issue || this.data.operationKind) {
+      return;
+    }
+    wx.showModal({
+      title: "这条意见已经处理？",
+      content: "如果你已经修改了相关小节的标题或正文，可以标记为已处理；系统会继续检查下一项。",
+      confirmText: "标记已处理",
+      cancelText: "暂不处理",
+      success: (result) => {
+        if (result.confirm) {
+          void this.applyCurrentIssueConfirmation(
+            issue.id,
+            "用户已通过修改处理",
+          );
+        }
+      },
+    });
+  },
+
+  async applyCurrentIssueConfirmation(
+    issueId: string,
+    note = "用户已确认按当前建议处理",
+  ) {
     if (
       !issueId
       || !this.beginOperation("confirm_issue", issueId)
@@ -1338,7 +1362,7 @@ definePage<ChapterWorkspacePageData>()({
     try {
       await closeMemoirCompletionIssue(this.data.projectId, issueId, {
         outcome: "confirmed",
-        note: "用户已确认按当前建议处理",
+        note,
       });
       const job = await enqueueMemoirChapterPreparationJob(
         this.data.projectId,
