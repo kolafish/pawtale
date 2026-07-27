@@ -10,7 +10,6 @@ from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
-    MemoirCompletionIssueOutcome,
     MemoirCompletionIssueScope,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -784,7 +783,7 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     assert rewritten.json()["detail"] == "本章还有一项需要您先确认"
 
 
-async def test_rewrite_uses_current_material_without_forcing_more_interviews(
+async def test_chapter_review_filters_section_findings_before_rewrite(
     client,
     test_db,
     monkeypatch,
@@ -792,7 +791,6 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
     chapter_id = chapter.id
-    section_title = chapter.title
     await _create_current_draft(
         test_db,
         project_id=project_id,
@@ -825,38 +823,22 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     )
 
     assert prepared.status_code == 200, prepared.text
-    before = prepared.json()
-    assert before["completion_summary"]["state"] == "needs_input"
-    assert before["completion_summary"]["headline"] == (
-        f"小节《{section_title}》还需要补充一点"
-    )
-    assert before["completion_summary"]["detail"].startswith(
-        f"针对小节《{section_title}》："
-    )
-    assert before["draft_needs_rewrite"] is True
-    assert before["can_rewrite_draft"] is True
-    assert before["pending_new_source_count"] == 1
-
-    rewritten = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/"
-        f"chapters/{chapter_id}/rewrite",
-        json={},
-    )
-
-    assert rewritten.status_code == 200, rewritten.text
-    after = rewritten.json()
-    assert after["completion_summary"]["state"] == "draft_ready"
-    assert after["draft_needs_rewrite"] is False
-    assert after["draft_content"].startswith("那年，我参加了学校比赛")
+    workspace = prepared.json()
+    assert workspace["completion_summary"]["state"] == "draft_ready"
+    assert workspace["draft_needs_rewrite"] is False
+    assert workspace["draft_content"].startswith("那年，我参加了学校比赛")
     issue = await test_db.scalar(
         select(MemoirCompletionIssue).where(
             MemoirCompletionIssue.project_id == project_id,
             MemoirCompletionIssue.chapter_id == chapter_id,
         )
     )
-    assert issue is not None
-    assert issue.outcome == MemoirCompletionIssueOutcome.DEFERRED.value
-    assert issue.outcome_note == "用户选择先按现有素材重新生成正文"
+    assert issue is None
+    assert any(
+        "这件事后来对你有什么影响" in prompt
+        for prompt in fake.prompts
+        if "请审阅回忆录章节" in prompt
+    )
 
 
 async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
@@ -1229,45 +1211,6 @@ async def test_legacy_flat_draft_requires_rewrite_before_confirmation(
     assert confirmed.status_code == 409
     assert "没有小节结构" in confirmed.json()["detail"]
     assert draft.status == MemoirBookChapterDraftStatus.DRAFT.value
-
-
-async def test_closed_section_issue_is_not_reopened_on_prepare(
-    client,
-    test_db,
-    monkeypatch,
-):
-    project_id, chapters, _ = await _book(client, test_db)
-    chapter = chapters[0]
-    fake = LayeredBookAI(section_issue=True)
-    _install_ai(monkeypatch, fake)
-
-    first = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/"
-        f"chapters/{chapter.id}/prepare",
-        json={},
-    )
-    assert first.status_code == 200
-    summary = first.json()["completion_summary"]
-    assert summary["state"] == "needs_input"
-    assert summary["next_action"]["kind"] == "start_interview"
-    issue_id = summary["active_issue"]["id"]
-
-    closed = await client.post(
-        f"/api/memoir/projects/{project_id}/completion-issues/{issue_id}/close",
-        json={"outcome": "not_remembered", "note": "确实想不起来"},
-    )
-    assert closed.status_code == 200
-    second = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/"
-        f"chapters/{chapter.id}/prepare",
-        json={},
-    )
-    assert second.status_code == 200
-    assert second.json()["completion_summary"]["state"] == "draft_ready"
-    issue = await test_db.get(MemoirCompletionIssue, issue_id)
-    assert issue is not None
-    assert issue.status == "closed"
-    assert issue.outcome == "not_remembered"
 
 
 async def test_chapter_manual_issue_is_one_explicit_next_action(

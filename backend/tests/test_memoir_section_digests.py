@@ -91,6 +91,7 @@ def _valid_digest_payload(material_id: str) -> dict:
         "summary": "朋友发来山桃花照片，随后两人重新联系并一起参加爬山。",
         "focus": "一段疏远的关系如何重新搭上线。",
         "covered_points": ["重新联系的契机", "第一次共同活动"],
+        "editorial_guidance": ["合并两处重复的爬山经过。"],
         "candidate_issues": [
             {
                 "issue_type": "meaning",
@@ -130,6 +131,9 @@ async def test_section_digest_signature_reuses_same_material_input(client, test_
     assert "不要逐条检查时间、地点、人物" in fake.prompts[0]
     assert first.digest_json["candidate_issues"][0]["material_ids"] == [
         created[0]["utterance_id"]
+    ]
+    assert first.digest_json["editorial_guidance"] == [
+        "合并两处重复的爬山经过。"
     ]
 
     response = await client.get(
