@@ -156,6 +156,15 @@ async def chapter_summary(
         ),
         None,
     )
+    optional_count = sum(
+        issue.channel == MemoirCompletionIssueChannel.INTERVIEW.value
+        for issue in issues
+    )
+    optional_note = (
+        f"另有 {optional_count} 条可选补充建议。"
+        if optional_count
+        else ""
+    )
     draft, version = await _latest_version(
         db,
         project_id=project_id,
@@ -272,7 +281,7 @@ async def chapter_summary(
                 action_text="查看正文",
             ),
             headline="本章已确认",
-            detail="正文已经收录进书稿。",
+            detail=f"正文已经收录进书稿。{optional_note}",
         )
     if draft is not None and version is not None and draft_current:
         return MemoirChapterCompletionSummary(
@@ -287,7 +296,7 @@ async def chapter_summary(
                 action_text="通读并确认",
             ),
             headline="正文可以通读",
-            detail="现有素材已经整理成完整章节。",
+            detail=f"现有素材已经整理成完整章节。{optional_note}",
         )
     return MemoirChapterCompletionSummary(
         chapter_id=chapter.id,
@@ -340,7 +349,7 @@ async def book_overview(
         if needs_check:
             progress.append(f"{needs_check} 章待检查")
         if needs_input:
-            progress.append(f"{needs_input} 章待补充或确认")
+            progress.append(f"{needs_input} 章待确认")
         if ready_to_review:
             progress.append(f"{ready_to_review} 章待通读")
         headline = f"还有 {unfinished} 章未完成"

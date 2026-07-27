@@ -1,8 +1,5 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
-import type {
-  MemoirCompletionIssue,
-  MemoirCompletionIssueOutcome,
-} from "../../domain/voice-chat";
+import type { MemoirCompletionIssue } from "../../domain/voice-chat";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   AudioPlaybackController,
@@ -1393,10 +1390,7 @@ definePage<ChapterWorkspacePageData>()({
       return;
     }
     const choices: Array<{
-      outcome: Extract<
-        MemoirCompletionIssueOutcome,
-        "deferred" | "not_remembered" | "declined"
-      >;
+      outcome: "deferred" | "not_remembered" | "declined";
       note: string;
     }> = [
       { outcome: "deferred", note: "用户选择暂时不补" },

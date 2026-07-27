@@ -152,7 +152,7 @@ function chapterView(
   const stateText = {
     not_started: "待检查",
     preparing: "正在检查",
-    needs_input: "需要您补充",
+    needs_input: "需要确认",
     draft_ready: "等待通读",
     confirmed: "已经确认",
     failed: "检查未完成",

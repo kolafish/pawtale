@@ -1077,7 +1077,7 @@ async def test_book_overview_counts_all_unfinished_chapter_states(
 
     assert overview.headline == "还有 3 章未完成"
     assert overview.detail == (
-        "1 章待检查，1 章待补充或确认，1 章待通读。"
+        "1 章待检查，1 章待确认，1 章待通读。"
         "每章只显示当前最重要的一步。"
     )
 

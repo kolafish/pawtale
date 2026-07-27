@@ -219,11 +219,6 @@
   font-size: 24rpx;
   line-height: 38rpx;
   text-wrap: pretty;
-}
-
-.suggestion-group-detail,
-.suggestion-reason,
-.suggestion-state {
   margin-top: 8rpx;
 }
 

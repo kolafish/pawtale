@@ -385,7 +385,10 @@ async def collection_response(
                     }
                 ),
             )
-            .order_by(MemoirVoiceSession.updated_at.desc())
+            .order_by(
+                MemoirVoiceSession.updated_at.desc(),
+                MemoirVoiceSession.id.desc(),
+            )
         )
         for issue_id, session_id in rows:
             active_sessions.setdefault(issue_id, session_id)
