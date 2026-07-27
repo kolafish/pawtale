@@ -143,6 +143,23 @@ async def _active_issue_session_id(
     )
 
 
+async def _issue_target_label(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    issue: MemoirCompletionIssue,
+) -> str:
+    if issue.section_id is None:
+        return ""
+    title = await db.scalar(
+        select(MemoirSection.title).where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.id == issue.section_id,
+        )
+    )
+    return f"小节《{title}》" if title else "当前小节"
+
+
 async def chapter_summary(
     db: AsyncSession,
     *,
@@ -273,11 +290,21 @@ async def chapter_summary(
         manual = (
             issue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value
         )
+        target_label = await _issue_target_label(
+            db,
+            project_id=project_id,
+            issue=issue,
+        )
         item_status = (
             "in_progress"
             if issue.status == MemoirCompletionIssueStatus.IN_PROGRESS.value
             else "pending"
         )
+        headline = "需要确认" if manual else "还需要补充一点"
+        detail = issue.reason
+        if target_label:
+            headline = f"{target_label}{headline}"
+            detail = f"针对{target_label}：{detail}"
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
             title=chapter.title,
@@ -300,8 +327,8 @@ async def chapter_summary(
                     issue_id=issue.id,
                 ),
             ),
-            headline="需要确认" if manual else "还需要补充一点",
-            detail=issue.reason,
+            headline=headline,
+            detail=detail,
         )
     if (
         draft is not None

@@ -792,6 +792,7 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
     chapter_id = chapter.id
+    section_title = chapter.title
     await _create_current_draft(
         test_db,
         project_id=project_id,
@@ -810,6 +811,8 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
         chapter_id=chapter_id,
         source_refs=[memoir_source_ref(supplemental)],
     )
+    chapter.title = "离乡后的成长"
+    test_db.add(chapter)
     await test_db.commit()
     test_db.expire_all()
     fake = LayeredBookAI(section_issue=True)
@@ -824,6 +827,12 @@ async def test_rewrite_uses_current_material_without_forcing_more_interviews(
     assert prepared.status_code == 200, prepared.text
     before = prepared.json()
     assert before["completion_summary"]["state"] == "needs_input"
+    assert before["completion_summary"]["headline"] == (
+        f"小节《{section_title}》还需要补充一点"
+    )
+    assert before["completion_summary"]["detail"].startswith(
+        f"针对小节《{section_title}》："
+    )
     assert before["draft_needs_rewrite"] is True
     assert before["can_rewrite_draft"] is True
     assert before["pending_new_source_count"] == 1
