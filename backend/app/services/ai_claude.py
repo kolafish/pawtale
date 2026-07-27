@@ -134,36 +134,41 @@ class ClaudeTextService(AITextServiceBase):
         attempt_count: int,
     ) -> tuple[AITextCallResult, object | None]:
         request_timeout = effective_ai_text_timeout_seconds(timeout)
+        merged = (
+            f"{system_prompt}\n\n{user_prompt}"
+            if system_prompt.strip()
+            else user_prompt
+        )
         payload: dict[str, object] = {
             "model": self.model,
             "max_tokens": max_tokens,
             "temperature": temperature,
-            "messages": [{"role": "user", "content": user_prompt}],
+            "messages": [{"role": "user", "content": merged}],
+            "stream": False,
             "tools": [
                 {
-                    "name": STRUCTURED_RESULT_TOOL_NAME,
-                    "description": "提交最终结构化结果，不要把结果写成普通文本。",
-                    "strict": True,
-                    "input_schema": output_model.model_json_schema(),
+                    "type": "function",
+                    "function": {
+                        "name": STRUCTURED_RESULT_TOOL_NAME,
+                        "description": "提交最终结构化结果，不要把结果写成普通文本。",
+                        "strict": True,
+                        "parameters": output_model.model_json_schema(),
+                    },
                 }
             ],
             "tool_choice": {
-                "type": "tool",
-                "name": STRUCTURED_RESULT_TOOL_NAME,
+                "type": "function",
+                "function": {"name": STRUCTURED_RESULT_TOOL_NAME},
             },
         }
-        if system_prompt.strip():
-            payload["system"] = system_prompt
 
         async def request() -> dict:
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
-                        self._messages_url(),
+                        self._chat_completions_url(),
                         headers={
                             "Authorization": f"Bearer {self.auth_token}",
-                            "x-api-key": self.auth_token,
-                            "anthropic-version": "2023-06-01",
                             "Content-Type": "application/json",
                         },
                         json=payload,
@@ -184,34 +189,49 @@ class ClaudeTextService(AITextServiceBase):
             self.max_concurrent_requests,
             request,
         )
-        structured_payload: object | None = None
-        content_parts: list[str] = []
-        blocks = response_json.get("content")
-        if isinstance(blocks, list):
-            for block in blocks:
-                if not isinstance(block, dict):
-                    continue
-                if (
-                    block.get("type") == "tool_use"
-                    and block.get("name") == STRUCTURED_RESULT_TOOL_NAME
-                ):
-                    structured_payload = block.get("input")
-                text = block.get("text")
-                if isinstance(text, str) and text.strip():
-                    content_parts.append(text.strip())
-        content = (
-            json.dumps(structured_payload, ensure_ascii=False)
-            if isinstance(structured_payload, dict)
-            else "\n".join(content_parts).strip()
-        )
+        arguments = self._structured_function_arguments(response_json)
+        structured_payload: object = []
+        if arguments:
+            try:
+                parsed = json.loads(arguments)
+            except json.JSONDecodeError:
+                pass
+            else:
+                structured_payload = parsed if parsed is not None else []
         result = build_text_call_result(
-            (content, response_json),
+            (arguments, response_json),
             client=self,
             requested_model=requested_model,
             elapsed_ms=round((time.monotonic() - started_at) * 1000),
             attempt_count=attempt_count,
         )
         return result, structured_payload
+
+    @staticmethod
+    def _structured_function_arguments(response_json: dict) -> str:
+        choices = response_json.get("choices")
+        if not isinstance(choices, list):
+            return ""
+        for choice in choices:
+            if not isinstance(choice, dict):
+                continue
+            message = choice.get("message")
+            if not isinstance(message, dict):
+                continue
+            tool_calls = message.get("tool_calls")
+            if not isinstance(tool_calls, list):
+                continue
+            for tool_call in tool_calls:
+                if not isinstance(tool_call, dict):
+                    continue
+                function = tool_call.get("function")
+                if not isinstance(function, dict):
+                    continue
+                if function.get("name") != STRUCTURED_RESULT_TOOL_NAME:
+                    continue
+                arguments = function.get("arguments")
+                return arguments.strip() if isinstance(arguments, str) else ""
+        return ""
 
     async def stream_llm(
         self,

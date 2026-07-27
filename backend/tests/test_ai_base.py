@@ -4,7 +4,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from app.services.ai_calls import AIOutputTruncatedError
+from app.services.ai_calls import (
+    AIInvalidStructuredOutputError,
+    AIOutputTruncatedError,
+)
 from app.services.ai_base import AITextServiceBase
 import app.services.ai_story as ai_story
 from app.services.ai_project_analysis import normalize_project_analysis
@@ -18,6 +21,19 @@ class _StructuredProbe(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     ok: bool
+
+
+class _StructuredIssueProbe(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str
+    reason: str
+
+
+class _StructuredListProbe(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_issues: list[_StructuredIssueProbe]
 
 
 # ── Helper Unit Tests ──────────────────────────
@@ -359,19 +375,27 @@ class TestCallLlmContract:
         assert isinstance(result[1], dict)
 
     @pytest.mark.asyncio
-    async def test_claude_structured_generation_uses_native_forced_tool(self):
+    async def test_claude_structured_generation_uses_forced_function_call(self):
         service = ClaudeTextService(model="claude-opus-4-8")
         raw = {
             "model": "claude-opus-4-8",
-            "stop_reason": "tool_use",
-            "usage": {"input_tokens": 10, "output_tokens": 5},
-            "content": [
-                {
-                    "type": "tool_use",
-                    "name": "emit_structured_result",
-                    "input": {"ok": True},
-                }
-            ],
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "tool_calls": [{
+                        "type": "function",
+                        "function": {
+                            "name": "emit_structured_result",
+                            "arguments": '{"ok": true}',
+                        },
+                    }],
+                },
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+            },
         }
         mock_resp = MagicMock()
         mock_resp.json.return_value = raw
@@ -395,20 +419,119 @@ class TestCallLlmContract:
             )
 
         assert result.value.ok is True
-        assert result.response.finish_reason == "tool_use"
+        assert result.response.finish_reason == "tool_calls"
         assert result.response.response_model == "claude-opus-4-8"
-        assert result.response.usage["output_tokens"] == 5
+        assert result.response.usage["completion_tokens"] == 5
         args, kwargs = inst.post.call_args
-        assert args[0] == "https://blankapi.com/v1/messages"
-        assert kwargs["json"]["system"] == "system"
+        assert args[0] == "https://blankapi.com/v1/chat/completions"
+        assert kwargs["json"]["messages"] == [{
+            "role": "user",
+            "content": "system\n\nuser",
+        }]
+        assert kwargs["json"]["stream"] is False
         assert kwargs["json"]["max_tokens"] == 4000
         assert kwargs["json"]["tool_choice"] == {
-            "type": "tool",
-            "name": "emit_structured_result",
+            "type": "function",
+            "function": {"name": "emit_structured_result"},
         }
         tool = kwargs["json"]["tools"][0]
-        assert tool["strict"] is True
-        assert tool["input_schema"]["properties"]["ok"]["type"] == "boolean"
+        assert tool["type"] == "function"
+        assert tool["function"]["strict"] is True
+        assert (
+            tool["function"]["parameters"]["properties"]["ok"]["type"]
+            == "boolean"
+        )
+
+    @pytest.mark.asyncio
+    async def test_claude_structured_generation_retries_invalid_function_arguments(
+        self,
+    ):
+        service = ClaudeTextService(model="claude-opus-4-8")
+
+        def response(arguments: str):
+            mock = MagicMock()
+            mock.json.return_value = {
+                "model": "claude-opus-4-8",
+                "choices": [{
+                    "finish_reason": "tool_calls",
+                    "message": {
+                        "tool_calls": [{
+                            "type": "function",
+                            "function": {
+                                "name": "emit_structured_result",
+                                "arguments": arguments,
+                            },
+                        }],
+                    },
+                }],
+            }
+            mock.raise_for_status = MagicMock()
+            return mock
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(side_effect=[
+                response('{"candidate_issues": "不是数组"}'),
+                response(
+                    '{"candidate_issues": [{'
+                    '"question": "测试问题", "reason": "测试原因"'
+                    '}]}'
+                ),
+            ])
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            result = await service.generate_structured(
+                "system",
+                "user",
+                output_model=_StructuredListProbe,
+                requested_model="claude-opus-4-8",
+                max_attempts=2,
+            )
+
+        assert result.value.candidate_issues[0].question == "测试问题"
+        assert result.response.attempt_count == 2
+        first_payload = inst.post.await_args_list[0].kwargs["json"]
+        parameters = first_payload["tools"][0]["function"]["parameters"]
+        assert "_StructuredIssueProbe" in parameters["$defs"]
+        assert parameters["properties"]["candidate_issues"]["items"] == {
+            "$ref": "#/$defs/_StructuredIssueProbe",
+        }
+        second_payload = inst.post.await_args_list[1].kwargs["json"]
+        assert "上次输出未通过结构校验" in (
+            second_payload["messages"][0]["content"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_claude_structured_generation_rejects_plain_message_json(self):
+        service = ClaudeTextService(model="claude-opus-4-8")
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "model": "claude-opus-4-8",
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": '{"ok": true}'},
+            }],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            with pytest.raises(AIInvalidStructuredOutputError):
+                await service.generate_structured(
+                    "system",
+                    "user",
+                    output_model=_StructuredProbe,
+                    requested_model="claude-opus-4-8",
+                    max_attempts=1,
+                )
+
 
     @pytest.mark.asyncio
     async def test_claude_streaming_uses_native_messages_endpoint(self):

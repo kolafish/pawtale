@@ -54,7 +54,10 @@ provider 子类只负责认证、payload、HTTP/SSE 解析、超时和并发限�
 
 ### Claude 兼容代理
 
-- 使用 OpenAI-compatible `/v1/chat/completions`；
+- 普通非流式文本使用 OpenAI-compatible `/v1/chat/completions`；
+- 结构化输出使用同一接口的强制函数调用，显式关闭流式输出，只解析
+  `tool_calls[].function.arguments`，再通过业务 Pydantic schema 校验；
+- 实时流式文本使用 Anthropic-compatible `/v1/messages` SSE；
 - Base URL 兼容带或不带 `/v1`；
 - 当前代理可能忽略 system role，因此 transport 将 system 与 user prompt 合并；
 - 响应解析兼容 OpenAI message、Anthropic content blocks 和纯文本 content。
