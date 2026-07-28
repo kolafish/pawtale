@@ -189,6 +189,8 @@ function loadVoiceChatPage({
   });
   clearModule("../services/voice-assistant-turn-runtime.ts");
   clearModule("../services/voice-assistant-turn-queue.ts");
+  clearModule("../pages/voice-chat/voice-chat-assistant-playback.ts");
+  clearModule("../pages/voice-chat/voice-chat-recording-runtime.ts");
 
   return loadPageModule("../pages/voice-chat/index.ts").page;
 }
