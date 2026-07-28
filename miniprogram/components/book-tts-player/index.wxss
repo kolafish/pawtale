@@ -1,0 +1,109 @@
+.book-tts-card {
+  width: 100%;
+  padding: 26rpx;
+  box-sizing: border-box;
+  border-radius: 20rpx;
+  background: var(--ui-surface);
+  box-shadow:
+    0 0 0 1rpx rgba(0, 0, 0, 0.05),
+    0 2rpx 6rpx rgba(0, 0, 0, 0.04),
+    0 12rpx 28rpx rgba(0, 0, 0, 0.05);
+}
+
+.book-tts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+}
+
+.book-tts-heading {
+  min-width: 0;
+}
+
+.book-tts-title,
+.book-tts-status {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.book-tts-title {
+  color: var(--ui-text-primary);
+  font-size: 29rpx;
+  font-weight: 800;
+  line-height: 1.4;
+  text-wrap: balance;
+}
+
+.book-tts-status {
+  margin-top: 4rpx;
+  color: var(--ui-text-secondary);
+  font-size: 24rpx;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.book-tts-action {
+  flex: 0 0 auto;
+  min-width: 104rpx;
+  min-height: 80rpx;
+  padding: 0 20rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1;
+  transition-property: transform, opacity, background-color;
+  transition-duration: 140ms;
+  transition-timing-function: ease-out;
+}
+
+.book-tts-action:active {
+  transform: scale(0.96);
+}
+
+.book-tts-track {
+  height: 10rpx;
+  margin-top: 22rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: var(--ui-border);
+}
+
+.book-tts-progress {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--ui-accent);
+  transition-property: width;
+  transition-duration: 180ms;
+  transition-timing-function: ease-out;
+}
+
+.book-tts-highlight {
+  margin-top: 20rpx;
+  color: var(--ui-text-primary);
+  font-size: 28rpx;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.book-tts-spoken {
+  color: var(--ui-text-muted);
+}
+
+.book-tts-current {
+  padding: 2rpx 4rpx;
+  border-radius: 6rpx;
+  background: var(--ui-warning-surface);
+  color: var(--ui-text-primary);
+  font-weight: 800;
+}
+
+.book-tts-remaining {
+  color: var(--ui-text-primary);
+}

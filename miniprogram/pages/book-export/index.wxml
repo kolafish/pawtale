@@ -36,7 +36,7 @@
       <view class="preview-card">
         <view class="section-head">
           <text class="section-title">全书预览</text>
-          <button class="text-button reader-entry-action" bindtap="openBookReader">沉浸阅读</button>
+          <button class="text-button reader-entry-action" bindtap="openBookReader">阅读与朗读</button>
         </view>
 
         <view wx:if="{{bookPreviewTocItems.length}}" class="toc-list">

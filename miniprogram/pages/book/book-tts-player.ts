@@ -1,5 +1,6 @@
 import type {
   MemoirBookAudioResponse,
+  TTSAlignmentSegment,
 } from "../../domain/voice-chat";
 import {
   playAudioFileSequence,
@@ -9,19 +10,25 @@ import {
   VoiceAssistantTTSProgressRuntime,
   type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
-import type { BookData } from "./book-view-model";
 import { positiveFiniteSeconds } from "./book-view-model";
 
+export interface BookTTSState {
+  error: string;
+  playingTarget: string;
+  ttsBusyTarget: string;
+  bookTTSActiveTarget: string;
+  bookTTSActiveText: string;
+  bookTTSSpokenText: string;
+  bookTTSCurrentText: string;
+  bookTTSRemainingText: string;
+  bookTTSProgressPercent: number;
+  bookTTSDurationSeconds: number;
+  bookTTSAlignment: TTSAlignmentSegment[];
+}
+
 export interface BookTTSHost {
-  data: Pick<
-    BookData,
-    | "bookTTSActiveText"
-    | "bookTTSDurationSeconds"
-    | "bookTTSAlignment"
-    | "playingTarget"
-    | "ttsBusyTarget"
-  >;
-  setData(patch: Partial<BookData>): void;
+  data: BookTTSState;
+  setData(patch: Partial<BookTTSState>): void;
   audioPlayback: AudioPlaybackController;
   ttsProgress: VoiceAssistantTTSProgressRuntime;
   playToken: number;
@@ -80,6 +87,11 @@ export async function playBookAudioFiles(
     if (completed) {
       updateBookTTSProgress(host, durationSeconds || elapsedBeforeSeconds, durationSeconds || elapsedBeforeSeconds);
     }
+  } catch (error) {
+    if (token === host.playToken) {
+      resetBookTTSProgress(host);
+    }
+    throw error;
   } finally {
     if (token === host.playToken) {
       host.setData({ playingTarget: "" });

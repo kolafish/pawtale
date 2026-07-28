@@ -1,7 +1,16 @@
-import type { MemoirBookOutput } from "../../domain/voice-chat";
+import type {
+  MemoirBookAudioResponse,
+  MemoirBookOutput,
+} from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
-import { getMemoirBookOutput } from "../../services/memoir-voice-api";
+import {
+  createMemoirBookOutputTTS,
+  getMemoirBookOutput,
+} from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
+import { AudioPlaybackController } from "../../services/audio-playback";
+import { readBookTTSRequest } from "../../services/tts-settings";
+import { VoiceAssistantTTSProgressRuntime } from "../../services/voice-assistant-tts-progress";
 import {
   datasetString,
   queryParam,
@@ -18,6 +27,11 @@ import {
   trimText,
   type BookData,
 } from "../book/book-view-model";
+import {
+  playBookAudioFiles,
+  stopBookPlayback,
+  type BookTTSState,
+} from "../book/book-tts-player";
 
 type BookReaderData = Pick<
   BookData,
@@ -30,10 +44,12 @@ type BookReaderData = Pick<
   | "bookManuscriptTitle"
   | "bookManuscriptSubtitle"
   | "bookVersionText"
+  | "bookViewingHistoricalVersion"
+  | "bookVersionNotice"
   | "bookStaleNotice"
-> & {
+> & BookTTSState & {
   loading: boolean;
-  error: string;
+  playbackError: string;
   projectId: string;
   versionId: string;
   readerTitle: string;
@@ -64,6 +80,8 @@ function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
   | "bookManuscriptTitle"
   | "bookManuscriptSubtitle"
   | "bookVersionText"
+  | "bookViewingHistoricalVersion"
+  | "bookVersionNotice"
   | "bookStaleNotice"
   | "readerTitle"
   | "readerSubtitle"
@@ -84,6 +102,8 @@ function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
     bookManuscriptTitle: data.bookManuscriptTitle,
     bookManuscriptSubtitle: data.bookManuscriptSubtitle,
     bookVersionText: data.bookVersionText,
+    bookViewingHistoricalVersion: data.bookViewingHistoricalVersion,
+    bookVersionNotice: data.bookVersionNotice,
     bookStaleNotice: data.bookStaleNotice,
     readerTitle,
     readerSubtitle: trimText(data.bookManuscriptSubtitle || "根据口述访谈整理"),
@@ -91,11 +111,26 @@ function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
 }
 
 definePage<BookReaderData>()({
+  audioPlayback: new AudioPlaybackController(),
+  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
+  playToken: 0,
+
   data: {
     loading: false,
     error: "",
+    playbackError: "",
     projectId: "",
     versionId: "",
+    ttsBusyTarget: "",
+    playingTarget: "",
+    bookTTSActiveTarget: "",
+    bookTTSActiveText: "",
+    bookTTSSpokenText: "",
+    bookTTSCurrentText: "",
+    bookTTSRemainingText: "",
+    bookTTSProgressPercent: 0,
+    bookTTSDurationSeconds: 0,
+    bookTTSAlignment: [],
     ...readerData(null),
   },
 
@@ -112,6 +147,14 @@ definePage<BookReaderData>()({
 
   onShow() {
     enableMiniProgramShareMenu();
+  },
+
+  onHide() {
+    this.stopPlayback();
+  },
+
+  onUnload() {
+    this.stopPlayback();
   },
 
   onShareAppMessage() {
@@ -142,8 +185,68 @@ definePage<BookReaderData>()({
     scrollReader({ scrollTop: 0 });
   },
 
+  async playBookAudio() {
+    const target = "book";
+    if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
+      this.stopPlayback();
+      return;
+    }
+    if (!this.data.projectId || !trimText(this.data.bookContent)) {
+      return;
+    }
+    if (this.data.bookViewingHistoricalVersion) {
+      this.setData({ playbackError: "历史版本没有对应朗读，请切回最新版后再播放。" });
+      return;
+    }
+    this.stopPlayback();
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
+    this.setData({
+      ttsBusyTarget: target,
+      playbackError: "",
+    });
+    try {
+      const response = await createMemoirBookOutputTTS(
+        this.data.projectId,
+        readBookTTSRequest(),
+      );
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({ ttsBusyTarget: "" });
+      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          playbackError: error instanceof Error ? error.message : "全书朗读失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+    }
+  },
+
+  async playAudioFiles(
+    response: MemoirBookAudioResponse,
+    target: string,
+    token: number,
+    activeText: string,
+  ) {
+    return playBookAudioFiles(this, response, target, token, activeText);
+  },
+
+  stopPlayback() {
+    stopBookPlayback(this);
+  },
+
   async loadBookReader(projectId: string, versionId = "") {
-    this.setData({ loading: true, error: "" });
+    this.stopPlayback();
+    this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const output = await getMemoirBookOutput(projectId);
       this.setData(readerData(output, versionId));

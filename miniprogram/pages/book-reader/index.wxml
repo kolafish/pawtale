@@ -16,6 +16,31 @@
         {{bookPreviewChapters.length || bookPreviewTocItems.length}} 章 · {{bookCharCount || 0}} 字 · {{bookVersionText}}
       </text>
       <text wx:if="{{bookStaleNotice}}" class="reader-notice">{{bookStaleNotice}}</text>
+      <text wx:if="{{bookVersionNotice}}" class="reader-notice subtle">{{bookVersionNotice}}</text>
+      <view
+        class="reader-audio-action ui-block-action ui-pressable {{bookViewingHistoricalVersion ? 'is-disabled' : ''}}"
+        aria-role="button"
+        aria-disabled="{{bookViewingHistoricalVersion}}"
+        bindtap="playBookAudio"
+      >
+        {{ttsBusyTarget === "book" ? "正在准备全书朗读…" : (playingTarget === "book" ? "停止朗读" : (bookViewingHistoricalVersion ? "历史版本暂不朗读" : "朗读全书"))}}
+      </view>
+      <text wx:if="{{playbackError}}" class="reader-playback-error">{{playbackError}}</text>
+    </view>
+
+    <view
+      wx:if="{{ttsBusyTarget || playingTarget || bookTTSActiveTarget}}"
+      class="reader-tts-shell"
+    >
+      <book-tts-player
+        title="全书朗读"
+        phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
+        progress="{{bookTTSProgressPercent}}"
+        spoken-text="{{bookTTSSpokenText}}"
+        current-text="{{bookTTSCurrentText}}"
+        remaining-text="{{bookTTSRemainingText}}"
+        bindstop="stopPlayback"
+      />
     </view>
 
     <view wx:if="{{bookPreviewTocItems.length}}" class="reader-section">
