@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from sqlalchemy import event
@@ -90,6 +92,17 @@ async_session_maker = async_sessionmaker(
     class_=AsyncSession,
     expire_on_commit=False,
 )
+
+
+@asynccontextmanager
+async def commit_or_rollback(session: AsyncSession) -> AsyncIterator[None]:
+    """Own one request-level unit of work on an existing session."""
+    try:
+        yield
+        await session.commit()
+    except BaseException:
+        await session.rollback()
+        raise
 
 
 class Base(DeclarativeBase):
