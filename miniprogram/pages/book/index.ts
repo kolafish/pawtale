@@ -148,6 +148,8 @@ type BookWorkspaceView = "chapters" | "tools";
 type BookPageData = BookHomeData & {
   pageClass: string;
   bookWorkspaceView: BookWorkspaceView;
+  planStructureBusyChapterId: string;
+  planStructureBusyDirection: string;
 };
 
 definePage<BookPageData>()({
@@ -167,6 +169,8 @@ definePage<BookPageData>()({
     generatingPlan: false,
     confirmingPlan: false,
     updatingPlanStructure: false,
+    planStructureBusyChapterId: "",
+    planStructureBusyDirection: "",
     generatingBook: false,
     error: "",
     projectId: "",
@@ -643,8 +647,12 @@ definePage<BookPageData>()({
 
   openChapterEditor(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
+    const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapterId || !this.data.projectId) {
       this.setData({ error: "缺少章节信息" });
+      return;
+    }
+    if (this.data.updatingPlanStructure || chapter?.draftBusy) {
       return;
     }
     this.stopPlayback();
@@ -879,7 +887,16 @@ definePage<BookPageData>()({
     if (!command) {
       return;
     }
-    await this.applyPlanStructureCommand(command, "章节顺序已调整");
+    const previousChapters = this.data.chapters;
+    const fromIndex = previousChapters.findIndex((chapter) => chapter.id === chapterId);
+    const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
+    const chapters = [...previousChapters];
+    [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
+    this.setData(chapterCollectionData(chapters, this.data.splitSourceSelections));
+    const plan = await this.applyPlanStructureCommand(command, "章节顺序已调整");
+    if (!plan) {
+      this.setData(chapterCollectionData(previousChapters, this.data.splitSourceSelections));
+    }
   },
 
   async mergeChapterInto(event: PickerEvent) {
@@ -964,10 +981,44 @@ definePage<BookPageData>()({
       return null;
     }
     this.stopPlayback();
-    this.setData({ updatingPlanStructure: true, error: "" });
+    const movingChapter = command.type === "move_chapter";
+    this.setData({
+      updatingPlanStructure: true,
+      planStructureBusyChapterId: movingChapter ? command.chapter_id || "" : "",
+      planStructureBusyDirection: movingChapter ? command.direction || "" : "",
+      error: "",
+    });
     try {
       const plan = await applyMemoirBookPlanStructureCommand(this.data.projectId, command);
-      await this.applyUpdatedPlan(plan, toastTitle);
+      if (movingChapter) {
+        const previousSortOrderByChapterId = new Map(
+          this.data.chapters.map((chapter) => [chapter.id, chapter.sort_order]),
+        );
+        const movedChapterTitles = plan.chapters
+          .filter((chapter) => previousSortOrderByChapterId.get(chapter.id) !== chapter.sort_order)
+          .map((chapter) => chapter.title);
+        const draftsByChapterId = this.data.chapters.reduce<Record<string, MemoirBookChapterDraft | null>>(
+          (memo, chapter) => {
+            memo[chapter.id] = chapter.draft;
+            return memo;
+          },
+          {},
+        );
+        this.applyPlan(plan, draftsByChapterId);
+        if (this.data.bookOutput?.latest_version && movedChapterTitles.length) {
+          this.applyBookOutput({
+            ...this.data.bookOutput,
+            is_stale: true,
+            stale_chapter_titles: Array.from(new Set([
+              ...(this.data.bookOutput.stale_chapter_titles || []),
+              ...movedChapterTitles,
+            ])),
+          });
+        }
+        wx.showToast({ title: toastTitle, icon: "success" });
+      } else {
+        await this.applyUpdatedPlan(plan, toastTitle);
+      }
       return plan;
     } catch (error) {
       if (routeAuthError(error, "login")) {
@@ -976,7 +1027,11 @@ definePage<BookPageData>()({
       this.setData({ error: error instanceof Error ? error.message : "目录调整失败" });
       return null;
     } finally {
-      this.setData({ updatingPlanStructure: false });
+      this.setData({
+        updatingPlanStructure: false,
+        planStructureBusyChapterId: "",
+        planStructureBusyDirection: "",
+      });
     }
   },
 

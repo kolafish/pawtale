@@ -409,56 +409,66 @@
     <view class="section-head chapter-section-head">
       <view class="section-head-copy">
         <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "逐章成稿"}}</text>
-        <text class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
+        <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
+        <text wx:else class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
       </view>
-      <button
-        class="section-head-action"
+      <view
+        class="section-head-action chapter-order-toggle {{updatingPlanStructure ? 'is-locked' : ''}}"
         hover-class="section-head-action-active"
-        disabled="{{updatingPlanStructure}}"
+        aria-role="button"
+        aria-disabled="{{updatingPlanStructure}}"
         bindtap="toggleChapterStructureEditing"
       >
         {{chapterStructureEditing ? "完成" : "调整章节"}}
-      </button>
+      </view>
     </view>
 
-    <view wx:if="{{chapterStructureEditing}}" class="chapter-order-panel">
-      <view wx:for="{{chapters}}" wx:key="id" class="chapter-order-row">
+    <view wx:if="{{chapterStructureEditing}}" class="chapter-order-panel" aria-busy="{{updatingPlanStructure}}">
+      <view
+        wx:for="{{chapters}}"
+        wx:key="id"
+        class="chapter-order-row {{planStructureBusyChapterId === item.id ? 'is-saving' : ''}}"
+      >
         <view class="chapter-order-copy">
           <text class="chapter-order-index">第 {{index + 1}} 章</text>
           <text class="chapter-order-title">{{item.editingTitle || item.title || "未命名章节"}}</text>
         </view>
         <view class="chapter-order-actions">
-          <button
-            class="chapter-order-edit"
+          <view
+            class="chapter-order-edit {{item.draftBusy ? 'is-unavailable' : ''}} {{updatingPlanStructure ? 'is-locked' : ''}}"
             hover-class="chapter-order-button-active"
+            aria-role="button"
+            aria-label="编辑第 {{index + 1}} 章"
+            aria-disabled="{{updatingPlanStructure || item.draftBusy}}"
             data-id="{{item.id}}"
-            disabled="{{updatingPlanStructure || item.draftBusy}}"
             bindtap="openChapterEditor"
           >
             编辑
-          </button>
-          <button
-            class="chapter-order-button"
+          </view>
+          <view
+            class="chapter-order-button {{!item.canMoveUp ? 'is-unavailable' : ''}} {{updatingPlanStructure ? 'is-locked' : ''}} {{planStructureBusyChapterId === item.id && planStructureBusyDirection === 'up' ? 'is-saving' : ''}}"
             hover-class="chapter-order-button-active"
+            aria-role="button"
             aria-label="第 {{index + 1}} 章上移"
+            aria-disabled="{{updatingPlanStructure || !item.canMoveUp}}"
             data-id="{{item.id}}"
             data-direction="up"
             bindtap="moveChapter"
-            disabled="{{updatingPlanStructure || !item.canMoveUp}}"
           >
-            ↑
-          </button>
-          <button
-            class="chapter-order-button"
+            {{planStructureBusyChapterId === item.id && planStructureBusyDirection === "up" ? "…" : "↑"}}
+          </view>
+          <view
+            class="chapter-order-button {{!item.canMoveDown ? 'is-unavailable' : ''}} {{updatingPlanStructure ? 'is-locked' : ''}} {{planStructureBusyChapterId === item.id && planStructureBusyDirection === 'down' ? 'is-saving' : ''}}"
             hover-class="chapter-order-button-active"
+            aria-role="button"
             aria-label="第 {{index + 1}} 章下移"
+            aria-disabled="{{updatingPlanStructure || !item.canMoveDown}}"
             data-id="{{item.id}}"
             data-direction="down"
             bindtap="moveChapter"
-            disabled="{{updatingPlanStructure || !item.canMoveDown}}"
           >
-            ↓
-          </button>
+            {{planStructureBusyChapterId === item.id && planStructureBusyDirection === "down" ? "…" : "↓"}}
+          </view>
         </view>
       </view>
     </view>
