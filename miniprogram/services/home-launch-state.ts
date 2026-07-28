@@ -1,3 +1,5 @@
+import { timestampMs } from "./time";
+
 export type HomeLaunchVariant = "none" | "first_visit" | "new_project" | "returning_soft";
 
 const HOME_LAUNCH_STATE_KEY = "pawtale_home_launch_state";
@@ -48,14 +50,6 @@ function storageApi(): Pick<WechatMiniprogram.Wx, "getStorageSync" | "setStorage
 
 function isoTime(nowMs: number): string {
   return new Date(nowMs).toISOString();
-}
-
-function timestampMs(value?: string): number {
-  if (!value) {
-    return 0;
-  }
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
 function normalizeStore(value: unknown): HomeLaunchStore {

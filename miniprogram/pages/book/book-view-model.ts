@@ -6,13 +6,11 @@ import type {
   MemoirBookManuscriptTemplate,
   MemoirBookCoverStyle,
   MemoirBookOutput,
-  MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
   MemoirBookOutputVersionSummary,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
-  MemoirBookPlanChapterUpdateInput,
   TTSAlignmentSegment,
 } from "../../domain/voice-chat";
 import {
@@ -41,19 +39,6 @@ export {
 export { trimText } from "./book-view-model-utils";
 
 export type BookStage = "empty" | "plan_draft" | "drafting";
-
-export const BOOK_EXPORT_LAYOUT_OPTIONS: BookExportLayoutOptionView[] = [
-  {
-    label: "阅读版",
-    value: "standard",
-    detailText: "A5 书页，含目录页码，适合微信阅读和分享",
-  },
-  {
-    label: "打印版",
-    value: "large_print",
-    detailText: "字号更大，留白更宽，适合纸质打印",
-  },
-];
 
 export interface ChapterPickerOption {
   label: string;
@@ -172,12 +157,6 @@ export interface BookManuscriptChapterView {
   contentPreview: string;
 }
 
-export interface BookExportLayoutOptionView {
-  label: string;
-  value: MemoirBookOutputExportLayout;
-  detailText: string;
-}
-
 export interface BookCoverStyleOptionView {
   value: MemoirBookCoverStyle;
   label: string;
@@ -234,7 +213,6 @@ export interface BookData {
   stageText: string;
   chapters: BookChapterView[];
   chapterStructureEditing: boolean;
-  editingChapterId: string;
   splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
   totalChapterCount: number;
@@ -249,7 +227,6 @@ export interface BookData {
   bookPreviewTocItems: BookOutputTocView[];
   bookPreviewChapters: BookOutputChapterPreviewView[];
   bookPreviewChaptersExpanded: boolean;
-  bookOutputDetailsExpanded: boolean;
   bookManuscriptAvailable: boolean;
   bookManuscriptTitle: string;
   bookManuscriptSubtitle: string;
@@ -268,11 +245,6 @@ export interface BookData {
   bookStaleNotice: string;
   bookActionText: string;
   bookExportBusyTarget: string;
-  bookExportLayout: MemoirBookOutputExportLayout;
-  bookExportLayoutIndex: number;
-  bookExportLayoutLabel: string;
-  bookExportLayoutDetailText: string;
-  bookExportLayoutOptions: BookExportLayoutOptionView[];
   bookExportShowSourceAppendix: boolean;
   bookTitleInput: string;
   bookSubtitleInput: string;
@@ -295,13 +267,6 @@ export interface BookData {
   bookCoverStyleOptions: BookCoverStyleOptionView[];
   bookCoverStyleChanged: boolean;
   bookEditorialCopyBusyTarget: string;
-  bookChapterEditorialEditorVisible: boolean;
-  bookChapterEditorialChapterId: string;
-  bookChapterEditorialChapterTitle: string;
-  bookChapterEditorialIntroInput: string;
-  bookChapterEditorialPullQuoteInput: string;
-  bookChapterEditorialSourceRefId: string;
-  bookChapterEditorialSourceText: string;
   generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
@@ -330,11 +295,9 @@ export interface BookData {
 
 export type BookHomeData = Omit<
   BookData,
-  | "editingChapterId"
   | "bookPreviewTocItems"
   | "bookPreviewChapters"
   | "bookPreviewChaptersExpanded"
-  | "bookOutputDetailsExpanded"
   | "bookManuscriptAvailable"
   | "bookManuscriptTitle"
   | "bookManuscriptSubtitle"
@@ -351,11 +314,6 @@ export type BookHomeData = Omit<
   | "bookViewingHistoricalVersion"
   | "bookVersionNotice"
   | "bookExportBusyTarget"
-  | "bookExportLayout"
-  | "bookExportLayoutIndex"
-  | "bookExportLayoutLabel"
-  | "bookExportLayoutDetailText"
-  | "bookExportLayoutOptions"
   | "bookExportShowSourceAppendix"
   | "bookTitleInput"
   | "bookSubtitleInput"
@@ -378,13 +336,6 @@ export type BookHomeData = Omit<
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
   | "bookEditorialCopyBusyTarget"
-  | "bookChapterEditorialEditorVisible"
-  | "bookChapterEditorialChapterId"
-  | "bookChapterEditorialChapterTitle"
-  | "bookChapterEditorialIntroInput"
-  | "bookChapterEditorialPullQuoteInput"
-  | "bookChapterEditorialSourceRefId"
-  | "bookChapterEditorialSourceText"
 >;
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
@@ -949,11 +900,6 @@ function bookMetadataInputData(
   };
 }
 
-export function bookOutputVersionText(output: MemoirBookOutput | null): string {
-  const version = output?.latest_version?.version;
-  return version ? `已修改 ${version} 次` : "尚未生成全书";
-}
-
 function selectedBookOutputVersionText(
   output: MemoirBookOutput | null,
   selectedVersion: MemoirBookOutputVersion | null = null,
@@ -1450,15 +1396,6 @@ export function guestBookData(): Partial<BookHomeData> {
 export function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] {
   return chapters.map((chapter) => ({
     title: trimText(chapter.editingTitle),
-    include_in_book: chapter.include_in_book !== false,
-    source_refs: chapter.source_refs,
-  }));
-}
-
-export function toPlanUpdateInput(chapters: BookChapterView[]): MemoirBookPlanChapterUpdateInput[] {
-  return chapters.map((chapter) => ({
-    id: chapter.id,
-    title: trimText(chapter.editingTitle || chapter.title),
     include_in_book: chapter.include_in_book !== false,
     source_refs: chapter.source_refs,
   }));

@@ -56,6 +56,15 @@ export class ApiError extends Error {
   }
 }
 
+export function optionalApiResource<T>(request: Promise<T>): Promise<T | null> {
+  return request.catch((error: unknown) => {
+    if (error instanceof ApiError && error.statusCode === 404) {
+      return null;
+    }
+    throw error;
+  });
+}
+
 export function cleanBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/$/, "");
 }

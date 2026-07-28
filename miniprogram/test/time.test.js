@@ -28,3 +28,19 @@ test("formats Beijing time without timezone label for compact records", () => {
   assert.equal(formatBeijingDateTimeShort("2026-06-16T01:05:00+00:00"), "06-16 09:05");
   assert.equal(formatBeijingDateTimeShort(""), "");
 });
+
+test("normalizes timestamps for sorting persisted records", () => {
+  const { timestampMs } = timeModule();
+
+  assert.equal(timestampMs("2026-06-16T01:05:00Z"), Date.parse("2026-06-16T01:05:00Z"));
+  assert.equal(timestampMs("invalid"), 0);
+  assert.equal(timestampMs(null), 0);
+});
+
+test("formats playback seconds as an unclipped minute clock", () => {
+  const { formatPlaybackClock } = timeModule();
+
+  assert.equal(formatPlaybackClock(0), "0:00");
+  assert.equal(formatPlaybackClock(65.9), "1:05");
+  assert.equal(formatPlaybackClock(3600), "60:00");
+});

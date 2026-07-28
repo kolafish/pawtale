@@ -584,7 +584,6 @@ test("book export page downloads reading PDF with the standard layout", async ()
   });
   const context = pageContext(page, {
     projectId: "project/1",
-    bookExportLayout: "large_print",
   });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
 

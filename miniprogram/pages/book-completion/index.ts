@@ -20,7 +20,7 @@ import {
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
-import { ApiError } from "../../services/request";
+import { optionalApiResource } from "../../services/request";
 import {
   datasetString,
   pageUrl,
@@ -367,12 +367,7 @@ definePage<BookCompletionData>()({
         ? await Promise.all([
           getMemoirBookReview(this.data.projectId),
           listMemoirCompletionIssues(this.data.projectId),
-          getMemoirBookOutput(this.data.projectId).catch((error) => {
-            if (error instanceof ApiError && error.statusCode === 404) {
-              return null;
-            }
-            throw error;
-          }),
+          optionalApiResource(getMemoirBookOutput(this.data.projectId)),
         ])
         : [null, { issues: [] }, null];
       const finishedChapterId = this.data.preparingChapterId;
