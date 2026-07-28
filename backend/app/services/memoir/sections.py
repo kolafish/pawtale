@@ -50,6 +50,7 @@ from app.services.memoir.material_roles import (
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
+from app.services.memoir.transcript_projection import current_material_text
 
 
 async def _load_plan(
@@ -138,15 +139,6 @@ async def _load_sections(
     return list((await db.execute(query)).scalars().unique().all())
 
 
-def _material_text(material: MemoirSectionMaterial) -> str:
-    if material.transcript_version is not None:
-        text = (material.transcript_version.content or "").strip()
-        if text:
-            return text
-    utterance = material.utterance
-    return (utterance.transcript_edited or utterance.transcript_raw or "").strip()
-
-
 async def _chapter_titles(
     db: AsyncSession,
     *,
@@ -188,7 +180,7 @@ def _section_response(
                 utterance_id=material.utterance_id,
                 transcript_version_id=material.transcript_version_id,
                 sort_order=material.sort_order,
-                text=_material_text(material),
+                text=current_material_text(material),
                 include_in_book=material.include_in_book,
                 assigned_by=material.assigned_by,
                 assignment_confidence=material.assignment_confidence,
@@ -227,7 +219,7 @@ def _section_summary(section: MemoirSection) -> MemoirChapterSectionSummary:
             MemoirChapterSectionMaterialSummary(
                 utterance_id=material.utterance_id,
                 sort_order=material.sort_order,
-                text=_material_text(material),
+                text=current_material_text(material),
                 include_in_book=material.include_in_book,
             )
             for material in materials

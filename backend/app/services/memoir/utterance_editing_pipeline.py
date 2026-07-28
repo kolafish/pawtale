@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 
 from sqlalchemy import select, update
@@ -14,32 +13,20 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import editing_jobs, sections
+from app.services.memoir.narrative.framework_matching import (
+    schedule_framework_matching_job,
+)
+from app.services.memoir.transcript_projection import (
+    current_transcript_version_id,
+    current_utterance_text,
+    source_text_hash,
+)
 
 
 @dataclass(frozen=True)
 class TranscriptMutationGuard:
     source_text_hash: str
     transcript_version_id: str | None
-
-
-def current_utterance_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (
-        utterance.transcript_raw or ""
-    ).strip()
-
-
-def current_transcript_version_id(
-    utterance: MemoirVoiceUtterance,
-) -> str | None:
-    return (
-        utterance.chat_message.transcript_version_id
-        if utterance.chat_message
-        else None
-    )
-
-
-def source_text_hash(text: str) -> str:
-    return hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
 
 
 def transcript_mutation_guard(
@@ -98,10 +85,6 @@ async def schedule_material_organization_for_ready_utterance(
     text = current_utterance_text(utterance)
     if not text:
         return None
-    from app.services.memoir.narrative.framework_matching import (
-        schedule_framework_matching_job,
-    )
-
     await schedule_framework_matching_job(
         db,
         project_id=project_id,

@@ -49,9 +49,7 @@ from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
-from app.services.memoir.utterance_editing_pipeline import (
-    source_text_hash,
-)
+from app.services.memoir.transcript_projection import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_voice_transcript,
@@ -1100,11 +1098,13 @@ async def test_share_video_worker_deadline_fails_without_retry(
         "app.services.memoir.share_video_jobs.MEMOIR_SHARE_VIDEO_DIR",
         tmp_path / "share-videos",
     )
+    render_started = asyncio.Event()
     render_cancelled = asyncio.Event()
 
     async def stalled_render(request):
         request.target_path.parent.mkdir(parents=True, exist_ok=True)
         request.target_path.write_bytes(b"partial mp4")
+        render_started.set()
         try:
             await asyncio.Event().wait()
         finally:
@@ -1139,11 +1139,15 @@ async def test_share_video_worker_deadline_fails_without_retry(
         expire_on_commit=False,
     )
 
-    assert await share_video_jobs.run_share_video_job(
-        lease,
-        session_maker=session_maker,
-        timeout_seconds=0.02,
-    ) is False
+    worker_task = asyncio.create_task(
+        share_video_jobs.run_share_video_job(
+            lease,
+            session_maker=session_maker,
+            timeout_seconds=1.0,
+        )
+    )
+    await asyncio.wait_for(render_started.wait(), timeout=2.0)
+    assert await worker_task is False
     assert render_cancelled.is_set()
     await test_db.rollback()
     stored_job = await test_db.get(MemoirMaterialShareVideo, job_id)
@@ -1153,7 +1157,7 @@ async def test_share_video_worker_deadline_fails_without_retry(
     assert stored_job.attempts == 1
     assert stored_job.run_after is None
     assert stored_job.metadata_json["error_type"] == "job_deadline_exceeded"
-    assert stored_job.metadata_json["timeout_seconds"] == 0.02
+    assert stored_job.metadata_json["timeout_seconds"] == 1.0
     assert "已停止，请重新生成" in stored_job.error_message
     assert not target_path.exists()
 

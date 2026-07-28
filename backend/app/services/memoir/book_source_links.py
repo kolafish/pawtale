@@ -16,6 +16,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.schemas.memoir_book import MemoirBookSourceIncludedChapter
+from app.services.memoir.transcript_projection import current_material_text
 
 
 @dataclass(frozen=True)
@@ -63,11 +64,7 @@ def _material_ref(
     material: MemoirSectionMaterial,
     utterance: MemoirVoiceUtterance,
 ) -> dict[str, object]:
-    text = ""
-    if material.transcript_version is not None:
-        text = (material.transcript_version.content or "").strip()
-    if not text:
-        text = (utterance.transcript_edited or utterance.transcript_raw or "").strip()
+    text = current_material_text(material, utterance=utterance)
     ref: dict[str, object] = {
         "voice_session_id": utterance.voice_session_id,
         "message_id": utterance.chat_message_id or "",

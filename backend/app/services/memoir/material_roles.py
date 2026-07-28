@@ -4,6 +4,7 @@ from sqlalchemy import and_, func, or_
 
 from app.domain.memoir.types import MemoirChatMessageRole, MemoirSpeakerRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 def is_narrator_material(utterance: MemoirVoiceUtterance) -> bool:
@@ -24,7 +25,7 @@ def is_countable_material(
     content = (
         text
         if text is not None
-        else utterance.transcript_edited or utterance.transcript_raw
+        else current_utterance_text(utterance)
     )
     return bool(str(content or "").strip()) and is_narrator_material(utterance)
 

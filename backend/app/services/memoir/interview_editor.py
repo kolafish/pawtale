@@ -43,6 +43,7 @@ from app.services.memoir.material_roles import (
     is_countable_material,
     narrator_material_clause,
 )
+from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
@@ -64,16 +65,12 @@ def _utterance_order_key(utterance: MemoirVoiceUtterance) -> tuple[object, str]:
     return utterance.created_at, utterance.id
 
 
-def _utterance_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
-
-
 def _message_text(message: MemoirChatMessage) -> str:
     text = (message.content_text or "").strip()
     if text:
         return text
     utterance = _primary_utterance(message)
-    return _utterance_text(utterance) if utterance else ""
+    return current_utterance_text(utterance) if utterance else ""
 
 
 def _primary_utterance(message: MemoirChatMessage) -> MemoirVoiceUtterance | None:
@@ -87,7 +84,7 @@ def _answer_pairs(session: MemoirVoiceSession) -> list[tuple[MemoirChatMessage, 
         if message.role != MemoirChatMessageRole.USER.value:
             continue
         for utterance in sorted(list(message.utterances), key=_utterance_order_key):
-            text = _utterance_text(utterance)
+            text = current_utterance_text(utterance)
             if text and is_countable_material(utterance, text):
                 pairs.append((message, utterance))
     return pairs
@@ -212,7 +209,7 @@ def _session_summary_text(
         answer_pairs,
         key=lambda item: (_message_order_key(item[0]), item[1].created_at, item[1].id),
     ):
-        text = _markdown_inline(_utterance_text(utterance))
+        text = _markdown_inline(current_utterance_text(utterance))
         if text:
             excerpts.append(text)
         if len(excerpts) >= 2:
@@ -337,7 +334,7 @@ def _answer_response(
     included_by_utterance: dict[str, list],
 ) -> MemoirInterviewEditorAnswerResponse:
     audio_file = utterance.audio_file
-    display_text = _utterance_text(utterance)
+    display_text = current_utterance_text(utterance)
     included_chapters = included_by_utterance.get(utterance.id, [])
     return MemoirInterviewEditorAnswerResponse(
         id=utterance.id,
@@ -478,7 +475,7 @@ async def get_interview_session_detail(
         _answer_pairs(session),
         key=lambda item: (_message_order_key(item[0]), item[1].created_at, item[1].id),
     ):
-        if not is_countable_material(utterance, _utterance_text(utterance)):
+        if not is_countable_material(utterance, current_utterance_text(utterance)):
             continue
         answer = _answer_response(message, utterance, included_by_utterance=included_by_utterance)
         parent_id = answer.parent_question_message_id
@@ -703,7 +700,7 @@ async def convert_interview_question_to_answer(
         raise HTTPException(status_code=400, detail="这个问题下还有回答，请先移动这些回答")
 
     utterances = sorted(list(message.utterances), key=_utterance_order_key)
-    if not any(_utterance_text(utterance) for utterance in utterances):
+    if not any(current_utterance_text(utterance) for utterance in utterances):
         raise HTTPException(status_code=400, detail="这条问题没有可转成回答的识别文字")
 
     parent_id = req.parent_question_message_id

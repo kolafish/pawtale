@@ -12,16 +12,13 @@ from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
 from app.migrations.memoir_voice import migrate_memoir_voice_schema
 
 
-# 使用内存数据库进行测试
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
-
-
 @pytest_asyncio.fixture
-async def test_db():
+async def test_db(tmp_path):
     """创建测试数据库"""
     register_models()
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
     test_settings = settings.model_copy(
-        update={"app_env": "test", "database_url": TEST_DATABASE_URL}
+        update={"app_env": "test", "database_url": database_url}
     )
     engine = create_database_engine(test_settings)
     async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

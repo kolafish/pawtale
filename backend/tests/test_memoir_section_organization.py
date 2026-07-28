@@ -17,7 +17,7 @@ from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
 )
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
-from app.services.memoir.utterance_editing_pipeline import source_text_hash
+from app.services.memoir.transcript_projection import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_chapter_draft,

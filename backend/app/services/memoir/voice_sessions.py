@@ -35,6 +35,7 @@ from app.services.memoir.material_roles import (
     is_countable_material,
     narrator_material_clause,
 )
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 def _detail_options():
@@ -165,15 +166,11 @@ def _char_count(text: str) -> int:
     return len("".join(str(text or "").split()))
 
 
-def _utterance_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
-
-
 def _visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
     return [
         utterance
         for utterance in voice_session.utterances
-        if is_countable_material(utterance, _utterance_text(utterance))
+        if is_countable_material(utterance, current_utterance_text(utterance))
     ]
 
 
@@ -231,7 +228,7 @@ def _session_summary(voice_session: MemoirVoiceSession) -> MemoirVoiceSessionSum
         user_message_count=len(user_messages),
         assistant_message_count=len(assistant_messages),
         utterance_count=len(utterances),
-        total_user_char_count=sum(_char_count(_utterance_text(utterance)) for utterance in utterances),
+        total_user_char_count=sum(_char_count(current_utterance_text(utterance)) for utterance in utterances),
         total_audio_seconds=sum(_utterance_duration_seconds(utterance) for utterance in utterances),
         last_message_text=(last_message.content_text if last_message else "")[:120],
         last_message_role=last_message.role if last_message else None,

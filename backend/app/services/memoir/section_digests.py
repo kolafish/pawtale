@@ -42,6 +42,7 @@ from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
+from app.services.memoir.transcript_projection import current_material_text
 
 
 SECTION_DIGEST_ENGINE = "llm_section_digest_v2"
@@ -127,17 +128,6 @@ def _string_list(
     return result
 
 
-def _material_text(material: MemoirSectionMaterial) -> str:
-    if material.transcript_version is not None:
-        text = _compact_text(material.transcript_version.content)
-        if text:
-            return text
-    return _compact_text(
-        material.utterance.transcript_edited
-        or material.utterance.transcript_raw
-    )
-
-
 async def load_section_digest_context(
     db: AsyncSession,
     *,
@@ -171,7 +161,7 @@ async def load_section_digest_context(
             section_material_id=material.id,
             transcript_version_id=material.transcript_version_id,
             sort_order=material.sort_order,
-            text=_material_text(material),
+            text=_compact_text(current_material_text(material)),
             include_in_book=material.include_in_book,
         )
         for material in ordered

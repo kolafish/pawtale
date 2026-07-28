@@ -25,7 +25,7 @@ from app.models.memoir import (
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.utterance_editing_pipeline import source_text_hash
+from app.services.memoir.transcript_projection import source_text_hash
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway import (
     MAX_AUDIO_FRAME_BYTES,

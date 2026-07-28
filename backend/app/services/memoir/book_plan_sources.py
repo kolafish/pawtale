@@ -30,6 +30,7 @@ from app.services.memoir.book_source_links import (
     chapter_source_change_states_by_chapter,
     plan_source_ref_dicts_by_chapter,
 )
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 PENDING_SOURCE_UTTERANCE_IDS_KEY = "pending_source_utterance_ids"
@@ -81,10 +82,6 @@ class SourceSegment:
 
 def text_or_empty(value: str | None) -> str:
     return (value or "").strip()
-
-
-def display_text(utterance: MemoirVoiceUtterance) -> str:
-    return text_or_empty(utterance.transcript_edited) or text_or_empty(utterance.transcript_raw)
 
 
 def safe_quote(source_text: str, quote: str = "") -> str:
@@ -367,7 +364,7 @@ async def source_segments(
     )
     segments: list[SourceSegment] = []
     for utterance, message in result.all():
-        text = display_text(utterance)
+        text = current_utterance_text(utterance)
         if not text:
             continue
         segments.append(
