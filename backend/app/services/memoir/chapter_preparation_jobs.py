@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
@@ -11,10 +11,6 @@ from app.services.memoir.access import load_memoir_project
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.project_ai_preferences import select_project_ai_model
-
-
-class _ChapterPreparationCancelled(Exception):
-    pass
 
 
 _ACTIVE_STATUSES = {
@@ -266,27 +262,7 @@ async def cancel_chapter_preparation_job(
     )
     if job is None:
         raise ValueError("章节处理任务不存在")
-    result_json = {
-        **dict(job.result_json or {}),
-        "stage": "cancelled",
-        "cancelled": True,
-    }
-    await db.execute(
-        update(MemoirEditingJob)
-        .where(
-            MemoirEditingJob.id == job.id,
-            MemoirEditingJob.status.in_(_ACTIVE_STATUSES),
-        )
-        .values(
-            status=MemoirEditingJobStatus.SKIPPED.value,
-            locked_at=None,
-            lease_token=None,
-            lease_expires_at=None,
-            result_json=result_json,
-        )
-    )
-    await db.commit()
-    await db.refresh(job)
+    await editing_jobs.cancel_project_editing_job(db, job=job)
     return _job_state(
         project_id=project_id,
         chapter_id=chapter_id,
@@ -298,8 +274,6 @@ async def run_chapter_preparation_job(
     db: AsyncSession,
     job: MemoirEditingJob,
 ) -> EditingJobResult:
-    job_id = job.id
-    job_lease_token = job.lease_token
     project_id = job.project_id
     chapter_id = str(job.chapter_id or "")
     payload = dict(job.payload_json or {})
@@ -307,16 +281,11 @@ async def run_chapter_preparation_job(
     if operation not in {"prepare", "rewrite"}:
         raise ValueError("章节处理任务类型无效")
     progress = dict(job.result_json or {})
-
-    async def update_progress(patch: dict[str, object]) -> None:
-        progress.update(patch)
-        if not await editing_jobs.update_editing_job_progress_for_lease(
-            db,
-            job_id=job_id,
-            lease_token=job_lease_token,
-            result_json=progress,
-        ):
-            raise _ChapterPreparationCancelled
+    update_progress = editing_jobs.editing_job_progress_callback(
+        db,
+        job=job,
+        progress=progress,
+    )
 
     try:
         if operation == "rewrite":
@@ -347,7 +316,7 @@ async def run_chapter_preparation_job(
                 checkpoint=progress,
                 progress_callback=update_progress,
             )
-    except _ChapterPreparationCancelled:
+    except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={

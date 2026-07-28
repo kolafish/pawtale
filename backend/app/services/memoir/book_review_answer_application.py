@@ -27,7 +27,11 @@ from app.services.ai_timeouts import (
 )
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir import book_review_answer_state, book_reviews
+from app.services.memoir import (
+    book_output_versions,
+    book_review_answer_state,
+    book_reviews,
+)
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     manuscript_from_snapshot,
@@ -235,23 +239,6 @@ def _normalize_application(
     return revised_snapshots, changed_ids, summary
 
 
-async def _latest_output_version(
-    db: AsyncSession,
-    *,
-    output_id: str,
-) -> MemoirBookOutputVersion | None:
-    return await db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.output_id == output_id)
-        .order_by(
-            MemoirBookOutputVersion.version.desc(),
-            MemoirBookOutputVersion.created_at.desc(),
-            MemoirBookOutputVersion.id.desc(),
-        )
-        .limit(1)
-    )
-
-
 def _stored_illustrations(
     manuscript: object,
 ) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
@@ -437,7 +424,10 @@ async def apply_book_review_answers(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     latest = (
-        await _latest_output_version(db, output_id=current_output.id)
+        await book_output_versions.load_latest_book_output_version(
+            db,
+            output_id=current_output.id,
+        )
         if current_output is not None
         else None
     )

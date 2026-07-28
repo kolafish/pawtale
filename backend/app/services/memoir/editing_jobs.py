@@ -47,6 +47,24 @@ class EditingJobDeadlineExceeded(RuntimeError):
     pass
 
 
+class EditingJobProgressLost(RuntimeError):
+    pass
+
+
+ACTIVE_EDITING_JOB_STATUSES = frozenset(
+    {
+        MemoirEditingJobStatus.PENDING.value,
+        MemoirEditingJobStatus.RUNNING.value,
+    }
+)
+_VISIBLE_EDITING_JOB_STATUSES = {
+    MemoirEditingJobStatus.PENDING.value,
+    MemoirEditingJobStatus.RUNNING.value,
+    MemoirEditingJobStatus.SUCCEEDED.value,
+    MemoirEditingJobStatus.FAILED.value,
+}
+
+
 def register_editing_job_handler(
     job_type: MemoirEditingJobType,
     handler: EditingJobHandler,
@@ -56,6 +74,119 @@ def register_editing_job_handler(
 
 def clear_editing_job_handlers() -> None:
     _HANDLERS.clear()
+
+
+async def load_project_editing_job(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    job_type: MemoirEditingJobType,
+    dedupe_key: str,
+    job_id: str | None = None,
+) -> MemoirEditingJob | None:
+    statement = select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == job_type.value,
+    )
+    if job_id:
+        statement = statement.where(MemoirEditingJob.id == job_id)
+    else:
+        statement = statement.where(MemoirEditingJob.dedupe_key == dedupe_key)
+    return await db.scalar(statement)
+
+
+def project_editing_job_state(
+    *,
+    project_id: str,
+    job: MemoirEditingJob | None,
+) -> dict[str, object]:
+    if job is None:
+        return {
+            "project_id": project_id,
+            "status": "idle",
+        }
+    result = dict(job.result_json or {})
+    status = (
+        "cancelled"
+        if result.get("cancelled") is True
+        else (
+            job.status
+            if job.status in _VISIBLE_EDITING_JOB_STATUSES
+            else MemoirEditingJobStatus.FAILED.value
+        )
+    )
+    return {
+        **result,
+        "job_id": job.id,
+        "project_id": project_id,
+        "status": status,
+        "can_cancel": status in ACTIVE_EDITING_JOB_STATUSES,
+        "can_retry": status
+        in {
+            MemoirEditingJobStatus.FAILED.value,
+            "cancelled",
+        },
+        "error_message": (
+            job.error_message
+            if status == MemoirEditingJobStatus.FAILED.value
+            else ""
+        ),
+    }
+
+
+async def cancel_project_editing_job(
+    db: AsyncSession,
+    *,
+    job: MemoirEditingJob,
+    result_patch: dict[str, object] | None = None,
+) -> MemoirEditingJob:
+    if job.status not in ACTIVE_EDITING_JOB_STATUSES:
+        return job
+    result_json = {
+        **dict(job.result_json or {}),
+        **(result_patch or {}),
+        "stage": "cancelled",
+        "cancelled": True,
+    }
+    await db.execute(
+        update(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.id == job.id,
+            MemoirEditingJob.status.in_(ACTIVE_EDITING_JOB_STATUSES),
+        )
+        .values(
+            status=MemoirEditingJobStatus.SKIPPED.value,
+            locked_at=None,
+            lease_token=None,
+            lease_expires_at=None,
+            result_json=result_json,
+        )
+    )
+    await db.commit()
+    await db.refresh(job)
+    return job
+
+
+def editing_job_progress_callback(
+    db: AsyncSession,
+    *,
+    job: MemoirEditingJob,
+    progress: dict[str, object],
+) -> Callable[[dict[str, object]], Awaitable[None]]:
+    job_id = job.id
+    lease_token = job.lease_token
+
+    async def update_progress(patch: dict[str, object]) -> None:
+        progress.update(patch)
+        if not await update_editing_job_progress_for_lease(
+            db,
+            job_id=job_id,
+            lease_token=lease_token,
+            result_json=progress,
+        ):
+            raise EditingJobProgressLost
+
+    return update_progress
 
 
 async def enqueue_editing_job(

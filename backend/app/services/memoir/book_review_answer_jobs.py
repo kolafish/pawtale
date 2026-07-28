@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookOutput,
-    MemoirBookOutputVersion,
     MemoirEditingJob,
 )
 from app.schemas.memoir_book_review import MemoirBookReviewAnswerApplyRequest
 from app.services.memoir import (
+    book_output_versions,
     book_review_answer_application,
     book_review_answer_state,
     book_reviews,
@@ -20,16 +20,6 @@ from app.services.memoir import (
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.project_ai_preferences import select_project_ai_model
-
-
-class _BookReviewAnswerApplicationCancelled(Exception):
-    pass
-
-
-_ACTIVE_STATUSES = {
-    MemoirEditingJobStatus.PENDING.value,
-    MemoirEditingJobStatus.RUNNING.value,
-}
 
 
 def _job_dedupe_key(project_id: str) -> str:
@@ -42,34 +32,12 @@ async def _load_job(
     project_id: str,
     job_id: str | None = None,
 ) -> MemoirEditingJob | None:
-    statement = select(MemoirEditingJob).where(
-        MemoirEditingJob.project_id == project_id,
-        MemoirEditingJob.job_type
-        == MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS.value,
-    )
-    if job_id:
-        statement = statement.where(MemoirEditingJob.id == job_id)
-    else:
-        statement = statement.where(
-            MemoirEditingJob.dedupe_key == _job_dedupe_key(project_id)
-        )
-    return await db.scalar(statement)
-
-
-async def _latest_output_version(
-    db: AsyncSession,
-    *,
-    output_id: str,
-) -> MemoirBookOutputVersion | None:
-    return await db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.output_id == output_id)
-        .order_by(
-            MemoirBookOutputVersion.version.desc(),
-            MemoirBookOutputVersion.created_at.desc(),
-            MemoirBookOutputVersion.id.desc(),
-        )
-        .limit(1)
+    return await editing_jobs.load_project_editing_job(
+        db,
+        project_id=project_id,
+        job_type=MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS,
+        dedupe_key=_job_dedupe_key(project_id),
+        job_id=job_id,
     )
 
 
@@ -89,7 +57,10 @@ async def _current_answer_state(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     latest = (
-        await _latest_output_version(db, output_id=output.id)
+        await book_output_versions.load_latest_book_output_version(
+            db,
+            output_id=output.id,
+        )
         if output is not None
         else None
     )
@@ -127,29 +98,13 @@ async def _job_state(
                 and not already_applied
             ),
         }
-    result = dict(job.result_json or {})
-    cancelled = result.get("cancelled") is True
-    status = (
-        "cancelled"
-        if cancelled
-        else (
-            job.status
-            if job.status
-            in {
-                MemoirEditingJobStatus.PENDING.value,
-                MemoirEditingJobStatus.RUNNING.value,
-                MemoirEditingJobStatus.SUCCEEDED.value,
-                MemoirEditingJobStatus.FAILED.value,
-            }
-            else MemoirEditingJobStatus.FAILED.value
-        )
+    state = editing_jobs.project_editing_job_state(
+        project_id=project_id,
+        job=job,
     )
-    active = status in _ACTIVE_STATUSES
+    active = state["can_cancel"] is True
     return {
-        **result,
-        "job_id": job.id,
-        "project_id": project_id,
-        "status": status,
+        **state,
         "answer_count": answer_count,
         "unresolved_count": unresolved_count,
         "already_applied": already_applied,
@@ -158,16 +113,6 @@ async def _job_state(
             and unresolved_count == 0
             and not already_applied
             and not active
-        ),
-        "can_cancel": active,
-        "can_retry": status in {
-            MemoirEditingJobStatus.FAILED.value,
-            "cancelled",
-        },
-        "error_message": (
-            job.error_message
-            if status == MemoirEditingJobStatus.FAILED.value
-            else ""
         ),
     }
 
@@ -187,7 +132,10 @@ async def enqueue_book_review_answer_application_job(
         allow_admin=allow_admin,
     )
     existing = await _load_job(db, project_id=project_id)
-    if existing is not None and existing.status in _ACTIVE_STATUSES:
+    if (
+        existing is not None
+        and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+    ):
         return await _job_state(db, project_id=project_id, job=existing)
 
     review = await book_reviews.get_current_book_review(db, project_id=project_id)
@@ -205,7 +153,10 @@ async def enqueue_book_review_answer_application_job(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
     )
     latest = (
-        await _latest_output_version(db, output_id=output.id)
+        await book_output_versions.load_latest_book_output_version(
+            db,
+            output_id=output.id,
+        )
         if output is not None
         else None
     )
@@ -285,29 +236,7 @@ async def cancel_book_review_answer_application_job(
     job = await _load_job(db, project_id=project_id, job_id=job_id)
     if job is None:
         raise ValueError("书稿调整任务不存在")
-    if job.status not in _ACTIVE_STATUSES:
-        return await _job_state(db, project_id=project_id, job=job)
-    result_json = {
-        **dict(job.result_json or {}),
-        "stage": "cancelled",
-        "cancelled": True,
-    }
-    await db.execute(
-        update(MemoirEditingJob)
-        .where(
-            MemoirEditingJob.id == job.id,
-            MemoirEditingJob.status.in_(_ACTIVE_STATUSES),
-        )
-        .values(
-            status=MemoirEditingJobStatus.SKIPPED.value,
-            locked_at=None,
-            lease_token=None,
-            lease_expires_at=None,
-            result_json=result_json,
-        )
-    )
-    await db.commit()
-    await db.refresh(job)
+    await editing_jobs.cancel_project_editing_job(db, job=job)
     return await _job_state(db, project_id=project_id, job=job)
 
 
@@ -317,18 +246,11 @@ async def run_book_review_answer_application_job(
 ) -> EditingJobResult:
     payload = dict(job.payload_json or {})
     progress = dict(job.result_json or {})
-    job_id = job.id
-    lease_token = job.lease_token
-
-    async def update_progress(patch: dict[str, object]) -> None:
-        progress.update(patch)
-        if not await editing_jobs.update_editing_job_progress_for_lease(
-            db,
-            job_id=job_id,
-            lease_token=lease_token,
-            result_json=progress,
-        ):
-            raise _BookReviewAnswerApplicationCancelled
+    update_progress = editing_jobs.editing_job_progress_callback(
+        db,
+        job=job,
+        progress=progress,
+    )
 
     try:
         await load_memoir_project(
@@ -353,7 +275,7 @@ async def run_book_review_answer_application_job(
             ),
             progress_callback=update_progress,
         )
-    except _BookReviewAnswerApplicationCancelled:
+    except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             result_json={
