@@ -21,6 +21,7 @@ import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
+  createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   assembleMemoirBookOutput,
   generateMemoirBookChapterTitle,
@@ -1063,7 +1064,7 @@ definePage<BookPageData>()({
 
   async playBookOutlineAudio() {
     const target = "outline";
-    if (this.data.playingTarget === target) {
+    if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
       this.stopPlayback();
       return;
     }
@@ -1105,10 +1106,56 @@ definePage<BookPageData>()({
     }
   },
 
+  async playBookOutputAudio() {
+    const target = "book";
+    if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
+      this.stopPlayback();
+      return;
+    }
+    if (!this.data.bookContent) {
+      wx.showToast({ title: "先生成全书稿", icon: "none" });
+      return;
+    }
+    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
+      return;
+    }
+    this.stopPlayback();
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
+    this.setData({
+      ttsBusyTarget: target,
+      error: "",
+    });
+    try {
+      const response = await this.requestBookAudio(target);
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({ ttsBusyTarget: "" });
+      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : "全书朗读失败",
+        });
+      }
+    } finally {
+      if (token === this.playToken && this.data.ttsBusyTarget === target) {
+        this.setData({ ttsBusyTarget: "" });
+      }
+    }
+  },
+
   async requestBookAudio(target: string) {
     const request = readBookTTSRequest();
     if (target === "outline") {
       return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
+    }
+    if (target === "book") {
+      return createMemoirBookOutputTTS(this.data.projectId, request);
     }
     if (target.startsWith("chapter:")) {
       return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), request);

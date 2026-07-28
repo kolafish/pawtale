@@ -1,5 +1,8 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
-import type { MemoirCompletionIssue } from "../../domain/voice-chat";
+import type {
+  MemoirBookAudioResponse,
+  MemoirCompletionIssue,
+} from "../../domain/voice-chat";
 import {
   AudioPlaybackController,
   playAudioFileSequence,
@@ -11,6 +14,7 @@ import {
   cancelMemoirChapterPreparationJob,
   cancelMemoirChapterSectionRegenerationJob,
   confirmMemoirBookChapterDraft,
+  createMemoirBookChapterDraftTTS,
   createMemoirBookChapterDraftSectionTTS,
   enqueueMemoirChapterPreparationJob,
   getMemoirChapterPreparationJob,
@@ -68,6 +72,7 @@ export { chapterWorkspaceViewPatch };
 const PREPARATION_POLL_INTERVAL_MS = 1500;
 const SECTION_REGENERATION_POLL_INTERVAL_MS = 1500;
 const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
+const CHAPTER_AUDIO_TARGET = "chapter";
 
 function readableReviewText(
   text: string,
@@ -329,7 +334,7 @@ interface ChapterWorkspacePageData {
   sectionRegenerationProgress: number;
   sectionRegenerationProgressMode: AITaskProgressMode;
   audioPhase: ChapterWorkspaceAudioPhase;
-  audioSectionId: string;
+  audioTarget: string;
   editingMode: DraftSectionEditingMode;
   editingSectionId: string;
   editingSectionContent: string;
@@ -392,7 +397,7 @@ definePage<ChapterWorkspacePageData>()({
     sectionRegenerationProgress: 0,
     sectionRegenerationProgressMode: "hidden",
     audioPhase: "idle",
-    audioSectionId: "",
+    audioTarget: "",
     ...CLOSED_DRAFT_SECTION_EDITOR,
   },
 
@@ -1667,8 +1672,45 @@ definePage<ChapterWorkspacePageData>()({
     if (!section || !this.data.projectId || !this.data.chapterId) {
       return;
     }
+    await this.playDraftAudio(
+      sectionId,
+      () => createMemoirBookChapterDraftSectionTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        sectionId,
+        readBookTTSRequest(),
+      ),
+      "小节朗读失败",
+    );
+  },
+
+  async playDraftChapter() {
     if (
-      this.data.audioSectionId === sectionId
+      !this.data.workspace?.draft_version_id
+      || !this.data.workspace.draft_content.trim()
+      || !this.data.projectId
+      || !this.data.chapterId
+    ) {
+      return;
+    }
+    await this.playDraftAudio(
+      CHAPTER_AUDIO_TARGET,
+      () => createMemoirBookChapterDraftTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        readBookTTSRequest(),
+      ),
+      "整章朗读失败",
+    );
+  },
+
+  async playDraftAudio(
+    target: string,
+    createAudio: () => Promise<MemoirBookAudioResponse>,
+    errorMessage: string,
+  ) {
+    if (
+      this.data.audioTarget === target
       && this.data.audioPhase !== "idle"
     ) {
       this.stopDraftSectionPlayback();
@@ -1686,22 +1728,17 @@ definePage<ChapterWorkspacePageData>()({
     this.playToken = token;
     this.setData({
       audioPhase: "preparing",
-      audioSectionId: sectionId,
+      audioTarget: target,
       error: "",
     });
     try {
-      const response = await createMemoirBookChapterDraftSectionTTS(
-        this.data.projectId,
-        this.data.chapterId,
-        sectionId,
-        readBookTTSRequest(),
-      );
+      const response = await createAudio();
       if (token !== this.playToken) {
         return;
       }
       this.setData({
         audioPhase: "playing",
-        audioSectionId: sectionId,
+        audioTarget: target,
       });
       await playAudioFileSequence(response.audio_file_ids || [], {
         token,
@@ -1709,7 +1746,7 @@ definePage<ChapterWorkspacePageData>()({
         playFile: (audioFileId) => this.audioPlayback.playFile(
           audioFileId,
           token,
-          { errorMessage: "小节朗读失败" },
+          { errorMessage },
         ),
       });
     } catch (error) {
@@ -1718,14 +1755,14 @@ definePage<ChapterWorkspacePageData>()({
       }
       if (token === this.playToken) {
         this.setData({
-          error: error instanceof Error ? error.message : "小节朗读失败",
+          error: error instanceof Error ? error.message : errorMessage,
         });
       }
     } finally {
       if (token === this.playToken) {
         this.setData({
           audioPhase: "idle",
-          audioSectionId: "",
+          audioTarget: "",
         });
       }
     }
@@ -1734,10 +1771,10 @@ definePage<ChapterWorkspacePageData>()({
   stopDraftSectionPlayback() {
     this.audioPlayback.stop();
     this.playToken = this.audioPlayback.currentToken();
-    if (this.data.audioPhase !== "idle" || this.data.audioSectionId) {
+    if (this.data.audioPhase !== "idle" || this.data.audioTarget) {
       this.setData({
         audioPhase: "idle",
-        audioSectionId: "",
+        audioTarget: "",
       });
     }
   },

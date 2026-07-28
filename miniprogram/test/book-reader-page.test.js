@@ -12,10 +12,17 @@ function sampleFinishedBook(content = "全书正文") {
   return sampleBookOutput(1, content, false, [], sampleStructuredBookContent());
 }
 
-function loadBookReaderPage(voiceApiExports = {}) {
+function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
+    createMemoirBookOutputTTS: async () => {
+      throw new Error("createMemoirBookOutputTTS was not mocked");
+    },
     getMemoirBookOutput: async () => sampleFinishedBook(),
     ...voiceApiExports,
+  });
+  mockModule("../services/tts-settings.ts", {
+    readBookTTSRequest: () => ({}),
+    ...ttsExports,
   });
   return loadPageModule("../pages/book-reader/index.ts");
 }
@@ -28,6 +35,9 @@ test("book reader page is registered as the finished-book route", () => {
   assert.ok(appJson.pages.includes("pages/book-reader/index"));
   assert.equal(pageJson.navigationBarTitleText, "成书阅读");
   assert.match(pageWxml, /成书阅读/);
+  assert.match(pageWxml, /bindtap="playBookAudio"/);
+  assert.match(pageWxml, /朗读全书/);
+  assert.match(pageWxml, /<book-tts-player/);
   assert.doesNotMatch(pageWxml, /导出|重写|输入书名/);
 });
 
@@ -160,4 +170,74 @@ test("book reader opens the version selected by the export flow", async () => {
 
   assert.equal(context.data.versionId, "book-output-version-history");
   assert.equal(context.data.bookContent, "历史版本正文");
+  assert.equal(context.data.bookViewingHistoricalVersion, true);
+  assert.match(context.data.bookVersionNotice, /切回最新版/);
+});
+
+test("book reader reads the latest full book with saved book voice settings", async () => {
+  const requests = [];
+  const playCalls = [];
+  const { page } = loadBookReaderPage({
+    createMemoirBookOutputTTS: async (...args) => {
+      requests.push(args);
+      return {
+        audio_file_ids: ["audio-book-1"],
+        audio_file_durations_seconds: [1.2],
+        provider: "fake",
+        model: "fake-tts",
+        mime_type: "audio/mpeg",
+        chunk_count: 1,
+        source_text_hash: "hash",
+        duration_seconds: 1.2,
+        alignment: [],
+      };
+    },
+  }, {
+    readBookTTSRequest: () => ({
+      voice: "zh_male_m191_uranus_bigtts",
+      speed_ratio: 1.25,
+    }),
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "外婆回忆录正文",
+    bookViewingHistoricalVersion: false,
+  });
+  context.playAudioFiles = async (...args) => {
+    playCalls.push(args);
+  };
+
+  await page.playBookAudio.call(context);
+
+  assert.deepEqual(requests, [[
+    "project/1",
+    {
+      voice: "zh_male_m191_uranus_bigtts",
+      speed_ratio: 1.25,
+    },
+  ]]);
+  assert.equal(playCalls.length, 1);
+  assert.equal(playCalls[0][1], "book");
+  assert.equal(playCalls[0][3], "外婆回忆录正文");
+  assert.equal(context.data.playbackError, "");
+});
+
+test("book reader does not mismatch latest audio with historical text", async () => {
+  let requestCount = 0;
+  const { page } = loadBookReaderPage({
+    createMemoirBookOutputTTS: async () => {
+      requestCount += 1;
+      throw new Error("should not run");
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "历史版本正文",
+    bookViewingHistoricalVersion: true,
+  });
+
+  await page.playBookAudio.call(context);
+
+  assert.equal(requestCount, 0);
+  assert.match(context.data.playbackError, /历史版本/);
 });

@@ -194,7 +194,16 @@
           <text class="section-kicker">本章正文</text>
           <text class="section-title">{{workspace.draft_sections.length ? "按小节通读，最后整章确认" : "完成当前步骤，生成小节正文"}}</text>
         </view>
-        <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
+        <view class="draft-heading-actions">
+          <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
+          <view
+            wx:if="{{workspace.draft_version_id && workspace.draft_content}}"
+            class="chapter-read-action {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== 'chapter') ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== 'chapter')}}"
+            bindtap="playDraftChapter"
+          >{{audioPhase === "preparing" && audioTarget === "chapter" ? "准备整章…" : (audioPhase === "playing" && audioTarget === "chapter" ? "停止朗读" : "朗读整章")}}</view>
+        </view>
       </view>
 
       <view wx:if="{{workspace.draft_needs_rewrite && workspace.draft_sections.length}}" class="rewrite-notice">
@@ -321,12 +330,12 @@
           <block wx:else>
             <view class="draft-section-actions">
               <view
-                class="draft-section-action {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioSectionId !== item.section_id) ? 'is-disabled' : ''}}"
+                class="draft-section-action {{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.section_id) ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"
                 aria-role="button"
-                aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioSectionId !== item.section_id)}}"
+                aria-disabled="{{operationKind !== '' || editingSectionId !== '' || (audioPhase !== 'idle' && audioTarget !== item.section_id)}}"
                 bindtap="playDraftSection"
-              >{{audioPhase === "preparing" && audioSectionId === item.section_id ? "准备朗读…" : (audioPhase === "playing" && audioSectionId === item.section_id ? "停止朗读" : "朗读")}}</view>
+              >{{audioPhase === "preparing" && audioTarget === item.section_id ? "准备朗读…" : (audioPhase === "playing" && audioTarget === item.section_id ? "停止朗读" : "朗读")}}</view>
               <view
                 class="draft-section-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
                 data-id="{{item.section_id}}"

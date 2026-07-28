@@ -83,6 +83,34 @@
   line-height: 1.5;
 }
 
+.reader-notice.subtle {
+  background: var(--ui-surface-subtle);
+  color: var(--ui-text-secondary);
+}
+
+.reader-audio-action {
+  margin-top: 28rpx;
+  border-radius: 12rpx;
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
+  font-size: 29rpx;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.reader-playback-error {
+  display: block;
+  margin-top: 16rpx;
+  color: var(--ui-danger-text);
+  font-size: 25rpx;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.reader-tts-shell {
+  margin-top: 24rpx;
+}
+
 .reader-state {
   padding: 36rpx 30rpx;
   color: var(--ui-text-secondary);

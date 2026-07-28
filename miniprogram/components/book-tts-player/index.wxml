@@ -1,0 +1,30 @@
+<view class="book-tts-card">
+  <view class="book-tts-head">
+    <view class="book-tts-heading">
+      <text class="book-tts-title">{{title}}</text>
+      <text class="book-tts-status">
+        {{phase === "preparing" ? "正在准备音频…" : (phase === "playing" ? "正在朗读…" : "本次朗读已完成")}}
+      </text>
+    </view>
+    <view
+      class="book-tts-action"
+      aria-role="button"
+      aria-label="{{phase === 'completed' ? '收起朗读状态' : '停止朗读'}}"
+      bindtap="stopPlayback"
+    >{{phase === "completed" ? "收起" : "停止"}}</view>
+  </view>
+
+  <block wx:if="{{phase !== 'preparing'}}">
+    <view class="book-tts-track" aria-label="朗读进度 {{progress}}%">
+      <view class="book-tts-progress" style="width: {{progress}}%;"></view>
+    </view>
+    <view
+      wx:if="{{spokenText || currentText || remainingText}}"
+      class="book-tts-highlight"
+    >
+      <text class="book-tts-spoken">{{spokenText}}</text>
+      <text class="book-tts-current">{{currentText}}</text>
+      <text class="book-tts-remaining">{{remainingText}}</text>
+    </view>
+  </block>
+</view>

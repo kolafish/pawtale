@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "成书阅读"
+  "navigationBarTitleText": "成书阅读",
+  "usingComponents": {
+    "book-tts-player": "/components/book-tts-player/index"
+  }
 }

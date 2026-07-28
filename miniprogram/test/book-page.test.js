@@ -149,6 +149,9 @@ function loadBookPage({
     createMemoirBookChapterDraftTTS: async () => {
       throw new Error("createMemoirBookChapterDraftTTS was not mocked");
     },
+    createMemoirBookOutputTTS: async () => {
+      throw new Error("createMemoirBookOutputTTS was not mocked");
+    },
     createMemoirBookPlanOutlineTTS: async () => {
       throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
     },
@@ -993,7 +996,7 @@ test("book page shows assembly errors without leaving the page busy", async () =
   delete global.wx;
 });
 
-test("book page sends TTS voice and speed for chapter and outline audio", async () => {
+test("book page sends TTS voice and speed for chapter, outline, and full-book audio", async () => {
   const calls = [];
   const { page } = loadBookPage({
     voiceApiExports: {
@@ -1003,6 +1006,10 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
       },
       createMemoirBookPlanOutlineTTS: async (projectId, data) => {
         calls.push({ kind: "outline", projectId, data });
+        return sampleAudioResponse();
+      },
+      createMemoirBookOutputTTS: async (projectId, data) => {
+        calls.push({ kind: "book", projectId, data });
         return sampleAudioResponse();
       },
     },
@@ -1017,6 +1024,7 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
 
   await page.requestBookAudio.call(context, "outline");
   await page.requestBookAudio.call(context, "chapter:chapter-1");
+  await page.requestBookAudio.call(context, "book");
 
   assert.deepEqual(calls, [
     {
@@ -1036,7 +1044,25 @@ test("book page sends TTS voice and speed for chapter and outline audio", async 
         speed_ratio: 1.5,
       },
     },
+    {
+      kind: "book",
+      projectId: "project/1",
+      data: {
+        voice: "zh_male_m191_uranus_bigtts",
+        speed_ratio: 1.5,
+      },
+    },
   ]);
+});
+
+test("book page exposes outline and full-book narration controls", () => {
+  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
+
+  assert.match(pageWxml, /bindtap="playBookOutlineAudio"/);
+  assert.match(pageWxml, /朗读目录/);
+  assert.match(pageWxml, /bindtap="playBookOutputAudio"/);
+  assert.match(pageWxml, /朗读全书/);
+  assert.match(pageWxml, /<book-tts-player/);
 });
 
 test("book page shows chapter narration toast after preflight passes", async () => {
