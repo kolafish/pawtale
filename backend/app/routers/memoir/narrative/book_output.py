@@ -3,7 +3,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
-from app.database import get_db
+from app.database import commit_or_rollback, get_db
 from app.models.users import User
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
 from app.services.memoir.narrative import book_output_assembly
@@ -25,17 +25,14 @@ async def assemble_memoir_book_output(
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
     try:
-        response = await book_output_assembly.assemble_book_output(
-            db,
-            project_id=project_id,
-        )
-        await db.commit()
-        return response
+        async with commit_or_rollback(db):
+            return await book_output_assembly.assemble_book_output(
+                db,
+                project_id=project_id,
+            )
     except ValueError as exc:
-        await db.rollback()
         raise decision_error(exc) from exc
     except IntegrityError as exc:
-        await db.rollback()
         raise HTTPException(
             status_code=409,
             detail="book output changed concurrently",

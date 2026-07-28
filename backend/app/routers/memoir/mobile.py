@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user
-from app.database import get_db
+from app.database import commit_or_rollback, get_db
 from app.models.users import User
 from app.schemas.memoir_projects import (
     MemoirIdentityResponse,
@@ -140,16 +140,14 @@ async def update_mobile_memoir_topic_map_resolution(
 ):
     await load_memoir_project(db, project_id, current_user.id)
     try:
-        item = await topic_map.update_user_resolution(
-            db,
-            project_id=project_id,
-            item_id=item_id,
-            user_resolution=req.user_resolution,
-            actor_user_id=current_user.id,
-        )
-        await db.commit()
-        return item
+        async with commit_or_rollback(db):
+            return await topic_map.update_user_resolution(
+                db,
+                project_id=project_id,
+                item_id=item_id,
+                user_resolution=req.user_resolution,
+                actor_user_id=current_user.id,
+            )
     except ValueError as exc:
-        await db.rollback()
         status_code = 404 if "does not belong" in str(exc) else 409
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc

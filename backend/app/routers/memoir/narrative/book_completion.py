@@ -2,7 +2,7 @@ from fastapi import APIRouter, Body, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
-from app.database import get_db
+from app.database import commit_or_rollback, get_db
 from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionJobRequest,
@@ -215,17 +215,15 @@ async def prepare_memoir_book_completion_chapter(
     # not hold SQLite's write lock throughout multi-step chapter preparation.
     await db.commit()
     try:
-        workspace = await book_completion.prepare_chapter(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            user_id=current_user.id,
-            ai_model=selected_ai_model,
-        )
-        await db.commit()
-        return workspace
+        async with commit_or_rollback(db):
+            return await book_completion.prepare_chapter(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                user_id=current_user.id,
+                ai_model=selected_ai_model,
+            )
     except ValueError as exc:
-        await db.rollback()
         raise decision_error(exc) from exc
 
 
@@ -249,17 +247,15 @@ async def rewrite_memoir_book_completion_chapter(
     )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     try:
-        workspace = await book_completion.rewrite_chapter(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            user_id=current_user.id,
-            ai_model=selected_ai_model,
-        )
-        await db.commit()
-        return workspace
+        async with commit_or_rollback(db):
+            return await book_completion.rewrite_chapter(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                user_id=current_user.id,
+                ai_model=selected_ai_model,
+            )
     except ValueError as exc:
-        await db.rollback()
         raise decision_error(exc) from exc
 
 
@@ -282,18 +278,16 @@ async def revise_memoir_chapter_draft_section_with_ai(
     )
     selected_ai_model = select_project_ai_model(project, req.ai_model)
     try:
-        workspace = await book_completion.revise_chapter_section_with_ai(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-            section_id=section_id,
-            expected_version_id=req.expected_version_id,
-            instruction_text=req.instruction_text,
-            user_id=current_user.id,
-            ai_model=selected_ai_model,
-        )
-        await db.commit()
-        return workspace
+        async with commit_or_rollback(db):
+            return await book_completion.revise_chapter_section_with_ai(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+                section_id=section_id,
+                expected_version_id=req.expected_version_id,
+                instruction_text=req.instruction_text,
+                user_id=current_user.id,
+                ai_model=selected_ai_model,
+            )
     except ValueError as exc:
-        await db.rollback()
         raise decision_error(exc) from exc
