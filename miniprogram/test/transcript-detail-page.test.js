@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  clearModule,
   loadPageModule,
   mockModule,
   pageContext,
@@ -219,6 +220,10 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
+  clearModule("../pages/transcript-detail/transcript-detail-audio-workflow.ts");
+  clearModule("../pages/transcript-detail/transcript-detail-edit-workflow.ts");
+  clearModule("../pages/transcript-detail/transcript-detail-model.ts");
+  clearModule("../pages/transcript-detail/transcript-detail-share-video-workflow.ts");
   return loadPageModule("../pages/transcript-detail/index.ts");
 }
 
