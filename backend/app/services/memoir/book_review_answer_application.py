@@ -7,7 +7,7 @@ import logging
 import time
 
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
@@ -43,7 +43,7 @@ from app.services.memoir.narrative.book_output_assembly import (
 
 
 logger = logging.getLogger(__name__)
-BOOK_REVIEW_ANSWER_APPLICATION_ENGINE = "llm_book_review_answer_application_v1"
+BOOK_REVIEW_ANSWER_APPLICATION_ENGINE = "llm_book_review_answer_application_v2"
 BOOK_REVIEW_ANSWER_APPLICATION_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。"
     "你只根据用户明确写下的回答调整已有书稿，不推测、不补造人生事实，"
@@ -59,20 +59,11 @@ class _SectionRevision(BaseModel):
     content: str
 
 
-class _ChapterRevision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    chapter_id: str
-    title: str = ""
-    section_revisions: list[_SectionRevision] = Field(default_factory=list)
-
-
 class _ApplicationOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
-    chapter_order: list[str] = Field(default_factory=list)
-    chapter_revisions: list[_ChapterRevision] = Field(default_factory=list)
+    section_revisions: list[_SectionRevision] = Field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -118,15 +109,6 @@ def _build_prompt(
     section_refs: ModelReferenceMap,
 ) -> str:
     related_ids = context.related_chapter_ids
-    chapter_overview = "\n".join(
-        (
-            f"chapter_id: {chapter_refs.encode(_text(snapshot.get('chapter_id')))}\n"
-            f"章节名: {_text(snapshot.get('chapter_title'))}\n"
-            f"章节摘要: {_text(snapshot.get('chapter_summary')) or _text(snapshot.get('content'))[:500]}"
-        )
-        for snapshot in snapshots
-        if _text(snapshot.get("chapter_id"))
-    )
     related_chapters: list[str] = []
     for snapshot in snapshots:
         chapter_id = _text(snapshot.get("chapter_id"))
@@ -162,9 +144,6 @@ def _build_prompt(
     )
     return f"""请把用户对全书检查问题的回答应用到现有书稿。
 
-全书章节顺序：
-{chapter_overview}
-
 用户回答：
 {answers}
 
@@ -174,30 +153,22 @@ def _build_prompt(
 请输出严格 JSON：
 {{
   "summary": "一句话说明本次实际调整；如果无需改文，明确说明已核对但正文无需调整",
-  "chapter_order": ["按调整后顺序列出全部保留的 chapter_id"],
-  "chapter_revisions": [
+  "section_revisions": [
     {{
-      "chapter_id": "需要修改的 chapter_id",
-      "title": "只有确需改名时才填写，否则为空字符串",
-      "section_revisions": [
-        {{
-          "section_id": "需要修改的小节 section_id",
-          "content": "修改后的完整小节正文"
-        }}
-      ]
+      "section_id": "需要修改的小节 section_id",
+      "content": "修改后的完整小节正文"
     }}
   ]
 }}
 
 要求：
 - chapter_id 和 section_id 只能使用输入中的本次请求短编号。
-- 只修改与回答关联的章节；无关章节不得改名、删减或改写。
+- 只修改与回答关联章节中已有小节的正文。
 - 回答是用户明确提供的事实或决定，可以写入相关正文；除此之外不能新增事实。
-- 若用户明确要求不收录某个关联章节，可从 chapter_order 中移除；其他章节必须保留。
-- 若无需调整章节顺序，chapter_order 仍按原顺序列出全部章节。
+- 不得改变章节或小节的顺序、收录状态、标题、数量及归属关系。
 - 若修改小节，必须返回该小节修改后的完整正文，不能只返回差异片段。
 - 保留原文叙述视角、语气和已有事实，避免为了润色大幅重写。
-- 不需要修改的章节和小节不要出现在 chapter_revisions。
+- 不需要修改的小节不要出现在 section_revisions。
 """
 
 
@@ -206,24 +177,9 @@ def _normalize_application(
     generated: _ApplicationOutput,
     snapshots: list[dict[str, object]],
     context: book_review_answer_state.BookReviewAnswerContext,
-    chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
 ) -> tuple[list[dict[str, object]], set[str], str]:
     original_ids = _chapter_ids(snapshots)
-    order = (
-        [chapter_refs.decode(value) for value in generated.chapter_order]
-        if generated.chapter_order
-        else list(original_ids)
-    )
-    if not order or len(order) != len(set(order)):
-        raise ValueError("模型返回的章节顺序无效")
-    original_set = set(original_ids)
-    if not set(order) <= original_set:
-        raise ValueError("模型返回了书稿中不存在的章节")
-    omitted = original_set - set(order)
-    if omitted - context.related_chapter_ids:
-        raise ValueError("模型试图移除与回答无关的章节")
-
     snapshots_by_id = {
         _text(snapshot.get("chapter_id")): deepcopy(snapshot)
         for snapshot in snapshots
@@ -238,23 +194,17 @@ def _normalize_application(
                 if section_id:
                     section_owner[section_id] = chapter_id
 
-    changed_ids = set(omitted)
-    revised_chapters: set[str] = set()
+    changed_ids: set[str] = set()
     revised_sections: set[str] = set()
-    for revision in generated.chapter_revisions:
-        chapter_id = chapter_refs.decode(revision.chapter_id)
-        if chapter_id in revised_chapters:
-            raise ValueError("模型重复修改了同一章节")
-        revised_chapters.add(chapter_id)
-        if chapter_id not in context.related_chapter_ids:
-            raise ValueError("模型试图修改与回答无关的章节")
-        if chapter_id not in snapshots_by_id or chapter_id not in order:
-            raise ValueError("模型修改的章节不在调整后书稿中")
+    for revision in generated.section_revisions:
+        section_id = section_refs.decode(revision.section_id)
+        if section_id in revised_sections:
+            raise ValueError("模型重复修改了同一小节")
+        revised_sections.add(section_id)
+        chapter_id = section_owner.get(section_id)
+        if not chapter_id or chapter_id not in context.related_chapter_ids:
+            raise ValueError("模型试图修改与回答无关的小节")
         snapshot = snapshots_by_id[chapter_id]
-        title = revision.title.strip()
-        if title and title != _text(snapshot.get("chapter_title")):
-            snapshot["chapter_title"] = title[:200]
-            changed_ids.add(chapter_id)
         raw_sections = snapshot.get("sections")
         sections = (
             [section for section in raw_sections if isinstance(section, dict)]
@@ -266,39 +216,21 @@ def _normalize_application(
             for section in sections
             if _text(section.get("section_id"))
         }
-        for section_revision in revision.section_revisions:
-            section_id = section_refs.decode(section_revision.section_id)
-            if section_id in revised_sections:
-                raise ValueError("模型重复修改了同一小节")
-            revised_sections.add(section_id)
-            if section_owner.get(section_id) != chapter_id:
-                raise ValueError("模型把小节写入了错误章节")
-            content = section_revision.content.strip()
-            if not content:
-                raise ValueError("模型返回了空的小节正文")
-            section = sections_by_id[section_id]
-            if content != _text(section.get("content")):
-                section["content"] = content
-                section["content_char_count"] = len(content)
-                changed_ids.add(chapter_id)
+        content = revision.content.strip()
+        if not content:
+            raise ValueError("模型返回了空的小节正文")
+        section = sections_by_id[section_id]
+        if content != _text(section.get("content")):
+            section["content"] = content
+            section["content_char_count"] = len(content)
+            changed_ids.add(chapter_id)
         snapshot["sections"] = sections
         snapshot["section_count"] = len(sections)
         content = sectioned_chapter_content(sections)
         snapshot["content"] = content
         snapshot["content_char_count"] = len(content)
 
-    original_positions = {
-        chapter_id: index
-        for index, chapter_id in enumerate(original_ids, start=1)
-    }
-    revised_snapshots: list[dict[str, object]] = []
-    for index, chapter_id in enumerate(order, start=1):
-        snapshot = snapshots_by_id[chapter_id]
-        if original_positions.get(chapter_id) != index:
-            changed_ids.add(chapter_id)
-        snapshot["chapter_index"] = index
-        snapshot["chapter_sort_order"] = index - 1
-        revised_snapshots.append(snapshot)
+    revised_snapshots = [snapshots_by_id[chapter_id] for chapter_id in original_ids]
     summary = " ".join(generated.summary.split())[:400]
     return revised_snapshots, changed_ids, summary
 
@@ -406,9 +338,19 @@ async def apply_book_review_answers(
         if isinstance(item, dict)
     ]
     chapter_ids = _chapter_ids(snapshots)
+    related_chapter_ids = [
+        chapter_id
+        for chapter_id in chapter_ids
+        if chapter_id in context.related_chapter_ids
+    ]
+    if not related_chapter_ids:
+        raise BookReviewAnswerApplicationError("问题没有关联到可调整的书稿章节")
+    if set(related_chapter_ids) != context.related_chapter_ids:
+        raise BookReviewAnswerApplicationError("问题关联的章节已经变化，请重新检查全书")
     section_ids = [
         section_id
         for snapshot in snapshots
+        if _text(snapshot.get("chapter_id")) in context.related_chapter_ids
         for section in (
             snapshot.get("sections")
             if isinstance(snapshot.get("sections"), list)
@@ -417,7 +359,7 @@ async def apply_book_review_answers(
         if isinstance(section, dict)
         and (section_id := _text(section.get("section_id")))
     ]
-    chapter_refs = ModelReferenceMap("C", chapter_ids)
+    chapter_refs = ModelReferenceMap("C", related_chapter_ids)
     section_refs = ModelReferenceMap("S", section_ids)
     prompt = _build_prompt(
         snapshots=snapshots,
@@ -447,7 +389,6 @@ async def apply_book_review_answers(
             generated=generated.value,
             snapshots=snapshots,
             context=context,
-            chapter_refs=chapter_refs,
             section_refs=section_refs,
         )
         generation = {
@@ -541,19 +482,11 @@ async def apply_book_review_answers(
             chapter_illustrations_by_chapter=illustrations,
             image_appendix=image_appendix,
         )
-        next_version = int(
-            await db.scalar(
-                select(func.max(MemoirBookOutputVersion.version)).where(
-                    MemoirBookOutputVersion.output_id == output.id
-                )
-            )
-            or 0
-        ) + 1
         applied_version = MemoirBookOutputVersion(
             output_id=output.id,
             project_id=project_id,
             plan_id=output.plan_id,
-            version=next_version,
+            version=baseline.version + 1,
             content=content,
             chapter_snapshot_json=revised_snapshots,
             manuscript_json=(

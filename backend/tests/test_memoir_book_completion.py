@@ -169,23 +169,15 @@ class LayeredBookAI:
                 "candidate_issues": candidates,
             }
         elif "请把用户对全书检查问题的回答应用到现有书稿" in user_prompt:
-            ordered_chapter_ids = list(dict.fromkeys(chapter_ids))
             payload = {
                 "summary": "保留两段学校经历，并把用户的说明写入第一章。",
-                "chapter_order": ordered_chapter_ids,
-                "chapter_revisions": [
+                "section_revisions": [
                     {
-                        "chapter_id": ordered_chapter_ids[0],
-                        "title": "",
-                        "section_revisions": [
-                            {
-                                "section_id": section_ids[0],
-                                "content": (
-                                    "这两段学校经历发生在不同阶段，"
-                                    "我决定都保留在书里。"
-                                ),
-                            }
-                        ],
+                        "section_id": section_ids[0],
+                        "content": (
+                            "这两段学校经历发生在不同阶段，"
+                            "我决定都保留在书里。"
+                        ),
                     }
                 ],
             }
@@ -382,6 +374,44 @@ def _install_ai(
         "get_ai_service",
         factory,
     )
+
+
+def test_book_review_answer_output_rejects_structure_changes():
+    valid = {
+        "summary": "根据回答补充第一章正文。",
+        "section_revisions": [
+            {
+                "section_id": "S1",
+                "content": "修改后的完整小节正文。",
+            }
+        ],
+    }
+
+    assert (
+        book_review_answer_application._ApplicationOutput.model_validate(
+            valid
+        ).model_dump()
+        == valid
+    )
+    with pytest.raises(ValueError):
+        book_review_answer_application._ApplicationOutput.model_validate(
+            {
+                **valid,
+                "chapter_order": ["C1"],
+            }
+        )
+    with pytest.raises(ValueError):
+        book_review_answer_application._ApplicationOutput.model_validate(
+            {
+                **valid,
+                "section_revisions": [
+                    {
+                        **valid["section_revisions"][0],
+                        "title": "模型不应改名",
+                    }
+                ],
+            }
+        )
 
 
 async def _book(client, test_db, *, chapter_count: int = 1):
@@ -1821,6 +1851,39 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         item["chapter_id"]
         for item in versions[1].chapter_snapshot_json
     ] == [chapter.id for chapter in chapters]
+    assert [
+        (
+            item["chapter_id"],
+            item["chapter_title"],
+            [
+                (
+                    section["section_id"],
+                    section["title"],
+                    section["sort_order"],
+                )
+                for section in item["sections"]
+            ],
+        )
+        for item in versions[1].chapter_snapshot_json
+    ] == [
+        (
+            item["chapter_id"],
+            item["chapter_title"],
+            [
+                (
+                    section["section_id"],
+                    section["title"],
+                    section["sort_order"],
+                )
+                for section in item["sections"]
+            ],
+        )
+        for item in versions[0].chapter_snapshot_json
+    ]
+    assert (
+        versions[1].chapter_snapshot_json[1:]
+        == versions[0].chapter_snapshot_json[1:]
+    )
     application_prompt = next(
         prompt
         for prompt in fake.prompts
@@ -1828,6 +1891,8 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     )
     assert "两段经历发生在不同阶段，我希望都保留" in application_prompt
     assert all(chapter.id not in application_prompt for chapter in chapters)
+    assert "全书章节顺序" not in application_prompt
+    assert "不得改变章节或小节的顺序" in application_prompt
 
     current_output = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output"
