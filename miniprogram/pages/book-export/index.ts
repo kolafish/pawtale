@@ -287,12 +287,14 @@ definePage<BookExportData>()({
         return;
       }
       this.applyBookEditorialCopyEvent(event);
-      if (previous?.status !== "pending" || event.status === "pending") {
-        return;
-      }
-      if (event.status === "completed") {
+      const completedNow = event.status === "completed"
+        && (!previous || previous.status === "pending");
+      if (completedNow) {
         const output = await this.loadBookOutput(this.data.projectId);
         this.applyBookExportData(this.data.plan, output);
+      }
+      if (previous?.status !== "pending" || event.status === "pending") {
+        return;
       }
       const targetLabel = event.metadata_json?.target_label;
       const label = typeof targetLabel === "string" && targetLabel.trim()
@@ -306,7 +308,6 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "成书文案进度同步失败" });
       if (previous?.status === "pending") {
         this.scheduleBookEditorialCopyPoll();
       }

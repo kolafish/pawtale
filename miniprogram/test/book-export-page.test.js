@@ -117,9 +117,25 @@ test("book export page loads plan and output from query project", async () => {
 });
 
 test("book export opens book settings when linked from whole-book review", async () => {
+  const completedEvent = sampleAutomationEvent({
+    event_type: "book_editorial_copy_generated",
+    status: "completed",
+    chapter_id: null,
+    summary_text: "前言已重生成，可以预览或导出。",
+    metadata_json: { target_label: "前言", targets: ["preface"] },
+  });
+  let outputLoads = 0;
   const { page } = loadBookExportPage({
     getMemoirBookPlan: async () => samplePlan(),
-    getMemoirBookOutput: async () => sampleBookOutput(),
+    getMemoirBookOutput: async () => {
+      outputLoads += 1;
+      return sampleBookOutput();
+    },
+    listMemoirAutomationEvents: async () => ({
+      items: [completedEvent],
+      total: 1,
+      limit: 20,
+    }),
   });
   const context = pageContext(page);
 
@@ -130,6 +146,8 @@ test("book export opens book settings when linked from whole-book review", async
   });
 
   assert.equal(context.data.showBookSettings, true);
+  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
+  assert.equal(outputLoads, 2);
 });
 
 test("book export page counts only chapters included in the final book", () => {
