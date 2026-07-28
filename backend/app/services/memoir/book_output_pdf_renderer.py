@@ -521,9 +521,9 @@ class PDFBookBuilder:
     def add_quote(self, text: str, *, spacing_after: int = 0) -> None:
         self.add_text(
             f"“{text}”",
-            font_size=self.layout.small_font_size + 1,
+            font_size=max(self.layout.small_font_size + 1, self.layout.font_size - 2),
             line_height=self.layout.line_height,
-            max_units=max(12, self.layout.max_line_units - 4),
+            max_units=self.layout.max_line_units,
             indent=12,
             paragraph_spacing_after=0,
             spacing_after=spacing_after,
@@ -539,6 +539,7 @@ class PDFBookBuilder:
             line_height=self.layout.line_height + 4,
             max_units=max(12, self.layout.max_line_units - 2),
             spacing_after=6,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
     def add_section_heading(self, text: str) -> None:
@@ -561,6 +562,7 @@ class PDFBookBuilder:
         max_units: int | None = None,
         spacing_after: int = 0,
         char_spacing: float = 0.0,
+        font_name: str | None = None,
     ) -> None:
         max_units = max_units or max(10, self.layout.max_line_units - 4)
         page = self._ensure_page()
@@ -574,6 +576,7 @@ class PDFBookBuilder:
                     y=self.y,
                     font_size=font_size,
                     char_spacing=char_spacing,
+                    font_name=font_name,
                 )
             )
             self.y -= line_height
@@ -619,6 +622,7 @@ class PDFBookBuilder:
         target_anchor: str | None = None,
         indent: int = 0,
         font_size: int | None = None,
+        font_name: str | None = None,
     ) -> None:
         font_size = font_size or self.layout.font_size
         line_height = self.layout.line_height + 2
@@ -639,6 +643,7 @@ class PDFBookBuilder:
                 y=self.y,
                 font_size=font_size,
                 target_anchor=target_anchor,
+                font_name=font_name,
             )
         )
         if page_text:

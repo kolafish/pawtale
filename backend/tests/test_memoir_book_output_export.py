@@ -2,6 +2,7 @@ from typing import get_args
 
 from PIL import Image
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase.ttfonts import TTFont
 
 from app.schemas.memoir_book import MemoirBookCoverStyle
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
@@ -16,6 +17,8 @@ from app.services.memoir.book_output_pdf_renderer import (
     LINE_END_FORBIDDEN_CHARS,
     LINE_START_FORBIDDEN_CHARS,
     PDF_LAYOUTS,
+    PDF_SANS_FONT_PATH,
+    PDF_SERIF_BOLD_FONT_PATH,
     PDF_SERIF_BOLD_FONT_NAME,
     PDF_SERIF_FONT_NAME,
     PDFBookBuilder,
@@ -35,6 +38,14 @@ EXPECTED_PDF_COVER_STYLES = {
     "moonlit_courtyard",
     "navy_gilt",
 }
+
+
+def test_pdf_font_assets_use_the_intended_weights():
+    bold_face = TTFont("TestMemoirSerifBold", str(PDF_SERIF_BOLD_FONT_PATH)).face
+    sans_face = TTFont("TestMemoirSansRegular", str(PDF_SANS_FONT_PATH)).face
+
+    assert bold_face.styleName == b"Bold"
+    assert sans_face.styleName == b"Regular"
 
 
 def test_pdf_renderer_reencodes_png_and_downsamples_to_print_resolution(tmp_path):
@@ -334,6 +345,7 @@ def test_table_of_contents_links_to_numbered_chapter_pages():
 
     assert toc_command.target_anchor == "chapter-1"
     assert toc_command.text == "第一章　外婆家的童年"
+    assert toc_command.font_name == PDF_SERIF_BOLD_FONT_NAME
     assert page_command.target_anchor == "chapter-1"
     assert page_command.x > toc_command.x
     assert page_command.y == toc_command.y
