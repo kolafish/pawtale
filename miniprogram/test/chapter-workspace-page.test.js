@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  clearModule,
   loadPageModule,
   mockModule,
   pageContext,
@@ -230,6 +231,9 @@ function loadWorkspacePage({
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
+  clearModule("../pages/chapter-workspace/chapter-workspace-draft-workflow.ts");
+  clearModule("../pages/chapter-workspace/chapter-workspace-job-workflow.ts");
+  clearModule("../pages/chapter-workspace/chapter-workspace-model.ts");
   return loadPageModule("../pages/chapter-workspace/index.ts");
 }
 

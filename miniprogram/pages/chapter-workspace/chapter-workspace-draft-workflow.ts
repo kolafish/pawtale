@@ -1,0 +1,473 @@
+import type { MemoirBookAudioResponse } from "../../domain/memoir-book";
+import {
+  AudioPlaybackController,
+  playAudioFileSequence,
+} from "../../services/audio-playback";
+import { trackAuditAction } from "../../services/audit-tracker";
+import {
+  confirmMemoirBookChapterDraft,
+  createMemoirBookChapterDraftSectionTTS,
+  createMemoirBookChapterDraftTTS,
+  reviseMemoirBookChapterDraft,
+  reviseMemoirChapterDraftSectionWithAI,
+} from "../../services/memoir-voice-api";
+import {
+  recordMemoirVoiceSearchQuery,
+  stopMemoirVoiceSearchRecording,
+} from "../../services/memoir-voice-search";
+import { routeAuthError } from "../../services/navigation";
+import {
+  datasetString,
+  type PageDatasetEvent,
+  type PageTextInputEvent,
+} from "../../services/page-input";
+import { readBookTTSRequest } from "../../services/tts-settings";
+import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
+import {
+  CHAPTER_AUDIO_TARGET,
+  CLOSED_DRAFT_SECTION_EDITOR,
+  DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
+  type ChapterWorkspaceOperationKind,
+  type ChapterWorkspacePageData,
+  type DraftSectionEditingMode,
+} from "./chapter-workspace-model";
+
+interface ChapterWorkspaceDraftHost {
+  data: ChapterWorkspacePageData;
+  audioPlayback: AudioPlaybackController;
+  playToken: number;
+  draftSectionVoiceInstructionToken: number;
+  setData(patch: Partial<ChapterWorkspacePageData>): void;
+  beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
+  finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
+  loadPageData(silent?: boolean): Promise<void>;
+}
+
+function defineChapterWorkspaceDraftMethods<TMethods extends object>(
+  methods: TMethods & ThisType<ChapterWorkspaceDraftHost & TMethods>,
+): TMethods {
+  return methods;
+}
+
+export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
+  openDraftSectionEditor(
+    event: PageDatasetEvent<{ id?: string }>,
+    editingMode: Exclude<DraftSectionEditingMode, "">,
+  ) {
+    const workspace = this.data.workspace;
+    const sectionId = datasetString(event, "id");
+    const section = workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
+    );
+    if (!workspace?.draft_version_id || !section) {
+      return;
+    }
+    if (editingMode === "ai" && workspace.draft_needs_rewrite) {
+      wx.showToast({
+        title: "请先更新有变化的小节正文",
+        icon: "none",
+      });
+      return;
+    }
+    if (
+      this.data.operationKind
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    const expandedDraftSectionIds = {
+      ...this.data.expandedDraftSectionIds,
+      [section.section_id]: true,
+    };
+    this.setData({
+      expandedDraftSectionIds,
+      ...chapterWorkspaceViewPatch(
+        workspace,
+        this.data.expandedSectionIds,
+        expandedDraftSectionIds,
+      ),
+      editingMode,
+      editingSectionId: section.section_id,
+      editingSectionContent: section.content,
+      draftSectionVoicePhase: "idle",
+      draftSectionAIInstruction: "",
+      error: "",
+    });
+  },
+
+  startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
+    this.openDraftSectionEditor(event, "manual");
+  },
+
+  changeDraftSectionContent(event: PageTextInputEvent) {
+    if (this.data.editingMode !== "manual") {
+      return;
+    }
+    this.setData({ editingSectionContent: event.detail.value });
+  },
+
+  cancelDraftSectionEdit() {
+    if (this.data.operationKind) {
+      return;
+    }
+    this.cancelDraftSectionVoiceInstruction();
+    this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+  },
+
+  startDraftSectionAIEdit(event: PageDatasetEvent<{ id?: string }>) {
+    this.openDraftSectionEditor(event, "ai");
+  },
+
+  changeDraftSectionAIInstruction(event: PageTextInputEvent) {
+    if (
+      this.data.editingMode !== "ai"
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    this.setData({ draftSectionAIInstruction: event.detail.value });
+  },
+
+  cancelDraftSectionVoiceInstruction() {
+    if (
+      this.data.draftSectionVoicePhase !== "listening"
+      && this.data.draftSectionVoicePhase !== "transcribing"
+    ) {
+      return;
+    }
+    this.draftSectionVoiceInstructionToken += 1;
+    if (this.data.draftSectionVoicePhase === "listening") {
+      stopMemoirVoiceSearchRecording();
+    }
+    this.setData({ draftSectionVoicePhase: "idle" });
+  },
+
+  async toggleDraftSectionVoiceInstruction() {
+    if (this.data.draftSectionVoicePhase === "listening") {
+      stopMemoirVoiceSearchRecording();
+      return;
+    }
+    const sectionId = this.data.editingSectionId;
+    if (
+      this.data.editingMode !== "ai"
+      || !sectionId
+      || this.data.operationKind
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    this.draftSectionVoiceInstructionToken += 1;
+    const requestToken = this.draftSectionVoiceInstructionToken;
+    this.setData({
+      draftSectionVoicePhase: "listening",
+      error: "",
+    });
+    try {
+      const instructionText = await recordMemoirVoiceSearchQuery({
+        stopMode: "manual",
+        maxDurationMs: DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
+        onRecordingEnd: () => {
+          if (requestToken === this.draftSectionVoiceInstructionToken) {
+            this.setData({ draftSectionVoicePhase: "transcribing" });
+          }
+        },
+        emptyTranscriptMessage: "没有识别到修改要求，请再说一次",
+        noVoiceTranscriptMessage: "没有听到修改要求，请再说一次",
+      });
+      if (requestToken !== this.draftSectionVoiceInstructionToken) {
+        return;
+      }
+      this.setData({
+        draftSectionAIInstruction: instructionText,
+        draftSectionVoicePhase: "idle",
+      });
+      wx.showToast({ title: "已识别修改要求", icon: "none" });
+    } catch (error) {
+      if (requestToken !== this.draftSectionVoiceInstructionToken) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "语音修改失败",
+        draftSectionVoicePhase: "idle",
+      });
+    }
+  },
+
+  async submitDraftSectionAIInstruction() {
+    const sectionId = this.data.editingSectionId;
+    const instructionText = this.data.draftSectionAIInstruction.trim();
+    if (
+      this.data.editingMode !== "ai"
+      || !sectionId
+      || this.data.operationKind
+      || this.data.draftSectionVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    if (!instructionText) {
+      wx.showToast({ title: "请先说出或输入修改要求", icon: "none" });
+      return;
+    }
+    this.setData({ error: "" });
+    await this.performDraftSectionAIRevision(
+      sectionId,
+      instructionText,
+    );
+  },
+
+  async saveDraftSectionEdit() {
+    const workspace = this.data.workspace;
+    const sectionId = this.data.editingSectionId;
+    const content = this.data.editingSectionContent.trim();
+    const currentSection = workspace?.draft_sections.find(
+      (section) => section.section_id === sectionId,
+    );
+    if (
+      !workspace?.draft_version_id
+      || !currentSection
+      || this.data.editingMode !== "manual"
+      || Boolean(this.data.operationKind)
+    ) {
+      return;
+    }
+    if (!content) {
+      wx.showToast({ title: "小节正文不能为空", icon: "none" });
+      return;
+    }
+    if (content === currentSection.content.trim()) {
+      this.cancelDraftSectionEdit();
+      return;
+    }
+    if (!this.beginOperation("save_draft_section", sectionId)) {
+      return;
+    }
+    try {
+      await reviseMemoirBookChapterDraft(
+        this.data.projectId,
+        this.data.chapterId,
+        {
+          expected_version_id: workspace.draft_version_id,
+          sections: workspace.draft_sections.map((section) => ({
+            section_id: section.section_id,
+            content: section.section_id === sectionId
+              ? content
+              : section.content,
+          })),
+        },
+      );
+      this.setData(CLOSED_DRAFT_SECTION_EDITOR);
+      await this.loadPageData(true);
+      wx.showToast({ title: "小节已保存", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "正文保存失败" });
+    } finally {
+      this.finishOperation("save_draft_section", sectionId);
+    }
+  },
+
+  async confirmChapter() {
+    if (
+      !this.data.canConfirmChapter
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    if (!this.beginOperation("confirm_chapter")) {
+      return;
+    }
+    try {
+      await confirmMemoirBookChapterDraft(this.data.projectId, this.data.chapterId);
+      await this.loadPageData(true);
+      wx.showToast({ title: "本章正文已确认", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
+    } finally {
+      this.finishOperation("confirm_chapter");
+    }
+  },
+
+  async performDraftSectionAIRevision(
+    sectionId: string,
+    instructionText: string,
+  ) {
+    const workspace = this.data.workspace;
+    const normalizedInstruction = instructionText.trim();
+    if (
+      !workspace?.draft_version_id
+      || !sectionId
+      || !normalizedInstruction
+      || !this.beginOperation("revise_draft_section_with_ai", sectionId)
+    ) {
+      return;
+    }
+    try {
+      const revisedWorkspace = await reviseMemoirChapterDraftSectionWithAI(
+        this.data.projectId,
+        this.data.chapterId,
+        sectionId,
+        workspace.draft_version_id,
+        normalizedInstruction,
+      );
+      if (
+        revisedWorkspace.draft_version_id === workspace.draft_version_id
+      ) {
+        this.setData({
+          error: "AI 没有改动这一小节，请把修改要求说得更具体一些",
+        });
+        return;
+      }
+      const expandedDraftSectionIds = {
+        ...this.data.expandedDraftSectionIds,
+        [sectionId]: true,
+      };
+      this.setData({
+        expandedDraftSectionIds,
+        ...CLOSED_DRAFT_SECTION_EDITOR,
+      });
+      await this.loadPageData(true);
+      wx.showToast({
+        title: "已按要求修改",
+        icon: "success",
+      });
+      trackAuditAction(
+        "chapter_workspace.section_ai_instruction_edit",
+        {},
+        { projectId: this.data.projectId },
+      );
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error
+          ? error.message
+          : "小节 AI 修改失败",
+      });
+    } finally {
+      this.finishOperation("revise_draft_section_with_ai", sectionId);
+    }
+  },
+
+  async playDraftSection(event: PageDatasetEvent<{ id?: string }>) {
+    const sectionId = datasetString(event, "id");
+    const section = this.data.workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
+    );
+    if (!section || !this.data.projectId || !this.data.chapterId) {
+      return;
+    }
+    await this.playDraftAudio(
+      sectionId,
+      () => createMemoirBookChapterDraftSectionTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        sectionId,
+        readBookTTSRequest(),
+      ),
+      "小节朗读失败",
+    );
+  },
+
+  async playDraftChapter() {
+    if (
+      !this.data.workspace?.draft_version_id
+      || !this.data.workspace.draft_content.trim()
+      || !this.data.projectId
+      || !this.data.chapterId
+    ) {
+      return;
+    }
+    await this.playDraftAudio(
+      CHAPTER_AUDIO_TARGET,
+      () => createMemoirBookChapterDraftTTS(
+        this.data.projectId,
+        this.data.chapterId,
+        readBookTTSRequest(),
+      ),
+      "整章朗读失败",
+    );
+  },
+
+  async playDraftAudio(
+    target: string,
+    createAudio: () => Promise<MemoirBookAudioResponse>,
+    errorMessage: string,
+  ) {
+    if (
+      this.data.audioTarget === target
+      && this.data.audioPhase !== "idle"
+    ) {
+      this.stopDraftSectionPlayback();
+      return;
+    }
+    if (
+      this.data.audioPhase !== "idle"
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    const token = this.audioPlayback.nextToken();
+    this.playToken = token;
+    this.setData({
+      audioPhase: "preparing",
+      audioTarget: target,
+      error: "",
+    });
+    try {
+      const response = await createAudio();
+      if (token !== this.playToken) {
+        return;
+      }
+      this.setData({
+        audioPhase: "playing",
+        audioTarget: target,
+      });
+      await playAudioFileSequence(response.audio_file_ids || [], {
+        token,
+        isCurrent: (candidate) => candidate === this.playToken,
+        playFile: (audioFileId) => this.audioPlayback.playFile(
+          audioFileId,
+          token,
+          { errorMessage },
+        ),
+      });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (token === this.playToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : errorMessage,
+        });
+      }
+    } finally {
+      if (token === this.playToken) {
+        this.setData({
+          audioPhase: "idle",
+          audioTarget: "",
+        });
+      }
+    }
+  },
+
+  stopDraftSectionPlayback() {
+    this.audioPlayback.stop();
+    this.playToken = this.audioPlayback.currentToken();
+    if (this.data.audioPhase !== "idle" || this.data.audioTarget) {
+      this.setData({
+        audioPhase: "idle",
+        audioTarget: "",
+      });
+    }
+  },
+});
