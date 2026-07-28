@@ -4,20 +4,15 @@ import type {
   MemoirSessionGoal,
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
-  VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
-import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
 import {
-  applyAssistantTTSResponse,
-  assistantTurnQueueItem,
   type AssistantTurnQueueItem,
-  type PreparedAssistantTurnAudio,
 } from "../../services/voice-assistant-turn-queue";
 import {
   type VoiceAssistantTurnCompletedEvent,
@@ -25,28 +20,16 @@ import {
 import {
   VoiceAssistantTurnRuntime,
 } from "../../services/voice-assistant-turn-runtime";
-import {
-  classifyVoiceClientConnectionError,
-  type MemoirCaptureStats,
-  type MemoirStreamingAsrClientEvent,
-  type VoiceChatConnectionStatus,
-} from "../../services/memoir-streaming-asr";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
-  createMemoirAssistantTTS,
-  createMemoirVoiceNoAnswerPrompt,
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
 } from "../../services/memoir-voice-api";
-import { readChatTTSSettings } from "../../services/tts-settings";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
-import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
 import {
-  streamingProgressPercent,
   VoiceAssistantTTSProgressRuntime,
-  type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import {
   readVoiceAuthorizationConsent,
@@ -54,15 +37,12 @@ import {
   syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_PAGE_URL,
 } from "../../services/voice-authorization";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   assistantTranscriptState,
   canRequestFollowUp,
   followUpSourceMessageId,
   latestAssistantMessageId,
-  latestPersistedAssistantMessageId,
   statusText,
-  ttsAlignmentFromMetadata,
   upsertTranscriptLine,
 } from "../../services/voice-chat-state";
 import {
@@ -74,42 +54,29 @@ import {
 } from "../../stores/memoir-cache";
 import {
   type VoiceChatData,
+  applyVoiceChatDataPatch,
   bookCompletionRoundFinished,
   initialVoiceChatData,
-  voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
   voiceAuthorizationRequiredPatch,
   voiceAuthorizationSyncFailedPatch,
   voiceAuthorizationWaitingPatch,
-  voiceCaptureStatsPatch,
-  voiceChatErrorPatch,
   voiceChatAutoListenGateSnapshot,
   voiceChatSessionEntryPatch,
-  voiceConnectionStatusPatch,
-  voiceGatewayEventPatch,
   voiceSessionDetailPatch,
   voiceSessionSnapshotPatch,
 } from "./voice-chat-page-state";
 import {
   finishSessionSavedPatch,
   finishSessionStartPatch,
-  noAnswerPromptFailedPatch,
-  noAnswerPromptPlan,
-  noAnswerPromptQueuedPatch,
-  noAnswerPromptStartPatch,
-  voiceFinalTranscriptResult,
-  voiceAssistantInterruptedPatch,
-  voiceClientUnavailableForRecording,
-  voiceLiveTranscriptPatch,
-  voiceRecorderPrivacyDeniedPatch,
-  voiceRecordingReconnectPatch,
-  voiceRecordingStartRequestedPatch,
-  voiceRecordingStartedPatch,
-  voiceRecordingStoppedPatch,
-  voiceRecordingUnavailablePatch,
 } from "./voice-chat-recording-flow";
 import { VoiceChatCompletionIssueRuntime } from "./voice-chat-completion-issue-runtime";
+import { voiceChatAssistantPlaybackMethods } from "./voice-chat-assistant-playback";
+import {
+  AUTO_STOP_SILENCE_MS,
+  voiceChatRecordingRuntimeMethods,
+} from "./voice-chat-recording-runtime";
 import {
   datasetString,
   queryChoice,
@@ -132,29 +99,10 @@ interface OpeningTopicDataset {
 
 type OpeningTopicTapEvent = PageDatasetEvent<OpeningTopicDataset>;
 type SpeakerRoleTapEvent = PageDatasetEvent<{ role?: string }>;
-
-let followUpRequestSerial = 0;
-const AUTO_STOP_SILENCE_MS = 3500;
-const AUTO_STOP_MIN_RECORDING_MS = 2000;
-const AUTO_LISTEN_NO_ANSWER_MS = 15000;
-const MAX_CONSECUTIVE_NO_ANSWER_PROMPTS = 2;
 const GUIDANCE_MODE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
 const INTERVIEW_TYPE_VALUES: readonly MemoirInterviewType[] = ["ai_interview", "human_interview"];
 const SESSION_GOAL_VALUES: readonly MemoirSessionGoal[] = ["open_narration", "book_completion"];
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
-
-interface VoiceChatDataContext {
-  data: VoiceChatData;
-  setData(patch: Partial<VoiceChatData>): void;
-}
-
-function setVoiceChatData(context: VoiceChatDataContext, patch: Partial<VoiceChatData>): void {
-  const nextData: VoiceChatData = { ...context.data, ...patch };
-  context.setData({
-    ...patch,
-    ...voiceChatViewPatch(nextData),
-  });
-}
 
 definePage<VoiceChatData>()({
   audioPlayback: new AudioPlaybackController(),
@@ -172,6 +120,7 @@ definePage<VoiceChatData>()({
   noAnswerPromptRequestSerial: 0,
   consecutiveNoAnswerPrompts: 0,
   handledNoAnswerFrameCount: -1,
+  followUpRequestSerial: 0,
   autoListenPendingAfterPlayback: false,
   pageSuspended: false,
   gatewayConnectPromise: null as Promise<boolean> | null,
@@ -185,7 +134,7 @@ definePage<VoiceChatData>()({
     if (!this.completionIssueRuntime) {
       this.completionIssueRuntime = new VoiceChatCompletionIssueRuntime({
         readState: () => this.data,
-        applyPatch: (patch) => setVoiceChatData(this, patch),
+        applyPatch: (patch) => applyVoiceChatDataPatch(this, patch),
         isSuspended: () => this.pageSuspended,
         cancelAssistant: (reason) => this.cancelFollowUpTTS(reason),
       });
@@ -220,7 +169,7 @@ definePage<VoiceChatData>()({
     const currentGuidanceModule = queryParam(query, "module");
     const projectTitle = queryParam(query, "projectTitle");
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    setVoiceChatData(this, voiceChatSessionEntryPatch({
+    applyVoiceChatDataPatch(this, voiceChatSessionEntryPatch({
       voiceSessionId,
       projectTitle,
       guidanceMode,
@@ -230,7 +179,7 @@ definePage<VoiceChatData>()({
       voiceAuthorizationAgreed,
     }));
     if (!voiceSessionId) {
-      setVoiceChatData(this, { error: "缺少本次语音记录" });
+      applyVoiceChatDataPatch(this, { error: "缺少本次语音记录" });
       return;
     }
     this.hydrateVoiceSessionSnapshot();
@@ -243,7 +192,7 @@ definePage<VoiceChatData>()({
       await this.syncVoiceAuthorizationAndConnect();
     }
     if (!this.data.voiceAuthorizationAgreed) {
-      setVoiceChatData(this, voiceAuthorizationWaitingPatch());
+      applyVoiceChatDataPatch(this, voiceAuthorizationWaitingPatch());
     }
   },
 
@@ -265,7 +214,7 @@ definePage<VoiceChatData>()({
 
   refreshAccessibilitySettings() {
     const settings = readAccessibilitySettings();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       largeTextEnabled: settings.largeTextEnabled,
       autoBargeInEnabled: settings.autoBargeInEnabled,
       ...(settings.autoBargeInEnabled ? {} : { autoListenStateText: "可以点按钮回答" }),
@@ -288,7 +237,7 @@ definePage<VoiceChatData>()({
     this.pageSuspended = true;
     this.stopCompletionIssueRefresh();
     this.recordingStartGeneration += 1;
-    followUpRequestSerial += 1;
+    this.followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
     this.noAnswerPromptInFlight = false;
     this.persistCurrentTranscriptSnapshot();
@@ -296,11 +245,11 @@ definePage<VoiceChatData>()({
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
     void this.stopAssistantBargeInMonitor();
     if (this.data.recordingStarting) {
-      setVoiceChatData(this, { recordingStarting: false });
+      applyVoiceChatDataPatch(this, { recordingStarting: false });
     }
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
-      setVoiceChatData(this, {
+      applyVoiceChatDataPatch(this, {
         recording: false,
         primaryActionText: "继续说话",
         persistenceStateText: "正在保存当前句",
@@ -311,7 +260,7 @@ definePage<VoiceChatData>()({
 
   refreshVoiceAuthorizationConsent() {
     const voiceAuthorizationAgreed = readVoiceAuthorizationConsent();
-    setVoiceChatData(this, voiceAuthorizationConsentPatch(this.data, voiceAuthorizationAgreed));
+    applyVoiceChatDataPatch(this, voiceAuthorizationConsentPatch(this.data, voiceAuthorizationAgreed));
     if (
       voiceAuthorizationAgreed
       && this.data.voiceSessionId
@@ -330,7 +279,7 @@ definePage<VoiceChatData>()({
     if (!agreed && this.voiceStreaming.hasClient() && this.data.recording) {
       this.voiceStreaming.stopRecording();
     }
-    setVoiceChatData(this, voiceAuthorizationChangePatch(this.data, consent.agreed));
+    applyVoiceChatDataPatch(this, voiceAuthorizationChangePatch(this.data, consent.agreed));
     if (agreed && this.data.voiceSessionId && !this.voiceStreaming.hasClient() && !this.data.connecting) {
       await this.syncVoiceAuthorizationAndConnect();
     } else {
@@ -351,11 +300,11 @@ definePage<VoiceChatData>()({
     const latestConsent = readVoiceAuthorizationConsent();
     if (latestConsent) {
       if (!this.data.voiceAuthorizationAgreed) {
-        setVoiceChatData(this, { voiceAuthorizationAgreed: true, error: "" });
+        applyVoiceChatDataPatch(this, { voiceAuthorizationAgreed: true, error: "" });
       }
       return true;
     }
-    setVoiceChatData(this, voiceAuthorizationRequiredPatch(autoTriggered));
+    applyVoiceChatDataPatch(this, voiceAuthorizationRequiredPatch(autoTriggered));
     wx.showToast({ title: "请先同意声纹授权协议", icon: "none" });
     return false;
   },
@@ -372,7 +321,7 @@ definePage<VoiceChatData>()({
       return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : "声纹授权同步失败";
-      setVoiceChatData(this, voiceAuthorizationSyncFailedPatch(message));
+      applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(message));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
         wx.showToast({ title: "声纹授权同步失败", icon: "none" });
       }
@@ -384,7 +333,7 @@ definePage<VoiceChatData>()({
     const synced = await this.syncVoiceAuthorizationForSession();
     if (!synced) {
       if (autoTriggered) {
-        setVoiceChatData(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
+        applyVoiceChatDataPatch(this, { autoListenStateText: "自动收音已暂停，等待声纹授权同步" });
       }
       return false;
     }
@@ -396,7 +345,7 @@ definePage<VoiceChatData>()({
     if (!snapshot.hasSession) {
       return;
     }
-    setVoiceChatData(this, voiceSessionSnapshotPatch(snapshot, this.data));
+    applyVoiceChatDataPatch(this, voiceSessionSnapshotPatch(snapshot, this.data));
   },
 
   async refreshVoiceSessionSnapshot() {
@@ -416,7 +365,7 @@ definePage<VoiceChatData>()({
     } catch (error) {
       console.warn("refresh voice session snapshot failed", error);
       const message = error instanceof Error ? error.message : "语音会话加载失败";
-      setVoiceChatData(this, {
+      applyVoiceChatDataPatch(this, {
         status: "error",
         statusText: statusText("error"),
         recording: false,
@@ -455,14 +404,14 @@ definePage<VoiceChatData>()({
     const pendingLiveTextSaved = !pendingLiveText || savedTexts.some((text) => text.includes(pendingLiveText));
     if (pendingLinesSaved && pendingLiveTextSaved) {
       clearMemoirVoiceSessionPendingClose(this.data.voiceSessionId);
-      setVoiceChatData(this, {
+      applyVoiceChatDataPatch(this, {
         recoveryNotice: "",
         canReconnect: false,
         canFinishAfterDisconnect: false,
       });
       return;
     }
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       recoveryNotice: "上次离开时最后一句可能未保存，请检查讲述记录",
       persistenceStateText: "已恢复已保存记录",
       canReconnect: true,
@@ -480,17 +429,17 @@ definePage<VoiceChatData>()({
       this.applyVoiceSessionDetail(detail);
       const persisted = detail.messages.some((message) => message.id === event.message_id)
         && detail.utterances.some((utterance) => utterance.id === event.utterance_id);
-      setVoiceChatData(this, {
+      applyVoiceChatDataPatch(this, {
         persistenceStateText: persisted ? "已保存" : "已识别，记录同步中",
       });
     } catch (error) {
       console.warn("confirm saved voice transcript failed", error);
-      setVoiceChatData(this, { persistenceStateText: "已保存，本地已缓存" });
+      applyVoiceChatDataPatch(this, { persistenceStateText: "已保存，本地已缓存" });
     }
   },
 
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail) {
-    setVoiceChatData(this, voiceSessionDetailPatch(detail, this.data));
+    applyVoiceChatDataPatch(this, voiceSessionDetailPatch(detail, this.data));
   },
 
   async refreshCompletionIssue(silent = false) {
@@ -541,7 +490,7 @@ definePage<VoiceChatData>()({
     this.recordingStartGeneration += 1;
     this.stopCompletionIssueRefresh();
     this.cancelFollowUpTTS();
-    setVoiceChatData(this, finishSessionStartPatch(false));
+    applyVoiceChatDataPatch(this, finishSessionStartPatch(false));
     try {
       if (this.voiceStreaming.hasClient()) {
         await this.voiceStreaming.finishSession();
@@ -553,13 +502,13 @@ definePage<VoiceChatData>()({
         { destination: "book_completion_overview" },
         { voiceSessionId: this.data.voiceSessionId },
       );
-      setVoiceChatData(this, finishSessionSavedPatch());
+      applyVoiceChatDataPatch(this, finishSessionSavedPatch());
       wx.navigateBack({ delta: 1 });
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");
     } finally {
-      setVoiceChatData(this, { finishingSession: false });
+      applyVoiceChatDataPatch(this, { finishingSession: false });
     }
   },
 
@@ -589,7 +538,7 @@ definePage<VoiceChatData>()({
   },
 
   async reconnectGateway() {
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       recoveryNotice: "",
       canReconnect: false,
       canFinishAfterDisconnect: false,
@@ -602,7 +551,7 @@ definePage<VoiceChatData>()({
   async finishAfterDisconnect() {
     this.voiceStreaming.close({ force: true });
     await this.refreshVoiceSessionSnapshot();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       recording: false,
       status: "closed",
       statusText: statusText("closed"),
@@ -642,12 +591,12 @@ definePage<VoiceChatData>()({
     if (!regenerate && this.data.lastFollowUpSourceMessageId === sourceMessageId) {
       return;
     }
-    const requestSerial = followUpRequestSerial + 1;
-    followUpRequestSerial = requestSerial;
+    const requestSerial = this.followUpRequestSerial + 1;
+    this.followUpRequestSerial = requestSerial;
     this.cancelFollowUpTTS();
     this.assistantStreamLineId = `assistant-stream-${requestSerial}`;
     this.ttsProgress.resetStreamingAudio();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       followUpLoading: true,
       followUpError: "",
       followUpTTSLoading: true,
@@ -664,13 +613,13 @@ definePage<VoiceChatData>()({
     try {
       await this.generateStreamingFollowUp(sourceMessageId, regenerate, requestSerial);
     } catch (error) {
-      if (requestSerial !== followUpRequestSerial) {
+      if (requestSerial !== this.followUpRequestSerial) {
         return;
       }
       this.clearFailedStreamingAssistantTurn(error instanceof Error ? error.message : "小余回应生成失败");
     } finally {
-      if (requestSerial === followUpRequestSerial) {
-        setVoiceChatData(this, {
+      if (requestSerial === this.followUpRequestSerial) {
+        applyVoiceChatDataPatch(this, {
           followUpLoading: false,
           followUpTTSLoading: false,
           canRequestFollowUp: canRequestFollowUp(
@@ -687,7 +636,7 @@ definePage<VoiceChatData>()({
   async generateStreamingFollowUp(sourceMessageId: string, regenerate: boolean, requestSerial: number) {
     const runtime = new VoiceAssistantTurnRuntime(this.data.voiceSessionId, {
       onStarted: () => {
-        setVoiceChatData(this, {
+        applyVoiceChatDataPatch(this, {
           followUpTTSStateText: "小余正在说",
           persistenceStateText: "小余正在回应",
         });
@@ -708,7 +657,7 @@ definePage<VoiceChatData>()({
         const durationSeconds = Number(event.duration_seconds);
         this.ttsProgress.setStreamingDurationSeconds(durationSeconds);
         this.stopFollowUpProgressTimer();
-        setVoiceChatData(this, {
+        applyVoiceChatDataPatch(this, {
           followUpTTSStateText: "正在整理回应",
         });
       },
@@ -719,11 +668,11 @@ definePage<VoiceChatData>()({
         this.markStreamingPlaybackError(error, requestSerial);
       },
     }, {
-      isActive: () => requestSerial === followUpRequestSerial,
+      isActive: () => requestSerial === this.followUpRequestSerial,
     });
     this.assistantTurnRuntime = runtime;
     const { completed, playbackError } = await runtime.start({ regenerate });
-    if (requestSerial !== followUpRequestSerial) {
+    if (requestSerial !== this.followUpRequestSerial) {
       return;
     }
     this.assistantTurnRuntime = null;
@@ -735,7 +684,7 @@ definePage<VoiceChatData>()({
     }
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       dismissedFollowUpMessageId: "",
       followUpLoading: false,
       followUpTTSLoading: false,
@@ -785,7 +734,7 @@ definePage<VoiceChatData>()({
       : this.data.transcriptLines;
     this.assistantStreamLineId = "";
     this.ttsProgress.resetStreamingAudio();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -829,7 +778,7 @@ definePage<VoiceChatData>()({
       },
     };
     const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, line);
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
@@ -875,7 +824,7 @@ definePage<VoiceChatData>()({
       && line.message_id !== event.message_id
     ));
     const transcriptLines = upsertTranscriptLine(withoutTemporaryLine, finalLine);
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       ...assistantTranscriptState(transcriptLines, {
         guidanceMode: this.data.guidanceMode,
         lastFollowUpSourceMessageId: sourceMessageId,
@@ -894,7 +843,7 @@ definePage<VoiceChatData>()({
   },
 
   prepareStreamingAudioPlayback(requestSerial: number) {
-    if (requestSerial !== followUpRequestSerial) {
+    if (requestSerial !== this.followUpRequestSerial) {
       return;
     }
     let playToken = this.ttsPlayToken;
@@ -904,7 +853,7 @@ definePage<VoiceChatData>()({
     }
     const fullText = this.data.assistantPromptText;
     const firstStreamingFrame = !this.ttsProgress.hasStreamingAudioFrame();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       followUpTTSLoading: false,
       followUpTTSPlaying: true,
       followUpTTSError: "",
@@ -920,12 +869,12 @@ definePage<VoiceChatData>()({
   },
 
   markStreamingPlaybackError(error: Error, requestSerial: number) {
-    if (requestSerial !== followUpRequestSerial) {
+    if (requestSerial !== this.followUpRequestSerial) {
       return;
     }
     this.stopAssistantBargeInMonitor();
     this.stopFollowUpProgressTimer();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       followUpTTSError: error.message,
       followUpTTSStateText: "播放失败",
     });
@@ -938,7 +887,7 @@ definePage<VoiceChatData>()({
   skipFollowUp() {
     const dismissedFollowUpMessageId = latestAssistantMessageId(this.data.transcriptLines);
     this.cancelFollowUpTTS();
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       assistantPromptText: "",
       followUpError: "",
       dismissedFollowUpMessageId,
@@ -975,7 +924,7 @@ definePage<VoiceChatData>()({
     if (this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
       this.cancelFollowUpTTS("opening_topic_selected");
     }
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       selectedOpeningTopicText: promptText,
       assistantPromptText: promptText,
       followUpError: "",
@@ -994,7 +943,7 @@ definePage<VoiceChatData>()({
       return;
     }
     const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       speakerRole: role,
       liveText: "",
       liveCharCount: 0,
@@ -1013,7 +962,7 @@ definePage<VoiceChatData>()({
       return;
     }
     const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       speakerRole: role,
       liveText: "",
       liveCharCount: 0,
@@ -1031,7 +980,7 @@ definePage<VoiceChatData>()({
     }
     if (this.data.recording && this.voiceStreaming.hasClient()) {
       this.voiceStreaming.stopRecording();
-      setVoiceChatData(this, {
+      applyVoiceChatDataPatch(this, {
         recording: false,
         primaryActionText: "继续说话",
         persistenceStateText: "已暂停收音",
@@ -1041,462 +990,12 @@ definePage<VoiceChatData>()({
     void this.generateFollowUp(true);
   },
 
-  enqueueAssistantTurn(item: AssistantTurnQueueItem) {
-    if (!item.messageId) {
-      return;
-    }
-    const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, item.line);
-    setVoiceChatData(this, {
-      transcriptLines,
-    });
-    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines });
-    item.prepare = this.prepareAssistantTurnAudio(item);
-    this.assistantTurnQueue.push(item);
-    if (!this.assistantTurnQueueRunning) {
-      void this.drainAssistantTurnQueue();
-    }
-  },
-
-  async drainAssistantTurnQueue() {
-    if (this.assistantTurnQueueRunning) {
-      return;
-    }
-    this.assistantTurnQueueRunning = true;
-    try {
-      while (this.assistantTurnQueue.length) {
-        const item = this.assistantTurnQueue.shift();
-        if (!item) {
-          continue;
-        }
-        this.showAssistantTurn(item, {
-          followUpTTSStateText: item.prepare ? "正在准备语音" : this.data.followUpTTSStateText,
-        });
-        try {
-          const prepared = await item.prepare;
-          if (!prepared) {
-            continue;
-          }
-          await this.playPreparedAssistantTurn(item, prepared);
-        } catch (error) {
-          if (error instanceof Error && error.message === "__assistant_audio_cancelled__") {
-            continue;
-          }
-          setVoiceChatData(this, {
-            followUpTTSError: error instanceof Error ? error.message : "小余语音生成失败",
-            followUpTTSStateText: "语音暂不可用",
-          });
-        }
-      }
-    } finally {
-      this.assistantTurnQueueRunning = false;
-    }
-  },
-
-  async prepareAssistantTurnAudio(item: AssistantTurnQueueItem) {
-    if (!this.data.voiceSessionId || !item.messageId) {
-      throw new Error("缺少要合成的小余回应");
-    }
-    const requestSerial = this.ttsRequestSerial;
-    this.assistantAudioPrepareCount += 1;
-    setVoiceChatData(this, {
-      followUpTTSLoading: true,
-      followUpTTSError: "",
-      followUpTTSStateText: "正在合成语音",
-    });
-    try {
-      const ttsSettings = readChatTTSSettings();
-      const response = await createMemoirAssistantTTS(this.data.voiceSessionId, item.messageId, {
-        voice: ttsSettings.voice || undefined,
-        speed_ratio: ttsSettings.speedRatio === 1 ? undefined : ttsSettings.speedRatio,
-        force_regenerate: item.forceRegenerate,
-      });
-      if (requestSerial !== this.ttsRequestSerial) {
-        throw new Error("__assistant_audio_cancelled__");
-      }
-      const { lines, prepared } = applyAssistantTTSResponse(this.data.transcriptLines, response);
-      setVoiceChatData(this, {
-        transcriptLines: lines,
-        followUpTTSError: "",
-        followUpTTSStateText: this.data.followUpTTSPlaying ? "下一句语音已准备" : "语音已生成",
-      });
-      writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines: lines });
-      return prepared;
-    } catch (error) {
-      throw error instanceof Error ? error : new Error("小余语音生成失败");
-    } finally {
-      this.assistantAudioPrepareCount = Math.max(0, this.assistantAudioPrepareCount - 1);
-      if (this.assistantAudioPrepareCount === 0) {
-        setVoiceChatData(this, { followUpTTSLoading: false });
-      }
-    }
-  },
-
-  showAssistantTurn(item: AssistantTurnQueueItem, patch: Partial<VoiceChatData> = {}) {
-    const transcriptLines = upsertTranscriptLine(this.data.transcriptLines, item.line);
-    setVoiceChatData(this, {
-      ...assistantTranscriptState(transcriptLines, {
-        guidanceMode: this.data.guidanceMode,
-        lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
-        followUpLoading: this.data.followUpLoading,
-        assistantPromptText: item.text,
-        followUpMessageId: item.messageId,
-        followUpAudioFileId: item.line.audio_file_id || "",
-        followUpTTSStateText: this.data.followUpTTSStateText,
-        ttsAlignment: ttsAlignmentFromMetadata(item.line.metadata_json),
-        assistantExpectsAnswer: item.expectsAnswer,
-        canRequestFollowUp: false,
-      }),
-      ...patch,
-    });
-  },
-
-  async playPreparedAssistantTurn(item: AssistantTurnQueueItem, prepared: PreparedAssistantTurnAudio) {
-    this.showAssistantTurn({
-      ...item,
-      line: {
-        ...item.line,
-        audio_file_id: prepared.audioFileId,
-        metadata_json: prepared.metadata || item.line.metadata_json,
-      },
-    }, {
-      followUpAudioFileId: prepared.audioFileId,
-      ttsAlignment: prepared.alignment,
-      followUpTTSStateText: "语音已生成",
-    });
-    await this.playAudioFile(prepared.audioFileId, {
-      autoListenAfterPlayback: item.autoListenAfterPlayback,
-      text: item.text,
-      alignment: prepared.alignment,
-    });
-  },
-
-  async prepareFollowUpTTS(messageId: string, forceRegenerate: boolean = false, autoListenAfterPlayback: boolean = true) {
-    if (!this.data.voiceSessionId || !messageId) {
-      return;
-    }
-    const line = this.data.transcriptLines.find((item) => (item.message_id || item.id) === messageId);
-    if (!line) {
-      return;
-    }
-    this.enqueueAssistantTurn({
-      messageId,
-      text: line.text,
-      expectsAnswer: line.metadata_json?.expects_answer !== false,
-      autoListenAfterPlayback,
-      forceRegenerate,
-      line,
-    });
-  },
-
-  async playFollowUpAudio() {
-    if (this.data.followUpTTSLoading) {
-      return;
-    }
-    if (this.data.followUpAudioFileId) {
-      await this.playAudioFile(this.data.followUpAudioFileId, {
-        autoListenAfterPlayback: false,
-        text: this.data.assistantPromptText,
-        alignment: this.data.ttsAlignment,
-        durationSeconds: this.ttsProgress.streamingDurationSeconds(),
-      });
-      return;
-    }
-    if (this.data.followUpMessageId) {
-      await this.prepareFollowUpTTS(this.data.followUpMessageId, false, false);
-    }
-  },
-
-  async playAudioFile(audioFileId: string, options: {
-      autoListenAfterPlayback?: boolean;
-      text?: string;
-      alignment?: TTSAlignmentSegment[];
-      durationSeconds?: number;
-    } = {}) {
-    if (!audioFileId) {
-      return;
-    }
-    this.stopFollowUpAudio();
-    const playToken = this.audioPlayback.nextToken();
-    this.ttsPlayToken = playToken;
-    setVoiceChatData(this, {
-      assistantPromptText: options.text || this.data.assistantPromptText,
-      ttsAlignment: options.alignment || this.data.ttsAlignment,
-      followUpTTSPlaying: true,
-      followUpTTSError: "",
-      followUpTTSStateText: "小余正在读问题",
-      ttsSpokenText: "",
-      ttsCurrentText: "",
-      ttsRemainingText: options.text || this.data.assistantPromptText,
-      ttsProgressPercent: 0,
-    });
-    const fallbackDuration = Number.isFinite(options.durationSeconds) && Number(options.durationSeconds) > 0
-      ? Number(options.durationSeconds)
-      : 0;
-    this.updateFollowUpTTSProgress(0, 0, fallbackDuration);
-    try {
-      await this.audioPlayback.playFile(audioFileId, playToken, {
-        onPlay: (audio) => {
-          if (playToken === this.ttsPlayToken) {
-            this.ttsProgress.markPlaybackStarted();
-            this.startFollowUpProgressTimer(playToken, audio, fallbackDuration);
-            this.startAssistantBargeInMonitor(followUpRequestSerial);
-          }
-        },
-        onTimeUpdate: (audio) => {
-          if (playToken === this.ttsPlayToken) {
-            this.updateFollowUpTTSProgress(
-              this.playbackTimeForProgress(audio),
-              audio.duration,
-              fallbackDuration,
-            );
-          }
-        },
-        onPlayRequested: (audio) => {
-          this.startFollowUpProgressTimer(playToken, audio, fallbackDuration);
-        },
-        onEnded: () => {
-          if (playToken === this.ttsPlayToken) {
-            this.stopAssistantBargeInMonitor();
-            if (options.autoListenAfterPlayback) {
-              this.autoListenPendingAfterPlayback = true;
-            }
-            this.stopFollowUpProgressTimer();
-            setVoiceChatData(this, {
-              followUpTTSPlaying: false,
-              followUpTTSStateText: options.autoListenAfterPlayback ? "播放完成，正在听你说" : "播放完成",
-              ttsSpokenText: this.data.assistantPromptText,
-              ttsCurrentText: "",
-              ttsRemainingText: "",
-              ttsProgressPercent: 100,
-            });
-          }
-          if (playToken === this.ttsPlayToken && options.autoListenAfterPlayback) {
-            void this.tryStartAutoListenAfterTTS();
-          }
-        },
-        onError: () => {
-          if (playToken === this.ttsPlayToken) {
-            this.stopAssistantBargeInMonitor();
-            this.stopFollowUpProgressTimer();
-            setVoiceChatData(this, {
-              followUpTTSPlaying: false,
-              followUpTTSError: "小余语音播放失败",
-              followUpTTSStateText: "播放失败",
-            });
-          }
-        },
-        errorMessage: "小余语音播放失败",
-      });
-    } catch (error) {
-      if (playToken === this.ttsPlayToken) {
-        this.stopAssistantBargeInMonitor();
-        setVoiceChatData(this, {
-          followUpTTSPlaying: false,
-          followUpTTSError: error instanceof Error ? error.message : "小余语音播放失败",
-          followUpTTSStateText: "播放失败",
-        });
-      }
-    }
-  },
-
-  stopFollowUpAudio() {
-    this.stopAssistantBargeInMonitor();
-    this.audioPlayback.stop();
-    this.assistantTurnRuntime?.stopPlayback();
-    this.ttsPlayToken = this.audioPlayback.currentToken();
-    this.autoListenPendingAfterPlayback = false;
-    this.stopFollowUpProgressTimer();
-    if (this.data.followUpTTSPlaying) {
-      setVoiceChatData(this, { followUpTTSPlaying: false });
-    }
-    this.resetFollowUpTTSProgress();
-  },
-
-  cancelFollowUpTTS(reason: string = "cancelled") {
-    this.ttsRequestSerial += 1;
-    const partialAssistantLineId = this.assistantStreamLineId;
-    const transcriptLines = partialAssistantLineId
-      ? this.data.transcriptLines.filter((line) => line.id !== partialAssistantLineId)
-      : this.data.transcriptLines;
-    this.assistantTurnRuntime?.cancel(reason);
-    this.assistantTurnRuntime = null;
-    this.assistantStreamLineId = "";
-    this.ttsProgress.resetStreamingAudio();
-    this.assistantTurnQueue = [];
-    this.assistantAudioPrepareCount = 0;
-    this.stopFollowUpAudio();
-    if (partialAssistantLineId) {
-      setVoiceChatData(this, {
-        ...assistantTranscriptState(transcriptLines, {
-          guidanceMode: this.data.guidanceMode,
-          lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
-          followUpLoading: false,
-          assistantPromptText: "",
-          followUpMessageId: "",
-          followUpAudioFileId: "",
-          followUpTTSStateText: "",
-          ttsAlignment: [],
-          assistantExpectsAnswer: true,
-          canRequestFollowUp: canRequestFollowUp(
-            transcriptLines,
-            this.data.guidanceMode,
-            this.data.lastFollowUpSourceMessageId,
-            false,
-          ),
-        }),
-      });
-    }
-    if (this.data.followUpLoading || this.data.followUpTTSLoading || this.data.followUpTTSPlaying) {
-      setVoiceChatData(this, {
-        followUpLoading: false,
-        followUpTTSLoading: false,
-        followUpTTSPlaying: false,
-        followUpTTSStateText: this.data.followUpTTSStateText ? "语音已停止" : "",
-      });
-    }
-  },
-
-  assistantTurnActiveForBargeIn() {
-    return Boolean(this.assistantTurnRuntime)
-      || this.data.followUpLoading
-      || this.data.followUpTTSLoading
-      || this.data.followUpTTSPlaying;
-  },
-
-  startAssistantBargeInMonitor(requestSerial: number) {
-    if (
-      this.data.recording
-      || bookCompletionRoundFinished(this.data)
-      || !this.data.autoBargeInEnabled
-      || !this.assistantTurnActiveForBargeIn()
-      || this.assistantBargeInMonitor.isRunning()
-    ) {
-      if (!this.data.autoBargeInEnabled && this.assistantTurnActiveForBargeIn()) {
-        setVoiceChatData(this, { autoListenStateText: "可以点按钮回答" });
-      }
-      return;
-    }
-    const started = this.assistantBargeInMonitor.start({
-      onBargeIn: () => {
-        void this.handleAssistantBargeIn(requestSerial);
-      },
-      onError: () => {
-        if (
-          requestSerial === followUpRequestSerial
-          && !this.data.recording
-          && this.assistantTurnActiveForBargeIn()
-        ) {
-          setVoiceChatData(this, { autoListenStateText: "可以点按钮回答" });
-        }
-      },
-    });
-    if (started) {
-      setVoiceChatData(this, { autoListenStateText: "想说时可以直接开口" });
-    }
-  },
-
-  stopAssistantBargeInMonitor() {
-    return this.assistantBargeInMonitor.stopAndWait();
-  },
-
-  async handleAssistantBargeIn(requestSerial: number) {
-    if (
-      requestSerial !== followUpRequestSerial
-      || this.data.recording
-      || bookCompletionRoundFinished(this.data)
-      || !this.assistantTurnActiveForBargeIn()
-    ) {
-      await this.stopAssistantBargeInMonitor();
-      return;
-    }
-    setVoiceChatData(this, {
-      autoListenStateText: "听到您说话了",
-    });
-    if (!this.ensureVoiceAuthorization(false)) {
-      await this.stopAssistantBargeInMonitor();
-      return;
-    }
-    await this.startRecordingAfterPrivacy(false);
-  },
-
-  markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent) {
-    this.ttsProgress.markStreamingAudioFrameScheduled(event);
-  },
-
-  updateStreamingTTSProgress() {
-    this.ttsProgress.updateStreamingProgress(
-      this.data.assistantPromptText,
-      this.assistantTurnRuntime?.stats()?.currentTimeSeconds,
-      (patch) => this.applyTTSProgressPatch(patch),
-    );
-  },
-
-  updateFollowUpTTSProgress(currentTime: number, duration: number, fallbackDuration: number = 0) {
-    this.ttsProgress.updateAudioFileProgress(
-      this.data.assistantPromptText,
-      currentTime,
-      duration,
-      fallbackDuration,
-      this.data.ttsAlignment,
-      (patch) => this.applyTTSProgressPatch(patch),
-    );
-  },
-
-  playbackTimeForProgress(audio: WechatMiniprogram.InnerAudioContext) {
-    return this.ttsProgress.playbackTimeForAudio(audio);
-  },
-
-  streamingProgressPercent(spokenText: string, fullText: string, allowComplete: boolean) {
-    return streamingProgressPercent(spokenText, fullText, allowComplete);
-  },
-
-  startStreamingProgressTimer(playToken: number) {
-    if (playToken !== this.ttsPlayToken) {
-      return;
-    }
-    this.ttsProgress.startStreamingTimer({
-      isActive: () => (
-        playToken === this.ttsPlayToken
-        && Boolean(this.assistantTurnRuntime)
-        && this.data.followUpTTSPlaying
-      ),
-      currentTimeSeconds: () => this.assistantTurnRuntime?.stats()?.currentTimeSeconds,
-      text: () => this.data.assistantPromptText,
-      applyPatch: (patch) => this.applyTTSProgressPatch(patch),
-    });
-  },
-
-  startFollowUpProgressTimer(playToken: number, audio: WechatMiniprogram.InnerAudioContext, fallbackDuration: number = 0) {
-    this.ttsProgress.startAudioFileTimer({
-      audio,
-      isActive: () => (
-        playToken === this.ttsPlayToken
-        && this.audioPlayback.currentAudio() === audio
-        && this.data.followUpTTSPlaying
-      ),
-      text: () => this.data.assistantPromptText,
-      alignment: () => this.data.ttsAlignment,
-      fallbackDurationSeconds: fallbackDuration,
-      applyPatch: (patch) => this.applyTTSProgressPatch(patch),
-    });
-  },
-
-  stopFollowUpProgressTimer() {
-    this.ttsProgress.stopTimer();
-  },
-
-  resetFollowUpTTSProgress() {
-    this.ttsProgress.resetProgress((patch) => this.applyTTSProgressPatch(patch));
-  },
-
-  applyTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
-    setVoiceChatData(this, patch);
-  },
+  ...voiceChatAssistantPlaybackMethods,
 
   toggleAutoStop() {
     const autoStopEnabled = !this.data.autoStopEnabled;
     this.voiceStreaming.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
-    setVoiceChatData(this, {
+    applyVoiceChatDataPatch(this, {
       autoStopEnabled,
       autoStopStateText: autoStopEnabled ? "自动收尾开" : "自动收尾关",
     });
@@ -1506,469 +1005,9 @@ definePage<VoiceChatData>()({
     if (!this.data.transcriptLines.length) {
       return;
     }
-    setVoiceChatData(this, { historyExpanded: !this.data.historyExpanded });
+    applyVoiceChatDataPatch(this, { historyExpanded: !this.data.historyExpanded });
   },
 
-  connectGateway(): Promise<boolean> {
-    if (!this.data.voiceSessionId) {
-      return Promise.resolve(false);
-    }
-    if (this.gatewayConnectPromise) {
-      return this.gatewayConnectPromise;
-    }
-    const connectPromise = this.performConnectGateway().catch((error) => {
-      const message = error instanceof Error ? error.message : "语音连接失败";
-      this.handleError(message, classifyVoiceClientConnectionError(message));
-      return false;
-    });
-    this.gatewayConnectPromise = connectPromise;
-    void connectPromise.finally(() => {
-      if (this.gatewayConnectPromise === connectPromise) {
-        this.gatewayConnectPromise = null;
-      }
-    });
-    return connectPromise;
-  },
+  ...voiceChatRecordingRuntimeMethods,
 
-  async performConnectGateway(): Promise<boolean> {
-    setVoiceChatData(this, { connecting: true, error: "" });
-    let connected = false;
-    try {
-      await this.voiceStreaming.connect({
-        voiceSessionId: this.data.voiceSessionId,
-        guidanceMode: this.data.guidanceMode,
-        currentGuidanceModule: this.data.currentGuidanceModule,
-        autoStopSilenceMs: this.data.autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0,
-        minAutoStopRecordingMs: AUTO_STOP_MIN_RECORDING_MS,
-        callbacks: {
-          onStatus: (status) => {
-            this.handleStatus(status);
-          },
-          onCaptureStats: (stats) => {
-            this.handleCaptureStats(stats);
-          },
-          onEvent: (event) => {
-            this.handleGatewayEvent(event);
-          },
-          onPartial: (text) => {
-            this.handlePartial(text);
-          },
-          onFinal: (event) => {
-            this.handleFinal(event);
-          },
-          onError: (message, error) => {
-            this.handleError(message, error);
-          },
-          onClientEvent: (event) => {
-            this.handleClientEvent(event);
-          },
-        },
-      });
-      connected = true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "语音连接失败";
-      this.handleError(message, classifyVoiceClientConnectionError(message));
-    } finally {
-      setVoiceChatData(this, { connecting: false });
-      if (connected) {
-        await this.tryStartAutoListenAfterTTS();
-      }
-    }
-    return connected;
-  },
-
-  startRecording(autoTriggered: boolean = false, speakerRole?: MemoirSpeakerRole) {
-    if (
-      this.data.finishingSession
-      || bookCompletionRoundFinished(this.data)
-      || !this.ensureVoiceAuthorization(autoTriggered)
-    ) {
-      return false;
-    }
-    if (this.recordingStartPromise) {
-      return true;
-    }
-    setVoiceChatData(this, voiceRecordingStartRequestedPatch());
-    const requestGeneration = ++this.recordingStartGeneration;
-    const startPromise = this.startRecordingAfterPrivacy(
-      autoTriggered,
-      speakerRole,
-      requestGeneration,
-    ).catch((error) => {
-      const message = error instanceof Error ? error.message : "录音启动失败";
-      this.handleError(message, { kind: "recorder", code: "recorder_start_failed", message });
-      return false;
-    });
-    this.recordingStartPromise = startPromise;
-    void startPromise.finally(() => {
-      if (this.recordingStartPromise === startPromise) {
-        this.recordingStartPromise = null;
-        setVoiceChatData(this, { recordingStarting: false });
-      }
-    });
-    return true;
-  },
-
-  async startRecordingAfterPrivacy(
-    autoTriggered: boolean = false,
-    speakerRole?: MemoirSpeakerRole,
-    requestedGeneration?: number,
-  ) {
-    const requestGeneration = requestedGeneration ?? ++this.recordingStartGeneration;
-    const interruptingAssistant = !autoTriggered && this.assistantTurnActiveForBargeIn();
-    const parentMessageId = this.data.interviewType === "human_interview"
-      ? ""
-      : latestPersistedAssistantMessageId(this.data.transcriptLines);
-    if (!autoTriggered) {
-      this.consecutiveNoAnswerPrompts = 0;
-      this.cancelPendingNoAnswerPrompt(!interruptingAssistant);
-    }
-    if (interruptingAssistant) {
-      followUpRequestSerial += 1;
-      this.cancelFollowUpTTS("interrupted_by_user");
-      setVoiceChatData(this, voiceAssistantInterruptedPatch());
-    }
-    await this.stopAssistantBargeInMonitor();
-    if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
-      || this.data.finishingSession
-      || bookCompletionRoundFinished(this.data)
-    ) {
-      return false;
-    }
-    if (!(await this.syncVoiceAuthorizationForSession())) {
-      return false;
-    }
-    try {
-      await ensureRecorderPrivacyAuthorization();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "微信隐私授权失败";
-      this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
-      setVoiceChatData(this, voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
-      return false;
-    }
-    if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
-      || this.data.finishingSession
-      || bookCompletionRoundFinished(this.data)
-    ) {
-      return false;
-    }
-    if (
-      this.data.connecting
-      || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
-    ) {
-      setVoiceChatData(this, voiceRecordingReconnectPatch(autoTriggered, this.data.autoListenStateText));
-      const connected = await this.connectGateway();
-      if (
-        !connected
-        || requestGeneration !== this.recordingStartGeneration
-        || this.pageSuspended
-        || this.data.finishingSession
-        || bookCompletionRoundFinished(this.data)
-        || voiceClientUnavailableForRecording(this.voiceStreaming.hasClient(), this.data.status)
-      ) {
-        setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
-        return false;
-      }
-    }
-    if (
-      requestGeneration !== this.recordingStartGeneration
-      || this.pageSuspended
-      || this.data.finishingSession
-      || bookCompletionRoundFinished(this.data)
-    ) {
-      return false;
-    }
-    const recordingOptions: {
-      noVoiceActivityTimeoutMs: number;
-      speakerRole?: MemoirSpeakerRole;
-      parentMessageId?: string;
-    } = {
-      noVoiceActivityTimeoutMs: autoTriggered ? AUTO_LISTEN_NO_ANSWER_MS : 0,
-    };
-    if (this.data.interviewType === "human_interview") {
-      recordingOptions.speakerRole = speakerRole || this.data.speakerRole;
-    } else if (parentMessageId) {
-      recordingOptions.parentMessageId = parentMessageId;
-    }
-    const started = this.voiceStreaming.startRecording(recordingOptions);
-    if (!started) {
-      setVoiceChatData(this, voiceRecordingUnavailablePatch(autoTriggered, this.data.autoListenStateText));
-      return false;
-    }
-    if (!interruptingAssistant) {
-      this.cancelFollowUpTTS();
-    }
-    this.handledNoAnswerFrameCount = -1;
-    setVoiceChatData(this, voiceRecordingStartedPatch(autoTriggered));
-    trackAuditAction(
-      "voice_chat.recording_start",
-      { auto_triggered: autoTriggered },
-      { voiceSessionId: this.data.voiceSessionId },
-    );
-    return true;
-  },
-
-  toggleRecording() {
-    if (!this.ensureVoiceAuthorization(false)) {
-      return;
-    }
-    if (this.data.recording) {
-      this.voiceStreaming.stopRecording();
-      setVoiceChatData(this, voiceRecordingStoppedPatch());
-      return;
-    }
-    this.startRecording(false);
-  },
-
-  shouldAutoStartListening() {
-    if (this.data.interviewType === "human_interview") {
-      return false;
-    }
-    return this.autoListenGateSnapshot().canStart;
-  },
-
-  async tryStartAutoListenAfterTTS() {
-    if (this.data.interviewType === "human_interview" || this.pageSuspended) {
-      return false;
-    }
-    const gate = this.autoListenGateSnapshot();
-    if (!this.autoListenPendingAfterPlayback || !gate.canStart) {
-      return false;
-    }
-    this.autoListenPendingAfterPlayback = false;
-    return this.startRecordingAfterPrivacy(true);
-  },
-
-  cancelPendingNoAnswerPrompt(clearLoading: boolean = true) {
-    this.noAnswerPromptRequestSerial += 1;
-    if (!this.noAnswerPromptInFlight) {
-      return;
-    }
-    this.noAnswerPromptInFlight = false;
-    if (clearLoading) {
-      setVoiceChatData(this, { followUpLoading: false });
-    }
-  },
-
-  async handleNoAnswerAutoStop() {
-    if (this.data.interviewType === "human_interview") {
-      return;
-    }
-    if (this.noAnswerPromptInFlight || !this.data.voiceSessionId) {
-      return;
-    }
-    this.noAnswerPromptInFlight = true;
-    const requestSerial = this.noAnswerPromptRequestSerial + 1;
-    this.noAnswerPromptRequestSerial = requestSerial;
-    const { attempt, autoListenAfterPlayback } = noAnswerPromptPlan(
-      this.consecutiveNoAnswerPrompts,
-      MAX_CONSECUTIVE_NO_ANSWER_PROMPTS,
-    );
-    this.consecutiveNoAnswerPrompts = attempt;
-    setVoiceChatData(this, noAnswerPromptStartPatch());
-    try {
-      const response = await createMemoirVoiceNoAnswerPrompt(this.data.voiceSessionId, { attempt });
-      if (requestSerial !== this.noAnswerPromptRequestSerial) {
-        return;
-      }
-      this.enqueueAssistantTurn(assistantTurnQueueItem(response, { autoListenAfterPlayback }));
-      setVoiceChatData(this, noAnswerPromptQueuedPatch(autoListenAfterPlayback));
-    } catch (error) {
-      if (requestSerial !== this.noAnswerPromptRequestSerial) {
-        return;
-      }
-      setVoiceChatData(this, noAnswerPromptFailedPatch(
-        canRequestFollowUp(
-          this.data.transcriptLines,
-          this.data.guidanceMode,
-          this.data.lastFollowUpSourceMessageId,
-          false,
-        ),
-        error instanceof Error ? error.message : "小余确认生成失败",
-      ));
-    } finally {
-      if (requestSerial === this.noAnswerPromptRequestSerial) {
-        this.noAnswerPromptInFlight = false;
-        setVoiceChatData(this, { followUpLoading: false });
-      }
-    }
-  },
-
-  async finishSession() {
-    if (this.data.finishingSession) {
-      return;
-    }
-    this.recordingStartGeneration += 1;
-    this.stopCompletionIssueRefresh();
-    this.cancelFollowUpTTS();
-    setVoiceChatData(this, finishSessionStartPatch(this.data.recording));
-    if (!this.voiceStreaming.hasClient()) {
-      await this.refreshVoiceSessionSnapshot();
-      setVoiceChatData(this, { finishingSession: false });
-      return;
-    }
-    try {
-      await this.voiceStreaming.finishSession();
-      trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
-      setVoiceChatData(this, finishSessionSavedPatch());
-      await this.refreshVoiceSessionSnapshot();
-      setVoiceChatData(this, { persistenceStateText: "已保存" });
-      if (this.data.sessionGoal === "book_completion") {
-        wx.showModal({
-          title: "本次补充已保存",
-          content: "回答已经直接放回相关小章节。返回后重新整理本章，就能生成更新后的正文。",
-          confirmText: "返回本章",
-          showCancel: false,
-          success: () => {
-            wx.navigateBack({ delta: 1 });
-          },
-        });
-        return;
-      }
-      wx.showModal({
-        title: "本次讲述已保存",
-        content: "可以到讲述记录里查看和整理文字。",
-        confirmText: "查看记录",
-        cancelText: "留在本页",
-        success: (result) => {
-          if (result.confirm) {
-            wx.switchTab({ url: "/pages/transcripts/index" });
-          }
-        },
-      });
-    } catch (error) {
-      await this.refreshVoiceSessionSnapshot();
-      this.handleError(error instanceof Error ? error.message : "语音保存失败");
-    } finally {
-      setVoiceChatData(this, { finishingSession: false });
-    }
-  },
-
-  handleStatus(status: VoiceChatConnectionStatus) {
-    setVoiceChatData(this, voiceConnectionStatusPatch(status, this.data));
-  },
-
-  handleCaptureStats(stats: MemoirCaptureStats) {
-    const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
-    const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
-      && this.handledNoAnswerFrameCount === stats.frameCount;
-    const { patch, shouldHandleNoAnswerAutoStop } = voiceCaptureStatsPatch(stats, {
-      autoStopEnabled: this.data.autoStopEnabled,
-      noAnswerPromptAlreadyHandled,
-    });
-    setVoiceChatData(this, patch);
-    if (shouldHandleNoAnswerAutoStop && !this.pageSuspended) {
-      this.handledNoAnswerFrameCount = stats.frameCount;
-      void this.handleNoAnswerAutoStop();
-    }
-  },
-
-  handleGatewayEvent(event: VoiceGatewayServerEvent) {
-    const nextData = voiceGatewayEventPatch(event, this.data);
-    if (Object.keys(nextData).length) {
-      setVoiceChatData(this, nextData);
-    }
-  },
-
-  handleClientEvent(event: MemoirStreamingAsrClientEvent) {
-    trackAuditAction(
-      "voice_chat.client_event",
-      {
-        type: event.type,
-        message: voiceAuditText(event.message || ""),
-        native_message: voiceAuditText(event.nativeMessage || ""),
-        gateway_event_type: event.gatewayEventType || "",
-        timeout_ms: event.timeoutMs || 0,
-        frame_count: event.frameCount,
-        audio_bytes_sent: event.audioBytesSent,
-        recording_elapsed_ms: event.recordingElapsedMs,
-        gateway_state: event.gatewayState || "",
-        auto_stopped: event.autoStopped,
-        auto_stop_reason: event.autoStopReason || "",
-        error_kind: event.errorKind || "",
-        error_code: event.errorCode || "",
-      },
-      { voiceSessionId: this.data.voiceSessionId },
-    );
-  },
-
-  handlePartial(text: string) {
-    setVoiceChatData(this, voiceLiveTranscriptPatch(text, this.data.liveScrollTop));
-  },
-
-  handleFinal(event: VoiceGatewayServerEvent) {
-    const result = voiceFinalTranscriptResult(
-      event,
-      {
-        transcriptLines: this.data.transcriptLines,
-        guidanceMode: this.data.guidanceMode,
-        lastFollowUpSourceMessageId: this.data.lastFollowUpSourceMessageId,
-      },
-      `${Date.now()}-${this.data.transcriptLines.length}`,
-    );
-    if (!result) {
-      return;
-    }
-    this.consecutiveNoAnswerPrompts = 0;
-    this.cancelPendingNoAnswerPrompt();
-    const completedBookAnswer = this.data.sessionGoal === "book_completion"
-      && result.line.role === "user";
-    if (completedBookAnswer) {
-      this.autoListenPendingAfterPlayback = false;
-    }
-    setVoiceChatData(this, {
-      ...result.patch,
-      ...(completedBookAnswer ? { assistantExpectsAnswer: false } : {}),
-    });
-    writeMemoirVoiceSessionSnapshot(this.data.voiceSessionId, { transcriptLines: result.transcriptLines });
-    trackAuditAction(
-      "voice_chat.asr_final",
-      {
-        turn_final: event.turn_final !== false,
-        has_audio: Boolean(event.audio_file_id),
-      },
-      { voiceSessionId: this.data.voiceSessionId },
-    );
-    if (event.message_id && event.utterance_id) {
-      void this.confirmSavedTranscriptSnapshot(event);
-    }
-    const finalSpeakerRole = event.speaker_role
-      || (this.data.interviewType === "human_interview" ? this.data.speakerRole : "narrator");
-    if (finalSpeakerRole !== "interviewer") {
-      this.startCompletionIssueVerification();
-    }
-    if (
-      this.data.interviewType !== "human_interview"
-      && event.message_id
-      && event.turn_final !== false
-      && !this.pageSuspended
-    ) {
-      void this.generateFollowUp(false);
-    }
-  },
-
-  handleError(message: string, error?: VoiceChatErrorInfo) {
-    trackAuditAction(
-      "voice_chat.error",
-      {
-        message: voiceAuditText(message),
-        error_kind: error?.kind || "",
-        error_code: error?.code || "",
-        gateway_state: error?.state || "",
-      },
-      { voiceSessionId: this.data.voiceSessionId },
-    );
-    if (error?.kind === "connection") {
-      this.persistPendingVoiceClose("connection_error");
-    }
-    setVoiceChatData(this, voiceChatErrorPatch(message, error, this.data));
-  },
 });
-
-function voiceAuditText(value: string): string {
-  return (value || "").slice(0, 240);
-}

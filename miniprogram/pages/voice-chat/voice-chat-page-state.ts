@@ -320,6 +320,22 @@ export function initialVoiceChatData(): VoiceChatData {
 
 export type VoiceChatPatch = Partial<VoiceChatData>;
 
+export interface VoiceChatDataContext {
+  data: VoiceChatData;
+  setData(patch: VoiceChatPatch): void;
+}
+
+export function applyVoiceChatDataPatch(
+  context: VoiceChatDataContext,
+  patch: VoiceChatPatch,
+): void {
+  const nextData: VoiceChatData = { ...context.data, ...patch };
+  context.setData({
+    ...patch,
+    ...voiceChatViewPatch(nextData),
+  });
+}
+
 export type VoiceChatViewPatch = Pick<
   VoiceChatData,
   | "finishButtonText"
