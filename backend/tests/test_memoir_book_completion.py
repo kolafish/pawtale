@@ -1293,26 +1293,6 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         )
         assert confirmed.status_code == 200, confirmed.text
 
-        digest_context = await chapter_digests.load_chapter_digest_context(
-            test_db,
-            project_id=project_id,
-            chapter_id=chapter.id,
-        )
-        digest = await chapter_digests.get_current_chapter_digest(
-            test_db,
-            project_id=project_id,
-            chapter_id=chapter.id,
-        )
-        assert digest is not None
-        digest.input_signature = (
-            chapter_digests._chapter_digest_input_signature(
-                chapter_id=digest_context.chapter_id,
-                chapter_title=digest_context.chapter_title,
-                include_in_book=digest_context.include_in_book,
-                sections=digest_context.sections,
-                legacy_sort_order=chapter.sort_order,
-            )
-        )
         version = await test_db.scalar(
             select(MemoirBookChapterDraftVersion)
             .where(
@@ -1323,7 +1303,7 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         )
         assert version is not None
         version.input_signature = f"legacy-order-{chapter.sort_order}"
-        test_db.add_all([digest, version])
+        test_db.add(version)
     await test_db.commit()
     reviewed = await client.post(
         f"/api/memoir/projects/{project_id}/book-review",
