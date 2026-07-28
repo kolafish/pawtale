@@ -548,6 +548,7 @@ def _add_title_page(builder: PDFBookBuilder, *, title: str, content: str) -> Non
         line_height=builder.layout.line_height + 12,
         max_units=max(8, builder.layout.max_line_units - 6),
         spacing_after=24,
+        font_name=PDF_SERIF_BOLD_FONT_NAME,
     )
     for raw_line in content.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         line = raw_line.strip()
@@ -659,7 +660,12 @@ def _add_table_of_contents(
     *,
     entries: list[PDFTocEntry],
 ) -> None:
-    builder.new_page("目录", show_header=False, show_footer=False)
+    builder.new_page(
+        "目录",
+        show_header=False,
+        show_footer=False,
+        continuation_show_header=True,
+    )
     builder.add_heading("目录")
     if not entries:
         builder.add_text("暂无章节。")
@@ -669,6 +675,7 @@ def _add_table_of_contents(
             label=_toc_line(entry, builder.layout) if entry.page_number is None else f"第{_chinese_number(entry.index)}章　{entry.title}",
             page_text=str(entry.page_number) if entry.page_number is not None else "",
             target_anchor=entry.anchor if entry.page_number is not None else None,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
         for section_index, section_title in enumerate(
             entry.section_titles,
@@ -681,7 +688,10 @@ def _add_table_of_contents(
                     entry.anchor if entry.page_number is not None else None
                 ),
                 indent=18,
-                font_size=builder.layout.small_font_size,
+                font_size=max(
+                    builder.layout.small_font_size,
+                    builder.layout.font_size - 3,
+                ),
             )
 
 
@@ -795,6 +805,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
             line_height=builder.layout.line_height + 12,
             max_units=max(10, builder.layout.max_line_units - 4),
             spacing_after=12,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
 
         hints = [
@@ -885,6 +896,7 @@ def _add_appendix_record_page(
             font_size=builder.layout.small_font_size + 1,
             line_height=builder.layout.line_height,
             spacing_after=2,
+            font_name=PDF_SERIF_BOLD_FONT_NAME,
         )
         builder.add_body_text(content, spacing_after=4)
 
