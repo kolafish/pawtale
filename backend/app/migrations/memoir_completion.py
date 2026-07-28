@@ -4,6 +4,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
+from app.migrations.schema_inspection import table_exists
 
 
 TABLE_NAME = "memoir_completion_issues"
@@ -32,21 +33,13 @@ REQUIRED_COLUMNS = {
 }
 
 
-async def _table_exists(conn) -> bool:
-    result = await conn.execute(
-        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table"),
-        {"table": TABLE_NAME},
-    )
-    return result.scalar_one_or_none() is not None
-
-
 async def migrate_memoir_completion_schema(
     engine: AsyncEngine,
 ) -> dict[str, object]:
     changed_tables: list[str] = []
     superseded_section_issues = 0
     async with engine.begin() as conn:
-        if not await _table_exists(conn):
+        if not await table_exists(conn, TABLE_NAME):
             register_models()
             table = Base.metadata.tables[TABLE_NAME]
             await conn.run_sync(

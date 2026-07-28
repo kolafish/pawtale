@@ -3,20 +3,14 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-
-async def _table_exists(conn, table: str) -> bool:
-    result = await conn.execute(
-        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table"),
-        {"table": table},
-    )
-    return result.scalar_one_or_none() is not None
+from app.migrations.schema_inspection import table_exists
 
 
 async def migrate_audit_schema(engine: AsyncEngine) -> dict:
     changed_tables: list[str] = []
 
     async with engine.begin() as conn:
-        if not await _table_exists(conn, "audit_sessions"):
+        if not await table_exists(conn, "audit_sessions"):
             await conn.execute(
                 text(
                     """
@@ -47,7 +41,7 @@ async def migrate_audit_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("audit_sessions")
 
-        if not await _table_exists(conn, "audit_events"):
+        if not await table_exists(conn, "audit_events"):
             await conn.execute(
                 text(
                     """
@@ -80,7 +74,7 @@ async def migrate_audit_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("audit_events")
 
-        if not await _table_exists(conn, "audit_daily_user_usage"):
+        if not await table_exists(conn, "audit_daily_user_usage"):
             await conn.execute(
                 text(
                     """
@@ -107,7 +101,7 @@ async def migrate_audit_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("audit_daily_user_usage")
 
-        if not await _table_exists(conn, "audit_daily_feature_usage"):
+        if not await table_exists(conn, "audit_daily_feature_usage"):
             await conn.execute(
                 text(
                     """

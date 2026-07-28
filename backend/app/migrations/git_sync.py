@@ -3,20 +3,14 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-
-async def _table_exists(conn, table: str) -> bool:
-    result = await conn.execute(
-        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table"),
-        {"table": table},
-    )
-    return result.scalar_one_or_none() is not None
+from app.migrations.schema_inspection import table_exists
 
 
 async def migrate_git_sync_schema(engine: AsyncEngine) -> dict:
     changed_tables: list[str] = []
 
     async with engine.begin() as conn:
-        if not await _table_exists(conn, "github_installations"):
+        if not await table_exists(conn, "github_installations"):
             await conn.execute(
                 text(
                     """
@@ -39,7 +33,7 @@ async def migrate_git_sync_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("github_installations")
 
-        if not await _table_exists(conn, "project_git_sync"):
+        if not await table_exists(conn, "project_git_sync"):
             await conn.execute(
                 text(
                     """
@@ -65,7 +59,7 @@ async def migrate_git_sync_schema(engine: AsyncEngine) -> dict:
             )
             changed_tables.append("project_git_sync")
 
-        if not await _table_exists(conn, "github_setup_states"):
+        if not await table_exists(conn, "github_setup_states"):
             await conn.execute(
                 text(
                     """

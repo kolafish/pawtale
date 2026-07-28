@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
+from app.migrations.schema_inspection import table_columns, table_exists, trigger_exists
 
 
 MEMOIR_NARRATIVE_TABLES = (
@@ -28,37 +29,6 @@ INTERVIEW_POLICY_FAILURE_CODES = (
     "wrong_topic_switch",
     "privacy_violation",
 )
-
-
-async def _table_exists(conn, table_name: str) -> bool:
-    return (
-        await conn.scalar(
-            text(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type = 'table' AND name = :name"
-            ),
-            {"name": table_name},
-        )
-        is not None
-    )
-
-
-async def _table_columns(conn, table_name: str) -> set[str]:
-    rows = (await conn.execute(text(f'PRAGMA table_info("{table_name}")'))).all()
-    return {str(row[1]) for row in rows}
-
-
-async def _trigger_exists(conn, trigger_name: str) -> bool:
-    return (
-        await conn.scalar(
-            text(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type = 'trigger' AND name = :name"
-            ),
-            {"name": trigger_name},
-        )
-        is not None
-    )
 
 
 async def _ensure_narrative_triggers(conn) -> list[str]:
@@ -183,7 +153,7 @@ async def _ensure_narrative_triggers(conn) -> list[str]:
     }
     changed: list[str] = []
     for name, statement in statements.items():
-        if await _trigger_exists(conn, name):
+        if await trigger_exists(conn, name):
             continue
         await conn.execute(text(statement))
         changed.append(name)
@@ -198,7 +168,7 @@ async def migrate_memoir_narrative_schema(
     created: list[str] = []
     async with engine.begin() as conn:
         for table_name in MEMOIR_NARRATIVE_TABLES:
-            if not await _table_exists(conn, table_name):
+            if not await table_exists(conn, table_name):
                 created.append(table_name)
         await conn.run_sync(Base.metadata.create_all)
         changed_triggers = await _ensure_narrative_triggers(conn)
@@ -216,10 +186,10 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
     missing_columns: list[str] = []
     async with engine.begin() as conn:
         for table_name in MEMOIR_NARRATIVE_TABLES:
-            if not await _table_exists(conn, table_name):
+            if not await table_exists(conn, table_name):
                 missing_tables.append(table_name)
                 continue
-            actual = await _table_columns(conn, table_name)
+            actual = await table_columns(conn, table_name)
             expected = {
                 column.name
                 for column in Base.metadata.tables[table_name].columns
@@ -230,7 +200,7 @@ async def assert_memoir_narrative_schema(engine: AsyncEngine) -> None:
         missing_triggers = [
             name
             for name in MEMOIR_NARRATIVE_TRIGGERS
-            if not await _trigger_exists(conn, name)
+            if not await trigger_exists(conn, name)
         ]
     if missing_tables or missing_columns or missing_triggers:
         raise RuntimeError(
