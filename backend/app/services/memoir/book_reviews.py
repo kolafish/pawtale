@@ -35,6 +35,7 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import chapter_digests, completion_issues
+from app.services.memoir.book_output_manuscript import formal_book_title
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -262,7 +263,7 @@ async def load_book_review_context(
     book_title = (
         (output.title or "").strip()
         if output is not None
-        else (plan.title or "").strip()
+        else formal_book_title((plan.title or "").strip())
     ) or "我的回忆录"
     chapters: list[BookReviewChapter] = []
     for chapter in plan_chapters:

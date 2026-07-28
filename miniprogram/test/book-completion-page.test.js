@@ -20,6 +20,13 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     enqueueMemoirBookReviewJob: unmockedAsync("enqueueMemoirBookReviewJob"),
     getMemoirBookReviewJob: async () => reviewJob(),
     cancelMemoirBookReviewJob: unmockedAsync("cancelMemoirBookReviewJob"),
+    enqueueMemoirBookReviewAnswerApplicationJob: unmockedAsync(
+      "enqueueMemoirBookReviewAnswerApplicationJob",
+    ),
+    getMemoirBookReviewAnswerApplicationJob: async () => answerApplicationJob(),
+    cancelMemoirBookReviewAnswerApplicationJob: unmockedAsync(
+      "cancelMemoirBookReviewAnswerApplicationJob",
+    ),
     getMemoirBookReview: async () => null,
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
@@ -146,6 +153,30 @@ function reviewJob(overrides = {}) {
   };
 }
 
+function answerApplicationJob(overrides = {}) {
+  return {
+    job_id: null,
+    project_id: "project-1",
+    status: "idle",
+    stage: "",
+    answer_count: 0,
+    unresolved_count: 0,
+    applied_answer_count: 0,
+    changed_chapter_count: 0,
+    summary: "",
+    output_version_id: null,
+    output_version: null,
+    requested_ai_model: null,
+    resolved_ai_model: null,
+    already_applied: false,
+    can_apply: false,
+    can_cancel: false,
+    can_retry: false,
+    error_message: "",
+    ...overrides,
+  };
+}
+
 test("book completion overview page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-completion/index"));
@@ -244,6 +275,32 @@ test("book review progress uses persisted stages without inventing model percent
   })).bookReviewProgressVisible, false);
 });
 
+test("book answer application reports its real background stage", () => {
+  const { answerApplicationJobView } = loadBookCompletionPage().mod;
+  const revising = answerApplicationJobView(answerApplicationJob({
+    job_id: "apply-job-1",
+    status: "running",
+    stage: "revising",
+    answer_count: 2,
+    can_cancel: true,
+  }));
+  const failed = answerApplicationJobView(answerApplicationJob({
+    job_id: "apply-job-1",
+    status: "failed",
+    stage: "failed",
+    answer_count: 2,
+    can_apply: true,
+    can_retry: true,
+    error_message: "模型暂时不可用",
+  }));
+
+  assert.equal(revising.answerApplicationProgressTitle, "正在把回答写入相关章节");
+  assert.equal(revising.answerApplicationProgressMode, "indeterminate");
+  assert.equal(revising.answerApplicationCanCancel, true);
+  assert.equal(failed.answerApplicationProgressTitle, "书稿调整未完成");
+  assert.equal(failed.answerApplicationProgressDetail, "模型暂时不可用");
+});
+
 test("book completion returns to the book hub for generation and chapter management", () => {
   const tabNavigations = [];
   global.wx = {
@@ -274,6 +331,76 @@ test("book completion opens book title settings directly", () => {
   assert.deepEqual(navigations, [
     "/pages/book-export/index?projectId=project%2F1&action=preview&settings=book",
   ]);
+});
+
+test("book completion submits saved answers and opens the adjusted manuscript", async () => {
+  const requests = [];
+  const navigations = [];
+  const overview = readyOverview();
+  overview.completed_chapters = 2;
+  overview.chapters = overview.chapters.map((chapter) => ({
+    ...chapter,
+    state: "confirmed",
+    next_action: {
+      kind: "complete",
+      title: "本章已确认",
+      detail: "正文已经收入书稿。",
+      action_text: "",
+      disabled: true,
+      issue_id: null,
+    },
+    active_issue: null,
+  }));
+  let currentJob = answerApplicationJob({
+    answer_count: 2,
+    can_apply: true,
+  });
+  global.wx = {
+    showToast() {},
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionOverview: async () => overview,
+      getMemoirBookReview: async () => bookReview(),
+      getMemoirBookOutput: async () => ({ id: "output-1" }),
+      getMemoirBookReviewAnswerApplicationJob: async () => currentJob,
+      enqueueMemoirBookReviewAnswerApplicationJob: async (projectId) => {
+        requests.push(projectId);
+        currentJob = answerApplicationJob({
+          job_id: "apply-job-1",
+          status: "pending",
+          stage: "queued",
+          answer_count: 2,
+          can_cancel: true,
+        });
+        return currentJob;
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "我的故事",
+  });
+
+  await page.onShow.call(context);
+  assert.equal(context.data.answerApplicationJob.can_apply, true);
+  await page.applyBookReviewAnswers.call(context);
+
+  assert.deepEqual(requests, ["project/1"]);
+  assert.equal(context.data.applyingAnswers, true);
+  assert.equal(
+    context.data.answerApplicationProgressTitle,
+    "书稿调整已提交",
+  );
+  page.openAdjustedBook.call(context);
+  assert.deepEqual(navigations, [
+    "/pages/book-export/index?projectId=project%2F1&action=preview",
+  ]);
+  page.onHide.call(context);
+  delete global.wx;
 });
 
 test("book completion submits the cross-chapter review to the background", async () => {

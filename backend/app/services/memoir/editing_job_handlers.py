@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain.memoir.types import MemoirEditingJobType
 from app.services.memoir import book_generation_jobs
+from app.services.memoir import book_review_answer_jobs
 from app.services.memoir import book_review_jobs
 from app.services.memoir import chapter_preparation_jobs
 from app.services.memoir import material_offline_asr_jobs
@@ -50,6 +51,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.GENERATE_BOOK_REVIEW,
         book_review_jobs.run_book_review_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS,
+        book_review_answer_jobs.run_book_review_answer_application_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.PREPARE_CHAPTER,

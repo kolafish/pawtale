@@ -153,6 +153,12 @@ BookReview 主要读取 ChapterDigest，并对具体疑点按需读取章节或�
 按章节摘要准备、全书审阅和结果保存阶段记录进度；小程序退出后任务继续，
 再次进入时按项目恢复当前任务并轮询，不依赖页面内存保存运行状态。
 
+BookReview 的 `candidate_issues` 持久化关联章节和解决方式。`user_decision`
+问题的文字回答保存在对应 CompletionIssue 的 `outcome_note`；全部必答问题处理后，
+用户可以发起一次持久化“根据回答调整书稿”任务。任务按 issue fingerprint 找回
+BookReview 中的关联章节，只允许修改这些章节，并生成新的 BookOutputVersion；
+原书稿版本必须保留。
+
 Digest 和 Review 都是可重新生成的派生数据，不是事实来源。
 
 ## 六、增量问题
@@ -189,6 +195,11 @@ CompletionIssue 只保存经过章节或全书审阅筛选、真正进入处理�
 ```
 
 回答已经明确归入某个 Section 且现有章节正文具有小节快照时，只重新生成素材或结构发生变化的 Section；其他 Section 正文原样复用，最后原子保存一个新的完整章节版本。只有缺少可复用快照或对应 Section 本身发生变化时，才扩大生成范围。
+
+`manual_review` 的文字回答不是语音素材，不创建 VoiceUtterance。它作为用户明确提供的
+事实或决定保存在 CompletionIssue 中，并通过全书回答应用任务进入派生的全书版本。
+任务必须校验当前 BookReview 输入签名、回答签名、关联章节和模型返回的短引用；
+未应用的文字回答会阻止普通全书组装，已应用版本在相同输入下不得被组装流程静默覆盖。
 
 全书审阅必须先区分问题的解决方式：
 

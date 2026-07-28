@@ -156,6 +156,7 @@ REQUIRED_SQL_MARKERS = {
     "memoir_editing_jobs": (
         MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS.value,
         MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
+        MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS.value,
         MemoirEditingJobType.PREPARE_CHAPTER.value,
     ),
 }

@@ -13,6 +13,10 @@ class MemoirBookReviewGenerateRequest(BaseModel):
     force_regenerate: bool = False
 
 
+class MemoirBookReviewAnswerApplyRequest(BaseModel):
+    ai_model: str | None = None
+
+
 class MemoirBookReviewResponse(BaseModel):
     id: str
     project_id: str
@@ -56,6 +60,39 @@ class MemoirBookReviewJobResponse(BaseModel):
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     review_id: str | None = None
+    can_cancel: bool = False
+    can_retry: bool = False
+    error_message: str = ""
+
+
+MemoirBookReviewAnswerApplicationStage = Literal[
+    "",
+    "queued",
+    "assembling",
+    "revising",
+    "saving",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class MemoirBookReviewAnswerApplicationJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    status: MemoirBookReviewJobStatus
+    stage: MemoirBookReviewAnswerApplicationStage = ""
+    answer_count: int = 0
+    unresolved_count: int = 0
+    applied_answer_count: int = 0
+    changed_chapter_count: int = 0
+    summary: str = ""
+    output_version_id: str | None = None
+    output_version: int | None = None
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    already_applied: bool = False
+    can_apply: bool = False
     can_cancel: bool = False
     can_retry: bool = False
     error_message: str = ""

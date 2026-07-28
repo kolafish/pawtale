@@ -8,7 +8,9 @@ import { definePage } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirBookReviewJob,
+  cancelMemoirBookReviewAnswerApplicationJob,
   cancelMemoirBookCompletionJob,
+  enqueueMemoirBookReviewAnswerApplicationJob,
   enqueueMemoirBookCompletionJob,
   enqueueMemoirBookReviewJob,
   enqueueMemoirChapterPreparationJob,
@@ -16,9 +18,11 @@ import {
   getMemoirBookCompletionOverview,
   getMemoirBookOutput,
   getMemoirBookReview,
+  getMemoirBookReviewAnswerApplicationJob,
   getMemoirBookReviewJob,
   listMemoirCompletionIssues,
   type MemoirBookReview,
+  type MemoirBookReviewAnswerApplicationJob,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
@@ -80,6 +84,15 @@ interface BookCompletionData {
   bookReviewCanCancel: boolean;
   bookReviewCancelling: boolean;
   checkingBook: boolean;
+  answerApplicationJob: MemoirBookReviewAnswerApplicationJob | null;
+  answerApplicationProgressVisible: boolean;
+  answerApplicationProgressTitle: string;
+  answerApplicationProgressDetail: string;
+  answerApplicationProgressMode: AITaskProgressMode;
+  answerApplicationProgressClass: string;
+  answerApplicationCanCancel: boolean;
+  applyingAnswers: boolean;
+  answerApplicationCancelling: boolean;
   bookOutputAvailable: boolean;
 }
 
@@ -120,6 +133,77 @@ function bookCompletionJobActive(job: MemoirBookCompletionJob): boolean {
 
 function bookReviewJobActive(job: MemoirBookReviewJob): boolean {
   return job.status === "pending" || job.status === "running";
+}
+
+function answerApplicationJobActive(
+  job: MemoirBookReviewAnswerApplicationJob,
+): boolean {
+  return job.status === "pending" || job.status === "running";
+}
+
+export function answerApplicationJobView(
+  job: MemoirBookReviewAnswerApplicationJob | null,
+): Pick<
+  BookCompletionData,
+  | "answerApplicationProgressVisible"
+  | "answerApplicationProgressTitle"
+  | "answerApplicationProgressDetail"
+  | "answerApplicationProgressMode"
+  | "answerApplicationProgressClass"
+  | "answerApplicationCanCancel"
+> {
+  if (!job || job.status === "idle" || job.status === "succeeded") {
+    return {
+      answerApplicationProgressVisible: false,
+      answerApplicationProgressTitle: "",
+      answerApplicationProgressDetail: "",
+      answerApplicationProgressMode: "hidden",
+      answerApplicationProgressClass: "",
+      answerApplicationCanCancel: false,
+    };
+  }
+  if (answerApplicationJobActive(job)) {
+    const stageTitles: Partial<
+      Record<MemoirBookReviewAnswerApplicationJob["stage"], string>
+    > = {
+      queued: "书稿调整已提交",
+      assembling: "正在准备当前书稿",
+      revising: "正在把回答写入相关章节",
+      saving: "正在保存新的书稿版本",
+    };
+    return {
+      answerApplicationProgressVisible: true,
+      answerApplicationProgressTitle: (
+        stageTitles[job.stage] || "正在根据回答调整书稿"
+      ),
+      answerApplicationProgressDetail: (
+        "任务在后台执行，离开页面后仍会继续，并保留原来的书稿版本"
+      ),
+      answerApplicationProgressMode: "indeterminate",
+      answerApplicationProgressClass: "active",
+      answerApplicationCanCancel: job.can_cancel,
+    };
+  }
+  if (job.status === "failed") {
+    return {
+      answerApplicationProgressVisible: true,
+      answerApplicationProgressTitle: "书稿调整未完成",
+      answerApplicationProgressDetail: (
+        job.error_message || "回答仍然保留，可以重新调整。"
+      ),
+      answerApplicationProgressMode: "hidden",
+      answerApplicationProgressClass: "failed",
+      answerApplicationCanCancel: false,
+    };
+  }
+  return {
+    answerApplicationProgressVisible: true,
+    answerApplicationProgressTitle: "书稿调整已停止",
+    answerApplicationProgressDetail: "回答仍然保留，可以重新调整。",
+    answerApplicationProgressMode: "hidden",
+    answerApplicationProgressClass: "cancelled",
+    answerApplicationCanCancel: false,
+  };
 }
 
 export function bookReviewJobView(
@@ -416,6 +500,15 @@ definePage<BookCompletionData>()({
     bookReviewCanCancel: false,
     bookReviewCancelling: false,
     checkingBook: false,
+    answerApplicationJob: null,
+    answerApplicationProgressVisible: false,
+    answerApplicationProgressTitle: "",
+    answerApplicationProgressDetail: "",
+    answerApplicationProgressMode: "hidden",
+    answerApplicationProgressClass: "",
+    answerApplicationCanCancel: false,
+    applyingAnswers: false,
+    answerApplicationCancelling: false,
     bookOutputAvailable: false,
   },
 
@@ -463,6 +556,18 @@ definePage<BookCompletionData>()({
     });
   },
 
+  openAdjustedBook() {
+    if (!this.data.projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-export/index", {
+        projectId: this.data.projectId,
+        action: "preview",
+      }),
+    });
+  },
+
   async loadOverview(silent = false) {
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
@@ -495,16 +600,22 @@ definePage<BookCompletionData>()({
         bookReviewJob,
         issueCollection,
         bookOutput,
+        answerApplicationJob,
       ] = view.allChaptersConfirmed
         ? await Promise.all([
           getMemoirBookReview(this.data.projectId),
           getMemoirBookReviewJob(this.data.projectId),
           listMemoirCompletionIssues(this.data.projectId),
           optionalApiResource(getMemoirBookOutput(this.data.projectId)),
+          getMemoirBookReviewAnswerApplicationJob(this.data.projectId),
         ])
-        : [null, null, { issues: [] }, null];
+        : [null, null, { issues: [] }, null, null];
       const reviewJobActive = Boolean(
         bookReviewJob && bookReviewJobActive(bookReviewJob),
+      );
+      const applicationActive = Boolean(
+        answerApplicationJob
+        && answerApplicationJobActive(answerApplicationJob),
       );
       const finishedBookReview = (
         this.data.checkingBook
@@ -512,6 +623,11 @@ definePage<BookCompletionData>()({
         && bookReviewJob?.status !== "idle"
       );
       const finishedChapterId = this.data.preparingChapterId;
+      const finishedAnswerApplication = (
+        this.data.applyingAnswers
+        && !applicationActive
+        && answerApplicationJob?.status !== "idle"
+      );
       const finishedWholeBook = (
         this.data.recheckingAll
         && !batchActive
@@ -524,6 +640,9 @@ definePage<BookCompletionData>()({
         ...bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,
+        ...answerApplicationJobView(answerApplicationJob),
+        answerApplicationJob,
+        applyingAnswers: applicationActive,
         ...bookCompletionJobView(
           view.allChaptersConfirmed ? null : bulkCheckJob,
         ),
@@ -539,6 +658,7 @@ definePage<BookCompletionData>()({
       if (
         batchActive
         || reviewJobActive
+        || applicationActive
         || overview.chapters.some((item) => item.state === "preparing")
       ) {
         this.schedulePolling();
@@ -577,6 +697,19 @@ definePage<BookCompletionData>()({
             icon: bookReviewJob?.status === "succeeded" ? "success" : "none",
           });
         }
+        if (finishedAnswerApplication) {
+          const toastTitle = answerApplicationJob?.status === "succeeded"
+            ? "回答已应用到书稿"
+            : (answerApplicationJob?.status === "cancelled"
+              ? "已停止调整书稿"
+              : "书稿调整未完成");
+          wx.showToast({
+            title: toastTitle,
+            icon: answerApplicationJob?.status === "succeeded"
+              ? "success"
+              : "none",
+          });
+        }
       }
     } catch (error) {
       if (routeAuthError(error)) {
@@ -590,6 +723,7 @@ definePage<BookCompletionData>()({
         this.data.preparingChapterId
         || this.data.recheckingAll
         || this.data.checkingBook
+        || this.data.applyingAnswers
       ) {
         this.schedulePolling();
       }
@@ -766,6 +900,80 @@ definePage<BookCompletionData>()({
       });
     } finally {
       this.setData({ bookReviewCancelling: false });
+    }
+  },
+
+  async applyBookReviewAnswers() {
+    const state = this.data.answerApplicationJob;
+    if (
+      !state?.can_apply
+      || this.data.applyingAnswers
+      || this.data.answerApplicationCancelling
+    ) {
+      return;
+    }
+    this.setData({
+      applyingAnswers: true,
+      error: "",
+      answerApplicationProgressVisible: true,
+      answerApplicationProgressTitle: "正在提交书稿调整",
+      answerApplicationProgressDetail: (
+        "提交后可以离开页面，回答和原书稿版本都会保留"
+      ),
+      answerApplicationProgressMode: "indeterminate",
+      answerApplicationProgressClass: "active",
+      answerApplicationCanCancel: false,
+    });
+    try {
+      await enqueueMemoirBookReviewAnswerApplicationJob(this.data.projectId);
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      const message = error instanceof Error
+        ? error.message
+        : "根据回答调整书稿失败";
+      this.setData({ applyingAnswers: false });
+      await this.loadOverview(true);
+      if (
+        !this.data.answerApplicationJob
+        || !answerApplicationJobActive(this.data.answerApplicationJob)
+      ) {
+        this.setData({ error: message });
+      }
+    }
+  },
+
+  async cancelAnswerApplication() {
+    const job = this.data.answerApplicationJob;
+    if (
+      !job?.job_id
+      || !answerApplicationJobActive(job)
+      || this.data.answerApplicationCancelling
+    ) {
+      return;
+    }
+    this.setData({
+      answerApplicationCancelling: true,
+      answerApplicationCanCancel: false,
+      error: "",
+    });
+    try {
+      await cancelMemoirBookReviewAnswerApplicationJob(
+        this.data.projectId,
+        job.job_id,
+      );
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "停止书稿调整失败",
+      });
+    } finally {
+      this.setData({ answerApplicationCancelling: false });
     }
   },
 

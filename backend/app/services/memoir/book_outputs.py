@@ -36,6 +36,7 @@ from app.schemas.memoir_book import (
 )
 from app.services.file_exports import ExportFile
 from app.services.memoir.access import load_memoir_project
+from app.services.memoir import book_review_answer_state, book_reviews
 from app.services.memoir.book_audio import (
     audio_cache_payload,
     audio_response,
@@ -400,12 +401,46 @@ async def book_output_response_or_none(
         allow_admin=allow_admin,
     )
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
+    try:
+        current_review = await book_reviews.get_current_book_review(
+            db,
+            project_id=project_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code not in {409, 422}:
+            raise
+        current_review = None
+    answer_application_current = False
+    pending_answer_application = False
+    if current_review is not None:
+        answer_context = await book_review_answer_state.load_answer_context(
+            db,
+            review=current_review,
+        )
+        answer_application_current = (
+            book_review_answer_state.marker_matches_context(
+                output=output,
+                version=output.versions[-1] if output.versions else None,
+                context=answer_context,
+            )
+        )
+        pending_answer_application = bool(
+            answer_context.answers and not answer_application_current
+        )
     return _output_response(
         output,
-        stale_chapter_titles=_output_stale_chapter_titles(
-            output,
-            plan,
-            source_refs_by_chapter=refs_by_chapter,
+        stale_chapter_titles=(
+            ["全书检查回答"]
+            if pending_answer_application
+            else (
+                []
+                if answer_application_current
+                else _output_stale_chapter_titles(
+                    output,
+                    plan,
+                    source_refs_by_chapter=refs_by_chapter,
+                )
+            )
         ),
     )
 

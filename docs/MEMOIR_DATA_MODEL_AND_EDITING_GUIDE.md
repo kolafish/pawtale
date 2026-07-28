@@ -11,7 +11,7 @@
 
 本文描述的是当前实现，不是脱离代码的目标模型。更上层的不变量以主架构文档为准：
 
-最后核对日期：2026-07-25。
+最后核对日期：2026-07-28。
 
 - `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`：事实来源、素材归属、主题讲述、成书、缓存和请求边界；
 - `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`：实时录音、ASR、对话和 TTS；
@@ -836,6 +836,7 @@ ChapterDraft 不直接保存正文。正文保存在不可变的 Version 中。
 | `input_signature` | 创建时数据版本 |
 | `status` | `open / in_progress / closed` |
 | `outcome` | answered、not_remembered、deferred、declined 等 |
+| `outcome_note` | 文字回答、用户决定或处理说明 |
 | `answered_material_id` | 回答产生的新素材 |
 
 补讲后的闭环：
@@ -849,6 +850,20 @@ CompletionIssue
   → Issue 关闭或重新评估
   → 章节正文提示更新
 ```
+
+全书 `manual_review` 文字回答采用另一条简化链路：
+
+```text
+CompletionIssue.outcome_note
+  → 通过 fingerprint 匹配 BookReview.candidate_issues
+  → 读取已保存的 chapter_ids
+  → 后台任务只调整关联章节
+  → 新增 BookOutputVersion，保留原版本
+```
+
+这类回答不创建 VoiceUtterance，也不反向修改 ChapterDraft。BookOutput 的
+`metadata_json.book_review_answer_application` 记录 BookReview 输入签名、回答签名、
+应用的 issue、输出版本和调整摘要，用于幂等判断和防止后续组装静默覆盖。
 
 Digest 和 Review 的展示原则：
 
@@ -896,8 +911,12 @@ Digest 和 Review 的展示原则：
 - 至少一个 `include_in_book` 章节；
 - 所有收录章节都有非空、已确认的最新正文；
 - 每章正文包含结构化 Section 快照。
+- 当前全书检查没有未处理的必答问题；
+- 已保存的全书检查文字回答已经通过回答应用任务进入书稿。
 
 相同输入重复组装会复用已有版本。章节、顺序、收录或素材变化后，BookOutput 标记 stale。
+回答应用任务生成的是新的派生全书版本：可改写关联小节、调整相关章节顺序或按用户决定
+不收录相关章节；无关章节保持原样，原有全书版本继续保留。
 
 ### 9.3 Manuscript 结构
 

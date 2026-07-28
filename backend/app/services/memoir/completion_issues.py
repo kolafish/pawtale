@@ -86,6 +86,74 @@ def _disambiguate_issue_values(values: list[dict]) -> list[dict]:
     return result
 
 
+def book_review_candidate_fingerprints(
+    candidates: list[dict],
+) -> list[tuple[str, dict]]:
+    """Return the persisted issue fingerprint paired with each valid candidate."""
+    values: list[tuple[dict, dict]] = []
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        try:
+            issue_type = MemoirCompletionIssueType(candidate.get("issue_type"))
+            MemoirCompletionIssuePriority(candidate.get("priority"))
+            MemoirCompletionIssueChannel(candidate.get("channel"))
+        except ValueError:
+            continue
+        question = str(candidate.get("question") or "").strip()
+        reason = str(candidate.get("reason") or "").strip()
+        if not question or not reason:
+            continue
+        material_ids = [
+            str(value).strip()
+            for value in candidate.get("material_ids", [])
+            if str(value).strip()
+        ]
+        chapter_ids = [
+            str(value).strip()
+            for value in candidate.get("chapter_ids", [])
+            if str(value).strip()
+        ]
+        values.append(
+            (
+                {
+                    "fingerprint": _issue_fingerprint(
+                        scope=MemoirCompletionIssueScope.BOOK,
+                        section_id=None,
+                        chapter_id=None,
+                        issue_type=issue_type,
+                        related_material_ids=material_ids,
+                        related_scope_ids=chapter_ids,
+                    ),
+                    "question": question,
+                },
+                candidate,
+            )
+        )
+
+    result: list[tuple[str, dict]] = []
+    seen_candidates: set[tuple[str, str]] = set()
+    occurrences: dict[str, int] = {}
+    for value, candidate in values:
+        base_fingerprint = value["fingerprint"]
+        candidate_key = (
+            base_fingerprint,
+            " ".join(str(value["question"]).split()),
+        )
+        if candidate_key in seen_candidates:
+            continue
+        seen_candidates.add(candidate_key)
+        occurrence = occurrences.get(base_fingerprint, 0)
+        occurrences[base_fingerprint] = occurrence + 1
+        fingerprint = (
+            sha256(f"{base_fingerprint}:{occurrence}".encode("utf-8")).hexdigest()
+            if occurrence
+            else base_fingerprint
+        )
+        result.append((fingerprint, candidate))
+    return result
+
+
 def _response(
     issue: MemoirCompletionIssue,
     *,
@@ -230,27 +298,15 @@ async def sync_book_review_issues(
     candidates: list[dict],
 ) -> list[MemoirCompletionIssue]:
     values: list[dict] = []
-    for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
-        try:
-            issue_type = MemoirCompletionIssueType(candidate.get("issue_type"))
-            priority = MemoirCompletionIssuePriority(candidate.get("priority"))
-            channel = MemoirCompletionIssueChannel(candidate.get("channel"))
-        except ValueError:
-            continue
+    for fingerprint, candidate in book_review_candidate_fingerprints(candidates):
+        issue_type = MemoirCompletionIssueType(candidate.get("issue_type"))
+        priority = MemoirCompletionIssuePriority(candidate.get("priority"))
+        channel = MemoirCompletionIssueChannel(candidate.get("channel"))
         question = str(candidate.get("question") or "").strip()
         reason = str(candidate.get("reason") or "").strip()
-        if not question or not reason:
-            continue
         material_ids = [
             str(value).strip()
             for value in candidate.get("material_ids", [])
-            if str(value).strip()
-        ]
-        chapter_ids = [
-            str(value).strip()
-            for value in candidate.get("chapter_ids", [])
             if str(value).strip()
         ]
         values.append(
@@ -264,19 +320,11 @@ async def sync_book_review_issues(
                 "question": question,
                 "reason": reason,
                 "priority": priority.value,
-                "fingerprint": _issue_fingerprint(
-                    scope=MemoirCompletionIssueScope.BOOK,
-                    section_id=None,
-                    chapter_id=None,
-                    issue_type=issue_type,
-                    related_material_ids=material_ids,
-                    related_scope_ids=chapter_ids,
-                ),
+                "fingerprint": fingerprint,
                 "related_material_ids_json": material_ids,
                 "input_signature": input_signature,
             }
         )
-    values = _disambiguate_issue_values(values)
     existing = list(
         (
             await db.scalars(
