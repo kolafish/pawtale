@@ -1296,6 +1296,11 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         version.input_signature = f"legacy-order-{chapter.sort_order}"
         test_db.add_all([digest, version])
     await test_db.commit()
+    reviewed = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review",
+        json={"force_regenerate": False},
+    )
+    assert reviewed.status_code == 200, reviewed.text
     prompt_count = len(fake.prompts)
 
     moved = await client.post(
@@ -1326,6 +1331,11 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         )
         assert workspace.status_code == 200, workspace.text
         assert workspace.json()["draft_needs_rewrite"] is False
+    current_review = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review"
+    )
+    assert current_review.status_code == 200, current_review.text
+    assert current_review.json() is None
     assert len(fake.prompts) == prompt_count
 
 
