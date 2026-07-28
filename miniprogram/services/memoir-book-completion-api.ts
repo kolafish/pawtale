@@ -51,6 +51,35 @@ export interface MemoirBookReviewJob {
   error_message: string;
 }
 
+export interface MemoirBookReviewAnswerApplicationJob {
+  job_id: string | null;
+  project_id: string;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage:
+    | ""
+    | "queued"
+    | "assembling"
+    | "revising"
+    | "saving"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  answer_count: number;
+  unresolved_count: number;
+  applied_answer_count: number;
+  changed_chapter_count: number;
+  summary: string;
+  output_version_id: string | null;
+  output_version: number | null;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  already_applied: boolean;
+  can_apply: boolean;
+  can_cancel: boolean;
+  can_retry: boolean;
+  error_message: string;
+}
+
 export interface MemoirChapterPreparationJob {
   job_id: string | null;
   project_id: string;
@@ -165,6 +194,37 @@ export function cancelMemoirBookReviewJob(
 ): Promise<MemoirBookReviewJob> {
   return memoirRequest<MemoirBookReviewJob>(
     `${bookReviewPath(projectId)}/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function enqueueMemoirBookReviewAnswerApplicationJob(
+  projectId: string,
+): Promise<MemoirBookReviewAnswerApplicationJob> {
+  return memoirAIRequest<
+    MemoirBookReviewAnswerApplicationJob,
+    { ai_model: null }
+  >(
+    `${bookReviewPath(projectId)}/answer-application/jobs`,
+    { ai_model: null },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookReviewAnswerApplicationJob(
+  projectId: string,
+): Promise<MemoirBookReviewAnswerApplicationJob> {
+  return memoirRequest<MemoirBookReviewAnswerApplicationJob>(
+    `${bookReviewPath(projectId)}/answer-application/jobs/current`,
+  );
+}
+
+export function cancelMemoirBookReviewAnswerApplicationJob(
+  projectId: string,
+  jobId: string,
+): Promise<MemoirBookReviewAnswerApplicationJob> {
+  return memoirRequest<MemoirBookReviewAnswerApplicationJob>(
+    `${bookReviewPath(projectId)}/answer-application/jobs/${encodeURIComponent(jobId)}`,
     { method: "DELETE" },
   );
 }

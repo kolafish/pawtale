@@ -189,7 +189,8 @@
 }
 
 .book-review-progress,
-.bulk-check-progress {
+.bulk-check-progress,
+.answer-application-progress {
   margin-top: 20rpx;
   padding: 20rpx;
   border-radius: 12rpx;
@@ -198,25 +199,29 @@
 }
 
 .book-review-progress.failed,
-.bulk-check-progress.failed {
+.bulk-check-progress.failed,
+.answer-application-progress.failed {
   background: var(--ui-danger-surface);
   box-shadow: inset 4rpx 0 0 var(--ui-danger-text);
 }
 
 .book-review-progress.cancelled,
-.bulk-check-progress.cancelled {
+.bulk-check-progress.cancelled,
+.answer-application-progress.cancelled {
   background: var(--ui-surface-subtle);
   box-shadow: inset 4rpx 0 0 var(--ui-text-muted);
 }
 
 .book-review-progress.succeeded,
-.bulk-check-progress.succeeded {
+.bulk-check-progress.succeeded,
+.answer-application-progress.succeeded {
   background: var(--ui-success-surface);
   box-shadow: inset 4rpx 0 0 var(--ui-success-text);
 }
 
 .book-ready-action,
-.recheck-book-action {
+.recheck-book-action,
+.apply-answers-action {
   min-height: 88rpx;
   margin-top: 22rpx;
   border: 0;
@@ -237,6 +242,46 @@
 
 .recheck-book-action::after {
   border: 0;
+}
+
+.answer-application {
+  margin-top: 24rpx;
+  padding: 24rpx;
+  border: 1rpx solid var(--ui-border);
+  border-radius: 12rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.answer-application.applied {
+  border-color: rgba(94, 119, 88, 0.28);
+  background: var(--ui-success-surface);
+}
+
+.answer-application-title,
+.answer-application-detail {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.answer-application-title {
+  color: var(--ui-text-primary);
+  font-size: 28rpx;
+  font-weight: 700;
+  line-height: 42rpx;
+  text-wrap: balance;
+}
+
+.answer-application-detail {
+  margin-top: 10rpx;
+  color: var(--ui-text-secondary);
+  font-size: 26rpx;
+  line-height: 40rpx;
+  text-wrap: pretty;
+}
+
+.apply-answers-action {
+  background: var(--ui-accent);
+  color: var(--ui-on-accent);
 }
 
 .completion-notice .book-ready-action + .recheck-book-action {
@@ -275,7 +320,8 @@
 }
 
 .book-ready-action:active,
-.recheck-book-action:active {
+.recheck-book-action:active,
+.apply-answers-action:active {
   transform: scale(0.96);
 }
 
@@ -285,6 +331,10 @@
 
 .recheck-book-action:active {
   background: var(--ui-success-surface);
+}
+
+.apply-answers-action:active {
+  background: var(--ui-accent-strong);
 }
 
 .chapter-item {

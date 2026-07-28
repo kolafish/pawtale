@@ -26,7 +26,7 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
-from app.services.memoir import book_reviews
+from app.services.memoir import book_review_answer_state, book_reviews
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     formal_book_title,
@@ -89,6 +89,7 @@ async def assemble_book_output(
     db: AsyncSession,
     *,
     project_id: str,
+    allow_unapplied_review_answers: bool = False,
 ) -> MemoirBookAssemblyResponse:
     plan = await db.scalar(
         select(MemoirBookPlan)
@@ -158,6 +159,10 @@ async def assemble_book_output(
     )
     if unresolved_decision:
         raise ValueError("book output requires resolving book review decisions")
+    answer_context = await book_review_answer_state.load_answer_context(
+        db,
+        review=current_review,
+    )
 
     project = await db.get(Project, project_id)
     if project is None:
@@ -187,6 +192,10 @@ async def assemble_book_output(
     )
     previous_version: MemoirBookOutputVersion | None = None
     if output is None:
+        if answer_context.answers and not allow_unapplied_review_answers:
+            raise ValueError(
+                "book output requires applying the saved book review answers"
+            )
         output = MemoirBookOutput(
             project_id=project_id,
             plan_id=plan.id,
@@ -201,6 +210,26 @@ async def assemble_book_output(
             db,
             output_id=output.id,
         )
+        if book_review_answer_state.marker_matches_context(
+            output=output,
+            version=previous_version,
+            context=answer_context,
+        ):
+            return MemoirBookAssemblyResponse(
+                project_id=project_id,
+                output_id=output.id,
+                output_version_id=previous_version.id,
+                version=previous_version.version,
+                content=previous_version.content,
+                chapter_snapshot_json=list(
+                    previous_version.chapter_snapshot_json or []
+                ),
+                created_at=previous_version.created_at,
+            )
+        if answer_context.answers and not allow_unapplied_review_answers:
+            raise ValueError(
+                "book output requires applying the saved book review answers"
+            )
         if (
             previous_version is not None
             and previous_version.content == content

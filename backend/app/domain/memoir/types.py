@@ -101,6 +101,7 @@ class MemoirEditingJobType(str, Enum):
     UPDATE_TOPIC_MAP = "update_topic_map"
     GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"
     GENERATE_BOOK_REVIEW = "generate_book_review"
+    APPLY_BOOK_REVIEW_ANSWERS = "apply_book_review_answers"
     PREPARE_CHAPTER = "prepare_chapter"
 
 

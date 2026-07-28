@@ -147,7 +147,7 @@ async def test_runtime_schema_migration_creates_book_completion_jobs():
         await engine.dispose()
 
 
-async def test_runtime_schema_includes_background_book_review_job_type():
+async def test_runtime_schema_includes_book_review_answer_application_job_type():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
@@ -156,7 +156,7 @@ async def test_runtime_schema_includes_background_book_review_job_type():
                 Base.metadata.tables["memoir_editing_jobs"]
             ).compile(dialect=engine.sync_engine.dialect)
         )
-        old_sql = current_sql.replace(", 'generate_book_review'", "")
+        old_sql = current_sql.replace(", 'apply_book_review_answers'", "")
         assert old_sql != current_sql
         async with engine.begin() as conn:
             await conn.execute(text(old_sql))
@@ -176,7 +176,7 @@ async def test_runtime_schema_includes_background_book_review_job_type():
         assert "memoir_editing_jobs" in (
             migration["memoir_schema_cutover"]["rebuilt_tables"]
         )
-        assert "generate_book_review" in table_sql
+        assert "apply_book_review_answers" in table_sql
         await assert_runtime_schema(
             engine,
             require_sqlite_foreign_keys=False,
