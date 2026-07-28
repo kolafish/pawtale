@@ -241,3 +241,22 @@ test("book reader does not mismatch latest audio with historical text", async ()
   assert.equal(requestCount, 0);
   assert.match(context.data.playbackError, /历史版本/);
 });
+
+test("book reader keeps the full text visible when narration fails", async () => {
+  const { page } = loadBookReaderPage({
+    createMemoirBookOutputTTS: async () => {
+      throw new Error("朗读服务暂时不可用");
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "仍然可以阅读的全书正文",
+    bookViewingHistoricalVersion: false,
+  });
+
+  await page.playBookAudio.call(context);
+
+  assert.equal(context.data.error, "");
+  assert.equal(context.data.bookContent, "仍然可以阅读的全书正文");
+  assert.equal(context.data.playbackError, "朗读服务暂时不可用");
+});
