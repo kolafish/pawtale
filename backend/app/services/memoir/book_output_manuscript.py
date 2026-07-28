@@ -14,8 +14,6 @@ from app.schemas.memoir_book import (
     MemoirBookManuscriptRenderSettings,
     MemoirBookManuscriptSection,
     MemoirBookManuscriptSourceRef,
-    MemoirBookOutputStructuredChapterResponse,
-    MemoirBookOutputStructuredContentResponse,
     MemoirBookOutputSectionResponse,
     MemoirBookOutputSectionTableOfContentsItemResponse,
     MemoirBookOutputTableOfContentsItemResponse,
@@ -65,10 +63,6 @@ def positive_int(value: object) -> int:
         except ValueError:
             return 0
     return 0
-
-
-def optional_positive_int(value: object) -> int | None:
-    return positive_int(value) or None
 
 
 def safe_str(value: object) -> str:
@@ -134,55 +128,6 @@ def project_narrator_name(project: object) -> str:
     metadata = getattr(project, "metadata_json", None)
     profile = metadata.get(MEMOIR_PROFILE_METADATA_KEY) if isinstance(metadata, dict) else None
     return limited_book_text(profile.get("narrator_name"), max_chars=80) if isinstance(profile, dict) else ""
-
-
-def structured_content_response(
-    *,
-    title: str,
-    content: str,
-    snapshot: list[dict[str, object]],
-) -> MemoirBookOutputStructuredContentResponse | None:
-    chapters: list[MemoirBookOutputStructuredChapterResponse] = []
-    for fallback_index, item in enumerate(snapshot, start=1):
-        chapter_id = safe_str(item.get("chapter_id"))
-        chapter_title = safe_str(item.get("chapter_title")) or safe_str(item.get("title"))
-        chapter_content = safe_str(item.get("content"))
-        if not chapter_id or not chapter_title or not chapter_content:
-            continue
-        sections = _section_responses(item.get("sections"))
-        chapters.append(
-            MemoirBookOutputStructuredChapterResponse(
-                chapter_id=chapter_id,
-                index=positive_int(item.get("chapter_index")) or fallback_index,
-                title=chapter_title,
-                content=chapter_content,
-                char_count=positive_int(item.get("content_char_count")) or len(chapter_content),
-                source_count=positive_int(item.get("source_count")),
-                draft_version_id=safe_str(item.get("draft_version_id")) or None,
-                draft_version=optional_positive_int(item.get("draft_version")),
-                sections=sections,
-            )
-        )
-    if not chapters:
-        return None
-    table_of_contents = [
-        MemoirBookOutputTableOfContentsItemResponse(
-            chapter_id=chapter.chapter_id,
-            index=chapter.index,
-            title=chapter.title,
-            char_count=chapter.char_count,
-            source_count=chapter.source_count,
-            sections=_section_toc_items(chapter.sections),
-        )
-        for chapter in chapters
-    ]
-    return MemoirBookOutputStructuredContentResponse(
-        title=title,
-        chapter_count=len(chapters),
-        char_count=len(content.strip()),
-        table_of_contents=table_of_contents,
-        chapters=chapters,
-    )
 
 
 def _brief_text(text: str, *, max_chars: int) -> str:

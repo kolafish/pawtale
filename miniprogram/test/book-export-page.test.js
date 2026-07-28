@@ -128,6 +128,48 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal("chapters" in context.data, false);
 });
 
+test("book export page keeps a production-sized book within the page-data budget", () => {
+  const output = sampleBookOutput();
+  const chapterBody = "那年院子里的桂花开了，我们围在桌边听外婆慢慢讲从前。".repeat(200);
+  const chapters = Array.from({ length: 8 }, (_, index) => ({
+    ...output.latest_version.manuscript.chapters[0],
+    chapter_id: `chapter-${index + 1}`,
+    index: index + 1,
+    title: `第 ${index + 1} 段往事`,
+    content: chapterBody,
+    sections: [],
+  }));
+  output.latest_version.content = chapters
+    .map((chapter) => `第 ${chapter.index} 章 ${chapter.title}\n\n${chapter.content}`)
+    .join("\n\n");
+  assert.ok(output.latest_version.content.length > 40_000);
+  output.latest_version.manuscript.chapters = chapters;
+  output.latest_version.manuscript.table_of_contents = chapters.map((chapter) => ({
+    chapter_id: chapter.chapter_id,
+    index: chapter.index,
+    title: chapter.title,
+    char_count: chapter.content.length,
+    source_count: 1,
+    sections: [],
+  }));
+  output.versions = Array.from({ length: 9 }, (_, index) => ({
+    id: `book-output-version-${index + 1}`,
+    version: index + 1,
+    created_by: "system",
+    created_at: `2026-06-${String(index + 1).padStart(2, "0")}T00:00:00.000Z`,
+  }));
+  const { page } = loadBookExportPage();
+  const context = pageContext(page);
+
+  page.applyBookExportData.call(context, samplePlan(), output);
+
+  const pageDataBytes = Buffer.byteLength(JSON.stringify(context.data), "utf8");
+  assert.ok(pageDataBytes < 512 * 1024, `Page.data is ${pageDataBytes} bytes`);
+  assert.equal("bookOutput" in context.data, false);
+  assert.equal("plan" in context.data, false);
+  assert.equal("chapters" in context.data, false);
+});
+
 test("book export opens book settings when linked from whole-book review", async () => {
   const completedEvent = sampleAutomationEvent({
     event_type: "book_editorial_copy_generated",

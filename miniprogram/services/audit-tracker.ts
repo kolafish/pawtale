@@ -286,6 +286,14 @@ export function trackAuditAction(
   void flushAuditEvents();
 }
 
+export function installAuditMemoryWarningTracker(): void {
+  wx.onMemoryWarning?.(({ level }) => {
+    trackAuditAction("runtime.memory_warning", {
+      level: typeof level === "number" && Number.isFinite(level) ? level : null,
+    });
+  });
+}
+
 export function installAuditPageTracker(): void {
   if (installed) {
     return;

@@ -410,6 +410,10 @@ declare namespace WechatMiniprogram {
     complete?(result: GeneralCallbackResult): void;
   }
 
+  interface MemoryWarningResult {
+    level?: number;
+  }
+
   interface Wx {
     env: {
       USER_DATA_PATH: string;
@@ -449,5 +453,6 @@ declare namespace WechatMiniprogram {
     getStorageInfoSync(): { keys: string[] };
     setStorageSync<T = unknown>(key: string, value: T): void;
     removeStorageSync(key: string): void;
+    onMemoryWarning?(listener: (result: MemoryWarningResult) => void): void;
   }
 }

@@ -939,26 +939,6 @@ export interface MemoirBookOutputTableOfContentsItem {
   sections: MemoirBookOutputSectionTableOfContentsItem[];
 }
 
-export interface MemoirBookOutputStructuredChapter {
-  chapter_id: string;
-  index: number;
-  title: string;
-  content: string;
-  char_count: number;
-  source_count: number;
-  draft_version_id?: string | null;
-  draft_version?: number | null;
-  sections: MemoirBookOutputSection[];
-}
-
-export interface MemoirBookOutputStructuredContent {
-  title: string;
-  chapter_count: number;
-  char_count: number;
-  table_of_contents: MemoirBookOutputTableOfContentsItem[];
-  chapters: MemoirBookOutputStructuredChapter[];
-}
-
 export type MemoirBookManuscriptTemplate = "classic_family" | "photo_memory" | "oral_archive";
 
 export interface MemoirBookManuscriptProfile {
