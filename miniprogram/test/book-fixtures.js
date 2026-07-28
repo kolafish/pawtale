@@ -327,19 +327,13 @@ function sampleBookManuscript(title = "外婆回忆录", coverStyle = "classic_p
 function sampleBookOutputVersion(
   version,
   content,
-  structuredContent = null,
   createdAt = CREATED_AT,
   manuscript = null,
 ) {
   return {
     id: `book-output-version-${version}`,
-    output_id: "book-output-1",
-    project_id: "project/1",
-    plan_id: "plan-1",
     version,
     content,
-    chapter_snapshot_json: [],
-    structured_content: structuredContent,
     manuscript,
     created_by: "system",
     created_at: createdAt,
@@ -351,18 +345,16 @@ function sampleBookOutput(
   content = "外婆回忆录\n\n目录\n1. 外婆家的童年\n\n第1章 外婆家的童年\n\n正文",
   isStale = false,
   staleChapterTitles = [],
-  structuredContent = null,
   versions = [],
   manuscript = null,
 ) {
-  const latestVersion = sampleBookOutputVersion(version, content, structuredContent, CREATED_AT, manuscript);
+  const latestVersion = sampleBookOutputVersion(version, content, CREATED_AT, manuscript);
   return {
     id: "book-output-1",
     project_id: "project/1",
     plan_id: "plan-1",
     title: "外婆回忆录",
     status: "draft",
-    metadata_json: {},
     is_stale: isStale,
     stale_chapter_titles: staleChapterTitles,
     latest_version: latestVersion,

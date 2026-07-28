@@ -10,7 +10,6 @@ import {
 } from "./book-view-model";
 
 export interface BookDesignState {
-  bookOutput: MemoirBookOutput | null;
   bookContent: string;
   bookViewingHistoricalVersion: boolean;
   bookTitleSaving: boolean;
@@ -68,8 +67,11 @@ export function bookGenerationSettings(
   };
 }
 
-export function bookMetadataChanged(data: BookDesignState): boolean {
-  const stored = latestBookMetadata(data.bookOutput);
+export function bookMetadataChanged(
+  data: BookDesignState,
+  output: MemoirBookOutput | null,
+): boolean {
+  const stored = latestBookMetadata(output);
   return (
     trimText(data.bookSubtitleInput) !== stored.subtitle
     || trimText(data.bookNarratorNameInput) !== stored.narrator_name
@@ -104,8 +106,11 @@ export function bookDesignHasChanges(data: BookDesignState): boolean {
   return data.bookTitleChanged || data.bookMetadataChanged || data.bookCoverStyleChanged;
 }
 
-export function bookEditorialCopyBlockedMessage(data: BookDesignState): string {
-  if (!data.bookOutput?.latest_version || !data.bookContent) {
+export function bookEditorialCopyBlockedMessage(
+  data: BookDesignState,
+  bookOutputAvailable: boolean,
+): string {
+  if (!bookOutputAvailable || !data.bookContent) {
     return "请先生成书稿";
   }
   if (data.bookViewingHistoricalVersion) {
@@ -122,8 +127,11 @@ export function isChapterEditorialCopyTarget(target: string): target is MemoirBo
   return target === "chapter_intros" || target === "pull_quotes";
 }
 
-export function bookDesignSaveStatusText(data: BookDesignState): string {
-  if (!data.bookOutput?.latest_version) {
+export function bookDesignSaveStatusText(
+  data: BookDesignState,
+  bookOutputAvailable: boolean,
+): string {
+  if (!bookOutputAvailable) {
     return "生成时应用";
   }
   if (data.bookViewingHistoricalVersion) {

@@ -526,7 +526,6 @@ test("book page stores only the full-book summary needed by the home view", () =
     "全书正文",
     true,
     ["外婆家的童年", "第一次离家", "县城生活"],
-    sampleStructuredBookContent(),
     [],
     sampleBookManuscript(),
   );
@@ -993,7 +992,14 @@ test("book page assembles confirmed chapter drafts and updates the full-book pro
       },
       updateMemoirBookOutput: async (projectId, data) => {
         calls.push({ kind: "update", projectId, data });
-        return sampleBookOutput(2, "全书第二版正文", false, [], null, [], sampleBookManuscript("外婆回忆录", "moonlit_courtyard"));
+        return sampleBookOutput(
+          2,
+          "全书第二版正文",
+          false,
+          [],
+          [],
+          sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
+        );
       },
     },
   });
@@ -1005,7 +1011,14 @@ test("book page assembles confirmed chapter drafts and updates the full-book pro
   });
   page.applyBookOutput.call(
     context,
-    sampleBookOutput(1, "全书第一版正文", false, [], null, [], sampleBookManuscript("外婆回忆录", "moonlit_courtyard")),
+    sampleBookOutput(
+      1,
+      "全书第一版正文",
+      false,
+      [],
+      [],
+      sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
+    ),
   );
 
   await page.generateBook.call(context);

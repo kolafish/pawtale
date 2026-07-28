@@ -1062,18 +1062,16 @@ export interface MemoirBookManuscript {
   render_settings: MemoirBookManuscriptRenderSettings;
 }
 
-export interface MemoirBookOutputVersion {
+export interface MemoirBookOutputVersionSummary {
   id: string;
-  output_id: string;
-  project_id: string;
-  plan_id: string;
   version: number;
-  content: string;
-  chapter_snapshot_json: Record<string, unknown>[];
-  structured_content?: MemoirBookOutputStructuredContent | null;
-  manuscript?: MemoirBookManuscript | null;
   created_by: MemoirCreatedBy;
   created_at: string;
+}
+
+export interface MemoirBookOutputVersion extends MemoirBookOutputVersionSummary {
+  content: string;
+  manuscript?: MemoirBookManuscript | null;
 }
 
 export interface MemoirBookOutput {
@@ -1082,11 +1080,10 @@ export interface MemoirBookOutput {
   plan_id: string;
   title: string;
   status: MemoirOutputStatus;
-  metadata_json: Record<string, unknown>;
   is_stale: boolean;
   stale_chapter_titles: string[];
   latest_version?: MemoirBookOutputVersion | null;
-  versions: MemoirBookOutputVersion[];
+  versions: MemoirBookOutputVersionSummary[];
   created_at: string;
   updated_at: string;
 }

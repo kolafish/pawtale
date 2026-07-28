@@ -150,7 +150,7 @@
         <view class="book-design-head">
           <view>
             <text class="book-design-title">成书信息</text>
-            <text class="book-design-meta">{{bookCoverStyleLabel}} · {{bookOutput && bookOutput.latest_version ? "已生成" : "待生成"}}</text>
+            <text class="book-design-meta">{{bookCoverStyleLabel}} · {{bookOutputAvailable ? "已生成" : "待生成"}}</text>
           </view>
           <text class="book-design-save-status {{bookTitleSaving ? 'saving' : ''}}">{{bookDesignSaveStatusText}}</text>
         </view>
@@ -440,6 +440,7 @@
           range="{{bookVersionOptions}}"
           range-key="label"
           value="{{bookSelectedVersionIndex}}"
+          disabled="{{bookExportBusyTarget === 'book-version'}}"
           bindchange="changeBookOutputVersion"
         >
           <view class="advanced-row">
