@@ -8,7 +8,7 @@ const {
   mockModule,
 } = require("./page-harness");
 
-function requiredIssue() {
+function requiredIssue(overrides = {}) {
   return {
     id: "issue-1",
     project_id: "project-1",
@@ -24,6 +24,7 @@ function requiredIssue() {
     outcome_note: "",
     created_at: "2026-07-28T00:00:00",
     updated_at: "2026-07-28T00:00:00",
+    ...overrides,
   };
 }
 
@@ -131,6 +132,37 @@ test("required book issue rejects an empty explanation without closing", async (
   assert.equal(context.data.requiredAnswer, "   ");
   assert.equal(context.data.requiredAnswerReady, false);
   assert.equal(toasts.at(-1).title, "请先填写回答");
+});
+
+test("required book issue keeps the current draft when another issue is tapped", () => {
+  global.wx = {};
+  const component = loadIssueList();
+  const context = componentContext(component, {
+    projectId: "project-1",
+    requiredIssues: [
+      requiredIssue(),
+      requiredIssue({
+        id: "issue-2",
+        question: "是否保留真实姓名？",
+      }),
+    ],
+    allowRequiredConfirmation: true,
+  });
+  context.beginRequiredAnswer.call(context, issueEvent());
+  context.changeRequiredAnswer.call(context, {
+    detail: { value: "先是大学时期，之后是工作后的经历。" },
+  });
+
+  context.beginRequiredAnswer.call(context, {
+    currentTarget: { dataset: { issueId: "issue-2" } },
+  });
+
+  assert.equal(context.data.answeringIssueId, "issue-1");
+  assert.equal(
+    context.data.requiredAnswer,
+    "先是大学时期，之后是工作后的经历。",
+  );
+  assert.equal(context.data.requiredAnswerReady, true);
 });
 
 test("required book issue keeps the explanation available after a save failure", async () => {

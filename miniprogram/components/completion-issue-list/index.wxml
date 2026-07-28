@@ -9,10 +9,10 @@
     <block wx:if="{{allowRequiredConfirmation}}">
       <view
         wx:if="{{answeringIssueId !== item.id}}"
-        class="action ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
+        class="action ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
         data-issue-id="{{item.id}}"
         aria-role="button"
-        aria-disabled="{{busyIssueId || disabled}}"
+        aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
         bindtap="beginRequiredAnswer"
       >填写回答或说明</view>
       <view wx:else class="required-answer-editor">
@@ -23,23 +23,23 @@
           maxlength="1000"
           auto-height
           cursor-spacing="24"
-          disabled="{{busyIssueId || disabled}}"
-          placeholder="例如：四段经历依次发生在……；其中……应放在最前面。"
+          disabled="{{busyIssueId !== '' || disabled}}"
+          placeholder="请写下您的回答、选择，或希望怎样处理这件事。"
           aria-label="填写问题的回答或处理说明"
           bindinput="changeRequiredAnswer"
         />
-        <text class="required-answer-hint">这里会保存您的原话，不会再用一句“已确认”代替。</text>
+        <text class="required-answer-hint">您的原话会作为这项问题的处理说明保存。</text>
         <view class="required-answer-actions">
           <view
             class="action compact subtle ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{busyIssueId || disabled}}"
+            aria-disabled="{{busyIssueId !== '' || disabled}}"
             bindtap="cancelRequiredAnswer"
           >稍后再填</view>
           <view
             class="action compact ui-pressable {{!requiredAnswerReady || busyIssueId || disabled ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{!requiredAnswerReady || busyIssueId || disabled}}"
+            aria-disabled="{{!requiredAnswerReady || busyIssueId !== '' || disabled}}"
             bindtap="submitRequiredAnswer"
           >{{busyIssueId === item.id ? "正在保存…" : "保存回答并处理"}}</view>
         </view>

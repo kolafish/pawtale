@@ -86,7 +86,12 @@ Component({
         this.properties.requiredIssues as MemoirCompletionIssue[],
         event,
       );
-      if (!issue || this.data.busyIssueId || this.properties.disabled) {
+      if (
+        !issue
+        || this.data.busyIssueId
+        || this.data.answeringIssueId
+        || this.properties.disabled
+      ) {
         return;
       }
       this.setData({
