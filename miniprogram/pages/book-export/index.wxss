@@ -310,10 +310,39 @@
 }
 
 .book-editorial-copy-notice-text {
-  flex: 1;
+  display: block;
+  margin-top: 4rpx;
   color: var(--ui-text-secondary);
   font-size: 25rpx;
   line-height: 1.5;
+}
+
+.book-editorial-copy-notice-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.book-editorial-copy-notice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.book-editorial-copy-notice-title,
+.book-editorial-copy-notice-status {
+  color: var(--ui-accent-strong);
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.book-editorial-copy-notice-detail {
+  display: block;
+  margin-top: 6rpx;
+  color: var(--ui-danger-text);
+  font-size: 23rpx;
+  line-height: 1.45;
 }
 
 .book-editorial-copy-notice-action {
