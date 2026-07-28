@@ -30,6 +30,7 @@ PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 
 ```bash
 cd backend
+venv/bin/ruff check app tests scripts
 venv/bin/python -m pytest -q
 ```
 

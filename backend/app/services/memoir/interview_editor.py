@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from fastapi import HTTPException
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
@@ -547,7 +548,7 @@ async def get_interview_session_review(
             )
         )
 
-    generated_at = datetime.utcnow()
+    generated_at = utcnow_naive()
     return MemoirInterviewEditorSessionReviewResponse(
         project_id=project_id,
         voice_session_id=voice_session_id,
@@ -582,7 +583,7 @@ async def create_interview_question(
         voice_session_id=req.voice_session_id,
         allow_admin=allow_admin,
     )
-    now = datetime.utcnow()
+    now = utcnow_naive()
     message = MemoirChatMessage(
         project_id=project_id,
         voice_session_id=session.id,
@@ -630,7 +631,7 @@ async def update_interview_question_text(
     )
     if message.role not in QUESTION_ROLES:
         raise HTTPException(status_code=400, detail="只能编辑可整理的问题")
-    now = datetime.utcnow()
+    now = utcnow_naive()
     original_text = message.content_text
     message.content_text = req.text
     message.content_status = MemoirChatContentStatus.CORRECTED.value
@@ -721,7 +722,7 @@ async def convert_interview_question_to_answer(
         if parent_message.role not in QUESTION_ROLES:
             raise HTTPException(status_code=400, detail="目标消息不是可归属的问题")
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     previous_role = message.role
     previous_parent_id = message.parent_message_id
     mutation_source = req.mutation_source or MUTATION_SOURCE
@@ -819,7 +820,7 @@ async def update_answer_parent_question(
         if parent_message.role not in QUESTION_ROLES:
             raise HTTPException(status_code=400, detail="目标消息不是可归属的问题")
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     previous_parent_id = message.parent_message_id
     message.parent_message_id = parent_id
     metadata = dict(message.metadata_json or {})

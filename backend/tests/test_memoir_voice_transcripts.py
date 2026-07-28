@@ -2,7 +2,7 @@ import base64
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,11 +10,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
-    MemoirAutomationEventStatus,
-    MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
-    MemoirBookPlanStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
@@ -24,11 +22,8 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     AudioFile,
-    MemoirAutomationEvent,
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
-    MemoirBookPlan,
-    MemoirBookPlanChapter,
     MemoirChatMessage,
     MemoirEditingJob,
     MemoirImageAsset,
@@ -58,7 +53,6 @@ from app.services.memoir.utterance_editing_pipeline import (
     source_text_hash,
 )
 from tests.memoir_helpers import (
-    add_test_section_materials,
     create_test_book_plan,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
@@ -1664,7 +1658,7 @@ async def test_share_video_worker_reclaims_expired_lease_without_get_side_effect
     )
     assert create_response.status_code == 201
     job_id = create_response.json()["id"]
-    claimed_at = datetime.utcnow() + timedelta(seconds=1)
+    claimed_at = utcnow_naive() + timedelta(seconds=1)
     first_lease = await share_video_jobs.claim_share_video_job(
         test_db,
         job_id,

@@ -3,13 +3,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Awaitable, Callable
 
 from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.clock import utcnow_naive
 from app.config import get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import (
@@ -46,10 +47,6 @@ class EditingJobDeadlineExceeded(RuntimeError):
     pass
 
 
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
-
-
 def register_editing_job_handler(
     job_type: MemoirEditingJobType,
     handler: EditingJobHandler,
@@ -73,7 +70,7 @@ async def enqueue_editing_job(
     replace_completed: bool = False,
     retry_failed: bool = False,
 ) -> MemoirEditingJob:
-    scheduled_at = run_after or _utcnow()
+    scheduled_at = run_after or utcnow_naive()
     payload = payload_json or {}
     existing = None
     if dedupe_key:
@@ -211,7 +208,7 @@ async def claim_due_editing_jobs(
     project_id: str | None = None,
 ) -> list[JobLease]:
     settings = get_settings()
-    due_at = now or _utcnow()
+    due_at = now or utcnow_naive()
     batch_size = limit or max(1, settings.memoir_editing_batch_size)
     lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
     statement = select(MemoirEditingJob.id).where(_claimable_editing_job(due_at))
@@ -257,7 +254,7 @@ async def claim_editing_job(
     lease_seconds: int | None = None,
 ) -> JobLease | None:
     settings = get_settings()
-    claimed_at = now or _utcnow()
+    claimed_at = now or utcnow_naive()
     lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
     await db.commit()
     leases = await _claim_editing_job_ids(
@@ -277,7 +274,7 @@ async def renew_editing_job_lease(
     lease_seconds: int | None = None,
 ) -> bool:
     settings = get_settings()
-    renewed_at = now or _utcnow()
+    renewed_at = now or utcnow_naive()
     lease_duration = lease_seconds or max(1, settings.memoir_editing_lease_seconds)
     result = await db.execute(
         update(MemoirEditingJob)
@@ -471,7 +468,7 @@ async def run_editing_job(
                 "error_type": "job_deadline_exceeded",
                 "timeout_seconds": deadline_seconds,
                 "elapsed_seconds": deadline_seconds,
-                "failed_at": _utcnow().isoformat(),
+                "failed_at": utcnow_naive().isoformat(),
             }
             await _mark_job(
                 db,

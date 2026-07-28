@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.clock import utcnow_naive
 from app.database import Base
 
 
@@ -21,8 +22,8 @@ class GitHubInstallation(Base):
     account_login: Mapped[str | None] = mapped_column(String(255), nullable=True)
     account_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     repository_selection: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
 
 class GitHubSetupState(Base):
@@ -30,7 +31,7 @@ class GitHubSetupState(Base):
 
     state: Mapped[str] = mapped_column(String(120), primary_key=True)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -48,5 +49,5 @@ class ProjectGitSync(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_commit_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)

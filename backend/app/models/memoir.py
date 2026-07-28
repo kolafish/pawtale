@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 import uuid
 
 from sqlalchemy import (
@@ -20,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship as orm_relationship
 
+from app.clock import utcnow_naive
 from app.database import Base
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -55,6 +57,10 @@ from app.domain.memoir.types import (
     MemoirVoiceSessionStatus,
 )
 from app.models.memoir_common import AudioFile, _enum_values
+
+if TYPE_CHECKING:
+    from app.models.projects import Project
+    from app.models.users import User
 
 
 class MemoirVoiceSession(Base):
@@ -135,8 +141,8 @@ class MemoirVoiceSession(Base):
     stopped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_voice_sessions")
     messages: Mapped[list["MemoirChatMessage"]] = orm_relationship(
@@ -174,8 +180,8 @@ class MemoirVoiceAuthorizationConsent(Base):
         index=True,
     )
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     user: Mapped["User"] = orm_relationship("User")
     source_session: Mapped[MemoirVoiceSession | None] = orm_relationship("MemoirVoiceSession")
@@ -216,8 +222,8 @@ class MemoirChatMessage(Base):
     guidance_intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
     turn_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="messages")
@@ -274,7 +280,7 @@ class MemoirVoiceUtterance(Base):
         nullable=True,
         index=True,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     voice_session: Mapped[MemoirVoiceSession] = orm_relationship("MemoirVoiceSession", back_populates="utterances")
     chat_message: Mapped[MemoirChatMessage | None] = orm_relationship(
@@ -309,8 +315,8 @@ class MemoirTranscriptAlignment(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     alignment_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     segments_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     utterance: Mapped[MemoirVoiceUtterance] = orm_relationship(
         "MemoirVoiceUtterance",
@@ -343,7 +349,7 @@ class MemoirMaterialShareVideo(Base):
         nullable=False,
         index=True,
     )
-    run_after: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True, index=True)
+    run_after: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow_naive, nullable=True, index=True)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
@@ -358,8 +364,8 @@ class MemoirMaterialShareVideo(Base):
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
@@ -405,7 +411,7 @@ class MemoirShareVideoOutput(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
+        default=utcnow_naive,
         nullable=False,
     )
 
@@ -439,7 +445,7 @@ class MemoirTranscriptVersion(Base):
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_by: Mapped[str] = mapped_column(String(20), nullable=False, default=MemoirCreatedBy.SYSTEM.value)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     voice_session: Mapped[MemoirVoiceSession] = orm_relationship(
         "MemoirVoiceSession",
@@ -498,8 +504,8 @@ class MemoirImageAsset(Base):
     )
     source_quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     user: Mapped["User"] = orm_relationship("User")
@@ -536,8 +542,8 @@ class MemoirBookImagePlacement(Base):
     display_size: Mapped[str] = mapped_column(String(40), default="full_width", nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     image_asset: Mapped[MemoirImageAsset] = orm_relationship("MemoirImageAsset", back_populates="placements")
@@ -570,8 +576,8 @@ class MemoirBookPlan(Base):
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     prompt_snapshot: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_book_plans")
     chapters: Mapped[list["MemoirBookPlanChapter"]] = orm_relationship(
@@ -600,8 +606,8 @@ class MemoirBookPlanChapter(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan", back_populates="chapters")
     draft: Mapped["MemoirBookChapterDraft | None"] = orm_relationship(
@@ -687,11 +693,11 @@ class MemoirSection(Base):
     include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     chapter: Mapped[MemoirBookPlanChapter] = orm_relationship(
@@ -774,11 +780,11 @@ class MemoirSectionMaterial(Base):
     assignment_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     assignment_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     include_in_book: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     section: Mapped[MemoirSection] = orm_relationship(
@@ -838,11 +844,11 @@ class MemoirSectionDigest(Base):
     )
     digest_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     section: Mapped[MemoirSection] = orm_relationship("MemoirSection")
@@ -992,11 +998,11 @@ class MemoirCompletionIssue(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     section: Mapped[MemoirSection | None] = orm_relationship(
@@ -1060,11 +1066,11 @@ class MemoirChapterDigest(Base):
     )
     digest_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
     chapter: Mapped[MemoirBookPlanChapter] = orm_relationship(
@@ -1112,11 +1118,11 @@ class MemoirBookReview(Base):
     )
     review_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
 
 
@@ -1144,8 +1150,8 @@ class MemoirBookChapterDraft(Base):
         nullable=False,
     )
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter", back_populates="draft")
     versions: Mapped[list["MemoirBookChapterDraftVersion"]] = orm_relationship(
@@ -1207,7 +1213,7 @@ class MemoirBookChapterDraftVersion(Base):
         server_default=sql_text("'[]'"),
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     draft: Mapped[MemoirBookChapterDraft] = orm_relationship("MemoirBookChapterDraft", back_populates="versions")
 
@@ -1228,8 +1234,8 @@ class MemoirBookOutput(Base):
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default=MemoirOutputStatus.DRAFT.value, nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project", back_populates="memoir_book_outputs")
     plan: Mapped[MemoirBookPlan] = orm_relationship("MemoirBookPlan")
@@ -1257,7 +1263,7 @@ class MemoirBookOutputVersion(Base):
     chapter_snapshot_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     manuscript_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_by: Mapped[str] = mapped_column(String(20), default=MemoirCreatedBy.SYSTEM.value, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     output: Mapped[MemoirBookOutput] = orm_relationship(
         "MemoirBookOutput",
@@ -1321,8 +1327,8 @@ class MemoirEditingJob(Base):
     payload_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     result_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     chapter: Mapped[MemoirBookPlanChapter | None] = orm_relationship("MemoirBookPlanChapter")
@@ -1372,8 +1378,8 @@ class MemoirBookCompletionJob(Base):
     chapter_results_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
 
@@ -1426,8 +1432,8 @@ class MemoirAutomationEvent(Base):
     summary_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = orm_relationship("Project")
     chapter: Mapped[MemoirBookPlanChapter | None] = orm_relationship("MemoirBookPlanChapter")

@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import select
 
+from app.clock import utcnow_naive
 from app.models.git_sync import GitHubSetupState
 from app.services.projects import git_sync as git_sync_service
 from tests.project_helpers import create_project_with_document
@@ -212,7 +213,7 @@ async def test_github_setup_state_expires(client, test_db, monkeypatch):
     state = await _create_setup_state(client)
     row = await test_db.scalar(select(GitHubSetupState).where(GitHubSetupState.state == state))
     assert row is not None
-    row.expires_at = datetime.utcnow() - timedelta(seconds=1)
+    row.expires_at = utcnow_naive() - timedelta(seconds=1)
     await test_db.commit()
 
     response = await client.get(

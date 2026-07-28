@@ -1,4 +1,4 @@
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
 
@@ -23,6 +23,11 @@ VALID_AI_TEXT_MODELS = {
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(BACKEND_DIR / ".env"),
+        extra="ignore",
+    )
+
     app_env: str = "development"
     app_secret_key: str = DEFAULT_APP_SECRET_KEY
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
@@ -137,11 +142,6 @@ class Settings(BaseSettings):
     volc_tts_speaker: str = "zh_female_vv_uranus_bigtts"
     volc_tts_response_format: str = "mp3"
     volc_tts_sample_rate: int = 24000
-
-    class Config:
-        env_file = str(BACKEND_DIR / ".env")
-        extra = "ignore"
-
 
 @lru_cache()
 def get_settings() -> Settings:

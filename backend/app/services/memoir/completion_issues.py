@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from hashlib import sha256
 import json
 
@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueOutcome,
@@ -31,10 +32,6 @@ _PRIORITY_ORDER = {
     MemoirCompletionIssuePriority.MEDIUM.value: 1,
     MemoirCompletionIssuePriority.LOW.value: 2,
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _issue_fingerprint(
@@ -210,7 +207,7 @@ async def sync_chapter_digest_issues(
                     setattr(issue, field, field_value)
             db.add(issue)
         current.append(issue)
-    now = _utcnow()
+    now = utcnow_naive()
     for issue in existing:
         if (
             issue.fingerprint not in fingerprints
@@ -305,7 +302,7 @@ async def sync_book_review_issues(
                     setattr(issue, field, field_value)
             db.add(issue)
         current.append(issue)
-    now = _utcnow()
+    now = utcnow_naive()
     for issue in existing:
         if (
             issue.fingerprint not in fingerprints
@@ -444,7 +441,7 @@ async def start_issue(
         raise HTTPException(status_code=409, detail="补全问题已经结束")
     if issue.status == MemoirCompletionIssueStatus.OPEN.value:
         issue.status = MemoirCompletionIssueStatus.IN_PROGRESS.value
-        issue.started_at = _utcnow()
+        issue.started_at = utcnow_naive()
         db.add(issue)
         await db.flush()
     return issue
@@ -486,7 +483,7 @@ async def close_issue(
     issue.outcome = outcome.value
     issue.outcome_note = note.strip()
     issue.answered_material_id = answered_material_id
-    issue.closed_at = _utcnow()
+    issue.closed_at = utcnow_naive()
     db.add(issue)
     await db.flush()
     return issue

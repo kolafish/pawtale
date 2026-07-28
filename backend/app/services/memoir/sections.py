@@ -7,6 +7,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirCreatedBy,
@@ -49,10 +50,6 @@ from app.services.memoir.material_roles import (
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 async def _load_plan(
@@ -363,7 +360,7 @@ async def _set_section_order(
         section.sort_order = -(index + 1)
         db.add(section)
     await db.flush()
-    now = _utcnow()
+    now = utcnow_naive()
     changed_ids: set[str] = set()
     for index, section in enumerate(sections):
         if original_orders[section.id] != index:
@@ -390,7 +387,7 @@ async def _set_material_order(
         material.sort_order = 1_000_000 + index
         db.add(material)
     await db.flush()
-    now = _utcnow()
+    now = utcnow_naive()
     for index, material in enumerate(materials):
         material.sort_order = index
         material.updated_at = now
@@ -476,7 +473,7 @@ async def update_section(
             changed = True
     if changed:
         section.version += 1
-        section.updated_at = _utcnow()
+        section.updated_at = utcnow_naive()
         db.add(section)
         await mark_section_digests_stale(
             db,
@@ -687,7 +684,7 @@ async def _move_materials(
             )
         ).scalars().all()
     )
-    now = _utcnow()
+    now = utcnow_naive()
     for section in sections:
         section.version += 1
         section.updated_at = now
@@ -770,7 +767,7 @@ async def refresh_material_transcript_version(
     if material.transcript_version_id == transcript_version_id:
         return material
     material.transcript_version_id = transcript_version_id
-    material.updated_at = _utcnow()
+    material.updated_at = utcnow_naive()
     db.add(material)
     await mark_section_digests_stale(
         db,
@@ -1153,7 +1150,7 @@ async def merge_sections(
     if req.title is not None:
         target.title = req.title
         target.version += 1
-        target.updated_at = _utcnow()
+        target.updated_at = utcnow_naive()
         db.add(target)
     await db.execute(
         delete(MemoirSection).where(

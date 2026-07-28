@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirEditingJobStatus,
@@ -34,10 +34,6 @@ _ACTIVE_CHAPTER_STATUSES = {
     MemoirEditingJobStatus.RUNNING.value,
 }
 _TERMINAL_CHAPTER_STATUSES = {"succeeded", "failed", "cancelled"}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _active_key(project_id: str) -> str:
@@ -249,7 +245,7 @@ async def _job_response(
         job.status = batch_status
         job.error_message = error_message
         job.active_key = None if terminal else _active_key(project_id)
-        job.completed_at = _utcnow() if terminal else None
+        job.completed_at = utcnow_naive() if terminal else None
         if terminal:
             job.chapter_results_json = chapter_items
         db.add(job)
@@ -520,7 +516,7 @@ async def cancel_book_completion_job(
 
     job.status = MemoirBookCompletionJobStatus.CANCELLED.value
     job.active_key = None
-    job.completed_at = _utcnow()
+    job.completed_at = utcnow_naive()
     db.add(job)
     await db.commit()
     return await _job_response(db, project_id=project_id, job=job)

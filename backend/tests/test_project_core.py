@@ -1,6 +1,5 @@
 from datetime import datetime
 
-import pytest
 from sqlalchemy import func, select
 
 from app.models.audit import AuditDailyFeatureUsage, AuditEvent, AuditSession

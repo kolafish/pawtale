@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.auth import hash_password, normalize_email
+from app.clock import utcnow_naive
 from app.config import get_settings
 
 
@@ -35,7 +35,7 @@ async def ensure_default_user(conn) -> str:
         return str(existing_id)
 
     user_id = str(uuid.uuid4())
-    now = datetime.utcnow()
+    now = utcnow_naive().isoformat(sep=" ")
     await conn.execute(
         text(
             """

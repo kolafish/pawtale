@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 AuditPlatform = Literal["miniprogram", "web"]
@@ -137,8 +137,7 @@ class AuditEventResponse(BaseModel):
     exit_reason: str
     metadata_json: dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AuditSessionResponse(BaseModel):

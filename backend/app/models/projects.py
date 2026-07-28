@@ -1,9 +1,19 @@
 from datetime import datetime, date
+from typing import TYPE_CHECKING
 import uuid
 from sqlalchemy import String, Text, Integer, Date, DateTime, JSON, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.clock import utcnow_naive
 from app.domain.projects.types import ProjectType
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.memoir import (
+        MemoirBookOutput,
+        MemoirBookPlan,
+        MemoirVoiceSession,
+    )
 
 
 class Project(Base):
@@ -23,8 +33,8 @@ class Project(Base):
         server_default="0",
         nullable=False,
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     groups: Mapped[list["DocumentGroup"]] = relationship(
         "DocumentGroup", back_populates="project", cascade="all, delete-orphan",
@@ -54,8 +64,8 @@ class DocumentGroup(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = relationship("Project", back_populates="groups")
     documents: Mapped[list["Document"]] = relationship(
@@ -77,8 +87,8 @@ class Document(Base):
     label: Mapped[str | None] = mapped_column(String(50), nullable=True)
     word_count_target: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     group: Mapped["DocumentGroup"] = relationship("DocumentGroup", back_populates="documents")
     reference_links: Mapped[list["DocumentReference"]] = relationship(
@@ -96,8 +106,8 @@ class ReferenceItem(Base):
     content: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     project: Mapped["Project"] = relationship("Project", back_populates="references")
     document_links: Mapped[list["DocumentReference"]] = relationship(
@@ -126,6 +136,6 @@ class WritingSession(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False)
     date: Mapped[date] = mapped_column(Date, nullable=False)
     words_written: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     project: Mapped["Project"] = relationship("Project", back_populates="sessions")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 import uuid
 
 from sqlalchemy import (
@@ -15,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.clock import utcnow_naive
 from app.database import Base
 from app.domain.memoir.narrative_types import (
     MemoirInterviewAction,
@@ -22,10 +23,6 @@ from app.domain.memoir.narrative_types import (
     MemoirInterviewResponseOutcome,
 )
 from app.models.memoir_common import _enum_values
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class MemoirInterviewPolicyDecision(Base):
@@ -101,7 +98,7 @@ class MemoirInterviewPolicyDecision(Base):
     )
     user_response_outcome: Mapped[str | None] = mapped_column(String(32), nullable=True)
     human_rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     evaluated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
@@ -135,4 +132,4 @@ class MemoirInterviewPolicyEvaluation(Base):
     )
     expected_action: Mapped[str | None] = mapped_column(String(40), nullable=True)
     failure_codes_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)

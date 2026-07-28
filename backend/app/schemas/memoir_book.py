@@ -16,7 +16,7 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
 )
 from app.schemas.memoir_voice import (
-    MemoirAutomationEventResponse,
+    MemoirAutomationEventResponse as MemoirAutomationEventResponse,
     MemoirTTSAlignmentSegmentResponse,
 )
 from app.schemas.memoir_sections import (

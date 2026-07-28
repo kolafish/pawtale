@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
+from typing import TYPE_CHECKING
 import uuid
 
 from sqlalchemy import (
@@ -17,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.clock import utcnow_naive
 from app.database import Base
 from app.domain.memoir.narrative_types import (
     MemoirFrameworkEvidenceState,
@@ -25,9 +27,8 @@ from app.domain.memoir.narrative_types import (
 )
 from app.models.memoir_common import _enum_values
 
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
+if TYPE_CHECKING:
+    from app.models.memoir import MemoirVoiceUtterance
 
 
 class MemoirProjectFramework(Base):
@@ -69,10 +70,10 @@ class MemoirProjectFramework(Base):
     template_snapshot_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     template_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, nullable=False
+        DateTime, default=utcnow_naive, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
     )
 
     items: Mapped[list["MemoirFrameworkItem"]] = relationship(
@@ -168,7 +169,7 @@ class MemoirFrameworkItem(Base):
     deferred_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     defer_reason: Mapped[str] = mapped_column(Text, default="", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
     )
 
     project_framework: Mapped[MemoirProjectFramework] = relationship(
@@ -225,10 +226,10 @@ class MemoirFrameworkItemMaterial(Base):
     matcher_version: Mapped[str | None] = mapped_column(String(40), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, nullable=False
+        DateTime, default=utcnow_naive, nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=_utcnow, onupdate=_utcnow, nullable=False
+        DateTime, default=utcnow_naive, onupdate=utcnow_naive, nullable=False
     )
 
     framework_item: Mapped[MemoirFrameworkItem] = relationship(
