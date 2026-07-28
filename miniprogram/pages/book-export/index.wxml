@@ -155,13 +155,20 @@
           <text class="book-design-save-status {{bookTitleSaving ? 'saving' : ''}}">{{bookDesignSaveStatusText}}</text>
         </view>
         <view
-          wx:if="{{bookEditorialCopyNotice}}"
+          wx:if="{{bookEditorialCopyEventItem}}"
           class="book-editorial-copy-notice"
           aria-role="button"
           bindtap="openBookHome"
         >
-          <text class="book-editorial-copy-notice-text">{{bookEditorialCopyNotice}}</text>
-          <text class="book-editorial-copy-notice-action">查看进度</text>
+          <view class="book-editorial-copy-notice-copy">
+            <view class="book-editorial-copy-notice-head">
+              <text class="book-editorial-copy-notice-title">{{bookEditorialCopyEventItem.titleText}}</text>
+              <text class="book-editorial-copy-notice-status">{{bookEditorialCopyEventItem.statusText}}</text>
+            </view>
+            <text class="book-editorial-copy-notice-text">{{bookEditorialCopyEventItem.summaryText}}</text>
+            <text wx:if="{{bookEditorialCopyEventItem.detailText}}" class="book-editorial-copy-notice-detail">{{bookEditorialCopyEventItem.detailText}}</text>
+          </view>
+          <text class="book-editorial-copy-notice-action">书稿工具</text>
         </view>
 
         <view class="book-title-editor">

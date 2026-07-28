@@ -14,6 +14,7 @@ import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterView, BookHomeData } from "./book-view-model";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import { promptRequiredText } from "../../services/text-prompt";
+import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 
 import {
   acknowledgeMemoirAutomationEvent,
@@ -221,10 +222,18 @@ definePage<BookPageData>()({
   },
 
   async onShow() {
+    this.applyBookWorkspaceNavigationTarget();
     this.setData({ pageClass: accessibilityPageClass("book-page") });
     enableMiniProgramShareMenu({ includeTimeline: false });
     this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();
+  },
+
+  applyBookWorkspaceNavigationTarget() {
+    const target = takeBookWorkspaceNavigationTarget();
+    if (target) {
+      this.setData({ bookWorkspaceView: target });
+    }
   },
 
   onShareAppMessage() {

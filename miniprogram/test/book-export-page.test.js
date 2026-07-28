@@ -7,6 +7,7 @@ const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 const {
+  sampleAutomationEvent,
   sampleBookManuscript: baseSampleBookManuscript,
   sampleBookOutput: baseSampleBookOutput,
   sampleBookOutputVersion: baseSampleBookOutputVersion,
@@ -56,7 +57,14 @@ function loadBookExportPage(voiceApiExports = {}) {
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
     assembleMemoirBookOutput: async () => undefined,
     updateMemoirBookOutput: async () => sampleBookOutput(),
-    enqueueMemoirBookOutputEditorialCopyGeneration: async () => ({ id: "event-1" }),
+    enqueueMemoirBookOutputEditorialCopyGeneration: async () => sampleAutomationEvent({
+      id: "event-1",
+      event_type: "book_editorial_copy_generated",
+      chapter_id: null,
+      summary_text: "后记已提交后台重生成。",
+      metadata_json: { target_label: "后记", targets: ["afterword"] },
+    }),
+    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 20 }),
     ...voiceApiExports,
   });
   return loadPageModule("../pages/book-export/index.ts");
@@ -109,9 +117,25 @@ test("book export page loads plan and output from query project", async () => {
 });
 
 test("book export opens book settings when linked from whole-book review", async () => {
+  const completedEvent = sampleAutomationEvent({
+    event_type: "book_editorial_copy_generated",
+    status: "completed",
+    chapter_id: null,
+    summary_text: "前言已重生成，可以预览或导出。",
+    metadata_json: { target_label: "前言", targets: ["preface"] },
+  });
+  let outputLoads = 0;
   const { page } = loadBookExportPage({
     getMemoirBookPlan: async () => samplePlan(),
-    getMemoirBookOutput: async () => sampleBookOutput(),
+    getMemoirBookOutput: async () => {
+      outputLoads += 1;
+      return sampleBookOutput();
+    },
+    listMemoirAutomationEvents: async () => ({
+      items: [completedEvent],
+      total: 1,
+      limit: 20,
+    }),
   });
   const context = pageContext(page);
 
@@ -122,6 +146,8 @@ test("book export opens book settings when linked from whole-book review", async
   });
 
   assert.equal(context.data.showBookSettings, true);
+  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
+  assert.equal(outputLoads, 2);
 });
 
 test("book export page counts only chapters included in the final book", () => {
@@ -271,7 +297,13 @@ test("book export page suggests titles and queues book-level editorial copy", as
     },
     enqueueMemoirBookOutputEditorialCopyGeneration: async (projectId, payload) => {
       editorialRequests.push({ projectId, payload });
-      return { id: "event-1" };
+      return sampleAutomationEvent({
+        id: "event-1",
+        event_type: "book_editorial_copy_generated",
+        chapter_id: null,
+        summary_text: "后记已提交后台重生成。",
+        metadata_json: { target_label: "后记", targets: ["afterword"] },
+      });
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -297,12 +329,14 @@ test("book export page suggests titles and queues book-level editorial copy", as
   });
   assert.equal(toasts[0].title, "已开始后台生成");
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
-  assert.equal(
-    context.data.bookEditorialCopyNotice,
-    "后记已转为后台生成，可到书稿首页查看任务进度和结果。",
-  );
+  assert.equal(context.data.bookEditorialCopyEventItem.titleText, "文案生成中");
+  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "处理中");
+  assert.equal(context.data.bookEditorialCopyEventItem.summaryText, "后记已提交后台重生成。");
   page.openBookHome.call(context);
   assert.deepEqual(navigations, ["/pages/book/index"]);
+  const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
+  assert.equal(takeBookWorkspaceNavigationTarget(), "tools");
+  page.clearBookEditorialCopyPoll.call(context);
   delete global.wx;
 });
 
@@ -318,7 +352,13 @@ test("book export page submits only one editorial copy task at a time", async ()
       await new Promise((resolve) => {
         resolveEnqueue = resolve;
       });
-      return { id: "event-1" };
+      return sampleAutomationEvent({
+        id: "event-1",
+        event_type: "book_editorial_copy_generated",
+        chapter_id: null,
+        summary_text: "前言已提交后台重生成。",
+        metadata_json: { target_label: "前言", targets: ["preface"] },
+      });
     },
   });
   const context = pageContext(page, { projectId: "project/1" });
@@ -341,6 +381,50 @@ test("book export page submits only one editorial copy task at a time", async ()
   resolveEnqueue();
   await firstSubmission;
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
+  page.clearBookEditorialCopyPoll.call(context);
+  delete global.wx;
+});
+
+test("book export page refreshes rewritten copy when the background task completes", async () => {
+  const updatedOutput = sampleBookOutput();
+  updatedOutput.latest_version.manuscript.back_matter.afterword.content = "新的后记。";
+  const pendingEvent = sampleAutomationEvent({
+    id: "event-1",
+    event_type: "book_editorial_copy_generated",
+    chapter_id: null,
+    summary_text: "后记已提交后台重生成。",
+    metadata_json: { target_label: "后记", targets: ["afterword"] },
+  });
+  const completedEvent = {
+    ...pendingEvent,
+    status: "completed",
+    summary_text: "后记已重生成，可以预览或导出。",
+    updated_at: "2026-06-17T00:01:00.000Z",
+  };
+  const toasts = [];
+  global.wx = {
+    showToast(options) {
+      toasts.push(options);
+    },
+  };
+  const { page } = loadBookExportPage({
+    listMemoirAutomationEvents: async () => ({
+      items: [completedEvent],
+      total: 1,
+      limit: 20,
+    }),
+    getMemoirBookOutput: async () => updatedOutput,
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+  page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
+  page.applyBookEditorialCopyEvent.call(context, pendingEvent);
+
+  await page.refreshBookEditorialCopyProgress.call(context);
+
+  assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
+  assert.equal(context.data.bookAfterwordInput, "新的后记。");
+  assert.equal(toasts[0].title, "后记已更新");
+  page.clearBookEditorialCopyPoll.call(context);
   delete global.wx;
 });
 

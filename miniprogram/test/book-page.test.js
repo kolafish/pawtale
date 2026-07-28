@@ -451,8 +451,13 @@ test("book page routes progress export actions to the full-book export page", ()
 });
 
 test("book page switches between chapter work and secondary tools", () => {
+  const { writeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
   const { page } = loadBookPage();
   const context = pageContext(page, { bookWorkspaceView: "chapters" });
+
+  writeBookWorkspaceNavigationTarget("tools");
+  page.applyBookWorkspaceNavigationTarget.call(context);
+  assert.equal(context.data.bookWorkspaceView, "tools");
 
   page.changeBookWorkspaceView.call(context, {
     currentTarget: { dataset: { view: "tools" } },

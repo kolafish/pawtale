@@ -1,4 +1,5 @@
 import type {
+  MemoirAutomationEvent,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
@@ -11,11 +12,13 @@ import {
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
   getMemoirBookPlan,
+  listMemoirAutomationEvents,
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
 import { ApiError } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
+import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   datasetChoice,
   datasetString,
@@ -30,11 +33,13 @@ import {
 } from "../../services/page-input";
 import {
   bookOutputData,
+  buildAutomationEventViews,
   buildChapterViews,
   planStage,
   stageText,
   trimText,
   type BookData,
+  type BookAutomationEventView,
 } from "../book/book-view-model";
 import {
   bookDesignHasChanges,
@@ -135,11 +140,12 @@ type BookExportData = Pick<
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;
-  bookEditorialCopyNotice: string;
+  bookEditorialCopyEventItem: BookAutomationEventView | null;
   showBookSettings: boolean;
 };
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
+const BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS = 3000;
 const BOOK_EXPORT_FORMATS: readonly MemoirBookOutputExportFormat[] = ["pdf", "txt"];
 const BOOK_EXPORT_LAYOUTS: readonly MemoirBookOutputExportLayout[] = ["standard", "large_print"];
 
@@ -163,16 +169,6 @@ function exportActionHint(action: string): string {
   return "适合微信分享和手机阅读。";
 }
 
-function editorialCopyTargetLabel(target: string): string {
-  if (target === "preface") {
-    return "前言";
-  }
-  if (target === "afterword") {
-    return "后记";
-  }
-  return "封底摘录";
-}
-
 function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): string {
   const outputData = bookOutputData(output);
   return (
@@ -185,6 +181,8 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 
 definePage<BookExportData>()({
   bookDesignAutosaveTimer: null as number | null,
+  bookEditorialCopyEvent: null as MemoirAutomationEvent | null,
+  bookEditorialCopyPollTimer: null as number | null,
 
   data: {
     loading: false,
@@ -207,7 +205,7 @@ definePage<BookExportData>()({
     requestedAction: "preview",
     exportNotice: exportNotice("preview"),
     exportActionHintText: exportActionHint("reading_pdf"),
-    bookEditorialCopyNotice: "",
+    bookEditorialCopyEventItem: null,
     showBookSettings: false,
     ...bookOutputData(null),
   },
@@ -231,6 +229,7 @@ definePage<BookExportData>()({
   },
 
   onUnload() {
+    this.clearBookEditorialCopyPoll();
     this.flushBookDesignAutosave();
   },
 
@@ -247,6 +246,9 @@ definePage<BookExportData>()({
         this.loadBookOutput(projectId),
       ]);
       this.applyBookExportData(plan, output);
+      if (this.data.showBookSettings) {
+        await this.refreshBookEditorialCopyProgress();
+      }
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -254,6 +256,83 @@ definePage<BookExportData>()({
       this.setData({ error: error instanceof Error ? error.message : "预览与导出页加载失败" });
     } finally {
       this.setData({ loading: false });
+    }
+  },
+
+  applyBookEditorialCopyEvent(event: MemoirAutomationEvent) {
+    this.bookEditorialCopyEvent = event;
+    this.setData({
+      bookEditorialCopyEventItem: buildAutomationEventViews([event])[0] || null,
+    });
+    this.clearBookEditorialCopyPoll();
+    if (event.status === "pending") {
+      this.scheduleBookEditorialCopyPoll();
+    }
+  },
+
+  async refreshBookEditorialCopyProgress() {
+    if (!this.data.projectId) {
+      return;
+    }
+    const previous = this.bookEditorialCopyEvent;
+    try {
+      const response = await listMemoirAutomationEvents(this.data.projectId, 20);
+      const candidates = (response.items || [])
+        .filter((candidate) => candidate.event_type === "book_editorial_copy_generated")
+        .sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+      const event = previous
+        ? candidates.find((candidate) => candidate.id === previous.id)
+        : candidates[0];
+      if (!event) {
+        return;
+      }
+      this.applyBookEditorialCopyEvent(event);
+      const completedNow = event.status === "completed"
+        && (!previous || previous.status === "pending");
+      if (completedNow) {
+        const output = await this.loadBookOutput(this.data.projectId);
+        this.applyBookExportData(this.data.plan, output);
+      }
+      if (previous?.status !== "pending" || event.status === "pending") {
+        return;
+      }
+      const targetLabel = event.metadata_json?.target_label;
+      const label = typeof targetLabel === "string" && targetLabel.trim()
+        ? targetLabel.trim()
+        : "成书文案";
+      wx.showToast({
+        title: event.status === "completed" ? `${label}已更新` : `${label}重写失败`,
+        icon: event.status === "completed" ? "success" : "none",
+      });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      if (previous?.status === "pending") {
+        this.scheduleBookEditorialCopyPoll();
+      }
+    }
+  },
+
+  scheduleBookEditorialCopyPoll() {
+    if (
+      this.bookEditorialCopyPollTimer !== null
+      || this.bookEditorialCopyEvent?.status !== "pending"
+    ) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      this.bookEditorialCopyPollTimer = null;
+      void this.refreshBookEditorialCopyProgress();
+    }, BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.bookEditorialCopyPollTimer = timer as unknown as number;
+  },
+
+  clearBookEditorialCopyPoll() {
+    if (this.bookEditorialCopyPollTimer !== null) {
+      clearTimeout(this.bookEditorialCopyPollTimer);
+      this.bookEditorialCopyPollTimer = null;
     }
   },
 
@@ -531,14 +610,14 @@ definePage<BookExportData>()({
     }
     this.setData({
       bookEditorialCopyBusyTarget: target,
-      bookEditorialCopyNotice: "",
       error: "",
     });
     try {
-      await enqueueMemoirBookOutputEditorialCopyGeneration(this.data.projectId, { targets: [target] });
-      this.setData({
-        bookEditorialCopyNotice: `${editorialCopyTargetLabel(target)}已转为后台生成，可到书稿首页查看任务进度和结果。`,
-      });
+      const queued = await enqueueMemoirBookOutputEditorialCopyGeneration(
+        this.data.projectId,
+        { targets: [target] },
+      );
+      this.applyBookEditorialCopyEvent(queued);
       wx.showToast({ title: "已开始后台生成", icon: "success" });
     } catch (error) {
       if (routeAuthError(error, "login")) {
@@ -626,11 +705,16 @@ definePage<BookExportData>()({
   },
 
   openBookHome() {
+    writeBookWorkspaceNavigationTarget("tools");
     wx.switchTab({ url: "/pages/book/index" });
   },
 
   toggleBookSettings() {
-    this.setData({ showBookSettings: !this.data.showBookSettings });
+    const showBookSettings = !this.data.showBookSettings;
+    this.setData({ showBookSettings });
+    if (showBookSettings) {
+      void this.refreshBookEditorialCopyProgress();
+    }
   },
 
   async downloadBookOutputExport(event: DatasetEvent) {
