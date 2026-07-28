@@ -1,6 +1,6 @@
 const { afterEach } = require("node:test");
 
-const TEST_GLOBAL_NAMES = ["wx", "Page", "getApp", "getCurrentPages"];
+const TEST_GLOBAL_NAMES = ["wx", "Page", "Component", "getApp", "getCurrentPages"];
 const initialGlobals = new Map(
   TEST_GLOBAL_NAMES.map((name) => [name, Object.prototype.hasOwnProperty.call(global, name)
     ? global[name]
@@ -60,12 +60,52 @@ function loadPageModule(relativePath) {
   return { mod, page };
 }
 
+function loadComponentModule(relativePath) {
+  const modulePath = clearModule(relativePath);
+  let component = null;
+  const previousComponent = global.Component;
+  global.Component = (definition) => {
+    component = definition;
+  };
+  let mod;
+  try {
+    mod = require(modulePath);
+  } finally {
+    if (previousComponent === undefined) {
+      delete global.Component;
+    } else {
+      global.Component = previousComponent;
+    }
+  }
+  return { mod, component };
+}
+
 function pageContext(page, dataPatch = {}) {
   return {
     ...page,
     data: { ...page.data, ...dataPatch },
     setData(patch) {
       this.data = { ...this.data, ...patch };
+    },
+  };
+}
+
+function componentContext(component, propertiesPatch = {}, dataPatch = {}) {
+  const properties = Object.fromEntries(
+    Object.entries(component.properties || {}).map(
+      ([key, definition]) => [key, definition.value],
+    ),
+  );
+  return {
+    ...component.methods,
+    properties: { ...properties, ...propertiesPatch },
+    data: { ...component.data, ...dataPatch },
+    events: [],
+    setData(patch) {
+      this.data = { ...this.data, ...patch };
+    },
+    triggerEvent(name, detail) {
+      this.events.push({ name, detail });
     },
   };
 }
@@ -86,7 +126,9 @@ afterEach(() => {
 
 module.exports = {
   clearModule,
+  componentContext,
   flushAsyncWork,
+  loadComponentModule,
   loadPageModule,
   mockModule,
   pageContext,

@@ -19,6 +19,10 @@ interface IssueEvent {
   currentTarget: { dataset: { issueId?: string } };
 }
 
+interface IssueInputEvent {
+  detail: { value?: string };
+}
+
 Component({
   properties: {
     projectId: { type: String, value: "" },
@@ -32,6 +36,9 @@ Component({
 
   data: {
     busyIssueId: "",
+    answeringIssueId: "",
+    requiredAnswer: "",
+    requiredAnswerReady: false,
   },
 
   methods: {
@@ -74,7 +81,7 @@ Component({
       }
     },
 
-    confirmRequired(event: IssueEvent) {
+    beginRequiredAnswer(event: IssueEvent) {
       const issue = this.issue(
         this.properties.requiredIssues as MemoirCompletionIssue[],
         event,
@@ -82,21 +89,47 @@ Component({
       if (!issue || this.data.busyIssueId || this.properties.disabled) {
         return;
       }
-      wx.showModal({
-        title: "确认处理决定",
-        content: issue.question,
-        confirmText: "确认",
-        cancelText: "再看看",
-        success: ({ confirm }) => {
-          if (confirm) {
-            void this.closeIssue(
-              issue.id,
-              "confirmed",
-              "用户已确认处理决定",
-            );
-          }
-        },
+      this.setData({
+        answeringIssueId: issue.id,
+        requiredAnswer: "",
+        requiredAnswerReady: false,
       });
+    },
+
+    changeRequiredAnswer(event: IssueInputEvent) {
+      const requiredAnswer = String(event.detail.value || "");
+      this.setData({
+        requiredAnswer,
+        requiredAnswerReady: Boolean(requiredAnswer.trim()),
+      });
+    },
+
+    cancelRequiredAnswer() {
+      if (this.data.busyIssueId || this.properties.disabled) {
+        return;
+      }
+      this.setData({
+        answeringIssueId: "",
+        requiredAnswer: "",
+        requiredAnswerReady: false,
+      });
+    },
+
+    async submitRequiredAnswer() {
+      const issueId = this.data.answeringIssueId;
+      const note = this.data.requiredAnswer.trim();
+      if (
+        !issueId
+        || this.data.busyIssueId
+        || this.properties.disabled
+      ) {
+        return;
+      }
+      if (!note) {
+        wx.showToast({ title: "请先填写回答", icon: "none" });
+        return;
+      }
+      await this.closeIssue(issueId, "confirmed", note);
     },
 
     markHandled(event: IssueEvent) {
@@ -152,6 +185,13 @@ Component({
           issueId,
           { outcome, note },
         );
+        if (this.data.answeringIssueId === issueId) {
+          this.setData({
+            answeringIssueId: "",
+            requiredAnswer: "",
+            requiredAnswerReady: false,
+          });
+        }
         this.triggerEvent("refresh");
         wx.showToast({ title: "已处理", icon: "success" });
       } catch (error) {
