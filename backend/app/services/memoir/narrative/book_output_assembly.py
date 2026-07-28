@@ -26,7 +26,11 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
-from app.services.memoir import book_review_answer_state, book_reviews
+from app.services.memoir import (
+    book_output_versions,
+    book_review_answer_state,
+    book_reviews,
+)
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
     formal_book_title,
@@ -65,23 +69,6 @@ def _latest_chapter_version(
     return max(
         chapter.draft.versions,
         key=lambda version: (version.version, version.created_at, version.id),
-    )
-
-
-async def _load_latest_book_output_version(
-    db: AsyncSession,
-    *,
-    output_id: str,
-) -> MemoirBookOutputVersion | None:
-    return await db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.output_id == output_id)
-        .order_by(
-            MemoirBookOutputVersion.version.desc(),
-            MemoirBookOutputVersion.created_at.desc(),
-            MemoirBookOutputVersion.id.desc(),
-        )
-        .limit(1)
     )
 
 
@@ -206,7 +193,7 @@ async def assemble_book_output(
         db.add(output)
         await db.flush()
     else:
-        previous_version = await _load_latest_book_output_version(
+        previous_version = await book_output_versions.load_latest_book_output_version(
             db,
             output_id=output.id,
         )

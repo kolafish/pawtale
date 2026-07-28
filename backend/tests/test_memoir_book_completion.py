@@ -1778,6 +1778,22 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         )
     ) == 1
 
+    cancelled = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"answer-application/jobs/{queued_body['job_id']}"
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["can_retry"] is True
+    retried = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "answer-application/jobs",
+        json={"ai_model": "claude-opus-4-8"},
+    )
+    assert retried.status_code == 202, retried.text
+    assert retried.json()["job_id"] == queued_body["job_id"]
+    assert retried.json()["status"] == "pending"
+
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     try:
