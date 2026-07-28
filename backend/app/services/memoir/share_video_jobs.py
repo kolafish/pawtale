@@ -351,6 +351,14 @@ def _claimable_share_video_job(now: datetime, max_attempts: int):
     )
 
 
+def _leased_share_video_job(lease: JobLease):
+    return and_(
+        MemoirMaterialShareVideo.id == lease.job_id,
+        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+        MemoirMaterialShareVideo.lease_token == lease.token,
+    )
+
+
 async def _fail_exhausted_share_video_jobs(
     db: AsyncSession,
     *,
@@ -507,11 +515,7 @@ async def renew_share_video_job_lease(
     lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
     result = await db.execute(
         update(MemoirMaterialShareVideo)
-        .where(
-            MemoirMaterialShareVideo.id == lease.job_id,
-            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-            MemoirMaterialShareVideo.lease_token == lease.token,
-        )
+        .where(_leased_share_video_job(lease))
         .values(lease_expires_at=lease_deadline(renewed_at, lease_duration))
     )
     await db.commit()
@@ -527,11 +531,7 @@ async def _commit_share_video_progress(
     with db.no_autoflush:
         result = await db.execute(
             update(MemoirMaterialShareVideo)
-            .where(
-                MemoirMaterialShareVideo.id == lease.job_id,
-                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                MemoirMaterialShareVideo.lease_token == lease.token,
-            )
+            .where(_leased_share_video_job(lease))
             .values(lease_expires_at=lease_deadline(utcnow_naive(), lease_seconds))
         )
     if result.rowcount != 1:
@@ -550,11 +550,7 @@ async def _complete_share_video_job(
     completed_at = utcnow_naive()
     result = await db.execute(
         update(MemoirMaterialShareVideo)
-        .where(
-            MemoirMaterialShareVideo.id == lease.job_id,
-            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-            MemoirMaterialShareVideo.lease_token == lease.token,
-        )
+        .where(_leased_share_video_job(lease))
         .values(
             status=MemoirShareVideoJobStatus.SUCCEEDED.value,
             run_after=None,
@@ -624,11 +620,7 @@ async def _wait_for_published_share_video(
 ) -> None:
     async with session_maker() as db:
         job = await db.scalar(
-            select(MemoirMaterialShareVideo).where(
-                MemoirMaterialShareVideo.id == lease.job_id,
-                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                MemoirMaterialShareVideo.lease_token == lease.token,
-            )
+            select(MemoirMaterialShareVideo).where(_leased_share_video_job(lease))
         )
         target_path = share_video_file_path(job) if job is not None else None
     if target_path is None:
@@ -649,11 +641,7 @@ async def _fail_share_video_job(
     metadata: ShareVideoJobMetadata | None = None,
 ) -> None:
     job = await db.scalar(
-        select(MemoirMaterialShareVideo).where(
-            MemoirMaterialShareVideo.id == lease.job_id,
-            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-            MemoirMaterialShareVideo.lease_token == lease.token,
-        )
+        select(MemoirMaterialShareVideo).where(_leased_share_video_job(lease))
     )
     if job is None:
         return
@@ -670,11 +658,7 @@ async def _fail_share_video_job(
     with db.no_autoflush:
         result = await db.execute(
             update(MemoirMaterialShareVideo)
-            .where(
-                MemoirMaterialShareVideo.id == lease.job_id,
-                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                MemoirMaterialShareVideo.lease_token == lease.token,
-            )
+            .where(_leased_share_video_job(lease))
             .values(
                 status=status,
                 run_after=next_attempt_at,
@@ -711,11 +695,7 @@ async def run_share_video_job_with_session(
     retry_delay = retry_seconds or max(1, settings.memoir_share_video_retry_seconds)
     job = await db.scalar(
         select(MemoirMaterialShareVideo)
-        .where(
-            MemoirMaterialShareVideo.id == lease.job_id,
-            MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-            MemoirMaterialShareVideo.lease_token == lease.token,
-        )
+        .where(_leased_share_video_job(lease))
         .options(
             selectinload(MemoirMaterialShareVideo.audio_file),
             selectinload(MemoirMaterialShareVideo.utterance),
@@ -885,9 +865,7 @@ async def run_share_video_job(
             async with session_maker() as db:
                 job = await db.scalar(
                     select(MemoirMaterialShareVideo).where(
-                        MemoirMaterialShareVideo.id == lease.job_id,
-                        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                        MemoirMaterialShareVideo.lease_token == lease.token,
+                        _leased_share_video_job(lease)
                     )
                 )
                 if job is not None:
