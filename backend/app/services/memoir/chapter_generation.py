@@ -50,6 +50,7 @@ from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
+from app.services.memoir.transcript_projection import current_material_text
 
 
 CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v2"
@@ -457,20 +458,6 @@ async def load_chapter_draft_generation_plan(
     return chapter_draft_generation_plan(context, latest)
 
 
-def _material_text(material: MemoirSectionMaterial) -> str:
-    if material.transcript_version is not None:
-        text = " ".join(material.transcript_version.content.split()).strip()
-        if text:
-            return text
-    return " ".join(
-        (
-            material.utterance.transcript_edited
-            or material.utterance.transcript_raw
-            or ""
-        ).split()
-    ).strip()
-
-
 async def load_chapter_generation_context(
     db: AsyncSession,
     *,
@@ -517,7 +504,7 @@ async def load_chapter_generation_context(
         ):
             if not material.include_in_book:
                 continue
-            text = _material_text(material)
+            text = " ".join(current_material_text(material).split())
             if not text:
                 continue
             item = ChapterMaterialInput(

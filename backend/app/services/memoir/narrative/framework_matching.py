@@ -22,7 +22,7 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult, enqueue_editing_job
 from app.services.memoir.narrative import frameworks
 from app.services.memoir.project_ai_preferences import load_project_ai_model
-from app.services.memoir.utterance_editing_pipeline import current_utterance_text
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 FRAMEWORK_MATCHER_VERSION = "memoir-topic-map-material-v1"

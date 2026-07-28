@@ -54,7 +54,7 @@ from app.services.memoir.sections import (
     assign_material_to_section,
     mark_section_structure_changed,
 )
-from app.services.memoir.utterance_editing_pipeline import (
+from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
     current_utterance_text,
     source_text_hash,

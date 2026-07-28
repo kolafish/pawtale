@@ -25,6 +25,7 @@ from app.services.memoir import voice_transcript_correction
 from app.services.memoir.audio_files import audio_file_path
 from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import (
     get_voice_transcript,
     prune_transcript_versions_for_utterance,
@@ -59,7 +60,7 @@ async def recover_voice_transcript_from_audio(
         user_id,
         allow_admin=allow_admin,
     )
-    if (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip():
+    if current_utterance_text(utterance):
         raise HTTPException(status_code=400, detail="这条讲述已经有转写文字")
     audio_file = utterance.audio_file
     if audio_file is None:

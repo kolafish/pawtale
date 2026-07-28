@@ -25,6 +25,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import completion_issues, sections
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 @dataclass(frozen=True)
@@ -33,13 +34,6 @@ class CompletionIssuePromptContext:
     question: str
     prompt_text: str
     answered: bool
-
-
-def _utterance_text(utterance: MemoirVoiceUtterance) -> str:
-    return (
-        (utterance.transcript_edited or "").strip()
-        or (utterance.transcript_raw or "").strip()
-    )
 
 
 async def _target_section_id(
@@ -228,7 +222,7 @@ async def bind_answer_segment(
     utterance.completion_issue_id = issue.id
     db.add(utterance)
     await db.flush()
-    if not _utterance_text(utterance):
+    if not current_utterance_text(utterance):
         return issue
 
     await sections.assign_material_to_section(

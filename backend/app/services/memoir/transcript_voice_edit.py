@@ -26,6 +26,7 @@ from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter, source_ref_utterance_id
 from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 SYSTEM_PROMPT = "你是一位谨慎的中文口述记录修正助手，只能按用户明确指出的细节错误修正当前这一条讲述记录。"
@@ -67,10 +68,6 @@ class _TranscriptVoiceEditOutput(BaseModel):
     reply_text: str | None = None
 
 
-def _current_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
-
-
 async def _load_owned_context(
     db: AsyncSession,
     *,
@@ -91,7 +88,7 @@ async def _load_owned_context(
     )
     if utterance is None:
         raise HTTPException(status_code=404, detail="讲述记录不存在")
-    current_text = _current_text(utterance)
+    current_text = current_utterance_text(utterance)
     if not current_text:
         raise HTTPException(status_code=400, detail="讲述记录内容为空，无法语音修正")
     included_chapter_titles = await _included_chapter_titles(

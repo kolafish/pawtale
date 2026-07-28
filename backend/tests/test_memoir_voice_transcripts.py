@@ -49,9 +49,7 @@ from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
-from app.services.memoir.utterance_editing_pipeline import (
-    source_text_hash,
-)
+from app.services.memoir.transcript_projection import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_voice_transcript,

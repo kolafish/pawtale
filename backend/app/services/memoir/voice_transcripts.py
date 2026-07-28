@@ -56,6 +56,7 @@ from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
+from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
@@ -108,14 +109,6 @@ class MemoirTranscriptCleanupContext:
     recent_assistant_messages: tuple[str, ...] = ()
 
 
-def _text_or_empty(value: str | None) -> str:
-    return (value or "").strip()
-
-
-def _current_text(utterance: MemoirVoiceUtterance) -> str:
-    return _text_or_empty(utterance.transcript_edited) or _text_or_empty(utterance.transcript_raw)
-
-
 def _has_transcript_text_clause(utterance_model=MemoirVoiceUtterance):
     return or_(
         func.trim(utterance_model.transcript_raw) != "",
@@ -128,7 +121,7 @@ def _has_recoverable_audio_clause(utterance_model=MemoirVoiceUtterance):
 
 
 def _transcription_status(utterance: MemoirVoiceUtterance) -> str:
-    if _current_text(utterance):
+    if current_utterance_text(utterance):
         return TRANSCRIPTION_STATUS_READY
     if utterance.audio_file_id:
         return TRANSCRIPTION_STATUS_PENDING
@@ -1159,7 +1152,7 @@ async def cleanup_voice_transcript(
     allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
     utterance = await _load_owned_utterance(db, utterance_id, user_id, allow_admin=allow_admin)
-    source_text = _current_text(utterance)
+    source_text = current_utterance_text(utterance)
     selected_ai_model = select_project_ai_model(
         utterance.voice_session.project,
         req.ai_model,

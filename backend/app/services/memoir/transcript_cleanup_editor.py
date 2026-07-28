@@ -22,6 +22,7 @@ from app.services.memoir import voice_transcripts
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_roles import is_countable_material
+from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     TranscriptMutationGuard,
     claim_transcript_mutation_guard,
@@ -30,10 +31,6 @@ from app.services.memoir.utterance_editing_pipeline import (
 
 
 GLOSSARY_METADATA_KEY = "memoir_dialect_glossary_entries"
-
-
-def _current_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
 
 
 def _entry_from_raw(value: object) -> MemoirDialectGlossaryEntry | None:
@@ -131,7 +128,7 @@ async def _load_project_utterances(
 
 
 def _ensure_cleanup_source(utterance: MemoirVoiceUtterance) -> str:
-    source_text = _current_text(utterance)
+    source_text = current_utterance_text(utterance)
     if not source_text:
         raise HTTPException(status_code=400, detail="讲述内容为空，无法整理")
     if not utterance.chat_message or utterance.chat_message.role != MemoirChatMessageRole.USER.value:

@@ -35,7 +35,7 @@ from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.sections import assign_material_to_section
-from app.services.memoir.utterance_editing_pipeline import (
+from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
     current_utterance_text,
     source_text_hash,
@@ -100,14 +100,6 @@ def _confidence(value: object) -> float | None:
     return min(1.0, max(0.0, float(value)))
 
 
-def _material_text(material: MemoirSectionMaterial) -> str:
-    utterance = material.utterance
-    return _compact(
-        utterance.transcript_edited or utterance.transcript_raw,
-        limit=120,
-    )
-
-
 def material_organization_excerpt(material_text: str) -> str:
     return _compact(material_text, limit=120)
 
@@ -136,7 +128,9 @@ def material_organization_candidates(
             existing_material_examples=[
                 text
                 for text in (
-                    _material_text(material)
+                    material_organization_excerpt(
+                        current_utterance_text(material.utterance)
+                    )
                     for material in sorted(
                         section.materials,
                         key=lambda item: (item.sort_order, item.id),

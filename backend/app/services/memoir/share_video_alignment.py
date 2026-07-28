@@ -33,6 +33,9 @@ from app.services.memoir.share_video_custom_backgrounds import (
     DEFAULT_SHARE_VIDEO_BACKGROUND_SOURCE,
     share_video_background_source_options,
 )
+from app.services.memoir.transcript_projection import (
+    current_utterance_text_and_source,
+)
 
 
 ALIGNMENT_STRATEGY_PROVIDER_WORDS = "provider_words"
@@ -63,13 +66,6 @@ class AlignmentBuildResult:
     confidence: float | None
     char_timings: list[dict[str, int]]
     segments: list[dict[str, object]]
-
-
-def _current_text_and_source(utterance: MemoirVoiceUtterance) -> tuple[str, str]:
-    edited = (utterance.transcript_edited or "").strip()
-    if edited:
-        return edited, "edited"
-    return (utterance.transcript_raw or "").strip(), "raw"
 
 
 def _stable_json_hash(value: object) -> str:
@@ -363,7 +359,7 @@ def _segments(
 
 
 def _build_alignment(utterance: MemoirVoiceUtterance) -> AlignmentBuildResult:
-    transcript_text, text_source = _current_text_and_source(utterance)
+    transcript_text, text_source = current_utterance_text_and_source(utterance)
     if not transcript_text:
         raise HTTPException(status_code=400, detail="素材还没有可分享的校正文")
     if not utterance.audio_file_id or not utterance.audio_file:

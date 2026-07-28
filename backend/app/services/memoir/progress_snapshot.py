@@ -38,6 +38,7 @@ from app.services.memoir.book_source_links import (
     source_ref_utterance_ids,
 )
 from app.services.memoir.material_roles import is_countable_material
+from app.services.memoir.transcript_projection import current_utterance_text
 
 
 @dataclass(frozen=True)
@@ -59,15 +60,11 @@ def char_count(text: str | None) -> int:
     return len("".join(str(text or "").split()))
 
 
-def utterance_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
-
-
 def visible_utterances(voice_session: MemoirVoiceSession) -> list[MemoirVoiceUtterance]:
     return [
         utterance
         for utterance in voice_session.utterances
-        if is_countable_material(utterance, utterance_text(utterance))
+        if is_countable_material(utterance, current_utterance_text(utterance))
     ]
 
 
@@ -99,7 +96,7 @@ def _session_voice_counts(voice_session: MemoirVoiceSession) -> tuple[int, int, 
         len(user_messages),
         len(assistant_messages),
         len(utterances),
-        sum(char_count(utterance_text(utterance)) for utterance in utterances),
+        sum(char_count(current_utterance_text(utterance)) for utterance in utterances),
         sum(utterance_duration_seconds(utterance) for utterance in utterances),
     )
 

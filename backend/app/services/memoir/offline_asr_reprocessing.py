@@ -42,6 +42,7 @@ from app.services.memoir.material_roles import (
     narrator_material_clause,
 )
 from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
@@ -171,10 +172,6 @@ async def _has_requested_reprocess_versions(
     return all(provider in existing for provider in providers)
 
 
-def _current_text(utterance: MemoirVoiceUtterance) -> str:
-    return (utterance.transcript_edited or "").strip() or (utterance.transcript_raw or "").strip()
-
-
 def _candidate_payload(utterance: MemoirVoiceUtterance) -> dict[str, object]:
     audio_file = utterance.audio_file
     return {
@@ -185,8 +182,8 @@ def _candidate_payload(utterance: MemoirVoiceUtterance) -> dict[str, object]:
         "audio_mime_type": audio_file.mime_type if audio_file else None,
         "audio_size_bytes": audio_file.size_bytes if audio_file else None,
         "estimated_seconds": round((audio_file.size_bytes if audio_file else 0) / 32000, 1),
-        "current_text_length": len(_current_text(utterance)),
-        "is_currently_blank": not bool(_current_text(utterance)),
+        "current_text_length": len(current_utterance_text(utterance)),
+        "is_currently_blank": not bool(current_utterance_text(utterance)),
     }
 
 
@@ -370,7 +367,7 @@ async def _apply_reprocessed_transcript(
     primary = _primary_asr_result(asr_results)
     version_ids = await _replace_reprocess_asr_versions(db, utterance, asr_results)
     primary_version_id = version_ids.get(primary.provider)
-    previous_text_blank = not bool(_current_text(utterance))
+    previous_text_blank = not bool(current_utterance_text(utterance))
 
     utterance.transcript_raw = primary.text.strip()
     utterance.provider = primary.provider
