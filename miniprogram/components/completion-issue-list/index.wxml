@@ -1,17 +1,50 @@
 <view wx:if="{{requiredIssues.length}}" class="issue-group required">
   <text class="group-title">需要确认 · {{requiredIssues.length}} 项</text>
   <text class="group-detail">
-    {{allowRequiredConfirmation ? "处理后才能生成全书。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
+    {{allowRequiredConfirmation ? "请填写回答或处理说明，保存后才能生成全书。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
   </text>
   <view wx:for="{{requiredIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>
     <text class="reason">{{item.reason}}</text>
-    <view
-      wx:if="{{allowRequiredConfirmation}}"
-      class="action ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
-      data-issue-id="{{item.id}}"
-      bindtap="confirmRequired"
-    >{{busyIssueId === item.id ? "处理中…" : "确认处理决定"}}</view>
+    <block wx:if="{{allowRequiredConfirmation}}">
+      <view
+        wx:if="{{answeringIssueId !== item.id}}"
+        class="action ui-pressable {{answeringIssueId || busyIssueId || disabled ? 'is-disabled' : ''}}"
+        data-issue-id="{{item.id}}"
+        aria-role="button"
+        aria-disabled="{{answeringIssueId !== '' || busyIssueId !== '' || disabled}}"
+        bindtap="beginRequiredAnswer"
+      >填写回答或说明</view>
+      <view wx:else class="required-answer-editor">
+        <text class="required-answer-label">我的回答或处理说明</text>
+        <textarea
+          class="required-answer-textarea"
+          value="{{requiredAnswer}}"
+          maxlength="1000"
+          auto-height
+          cursor-spacing="24"
+          disabled="{{busyIssueId !== '' || disabled}}"
+          placeholder="请写下您的回答、选择，或希望怎样处理这件事。"
+          aria-label="填写问题的回答或处理说明"
+          bindinput="changeRequiredAnswer"
+        />
+        <text class="required-answer-hint">您的原话会作为这项问题的处理说明保存。</text>
+        <view class="required-answer-actions">
+          <view
+            class="action compact subtle ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{busyIssueId !== '' || disabled}}"
+            bindtap="cancelRequiredAnswer"
+          >稍后再填</view>
+          <view
+            class="action compact ui-pressable {{!requiredAnswerReady || busyIssueId || disabled ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{!requiredAnswerReady || busyIssueId !== '' || disabled}}"
+            bindtap="submitRequiredAnswer"
+          >{{busyIssueId === item.id ? "正在保存…" : "保存回答并处理"}}</view>
+        </view>
+      </view>
+    </block>
     <text wx:else class="state">
       {{index === 0 ? "请点击上方“确认”按钮处理这一项" : "处理上一项后，上方会显示这一项"}}
     </text>
