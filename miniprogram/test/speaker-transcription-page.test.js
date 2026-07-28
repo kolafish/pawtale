@@ -50,7 +50,9 @@ function loadSpeakerTranscriptionPage({
   } else {
     clearModule("../services/speaker-transcription.ts");
   }
-  delete require.cache[require.resolve("../pages/speaker-transcription/index.ts")];
+  clearModule("../pages/speaker-transcription/speaker-transcription-text-reconciliation.ts");
+  clearModule("../pages/speaker-transcription/speaker-transcription-reducer.ts");
+  clearModule("../pages/speaker-transcription/index.ts");
   return loadPageModule("../pages/speaker-transcription/index.ts");
 }
 
