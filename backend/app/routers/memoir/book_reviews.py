@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
@@ -7,10 +7,11 @@ from app.models.memoir import MemoirBookReview
 from app.models.users import User
 from app.schemas.memoir_book_review import (
     MemoirBookReviewGenerateRequest,
+    MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir import book_reviews
+from app.services.memoir import book_review_jobs, book_reviews
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
@@ -77,3 +78,65 @@ async def generate_memoir_book_review(
     )
     await db.commit()
     return _response(review)
+
+
+@router.post(
+    "/projects/{project_id}/book-review/jobs",
+    response_model=MemoirBookReviewJobResponse,
+    status_code=202,
+)
+async def enqueue_memoir_book_review_job(
+    project_id: str,
+    req: MemoirBookReviewGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await book_review_jobs.enqueue_book_review_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            req=req,
+            allow_admin=is_admin_user(current_user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/book-review/jobs/current",
+    response_model=MemoirBookReviewJobResponse,
+)
+async def get_current_memoir_book_review_job(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await book_review_jobs.get_book_review_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/book-review/jobs/{job_id}",
+    response_model=MemoirBookReviewJobResponse,
+)
+async def cancel_memoir_book_review_job(
+    project_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await book_review_jobs.cancel_book_review_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            job_id=job_id,
+            allow_admin=is_admin_user(current_user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

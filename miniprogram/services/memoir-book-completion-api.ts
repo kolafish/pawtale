@@ -27,6 +27,30 @@ export interface MemoirBookReview {
   error_message: string;
 }
 
+export interface MemoirBookReviewJob {
+  job_id: string | null;
+  project_id: string;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage:
+    | ""
+    | "queued"
+    | "preparing_chapters"
+    | "reviewing"
+    | "saving"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  total_chapter_count: number;
+  processed_chapter_count: number;
+  current_chapter_title: string;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  review_id: string | null;
+  can_cancel: boolean;
+  can_retry: boolean;
+  error_message: string;
+}
+
 export interface MemoirChapterPreparationJob {
   job_id: string | null;
   project_id: string;
@@ -108,6 +132,41 @@ export function generateMemoirBookReview(
     force_regenerate: forceRegenerate,
     ai_model: null,
   });
+}
+
+export function enqueueMemoirBookReviewJob(
+  projectId: string,
+  forceRegenerate: boolean,
+): Promise<MemoirBookReviewJob> {
+  return memoirAIRequest<
+    MemoirBookReviewJob,
+    { force_regenerate: boolean; ai_model: null }
+  >(
+    `${bookReviewPath(projectId)}/jobs`,
+    {
+      force_regenerate: forceRegenerate,
+      ai_model: null,
+    },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookReviewJob(
+  projectId: string,
+): Promise<MemoirBookReviewJob> {
+  return memoirRequest<MemoirBookReviewJob>(
+    `${bookReviewPath(projectId)}/jobs/current`,
+  );
+}
+
+export function cancelMemoirBookReviewJob(
+  projectId: string,
+  jobId: string,
+): Promise<MemoirBookReviewJob> {
+  return memoirRequest<MemoirBookReviewJob>(
+    `${bookReviewPath(projectId)}/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE" },
+  );
 }
 
 export function enqueueMemoirBookCompletionJob(

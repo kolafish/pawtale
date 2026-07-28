@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -22,3 +23,39 @@ class MemoirBookReviewResponse(BaseModel):
     error_message: str
     created_at: datetime
     updated_at: datetime
+
+
+MemoirBookReviewJobStatus = Literal[
+    "idle",
+    "pending",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+]
+MemoirBookReviewJobStage = Literal[
+    "",
+    "queued",
+    "preparing_chapters",
+    "reviewing",
+    "saving",
+    "completed",
+    "failed",
+    "cancelled",
+]
+
+
+class MemoirBookReviewJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    status: MemoirBookReviewJobStatus
+    stage: MemoirBookReviewJobStage = ""
+    total_chapter_count: int = 0
+    processed_chapter_count: int = 0
+    current_chapter_title: str = ""
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    review_id: str | None = None
+    can_cancel: bool = False
+    can_retry: bool = False
+    error_message: str = ""

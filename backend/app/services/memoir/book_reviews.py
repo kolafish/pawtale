@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import logging
 import re
 import time
-from typing import Any, Literal
+from typing import Any, Awaitable, Callable, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,6 +47,10 @@ BOOK_REVIEW_SYSTEM_PROMPT = (
     "你根据章节摘要审阅全书层面的结构，不创造人生经历。"
 )
 logger = logging.getLogger(__name__)
+BookReviewProgressCallback = Callable[
+    [dict[str, object]],
+    Awaitable[None],
+]
 
 
 @dataclass(frozen=True)
@@ -212,13 +216,24 @@ async def ensure_chapter_digests(
     project_id: str,
     ai_model: str | None,
     ai_client: AITextClient | None,
+    progress_callback: BookReviewProgressCallback | None = None,
 ) -> None:
     _, chapters = await _plan(db, project_id=project_id)
     chapter_refs = tuple(
         (chapter.id, chapter.title)
         for chapter in chapters
     )
-    for chapter_id, chapter_title in chapter_refs:
+    total_chapter_count = len(chapter_refs)
+    for index, (chapter_id, chapter_title) in enumerate(chapter_refs):
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "stage": "preparing_chapters",
+                    "total_chapter_count": total_chapter_count,
+                    "processed_chapter_count": index,
+                    "current_chapter_title": chapter_title,
+                }
+            )
         digest = await chapter_digests.generate_or_reuse_chapter_digest(
             db,
             project_id=project_id,
@@ -523,14 +538,25 @@ async def generate_or_reuse_book_review(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     force_regenerate: bool = False,
+    progress_callback: BookReviewProgressCallback | None = None,
 ) -> MemoirBookReview:
     await ensure_chapter_digests(
         db,
         project_id=project_id,
         ai_model=ai_model,
         ai_client=ai_client,
+        progress_callback=progress_callback,
     )
     context = await load_book_review_context(db, project_id=project_id)
+    if progress_callback is not None:
+        await progress_callback(
+            {
+                "stage": "reviewing",
+                "total_chapter_count": len(context.chapters),
+                "processed_chapter_count": len(context.chapters),
+                "current_chapter_title": "",
+            }
+        )
     previous = list(
         (
             await db.scalars(
@@ -561,6 +587,15 @@ async def generate_or_reuse_book_review(
         and existing.status == MemoirSemanticCacheStatus.READY.value
         and not force_regenerate
     ):
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "stage": "saving",
+                    "total_chapter_count": len(context.chapters),
+                    "processed_chapter_count": len(context.chapters),
+                    "current_chapter_title": "",
+                }
+            )
         await completion_issues.sync_book_review_issues(
             db,
             project_id=project_id,
@@ -596,6 +631,15 @@ async def generate_or_reuse_book_review(
             raise HTTPException(
                 status_code=409,
                 detail="审阅期间全书内容已变化，请重试",
+            )
+        if progress_callback is not None:
+            await progress_callback(
+                {
+                    "stage": "saving",
+                    "total_chapter_count": len(context.chapters),
+                    "processed_chapter_count": len(context.chapters),
+                    "current_chapter_title": "",
+                }
             )
         if existing is not None:
             await db.refresh(existing)

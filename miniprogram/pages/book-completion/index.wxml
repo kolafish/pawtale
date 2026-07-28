@@ -21,6 +21,21 @@
         {{bookReview && bookReview.status === "ready" ? "检查跨章衔接与取舍" : "章节已确认，再看全书"}}
       </text>
 
+      <view
+        wx:if="{{bookReviewProgressVisible}}"
+        class="book-review-progress {{bookReviewProgressClass}}"
+      >
+        <ai-task-progress
+          title="{{bookReviewProgressTitle}}"
+          detail="{{bookReviewProgressDetail}}"
+          mode="{{bookReviewProgressMode}}"
+          progress="{{bookReviewProgressPercent}}"
+          can-cancel="{{bookReviewCanCancel && !bookReviewCancelling}}"
+          cancel-text="停止全书检查"
+          bindcancel="cancelBookReview"
+        />
+      </view>
+
       <block wx:if="{{bookReview && bookReview.status === 'ready'}}">
         <text class="book-review-summary">{{bookReview.review.summary}}</text>
 
@@ -82,9 +97,9 @@
         bindtap="openBookHome"
       >返回书稿</view>
       <view
-        class="recheck-book-action ui-block-action ui-pressable {{checkingBook ? 'is-disabled' : ''}}"
+        class="recheck-book-action ui-block-action ui-pressable {{checkingBook || bookReviewCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{checkingBook}}"
+        aria-disabled="{{checkingBook || bookReviewCancelling}}"
         bindtap="reviewBook"
       >{{checkingBook ? "正在检查全书…" : (bookReview ? "重新检查全书" : "检查全书")}}</view>
     </view>

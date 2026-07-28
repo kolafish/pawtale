@@ -188,6 +188,7 @@
   text-wrap: pretty;
 }
 
+.book-review-progress,
 .bulk-check-progress {
   margin-top: 20rpx;
   padding: 20rpx;
@@ -196,16 +197,19 @@
   box-shadow: inset 4rpx 0 0 var(--ui-accent);
 }
 
+.book-review-progress.failed,
 .bulk-check-progress.failed {
   background: var(--ui-danger-surface);
   box-shadow: inset 4rpx 0 0 var(--ui-danger-text);
 }
 
+.book-review-progress.cancelled,
 .bulk-check-progress.cancelled {
   background: var(--ui-surface-subtle);
   box-shadow: inset 4rpx 0 0 var(--ui-text-muted);
 }
 
+.book-review-progress.succeeded,
 .bulk-check-progress.succeeded {
   background: var(--ui-success-surface);
   box-shadow: inset 4rpx 0 0 var(--ui-success-text);

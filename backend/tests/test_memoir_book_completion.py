@@ -38,6 +38,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.services.memoir import (
     book_completion_jobs,
+    book_review_jobs,
     book_reviews,
     chapter_preparation_jobs,
     chapter_digests,
@@ -1510,6 +1511,182 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
             MemoirBookReview.project_id == project_id
         )
     ) == review["id"]
+
+
+async def test_book_review_job_persists_across_requests_and_runs_in_worker(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    fake = LayeredBookAI(book_issue=True)
+    requested_models: list[str | None] = []
+    _install_ai(monkeypatch, fake, requested_models)
+    bootstrapped = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/bootstrap"
+    )
+    assert bootstrapped.status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+
+    idle = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/jobs/current"
+    )
+    assert idle.status_code == 200
+    assert idle.json()["status"] == "idle"
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={
+            "force_regenerate": False,
+            "ai_model": "claude-opus-4-8",
+        },
+    )
+
+    assert queued.status_code == 202, queued.text
+    queued_body = queued.json()
+    assert queued_body["status"] == "pending"
+    assert queued_body["stage"] == "queued"
+    assert queued_body["total_chapter_count"] == 2
+    assert queued_body["processed_chapter_count"] == 0
+    assert queued_body["can_cancel"] is True
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirBookReview)
+        .where(MemoirBookReview.project_id == project_id)
+    ) == 0
+
+    duplicate = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={"force_regenerate": False},
+    )
+    assert duplicate.status_code == 202
+    assert duplicate.json()["job_id"] == queued_body["job_id"]
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
+        )
+    ) == 1
+
+    resumed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/jobs/current"
+    )
+    assert resumed.status_code == 200
+    assert resumed.json()["job_id"] == queued_body["job_id"]
+    assert resumed.json()["stage"] == "queued"
+
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued_body["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+
+    completed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/jobs/current"
+    )
+    assert completed.status_code == 200, completed.text
+    completed_body = completed.json()
+    assert completed_body["status"] == "succeeded"
+    assert completed_body["stage"] == "completed"
+    assert completed_body["processed_chapter_count"] == 2
+    assert completed_body["review_id"]
+    assert completed_body["can_cancel"] is False
+    assert completed_body["requested_ai_model"] == "claude-opus-4-8"
+    assert completed_body["resolved_ai_model"] == fake.model_name
+    assert set(requested_models) == {"claude-opus-4-8"}
+
+    current_review = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review"
+    )
+    assert current_review.status_code == 200
+    assert current_review.json()["id"] == completed_body["review_id"]
+    assert current_review.json()["status"] == "ready"
+
+    requeued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={"force_regenerate": True},
+    )
+    assert requeued.status_code == 202
+    assert requeued.json()["job_id"] == queued_body["job_id"]
+    assert requeued.json()["status"] == "pending"
+    cancelled = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-review/jobs/"
+        f"{queued_body['job_id']}"
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["can_retry"] is True
+
+
+async def test_book_review_job_preserves_failure_and_can_retry(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, _, _ = await _book(client, test_db)
+
+    async def fail_review(*args, progress_callback=None, **kwargs):
+        assert progress_callback is not None
+        await progress_callback(
+            {
+                "stage": "reviewing",
+                "total_chapter_count": 1,
+                "processed_chapter_count": 1,
+                "current_chapter_title": "",
+            }
+        )
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(
+        book_review_jobs.book_reviews,
+        "generate_or_reuse_book_review",
+        fail_review,
+    )
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={"force_regenerate": False},
+    )
+    assert queued.status_code == 202
+    job_id = queued.json()["job_id"]
+
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, job_id) is False
+    finally:
+        clear_editing_job_handlers()
+
+    failed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/jobs/current"
+    )
+    assert failed.status_code == 200
+    assert failed.json()["status"] == "failed"
+    assert failed.json()["stage"] == "reviewing"
+    assert failed.json()["error_message"] == "provider unavailable"
+    assert failed.json()["can_retry"] is True
+
+    retried = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={"force_regenerate": False},
+    )
+    assert retried.status_code == 202
+    assert retried.json()["job_id"] == job_id
+    assert retried.json()["status"] == "pending"
+    assert retried.json()["stage"] == "queued"
+    assert retried.json()["error_message"] == ""
 
 
 async def test_book_review_uses_the_current_output_title(
