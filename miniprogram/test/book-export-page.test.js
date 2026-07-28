@@ -142,6 +142,7 @@ test("book export page keeps a production-sized book within the page-data budget
   output.latest_version.content = chapters
     .map((chapter) => `第 ${chapter.index} 章 ${chapter.title}\n\n${chapter.content}`)
     .join("\n\n");
+  assert.ok(output.latest_version.content.length > 40_000);
   output.latest_version.manuscript.chapters = chapters;
   output.latest_version.manuscript.table_of_contents = chapters.map((chapter) => ({
     chapter_id: chapter.chapter_id,
