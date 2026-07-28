@@ -29,8 +29,10 @@ import {
 } from "../../services/user-profile";
 import { clearCurrentUserMemoirSnapshots } from "../../stores/memoir-read-cache";
 import { replaceMemoirStore } from "../../stores/session";
-
-const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
+import {
+  isProvisionalWeChatEmail,
+  userDisplayName,
+} from "../../services/user-display-name";
 
 interface MeData {
   pageClass: string;
@@ -77,21 +79,6 @@ interface ChooseAvatarEvent {
   detail: {
     avatarUrl?: string;
   };
-}
-
-function isProvisionalWeChatEmail(email: string): boolean {
-  return email.trim().toLowerCase().endsWith("@wechat.local");
-}
-
-function displayNameForUser(displayName: string, email: string): string {
-  const normalizedName = displayName.trim();
-  if (normalizedName && normalizedName !== WECHAT_PLACEHOLDER_DISPLAY_NAME) {
-    return normalizedName;
-  }
-  if (isProvisionalWeChatEmail(email)) {
-    return "作者";
-  }
-  return email.split("@", 1)[0].trim() || "作者";
 }
 
 function accountEmailText(email: string, passwordLoginEnabled: boolean): string {
@@ -236,7 +223,7 @@ definePage<MeData>()({
     this.setData({ loading: true, error: "" });
     try {
       const identity = await getMemoirIdentity();
-      const displayName = displayNameForUser(identity.display_name, identity.email);
+      const displayName = userDisplayName(identity.display_name, identity.email);
       const activeProjectId = identity.active_project_id || "";
       const keepVoiceStats = Boolean(activeProjectId && this.data.voiceStatsProjectId === activeProjectId);
       this.setData({
@@ -385,7 +372,7 @@ definePage<MeData>()({
     try {
       const user = await updateBackendProfile({ display_name: displayName });
       await getMemoirIdentity();
-      const normalizedName = displayNameForUser(user.display_name, user.email);
+      const normalizedName = userDisplayName(user.display_name, user.email);
       this.setData({
         displayName: normalizedName,
         nameDraft: normalizedName,

@@ -16,7 +16,7 @@ import {
   listMemoirImageAssets,
   updateMemoirImageAsset,
 } from "../../services/memoir-voice-api";
-import { ApiError } from "../../services/request";
+import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
@@ -245,7 +245,7 @@ definePage<ImageAssetsData>()({
       const projectId = await this.ensureProjectId();
       const [response, plan] = await Promise.all([
         listMemoirImageAssets(projectId),
-        this.loadBookPlan(projectId),
+        optionalApiResource(getMemoirBookPlan(projectId)),
       ]);
       if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
         return;
@@ -270,17 +270,6 @@ definePage<ImageAssetsData>()({
       if (requestToken === this.loadToken) {
         this.setData({ loading: false });
       }
-    }
-  },
-
-  async loadBookPlan(projectId: string): Promise<MemoirBookPlan | null> {
-    try {
-      return await getMemoirBookPlan(projectId);
-    } catch (error) {
-      if (error instanceof ApiError && error.statusCode === 404) {
-        return null;
-      }
-      throw error;
     }
   },
 

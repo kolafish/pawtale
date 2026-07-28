@@ -18,7 +18,7 @@ import {
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
-import { ApiError } from "../../services/request";
+import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
@@ -229,13 +229,8 @@ definePage<BookExportData>()({
     this.setData({ loading: true, error: "" });
     try {
       const [plan, output] = await Promise.all([
-        getMemoirBookPlan(projectId).catch((error) => {
-          if (error instanceof ApiError && error.statusCode === 404) {
-            return null;
-          }
-          throw error;
-        }),
-        this.loadBookOutput(projectId),
+        optionalApiResource(getMemoirBookPlan(projectId)),
+        optionalApiResource(getMemoirBookOutput(projectId)),
       ]);
       this.applyBookExportData(plan, output);
       if (this.data.showBookSettings) {
@@ -284,7 +279,7 @@ definePage<BookExportData>()({
         || (!previous && event.updated_at > (this.bookOutput?.updated_at || event.updated_at))
       );
       if (shouldReloadOutput) {
-        const output = await this.loadBookOutput(this.data.projectId);
+        const output = await optionalApiResource(getMemoirBookOutput(this.data.projectId));
         this.applyBookExportData(this.bookPlan, output);
       }
       if (previous?.status !== "pending" || event.status === "pending") {
@@ -322,17 +317,6 @@ definePage<BookExportData>()({
 
   clearBookEditorialCopyPoll() {
     this.bookEditorialCopyPoller.cancel();
-  },
-
-  async loadBookOutput(projectId: string) {
-    try {
-      return await getMemoirBookOutput(projectId);
-    } catch (error) {
-      if (error instanceof ApiError && error.statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
   },
 
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {

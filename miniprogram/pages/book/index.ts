@@ -34,7 +34,7 @@ import {
   updateMemoirBookChapterTitle,
   updateMemoirBookOutput,
 } from "../../services/memoir-voice-api";
-import { ApiError } from "../../services/request";
+import { ApiError, optionalApiResource } from "../../services/request";
 import {
   isAuthError,
   navigateToLogin,
@@ -398,17 +398,6 @@ definePage<BookPageData>()({
     }, {});
   },
 
-  async loadBookOutput(projectId: string) {
-    try {
-      return await getMemoirBookOutput(projectId);
-    } catch (error) {
-      if (error instanceof ApiError && error.statusCode === 404) {
-        return null;
-      }
-      throw error;
-    }
-  },
-
   applyImageAssetSummary(response: MemoirImageAssetListResponse | null) {
     const total = response?.total || 0;
     const included = response?.included_count || 0;
@@ -580,7 +569,7 @@ definePage<BookPageData>()({
     const [draftsByChapterId, output] = plan.status === "confirmed"
       ? await Promise.all([
         this.loadDraftsForPlan(plan),
-        this.loadBookOutput(plan.project_id),
+        optionalApiResource(getMemoirBookOutput(plan.project_id)),
       ])
       : [
         {},

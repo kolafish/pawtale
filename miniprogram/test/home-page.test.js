@@ -9,6 +9,7 @@ const {
   memoirHomePrompt,
   memoirStoryTitle,
 } = require("../services/memoir-display-copy.ts");
+const { userDisplayName } = require("../services/user-display-name.ts");
 
 function deferred() {
   let resolve;
@@ -319,20 +320,14 @@ test("home row actions use view shells instead of native button shrink wrapping"
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {
-  const { userDisplayName } = loadHomePage().mod;
-
   assert.equal(userDisplayName("微信用户", "memoir-author@example.com"), "memoir-author");
 });
 
 test("home userDisplayName hides provisional wechat local email", () => {
-  const { userDisplayName } = loadHomePage().mod;
-
   assert.equal(userDisplayName("微信用户", "wechat_1234567890abcdef12345678@wechat.local"), "作者");
 });
 
 test("home userDisplayName keeps real display names", () => {
-  const { userDisplayName } = loadHomePage().mod;
-
   assert.equal(userDisplayName("  余主任  ", "memoir-author@example.com"), "余主任");
 });
 

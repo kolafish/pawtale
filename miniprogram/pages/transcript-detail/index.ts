@@ -74,6 +74,7 @@ import {
 import { materialOfflineASRView } from "../../services/material-offline-asr-view";
 import { promptRequiredText } from "../../services/text-prompt";
 import { PollingTimer } from "../../services/polling-timer";
+import { formatPlaybackClock } from "../../services/time";
 
 type TextAreaEvent = PageTextInputEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
@@ -242,13 +243,6 @@ function answerAudioFallbackDuration(item: MemoirVoiceTranscriptItem | null): nu
   return 0;
 }
 
-function playbackClockText(seconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-}
-
 function answerPlaybackPatch(
   currentSeconds: number,
   durationSeconds: number,
@@ -265,8 +259,8 @@ function answerPlaybackPatch(
   const progressPercent = duration ? Math.max(0, Math.min(100, Math.round((current / duration) * 100))) : 0;
   return {
     answerPlaybackStatusText: statusText,
-    answerPlaybackCurrentText: playbackClockText(current),
-    answerPlaybackDurationText: duration ? playbackClockText(duration) : "时长未知",
+    answerPlaybackCurrentText: formatPlaybackClock(current),
+    answerPlaybackDurationText: duration ? formatPlaybackClock(duration) : "时长未知",
     answerPlaybackProgressStyle: `width: ${progressPercent}%;`,
   };
 }

@@ -109,10 +109,6 @@ export async function logoutBackendSession(): Promise<void> {
   }
 }
 
-export async function getBackendUser(): Promise<BackendAuthUser> {
-  return request<BackendAuthUser>("/api/auth/me");
-}
-
 export async function updateBackendProfile(input: UpdateProfileInput): Promise<BackendAuthUser> {
   return request<BackendAuthUser>("/api/auth/me", {
     method: "PATCH",

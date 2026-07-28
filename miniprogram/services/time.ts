@@ -32,3 +32,17 @@ export function formatBeijingDateTimeShort(value: string): string {
   const text = formatBeijingDateTime(value);
   return text.replace(/\s*北京时间$/, "");
 }
+
+export function timestampMs(value?: string | null): number {
+  if (!value) {
+    return 0;
+  }
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+export function formatPlaybackClock(seconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(totalSeconds / 60);
+  return `${minutes}:${pad2(totalSeconds % 60)}`;
+}

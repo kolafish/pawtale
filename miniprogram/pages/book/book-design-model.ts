@@ -123,10 +123,6 @@ export function isBookLevelEditorialCopyTarget(target: string): target is Memoir
   return target === "preface" || target === "afterword" || target === "back_cover_quote";
 }
 
-export function isChapterEditorialCopyTarget(target: string): target is MemoirBookEditorialCopyTarget {
-  return target === "chapter_intros" || target === "pull_quotes";
-}
-
 export function bookDesignSaveStatusText(
   data: BookDesignState,
   bookOutputAvailable: boolean,

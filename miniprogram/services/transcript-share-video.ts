@@ -14,6 +14,7 @@ import {
   type ShareVideoBackgroundSettings,
 } from "./share-video-background-settings";
 import { formatTranscriptDurationSeconds } from "./transcript-view-model";
+import { formatPlaybackClock } from "./time";
 
 export interface TranscriptShareVideoSegmentView extends MemoirTranscriptShareVideoSegment {
   arrayIndex: number;
@@ -134,15 +135,8 @@ export interface TranscriptShareVideoControllerOptions {
 const DEFAULT_POLL_INTERVAL_MS = 1500;
 const DEFAULT_MAX_POLL_FAILURES = 3;
 
-function playbackClockText(seconds: number): string {
-  const totalSeconds = Math.max(0, Math.floor(seconds));
-  const minutes = Math.floor(totalSeconds / 60);
-  const remainingSeconds = totalSeconds % 60;
-  return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
-}
-
 function shareVideoRangeText(startMs: number, endMs: number): string {
-  return `${playbackClockText(startMs / 1000)}-${playbackClockText(endMs / 1000)}`;
+  return `${formatPlaybackClock(startMs / 1000)}-${formatPlaybackClock(endMs / 1000)}`;
 }
 
 function sliceShareVideoText(text: string, startChar: number, endChar: number): string {

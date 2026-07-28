@@ -7,7 +7,6 @@ import type {
 } from "../domain/voice-chat";
 import {
   listMemoirCacheScopes,
-  markMemoirCacheStale,
   readMemoirCache,
   removeMemoirCache,
   writeMemoirCache,
@@ -24,6 +23,7 @@ import {
   type MemoirPendingVoiceClose,
   type MemoirVoiceSessionCache,
 } from "./session";
+import { timestampMs } from "../services/time";
 
 const LEGACY_CACHE_VERSION = 3;
 const IDENTITY_CACHE_SCHEMA_VERSION = 1;
@@ -306,14 +306,6 @@ function writeVoiceSessionCache(
   }
 }
 
-function timestampMs(value?: string | null): number {
-  if (!value) {
-    return 0;
-  }
-  const timestamp = new Date(value).getTime();
-  return Number.isNaN(timestamp) ? 0 : timestamp;
-}
-
 function compareVoiceMessages(left: MemoirChatMessage, right: MemoirChatMessage): number {
   return left.turn_index - right.turn_index
     || timestampMs(left.created_at) - timestampMs(right.created_at)
@@ -502,11 +494,4 @@ export function clearMemoirVoiceSessionPendingClose(voiceSessionId: string): voi
   const payload = { ...cached.payload };
   delete payload.pending_close;
   writeVoiceSessionCache(descriptor, payload);
-}
-
-export function markMemoirVoiceSessionSnapshotStale(voiceSessionId: string): void {
-  const { descriptor, cached } = readVoiceSessionCache(voiceSessionId);
-  if (descriptor && cached.payload) {
-    markMemoirCacheStale(descriptor);
-  }
 }
