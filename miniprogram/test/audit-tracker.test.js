@@ -178,6 +178,26 @@ test("audit action events include project and voice session context", async () =
   delete global.wx;
 });
 
+test("audit tracker reports mini-program memory warnings", async () => {
+  const requests = installWxMock(successResponse);
+  let memoryWarningListener = null;
+  global.wx.onMemoryWarning = (listener) => {
+    memoryWarningListener = listener;
+  };
+  const tracker = trackerModule();
+
+  tracker.installAuditMemoryWarningTracker();
+  memoryWarningListener({ level: 10 });
+  await tracker.flushAuditEvents();
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].data.events[0].feature_code, "runtime.memory_warning");
+  assert.deepEqual(requests[0].data.events[0].metadata_json, { level: 10 });
+
+  tracker.__resetAuditTrackerForTest();
+  delete global.wx;
+});
+
 test("audit tracker drops queued events when storage APIs are unavailable", async () => {
   const tracker = trackerModule();
   global.wx = {};

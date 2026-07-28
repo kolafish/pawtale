@@ -1,5 +1,8 @@
 import { BACKEND_HTTP_BASE_URL, BACKEND_WS_BASE_URL } from "./config";
-import { installAuditPageTracker } from "./services/audit-tracker";
+import {
+  installAuditMemoryWarningTracker,
+  installAuditPageTracker,
+} from "./services/audit-tracker";
 import {
   recoverMissingPage,
   type PageNotFoundQuery,
@@ -11,9 +14,9 @@ interface PageNotFoundOptions {
 }
 
 installAuditPageTracker();
+installAuditMemoryWarningTracker();
 
 App({
-  onLaunch() {},
   onPageNotFound(options: PageNotFoundOptions) {
     recoverMissingPage(options.path, options.query);
   },

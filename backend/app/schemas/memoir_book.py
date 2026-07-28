@@ -485,26 +485,6 @@ class MemoirBookOutputTableOfContentsItemResponse(BaseModel):
     )
 
 
-class MemoirBookOutputStructuredChapterResponse(BaseModel):
-    chapter_id: str
-    index: int
-    title: str
-    content: str
-    char_count: int = 0
-    source_count: int = 0
-    draft_version_id: str | None = None
-    draft_version: int | None = None
-    sections: list[MemoirBookOutputSectionResponse] = Field(default_factory=list)
-
-
-class MemoirBookOutputStructuredContentResponse(BaseModel):
-    title: str
-    chapter_count: int = 0
-    char_count: int = 0
-    table_of_contents: list[MemoirBookOutputTableOfContentsItemResponse] = Field(default_factory=list)
-    chapters: list[MemoirBookOutputStructuredChapterResponse] = Field(default_factory=list)
-
-
 class MemoirBookManuscriptProfile(BaseModel):
     template: Literal["classic_family", "photo_memory", "oral_archive"] = "classic_family"
     title: str
