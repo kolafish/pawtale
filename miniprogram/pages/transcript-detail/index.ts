@@ -1,9 +1,9 @@
+import type { MemoirBookPlan } from "../../domain/memoir-book";
 import type {
-  MemoirBookPlan,
   MemoirMaterialOfflineASRState,
   MemoirShareVideoCustomBackgroundAsset,
   MemoirVoiceTranscriptItem,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-transcript";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";

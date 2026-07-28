@@ -11,8 +11,8 @@ import type {
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
-  TTSAlignmentSegment,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
+import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import {
   sourceRefKey,
 } from "../../services/memoir-book-sources";

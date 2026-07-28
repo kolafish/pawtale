@@ -1,8 +1,8 @@
 import type {
   MemoirCompletionIssue,
   MemoirCompletionIssueOutcome,
-  MemoirSessionGoal,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-completion-issue";
+import type { MemoirSessionGoal } from "../../domain/memoir-voice-session";
 import {
   closeMemoirCompletionIssue,
   listMemoirCompletionIssues,

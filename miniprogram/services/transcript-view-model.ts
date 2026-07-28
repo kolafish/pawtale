@@ -1,7 +1,7 @@
 import type {
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptVoiceEditPreviewResponse,
-} from "../domain/voice-chat";
+} from "../domain/memoir-transcript";
 import { formatBeijingDateTimeShort } from "./time";
 
 const MAX_INLINE_DIFF_PRODUCT = 400000;

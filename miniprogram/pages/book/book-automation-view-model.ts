@@ -1,4 +1,4 @@
-import type { MemoirAutomationEvent } from "../../domain/voice-chat";
+import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
 import { formatBeijingDateTimeShort } from "../../services/time";
 import { trimText } from "./book-view-model-utils";
 

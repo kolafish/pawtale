@@ -2,7 +2,7 @@ import type {
   MemoirProjectListResponse,
   Project,
 } from "../domain/memoir";
-import type { MemoirGuidanceMode } from "../domain/voice-chat";
+import type { MemoirGuidanceMode } from "../domain/memoir-voice-session";
 import {
   memoirProjectPath,
   memoirRequest,

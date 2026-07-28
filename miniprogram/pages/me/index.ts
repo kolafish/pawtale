@@ -1,4 +1,4 @@
-import type { MemoirVoiceProgressResponse } from "../../domain/voice-chat";
+import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-session";
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirIdentity,

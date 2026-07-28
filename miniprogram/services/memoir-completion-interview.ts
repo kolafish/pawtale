@@ -1,6 +1,6 @@
 import type {
   MemoirCompletionIssue,
-} from "../domain/voice-chat";
+} from "../domain/memoir-completion-issue";
 import { trackAuditAction } from "./audit-tracker";
 import { createMemoirVoiceSession } from "./memoir-voice-session-api";
 import { pageUrl } from "./page-input";

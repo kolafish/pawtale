@@ -8,7 +8,7 @@ import type {
   MemoirVoiceSessionCreate,
   MemoirVoiceSessionDetail,
   MemoirVoiceSessionListResponse,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
 import {
   ensureMemoirBackendSession,
   memoirRequest,

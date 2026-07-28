@@ -1,11 +1,11 @@
 import type {
   MemoirGuidanceMode,
   MemoirVoiceAssistantIntent,
-  TTSAlignmentSegment,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayState,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
+import type { TTSAlignmentSegment } from "../domain/memoir-audio";
 import type { VoiceChatConnectionStatus } from "./memoir-streaming-asr";
 
 export function modeLabel(mode: MemoirGuidanceMode): string {

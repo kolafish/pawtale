@@ -1,9 +1,9 @@
 import type {
   MemoirAssistantTTSResponse,
   MemoirVoiceFollowUpResponse,
-  TTSAlignmentSegment,
   VoiceChatTranscriptLine,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
+import type { TTSAlignmentSegment } from "../domain/memoir-audio";
 import { ttsAlignmentFromMetadata } from "./voice-chat-state";
 
 export interface AssistantTurnQueueItem {

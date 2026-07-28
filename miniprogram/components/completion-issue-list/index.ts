@@ -1,7 +1,7 @@
 import type {
   MemoirCompletionIssue,
   MemoirCompletionIssueOutcome,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-completion-issue";
 import {
   closeMemoirCompletionIssue,
 } from "../../services/memoir-completion-issue-api";

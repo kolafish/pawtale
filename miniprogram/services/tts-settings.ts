@@ -1,4 +1,4 @@
-import type { MemoirBookAudioRequest } from "../domain/voice-chat";
+import type { MemoirBookAudioRequest } from "../domain/memoir-book";
 
 export interface TTSVoiceOption {
   value: string;

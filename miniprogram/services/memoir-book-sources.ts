@@ -1,6 +1,6 @@
 import type {
   MemoirBookChapterSourceRef,
-} from "../domain/voice-chat";
+} from "../domain/memoir-book";
 
 export function sourceRefKey(
   ref: Pick<MemoirBookChapterSourceRef, "utterance_id" | "voice_session_id" | "message_id">,

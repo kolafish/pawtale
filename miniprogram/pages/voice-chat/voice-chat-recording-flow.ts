@@ -2,7 +2,7 @@ import type {
   MemoirGuidanceMode,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-voice-session";
 import { normalizeMemoirAsrText } from "../../services/asr-text-normalization";
 import type { VoiceChatConnectionStatus } from "../../services/memoir-streaming-asr";
 import {

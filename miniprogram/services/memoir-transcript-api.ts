@@ -9,7 +9,7 @@ import type {
   MemoirVoiceTranscriptItem,
   MemoirVoiceTranscriptListResponse,
   MemoirVoiceTranscriptVoiceEditPreviewResponse,
-} from "../domain/voice-chat";
+} from "../domain/memoir-transcript";
 import {
   memoirAIRequest,
   memoirRequest,
