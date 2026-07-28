@@ -1238,6 +1238,107 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     assert overview.json()["chapters"][0]["state"] == "confirmed"
 
 
+async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(
+        client,
+        test_db,
+        chapter_count=2,
+    )
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
+
+    for chapter in chapters:
+        prepared = await client.post(
+            f"/api/memoir/projects/{project_id}/book-completion/"
+            f"chapters/{chapter.id}/prepare",
+            json={},
+        )
+        assert prepared.status_code == 200, prepared.text
+        confirmed = await client.post(
+            f"/api/mobile/memoir/projects/{project_id}/book-plan/"
+            f"chapters/{chapter.id}/draft/confirm"
+        )
+        assert confirmed.status_code == 200, confirmed.text
+
+        digest_context = await chapter_digests.load_chapter_digest_context(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
+        digest = await chapter_digests.get_current_chapter_digest(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
+        assert digest is not None
+        digest.input_signature = (
+            chapter_digests._chapter_digest_input_signature(
+                chapter_id=digest_context.chapter_id,
+                chapter_title=digest_context.chapter_title,
+                include_in_book=digest_context.include_in_book,
+                sections=digest_context.sections,
+                legacy_sort_order=chapter.sort_order,
+            )
+        )
+        version = await test_db.scalar(
+            select(MemoirBookChapterDraftVersion)
+            .where(
+                MemoirBookChapterDraftVersion.project_id == project_id,
+                MemoirBookChapterDraftVersion.chapter_id == chapter.id,
+            )
+            .order_by(MemoirBookChapterDraftVersion.version.desc())
+        )
+        assert version is not None
+        version.input_signature = f"legacy-order-{chapter.sort_order}"
+        test_db.add_all([digest, version])
+    await test_db.commit()
+    reviewed = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review",
+        json={"force_regenerate": False},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    prompt_count = len(fake.prompts)
+
+    moved = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/"
+        "book-plan/structure-commands",
+        json={
+            "type": "move_chapter",
+            "chapter_id": chapters[1].id,
+            "direction": "up",
+        },
+    )
+    assert moved.status_code == 200, moved.text
+
+    overview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert overview.status_code == 200, overview.text
+    assert [
+        item["chapter_id"] for item in overview.json()["chapters"]
+    ] == [chapters[1].id, chapters[0].id]
+    assert [
+        item["state"] for item in overview.json()["chapters"]
+    ] == ["confirmed", "confirmed"]
+    for chapter in chapters:
+        workspace = await client.get(
+            f"/api/memoir/projects/{project_id}/chapters/"
+            f"{chapter.id}/workspace"
+        )
+        assert workspace.status_code == 200, workspace.text
+        assert workspace.json()["draft_needs_rewrite"] is False
+    current_review = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review"
+    )
+    assert current_review.status_code == 200, current_review.text
+    assert current_review.json() is None
+    assert len(fake.prompts) == prompt_count
+
+
 async def test_section_revision_rejects_changed_section_boundary(
     client,
     test_db,

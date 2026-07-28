@@ -422,6 +422,28 @@ def chapter_draft_generation_plan(
     )
 
 
+def chapter_draft_is_current(
+    context: ChapterGenerationContext,
+    latest: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    if latest is None or not isinstance(latest.section_snapshot_json, list):
+        return False
+    snapshot_section_ids = [
+        str(snapshot.get("section_id") or "")
+        for snapshot in latest.section_snapshot_json
+        if isinstance(snapshot, dict)
+    ]
+    if snapshot_section_ids != [
+        section.section_id for section in context.sections
+    ]:
+        return False
+    plan = chapter_draft_generation_plan(context, latest)
+    return (
+        not plan.target_context.sections
+        and len(plan.preserved_sections) == len(context.sections)
+    )
+
+
 async def load_chapter_draft_generation_plan(
     db: AsyncSession,
     *,
@@ -529,7 +551,6 @@ async def load_chapter_generation_context(
             "chapter": {
                 "id": chapter.id,
                 "title": chapter.title,
-                "sort_order": chapter.sort_order,
                 "include_in_book": chapter.include_in_book,
             },
             "materials": [
@@ -1323,7 +1344,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
         raise HTTPException(status_code=404, detail="章节稿不存在")
     if latest.id != expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
-    if latest.input_signature != before.input_signature:
+    if not chapter_draft_is_current(before, latest):
         raise HTTPException(status_code=409, detail="本章素材已变化，请先更新相关小节正文")
     latest_sections = [
         dict(section)
@@ -1511,13 +1532,13 @@ async def confirm_chapter_draft(
     )
     if draft is None or latest is None:
         raise HTTPException(status_code=409, detail="章节正文尚未生成")
-    if latest.input_signature != context.input_signature:
-        raise HTTPException(status_code=409, detail="章节素材已变化，请重新生成正文")
     if not latest.section_snapshot_json:
         raise HTTPException(
             status_code=409,
             detail="当前正文还没有小节结构，请重新生成正文",
         )
+    if not chapter_draft_is_current(context, latest):
+        raise HTTPException(status_code=409, detail="章节素材已变化，请重新生成正文")
     blocking_issue = await db.scalar(
         select(MemoirCompletionIssue.id)
         .where(

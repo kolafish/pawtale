@@ -170,7 +170,7 @@ async def chapter_summary(
         project_id=project_id,
         chapter_id=chapter.id,
     )
-    current_signature = ""
+    draft_current = False
     if section_exists:
         try:
             context = await chapter_generation.load_chapter_generation_context(
@@ -178,14 +178,12 @@ async def chapter_summary(
                 project_id=project_id,
                 chapter_id=chapter.id,
             )
-            current_signature = context.input_signature
+            draft_current = chapter_generation.chapter_draft_is_current(
+                context,
+                version,
+            )
         except HTTPException:
-            current_signature = ""
-    draft_current = bool(
-        version
-        and version.input_signature
-        and version.input_signature == current_signature
-    )
+            draft_current = False
     digest = await chapter_digests.get_current_chapter_digest(
         db,
         project_id=project_id,
@@ -406,9 +404,9 @@ async def chapter_workspace(
                 project_id=project_id,
                 chapter_id=chapter_id,
             )
-            signature_changed = (
-                bool(version.input_signature)
-                and version.input_signature != context.input_signature
+            signature_changed = not chapter_generation.chapter_draft_is_current(
+                context,
+                version,
             )
         except HTTPException:
             signature_changed = False
