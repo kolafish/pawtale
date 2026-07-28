@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, Date, DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.clock import utcnow_naive
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.users import User
 
 
 class AuditSession(Base):
@@ -19,8 +24,8 @@ class AuditSession(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False, index=True)
     client_session_id: Mapped[str] = mapped_column(String(120), nullable=False)
     platform: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
-    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow_naive, index=True)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     active_ms: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     exit_page_path: Mapped[str] = mapped_column(String(255), default="", nullable=False)
@@ -29,8 +34,8 @@ class AuditSession(Base):
     app_version: Mapped[str] = mapped_column(String(80), default="", nullable=False)
     device_summary: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     user: Mapped["User"] = relationship("User")
     events: Mapped[list["AuditEvent"]] = relationship(
@@ -63,7 +68,7 @@ class AuditEvent(Base):
     active_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     exit_reason: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
 
     user: Mapped["User"] = relationship("User")
     session: Mapped[AuditSession] = relationship("AuditSession", back_populates="events")
@@ -86,7 +91,7 @@ class AuditDailyUserUsage(Base):
     last_exit_feature_code: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     last_exit_reason: Mapped[str] = mapped_column(String(60), default="", nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     user: Mapped["User"] = relationship("User")
 
@@ -112,6 +117,6 @@ class AuditDailyFeatureUsage(Base):
     event_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     user: Mapped["User"] = relationship("User")

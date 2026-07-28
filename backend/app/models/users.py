@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, ForeignKey, JSON, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.clock import utcnow_naive
 from app.database import Base
 
 
@@ -22,8 +23,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user", server_default=text("'user'"))
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     identities: Mapped[list["AuthIdentity"]] = relationship(
         "AuthIdentity",
@@ -44,7 +45,7 @@ class AuthIdentity(Base):
     provider_user_id: Mapped[str] = mapped_column(String(255), nullable=False)
     provider_union_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     profile_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, onupdate=utcnow_naive)
 
     user: Mapped[User] = relationship("User", back_populates="identities")

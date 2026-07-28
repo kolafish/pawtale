@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
@@ -42,10 +42,6 @@ from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.image_assets import manuscript_image_snapshots
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 async def _latest_output_version_number(
@@ -231,7 +227,7 @@ async def assemble_book_output(
             "source": "chapter_drafts",
             "book_tts": None,
         }
-        output.updated_at = _utcnow()
+        output.updated_at = utcnow_naive()
         db.add(output)
     chapter_illustrations, image_appendix = await manuscript_image_snapshots(
         db,

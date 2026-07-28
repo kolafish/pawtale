@@ -62,7 +62,6 @@ async def analyze_project(
     combined = "\n\n---\n\n".join(clipped_parts)
 
     ai_service = get_ai_service(req.ai_model)
-    selected_ai_model = req.ai_model or ai_service.model_name
 
     try:
         result = await ai_service.analyze_project_content(combined, debug=req.debug)

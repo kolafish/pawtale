@@ -1,10 +1,10 @@
-from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.domain.projects.templates import initialize_project_template
 from app.domain.projects.types import ProjectType
@@ -27,10 +27,6 @@ DEFAULT_MEMOIR_PROJECT_TITLE = "我的回忆录"
 MEMOIR_PROFILE_METADATA_KEY = "memoir_profile"
 DEFAULT_GUIDANCE_MODE = "free_narration"
 ALLOWED_NARRATOR_GENDERS = {"male", "female", "unspecified"}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _clean_text(value: str | None) -> str:
@@ -242,7 +238,7 @@ async def update_mobile_memoir_project(
     if req.description is not None:
         project.description = req.description
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
-    project.updated_at = _utcnow()
+    project.updated_at = utcnow_naive()
     await db.commit()
     return await _load_memoir_project_response(db, project.id, user_id)
 
@@ -255,7 +251,7 @@ async def activate_mobile_memoir_project(
     project = await load_project(db, project_id, user_id)
     if project.type != ProjectType.MEMOIR.value:
         raise HTTPException(status_code=400, detail="项目不是回忆录")
-    project.updated_at = _utcnow()
+    project.updated_at = utcnow_naive()
     await db.commit()
     return await mobile_project_list(db, user_id)
 

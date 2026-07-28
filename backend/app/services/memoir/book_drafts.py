@@ -152,7 +152,7 @@ async def get_chapter_draft(
     chapter_id: str,
     allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
-    chapter = await _load_chapter(
+    await _load_chapter(
         db,
         user_id=user_id,
         project_id=project_id,

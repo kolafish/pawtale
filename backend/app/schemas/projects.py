@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.projects.types import ProjectType
 from app.domain.references import (
@@ -38,8 +38,7 @@ class DocumentMeta(BaseModel):
     sort_order: int = 0
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GroupResponse(BaseModel):
@@ -48,8 +47,7 @@ class GroupResponse(BaseModel):
     sort_order: int = 0
     documents: list[DocumentMeta] = Field(default_factory=list)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReferenceItemBrief(BaseModel):
@@ -58,8 +56,7 @@ class ReferenceItemBrief(BaseModel):
     name: str
     sort_order: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectListItem(BaseModel):
@@ -80,8 +77,7 @@ class ProjectListItem(BaseModel):
     metadata_json: dict = Field(default_factory=dict)
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProjectResponse(BaseModel):
@@ -104,8 +100,7 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Document Group ───────────────────────────────────
@@ -152,8 +147,7 @@ class DocumentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DocumentReorderItem(BaseModel):
@@ -188,8 +182,7 @@ class ReferenceItemResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Document References (links) ────────────────────
@@ -212,8 +205,7 @@ class WritingSessionResponse(BaseModel):
     words_written: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Export ───────────────────────────────────────────
@@ -282,8 +274,7 @@ class ProjectGitSyncConfigResponse(BaseModel):
     last_commit_sha: str | None = None
     last_error: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GitSyncStatusResponse(BaseModel):

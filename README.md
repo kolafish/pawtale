@@ -97,7 +97,7 @@ cd frontend && npm run lint && npm test && npm run build
 cd miniprogram && npm run typecheck && npm test
 
 # 后端
-cd backend && venv/bin/python -m pytest -q
+cd backend && venv/bin/ruff check app tests scripts && venv/bin/python -m pytest -q
 ```
 
 真机语音、后台切换、权限和播放体验不能只依赖单元测试，合入相关改动前还应执行 [小程序真机 Smoke](./docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。

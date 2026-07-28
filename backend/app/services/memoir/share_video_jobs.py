@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 import logging
 from pathlib import Path
 
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
 
+from app.clock import utcnow_naive
 from app.config import DATA_DIR, get_settings
 from app.database import async_session_maker
 from app.domain.memoir.types import MemoirShareVideoJobStatus
@@ -62,10 +63,6 @@ logger = logging.getLogger(__name__)
 
 class ShareVideoLeaseLostError(RuntimeError):
     pass
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _set_job_metadata(job: MemoirMaterialShareVideo, metadata: ShareVideoJobMetadata) -> None:
@@ -247,7 +244,7 @@ async def create_share_video_job(
         audio_file_id=audio_file.id,
         user_id=user_id,
         status=MemoirShareVideoJobStatus.PENDING.value,
-        run_after=_utcnow(),
+        run_after=utcnow_naive(),
         text_source=alignment.text_source,
         text_hash=alignment.text_hash,
         selected_text=alignment.transcript_text[start_char:end_char],
@@ -445,7 +442,7 @@ async def claim_due_share_video_jobs(
     max_attempts: int | None = None,
 ) -> list[JobLease]:
     settings = get_settings()
-    claimed_at = now or _utcnow()
+    claimed_at = now or utcnow_naive()
     batch_size = limit or max(1, settings.memoir_share_video_batch_size)
     lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
     attempt_limit = max_attempts or max(1, settings.memoir_share_video_max_attempts)
@@ -484,7 +481,7 @@ async def claim_share_video_job(
     max_attempts: int | None = None,
 ) -> JobLease | None:
     settings = get_settings()
-    claimed_at = now or _utcnow()
+    claimed_at = now or utcnow_naive()
     lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
     attempt_limit = max_attempts or max(1, settings.memoir_share_video_max_attempts)
     await db.commit()
@@ -506,7 +503,7 @@ async def renew_share_video_job_lease(
     lease_seconds: int | None = None,
 ) -> bool:
     settings = get_settings()
-    renewed_at = now or _utcnow()
+    renewed_at = now or utcnow_naive()
     lease_duration = lease_seconds or max(1, settings.memoir_share_video_lease_seconds)
     result = await db.execute(
         update(MemoirMaterialShareVideo)
@@ -535,7 +532,7 @@ async def _commit_share_video_progress(
                 MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
                 MemoirMaterialShareVideo.lease_token == lease.token,
             )
-            .values(lease_expires_at=lease_deadline(_utcnow(), lease_seconds))
+            .values(lease_expires_at=lease_deadline(utcnow_naive(), lease_seconds))
         )
     if result.rowcount != 1:
         await db.rollback()
@@ -550,7 +547,7 @@ async def _complete_share_video_job(
     storage_path: str,
     size_bytes: int,
 ) -> bool:
-    completed_at = _utcnow()
+    completed_at = utcnow_naive()
     result = await db.execute(
         update(MemoirMaterialShareVideo)
         .where(
@@ -660,7 +657,7 @@ async def _fail_share_video_job(
     )
     if job is None:
         return
-    failed_at = _utcnow()
+    failed_at = utcnow_naive()
     should_retry = job.attempts < max(1, max_attempts)
     retry_delay = min(300, max(1, retry_seconds) * (2 ** max(0, job.attempts - 1)))
     next_attempt_at = failed_at + timedelta(seconds=retry_delay) if should_retry else None

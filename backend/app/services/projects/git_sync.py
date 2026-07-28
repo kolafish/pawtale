@@ -16,6 +16,7 @@ import jwt
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow_naive
 from app.config import get_settings
 from app.models.git_sync import GitHubInstallation, GitHubSetupState, ProjectGitSync
 from app.schemas.projects import (
@@ -419,7 +420,7 @@ async def create_setup_url(
     if not github.configured or not github.install_url:
         raise HTTPException(status_code=503, detail="GitHub App 未配置")
 
-    now = datetime.utcnow()
+    now = utcnow_naive()
     expires_at = now + timedelta(minutes=GITHUB_SETUP_STATE_TTL_MINUTES)
     await _cleanup_setup_states(db, now)
     setup_state = GitHubSetupState(
@@ -452,7 +453,7 @@ async def _consume_setup_state(
         raise HTTPException(status_code=403, detail="GitHub setup state 不属于当前用户")
     if row.used_at is not None:
         raise HTTPException(status_code=400, detail="GitHub setup state 已使用")
-    if row.expires_at <= datetime.utcnow():
+    if row.expires_at <= utcnow_naive():
         raise HTTPException(status_code=400, detail="GitHub setup state 已过期")
     return row
 
@@ -491,7 +492,7 @@ async def record_installation(
     row.repository_selection = (
         installation.get("repository_selection") if isinstance(installation.get("repository_selection"), str) else None
     )
-    setup_state.used_at = datetime.utcnow()
+    setup_state.used_at = utcnow_naive()
     await db.commit()
     await db.refresh(row)
     return _installation_response(row)
@@ -616,7 +617,7 @@ async def run_sync(
     if not github.configured:
         raise HTTPException(status_code=503, detail="GitHub App 未配置")
 
-    synced_at = datetime.utcnow()
+    synced_at = utcnow_naive()
     try:
         files = await _backup_files(db, project_id, user_id, config.base_path)
         commit_sha = await github.commit_files(

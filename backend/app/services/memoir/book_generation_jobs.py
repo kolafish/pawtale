@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -9,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -35,10 +35,6 @@ ACTIVE_JOB_STATUSES = {
     MemoirEditingJobStatus.PENDING.value,
     MemoirEditingJobStatus.RUNNING.value,
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _safe_str(value: object) -> str:
@@ -106,7 +102,7 @@ async def _enqueue_generation_job(
         chapter_id=chapter_id,
         job_type=job_type,
         payload_json=payload_json,
-        run_after=_utcnow(),
+        run_after=utcnow_naive(),
         dedupe_key=dedupe_key,
         replace_completed=True,
     )
@@ -207,7 +203,6 @@ async def _update_generation_event(
     chapter_id: str | None = None,
     metadata_json: dict | None = None,
 ) -> MemoirAutomationEvent:
-    payload = dict(job.payload_json or {})
     metadata = {
         "source": GENERATION_EVENT_SOURCE,
         "job_id": job.id,
@@ -310,7 +305,7 @@ async def _failed_result(
     return EditingJobResult(
         status=MemoirEditingJobStatus.FAILED,
         error_message=error_message,
-        result_json={"failed_at": _utcnow().isoformat()},
+        result_json={"failed_at": utcnow_naive().isoformat()},
     )
 
 
@@ -358,7 +353,7 @@ async def run_book_editorial_copy_generation_job(
         return EditingJobResult(
             result_json={
                 "result_version_id": latest_version.id if latest_version else "",
-                "completed_at": _utcnow().isoformat(),
+                "completed_at": utcnow_naive().isoformat(),
             },
         )
     except HTTPException as exc:
