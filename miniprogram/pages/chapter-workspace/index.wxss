@@ -1,8 +1,5 @@
 .workspace-page {
-  min-height: 100vh;
   padding: 24rpx 30rpx 112rpx;
-  box-sizing: border-box;
-  background: var(--ui-page-background);
   color: var(--ui-text-primary);
 }
 

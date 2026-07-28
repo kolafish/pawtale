@@ -1,8 +1,5 @@
 .topic-map-page {
-  min-height: 100vh;
-  box-sizing: border-box;
   padding: 38rpx 30rpx 96rpx;
-  background: var(--ui-page-background);
   color: var(--ui-text-primary);
   -webkit-font-smoothing: antialiased;
 }

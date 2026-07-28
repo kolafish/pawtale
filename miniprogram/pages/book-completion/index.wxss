@@ -1,8 +1,5 @@
 .completion-page {
-  min-height: 100vh;
   padding: 36rpx 30rpx 80rpx;
-  box-sizing: border-box;
-  background: var(--ui-page-background);
   color: var(--ui-text-primary);
 }
 

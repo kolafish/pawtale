@@ -1,4 +1,4 @@
-<view class="workspace-page">
+<view class="workspace-page ui-page-shell">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{workspace ? workspace.chapter_title : "本章正文"}} · 当前一步</text>
     <button class="workspace-home-action" bindtap="openBookHome">书稿首页</button>

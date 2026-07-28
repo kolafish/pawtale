@@ -1,7 +1,5 @@
 .voice-chat-page {
-  min-height: 100vh;
   padding: 34rpx 30rpx 350rpx;
-  background: var(--ui-page-background);
 }
 
 .voice-chat-page.no-control-bar {
@@ -752,11 +750,6 @@
   border: 0;
 }
 
-.history-toggle-hover {
-  background: var(--ui-surface-subtle);
-  transform: scale(0.96);
-}
-
 .history-heading {
   min-width: 0;
   display: flex;
@@ -1024,11 +1017,6 @@
 
 .error {
   margin-top: 18rpx;
-  padding: 22rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
-  font-size: 28rpx;
   line-height: 1.5;
 }
 

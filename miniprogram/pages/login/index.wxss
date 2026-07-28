@@ -1,7 +1,5 @@
 .login-page {
-  min-height: 100vh;
   padding: 72rpx 36rpx 80rpx;
-  background: var(--ui-page-background);
 }
 
 .brand-row {
@@ -154,10 +152,7 @@
   margin-top: 22rpx;
   padding: 20rpx 22rpx;
   border-radius: 14rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
   font-size: 26rpx;
-  line-height: 1.45;
 }
 
 .profile-setup-panel {
@@ -200,11 +195,6 @@
 
 .profile-avatar-picker::after {
   border: 0;
-}
-
-.profile-avatar-picker-hover {
-  transform: scale(0.96);
-  box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.10);
 }
 
 .profile-avatar-image {
@@ -299,9 +289,4 @@
 
 .skip-profile-button::after {
   border: 0;
-}
-
-.skip-profile-button-hover {
-  background: var(--ui-surface-subtle);
-  transform: scale(0.96);
 }

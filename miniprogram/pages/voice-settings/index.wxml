@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">访谈语音和成书朗读可以分别设置，选择后立即保存。</text>
   </view>

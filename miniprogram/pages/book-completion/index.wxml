@@ -1,4 +1,4 @@
-<view class="completion-page">
+<view class="completion-page ui-page-shell">
   <view class="flow-context">
     <text class="flow-context-label">{{projectTitle || "我的回忆录"}} · 全书进度</text>
     <button class="flow-context-action" bindtap="openBookHome">书稿首页</button>

@@ -1,9 +1,9 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{loggedIn ? "管理回忆录、语音工具和个人偏好" : "登录并继续记录家里的故事"}}</text>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <block wx:if="{{!loggedIn}}">
     <view class="guest-login-panel">
@@ -46,7 +46,7 @@
         disabled="{{avatarSaving || loading}}"
         bindchooseavatar="chooseWeChatAvatar"
         aria-label="更换微信头像"
-        hover-class="profile-avatar-picker-hover"
+        hover-class="ui-avatar-action-hover"
       >
         <image wx:if="{{avatarUrl}}" class="avatar-image ui-image-outline" src="{{avatarUrl}}" mode="aspectFill" />
         <view wx:else class="avatar">

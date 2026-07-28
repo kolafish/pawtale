@@ -1,20 +1,11 @@
 .speaker-transcription-page {
-  min-height: 100vh;
   padding: 28rpx 30rpx 128rpx;
-  background: var(--ui-page-background);
-  box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
 }
 
 .error {
   margin-bottom: 24rpx;
-  padding: 22rpx 26rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
   font-size: 32rpx;
-  line-height: 1.45;
-  word-break: break-word;
 }
 
 .control-panel,

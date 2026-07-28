@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
     <button
@@ -6,13 +6,13 @@
       class="book-share-button"
       open-type="share"
       data-share-kind="book"
-      hover-class="book-share-button-hover"
+      hover-class="ui-accent-action-hover"
     >
       分享成书
     </button>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
