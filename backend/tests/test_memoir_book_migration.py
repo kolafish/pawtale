@@ -146,6 +146,31 @@ async def test_runtime_schema_migration_creates_book_completion_jobs():
         await engine.dispose()
 
 
+async def test_runtime_schema_includes_background_book_review_job_type():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+        async with engine.begin() as conn:
+            table_sql = str(
+                await conn.scalar(
+                    text(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type = 'table' "
+                        "AND name = 'memoir_editing_jobs'"
+                    )
+                )
+                or ""
+            )
+        assert "generate_book_review" in table_sql
+        await assert_runtime_schema(
+            engine,
+            require_sqlite_foreign_keys=False,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_cutover_drops_all_known_legacy_tables():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)

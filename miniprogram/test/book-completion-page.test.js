@@ -17,7 +17,9 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
     enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),
     cancelMemoirBookCompletionJob: unmockedAsync("cancelMemoirBookCompletionJob"),
-    generateMemoirBookReview: unmockedAsync("generateMemoirBookReview"),
+    enqueueMemoirBookReviewJob: unmockedAsync("enqueueMemoirBookReviewJob"),
+    getMemoirBookReviewJob: async () => reviewJob(),
+    cancelMemoirBookReviewJob: unmockedAsync("cancelMemoirBookReviewJob"),
     getMemoirBookReview: async () => null,
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
@@ -125,6 +127,25 @@ function bookReview(overrides = {}) {
   };
 }
 
+function reviewJob(overrides = {}) {
+  return {
+    job_id: null,
+    project_id: "project-1",
+    status: "idle",
+    stage: "",
+    total_chapter_count: 0,
+    processed_chapter_count: 0,
+    current_chapter_title: "",
+    requested_ai_model: null,
+    resolved_ai_model: null,
+    review_id: null,
+    can_cancel: false,
+    can_retry: false,
+    error_message: "",
+    ...overrides,
+  };
+}
+
 test("book completion overview page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-completion/index"));
@@ -188,6 +209,34 @@ test("book completion uses only persisted chapter counts for whole-book progress
   assert.equal(failed.bulkCheckProgressMode, "hidden");
 });
 
+test("book review progress uses persisted stages without inventing model percentages", () => {
+  const { bookReviewJobView } = loadBookCompletionPage().mod;
+  const preparing = bookReviewJobView(reviewJob({
+    job_id: "review-job-1",
+    status: "running",
+    stage: "preparing_chapters",
+    total_chapter_count: 4,
+    processed_chapter_count: 2,
+    current_chapter_title: "参加工作",
+    can_cancel: true,
+  }));
+  const reviewing = bookReviewJobView(reviewJob({
+    job_id: "review-job-1",
+    status: "running",
+    stage: "reviewing",
+    total_chapter_count: 4,
+    processed_chapter_count: 4,
+    can_cancel: true,
+  }));
+
+  assert.equal(preparing.bookReviewProgressTitle, "正在准备《参加工作》");
+  assert.equal(preparing.bookReviewProgressPercent, 50);
+  assert.equal(preparing.bookReviewProgressMode, "determinate");
+  assert.equal(reviewing.bookReviewProgressTitle, "正在检查全书");
+  assert.equal(reviewing.bookReviewProgressMode, "indeterminate");
+  assert.equal(reviewing.bookReviewProgressPercent, 0);
+});
+
 test("book completion returns to the book hub for generation and chapter management", () => {
   const tabNavigations = [];
   global.wx = {
@@ -220,7 +269,7 @@ test("book completion opens book title settings directly", () => {
   ]);
 });
 
-test("book completion runs the cross-chapter review after chapters are confirmed", async () => {
+test("book completion submits the cross-chapter review to the background", async () => {
   const reviewRequests = [];
   const overview = readyOverview();
   overview.completed_chapters = 2;
@@ -240,16 +289,24 @@ test("book completion runs the cross-chapter review after chapters are confirmed
     detail: "正文已经收入书稿。",
   }));
   let currentReview = null;
+  let currentReviewJob = reviewJob();
   global.wx = { showToast() {} };
   const { page } = loadBookCompletionPage({
     voiceApiExports: {
       getMemoirBookCompletionOverview: async () => overview,
-      generateMemoirBookReview: async (projectId, force) => {
+      enqueueMemoirBookReviewJob: async (projectId, force) => {
         reviewRequests.push([projectId, force]);
-        currentReview = bookReview();
-        return currentReview;
+        currentReviewJob = reviewJob({
+          job_id: "review-job-1",
+          status: "pending",
+          stage: "queued",
+          total_chapter_count: 2,
+          can_cancel: true,
+        });
+        return currentReviewJob;
       },
       getMemoirBookReview: async () => currentReview,
+      getMemoirBookReviewJob: async () => currentReviewJob,
       getMemoirBookOutput: async () => ({ id: "book-output-1" }),
     },
   });
@@ -263,6 +320,22 @@ test("book completion runs the cross-chapter review after chapters are confirmed
   await page.reviewBook.call(context);
 
   assert.deepEqual(reviewRequests, [["project-1", false]]);
+  assert.equal(context.data.checkingBook, true);
+  assert.equal(context.data.bookReviewProgressTitle, "全书检查已提交");
+  assert.equal(context.data.bookReview, null);
+
+  currentReview = bookReview();
+  currentReviewJob = reviewJob({
+    job_id: "review-job-1",
+    status: "succeeded",
+    stage: "completed",
+    total_chapter_count: 2,
+    processed_chapter_count: 2,
+    review_id: "review-1",
+  });
+  await page.loadOverview.call(context, true);
+
+  assert.equal(context.data.checkingBook, false);
   assert.equal(context.data.bookReview.review.summary, "全书围绕家庭与成长展开。");
   assert.equal(context.data.bookOutputAvailable, true);
 });
@@ -363,7 +436,7 @@ test("book completion keeps a submit error when only an older finished job exist
   assert.deepEqual(toasts, []);
 });
 
-test("book completion restores and polls an active whole-book check after reopening", async () => {
+test("book completion restores and polls an active chapter batch after reopening", async () => {
   const scheduled = [];
   const originalSetTimeout = global.setTimeout;
   const originalClearTimeout = global.clearTimeout;
@@ -411,6 +484,82 @@ test("book completion restores and polls an active whole-book check after reopen
     assert.equal(context.data.bulkCheckProgressTitle, "正在检查《学校里的比赛》");
     assert.equal(scheduled.length, 1);
     assert.equal(scheduled[0][1], 1500);
+    page.onHide.call(context);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    delete global.wx;
+  }
+});
+
+test("book completion restores and can cancel an active full-book review after reopening", async () => {
+  const scheduled = [];
+  const cancellations = [];
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  global.setTimeout = (callback, delay) => {
+    scheduled.push([callback, delay]);
+    return 1;
+  };
+  global.clearTimeout = () => {};
+  global.wx = { showToast() {} };
+  const overview = readyOverview();
+  overview.completed_chapters = 2;
+  overview.chapters = overview.chapters.map((chapter) => ({
+    ...chapter,
+    state: "confirmed",
+    next_action: {
+      kind: "complete",
+      title: "本章已确认",
+      detail: "正文已经收入书稿。",
+      action_text: "",
+      disabled: true,
+      issue_id: null,
+    },
+    active_issue: null,
+  }));
+  let currentReviewJob = reviewJob({
+    job_id: "review-job-1",
+    status: "running",
+    stage: "reviewing",
+    total_chapter_count: 2,
+    processed_chapter_count: 2,
+    can_cancel: true,
+  });
+  try {
+    const { page } = loadBookCompletionPage({
+      voiceApiExports: {
+        getMemoirBookCompletionOverview: async () => overview,
+        getMemoirBookReviewJob: async () => currentReviewJob,
+        cancelMemoirBookReviewJob: async (projectId, jobId) => {
+          cancellations.push([projectId, jobId]);
+          currentReviewJob = reviewJob({
+            job_id: jobId,
+            status: "cancelled",
+            stage: "cancelled",
+            total_chapter_count: 2,
+            processed_chapter_count: 2,
+            can_retry: true,
+          });
+          return currentReviewJob;
+        },
+      },
+    });
+    const context = pageContext(page, { projectId: "project-1" });
+
+    await page.onShow.call(context);
+
+    assert.equal(context.data.checkingBook, true);
+    assert.equal(context.data.bookReviewProgressTitle, "正在检查全书");
+    assert.equal(context.data.bookReviewProgressMode, "indeterminate");
+    assert.equal(scheduled.length, 1);
+    assert.equal(scheduled[0][1], 1500);
+
+    await page.cancelBookReview.call(context);
+
+    assert.deepEqual(cancellations, [["project-1", "review-job-1"]]);
+    assert.equal(context.data.checkingBook, false);
+    assert.equal(context.data.bookReviewProgressTitle, "全书检查已停止");
     page.onHide.call(context);
   } finally {
     global.setTimeout = originalSetTimeout;
