@@ -1,7 +1,7 @@
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import InvalidRequestError, ResourceNotFoundError
 from app.domain.projects.types import ProjectType
 from app.models.memoir import AudioFile
 from app.models.projects import Project
@@ -22,9 +22,9 @@ async def load_memoir_project(
     )
     project = result.scalar_one_or_none()
     if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise ResourceNotFoundError("项目不存在")
     if project.type != ProjectType.MEMOIR.value:
-        raise HTTPException(status_code=400, detail="项目不是回忆录")
+        raise InvalidRequestError("项目不是回忆录")
     return project
 
 
@@ -43,5 +43,5 @@ async def load_audio_file(
     )
     audio_file = result.scalar_one_or_none()
     if not audio_file:
-        raise HTTPException(status_code=404, detail="音频文件不存在")
+        raise ResourceNotFoundError("音频文件不存在")
     return audio_file

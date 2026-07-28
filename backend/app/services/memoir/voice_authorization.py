@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.application_errors import ResourceNotFoundError
 from app.models.memoir import MemoirVoiceAuthorizationConsent, MemoirVoiceSession
 from app.models.projects import Project
 from app.schemas.memoir_voice import (
@@ -21,7 +21,7 @@ async def _assert_source_session_owner(db: AsyncSession, user_id: str, voice_ses
         .where(MemoirVoiceSession.id == voice_session_id, Project.user_id == user_id)
     )
     if result.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="本次语音记录不存在")
+        raise ResourceNotFoundError("本次语音记录不存在")
 
 
 async def record_voice_authorization_consent(
