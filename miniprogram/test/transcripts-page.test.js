@@ -2,31 +2,26 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   mockModule("../services/auth.ts", {
-    getMemoirIdentity: async () => {
-      throw new Error("getMemoirIdentity was not mocked");
-    },
+    getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
-    listMemoirVoiceTranscripts: async () => {
-      throw new Error("listMemoirVoiceTranscripts was not mocked");
-    },
-    parseMemoirVoiceSearchQuery: async () => {
-      throw new Error("parseMemoirVoiceSearchQuery was not mocked");
-    },
-    recoverMemoirVoiceTranscript: async () => {
-      throw new Error("recoverMemoirVoiceTranscript was not mocked");
-    },
+    listMemoirVoiceTranscripts: unmockedAsync("listMemoirVoiceTranscripts"),
+    parseMemoirVoiceSearchQuery: unmockedAsync("parseMemoirVoiceSearchQuery"),
+    recoverMemoirVoiceTranscript: unmockedAsync("recoverMemoirVoiceTranscript"),
     ...voiceApiExports,
   });
   mockModule("../services/memoir-voice-search.ts", {
-    recordMemoirVoiceSearchQuery: async () => {
-      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
-    },
+    recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
@@ -355,7 +350,6 @@ test("transcripts page shows saved audio awaiting transcription", async () => {
   assert.equal(context.data.items[0].recordMetaText, "07-01 15:38 · 8 秒 · 14 字");
   assert.equal(context.data.items[0].summaryTitleText, "爷爷退休后仍帮公司做事");
   assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
-  delete global.wx;
 });
 
 test("transcripts page opens transcript detail from a record card", () => {
@@ -376,7 +370,6 @@ test("transcripts page opens transcript detail from a record card", () => {
     { url: "/pages/transcript-detail/index?id=utterance%2Fdetail%20id" },
   ]);
 
-  delete global.wx;
 });
 
 test("transcripts page preserves loaded records after returning from detail", async () => {
@@ -442,7 +435,6 @@ test("transcripts page preserves loaded records after returning from detail", as
     "utterance-4",
   ]);
   assert.equal(context.data.showLoadMore, true);
-  delete global.wx;
 });
 
 test("transcripts page searches records and clears back to the full list", async () => {
@@ -651,7 +643,6 @@ test("transcripts page applies recognized voice search text", async () => {
   assert.equal(context.data.voiceSearchRecording, false);
   assert.equal(context.data.voiceSearchTranscribing, false);
   assert.deepEqual(toasts, [{ title: "已识别", icon: "success" }]);
-  delete global.wx;
 });
 
 test("transcripts page supports filter-only parsed voice search", async () => {
@@ -770,7 +761,6 @@ test("transcripts page scrolls to stored uncovered source target", async () => {
       duration: 240,
     },
   ]);
-  delete global.wx;
 });
 
 test("transcripts page stays browseable when login is required", async () => {
@@ -796,7 +786,6 @@ test("transcripts page stays browseable when login is required", async () => {
   assert.equal(context.data.projectTitle, "我的回忆录");
   assert.deepEqual(context.data.items, []);
   assert.deepEqual(switches, []);
-  delete global.wx;
 });
 
 test("transcripts page asks logged-in users to create a memoir before listing records", async () => {

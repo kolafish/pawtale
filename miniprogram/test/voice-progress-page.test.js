@@ -241,5 +241,4 @@ test("voice progress only resumes active sessions", () => {
 
   assert.equal(context.data.error, "这次讲述已保存");
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice-listening&mode=guided_interview&module=person");
-  delete global.wx;
 });

@@ -147,7 +147,6 @@ test("voice settings saves the automatic speech detection preference", () => {
   assert.equal(context.data.pageClass, "voice-settings-page large-text");
   assert.equal(context.data.autoBargeInEnabled, false);
   assert.deepEqual(toasts, ["自动检测已关闭"]);
-  delete global.wx;
 });
 
 test("voice settings saves the selected AI model", () => {
@@ -176,7 +175,6 @@ test("voice settings saves the selected AI model", () => {
   assert.deepEqual(saved, ["doubao-seed-2-0-pro-260215"]);
   assert.equal(context.data.aiModel, "doubao-seed-2-0-pro-260215");
   assert.equal(context.data.aiModelLabel, "Doubao Seed 2.0 Pro");
-  delete global.wx;
 });
 
 test("voice settings saves chat and book TTS settings independently", () => {
@@ -245,5 +243,4 @@ test("voice settings saves chat and book TTS settings independently", () => {
   ]);
   assert.equal(context.data.bookTTSVoice, "zh_male_m191_uranus_bigtts");
   assert.equal(context.data.chatTTSSpeedRatio, 1.5);
-  delete global.wx;
 });

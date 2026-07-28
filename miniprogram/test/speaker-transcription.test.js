@@ -219,7 +219,6 @@ test("speaker transcription client keeps terminal socket statuses stable", async
   await Promise.resolve();
   cancelledClient.close();
   await assert.rejects(cancelledStart, /连接已取消/);
-  delete global.wx;
 });
 
 test("speaker transcription client forwards provider diarization diagnostics", async () => {
@@ -283,5 +282,4 @@ test("speaker transcription client forwards provider diarization diagnostics", a
   assert.equal(diagnostics[0].status, "missing_provider_labels");
   assert.equal(diagnostics[0].message, "当前 ASR 返回结果没有说话人标签。");
   client.close();
-  delete global.wx;
 });

@@ -4,7 +4,13 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  flushAsyncWork,
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 const {
   sampleAudioResponse,
@@ -19,12 +25,6 @@ const {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-async function flushAsyncWork(rounds = 6) {
-  for (let index = 0; index < rounds; index += 1) {
-    await Promise.resolve();
-  }
 }
 
 function planFromStructureCommand(status, command) {
@@ -132,47 +132,23 @@ function loadBookPage({
   ttsExports = {},
   cacheExports = {},
 } = {}) {
-  const getMemoirIdentity = authExports.getMemoirIdentity || (async () => {
-    throw new Error("getMemoirIdentity was not mocked");
-  });
+  const getMemoirIdentity = authExports.getMemoirIdentity || unmockedAsync("getMemoirIdentity");
   mockModule("../services/auth.ts", {
     getMemoirIdentity,
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
-    applyMemoirBookPlanStructureCommand: async () => {
-      throw new Error("applyMemoirBookPlanStructureCommand was not mocked");
-    },
-    confirmMemoirBookPlan: async () => {
-      throw new Error("confirmMemoirBookPlan was not mocked");
-    },
-    createMemoirBookChapterDraftTTS: async () => {
-      throw new Error("createMemoirBookChapterDraftTTS was not mocked");
-    },
-    createMemoirBookOutputTTS: async () => {
-      throw new Error("createMemoirBookOutputTTS was not mocked");
-    },
-    createMemoirBookPlanOutlineTTS: async () => {
-      throw new Error("createMemoirBookPlanOutlineTTS was not mocked");
-    },
-    assembleMemoirBookOutput: async () => {
-      throw new Error("assembleMemoirBookOutput was not mocked");
-    },
-    updateMemoirBookOutput: async () => {
-      throw new Error("updateMemoirBookOutput was not mocked");
-    },
-    downloadMemoirVoiceAudio: async () => {
-      throw new Error("downloadMemoirVoiceAudio was not mocked");
-    },
-    generateMemoirBookChapterTitle: async () => {
-      throw new Error("generateMemoirBookChapterTitle was not mocked");
-    },
-    updateMemoirBookChapterTitle: async () => {
-      throw new Error("updateMemoirBookChapterTitle was not mocked");
-    },
-    generateMemoirBookPlan: async () => {
-      throw new Error("generateMemoirBookPlan was not mocked");
-    },
+    applyMemoirBookPlanStructureCommand: unmockedAsync("applyMemoirBookPlanStructureCommand"),
+    confirmMemoirBookPlan: unmockedAsync("confirmMemoirBookPlan"),
+    createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
+    createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
+    createMemoirBookPlanOutlineTTS: unmockedAsync("createMemoirBookPlanOutlineTTS"),
+    assembleMemoirBookOutput: unmockedAsync("assembleMemoirBookOutput"),
+    updateMemoirBookOutput: unmockedAsync("updateMemoirBookOutput"),
+    downloadMemoirVoiceAudio: unmockedAsync("downloadMemoirVoiceAudio"),
+    generateMemoirBookChapterTitle: unmockedAsync("generateMemoirBookChapterTitle"),
+    updateMemoirBookChapterTitle: unmockedAsync("updateMemoirBookChapterTitle"),
+    generateMemoirBookPlan: unmockedAsync("generateMemoirBookPlan"),
     getMemoirBookChapterDraft: async () => null,
     getMemoirBookOutput: async () => null,
     getMemoirBookSnapshot: async () => {
@@ -193,15 +169,11 @@ function loadBookPage({
         },
       };
     },
-    getMemoirBookPlan: async () => {
-      throw new Error("getMemoirBookPlan was not mocked");
-    },
+    getMemoirBookPlan: unmockedAsync("getMemoirBookPlan"),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
     acknowledgeDismissibleMemoirAutomationEvents: async () => ({ updated_count: 0 }),
-    updateMemoirBookPlan: async () => {
-      throw new Error("updateMemoirBookPlan was not mocked");
-    },
+    updateMemoirBookPlan: unmockedAsync("updateMemoirBookPlan"),
     ...voiceApiExports,
   });
   mockModule("../stores/memoir-read-cache.ts", {
@@ -272,7 +244,6 @@ test("book page routes chapter card actions to the chapter workspace", () => {
   assert.deepEqual(navigations, [
     "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter%2F1",
   ]);
-  delete global.wx;
 });
 
 test("book page routes unfinished book progress into the unified completion flow", () => {
@@ -300,7 +271,6 @@ test("book page routes unfinished book progress into the unified completion flow
   assert.deepEqual(navigations, [
     "/pages/book-completion/index?projectId=project%2F1&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B",
   ]);
-  delete global.wx;
 });
 
 test("book page exposes chapter reordering after the plan is confirmed", () => {
@@ -320,7 +290,6 @@ test("book page exposes chapter reordering after the plan is confirmed", () => {
 
   page.toggleChapterStructureEditing.call(context);
   assert.equal(context.data.chapterStructureEditing, false);
-  delete global.wx;
 });
 
 test("book page opens secondary chapter actions from the more sheet", () => {
@@ -364,7 +333,6 @@ test("book page opens secondary chapter actions from the more sheet", () => {
     "/pages/chapter-workspace/index?projectId=project%2F1&chapterId=chapter-1",
   ]);
   assert.deepEqual(audioCalls, ["chapter-1"]);
-  delete global.wx;
 });
 
 test("book page hides and restores a chapter without deleting its content", async () => {
@@ -419,7 +387,6 @@ test("book page hides and restores a chapter without deleting its content", asyn
   assert.equal(calls[1].data.include_in_book, true);
   assert.equal(context.data.chapters[1].include_in_book, true);
   assert.equal(context.data.totalChapterCount, 2);
-  delete global.wx;
 });
 
 test("book page routes progress export actions to the full-book export page", () => {
@@ -447,7 +414,6 @@ test("book page routes progress export actions to the full-book export page", ()
     "/pages/book-export/index?projectId=project%2F1&action=preview",
     "/pages/book-export/index?projectId=project%2F1&action=reading_pdf",
   ]);
-  delete global.wx;
 });
 
 test("book page switches between chapter work and secondary tools", () => {
@@ -516,7 +482,6 @@ test("book page excludes hidden chapters from full-book generation readiness", (
   assert.equal(context.data.allChaptersConfirmed, true);
   assert.equal(context.data.canGenerateBook, true);
   assert.equal(context.data.progressText, "1/1 章已确认，1 章已有正文");
-  delete global.wx;
 });
 
 test("book page stores only the full-book summary needed by the home view", () => {
@@ -566,7 +531,6 @@ test("book page stays on the book tab when login is required", async () => {
   assert.equal(context.data.projectTitle, "我的回忆录");
   assert.equal(context.data.progressText, "登录后可以开始整理");
   assert.deepEqual(switches, []);
-  delete global.wx;
 });
 
 test("book page asks logged-in users to create a memoir before loading book content", async () => {
@@ -741,7 +705,6 @@ test("book page confirms chapters with trimmed user edits and original source re
   assert.equal("summary" in submissions[0].data.chapters[0], false);
   assert.equal(submissions[0].data.chapters[0].source_refs[0].utterance_id, "utterance-1");
   assert.equal(context.data.stage, "drafting");
-  delete global.wx;
 });
 
 test("book page renames a confirmed chapter manually or through AI", async () => {
@@ -803,7 +766,6 @@ test("book page renames a confirmed chapter manually or through AI", async () =>
   });
   assert.equal(context.data.chapters[0].title, "外婆院中的日子");
   assert.equal(context.data.titleBusyTarget, "");
-  delete global.wx;
 });
 
 test("book page reorders chapters through structure command", async () => {
@@ -861,7 +823,6 @@ test("book page reorders chapters through structure command", async () => {
   assert.equal(context.data.bookOutput.is_stale, true);
   assert.deepEqual(context.data.bookOutput.stale_chapter_titles, ["第一次离家", "外婆家的童年"]);
   assert.equal(context.data.bookActionText, "更新书稿");
-  delete global.wx;
 });
 
 test("book page restores chapter order when structure save fails", async () => {
@@ -883,7 +844,6 @@ test("book page restores chapter order when structure save fails", async () => {
   assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
   assert.equal(context.data.error, "保存顺序失败");
   assert.equal(context.data.updatingPlanStructure, false);
-  delete global.wx;
 });
 
 test("book page splits selected chapter sources into a new chapter", async () => {
@@ -932,7 +892,6 @@ test("book page splits selected chapter sources into a new chapter", async () =>
     utterance_ids: ["utterance-3"],
   });
   assert.equal(context.data.splitSourceSelections["chapter-1"], undefined);
-  delete global.wx;
 });
 
 test("book page merges chapters and directs the user back to the workspace", async () => {
@@ -979,7 +938,6 @@ test("book page merges chapters and directs the user back to the workspace", asy
   });
   assert.equal(context.data.chapters[0].title, "童年里的离别");
   assert.equal(context.data.chapters[0].draftError, "章节已合并，请进入章节工作台重新整理正文");
-  delete global.wx;
 });
 
 test("book page assembles confirmed chapter drafts and updates the full-book projection", async () => {
@@ -1039,7 +997,6 @@ test("book page assembles confirmed chapter drafts and updates the full-book pro
   });
   assert.equal(context.data.generatingBook, false);
   assert.equal(context.data.bookContent, "全书第二版正文");
-  delete global.wx;
 });
 
 test("book page shows assembly errors without leaving the page busy", async () => {
@@ -1061,7 +1018,6 @@ test("book page shows assembly errors without leaving the page busy", async () =
 
   assert.equal(context.data.error, "request:fail network");
   assert.equal(context.data.generatingBook, false);
-  delete global.wx;
 });
 
 test("book page sends TTS voice and speed for chapter, outline, and full-book audio", async () => {
@@ -1176,5 +1132,4 @@ test("book page shows chapter narration toast after preflight passes", async () 
   await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });
 
   assert.deepEqual(toasts, ["正在准备朗读"]);
-  delete global.wx;
 });

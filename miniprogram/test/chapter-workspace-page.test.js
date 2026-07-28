@@ -4,7 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function summary(overrides = {}) {
   return {
@@ -221,9 +226,7 @@ function loadWorkspacePage({
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
   });
   mockModule("../services/memoir-voice-search.ts", {
-    recordMemoirVoiceSearchQuery: async () => {
-      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
-    },
+    recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
@@ -342,7 +345,6 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
   );
-  delete global.wx;
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {
@@ -377,7 +379,6 @@ test("chapter workspace accepts a refresh started after cache invalidation", asy
   assert.equal(loadCount, 2);
   assert.equal(context.data.workspace.pending_assignment_material_count, 1);
   assert.equal(context.data.nextAction.kind, "review_draft");
-  delete global.wx;
 });
 
 test("chapter workspace keeps draft bodies collapsed until the selected section is opened", async () => {
@@ -398,7 +399,6 @@ test("chapter workspace keeps draft bodies collapsed until the selected section 
     currentTarget: { dataset: { id: "section-1" } },
   });
   assert.equal(context.data.draftSectionViews[0].expanded, false);
-  delete global.wx;
 });
 
 test("chapter workspace serializes mutations through one operation state", () => {
@@ -444,7 +444,6 @@ test("chapter workspace serializes mutations through one operation state", () =>
     "revise_draft_section_with_ai",
     "section-1",
   );
-  delete global.wx;
 });
 
 test("chapter workspace blocks row actions while another operation is active", async () => {
@@ -474,7 +473,6 @@ test("chapter workspace blocks row actions while another operation is active", a
   assert.equal(context.data.editingSectionId, "");
   assert.equal(modals.length, 0);
   assert.deepEqual(ttsRequests, []);
-  delete global.wx;
 });
 
 test("chapter workspace protects unsaved edits before returning to the book flow", () => {
@@ -506,7 +504,6 @@ test("chapter workspace protects unsaved edits before returning to the book flow
 
   page.returnToBookFlow.call(context);
   assert.deepEqual(tabNavigations, ["/pages/book/index"]);
-  delete global.wx;
 });
 
 test("chapter workspace expands materials under their section", async () => {
@@ -527,7 +524,6 @@ test("chapter workspace expands materials under their section", async () => {
     context.data.sectionViews[0].visibleMaterials[0].text,
     "十八岁那年，我第一次离开家。",
   );
-  delete global.wx;
 });
 
 test("confirmed chapter can reopen its structure and merge with the previous section", async () => {
@@ -587,7 +583,6 @@ test("confirmed chapter can reopen its structure and merge with the previous sec
   assert.deepEqual(calls, [["project-1", "section-1", "section-2"]]);
   assert.equal(modals.at(-1).title, "与上一小节合并？");
   assert.equal(toasts.at(-1).title, "小节已合并");
-  delete global.wx;
 });
 
 test("chapter workspace regenerates the current section structure after confirmation", async () => {
@@ -636,7 +631,6 @@ test("chapter workspace regenerates the current section structure after confirma
   assert.equal(toasts.at(-1).title, "已整理为2个小节");
   assert.equal(context.data.operationKind, "");
   assert.equal(context.data.sectionRegenerationJob, null);
-  delete global.wx;
 });
 
 test("chapter workspace resumes and cancels an active section regeneration job", async () => {
@@ -675,7 +669,6 @@ test("chapter workspace resumes and cancels an active section regeneration job",
   assert.equal(context.data.operationKind, "");
   assert.equal(context.data.sectionRegenerationJob, null);
   assert.equal(toasts.at(-1).title, "已取消整理");
-  delete global.wx;
 });
 
 test("section regeneration opens pending material instead of running a stale next action", async () => {
@@ -743,7 +736,6 @@ test("section regeneration opens pending material instead of running a stale nex
   assert.equal(context.data.structureExpanded, true);
   assert.equal(context.data.sectionViews.at(-1).expanded, true);
   assert.equal(scrolls.at(-1), "#chapter-structure");
-  delete global.wx;
 });
 
 test("chapter workspace keeps pending materials optional and opens their editor", async () => {
@@ -812,7 +804,6 @@ test("chapter workspace keeps pending materials optional and opens their editor"
   ]]);
   assert.equal(toasts.at(-1).title, "已选择小节");
   assert.equal(context.data.operationKind, "");
-  delete global.wx;
 });
 
 test("chapter workspace creates a small section while assigning pending material", async () => {
@@ -852,7 +843,6 @@ test("chapter workspace creates a small section while assigning pending material
     },
   ]]);
   assert.equal(toasts.at(-1).title, "已新建小节");
-  delete global.wx;
 });
 
 test("chapter workspace confirms the current completion issue then prepares again", async () => {
@@ -902,7 +892,6 @@ test("chapter workspace confirms the current completion issue then prepares agai
     }],
     ["prepare", "project-1", "chapter-1", "prepare"],
   ]);
-  delete global.wx;
 });
 
 test("chapter workspace separates optional suggestions from required decisions", async () => {
@@ -953,7 +942,6 @@ test("chapter workspace separates optional suggestions from required decisions",
     context.data.optionalIssues[0].reason,
     "补充第1小节“离家前的准备”之后的感受会让这一段更丰富。",
   );
-  delete global.wx;
 });
 
 test("chapter workspace edits one small section with optimistic version control", async () => {
@@ -1009,7 +997,6 @@ test("chapter workspace edits one small section with optimistic version control"
     },
   ]]);
   assert.equal(toasts[0].title, "小节已保存");
-  delete global.wx;
 });
 
 test("chapter workspace sends a typed instruction to edit one draft section", async () => {
@@ -1063,7 +1050,6 @@ test("chapter workspace sends a typed instruction to edit one draft section", as
   assert.equal(context.data.editingSectionId, "");
   assert.equal(context.data.draftSectionAIInstruction, "");
   assert.equal(context.data.draftSectionVoicePhase, "idle");
-  delete global.wx;
 });
 
 test("chapter workspace keeps the instruction when AI makes no change", async () => {
@@ -1096,7 +1082,6 @@ test("chapter workspace keeps the instruction when AI makes no change", async ()
   assert.match(context.data.error, /没有改动/);
   assert.deepEqual(toasts, []);
   assert.equal(context.data.operationKind, "");
-  delete global.wx;
 });
 
 test("chapter workspace transcribes a voice instruction before editing one section", async () => {
@@ -1156,7 +1141,6 @@ test("chapter workspace transcribes a voice instruction before editing one secti
   ]]);
   assert.equal(context.data.editingMode, "");
   assert.equal(context.data.draftSectionVoicePhase, "idle");
-  delete global.wx;
 });
 
 test("chapter workspace reads one draft section with saved book voice settings", async () => {
@@ -1209,7 +1193,6 @@ test("chapter workspace reads one draft section with saved book voice settings",
   assert.deepEqual(played, [["audio-1", 2], ["audio-2", 2]]);
   assert.equal(context.data.audioPhase, "idle");
   assert.equal(context.data.audioTarget, "");
-  delete global.wx;
 });
 
 test("chapter workspace reads the full chapter with saved book voice settings", async () => {
@@ -1262,7 +1245,6 @@ test("chapter workspace reads the full chapter with saved book voice settings", 
   ]);
   assert.equal(context.data.audioPhase, "idle");
   assert.equal(context.data.audioTarget, "");
-  delete global.wx;
 });
 
 test("chapter workspace does not confirm a legacy flat draft without section boundaries", async () => {
@@ -1278,7 +1260,6 @@ test("chapter workspace does not confirm a legacy flat draft without section bou
   });
 
   assert.equal(context.data.canConfirmChapter, false);
-  delete global.wx;
 });
 
 test("legacy flat draft exposes direct section draft regeneration when ready", async () => {
@@ -1328,7 +1309,6 @@ test("legacy flat draft exposes direct section draft regeneration when ready", a
   assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
-  delete global.wx;
 });
 
 test("chapter rewrite reports persisted section progress at its action surface", async () => {
@@ -1366,7 +1346,6 @@ test("chapter rewrite reports persisted section progress at its action surface",
   assert.equal(context.data.chapterPreparationProgress, 33);
   assert.equal(context.data.chapterPreparationProgressMode, "determinate");
   page.onUnload.call(context);
-  delete global.wx;
 });
 
 test("chapter workspace does not confirm a draft after its section structure changes", async () => {
@@ -1385,7 +1364,6 @@ test("chapter workspace does not confirm a draft after its section structure cha
   });
 
   assert.equal(context.data.canConfirmChapter, false);
-  delete global.wx;
 });
 
 test("chapter workspace explains that an old draft is preserved after regrouping", async () => {
@@ -1415,7 +1393,6 @@ test("chapter workspace explains that an old draft is preserved after regrouping
     context.data.rewriteNoticeDetail,
     /当前 1 个素材或结构发生变化的小节/,
   );
-  delete global.wx;
 });
 
 test("chapter workspace confirms the current structured draft without an assembly step", async () => {
@@ -1433,7 +1410,6 @@ test("chapter workspace confirms the current structured draft without an assembl
 
   assert.deepEqual(calls, [["project-1", "chapter-1"]]);
   assert.equal(toasts[0].title, "本章正文已确认");
-  delete global.wx;
 });
 
 test("required review keeps an existing draft from being confirmed", async () => {
@@ -1463,7 +1439,6 @@ test("required review keeps an existing draft from being confirmed", async () =>
 
   assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
   assert.equal(context.data.canConfirmChapter, false);
-  delete global.wx;
 });
 
 test("chapter workspace can rewrite while optional suggestions remain open", async () => {
@@ -1552,5 +1527,4 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   assert.equal(context.data.chapterPreparationTitle, "正文更新任务已排队");
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
-  delete global.wx;
 });

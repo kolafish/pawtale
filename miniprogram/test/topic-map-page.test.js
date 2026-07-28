@@ -4,7 +4,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  unmockedAsync,
+} = require("./page-harness");
 
 function topicMapFixture() {
   return {
@@ -55,18 +59,14 @@ function loadTopicMapPage({
 } = {}) {
   mockModule("../services/memoir-topic-map-api.ts", {
     getMemoirTopicMap: async () => topicMapFixture(),
-    updateMemoirTopicMapResolution: async () => {
-      throw new Error("updateMemoirTopicMapResolution was not mocked");
-    },
+    updateMemoirTopicMapResolution: unmockedAsync("updateMemoirTopicMapResolution"),
     ...apiExports,
   });
   mockModule("../services/accessibility-settings.ts", {
     readLargeTextEnabled: () => false,
   });
   mockModule("../services/memoir-voice-session-api.ts", {
-    createMemoirVoiceSession: async () => {
-      throw new Error("createMemoirVoiceSession was not mocked");
-    },
+    createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     ...voiceApiExports,
   });
   mockModule("../services/voice-authorization.ts", {
@@ -154,7 +154,6 @@ test("starting from a topic creates an explicitly anchored guided session", asyn
   assert.equal(created[0].options.projectId, "project-1");
   assert.match(navigations[0], /voiceSessionId=voice-1/);
   assert.match(navigations[0], /mode=guided_interview/);
-  delete global.wx;
 });
 
 test("starting from a topic waits for voice authorization", async () => {
@@ -193,7 +192,6 @@ test("starting from a topic waits for voice authorization", async () => {
 
   assert.equal(created, false);
   assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
-  delete global.wx;
 });
 
 test("saving a resolution updates only the selected topic", async () => {
@@ -242,5 +240,4 @@ test("saving a resolution updates only the selected topic", async () => {
   assert.equal(context.data.modules[0].items[0].state_text, "目前讲这些就够了");
   assert.equal(context.data.modules[0].items[1].state_text, "不想聊这个");
   assert.equal(toasts[0].title, "已保存");
-  delete global.wx;
 });
