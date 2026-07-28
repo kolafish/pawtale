@@ -698,6 +698,7 @@ test("book service APIs encode backend routes and selected AI model", async () =
     { call: () => api.getMemoirBookCompletionJob("project/1"), method: "GET", url: `${narrativeBase}/book-completion/jobs/current` },
     { call: () => api.cancelMemoirBookCompletionJob("project/1", "job/1"), method: "DELETE", url: `${narrativeBase}/book-completion/jobs/job%2F1` },
     { call: () => api.getMemoirBookOutput("project/1"), method: "GET", url: `${base}/book-output` },
+    { call: () => api.getMemoirBookOutputVersion("project/1", "version/1"), method: "GET", url: `${base}/book-output/versions/version%2F1` },
     { call: () => api.updateMemoirBookOutput("project/1", { title: "外婆慢慢说", cover_style: "warm_gray" }), method: "PATCH", url: `${base}/book-output`, data: { title: "外婆慢慢说", cover_style: "warm_gray" } },
     { call: () => api.suggestMemoirBookOutputTitles("project/1", { count: 4 }), method: "POST", url: `${base}/book-output/title-suggestions`, data: { count: 4, ai_model: selectedModel } },
     { call: () => api.enqueueMemoirBookOutputEditorialCopyGeneration("project/1", { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然" }), method: "POST", url: `${base}/book-output/editorial-copy/regenerate/jobs`, data: { targets: ["preface"], chapter_ids: ["chapter/1"], feedback: "更自然", ai_model: selectedModel } },

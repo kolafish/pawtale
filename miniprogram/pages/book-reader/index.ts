@@ -1,11 +1,13 @@
 import type {
   MemoirBookAudioResponse,
   MemoirBookOutput,
+  MemoirBookOutputVersion,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
 import {
   createMemoirBookOutputTTS,
   getMemoirBookOutput,
+  getMemoirBookOutputVersion,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import { AudioPlaybackController } from "../../services/audio-playback";
@@ -35,7 +37,6 @@ import {
 
 type BookReaderData = Pick<
   BookData,
-  | "bookOutput"
   | "bookContent"
   | "bookCharCount"
   | "bookPreviewTitle"
@@ -69,9 +70,11 @@ function scrollReader(options: { selector?: string; scrollTop?: number }) {
   }
 }
 
-function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
+function readerData(
+  output: MemoirBookOutput | null,
+  version: MemoirBookOutputVersion | null = null,
+): Pick<
   BookReaderData,
-  | "bookOutput"
   | "bookContent"
   | "bookCharCount"
   | "bookPreviewTitle"
@@ -86,14 +89,13 @@ function readerData(output: MemoirBookOutput | null, versionId = ""): Pick<
   | "readerTitle"
   | "readerSubtitle"
 > {
-  const data = bookOutputData(output, versionId);
+  const data = bookOutputData(output, version);
   const readerTitle = (
     trimText(data.bookManuscriptTitle)
     || trimText(data.bookPreviewTitle)
     || "家庭回忆录"
   );
   return {
-    bookOutput: data.bookOutput,
     bookContent: data.bookContent,
     bookCharCount: data.bookCharCount,
     bookPreviewTitle: data.bookPreviewTitle,
@@ -249,7 +251,11 @@ definePage<BookReaderData>()({
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const output = await getMemoirBookOutput(projectId);
-      this.setData(readerData(output, versionId));
+      const latestVersion = output.latest_version || null;
+      const version = versionId && versionId !== latestVersion?.id
+        ? await getMemoirBookOutputVersion(projectId, versionId)
+        : latestVersion;
+      this.setData(readerData(output, version));
       if (!trimText(this.data.bookContent)) {
         this.setData({ error: "这本书还没有生成成书内容。" });
       }

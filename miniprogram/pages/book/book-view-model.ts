@@ -8,6 +8,7 @@ import type {
   MemoirBookOutput,
   MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
+  MemoirBookOutputVersionSummary,
   MemoirBookPlan,
   MemoirBookPlanChapter,
   MemoirBookPlanChapterInput,
@@ -487,7 +488,7 @@ export function latestBookContent(output: MemoirBookOutput | null): string {
   return output?.latest_version?.content || "";
 }
 
-export function bookOutputVersions(output: MemoirBookOutput | null): MemoirBookOutputVersion[] {
+export function bookOutputVersions(output: MemoirBookOutput | null): MemoirBookOutputVersionSummary[] {
   if (!output) {
     return [];
   }
@@ -503,17 +504,16 @@ export function bookOutputVersions(output: MemoirBookOutput | null): MemoirBookO
 
 export function selectedBookOutputVersion(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): MemoirBookOutputVersion | null {
-  const versions = bookOutputVersions(output);
-  if (!versions.length) {
-    return null;
-  }
-  return versions.find((version) => version.id === selectedVersionId) || versions[0];
+  return selectedVersion || output?.latest_version || null;
 }
 
-export function selectedBookContent(output: MemoirBookOutput | null, selectedVersionId = ""): string {
-  return selectedBookOutputVersion(output, selectedVersionId)?.content || "";
+export function selectedBookContent(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): string {
+  return selectedBookOutputVersion(output, selectedVersion)?.content || "";
 }
 
 function bookOutputLatestVersionId(output: MemoirBookOutput | null): string {
@@ -522,7 +522,7 @@ function bookOutputLatestVersionId(output: MemoirBookOutput | null): string {
 
 export function bookVersionOptions(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): {
   options: BookOutputVersionOptionView[];
   selectedId: string;
@@ -531,7 +531,7 @@ export function bookVersionOptions(
 } {
   const versions = bookOutputVersions(output);
   const latestId = bookOutputLatestVersionId(output);
-  const selected = selectedBookOutputVersion(output, selectedVersionId);
+  const selected = selectedBookOutputVersion(output, selectedVersion);
   const selectedId = selected?.id || "";
   const options = versions.map((version) => {
     const createdAtText = version.created_at ? formatBeijingDateTimeShort(version.created_at) : "";
@@ -563,14 +563,17 @@ function bookOralSourceCountText(count: number): string {
 
 export function bookOutputPreviewTitle(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): string {
-  const version = selectedBookOutputVersion(output, selectedVersionId);
-  return trimText(version?.structured_content?.title || output?.title || "");
+  const version = selectedBookOutputVersion(output, selectedVersion);
+  return trimText(version?.manuscript?.profile.title || output?.title || "");
 }
 
-export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVersionId = ""): BookOutputTocView[] {
-  const toc = selectedBookOutputVersion(output, selectedVersionId)?.structured_content?.table_of_contents || [];
+export function bookOutputTocItems(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): BookOutputTocView[] {
+  const toc = selectedBookOutputVersion(output, selectedVersion)?.manuscript?.table_of_contents || [];
   return toc
     .filter((item) => item.chapter_id && item.title)
     .map((item, index) => {
@@ -610,15 +613,15 @@ export function bookOutputTocItems(output: MemoirBookOutput | null, selectedVers
 
 export function bookOutputChapterPreviews(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookOutputChapterPreviewView[] {
-  const chapters = selectedBookOutputVersion(output, selectedVersionId)?.structured_content?.chapters || [];
+  const chapters = selectedBookOutputVersion(output, selectedVersion)?.manuscript?.chapters || [];
   return chapters
     .filter((chapter) => chapter.chapter_id && chapter.title && trimText(chapter.content))
     .map((chapter, index) => {
       const chapterIndex = responseCount(chapter.index) || index + 1;
-      const charCount = responseCount(chapter.char_count) || trimText(chapter.content).length;
-      const sourceCount = responseCount(chapter.source_count);
+      const charCount = trimText(chapter.content).length;
+      const sourceCount = chapter.source_refs?.length || 0;
       const sections = (chapter.sections || [])
         .filter((section) => section.section_id && trimText(section.title) && trimText(section.content))
         .map((section, sectionOffset) => {
@@ -638,7 +641,6 @@ export function bookOutputChapterPreviews(
             ].join(" · "),
           };
         });
-      const versionText = responseCount(chapter.draft_version) ? `已修改 ${chapter.draft_version} 次` : "";
       return {
         id: `${chapter.chapter_id}:${chapterIndex}`,
         chapterId: chapter.chapter_id,
@@ -647,14 +649,17 @@ export function bookOutputChapterPreviews(
         title: trimText(chapter.title),
         content: trimText(chapter.content),
         excerpt: previewText(chapter.content, 96),
-        metaText: [`${charCount} 字`, bookSourceCountText(sourceCount), versionText].filter(Boolean).join(" · "),
+        metaText: [`${charCount} 字`, bookSourceCountText(sourceCount)].join(" · "),
         sections,
       };
     });
 }
 
-function selectedBookManuscript(output: MemoirBookOutput | null, selectedVersionId = ""): MemoirBookManuscript | null {
-  return selectedBookOutputVersion(output, selectedVersionId)?.manuscript || null;
+function selectedBookManuscript(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): MemoirBookManuscript | null {
+  return selectedBookOutputVersion(output, selectedVersion)?.manuscript || null;
 }
 
 function manuscriptFrontSectionContent(manuscript: MemoirBookManuscript | null, kind: string): string {
@@ -741,10 +746,10 @@ function manuscriptSettingsText(manuscript: MemoirBookManuscript | null): string
 
 function fallbackManuscriptStructureItems(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookManuscriptStructureItemView[] {
-  const tocItems = bookOutputTocItems(output, selectedVersionId);
-  const chapters = bookOutputChapterPreviews(output, selectedVersionId);
+  const tocItems = bookOutputTocItems(output, selectedVersion);
+  const chapters = bookOutputChapterPreviews(output, selectedVersion);
   if (!tocItems.length && !chapters.length) {
     return [];
   }
@@ -758,10 +763,10 @@ function fallbackManuscriptStructureItems(
 function manuscriptStructureItems(
   manuscript: MemoirBookManuscript | null,
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookManuscriptStructureItemView[] {
   if (!manuscript) {
-    return fallbackManuscriptStructureItems(output, selectedVersionId);
+    return fallbackManuscriptStructureItems(output, selectedVersion);
   }
   const frontMatter = (manuscript.front_matter || []).map((section, index) => ({
     id: `front:${section.kind}:${index}`,
@@ -796,10 +801,10 @@ function manuscriptStructureItems(
 function manuscriptChapterViews(
   manuscript: MemoirBookManuscript | null,
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): BookManuscriptChapterView[] {
   if (!manuscript) {
-    return bookOutputChapterPreviews(output, selectedVersionId).map((chapter) => ({
+    return bookOutputChapterPreviews(output, selectedVersion).map((chapter) => ({
       id: `fallback:${chapter.id}`,
       chapterId: chapter.chapterId,
       indexText: chapter.indexText,
@@ -848,7 +853,7 @@ function manuscriptChapterViews(
 
 export function bookManuscriptData(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): Pick<
   BookData,
   | "bookManuscriptAvailable"
@@ -861,10 +866,10 @@ export function bookManuscriptData(
   | "bookManuscriptChapterItems"
   | "bookManuscriptBackMatterItems"
 > {
-  const manuscript = selectedBookManuscript(output, selectedVersionId);
-  const fallbackTitle = bookOutputPreviewTitle(output, selectedVersionId);
-  const structureItems = manuscriptStructureItems(manuscript, output, selectedVersionId);
-  const chapterItems = manuscriptChapterViews(manuscript, output, selectedVersionId);
+  const manuscript = selectedBookManuscript(output, selectedVersion);
+  const fallbackTitle = bookOutputPreviewTitle(output, selectedVersion);
+  const structureItems = manuscriptStructureItems(manuscript, output, selectedVersion);
+  const chapterItems = manuscriptChapterViews(manuscript, output, selectedVersion);
   return {
     bookManuscriptAvailable: Boolean(manuscript || structureItems.length || chapterItems.length),
     bookManuscriptTitle: trimText(manuscript?.profile.title || fallbackTitle),
@@ -882,8 +887,11 @@ export function bookManuscriptData(
   };
 }
 
-function selectedBookCoverStyle(output: MemoirBookOutput | null, selectedVersionId = ""): MemoirBookCoverStyle {
-  const manuscript = selectedBookManuscript(output, selectedVersionId);
+function selectedBookCoverStyle(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): MemoirBookCoverStyle {
+  const manuscript = selectedBookManuscript(output, selectedVersion);
   const style = manuscript?.render_settings?.cover_style;
   const option = BOOK_COVER_STYLE_OPTIONS.find((candidate) => candidate.value === style);
   return option ? option.value : "classic_plain";
@@ -891,7 +899,7 @@ function selectedBookCoverStyle(output: MemoirBookOutput | null, selectedVersion
 
 export function bookCoverStyleData(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): Pick<
   BookData,
   | "bookCoverStyle"
@@ -902,7 +910,7 @@ export function bookCoverStyleData(
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
 > {
-  const style = selectedBookCoverStyle(output, selectedVersionId);
+  const style = selectedBookCoverStyle(output, selectedVersion);
   const index = Math.max(0, BOOK_COVER_STYLE_OPTIONS.findIndex((option) => option.value === style));
   const option = BOOK_COVER_STYLE_OPTIONS[index] || BOOK_COVER_STYLE_OPTIONS[0];
   return {
@@ -918,7 +926,7 @@ export function bookCoverStyleData(
 
 function bookMetadataInputData(
   output: MemoirBookOutput | null,
-  selectedVersionId = "",
+  selectedVersion: MemoirBookOutputVersion | null = null,
 ): Pick<
   BookData,
   | "bookSubtitleInput"
@@ -929,7 +937,7 @@ function bookMetadataInputData(
   | "bookBackCoverQuoteInput"
   | "bookMetadataChanged"
 > {
-  const manuscript = selectedBookManuscript(output, selectedVersionId);
+  const manuscript = selectedBookManuscript(output, selectedVersion);
   return {
     bookSubtitleInput: trimText(manuscript?.profile.subtitle || ""),
     bookNarratorNameInput: trimText(manuscript?.profile.narrator_name || ""),
@@ -946,8 +954,11 @@ export function bookOutputVersionText(output: MemoirBookOutput | null): string {
   return version ? `已修改 ${version} 次` : "尚未生成全书";
 }
 
-function selectedBookOutputVersionText(output: MemoirBookOutput | null, selectedVersionId = ""): string {
-  const selected = selectedBookOutputVersion(output, selectedVersionId);
+function selectedBookOutputVersionText(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): string {
+  const selected = selectedBookOutputVersion(output, selectedVersion);
   return selected ? `已修改 ${selected.version} 次` : "尚未生成全书";
 }
 
@@ -980,9 +991,11 @@ function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: b
   return "";
 }
 
-export function bookOutputData(output: MemoirBookOutput | null, selectedVersionId = ""): Pick<
+export function bookOutputData(
+  output: MemoirBookOutput | null,
+  selectedVersion: MemoirBookOutputVersion | null = null,
+): Pick<
   BookData,
-  | "bookOutput"
   | "bookContent"
   | "bookCharCount"
   | "bookPreviewTitle"
@@ -1024,18 +1037,17 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
 > {
-  const versionState = bookVersionOptions(output, selectedVersionId);
-  const content = selectedBookContent(output, versionState.selectedId);
-  const manuscriptData = bookManuscriptData(output, versionState.selectedId);
+  const versionState = bookVersionOptions(output, selectedVersion);
+  const content = selectedBookContent(output, selectedVersion);
+  const manuscriptData = bookManuscriptData(output, selectedVersion);
   return {
-    bookOutput: output,
     bookContent: content,
     bookCharCount: trimText(content).length,
-    bookPreviewTitle: bookOutputPreviewTitle(output, versionState.selectedId),
-    bookPreviewTocItems: bookOutputTocItems(output, versionState.selectedId),
-    bookPreviewChapters: bookOutputChapterPreviews(output, versionState.selectedId),
+    bookPreviewTitle: bookOutputPreviewTitle(output, selectedVersion),
+    bookPreviewTocItems: bookOutputTocItems(output, selectedVersion),
+    bookPreviewChapters: bookOutputChapterPreviews(output, selectedVersion),
     ...manuscriptData,
-    bookVersionText: selectedBookOutputVersionText(output, versionState.selectedId),
+    bookVersionText: selectedBookOutputVersionText(output, selectedVersion),
     bookVersionOptions: versionState.options,
     bookSelectedVersionId: versionState.selectedId,
     bookSelectedVersionIndex: versionState.selectedIndex,
@@ -1043,14 +1055,14 @@ export function bookOutputData(output: MemoirBookOutput | null, selectedVersionI
     bookVersionNotice: bookVersionNotice(output, versionState.viewingHistorical),
     bookStaleNotice: bookOutputStaleNotice(output),
     bookActionText: bookActionText(output),
-    bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, versionState.selectedId),
-    ...bookMetadataInputData(output, versionState.selectedId),
+    bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, selectedVersion),
+    ...bookMetadataInputData(output, selectedVersion),
     bookTitleChanged: false,
     bookDesignSaveStatusText: output?.latest_version
       ? (versionState.viewingHistorical ? "切回最新版后自动保存" : "已保存")
       : "生成时应用",
     bookTitleSuggestions: [],
-    ...bookCoverStyleData(output, versionState.selectedId),
+    ...bookCoverStyleData(output, selectedVersion),
   };
 }
 

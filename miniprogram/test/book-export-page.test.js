@@ -12,7 +12,6 @@ const {
   sampleBookOutput: baseSampleBookOutput,
   sampleBookOutputVersion: baseSampleBookOutputVersion,
   samplePlan: baseSamplePlan,
-  sampleStructuredBookContent,
 } = require("./book-fixtures");
 
 function samplePlan(status = "confirmed") {
@@ -32,7 +31,6 @@ function sampleBookOutputVersion(
   return baseSampleBookOutputVersion(
     version,
     content,
-    sampleStructuredBookContent({ chapterCount: 1 }),
     createdAt,
     manuscript,
   );
@@ -40,11 +38,21 @@ function sampleBookOutputVersion(
 
 function sampleBookOutput() {
   const latestVersion = sampleBookOutputVersion(2, "全书第二版正文");
+  const historicalVersion = sampleBookOutputVersion(
+    1,
+    "全书第一版正文",
+    "2026-06-16T00:00:00.000Z",
+  );
   return {
-    ...baseSampleBookOutput(2, "全书第二版正文", false, [], latestVersion.structured_content, [
-      sampleBookOutputVersion(1, "全书第一版正文", "2026-06-16T00:00:00.000Z"),
+    ...baseSampleBookOutput(2, "全书第二版正文", false, [], [
+      historicalVersion,
       latestVersion,
-    ], latestVersion.manuscript),
+    ].map(({ id, version, created_by, created_at }) => ({
+      id,
+      version,
+      created_by,
+      created_at,
+    })), latestVersion.manuscript),
     latest_version: latestVersion,
   };
 }
@@ -53,6 +61,7 @@ function loadBookExportPage(voiceApiExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookPlan: async () => samplePlan(),
     getMemoirBookOutput: async () => sampleBookOutput(),
+    getMemoirBookOutputVersion: async () => sampleBookOutputVersion(1, "全书第一版正文"),
     downloadMemoirBookOutputExport: async () => "/tmp/book.pdf",
     suggestMemoirBookOutputTitles: async () => ({ suggestions: [] }),
     assembleMemoirBookOutput: async () => undefined,
@@ -114,6 +123,9 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.bookManuscriptStructureItems.some((item) => item.title === "目录"), true);
   assert.equal(context.data.bookManuscriptChapterItems[0].intro, "这一章主要记录外婆小时候在院子里的生活。");
   assert.equal(context.data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
+  assert.equal("bookOutput" in context.data, false);
+  assert.equal("plan" in context.data, false);
+  assert.equal("chapters" in context.data, false);
 });
 
 test("book export opens book settings when linked from whole-book review", async () => {
@@ -147,6 +159,38 @@ test("book export opens book settings when linked from whole-book review", async
 
   assert.equal(context.data.showBookSettings, true);
   assert.equal(context.data.bookEditorialCopyEventItem.statusText, "已完成");
+  assert.equal(outputLoads, 1);
+});
+
+test("book export refreshes when an initial completed event is newer than the loaded output", async () => {
+  const output = sampleBookOutput();
+  output.updated_at = "2026-06-17T00:00:00.000Z";
+  const completedEvent = sampleAutomationEvent({
+    event_type: "book_editorial_copy_generated",
+    status: "completed",
+    chapter_id: null,
+    updated_at: "2026-06-17T00:01:00.000Z",
+  });
+  let outputLoads = 0;
+  const { page } = loadBookExportPage({
+    getMemoirBookPlan: async () => samplePlan(),
+    getMemoirBookOutput: async () => {
+      outputLoads += 1;
+      return output;
+    },
+    listMemoirAutomationEvents: async () => ({
+      items: [completedEvent],
+      total: 1,
+      limit: 20,
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    settings: "book",
+  });
+
   assert.equal(outputLoads, 2);
 });
 
@@ -449,7 +493,10 @@ test("book export page downloads selected PDF layout and source appendix setting
   });
   const context = pageContext(page, { projectId: "project/1" });
   page.applyBookExportData.call(context, samplePlan(), sampleBookOutput());
-  page.changeBookOutputVersion.call(context, { currentTarget: { dataset: {} }, detail: { value: "1" } });
+  await page.changeBookOutputVersion.call(
+    context,
+    { currentTarget: { dataset: {} }, detail: { value: "1" } },
+  );
   page.toggleBookExportSourceAppendix.call(context, {
     currentTarget: { dataset: {} },
     detail: { value: false },

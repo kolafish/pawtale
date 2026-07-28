@@ -6,10 +6,13 @@ const path = require("node:path");
 const test = require("node:test");
 const { loadPageModule, mockModule, pageContext } = require("./page-harness");
 
-const { sampleBookOutput, sampleStructuredBookContent } = require("./book-fixtures");
+const {
+  sampleBookManuscript,
+  sampleBookOutput,
+} = require("./book-fixtures");
 
 function sampleFinishedBook(content = "全书正文") {
-  return sampleBookOutput(1, content, false, [], sampleStructuredBookContent());
+  return sampleBookOutput(1, content, false, [], [], sampleBookManuscript());
 }
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
@@ -18,6 +21,9 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
       throw new Error("createMemoirBookOutputTTS was not mocked");
     },
     getMemoirBookOutput: async () => sampleFinishedBook(),
+    getMemoirBookOutputVersion: async () => {
+      throw new Error("getMemoirBookOutputVersion was not mocked");
+    },
     ...voiceApiExports,
   });
   mockModule("../services/tts-settings.ts", {
@@ -124,16 +130,21 @@ test("book reader jumps from the table of contents to a chapter and back to the 
 });
 
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {
-  const structured = sampleStructuredBookContent({ chapterCount: 1 });
-  structured.table_of_contents[0].sections = [];
-  structured.chapters[0].sections = [];
+  const manuscript = sampleBookManuscript(
+    "外婆回忆录",
+    "classic_plain",
+    { chapterCount: 1 },
+  );
+  manuscript.table_of_contents[0].sections = [];
+  manuscript.chapters[0].sections = [];
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: async () => sampleBookOutput(
       1,
       "旧版扁平正文",
       false,
       [],
-      structured,
+      [],
+      manuscript,
     ),
   });
   const context = pageContext(page);
@@ -158,8 +169,17 @@ test("book reader opens the version selected by the export flow", async () => {
   const { page } = loadBookReaderPage({
     getMemoirBookOutput: async () => ({
       ...latest,
-      versions: [historical, ...(latest.versions || [])],
+      versions: [
+        {
+          id: historical.id,
+          version: historical.version,
+          created_by: historical.created_by,
+          created_at: historical.created_at,
+        },
+        ...(latest.versions || []),
+      ],
     }),
+    getMemoirBookOutputVersion: async () => historical,
   });
   const context = pageContext(page);
 

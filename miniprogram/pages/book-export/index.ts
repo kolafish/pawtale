@@ -3,6 +3,7 @@ import type {
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
+  MemoirBookOutputVersion,
   MemoirBookPlan,
 } from "../../domain/voice-chat";
 import { definePage } from "../../services/page-definition";
@@ -11,6 +12,7 @@ import {
   assembleMemoirBookOutput,
   enqueueMemoirBookOutputEditorialCopyGeneration,
   getMemoirBookOutput,
+  getMemoirBookOutputVersion,
   getMemoirBookPlan,
   listMemoirAutomationEvents,
   suggestMemoirBookOutputTitles,
@@ -34,9 +36,6 @@ import {
 import {
   bookOutputData,
   buildAutomationEventViews,
-  buildChapterViews,
-  planStage,
-  stageText,
   trimText,
   type BookData,
   type BookAutomationEventView,
@@ -82,14 +81,8 @@ type BookExportData = Pick<
   | "loading"
   | "error"
   | "projectId"
-  | "plan"
   | "planTitle"
-  | "stage"
-  | "stageText"
-  | "chapters"
   | "totalChapterCount"
-  | "allChaptersConfirmed"
-  | "bookOutput"
   | "bookContent"
   | "bookCharCount"
   | "bookPreviewTitle"
@@ -141,6 +134,7 @@ type BookExportData = Pick<
   exportNotice: string;
   exportActionHintText: string;
   bookEditorialCopyEventItem: BookAutomationEventView | null;
+  bookOutputAvailable: boolean;
   showBookSettings: boolean;
 };
 
@@ -170,10 +164,8 @@ function exportActionHint(action: string): string {
 }
 
 function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | null): string {
-  const outputData = bookOutputData(output);
   return (
-    trimText(outputData.bookManuscriptTitle)
-    || trimText(outputData.bookPreviewTitle)
+    latestBookTitle(output)
     || trimText(plan?.title || "").replace("章节规划", "").replace("主题回忆录", "回忆录")
     || "家庭回忆录"
   );
@@ -183,18 +175,17 @@ definePage<BookExportData>()({
   bookDesignAutosaveTimer: null as number | null,
   bookEditorialCopyEvent: null as MemoirAutomationEvent | null,
   bookEditorialCopyPollTimer: null as number | null,
+  bookOutput: null as MemoirBookOutput | null,
+  bookOutputVersion: null as MemoirBookOutputVersion | null,
+  bookPlan: null as MemoirBookPlan | null,
 
   data: {
     loading: false,
     error: "",
     projectId: "",
-    plan: null,
     planTitle: "预览与导出",
-    stage: "empty",
-    stageText: "尚未整理",
-    chapters: [],
     totalChapterCount: 0,
-    allChaptersConfirmed: false,
+    bookOutputAvailable: false,
     bookPreviewChaptersExpanded: true,
     bookExportBusyTarget: "",
     bookExportShowSourceAppendix: true,
@@ -287,11 +278,13 @@ definePage<BookExportData>()({
         return;
       }
       this.applyBookEditorialCopyEvent(event);
-      const completedNow = event.status === "completed"
-        && (!previous || previous.status === "pending");
-      if (completedNow) {
+      const shouldReloadOutput = event.status === "completed" && (
+        previous?.status === "pending"
+        || (!previous && event.updated_at > (this.bookOutput?.updated_at || event.updated_at))
+      );
+      if (shouldReloadOutput) {
         const output = await this.loadBookOutput(this.data.projectId);
-        this.applyBookExportData(this.data.plan, output);
+        this.applyBookExportData(this.bookPlan, output);
       }
       if (previous?.status !== "pending" || event.status === "pending") {
         return;
@@ -348,21 +341,20 @@ definePage<BookExportData>()({
   },
 
   applyBookExportData(plan: MemoirBookPlan | null, output: MemoirBookOutput | null) {
-    const chapters = plan ? buildChapterViews(plan) : [];
-    const includedChapterCount = chapters.filter((chapter) => chapter.include_in_book !== false).length;
-    const stage = planStage(plan);
-    const outputData = bookOutputData(output);
+    this.bookPlan = plan;
+    this.bookOutput = output;
+    this.bookOutputVersion = output?.latest_version || null;
+    const includedChapterCount = (plan?.chapters || [])
+      .filter((chapter) => chapter.include_in_book !== false)
+      .length;
+    const outputData = bookOutputData(output, this.bookOutputVersion);
     if (!output && !outputData.bookTitleInput) {
       outputData.bookTitleInput = defaultTitle(plan, output);
     }
     this.setData({
-      plan,
       planTitle: defaultTitle(plan, output),
-      stage,
-      stageText: stageText(stage),
-      chapters,
       totalChapterCount: includedChapterCount,
-      allChaptersConfirmed: Boolean(output?.latest_version),
+      bookOutputAvailable: Boolean(output?.latest_version),
       ...outputData,
       bookPreviewChaptersExpanded: true,
       bookExportBusyTarget: "",
@@ -371,7 +363,7 @@ definePage<BookExportData>()({
 
   changeBookTitle(event: TextInputEvent) {
     const value = event.detail.value;
-    const storedTitle = latestBookTitle(this.data.bookOutput)
+    const storedTitle = latestBookTitle(this.bookOutput)
       || this.data.bookManuscriptTitle
       || this.data.bookPreviewTitle;
     this.setData({
@@ -399,7 +391,7 @@ definePage<BookExportData>()({
     const nextData = { ...this.data, [field]: value } as BookExportData;
     this.setData({
       [field]: value,
-      bookMetadataChanged: bookMetadataChanged(nextData),
+      bookMetadataChanged: bookMetadataChanged(nextData, this.bookOutput),
       error: "",
     });
     this.scheduleBookDesignAutosave();
@@ -436,7 +428,7 @@ definePage<BookExportData>()({
     if (!title) {
       return;
     }
-    const storedTitle = latestBookTitle(this.data.bookOutput)
+    const storedTitle = latestBookTitle(this.bookOutput)
       || this.data.bookManuscriptTitle
       || this.data.bookPreviewTitle;
     this.setData({
@@ -459,7 +451,7 @@ definePage<BookExportData>()({
       bookCoverStyleIndex: index,
       bookCoverStyleLabel: option.label,
       bookCoverStyleDetailText: option.detailText,
-      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.data.bookOutput),
+      bookCoverStyleChanged: option.value !== latestBookCoverStyle(this.bookOutput),
       error: "",
     });
     this.scheduleBookDesignAutosave();
@@ -467,8 +459,13 @@ definePage<BookExportData>()({
 
   scheduleBookDesignAutosave() {
     this.clearBookDesignAutosaveTimer();
-    if (!this.data.bookOutput?.latest_version || this.data.bookViewingHistoricalVersion) {
-      this.setData({ bookDesignSaveStatusText: bookDesignSaveStatusText(this.data) });
+    if (!this.bookOutput?.latest_version || this.data.bookViewingHistoricalVersion) {
+      this.setData({
+        bookDesignSaveStatusText: bookDesignSaveStatusText(
+          this.data,
+          this.data.bookOutputAvailable,
+        ),
+      });
       return;
     }
     if (!bookDesignHasChanges(this.data)) {
@@ -505,7 +502,7 @@ definePage<BookExportData>()({
     if (!this.data.projectId || this.data.bookTitleSaving) {
       return;
     }
-    if (!this.data.bookOutput?.latest_version) {
+    if (!this.bookOutput?.latest_version) {
       this.setData({ bookDesignSaveStatusText: "生成时应用" });
       return;
     }
@@ -539,7 +536,7 @@ definePage<BookExportData>()({
         back_cover_quote: metadata.back_cover_quote,
         cover_style: coverStyle,
       });
-      this.applyBookExportData(this.data.plan, output);
+      this.applyBookExportData(this.bookPlan, output);
       const option = this.data.bookCoverStyleOptions.find((candidate) => candidate.value === coverStyle)
         || this.data.bookCoverStyleOptions[0];
       this.setData({
@@ -600,7 +597,10 @@ definePage<BookExportData>()({
     if (!this.data.projectId || this.data.bookEditorialCopyBusyTarget || this.data.bookTitleSaving) {
       return;
     }
-    const blockedMessage = bookEditorialCopyBlockedMessage(this.data);
+    const blockedMessage = bookEditorialCopyBlockedMessage(
+      this.data,
+      this.data.bookOutputAvailable,
+    );
     if (blockedMessage) {
       this.setData({ error: blockedMessage });
       return;
@@ -655,7 +655,7 @@ definePage<BookExportData>()({
         ...metadata,
         cover_style: this.data.bookCoverStyle,
       });
-      this.applyBookExportData(this.data.plan, output);
+      this.applyBookExportData(this.bookPlan, output);
       this.setData({ exportNotice: "已根据各章确认正文更新全书稿。" });
       wx.showToast({ title: "书稿已更新", icon: "success" });
     } catch (error) {
@@ -668,16 +668,30 @@ definePage<BookExportData>()({
     }
   },
 
-  changeBookOutputVersion(event: PickerEvent) {
+  async changeBookOutputVersion(event: PickerEvent) {
     const index = pickerIndex(event);
     const option = this.data.bookVersionOptions[index];
-    if (!option || !this.data.bookOutput) {
+    if (!option || !this.bookOutput || !this.data.projectId) {
       return;
     }
-    this.setData({
-      ...bookOutputData(this.data.bookOutput, option.id),
-      bookPreviewChaptersExpanded: true,
-    });
+    this.setData({ bookExportBusyTarget: "book-version", error: "" });
+    try {
+      const version = option.isLatest
+        ? this.bookOutput.latest_version || null
+        : await getMemoirBookOutputVersion(this.data.projectId, option.id);
+      this.bookOutputVersion = version;
+      this.setData({
+        ...bookOutputData(this.bookOutput, version),
+        bookPreviewChaptersExpanded: true,
+      });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({ error: error instanceof Error ? error.message : "书稿版本加载失败" });
+    } finally {
+      this.setData({ bookExportBusyTarget: "" });
+    }
   },
 
   toggleBookExportSourceAppendix(event: SwitchEvent) {
@@ -733,7 +747,7 @@ definePage<BookExportData>()({
       this.setData({ error: "请先生成书稿" });
       return;
     }
-    if (this.data.bookOutput?.is_stale) {
+    if (this.bookOutput?.is_stale) {
       this.setData({ error: "章节内容已更新，请先更新书稿再导出" });
       return;
     }

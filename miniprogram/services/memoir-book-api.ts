@@ -12,6 +12,7 @@ import type {
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutputUpdateRequest,
+  MemoirBookOutputVersion,
   MemoirBookPlan,
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
@@ -306,6 +307,18 @@ export function createMemoirBookOutputTTS(
 
 export function getMemoirBookOutput(projectId: string): Promise<MemoirBookOutput> {
   return memoirRequest<MemoirBookOutput>(memoirProjectPath(projectId, "/book-output"));
+}
+
+export function getMemoirBookOutputVersion(
+  projectId: string,
+  versionId: string,
+): Promise<MemoirBookOutputVersion> {
+  return memoirRequest<MemoirBookOutputVersion>(
+    memoirProjectPath(
+      projectId,
+      `/book-output/versions/${encodeURIComponent(versionId)}`,
+    ),
+  );
 }
 
 export function updateMemoirBookOutput(
