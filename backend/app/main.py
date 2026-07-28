@@ -3,6 +3,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from app.application_errors import (
+    ApplicationError,
+    InvalidRequestError,
+    ResourceNotFoundError,
+)
 from app.config import get_settings, validate_runtime_settings
 from app.database import engine
 from app.migrations.runtime import assert_runtime_schema
@@ -55,6 +60,16 @@ app.add_middleware(
 @app.exception_handler(UnsupportedAIModelError)
 async def unsupported_ai_model_handler(_request, exc: UnsupportedAIModelError):
     return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+
+@app.exception_handler(ApplicationError)
+async def application_error_handler(_request, exc: ApplicationError):
+    status_code = {
+        InvalidRequestError: 400,
+        ResourceNotFoundError: 404,
+    }[type(exc)]
+    return JSONResponse(status_code=status_code, content={"detail": str(exc)})
+
 
 # 注册路由
 app.include_router(auth_router)

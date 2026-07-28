@@ -1,8 +1,8 @@
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.application_errors import ResourceNotFoundError
 from app.models.projects import Document, DocumentGroup, DocumentReference, Project, ReferenceItem
 
 
@@ -26,7 +26,7 @@ async def load_project(
     )
     project = result.scalar_one_or_none()
     if not project:
-        raise HTTPException(status_code=404, detail="项目不存在")
+        raise ResourceNotFoundError("项目不存在")
     return project
 
 
@@ -38,7 +38,7 @@ async def get_group(db: AsyncSession, project_id: str, group_id: str) -> Documen
     )
     group = result.scalar_one_or_none()
     if not group:
-        raise HTTPException(status_code=404, detail="分组不存在")
+        raise ResourceNotFoundError("分组不存在")
     return group
 
 
@@ -61,7 +61,7 @@ async def get_document(
     result = await db.execute(query)
     doc = result.scalar_one_or_none()
     if not doc:
-        raise HTTPException(status_code=404, detail="文档不存在")
+        raise ResourceNotFoundError("文档不存在")
     return doc
 
 
@@ -74,5 +74,5 @@ async def get_reference(db: AsyncSession, project_id: str, ref_id: str) -> Refer
     )
     ref = result.scalar_one_or_none()
     if not ref:
-        raise HTTPException(status_code=404, detail="参考资料不存在")
+        raise ResourceNotFoundError("参考资料不存在")
     return ref
