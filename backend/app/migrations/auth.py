@@ -8,22 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.auth import hash_password, normalize_email
 from app.clock import utcnow_naive
 from app.config import get_settings
+from app.migrations.schema_inspection import table_columns, table_exists
 
 
 OWNED_TABLES = ["projects"]
-
-
-async def _table_columns(conn, table: str) -> set[str]:
-    result = await conn.execute(text(f"PRAGMA table_info({table})"))
-    return {row[1] for row in result.fetchall()}
-
-
-async def _table_exists(conn, table: str) -> bool:
-    result = await conn.execute(
-        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table"),
-        {"table": table},
-    )
-    return result.scalar_one_or_none() is not None
 
 
 async def ensure_default_user(conn) -> str:
@@ -62,7 +50,7 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
         changed_columns: list[str] = []
         changed_tables: list[str] = []
 
-        user_columns = await _table_columns(conn, "users")
+        user_columns = await table_columns(conn, "users")
         if "password_login_enabled" not in user_columns:
             await conn.execute(
                 text("ALTER TABLE users ADD COLUMN password_login_enabled BOOLEAN NOT NULL DEFAULT 1")
@@ -72,7 +60,7 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
             await conn.execute(text("ALTER TABLE users ADD COLUMN role VARCHAR(20) NOT NULL DEFAULT 'user'"))
             changed_columns.append("users.role")
 
-        if not await _table_exists(conn, "auth_identities"):
+        if not await table_exists(conn, "auth_identities"):
             await conn.execute(
                 text(
                     """
@@ -109,9 +97,9 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
         )
 
         for table in OWNED_TABLES:
-            if not await _table_exists(conn, table):
+            if not await table_exists(conn, table):
                 continue
-            columns = await _table_columns(conn, table)
+            columns = await table_columns(conn, table)
             if "user_id" not in columns:
                 await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN user_id VARCHAR(36)"))
                 changed_columns.append(f"{table}.user_id")
@@ -120,7 +108,7 @@ async def migrate_auth_schema(engine: AsyncEngine) -> dict:
             )
 
         for table in ("projects",):
-            if await _table_exists(conn, table):
+            if await table_exists(conn, table):
                 await conn.execute(
                     text(f"UPDATE {table} SET user_id = :user_id WHERE user_id IS NULL"),
                     {"user_id": default_user_id},

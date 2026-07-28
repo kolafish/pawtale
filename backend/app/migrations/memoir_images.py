@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
 
 from app.database import Base, register_models
+from app.migrations.schema_inspection import table_exists
 
 
 MEMOIR_IMAGE_TABLES = (
@@ -33,14 +34,6 @@ def expected_memoir_image_schema() -> dict[str, list[dict[str, object]]]:
     }
 
 
-async def _table_exists(conn, table: str) -> bool:
-    result = await conn.execute(
-        text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :table"),
-        {"table": table},
-    )
-    return result.scalar_one_or_none() is not None
-
-
 async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
     result = await conn.execute(text(f"PRAGMA table_info({table})"))
     return [
@@ -57,7 +50,7 @@ async def migrate_memoir_image_schema(engine: AsyncEngine) -> dict[str, list[str
     changed_tables: list[str] = []
     async with engine.begin() as conn:
         for table in _memoir_image_tables_from_metadata():
-            if not await _table_exists(conn, table.name):
+            if not await table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
                 changed_tables.append(table.name)
     return {"changed_tables": changed_tables}
@@ -73,7 +66,7 @@ async def assert_memoir_image_schema(engine: AsyncEngine) -> None:
     column_mismatches: list[str] = []
     async with engine.begin() as conn:
         for table_name, expected_columns in expected_schema.items():
-            if not await _table_exists(conn, table_name):
+            if not await table_exists(conn, table_name):
                 missing_tables.append(table_name)
                 continue
             actual_schema = {

@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
+from app.migrations.schema_inspection import schema_object_exists, table_columns
 
 
 REALTIME_VOICE_TABLES = (
@@ -42,24 +43,6 @@ VOICE_COMPLETION_COLUMNS = {
 }
 
 
-async def _object_exists(conn, *, object_type: str, name: str) -> bool:
-    return (
-        await conn.scalar(
-            text(
-                "SELECT 1 FROM sqlite_master "
-                "WHERE type = :object_type AND name = :name"
-            ),
-            {"object_type": object_type, "name": name},
-        )
-        is not None
-    )
-
-
-async def _table_columns(conn, table_name: str) -> set[str]:
-    rows = (await conn.execute(text(f"PRAGMA table_info({table_name})"))).fetchall()
-    return {str(row[1]) for row in rows}
-
-
 async def _ensure_completion_issue_columns(conn) -> list[str]:
     changed: list[str] = []
     statements = {
@@ -87,7 +70,7 @@ async def _ensure_completion_issue_columns(conn) -> list[str]:
         ),
     }
     for table_name, column_name in VOICE_COMPLETION_COLUMNS.items():
-        if column_name not in await _table_columns(conn, table_name):
+        if column_name not in await table_columns(conn, table_name):
             await conn.execute(text(statements[table_name]))
             changed.append(f"{table_name}.{column_name}")
         await conn.execute(text(indexes[table_name]))
@@ -110,7 +93,7 @@ async def _drop_stale_voice_target_triggers(conn) -> None:
 async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
     changed_tables: list[str] = []
     changed_triggers: list[str] = []
-    if not await _object_exists(
+    if not await schema_object_exists(
         conn,
         object_type="table",
         name=TRANSCRIPT_FTS_TABLE,
@@ -178,7 +161,7 @@ async def _ensure_transcript_fts(conn) -> dict[str, list[str]]:
         """,
     }
     for name, statement in statements.items():
-        if await _object_exists(conn, object_type="trigger", name=name):
+        if await schema_object_exists(conn, object_type="trigger", name=name):
             continue
         await conn.execute(text(statement))
         changed_triggers.append(name)
@@ -336,7 +319,7 @@ async def _ensure_voice_integrity_triggers(conn) -> list[str]:
     }
     changed: list[str] = []
     for name, statement in statements.items():
-        if await _object_exists(conn, object_type="trigger", name=name):
+        if await schema_object_exists(conn, object_type="trigger", name=name):
             continue
         await conn.execute(text(statement))
         changed.append(name)
@@ -365,23 +348,23 @@ async def assert_memoir_voice_schema(engine: AsyncEngine) -> None:
         missing = [
             name
             for name in expected_tables
-            if not await _object_exists(conn, object_type="table", name=name)
+            if not await schema_object_exists(conn, object_type="table", name=name)
         ]
-        if not await _object_exists(
+        if not await schema_object_exists(
             conn,
             object_type="table",
             name=TRANSCRIPT_FTS_TABLE,
         ):
             missing.append(TRANSCRIPT_FTS_TABLE)
         for name in (*TRANSCRIPT_FTS_TRIGGERS, *VOICE_INTEGRITY_TRIGGERS):
-            if not await _object_exists(
+            if not await schema_object_exists(
                 conn,
                 object_type="trigger",
                 name=name,
             ):
                 missing.append(name)
         for table_name, column_name in VOICE_COMPLETION_COLUMNS.items():
-            if column_name not in await _table_columns(conn, table_name):
+            if column_name not in await table_columns(conn, table_name):
                 missing.append(f"{table_name}.{column_name}")
     if missing:
         raise RuntimeError(f"Missing memoir voice schema objects: {sorted(missing)}")

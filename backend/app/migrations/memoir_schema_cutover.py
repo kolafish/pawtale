@@ -12,6 +12,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
 )
+from app.migrations.schema_inspection import table_columns
 
 
 # These tables belong to superseded knowledge-graph, semantic-card and
@@ -185,13 +186,6 @@ async def _object_names(conn: AsyncConnection, object_type: str) -> set[str]:
     return {str(name) for name in rows}
 
 
-async def _table_columns(conn: AsyncConnection, table_name: str) -> set[str]:
-    rows = (
-        await conn.execute(text(f'PRAGMA table_info("{table_name}")'))
-    ).all()
-    return {str(row[1]) for row in rows}
-
-
 async def _table_sql(conn: AsyncConnection, table_name: str) -> str:
     value = await conn.scalar(
         text(
@@ -207,7 +201,7 @@ async def _needs_rebuild(
     conn: AsyncConnection,
     table_name: str,
 ) -> bool:
-    actual_columns = await _table_columns(conn, table_name)
+    actual_columns = await table_columns(conn, table_name)
     expected_columns = set(Base.metadata.tables[table_name].columns.keys())
     if expected_columns - actual_columns:
         return True
@@ -271,7 +265,7 @@ async def _rebuild_table(
 ) -> int:
     legacy_table = f"_{table_name}_before_cutover"
     await conn.execute(text(f'DROP TABLE IF EXISTS "{legacy_table}"'))
-    source_columns = await _table_columns(conn, table_name)
+    source_columns = await table_columns(conn, table_name)
     target_columns = list(Base.metadata.tables[table_name].columns.keys())
     copied_columns = [
         column_name
