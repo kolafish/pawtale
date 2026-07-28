@@ -804,15 +804,69 @@ test("book page renames a confirmed chapter manually or through AI", async () =>
 
 test("book page reorders chapters through structure command", async () => {
   const calls = [];
+  let draftReads = 0;
+  let outputReads = 0;
+  let resolveCommand;
+  const commandResponse = new Promise((resolve) => {
+    resolveCommand = resolve;
+  });
   global.wx = { showToast() {}, switchTab() {} };
   const { page } = loadBookPage({
     voiceApiExports: {
       applyMemoirBookPlanStructureCommand: async (projectId, data) => {
         calls.push({ projectId, data });
-        return planFromStructureCommand("confirmed", data);
+        return commandResponse;
       },
-      getMemoirBookChapterDraft: async () => null,
-      getMemoirBookOutput: async () => null,
+      getMemoirBookChapterDraft: async () => {
+        draftReads += 1;
+        return null;
+      },
+      getMemoirBookOutput: async () => {
+        outputReads += 1;
+        return null;
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
+  page.applyPlan.call(context, samplePlan("confirmed"));
+  page.applyBookOutput.call(context, sampleBookOutput());
+
+  const movePromise = page.moveChapter.call(context, {
+    currentTarget: { dataset: { id: "chapter-1", direction: "down" } },
+  });
+
+  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.equal(context.data.updatingPlanStructure, true);
+  assert.equal(context.data.planStructureBusyChapterId, "chapter-1");
+  assert.equal(context.data.planStructureBusyDirection, "down");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].data, {
+    type: "move_chapter",
+    chapter_id: "chapter-1",
+    direction: "down",
+  });
+  resolveCommand(planFromStructureCommand("confirmed", calls[0].data));
+  await movePromise;
+
+  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.equal(context.data.updatingPlanStructure, false);
+  assert.equal(context.data.planStructureBusyChapterId, "");
+  assert.equal(context.data.planStructureBusyDirection, "");
+  assert.equal(draftReads, 0);
+  assert.equal(outputReads, 0);
+  assert.equal(context.data.bookOutput.is_stale, true);
+  assert.deepEqual(context.data.bookOutput.stale_chapter_titles, ["第一次离家", "外婆家的童年"]);
+  assert.equal(context.data.bookActionText, "更新书稿");
+  delete global.wx;
+});
+
+test("book page restores chapter order when structure save fails", async () => {
+  global.wx = { showToast() {}, switchTab() {} };
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      applyMemoirBookPlanStructureCommand: async () => {
+        throw new Error("保存顺序失败");
+      },
     },
   });
   const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
@@ -822,13 +876,9 @@ test("book page reorders chapters through structure command", async () => {
     currentTarget: { dataset: { id: "chapter-1", direction: "down" } },
   });
 
-  assert.equal(calls.length, 1);
-  assert.deepEqual(calls[0].data, {
-    type: "move_chapter",
-    chapter_id: "chapter-1",
-    direction: "down",
-  });
-  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-2", "chapter-1"]);
+  assert.deepEqual(context.data.chapters.map((chapter) => chapter.id), ["chapter-1", "chapter-2"]);
+  assert.equal(context.data.error, "保存顺序失败");
+  assert.equal(context.data.updatingPlanStructure, false);
   delete global.wx;
 });
 

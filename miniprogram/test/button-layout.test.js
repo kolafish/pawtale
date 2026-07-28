@@ -48,6 +48,11 @@ test("layout-critical row actions avoid native button shrink wrapping", () => {
       "toc-row",
       "reader-top-action",
     ],
+    book: [
+      "chapter-order-toggle",
+      "chapter-order-edit",
+      "chapter-order-button",
+    ],
     "book-export": [
       "state-action",
       "settings-toggle",
