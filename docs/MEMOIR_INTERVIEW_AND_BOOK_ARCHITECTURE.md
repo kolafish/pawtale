@@ -156,7 +156,8 @@ BookReview 主要读取 ChapterDigest，并对具体疑点按需读取章节或�
 BookReview 的 `candidate_issues` 持久化关联章节和解决方式。`user_decision`
 问题的文字回答保存在对应 CompletionIssue 的 `outcome_note`；全部必答问题处理后，
 用户可以发起一次持久化“根据回答调整书稿”任务。任务按 issue fingerprint 找回
-BookReview 中的关联章节，只允许修改这些章节，并生成新的 BookOutputVersion；
+BookReview 中的关联章节，只允许改写这些章节中已有小节的正文，不得改变章节或
+小节的顺序、收录状态、标题、数量及归属关系。任务生成新的 BookOutputVersion，
 原书稿版本必须保留。
 
 Digest 和 Review 都是可重新生成的派生数据，不是事实来源。
