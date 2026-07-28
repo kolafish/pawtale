@@ -66,6 +66,7 @@ import {
   type AITaskProgressMode,
   type AITaskProgressView,
 } from "../../services/ai-task-progress";
+import { PollingTimer } from "../../services/polling-timer";
 
 export { chapterWorkspaceViewPatch };
 
@@ -345,8 +346,8 @@ interface ChapterWorkspacePageData {
 definePage<ChapterWorkspacePageData>()({
   audioPlayback: new AudioPlaybackController(),
   playToken: 0,
-  preparationPollTimer: null as ReturnType<typeof setTimeout> | null,
-  sectionRegenerationPollTimer: null as ReturnType<typeof setTimeout> | null,
+  preparationPoller: new PollingTimer(PREPARATION_POLL_INTERVAL_MS),
+  sectionRegenerationPoller: new PollingTimer(SECTION_REGENERATION_POLL_INTERVAL_MS),
   pageVisible: false,
   loadedOnce: false,
   workspaceLoadSequence: 0,
@@ -1827,46 +1828,38 @@ definePage<ChapterWorkspacePageData>()({
   schedulePreparationPolling() {
     if (
       !this.pageVisible
-      || this.preparationPollTimer !== null
+      || this.preparationPoller.pending
       || !isActiveChapterPreparation(this.data.chapterPreparationJob)
     ) {
       return;
     }
-    this.preparationPollTimer = setTimeout(() => {
-      this.preparationPollTimer = null;
+    this.preparationPoller.schedule(() => {
       if (this.pageVisible) {
         void this.refreshChapterPreparationJob();
       }
-    }, PREPARATION_POLL_INTERVAL_MS);
+    });
   },
 
   stopPreparationPolling() {
-    if (this.preparationPollTimer !== null) {
-      clearTimeout(this.preparationPollTimer);
-      this.preparationPollTimer = null;
-    }
+    this.preparationPoller.cancel();
   },
 
   scheduleSectionRegenerationPolling() {
     if (
       !this.pageVisible
-      || this.sectionRegenerationPollTimer !== null
+      || this.sectionRegenerationPoller.pending
       || !isActiveSectionRegeneration(this.data.sectionRegenerationJob)
     ) {
       return;
     }
-    this.sectionRegenerationPollTimer = setTimeout(() => {
-      this.sectionRegenerationPollTimer = null;
+    this.sectionRegenerationPoller.schedule(() => {
       if (this.pageVisible) {
         void this.refreshSectionRegenerationJob();
       }
-    }, SECTION_REGENERATION_POLL_INTERVAL_MS);
+    });
   },
 
   stopSectionRegenerationPolling() {
-    if (this.sectionRegenerationPollTimer !== null) {
-      clearTimeout(this.sectionRegenerationPollTimer);
-      this.sectionRegenerationPollTimer = null;
-    }
+    this.sectionRegenerationPoller.cancel();
   },
 });

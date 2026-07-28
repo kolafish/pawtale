@@ -5,6 +5,7 @@ import type {
 import type { MemoirCompletionIssue } from "../../domain/voice-chat";
 import { aiTaskProgressPercent, type AITaskProgressMode } from "../../services/ai-task-progress";
 import { definePage } from "../../services/page-definition";
+import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirBookCompletionJob,
   enqueueMemoirBookCompletionJob,
@@ -256,7 +257,7 @@ export function bookCompletionViewPatch(
 }
 
 definePage<BookCompletionData>()({
-  overviewPollTimer: null as ReturnType<typeof setTimeout> | null,
+  overviewPoller: new PollingTimer(POLL_INTERVAL_MS),
   pageVisible: false,
 
   data: {
@@ -604,21 +605,17 @@ definePage<BookCompletionData>()({
   },
 
   schedulePolling() {
-    if (!this.pageVisible || this.overviewPollTimer !== null) {
+    if (!this.pageVisible || this.overviewPoller.pending) {
       return;
     }
-    this.overviewPollTimer = setTimeout(() => {
-      this.overviewPollTimer = null;
+    this.overviewPoller.schedule(() => {
       if (this.pageVisible) {
         void this.loadOverview(true);
       }
-    }, POLL_INTERVAL_MS);
+    });
   },
 
   stopPolling() {
-    if (this.overviewPollTimer !== null) {
-      clearTimeout(this.overviewPollTimer);
-      this.overviewPollTimer = null;
-    }
+    this.overviewPoller.cancel();
   },
 });

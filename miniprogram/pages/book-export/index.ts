@@ -50,6 +50,7 @@ import {
   latestBookCoverStyle,
   latestBookTitle,
 } from "../book/book-design-model";
+import { PollingTimer } from "../../services/polling-timer";
 interface BookExportDataset {
   action?: string;
   format?: string;
@@ -174,7 +175,7 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 definePage<BookExportData>()({
   bookDesignAutosaveTimer: null as number | null,
   bookEditorialCopyEvent: null as MemoirAutomationEvent | null,
-  bookEditorialCopyPollTimer: null as number | null,
+  bookEditorialCopyPoller: new PollingTimer(BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS),
   bookOutput: null as MemoirBookOutput | null,
   bookOutputVersion: null as MemoirBookOutputVersion | null,
   bookPlan: null as MemoirBookPlan | null,
@@ -309,24 +310,18 @@ definePage<BookExportData>()({
 
   scheduleBookEditorialCopyPoll() {
     if (
-      this.bookEditorialCopyPollTimer !== null
+      this.bookEditorialCopyPoller.pending
       || this.bookEditorialCopyEvent?.status !== "pending"
     ) {
       return;
     }
-    const timer = setTimeout(() => {
-      this.bookEditorialCopyPollTimer = null;
+    this.bookEditorialCopyPoller.schedule(() => {
       void this.refreshBookEditorialCopyProgress();
-    }, BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS);
-    (timer as unknown as { unref?: () => void }).unref?.();
-    this.bookEditorialCopyPollTimer = timer as unknown as number;
+    });
   },
 
   clearBookEditorialCopyPoll() {
-    if (this.bookEditorialCopyPollTimer !== null) {
-      clearTimeout(this.bookEditorialCopyPollTimer);
-      this.bookEditorialCopyPollTimer = null;
-    }
+    this.bookEditorialCopyPoller.cancel();
   },
 
   async loadBookOutput(projectId: string) {
