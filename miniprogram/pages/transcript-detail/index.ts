@@ -73,6 +73,7 @@ import {
 } from "../../services/transcript-share-video";
 import { materialOfflineASRView } from "../../services/material-offline-asr-view";
 import { promptRequiredText } from "../../services/text-prompt";
+import { PollingTimer } from "../../services/polling-timer";
 
 type TextAreaEvent = PageTextInputEvent;
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
@@ -531,7 +532,7 @@ definePage<TranscriptDetailData>()({
   loadToken: 0,
   voiceEditToken: 0,
   shareVideoBackgroundUploadToken: 0,
-  offlineAsrPollTimer: null as ReturnType<typeof setTimeout> | null,
+  offlineAsrPoller: new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
   offlineAsrPollToken: 0,
   offlineAsrPollAttempts: 0,
 
@@ -636,10 +637,7 @@ definePage<TranscriptDetailData>()({
   stopOfflineAsrPolling() {
     this.offlineAsrPollToken += 1;
     this.offlineAsrPollAttempts = 0;
-    if (this.offlineAsrPollTimer !== null) {
-      clearTimeout(this.offlineAsrPollTimer);
-      this.offlineAsrPollTimer = null;
-    }
+    this.offlineAsrPoller.cancel();
   },
 
   startOfflineAsrPollingIfNeeded() {
@@ -658,10 +656,9 @@ definePage<TranscriptDetailData>()({
     if (this.offlineAsrPollAttempts >= OFFLINE_ASR_MAX_POLL_ATTEMPTS) {
       return;
     }
-    this.offlineAsrPollTimer = setTimeout(() => {
-      this.offlineAsrPollTimer = null;
+    this.offlineAsrPoller.schedule(() => {
       void this.pollOfflineAsr(token);
-    }, OFFLINE_ASR_POLL_INTERVAL_MS);
+    });
   },
 
   async pollOfflineAsr(token: number) {

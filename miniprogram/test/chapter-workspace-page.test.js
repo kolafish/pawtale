@@ -1365,6 +1365,7 @@ test("chapter rewrite reports persisted section progress at its action surface",
   assert.match(context.data.chapterPreparationDetail, /院子里的雨声/);
   assert.equal(context.data.chapterPreparationProgress, 33);
   assert.equal(context.data.chapterPreparationProgressMode, "determinate");
+  page.onUnload.call(context);
   delete global.wx;
 });
 

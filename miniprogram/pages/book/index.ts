@@ -100,6 +100,7 @@ import {
   readCachedMemoirBook,
   writeCachedMemoirBook,
 } from "../../stores/memoir-read-cache";
+import { PollingTimer } from "../../services/polling-timer";
 export {
   bookChapterDetailUrl,
   bookExportPageUrl,
@@ -157,7 +158,7 @@ definePage<BookPageData>()({
   audioPlayback: new AudioPlaybackController(),
   ttsProgress: new VoiceAssistantTTSProgressRuntime(),
   playToken: 0,
-  bookGenerationPollTimer: null as number | null,
+  bookGenerationPoller: new PollingTimer(BOOK_GENERATION_EVENT_POLL_INTERVAL_MS),
   bookGenerationPollAttempts: 0,
   automationEvents: [] as MemoirAutomationEvent[],
   bookLoadSequence: 0,
@@ -357,7 +358,7 @@ definePage<BookPageData>()({
   },
 
   scheduleBookGenerationEventPoll() {
-    if (this.bookGenerationPollTimer !== null || !this.data.projectId) {
+    if (this.bookGenerationPoller.pending || !this.data.projectId) {
       return;
     }
     if (!pendingBookGenerationEvents(this.automationEvents).length) {
@@ -368,19 +369,13 @@ definePage<BookPageData>()({
       return;
     }
     this.bookGenerationPollAttempts += 1;
-    const timer = setTimeout(() => {
-      this.bookGenerationPollTimer = null;
+    this.bookGenerationPoller.schedule(() => {
       void this.refreshAutomationEventsAfterGeneration();
-    }, BOOK_GENERATION_EVENT_POLL_INTERVAL_MS);
-    (timer as unknown as { unref?: () => void }).unref?.();
-    this.bookGenerationPollTimer = timer as unknown as number;
+    });
   },
 
   clearBookGenerationEventPoll() {
-    if (this.bookGenerationPollTimer !== null) {
-      clearTimeout(this.bookGenerationPollTimer);
-      this.bookGenerationPollTimer = null;
-    }
+    this.bookGenerationPoller.cancel();
   },
 
   async loadDraftsForPlan(plan: MemoirBookPlan) {
