@@ -64,7 +64,6 @@ test("new memoir action stays inactive while another project action is busy", ()
   page.createProject.call(context);
 
   assert.deepEqual(navigations, []);
-  delete global.wx;
 });
 
 test("project cards switch the active memoir directly", async () => {
@@ -102,7 +101,6 @@ test("project cards switch the active memoir directly", async () => {
   assert.equal(context.data.activeProjectId, "project-2");
   assert.deepEqual(toasts, ["已切换"]);
   assert.equal(context.data.busy, false);
-  delete global.wx;
 });
 
 test("tapping the current project card does not repeat activation", async () => {
@@ -168,5 +166,4 @@ test("project deletion stays behind the more menu and confirmation", async () =>
   assert.deepEqual(deleted, ["project-2"]);
   assert.equal(context.data.deletingId, "");
   assert.equal(context.data.busy, false);
-  delete global.wx;
 });

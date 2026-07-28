@@ -4,7 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function loadMePage({
   authExports = {},
@@ -18,16 +23,10 @@ function loadMePage({
 } = {}) {
   mockModule("../services/auth.ts", {
     isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-    getMemoirIdentity: async () => {
-      throw new Error("getMemoirIdentity was not mocked");
-    },
+    getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
     logoutBackendSession: async () => {},
-    setAccountCredentials: async () => {
-      throw new Error("setAccountCredentials was not mocked");
-    },
-    updateBackendProfile: async () => {
-      throw new Error("updateBackendProfile was not mocked");
-    },
+    setAccountCredentials: unmockedAsync("setAccountCredentials"),
+    updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
@@ -110,9 +109,7 @@ function loadMePage({
   });
   mockModule("../services/user-profile.ts", {
     resolveBackendAvatarUrl: (avatarUrl) => avatarUrl || "",
-    uploadBackendAvatar: async () => {
-      throw new Error("uploadBackendAvatar was not mocked");
-    },
+    uploadBackendAvatar: unmockedAsync("uploadBackendAvatar"),
     ...profileExports,
   });
   mockModule("../stores/memoir-read-cache.ts", {
@@ -163,7 +160,6 @@ test("me opens the dedicated login page from the guest entry", () => {
   page.openLogin.call(pageContext(page));
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
-  delete global.wx;
 });
 
 test("me keeps large text available before login-only settings", () => {
@@ -232,7 +228,6 @@ test("me saves the local large text preference", () => {
   assert.equal(context.data.largeTextEnabled, false);
   assert.equal(context.data.pageClass, "me-page");
   assert.deepEqual(toasts, ["大字模式已关闭"]);
-  delete global.wx;
 });
 
 test("me treats wechat-only users as logged in and shows wechat profile", async () => {
@@ -319,7 +314,6 @@ test("me uploads a selected wechat avatar and refreshes the cached identity", as
   );
   assert.equal(context.data.avatarSaving, false);
   assert.deepEqual(toasts, ["头像已更新"]);
-  delete global.wx;
 });
 
 test("me keeps existing voice stats while refreshing the same project", async () => {
@@ -465,7 +459,6 @@ test("me shows voice authorization status and opens agreement", () => {
   assert.equal(context.data.voiceAuthorizationAgreed, true);
   assert.equal(context.data.voiceAuthorizationStatusText, "已同意");
   assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
-  delete global.wx;
 });
 
 test("me shows missing voice authorization consent as not agreed", () => {
@@ -552,7 +545,6 @@ test("me saves Web login credentials without overriding wechat nickname", async 
   ]);
   assert.equal(refreshed, true);
   assert.equal(context.data.passwordLoginEnabled, true);
-  delete global.wx;
 });
 
 test("me keeps memoir management, voice progress, speaker transcription, and voice settings as separate entries", () => {
@@ -576,7 +568,6 @@ test("me keeps memoir management, voice progress, speaker transcription, and voi
     "/pages/speaker-transcription/index",
     "/pages/voice-settings/index",
   ]);
-  delete global.wx;
 });
 
 test("me does not open voice progress before a memoir exists", () => {
@@ -592,7 +583,6 @@ test("me does not open voice progress before a memoir exists", () => {
   page.openVoiceProgress.call(context);
 
   assert.deepEqual(navigations, []);
-  delete global.wx;
 });
 
 test("me clears the current user's memoir snapshots on logout", async () => {
@@ -617,5 +607,4 @@ test("me clears the current user's memoir snapshots on logout", async () => {
 
   assert.equal(cacheClearCount, 1);
   assert.equal(context.data.loggedIn, false);
-  delete global.wx;
 });

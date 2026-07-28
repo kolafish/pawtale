@@ -4,7 +4,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  unmockedAsync,
+} = require("./page-harness");
 const {
   memoirHomePrompt,
   memoirStoryTitle,
@@ -27,9 +31,7 @@ function loadHomePage({
   accessibilityExports = {},
   cacheExports = {},
 } = {}) {
-  const getMemoirIdentity = authExports.getMemoirIdentity || (async () => {
-    throw new Error("getMemoirIdentity was not mocked");
-  });
+  const getMemoirIdentity = authExports.getMemoirIdentity || unmockedAsync("getMemoirIdentity");
   const listMemoirVoiceTranscripts = voiceApiExports.listMemoirVoiceTranscripts
     || (async () => ({ items: [], total: 0, limit: 1, offset: 0 }));
   mockModule("../services/auth.ts", {
@@ -38,9 +40,7 @@ function loadHomePage({
     ...authExports,
   });
   mockModule("../services/memoir-voice-api.ts", {
-    createMemoirVoiceSession: async () => {
-      throw new Error("createMemoirVoiceSession was not mocked");
-    },
+    createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirVoiceTranscripts,
     getMemoirHomeSnapshot: async () => {
       const identity = await getMemoirIdentity();
@@ -302,7 +302,6 @@ test("home primary and alternate CTAs create sessions with their displayed guida
   await page.startAlternateGuidance.call(context);
 
   assert.deepEqual(createdModes, ["guided_interview", "free_narration"]);
-  delete global.wx;
 });
 
 test("home row actions use view shells instead of native button shrink wrapping", () => {
@@ -632,7 +631,6 @@ test("home creates voice sessions with the project-bound guidance mode", async (
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
   assert.equal(context.data.creatingVoice, false);
-  delete global.wx;
 });
 
 test("home creates free narration voice sessions without a guidance module", async () => {
@@ -677,7 +675,6 @@ test("home creates free narration voice sessions without a guidance module", asy
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2Ffree&mode=free_narration&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E8%87%AA%E7%94%B1%E5%9B%9E%E5%BF%86");
-  delete global.wx;
 });
 
 test("home daily actions create free narration and human interview sessions", async () => {
@@ -728,7 +725,6 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(createdSessions[1].input.metadata_json.entry, "miniprogram_home_resume");
   assert.equal(createdSessions[1].input.metadata_json.interview_type, "human_interview");
   assert.equal(navigations.length, 2);
-  delete global.wx;
 });
 
 test("home opens the whole-book completion overview without waiting for background work", () => {
@@ -760,7 +756,6 @@ test("home opens the whole-book completion overview without waiting for backgrou
   assert.match(navigations[0], /projectId=project%2F1/);
   assert.match(navigations[0], /projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B/);
   assert.equal(context.data.error, "");
-  delete global.wx;
 });
 
 test("home opens the topic map without requiring microphone consent", () => {
@@ -791,7 +786,6 @@ test("home opens the topic map without requiring microphone consent", () => {
     "/pages/topic-map/index?projectId=project%2F1",
   );
   assert.equal(context.data.error, "");
-  delete global.wx;
 });
 
 test("home does not create voice sessions when consent audit sync fails", async () => {
@@ -863,7 +857,6 @@ test("home sends voice starts without a project to project creation", async () =
 
   assert.equal(createCalls, 0);
   assert.deepEqual(navigations, ["/pages/project-edit/index"]);
-  delete global.wx;
 });
 
 test("home sends login-required voice starts to the dedicated login page", async () => {
@@ -889,7 +882,6 @@ test("home sends login-required voice starts to the dedicated login page", async
   await page.startVoiceChat.call(context);
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
-  delete global.wx;
 });
 
 test("home opens the project switcher from the current memoir", () => {
@@ -916,7 +908,6 @@ test("home opens the project switcher from the current memoir", () => {
   page.openProjects.call(context);
 
   assert.deepEqual(navigations, ["/pages/projects/index"]);
-  delete global.wx;
 });
 
 test("home blocks voice session creation before voice authorization consent", async () => {
@@ -954,7 +945,6 @@ test("home blocks voice session creation before voice authorization consent", as
   assert.equal(createCalls, 0);
   assert.match(context.data.error, /声纹授权协议/);
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
-  delete global.wx;
 });
 
 test("home refreshes voice authorization consent from storage", () => {

@@ -2,7 +2,12 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { clearModule, loadPageModule, mockModule } = require("./page-harness");
+const {
+  clearModule,
+  loadPageModule,
+  mockModule,
+  unmockedAsync,
+} = require("./page-harness");
 
 function loadVoiceChatPage({
   streamingExports = {},
@@ -40,12 +45,8 @@ function loadVoiceChatPage({
   });
   clearModule("../services/streaming-voice-controller.ts");
   mockModule("../services/memoir-voice-api.ts", {
-    createMemoirAssistantTTS: async () => {
-      throw new Error("createMemoirAssistantTTS was not mocked");
-    },
-    createMemoirVoiceNoAnswerPrompt: async () => {
-      throw new Error("createMemoirVoiceNoAnswerPrompt was not mocked");
-    },
+    createMemoirAssistantTTS: unmockedAsync("createMemoirAssistantTTS"),
+    createMemoirVoiceNoAnswerPrompt: unmockedAsync("createMemoirVoiceNoAnswerPrompt"),
     downloadMemoirVoiceAudio: async () => "",
     getMemoirVoiceSession: async () => ({
       session: {
@@ -57,16 +58,10 @@ function loadVoiceChatPage({
       messages: [],
       utterances: [],
     }),
-    listMemoirCompletionIssues: async () => {
-      throw new Error("listMemoirCompletionIssues was not mocked");
-    },
-    closeMemoirCompletionIssue: async () => {
-      throw new Error("closeMemoirCompletionIssue was not mocked");
-    },
+    listMemoirCompletionIssues: unmockedAsync("listMemoirCompletionIssues"),
+    closeMemoirCompletionIssue: unmockedAsync("closeMemoirCompletionIssue"),
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
-    stopMemoirVoiceSession: async () => {
-      throw new Error("stopMemoirVoiceSession was not mocked");
-    },
+    stopMemoirVoiceSession: unmockedAsync("stopMemoirVoiceSession"),
     ...voiceApiExports,
   });
   clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
@@ -255,7 +250,6 @@ test("voice chat blocks recording before voice authorization consent", () => {
   assert.match(context.data.error, /声纹授权协议/);
   assert.equal(context.data.autoListenStateText, "自动收音已暂停，等待声纹授权");
   assert.equal(toasts[0].title, "请先同意声纹授权协议");
-  delete global.wx;
 });
 
 test("closing a completion issue keeps save controls available while it persists", async () => {
@@ -355,7 +349,6 @@ test("book completion return stops the backend session when websocket is absent"
   assert.deepEqual(stoppedSessions, ["voice-1"]);
   assert.deepEqual(navigations, [{ delta: 1 }]);
   assert.equal(context.data.finishingSession, false);
-  delete global.wx;
 });
 
 test("book completion return stays inactive while issue controls are disabled", async () => {
@@ -917,7 +910,6 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(modals.length, 1);
-  delete global.wx;
 });
 
 test("book completion finish explains that the answer is already in its section", async () => {
@@ -980,7 +972,6 @@ test("book completion finish explains that the answer is already in its section"
   );
   assert.equal(modals[0].confirmText, "返回本章");
   assert.equal(modals[0].showCancel, false);
-  delete global.wx;
 });
 
 test("voice chat save action cancels a recording start that is still authorizing", async () => {
@@ -1728,7 +1719,6 @@ test("voice chat starts auto listening after AI audio playback ends when gateway
   assert.deepEqual(startCalls, [true]);
   assert.equal(context.data.followUpTTSPlaying, false);
   assert.equal(context.data.followUpTTSStateText, "播放完成，正在听你说");
-  delete global.wx;
 });
 
 test("voice chat starts pending auto listening when gateway becomes ready after playback", async () => {
@@ -1803,7 +1793,6 @@ test("voice chat starts pending auto listening when gateway becomes ready after 
 
   assert.deepEqual(startCalls, [true]);
   assert.equal(context.autoListenPendingAfterPlayback, false);
-  delete global.wx;
 });
 
 test("voice chat streams one assistant turn and plays pcm audio frames", async () => {

@@ -4,27 +4,24 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function loadLoginPage({ authExports = {}, profileExports = {} } = {}) {
   mockModule("../services/auth.ts", {
     isValidEmail: (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
-    loginWithEmail: async () => {
-      throw new Error("loginWithEmail was not mocked");
-    },
-    loginWithWeChat: async () => {
-      throw new Error("loginWithWeChat was not mocked");
-    },
-    updateBackendProfile: async () => {
-      throw new Error("updateBackendProfile was not mocked");
-    },
+    loginWithEmail: unmockedAsync("loginWithEmail"),
+    loginWithWeChat: unmockedAsync("loginWithWeChat"),
+    updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
   mockModule("../services/user-profile.ts", {
     resolveBackendAvatarUrl: (avatarUrl) => avatarUrl || "",
-    uploadBackendAvatar: async () => {
-      throw new Error("uploadBackendAvatar was not mocked");
-    },
+    uploadBackendAvatar: unmockedAsync("uploadBackendAvatar"),
     ...profileExports,
   });
 
@@ -82,7 +79,6 @@ test("login page relaunches home when the wechat profile is already complete", a
 
   assert.deepEqual(relaunches, ["/pages/home/index"]);
   assert.equal(context.data.wechatLoading, false);
-  delete global.wx;
 });
 
 test("login page asks a new wechat user to choose nickname and avatar", async () => {
@@ -116,7 +112,6 @@ test("login page asks a new wechat user to choose nickname and avatar", async ()
   assert.equal(context.data.profileDisplayName, "");
   assert.equal(context.data.profileAvatarPath, "");
   assert.equal(context.data.wechatLoading, false);
-  delete global.wx;
 });
 
 test("login page saves selected wechat nickname and avatar before entering", async () => {
@@ -167,7 +162,6 @@ test("login page saves selected wechat nickname and avatar before entering", asy
   assert.deepEqual(avatarUploads, ["wxfile://chosen-avatar"]);
   assert.deepEqual(relaunches, ["/pages/home/index"]);
   assert.equal(context.data.profileSaving, false);
-  delete global.wx;
 });
 
 test("login page validates email before Pawtale account login", async () => {
@@ -227,5 +221,4 @@ test("login page logs in with trimmed Pawtale account email", async () => {
     },
   ]);
   assert.deepEqual(relaunches, ["/pages/home/index"]);
-  delete global.wx;
 });

@@ -2,7 +2,12 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function imageAsset(id, overrides = {}) {
   return {
@@ -56,18 +61,10 @@ function loadImageAssetsPage(apiExports = {}) {
     getMemoirIdentity: async () => ({ active_project_id: "project-1" }),
   });
   mockModule("../services/memoir-voice-api.ts", {
-    createMemoirBookImagePlacement: async () => {
-      throw new Error("createMemoirBookImagePlacement was not mocked");
-    },
-    deleteMemoirBookImagePlacement: async () => {
-      throw new Error("deleteMemoirBookImagePlacement was not mocked");
-    },
-    deleteMemoirImageAsset: async () => {
-      throw new Error("deleteMemoirImageAsset was not mocked");
-    },
-    downloadMemoirImageAssetFile: async () => {
-      throw new Error("downloadMemoirImageAssetFile was not mocked");
-    },
+    createMemoirBookImagePlacement: unmockedAsync("createMemoirBookImagePlacement"),
+    deleteMemoirBookImagePlacement: unmockedAsync("deleteMemoirBookImagePlacement"),
+    deleteMemoirImageAsset: unmockedAsync("deleteMemoirImageAsset"),
+    downloadMemoirImageAssetFile: unmockedAsync("downloadMemoirImageAssetFile"),
     getMemoirBookPlan: async () => null,
     listMemoirImageAssets: async () => ({
       items: [],
@@ -76,9 +73,7 @@ function loadImageAssetsPage(apiExports = {}) {
       included_count: 0,
       unused_count: 0,
     }),
-    updateMemoirImageAsset: async () => {
-      throw new Error("updateMemoirImageAsset was not mocked");
-    },
+    updateMemoirImageAsset: unmockedAsync("updateMemoirImageAsset"),
     ...apiExports,
   });
   return loadPageModule("../pages/image-assets/index.ts");
@@ -126,7 +121,6 @@ test("image assets page batches thumbnails and uses the full file for preview", 
   await page.previewAsset.call(context, {
     currentTarget: { dataset: { id: "asset-1" } },
   });
-  delete global.wx;
 
   assert.deepEqual(downloads[downloads.length - 1], {
     projectId: "project-1",

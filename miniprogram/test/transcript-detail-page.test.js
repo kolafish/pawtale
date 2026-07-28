@@ -2,7 +2,12 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function sampleTranscript(id, overrides = {}) {
   return {
@@ -190,57 +195,27 @@ function sampleShareVideoJob(overrides = {}) {
 
 function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
-    convertMemoirInterviewQuestionToAnswer: async () => {
-      throw new Error("convertMemoirInterviewQuestionToAnswer was not mocked");
-    },
-    createMemoirTranscriptShareVideoJob: async () => {
-      throw new Error("createMemoirTranscriptShareVideoJob was not mocked");
-    },
-    deleteMemoirVoiceTranscript: async () => {
-      throw new Error("deleteMemoirVoiceTranscript was not mocked");
-    },
-    downloadMemoirShareVideoCustomBackgroundPreview: async () => {
-      throw new Error("downloadMemoirShareVideoCustomBackgroundPreview was not mocked");
-    },
-    downloadMemoirShareVideoJob: async () => {
-      throw new Error("downloadMemoirShareVideoJob was not mocked");
-    },
-    getMemoirShareVideoJob: async () => {
-      throw new Error("getMemoirShareVideoJob was not mocked");
-    },
-    getMemoirTranscriptShareVideoContext: async () => {
-      throw new Error("getMemoirTranscriptShareVideoContext was not mocked");
-    },
-    getMemoirBookPlan: async () => {
-      throw new Error("getMemoirBookPlan was not mocked");
-    },
-    getMemoirVoiceTranscript: async () => {
-      throw new Error("getMemoirVoiceTranscript was not mocked");
-    },
-    placeMemoirChapterMaterial: async () => {
-      throw new Error("placeMemoirChapterMaterial was not mocked");
-    },
-    previewMemoirVoiceTranscriptVoiceEdit: async () => {
-      throw new Error("previewMemoirVoiceTranscriptVoiceEdit was not mocked");
-    },
-    recoverMemoirVoiceTranscript: async () => {
-      throw new Error("recoverMemoirVoiceTranscript was not mocked");
-    },
-    startMemoirMaterialOfflineASR: async () => {
-      throw new Error("startMemoirMaterialOfflineASR was not mocked");
-    },
-    updateMemoirVoiceTranscript: async () => {
-      throw new Error("updateMemoirVoiceTranscript was not mocked");
-    },
-    uploadMemoirShareVideoCustomBackground: async () => {
-      throw new Error("uploadMemoirShareVideoCustomBackground was not mocked");
-    },
+    convertMemoirInterviewQuestionToAnswer: unmockedAsync("convertMemoirInterviewQuestionToAnswer"),
+    createMemoirTranscriptShareVideoJob: unmockedAsync("createMemoirTranscriptShareVideoJob"),
+    deleteMemoirVoiceTranscript: unmockedAsync("deleteMemoirVoiceTranscript"),
+    downloadMemoirShareVideoCustomBackgroundPreview: unmockedAsync(
+      "downloadMemoirShareVideoCustomBackgroundPreview",
+    ),
+    downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
+    getMemoirShareVideoJob: unmockedAsync("getMemoirShareVideoJob"),
+    getMemoirTranscriptShareVideoContext: unmockedAsync("getMemoirTranscriptShareVideoContext"),
+    getMemoirBookPlan: unmockedAsync("getMemoirBookPlan"),
+    getMemoirVoiceTranscript: unmockedAsync("getMemoirVoiceTranscript"),
+    placeMemoirChapterMaterial: unmockedAsync("placeMemoirChapterMaterial"),
+    previewMemoirVoiceTranscriptVoiceEdit: unmockedAsync("previewMemoirVoiceTranscriptVoiceEdit"),
+    recoverMemoirVoiceTranscript: unmockedAsync("recoverMemoirVoiceTranscript"),
+    startMemoirMaterialOfflineASR: unmockedAsync("startMemoirMaterialOfflineASR"),
+    updateMemoirVoiceTranscript: unmockedAsync("updateMemoirVoiceTranscript"),
+    uploadMemoirShareVideoCustomBackground: unmockedAsync("uploadMemoirShareVideoCustomBackground"),
     ...voiceApiExports,
   });
   mockModule("../services/memoir-voice-search.ts", {
-    recordMemoirVoiceSearchQuery: async () => {
-      throw new Error("recordMemoirVoiceSearchQuery was not mocked");
-    },
+    recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
     stopMemoirVoiceSearchRecording: () => {},
     ...voiceSearchExports,
   });
@@ -341,7 +316,6 @@ test("transcript detail page shows saved audio awaiting transcription", async ()
   assert.equal(context.data.item.titleText, "爷爷退休后仍帮公司做事");
   assert.equal(context.data.item.displayCountText, "14 字");
   assert.deepEqual(toasts, [{ title: "已恢复转写", icon: "success" }]);
-  delete global.wx;
 });
 
 test("transcript detail page labels human interviewer questions", async () => {
@@ -576,7 +550,6 @@ test("transcript detail page converts a human interviewer material item to an an
   assert.equal(context.data.item.chat_message_role, "user");
   assert.equal(context.data.item.canConvertQuestionToAnswer, false);
   assert.equal(context.data.moreActionsExpanded, false);
-  delete global.wx;
 });
 
 test("transcript detail page uses content-first inclusion labels", async () => {
@@ -731,7 +704,6 @@ test("transcript detail page moves material to a selected chapter section", asyn
   assert.equal(context.data.item.chapterLocationText, "第 2 章：家里的人");
   assert.equal(context.data.item.sectionLocationText, "小节 1：她给我送胡豆");
   assert.deepEqual(toasts, [{ title: "章节和小节已更新", icon: "success" }]);
-  delete global.wx;
 });
 
 test("transcript detail page creates a chapter while assigning material", async () => {
@@ -804,7 +776,6 @@ test("transcript detail page creates a chapter while assigning material", async 
       new_section_title: "照片里的邀约",
     },
   }]);
-  delete global.wx;
 });
 
 test("transcript detail page creates share video from selected corrected segments", async () => {
@@ -881,7 +852,6 @@ test("transcript detail page creates share video from selected corrected segment
   page.selectShareVideoBackgroundStyle.call(context, {
     currentTarget: { dataset: { backgroundStyle: "storybook" } },
   });
-  delete global.wx;
   assert.equal(context.data.shareVideoBackgroundStyle, "storybook");
   assert.equal(context.data.shareVideoBackgroundStyleLabel, "老故事书");
   assert.deepEqual(storageWrites, [
@@ -928,7 +898,6 @@ test("transcript detail page creates share video from selected corrected segment
     },
   };
   await page.shareGeneratedVideo.call(context);
-  delete global.wx;
 
   assert.deepEqual(downloads, ["job-1"]);
   assert.equal(shareCalls.length, 1);
@@ -1046,7 +1015,6 @@ test("transcript detail page uses backend background options as the configuratio
       },
     },
   ]);
-  delete global.wx;
 });
 
 test("transcript detail page requires a custom background asset before creating video", async () => {
@@ -1162,7 +1130,6 @@ test("transcript detail page uploads a custom background before creating share v
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   await page.createShareVideo.call(context);
   context.shareVideoController.cancel();
-  delete global.wx;
 
   assert.deepEqual(createCalls, [
     {
@@ -1422,7 +1389,6 @@ test("transcript detail edit mode exposes original text reference and protects u
   assert.equal(context.data.item.isEditing, false);
   assert.equal(context.data.editReferenceExpanded, false);
   assert.deepEqual(unloadAlerts.slice(-1), [{ type: "disable" }]);
-  delete global.wx;
 });
 
 test("transcript detail page saves edited display text", async () => {
@@ -1460,7 +1426,6 @@ test("transcript detail page saves edited display text", async () => {
   assert.equal(context.data.item.display_text, "爷爷退休后还帮公司处理事情。");
   assert.equal(context.data.item.isEditing, false);
   assert.deepEqual(toasts, [{ title: "已保存", icon: "success" }]);
-  delete global.wx;
 });
 
 test("transcript detail page deletes after confirmation and navigates back", async () => {
@@ -1499,5 +1464,4 @@ test("transcript detail page deletes after confirmation and navigates back", asy
   assert.match(modals[0].content, /已生成正文不会自动改写/);
   assert.deepEqual(toasts, [{ title: "已删除", icon: "success" }]);
   assert.deepEqual(navigations, [{ delta: 1 }]);
-  delete global.wx;
 });

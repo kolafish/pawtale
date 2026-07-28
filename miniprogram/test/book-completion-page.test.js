@@ -4,23 +4,20 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookCompletionJob: async () => bulkJob(),
-    getMemoirBookCompletionOverview: async () => {
-      throw new Error("getMemoirBookCompletionOverview was not mocked");
-    },
-    enqueueMemoirBookCompletionJob: async () => {
-      throw new Error("enqueueMemoirBookCompletionJob was not mocked");
-    },
-    cancelMemoirBookCompletionJob: async () => {
-      throw new Error("cancelMemoirBookCompletionJob was not mocked");
-    },
-    generateMemoirBookReview: async () => {
-      throw new Error("generateMemoirBookReview was not mocked");
-    },
+    getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
+    enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),
+    cancelMemoirBookCompletionJob: unmockedAsync("cancelMemoirBookCompletionJob"),
+    generateMemoirBookReview: unmockedAsync("generateMemoirBookReview"),
     getMemoirBookReview: async () => null,
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
@@ -28,9 +25,7 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
       current_issue: null,
       issues: [],
     }),
-    enqueueMemoirChapterPreparationJob: async () => {
-      throw new Error("enqueueMemoirChapterPreparationJob was not mocked");
-    },
+    enqueueMemoirChapterPreparationJob: unmockedAsync("enqueueMemoirChapterPreparationJob"),
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
@@ -206,7 +201,6 @@ test("book completion returns to the book hub for generation and chapter managem
   page.openBookHome.call(context);
 
   assert.deepEqual(tabNavigations, ["/pages/book/index"]);
-  delete global.wx;
 });
 
 test("book completion opens book title settings directly", () => {
@@ -224,7 +218,6 @@ test("book completion opens book title settings directly", () => {
   assert.deepEqual(navigations, [
     "/pages/book-export/index?projectId=project%2F1&action=preview&settings=book",
   ]);
-  delete global.wx;
 });
 
 test("book completion runs the cross-chapter review after chapters are confirmed", async () => {
@@ -272,7 +265,6 @@ test("book completion runs the cross-chapter review after chapters are confirmed
   assert.deepEqual(reviewRequests, [["project-1", false]]);
   assert.equal(context.data.bookReview.review.summary, "全书围绕家庭与成长展开。");
   assert.equal(context.data.bookOutputAvailable, true);
-  delete global.wx;
 });
 
 test("book completion can check only chapters that have not been checked", async () => {
@@ -333,7 +325,6 @@ test("book completion can check only chapters that have not been checked", async
   assert.deepEqual(batchRequests, [["project-1", null]]);
   assert.equal(context.data.recheckingAll, true);
   assert.equal(context.data.bulkCheckProgressMode, "determinate");
-  delete global.wx;
 });
 
 test("book completion keeps a submit error when only an older finished job exists", async () => {
@@ -370,7 +361,6 @@ test("book completion keeps a submit error when only an older finished job exist
   assert.equal(context.data.recheckingAll, false);
   assert.equal(context.data.error, "network unavailable");
   assert.deepEqual(toasts, []);
-  delete global.wx;
 });
 
 test("book completion restores and polls an active whole-book check after reopening", async () => {
@@ -486,7 +476,6 @@ test("book completion preserves partial results and can cancel remaining checks"
   assert.deepEqual(cancellations, [["project-1", "book-job-2"]]);
   assert.equal(context.data.bulkCheckProgressTitle, "全书检查已停止");
   assert.match(context.data.bulkCheckProgressDetail, /已完成结果已保留/);
-  delete global.wx;
 });
 
 test("book completion resumes polling after a transient recheck refresh failure", async () => {
@@ -558,5 +547,4 @@ test("book completion prepares an untouched chapter in place", async () => {
   });
 
   assert.deepEqual(prepared, [["project-1", "chapter-1", "prepare"]]);
-  delete global.wx;
 });

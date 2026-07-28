@@ -284,7 +284,6 @@ test("book export keeps advanced settings collapsed and opens immersive reading"
   assert.deepEqual(navigations, [
     "/pages/book-reader/index?projectId=project%2F1&versionId=book-output-version-2",
   ]);
-  delete global.wx;
 });
 
 test("book export does not save settings while viewing a historical version", async () => {
@@ -423,7 +422,6 @@ test("book export page suggests titles and queues book-level editorial copy", as
   const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
   assert.equal(takeBookWorkspaceNavigationTarget(), "tools");
   page.clearBookEditorialCopyPoll.call(context);
-  delete global.wx;
 });
 
 test("book export page submits only one editorial copy task at a time", async () => {
@@ -468,7 +466,6 @@ test("book export page submits only one editorial copy task at a time", async ()
   await firstSubmission;
   assert.equal(context.data.bookEditorialCopyBusyTarget, "");
   page.clearBookEditorialCopyPoll.call(context);
-  delete global.wx;
 });
 
 test("book export page refreshes rewritten copy when the background task completes", async () => {
@@ -511,7 +508,6 @@ test("book export page refreshes rewritten copy when the background task complet
   assert.equal(context.data.bookAfterwordInput, "新的后记。");
   assert.equal(toasts[0].title, "后记已更新");
   page.clearBookEditorialCopyPoll.call(context);
-  delete global.wx;
 });
 
 test("book export page downloads selected PDF layout and source appendix setting", async () => {
@@ -560,7 +556,6 @@ test("book export page downloads selected PDF layout and source appendix setting
   assert.equal(toasts[0].title, "PDF 已打开");
   assert.equal(context.data.exportActionHintText, "适合拿去打印装订，页边距更宽。");
   assert.equal(context.data.bookExportBusyTarget, "");
-  delete global.wx;
 });
 
 test("book export page downloads reading PDF with the standard layout", async () => {
@@ -596,7 +591,6 @@ test("book export page downloads reading PDF with the standard layout", async ()
   assert.equal(opened[0].filePath, "/tmp/reading.pdf");
   assert.equal(toasts[0].title, "PDF 已打开");
   assert.equal(context.data.exportActionHintText, "适合微信分享和手机阅读。");
-  delete global.wx;
 });
 
 test("book export page assembles confirmed chapter drafts as a new full-book version", async () => {
@@ -639,5 +633,4 @@ test("book export page assembles confirmed chapter drafts as a new full-book ver
   assert.equal(context.data.generatingBook, false);
   assert.equal(context.data.exportNotice, "已根据各章确认正文更新全书稿。");
   assert.equal(toasts[0].title, "书稿已更新");
-  delete global.wx;
 });

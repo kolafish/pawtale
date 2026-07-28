@@ -4,7 +4,12 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const {
+  loadPageModule,
+  mockModule,
+  pageContext,
+  unmockedAsync,
+} = require("./page-harness");
 
 const {
   sampleBookManuscript,
@@ -17,13 +22,9 @@ function sampleFinishedBook(content = "全书正文") {
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
-    createMemoirBookOutputTTS: async () => {
-      throw new Error("createMemoirBookOutputTTS was not mocked");
-    },
+    createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
-    getMemoirBookOutputVersion: async () => {
-      throw new Error("getMemoirBookOutputVersion was not mocked");
-    },
+    getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
     ...voiceApiExports,
   });
   mockModule("../services/tts-settings.ts", {
@@ -126,7 +127,6 @@ test("book reader jumps from the table of contents to a chapter and back to the 
     { selector: "#reader-chapter-1", duration: 280 },
     { scrollTop: 0, duration: 280 },
   ]);
-  delete global.wx;
 });
 
 test("book reader keeps flat chapter content as a historical-version fallback", async () => {
