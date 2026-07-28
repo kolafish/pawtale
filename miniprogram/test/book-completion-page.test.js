@@ -22,6 +22,7 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
       throw new Error("generateMemoirBookReview was not mocked");
     },
     getMemoirBookReview: async () => null,
+    getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
       project_id: "project-1",
       current_issue: null,
@@ -208,6 +209,24 @@ test("book completion returns to the book hub for generation and chapter managem
   delete global.wx;
 });
 
+test("book completion opens book title settings directly", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadBookCompletionPage();
+  const context = pageContext(page, { projectId: "project/1" });
+
+  page.openBookSettings.call(context);
+
+  assert.deepEqual(navigations, [
+    "/pages/book-export/index?projectId=project%2F1&action=preview&settings=book",
+  ]);
+  delete global.wx;
+});
+
 test("book completion runs the cross-chapter review after chapters are confirmed", async () => {
   const reviewRequests = [];
   const overview = readyOverview();
@@ -238,6 +257,7 @@ test("book completion runs the cross-chapter review after chapters are confirmed
         return currentReview;
       },
       getMemoirBookReview: async () => currentReview,
+      getMemoirBookOutput: async () => ({ id: "book-output-1" }),
     },
   });
   const context = pageContext(page, {
@@ -251,6 +271,7 @@ test("book completion runs the cross-chapter review after chapters are confirmed
 
   assert.deepEqual(reviewRequests, [["project-1", false]]);
   assert.equal(context.data.bookReview.review.summary, "全书围绕家庭与成长展开。");
+  assert.equal(context.data.bookOutputAvailable, true);
   delete global.wx;
 });
 

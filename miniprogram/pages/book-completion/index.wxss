@@ -250,6 +250,29 @@
   box-shadow: inset 0 0 0 1rpx rgba(143, 64, 55, 0.28);
 }
 
+.review-book-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+  margin-top: 28rpx;
+  padding: 24rpx;
+  border: 1rpx solid var(--ui-border);
+  border-radius: 20rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.review-book-settings-copy {
+  color: var(--ui-text-muted);
+  font-size: 28rpx;
+  line-height: 1.7;
+}
+
+.review-book-settings-action {
+  margin-top: 0;
+  background: var(--ui-surface);
+  color: var(--ui-accent);
+}
+
 .book-ready-action:active,
 .recheck-book-action:active {
   transform: scale(0.96);
