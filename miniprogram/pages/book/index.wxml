@@ -81,7 +81,7 @@
         wx:if="{{bookContent}}"
         class="ghost-button small"
         loading="{{ttsBusyTarget === 'book'}}"
-        disabled="{{(ttsBusyTarget && ttsBusyTarget !== 'book') || (playingTarget && playingTarget !== 'book')}}"
+        disabled="{{generatingBook || (ttsBusyTarget && ttsBusyTarget !== 'book') || (playingTarget && playingTarget !== 'book')}}"
         bindtap="playBookOutputAudio"
       >
         {{ttsBusyTarget === "book" ? "准备全书朗读…" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}

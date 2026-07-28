@@ -1065,6 +1065,28 @@ test("book page exposes outline and full-book narration controls", () => {
   assert.match(pageWxml, /<book-tts-player/);
 });
 
+test("book page does not synthesize stale full-book audio while the book is updating", async () => {
+  let requestCount = 0;
+  const { page } = loadBookPage({
+    voiceApiExports: {
+      createMemoirBookOutputTTS: async () => {
+        requestCount += 1;
+        return sampleAudioResponse();
+      },
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    bookContent: "更新前的全书正文",
+    generatingBook: true,
+  });
+
+  await page.playBookOutputAudio.call(context);
+
+  assert.equal(requestCount, 0);
+  assert.equal(context.data.ttsBusyTarget, "");
+});
+
 test("book page shows chapter narration toast after preflight passes", async () => {
   const toasts = [];
   const { mod, page } = loadBookPage({

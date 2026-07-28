@@ -1072,7 +1072,12 @@ definePage<BookPageData>()({
       wx.showToast({ title: "先生成章节规划", icon: "none" });
       return;
     }
-    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
+    if (
+      !this.data.projectId
+      || this.data.ttsBusyTarget
+      || this.data.updatingPlanStructure
+      || this.data.generatingBook
+    ) {
       return;
     }
     this.stopPlayback();
@@ -1116,7 +1121,12 @@ definePage<BookPageData>()({
       wx.showToast({ title: "先生成全书稿", icon: "none" });
       return;
     }
-    if (!this.data.projectId || this.data.ttsBusyTarget || this.data.updatingPlanStructure) {
+    if (
+      !this.data.projectId
+      || this.data.ttsBusyTarget
+      || this.data.updatingPlanStructure
+      || this.data.generatingBook
+    ) {
       return;
     }
     this.stopPlayback();
