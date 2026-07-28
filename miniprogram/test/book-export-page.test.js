@@ -108,6 +108,22 @@ test("book export page loads plan and output from query project", async () => {
   assert.equal(context.data.bookManuscriptBackMatterItems.some((item) => item.title === "原始讲述索引"), true);
 });
 
+test("book export opens book settings when linked from whole-book review", async () => {
+  const { page } = loadBookExportPage({
+    getMemoirBookPlan: async () => samplePlan(),
+    getMemoirBookOutput: async () => sampleBookOutput(),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    action: "preview",
+    settings: "book",
+  });
+
+  assert.equal(context.data.showBookSettings, true);
+});
+
 test("book export page counts only chapters included in the final book", () => {
   const { page } = loadBookExportPage();
   const context = pageContext(page);

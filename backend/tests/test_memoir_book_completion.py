@@ -22,6 +22,7 @@ from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookCompletionJob,
+    MemoirBookOutput,
     MemoirBookReview,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -43,6 +44,11 @@ from app.services.memoir import (
     chapter_generation,
     completion_read_model,
     section_digests,
+)
+from app.services.memoir.book_reviews import (
+    BookReviewChapter,
+    BookReviewContext,
+    normalize_book_review,
 )
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
@@ -140,17 +146,17 @@ class LayeredBookAI:
                 "structure_guidance": ["从比赛现场开始。"],
                 "candidate_issues": candidates,
             }
-        elif "请审阅回忆录“" in user_prompt:
+        elif "请审阅下面这本回忆录的全书结构" in user_prompt:
             candidates = []
             if self.book_issue:
                 candidates = [
                     {
                         "issue_type": "structure",
-                        "channel": "manual_review",
                         "question": "是否保留两章相近的学校经历？",
                         "reason": "两章主题接近，需要用户决定取舍。",
                         "priority": "medium",
                         "chapter_ids": chapter_ids[:2],
+                        "resolution": "user_decision",
                     }
                 ]
             payload = {
@@ -181,6 +187,73 @@ class LayeredBookAI:
                 "editor_notes": [],
             }
         return json.dumps(payload, ensure_ascii=False)
+
+
+def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
+    context = BookReviewContext(
+        project_id="project-1",
+        plan_id="plan-1",
+        title="爷爷的故事",
+        chapters=(
+            BookReviewChapter(
+                chapter_id="chapter-1",
+                title="故园旧忆与 C2 家人琐记",
+                sort_order=1,
+                digest_id="digest-1",
+                digest_signature="digest-signature-1",
+                digest={},
+                confirmed_draft_version_id="version-1",
+                confirmed_draft_hash="hash-1",
+                material_ids=frozenset({"material-1"}),
+            ),
+            BookReviewChapter(
+                chapter_id="chapter-2",
+                title="工作与选择",
+                sort_order=2,
+                digest_id="digest-2",
+                digest_signature="digest-signature-2",
+                digest={},
+                confirmed_draft_version_id="version-2",
+                confirmed_draft_hash="hash-2",
+                material_ids=frozenset({"material-2"}),
+            ),
+        ),
+        input_signature="book-signature-1",
+    )
+
+    review = normalize_book_review(
+        {
+            "summary": "C1 讲家庭，C2 讲工作。",
+            "strengths": ["C2 的职业主线完整。"],
+            "structure_guidance": [
+                "在 C1 与 C2 之间增加过渡。",
+                *[f"普通编辑建议 {index}" for index in range(2, 9)],
+            ],
+            "candidate_issues": [
+                {
+                    "issue_type": "meaning",
+                    "question": "书名是否应从 C1 的爷爷主题改为个人成长？",
+                    "reason": "这是 C1、C2 共同决定的全书定位。",
+                    "priority": "medium",
+                    "chapter_ids": ["C1", "C2"],
+                    "resolution": "editorial_change",
+                }
+            ],
+        },
+        context=context,
+    )
+
+    visible = json.dumps(review, ensure_ascii=False)
+    assert "C1" not in visible
+    assert review["summary"] == (
+        "第1章《故园旧忆与 C2 家人琐记》 讲家庭，"
+        "第2章《工作与选择》 讲工作。"
+    )
+    assert "第1章《故园旧忆与 C2 家人琐记》" in visible
+    assert "第2章《工作与选择》" in visible
+    assert review["candidate_issues"] == []
+    assert len(review["structure_guidance"]) == 8
+    assert "书名是否应" in review["structure_guidance"][0]
 
 
 def test_section_revision_keeps_whole_chapter_size_limit():
@@ -1294,7 +1367,9 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert review["status"] == "ready"
     assert set(requested_models) == {"claude-opus-4-8"}
     book_prompt = next(
-        prompt for prompt in fake.prompts if "请审阅回忆录“" in prompt
+        prompt
+        for prompt in fake.prompts
+        if "请审阅下面这本回忆录的全书结构" in prompt
     )
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
@@ -1334,3 +1409,49 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
             MemoirBookReview.project_id == project_id
         )
     ) == review["id"]
+
+
+async def test_book_review_uses_the_current_output_title(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    fake = LayeredBookAI()
+    _install_ai(monkeypatch, fake)
+    bootstrapped = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/bootstrap"
+    )
+    assert bootstrapped.status_code == 200
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    reviewed = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review",
+        json={"force_regenerate": False},
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble",
+    )
+    assert assembled.status_code == 200, assembled.text
+    output = await test_db.scalar(
+        select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id,
+        )
+    )
+    assert output is not None
+    output.title = "一个人的故园与远方"
+    test_db.add(output)
+    await test_db.flush()
+
+    context = await book_reviews.load_book_review_context(
+        test_db,
+        project_id=project_id,
+    )
+
+    assert context.title == "一个人的故园与远方"
+    assert context.input_signature != reviewed.json()["input_signature"]

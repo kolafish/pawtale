@@ -573,7 +573,7 @@ test("voice chat starts the opening assistant turn after a normal session load",
   assert.equal(context.data.status, "ready");
 });
 
-test("book completion without a current issue does not generate a generic opening question", () => {
+test("book completion shows the persisted issue without generating another opening question", () => {
   const page = loadVoiceChatPage();
   let followUpCalls = 0;
   const context = {
@@ -582,8 +582,12 @@ test("book completion without a current issue does not generate a generic openin
       ...page.data,
       voiceSessionId: "voice-1",
       sessionGoal: "book_completion",
-      currentCompletionIssueId: "",
-      completionIssue: null,
+      currentCompletionIssueId: "issue-1",
+      completionIssue: {
+        id: "issue-1",
+        status: "in_progress",
+        question: "您希望保留现在的书名，还是调整全书定位？",
+      },
     },
     generateFollowUp() {
       followUpCalls += 1;
@@ -593,6 +597,38 @@ test("book completion without a current issue does not generate a generic openin
   page.maybeGenerateOpeningFollowUp.call(context);
 
   assert.equal(followUpCalls, 0);
+});
+
+test("book completion never sends its persisted question through the assistant model", async () => {
+  let streamStarts = 0;
+  const page = loadVoiceChatPage({
+    assistantTurnRuntimeExports: {
+      VoiceAssistantTurnRuntime: class {
+        async start() {
+          streamStarts += 1;
+          throw new Error("不应调用模型");
+        }
+      },
+    },
+  });
+  const context = {
+    ...page,
+    data: {
+      ...page.data,
+      voiceSessionId: "voice-1",
+      sessionGoal: "book_completion",
+      currentCompletionIssueId: "issue-1",
+      completionIssue: {
+        id: "issue-1",
+        status: "in_progress",
+        question: "请补充这一段经历。",
+      },
+    },
+  };
+
+  await page.generateFollowUp.call(context, false);
+
+  assert.equal(streamStarts, 0);
 });
 
 test("voice chat shows an error instead of continuing when session load fails", async () => {

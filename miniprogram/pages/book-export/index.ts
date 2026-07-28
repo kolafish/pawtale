@@ -215,11 +215,13 @@ definePage<BookExportData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const action = queryParam(query, "action") || "preview";
+    const showBookSettings = queryParam(query, "settings") === "book";
     this.setData({
       projectId,
       requestedAction: action,
       exportNotice: exportNotice(action),
       exportActionHintText: exportActionHint(action),
+      showBookSettings,
     });
     if (!projectId) {
       this.setData({ error: "缺少回忆录项目信息" });

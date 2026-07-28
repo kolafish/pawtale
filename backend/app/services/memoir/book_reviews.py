@@ -3,8 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
+import re
 import time
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -18,6 +19,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
+    MemoirBookOutput,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookReview,
@@ -40,7 +42,7 @@ from app.services.memoir.semantic_state import (
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v3"
+BOOK_REVIEW_ENGINE = "llm_book_review_v4"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
     "你根据章节摘要审阅全书层面的结构，不创造人生经历。"
@@ -74,11 +76,15 @@ class _BookReviewIssueOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     issue_type: str = ""
-    channel: str = ""
     question: str = ""
     reason: str = ""
     priority: str = ""
     chapter_ids: list[str] = Field(default_factory=list)
+    resolution: Literal[
+        "new_material",
+        "editorial_change",
+        "user_decision",
+    ]
 
 
 class _BookReviewOutput(BaseModel):
@@ -89,16 +95,52 @@ class _BookReviewOutput(BaseModel):
     structure_guidance: list[str] = Field(default_factory=list)
     candidate_issues: list[_BookReviewIssueOutput] = Field(default_factory=list)
 
+
 def _compact(value: object, *, limit: int) -> str:
     return " ".join(value.split())[:limit] if isinstance(value, str) else ""
 
 
-def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
+def _user_visible_text(
+    value: object,
+    *,
+    context: BookReviewContext,
+    limit: int,
+) -> str:
+    text = value if isinstance(value, str) else ""
+    references = _chapter_references(context)
+    labels: dict[str, str] = {}
+    for index, chapter in enumerate(context.chapters, start=1):
+        reference = references.encode(chapter.chapter_id)
+        labels[reference] = f"第{index}章《{chapter.title}》"
+    if labels:
+        reference_pattern = "|".join(
+            re.escape(reference)
+            for reference in sorted(labels, key=len, reverse=True)
+        )
+        text = re.sub(
+            rf"(?<![A-Za-z0-9])(?:{reference_pattern})(?![A-Za-z0-9])",
+            lambda match: labels[match.group(0)],
+            text,
+        )
+    return _compact(text, limit=limit)
+
+
+def _user_visible_string_list(
+    value: object,
+    *,
+    context: BookReviewContext,
+    limit: int,
+    item_limit: int,
+) -> list[str]:
     if not isinstance(value, list):
         return []
     result: list[str] = []
     for item in value:
-        text = _compact(item, limit=item_limit)
+        text = _user_visible_text(
+            item,
+            context=context,
+            limit=item_limit,
+        )
         if text and text not in result:
             result.append(text)
         if len(result) >= limit:
@@ -198,6 +240,16 @@ async def load_book_review_context(
     project_id: str,
 ) -> BookReviewContext:
     plan, plan_chapters = await _plan(db, project_id=project_id)
+    output = await db.scalar(
+        select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id,
+        )
+    )
+    book_title = (
+        (output.title or "").strip()
+        if output is not None
+        else (plan.title or "").strip()
+    ) or "我的回忆录"
     chapters: list[BookReviewChapter] = []
     for chapter in plan_chapters:
         digest_context = await chapter_digests.load_chapter_digest_context(
@@ -242,7 +294,8 @@ async def load_book_review_context(
         )
     signature = semantic_json_signature(
         {
-            "plan": {"id": plan.id, "title": plan.title},
+            "plan": {"id": plan.id},
+            "book_title": book_title,
             "chapters": [
                 {
                     "id": chapter.chapter_id,
@@ -264,7 +317,7 @@ async def load_book_review_context(
     return BookReviewContext(
         project_id=project_id,
         plan_id=plan.id,
-        title=plan.title,
+        title=book_title,
         chapters=tuple(chapters),
         input_signature=signature,
     )
@@ -288,7 +341,9 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         )
         for chapter in context.chapters
     )
-    return f"""请审阅回忆录“{context.title}”的全书结构。
+    return f"""请审阅下面这本回忆录的全书结构。
+
+当前书名：{context.title}
 
 有序章节：
 {chapters}
@@ -301,11 +356,11 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|impact|meaning|clarity|structure|privacy|conflict",
-      "channel": "interview|manual_review",
       "question": "确实需要用户处理时的一句自然问题",
       "reason": "为什么这会明显影响全书理解或用户决定",
       "priority": "high|medium|low",
-      "chapter_ids": ["相关 chapter_id"]
+      "chapter_ids": ["相关 chapter_id"],
+      "resolution": "new_material|editorial_change|user_decision"
     }}
   ]
 }}
@@ -314,10 +369,13 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
 - 纯编辑问题写入 structure_guidance，不要求用户补讲。
-- interview 只用于用户可选择补讲的信息，不阻塞成书；manual_review 只用于隐私、冲突、收录取舍等必须由用户确认的决定。
+- 书名、全书定位、主题取舍、章节顺序、合并、删减、过渡和篇幅调整都属于 editorial_change；优先写入 structure_guidance，不生成语音补讲问题。
+- 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
+- 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建摘要中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
+- summary、strengths、structure_guidance、question 和 reason 会直接展示给用户；其中必须使用章节标题或“第几章＋标题”，不得出现 C1、C2 等内部短编号。
 """
 
 
@@ -328,13 +386,18 @@ def normalize_book_review(
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("book review AI did not return a JSON object")
-    summary = _compact(payload.get("summary"), limit=1000)
+    summary = _user_visible_text(
+        payload.get("summary"),
+        context=context,
+        limit=1000,
+    )
     if not summary:
         raise ValueError("book review summary is empty")
     candidates = payload.get("candidate_issues")
     if not isinstance(candidates, list):
         candidates = []
     issues: list[dict] = []
+    promoted_guidance: list[str] = []
     allowed_types = {
         "context",
         "sequence",
@@ -349,8 +412,16 @@ def normalize_book_review(
     for candidate in candidates:
         if not isinstance(candidate, dict):
             continue
-        question = _compact(candidate.get("question"), limit=180)
-        reason = _compact(candidate.get("reason"), limit=300)
+        question = _user_visible_text(
+            candidate.get("question"),
+            context=context,
+            limit=180,
+        )
+        reason = _user_visible_text(
+            candidate.get("reason"),
+            context=context,
+            limit=300,
+        )
         if not question or not reason:
             continue
         chapter_ids = _chapter_references(context).decode_many(
@@ -366,18 +437,24 @@ def normalize_book_review(
             and chapter.material_ids
         ]
         issue_type = _compact(candidate.get("issue_type"), limit=24)
-        channel = _compact(candidate.get("channel"), limit=24)
         priority = _compact(candidate.get("priority"), limit=12)
+        resolution = _compact(candidate.get("resolution"), limit=24)
         issue_type = issue_type if issue_type in allowed_types else "clarity"
+        if resolution == "editorial_change":
+            guidance = question.rstrip("？?。 ")
+            if reason and reason not in guidance:
+                guidance = f"{guidance}。{reason}"
+            if guidance and guidance not in promoted_guidance:
+                promoted_guidance.append(guidance)
+            continue
+        if resolution == "user_decision":
+            normalized_channel = "manual_review"
+        else:
+            normalized_channel = "interview"
         issues.append(
             {
                 "issue_type": issue_type,
-                "channel": (
-                    "manual_review"
-                    if channel == "manual_review"
-                    and issue_type in {"privacy", "conflict", "structure"}
-                    else "interview"
-                ),
+                "channel": normalized_channel,
                 "question": question,
                 "reason": reason,
                 "priority": (
@@ -387,20 +464,30 @@ def normalize_book_review(
                 ),
                 "chapter_ids": chapter_ids,
                 "material_ids": material_ids,
+                "resolution": resolution,
             }
         )
+    model_guidance = _user_visible_string_list(
+        payload.get("structure_guidance"),
+        context=context,
+        limit=8,
+        item_limit=240,
+    )
+    structure_guidance: list[str] = []
+    for guidance in [*promoted_guidance, *model_guidance]:
+        if guidance not in structure_guidance:
+            structure_guidance.append(guidance)
+        if len(structure_guidance) >= 8:
+            break
     return {
         "summary": summary,
-        "strengths": _string_list(
+        "strengths": _user_visible_string_list(
             payload.get("strengths"),
+            context=context,
             limit=8,
             item_limit=240,
         ),
-        "structure_guidance": _string_list(
-            payload.get("structure_guidance"),
-            limit=8,
-            item_limit=240,
-        ),
+        "structure_guidance": structure_guidance,
         "candidate_issues": issues,
     }
 

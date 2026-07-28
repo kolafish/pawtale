@@ -12,12 +12,14 @@ import {
   generateMemoirBookReview,
   getMemoirBookCompletionJob,
   getMemoirBookCompletionOverview,
+  getMemoirBookOutput,
   getMemoirBookReview,
   listMemoirCompletionIssues,
   type MemoirBookReview,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
+import { ApiError } from "../../services/request";
 import {
   datasetString,
   pageUrl,
@@ -65,6 +67,7 @@ interface BookCompletionData {
   requiredBookIssues: MemoirCompletionIssue[];
   optionalBookIssues: MemoirCompletionIssue[];
   checkingBook: boolean;
+  bookOutputAvailable: boolean;
 }
 
 interface ChapterDataset {
@@ -285,6 +288,7 @@ definePage<BookCompletionData>()({
     requiredBookIssues: [],
     optionalBookIssues: [],
     checkingBook: false,
+    bookOutputAvailable: false,
   },
 
   onLoad(options: PageQuery) {
@@ -318,6 +322,19 @@ definePage<BookCompletionData>()({
     wx.switchTab({ url: "/pages/book/index" });
   },
 
+  openBookSettings() {
+    if (!this.data.projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-export/index", {
+        projectId: this.data.projectId,
+        action: "preview",
+        settings: "book",
+      }),
+    });
+  },
+
   async loadOverview(silent = false) {
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
@@ -345,12 +362,18 @@ definePage<BookCompletionData>()({
         this.data.preparingChapterId,
         batchActive,
       );
-      const [bookReview, issueCollection] = view.allChaptersConfirmed
+      const [bookReview, issueCollection, bookOutput] = view.allChaptersConfirmed
         ? await Promise.all([
           getMemoirBookReview(this.data.projectId),
           listMemoirCompletionIssues(this.data.projectId),
+          getMemoirBookOutput(this.data.projectId).catch((error) => {
+            if (error instanceof ApiError && error.statusCode === 404) {
+              return null;
+            }
+            throw error;
+          }),
         ])
-        : [null, { issues: [] }];
+        : [null, { issues: [] }, null];
       const finishedChapterId = this.data.preparingChapterId;
       const finishedWholeBook = (
         this.data.recheckingAll
@@ -360,6 +383,7 @@ definePage<BookCompletionData>()({
       this.setData({
         ...view,
         ...bookReviewViewPatch(bookReview, issueCollection.issues),
+        bookOutputAvailable: Boolean(bookOutput),
         ...bookCompletionJobView(
           view.allChaptersConfirmed ? null : bulkCheckJob,
         ),

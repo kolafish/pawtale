@@ -616,13 +616,9 @@ definePage<VoiceChatData>()({
   maybeGenerateOpeningFollowUp() {
     if (
       this.data.interviewType === "human_interview"
+      || this.data.sessionGoal === "book_completion"
       || this.pageSuspended
       || this.data.followUpLoading
-      || (
-        this.data.sessionGoal === "book_completion"
-        && this.data.completionIssue?.status !== "in_progress"
-        && this.data.completionIssue?.status !== "open"
-      )
     ) {
       return;
     }
@@ -635,14 +631,10 @@ definePage<VoiceChatData>()({
   async generateFollowUp(regenerate: boolean = false) {
     if (
       this.data.interviewType === "human_interview"
+      || this.data.sessionGoal === "book_completion"
       || this.pageSuspended
       || !this.data.voiceSessionId
       || this.data.followUpLoading
-      || (
-        this.data.sessionGoal === "book_completion"
-        && this.data.completionIssue?.status !== "in_progress"
-        && this.data.completionIssue?.status !== "open"
-      )
     ) {
       return;
     }
