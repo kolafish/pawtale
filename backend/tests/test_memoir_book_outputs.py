@@ -528,13 +528,25 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     )
     await test_db.commit()
 
-    await _seed_confirmed_book_output(test_db, project_id=project_id)
+    version = await _seed_confirmed_book_output(test_db, project_id=project_id)
     response = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
 
     assert response.status_code == 200
     data = response.json()
+    assert "metadata_json" not in data
     assert data["title"] == "外婆的回忆录"
     assert data["latest_version"]["version"] == 1
+    assert data["versions"] == [
+        {
+            "id": version.id,
+            "version": 1,
+            "created_by": "system",
+            "created_at": version.created_at.isoformat(),
+        }
+    ]
+    assert "content" not in data["versions"][0]
+    assert "chapter_snapshot_json" not in data["latest_version"]
+    assert "structured_content" not in data["latest_version"]
     content = data["latest_version"]["content"]
     assert "目录\n1. 外婆家的童年\n  1.1 外婆家的童年\n2. 第一次离家" in content
     assert "第1章 外婆家的童年" in content
@@ -542,23 +554,6 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert "我小时候常在外婆家的院子里晒太阳。" in content
     assert "第2章 第一次离家" in content
     assert "后来我第一次离家去县城读书，心里很紧张。" in content
-    snapshot = data["latest_version"]["chapter_snapshot_json"]
-    assert [item["chapter_id"] for item in snapshot] == [chapters[0].id, chapters[1].id]
-    assert snapshot[0]["chapter_index"] == 1
-    assert snapshot[0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
-    assert snapshot[0]["section_count"] == 1
-    assert snapshot[0]["sections"][0]["title"] == "外婆家的童年"
-    structured = data["latest_version"]["structured_content"]
-    assert structured["title"] == "外婆的回忆录"
-    assert structured["chapter_count"] == 2
-    assert [item["title"] for item in structured["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
-    assert structured["chapters"][0]["chapter_id"] == chapters[0].id
-    assert structured["chapters"][0]["index"] == 1
-    assert structured["chapters"][0]["content"] == "我小时候常在外婆家的院子里晒太阳。"
-    assert structured["table_of_contents"][0]["sections"][0]["title"] == "外婆家的童年"
-    assert structured["chapters"][0]["sections"][0]["content"] == (
-        "我小时候常在外婆家的院子里晒太阳。"
-    )
     manuscript = data["latest_version"]["manuscript"]
     assert manuscript["schema_version"] == 2
     assert manuscript["profile"]["template"] == "classic_family"
@@ -573,6 +568,7 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
     assert manuscript["front_matter"][2]["title"] == "整理说明"
     assert manuscript["front_matter"][3]["title"] == "写在前面"
     assert [item["title"] for item in manuscript["table_of_contents"]] == ["外婆家的童年", "第一次离家"]
+
     assert manuscript["chapters"][0]["chapter_id"] == chapters[0].id
     assert manuscript["chapters"][0]["sections"][0]["title"] == "外婆家的童年"
     assert manuscript["chapters"][0]["intro"].startswith("记忆先回到外婆家的童年")
@@ -588,6 +584,22 @@ async def test_mobile_memoir_book_output_serializes_confirmed_chapter_projection
         "我小时候常在外婆家的院子里晒太阳。"
     )
     assert manuscript["render_settings"]["page_size"] == "a5"
+
+    version_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/versions/{version.id}"
+    )
+    assert version_response.status_code == 200
+    version_data = version_response.json()
+    assert version_data["id"] == version.id
+    assert version_data["content"] == content
+    assert version_data["manuscript"]["chapters"][0]["chapter_id"] == chapters[0].id
+    assert "chapter_snapshot_json" not in version_data
+    assert "structured_content" not in version_data
+
+    missing_version_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/versions/missing"
+    )
+    assert missing_version_response.status_code == 404
 
     stored_output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     stored_versions = (
