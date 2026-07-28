@@ -19,6 +19,7 @@ from app.schemas.memoir_book import (
     MemoirBookChapterTitleUpdateRequest,
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
+    MemoirBookOutputVersionResponse,
     MemoirBookPlanConfirmRequest,
     MemoirBookPlanGenerateRequest,
     MemoirBookPlanResponse,
@@ -416,6 +417,24 @@ async def get_mobile_memoir_book_output(
         db,
         user_id=current_user.id,
         project_id=project_id,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/book-output/versions/{version_id}",
+    response_model=MemoirBookOutputVersionResponse,
+)
+async def get_mobile_memoir_book_output_version(
+    project_id: str,
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_book_outputs.get_book_output_version(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        version_id=version_id,
     )
 
 

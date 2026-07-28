@@ -611,14 +611,16 @@ class MemoirBookManuscript(BaseModel):
 
 class MemoirBookOutputVersionResponse(BaseModel):
     id: str
-    output_id: str
-    project_id: str
-    plan_id: str
     version: int
     content: str
-    chapter_snapshot_json: list[dict[str, object]] = Field(default_factory=list)
-    structured_content: MemoirBookOutputStructuredContentResponse | None = None
     manuscript: MemoirBookManuscript | None = None
+    created_by: MemoirCreatedBy
+    created_at: datetime
+
+
+class MemoirBookOutputVersionSummaryResponse(BaseModel):
+    id: str
+    version: int
     created_by: MemoirCreatedBy
     created_at: datetime
 
@@ -629,10 +631,9 @@ class MemoirBookOutputResponse(BaseModel):
     plan_id: str
     title: str
     status: MemoirOutputStatus
-    metadata_json: dict[str, object] = Field(default_factory=dict)
     is_stale: bool = False
     stale_chapter_titles: list[str] = Field(default_factory=list)
     latest_version: MemoirBookOutputVersionResponse | None = None
-    versions: list[MemoirBookOutputVersionResponse] = Field(default_factory=list)
+    versions: list[MemoirBookOutputVersionSummaryResponse] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime

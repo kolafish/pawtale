@@ -30,6 +30,7 @@ from app.schemas.memoir_book import (
     MemoirBookOutputResponse,
     MemoirBookOutputUpdateRequest,
     MemoirBookOutputVersionResponse,
+    MemoirBookOutputVersionSummaryResponse,
     MemoirBookTitleSuggestionRequest,
     MemoirBookTitleSuggestionResponse,
 )
@@ -56,7 +57,6 @@ from app.services.memoir.book_output_manuscript import (
     request_book_metadata_patch as _request_book_metadata_patch,
     safe_str as _safe_str,
     stored_cover_style as _stored_cover_style,
-    structured_content_response as _structured_content_response,
     target_set as _target_set,
     update_chapter_editorial_copy as _update_chapter_editorial_copy,
     updated_manuscript_payload as _updated_manuscript_payload,
@@ -110,18 +110,20 @@ def _output_version_response(version: MemoirBookOutputVersion, *, title: str) ->
     )
     return MemoirBookOutputVersionResponse(
         id=version.id,
-        output_id=version.output_id,
-        project_id=version.project_id,
-        plan_id=version.plan_id,
         version=version.version,
         content=version.content,
-        chapter_snapshot_json=snapshot,
-        structured_content=_structured_content_response(
-            title=title,
-            content=version.content,
-            snapshot=snapshot,
-        ),
         manuscript=manuscript,
+        created_by=MemoirCreatedBy(version.created_by),
+        created_at=version.created_at,
+    )
+
+
+def _output_version_summary_response(
+    version: MemoirBookOutputVersion,
+) -> MemoirBookOutputVersionSummaryResponse:
+    return MemoirBookOutputVersionSummaryResponse(
+        id=version.id,
+        version=version.version,
         created_by=MemoirCreatedBy(version.created_by),
         created_at=version.created_at,
     )
@@ -132,7 +134,15 @@ def _output_response(
     *,
     stale_chapter_titles: list[str] | None = None,
 ) -> MemoirBookOutputResponse:
-    versions = [_output_version_response(version, title=output.title) for version in output.versions]
+    versions = [
+        _output_version_summary_response(version)
+        for version in output.versions
+    ]
+    latest_version = (
+        _output_version_response(output.versions[-1], title=output.title)
+        if output.versions
+        else None
+    )
     stale_titles = stale_chapter_titles or []
     return MemoirBookOutputResponse(
         id=output.id,
@@ -140,10 +150,9 @@ def _output_response(
         plan_id=output.plan_id,
         title=output.title,
         status=MemoirOutputStatus(output.status),
-        metadata_json=output.metadata_json or {},
         is_stale=bool(stale_titles),
         stale_chapter_titles=stale_titles,
-        latest_version=versions[-1] if versions else None,
+        latest_version=latest_version,
         versions=versions,
         created_at=output.created_at,
         updated_at=output.updated_at,
@@ -352,6 +361,27 @@ async def get_book_output(
     if response is None:
         raise HTTPException(status_code=404, detail="全书稿不存在")
     return response
+
+
+async def get_book_output_version(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str,
+    version_id: str,
+    allow_admin: bool = False,
+) -> MemoirBookOutputVersionResponse:
+    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
+    output = await _load_output(db, project_id=project_id)
+    if not output:
+        raise HTTPException(status_code=404, detail="全书稿不存在")
+    version = next(
+        (item for item in output.versions if item.id == version_id),
+        None,
+    )
+    if version is None:
+        raise HTTPException(status_code=404, detail="书稿版本不存在")
+    return _output_version_response(version, title=output.title)
 
 
 async def book_output_response_or_none(
