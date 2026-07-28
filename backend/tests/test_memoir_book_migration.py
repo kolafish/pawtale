@@ -1,8 +1,9 @@
 import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.schema import CreateTable
 
-from app.database import register_models
+from app.database import Base, register_models
 from app.migrations.memoir_schema_cutover import (
     OBSOLETE_MEMOIR_TABLES,
     migrate_memoir_schema_cutover,
@@ -150,7 +151,17 @@ async def test_runtime_schema_includes_background_book_review_job_type():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
-        await migrate_runtime_schema(engine)
+        current_sql = str(
+            CreateTable(
+                Base.metadata.tables["memoir_editing_jobs"]
+            ).compile(dialect=engine.sync_engine.dialect)
+        )
+        old_sql = current_sql.replace(", 'generate_book_review'", "")
+        assert old_sql != current_sql
+        async with engine.begin() as conn:
+            await conn.execute(text(old_sql))
+
+        migration = await migrate_runtime_schema(engine)
         async with engine.begin() as conn:
             table_sql = str(
                 await conn.scalar(
@@ -162,6 +173,9 @@ async def test_runtime_schema_includes_background_book_review_job_type():
                 )
                 or ""
             )
+        assert "memoir_editing_jobs" in (
+            migration["memoir_schema_cutover"]["rebuilt_tables"]
+        )
         assert "generate_book_review" in table_sql
         await assert_runtime_schema(
             engine,

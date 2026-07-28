@@ -235,6 +235,13 @@ test("book review progress uses persisted stages without inventing model percent
   assert.equal(reviewing.bookReviewProgressTitle, "正在检查全书");
   assert.equal(reviewing.bookReviewProgressMode, "indeterminate");
   assert.equal(reviewing.bookReviewProgressPercent, 0);
+  assert.equal(bookReviewJobView(reviewJob({
+    job_id: "review-job-1",
+    status: "succeeded",
+    stage: "completed",
+    total_chapter_count: 4,
+    processed_chapter_count: 4,
+  })).bookReviewProgressVisible, false);
 });
 
 test("book completion returns to the book hub for generation and chapter management", () => {

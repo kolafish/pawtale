@@ -33,13 +33,23 @@ MemoirBookReviewJobStatus = Literal[
     "failed",
     "cancelled",
 ]
+MemoirBookReviewJobStage = Literal[
+    "",
+    "queued",
+    "preparing_chapters",
+    "reviewing",
+    "saving",
+    "completed",
+    "failed",
+    "cancelled",
+]
 
 
 class MemoirBookReviewJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
     status: MemoirBookReviewJobStatus
-    stage: str = ""
+    stage: MemoirBookReviewJobStage = ""
     total_chapter_count: int = 0
     processed_chapter_count: int = 0
     current_chapter_title: str = ""

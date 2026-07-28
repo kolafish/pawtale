@@ -31,7 +31,15 @@ export interface MemoirBookReviewJob {
   job_id: string | null;
   project_id: string;
   status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
-  stage: string;
+  stage:
+    | ""
+    | "queued"
+    | "preparing_chapters"
+    | "reviewing"
+    | "saving"
+    | "completed"
+    | "failed"
+    | "cancelled";
   total_chapter_count: number;
   processed_chapter_count: number;
   current_chapter_title: string;

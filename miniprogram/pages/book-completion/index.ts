@@ -145,16 +145,30 @@ export function bookReviewJobView(
       bookReviewCanCancel: false,
     };
   }
+  if (job.status === "succeeded") {
+    return {
+      bookReviewProgressVisible: false,
+      bookReviewProgressTitle: "",
+      bookReviewProgressDetail: "",
+      bookReviewProgressMode: "hidden",
+      bookReviewProgressPercent: 0,
+      bookReviewProgressClass: "",
+      bookReviewCanCancel: false,
+    };
+  }
   if (bookReviewJobActive(job)) {
     const preparing = job.stage === "preparing_chapters";
-    const stageTitle = {
+    const stageTitles: Partial<
+      Record<MemoirBookReviewJob["stage"], string>
+    > = {
       queued: "全书检查已提交",
       preparing_chapters: job.current_chapter_title
         ? `正在准备《${job.current_chapter_title}》`
         : "正在准备章节摘要",
       reviewing: "正在检查全书",
       saving: "正在保存检查结果",
-    }[job.stage] || "正在检查全书";
+    };
+    const stageTitle = stageTitles[job.stage] || "正在检查全书";
     const detail = preparing && job.total_chapter_count
       ? `已准备 ${job.processed_chapter_count}/${job.total_chapter_count} 章，离开页面后任务会继续`
       : (job.stage === "saving"
@@ -507,11 +521,7 @@ definePage<BookCompletionData>()({
         ...view,
         ...bookReviewViewPatch(bookReview, issueCollection.issues),
         bookOutputAvailable: Boolean(bookOutput),
-        ...bookReviewJobView(
-          bookReviewJob?.status === "succeeded" && bookReview
-            ? null
-            : bookReviewJob,
-        ),
+        ...bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,
         ...bookCompletionJobView(
