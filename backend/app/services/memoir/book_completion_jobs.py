@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -108,6 +109,87 @@ async def _chapter_jobs(
     return {row.id: row for row in rows}
 
 
+def _chapter_item(
+    *,
+    target: dict[str, str],
+    batch_status: str,
+    stored_item: dict[str, object] | None,
+    child_job_id: str | None,
+    child_job: MemoirEditingJob | None,
+    enqueue_error: str,
+) -> dict[str, object]:
+    error_message = enqueue_error
+    if stored_item is not None:
+        child_job_id = (
+            str(stored_item["job_id"])
+            if stored_item.get("job_id")
+            else None
+        )
+        status = str(stored_item["status"])
+        error_message = str(stored_item["error_message"])
+    elif error_message:
+        status = "failed"
+    elif (
+        batch_status == MemoirBookCompletionJobStatus.CANCELLED.value
+        and child_job is None
+    ):
+        status = "cancelled"
+    elif child_job is None:
+        status = (
+            "pending"
+            if batch_status == MemoirBookCompletionJobStatus.PENDING.value
+            else "failed"
+        )
+        if status == "failed":
+            error_message = "章节检查任务未成功提交"
+    elif child_job.status == MemoirEditingJobStatus.SUCCEEDED.value:
+        status = "succeeded"
+    elif child_job.status == MemoirEditingJobStatus.FAILED.value:
+        status = "failed"
+        error_message = child_job.error_message or "章节检查失败"
+    elif child_job.status == MemoirEditingJobStatus.SKIPPED.value:
+        status = "cancelled"
+    else:
+        status = (
+            "running"
+            if child_job.status == MemoirEditingJobStatus.RUNNING.value
+            else "pending"
+        )
+    return {
+        **target,
+        "job_id": child_job_id,
+        "status": status,
+        "error_message": error_message,
+    }
+
+
+def _batch_status(
+    job_status: str,
+    chapter_items: list[dict[str, object]],
+    *,
+    stored_results: bool,
+) -> str:
+    if stored_results:
+        return job_status
+    if job_status == MemoirBookCompletionJobStatus.CANCELLED.value:
+        return MemoirBookCompletionJobStatus.CANCELLED.value
+    if any(
+        item["status"] not in _TERMINAL_CHAPTER_STATUSES
+        for item in chapter_items
+    ):
+        return (
+            MemoirBookCompletionJobStatus.PENDING.value
+            if any(item["job_id"] is None for item in chapter_items)
+            else MemoirBookCompletionJobStatus.RUNNING.value
+        )
+    statuses = {str(item["status"]) for item in chapter_items}
+    if "failed" in statuses:
+        return MemoirBookCompletionJobStatus.FAILED.value
+    if "cancelled" in statuses:
+        return MemoirBookCompletionJobStatus.CANCELLED.value
+    return MemoirBookCompletionJobStatus.SUCCEEDED.value
+
+
 async def _job_response(
     db: AsyncSession,
     *,
@@ -142,90 +224,36 @@ async def _job_response(
         str(item["chapter_id"]): item
         for item in stored_chapter_items or []
     }
-    chapter_items: list[dict[str, object]] = []
-    succeeded_count = 0
-    failed_count = 0
-    cancelled_count = 0
-    current_chapter_id: str | None = None
-    current_chapter_title = ""
-
-    for target in targets:
-        chapter_id = target["chapter_id"]
-        stored_item = stored_by_chapter.get(chapter_id)
-        child_job_id = job_ids.get(chapter_id)
-        child_job = child_jobs.get(child_job_id or "")
-        error_message = enqueue_errors.get(chapter_id, "")
-        if stored_item is not None:
-            child_job_id = (
-                str(stored_item["job_id"])
-                if stored_item.get("job_id")
-                else None
-            )
-            status = str(stored_item["status"])
-            error_message = str(stored_item["error_message"])
-        elif error_message:
-            status = "failed"
-        elif job.status == MemoirBookCompletionJobStatus.CANCELLED.value and child_job is None:
-            status = "cancelled"
-        elif child_job is None:
-            status = (
-                "pending"
-                if job.status == MemoirBookCompletionJobStatus.PENDING.value
-                else "failed"
-            )
-            if status == "failed":
-                error_message = "章节检查任务未成功提交"
-        elif child_job.status == MemoirEditingJobStatus.SUCCEEDED.value:
-            status = "succeeded"
-        elif child_job.status == MemoirEditingJobStatus.FAILED.value:
-            status = "failed"
-            error_message = child_job.error_message or "章节检查失败"
-        elif child_job.status == MemoirEditingJobStatus.SKIPPED.value:
-            status = "cancelled"
-        else:
-            status = (
-                "running"
-                if child_job.status == MemoirEditingJobStatus.RUNNING.value
-                else "pending"
-            )
-
-        if status == "succeeded":
-            succeeded_count += 1
-        elif status == "failed":
-            failed_count += 1
-        elif status == "cancelled":
-            cancelled_count += 1
-        elif current_chapter_id is None:
-            current_chapter_id = chapter_id
-            current_chapter_title = target["title"]
-
-        chapter_items.append({
-            **target,
-            "job_id": child_job_id,
-            "status": status,
-            "error_message": error_message,
-        })
-
+    chapter_items = [
+        _chapter_item(
+            target=target,
+            batch_status=job.status,
+            stored_item=stored_by_chapter.get(target["chapter_id"]),
+            child_job_id=job_ids.get(target["chapter_id"]),
+            child_job=child_jobs.get(job_ids.get(target["chapter_id"], "")),
+            enqueue_error=enqueue_errors.get(target["chapter_id"], ""),
+        )
+        for target in targets
+    ]
+    status_counts = Counter(str(item["status"]) for item in chapter_items)
+    succeeded_count = status_counts["succeeded"]
+    failed_count = status_counts["failed"]
+    cancelled_count = status_counts["cancelled"]
     total_count = len(chapter_items)
     processed_count = succeeded_count + failed_count + cancelled_count
-    has_active = processed_count < total_count
-    if stored_chapter_items is not None:
-        batch_status = job.status
-    elif job.status == MemoirBookCompletionJobStatus.CANCELLED.value:
-        batch_status = MemoirBookCompletionJobStatus.CANCELLED.value
-    elif has_active:
-        batch_status = (
-            MemoirBookCompletionJobStatus.PENDING.value
-            if any(item["job_id"] is None for item in chapter_items)
-            else MemoirBookCompletionJobStatus.RUNNING.value
-        )
-    elif failed_count:
-        batch_status = MemoirBookCompletionJobStatus.FAILED.value
-    elif cancelled_count:
-        batch_status = MemoirBookCompletionJobStatus.CANCELLED.value
-    else:
-        batch_status = MemoirBookCompletionJobStatus.SUCCEEDED.value
-
+    current = next(
+        (
+            item
+            for item in chapter_items
+            if item["status"] not in _TERMINAL_CHAPTER_STATUSES
+        ),
+        None,
+    )
+    batch_status = _batch_status(
+        job.status,
+        chapter_items,
+        stored_results=stored_chapter_items is not None,
+    )
     terminal = batch_status not in _ACTIVE_BATCH_STATUSES
     error_message = next(
         (
@@ -261,8 +289,8 @@ async def _job_response(
         "succeeded_chapter_count": succeeded_count,
         "failed_chapter_count": failed_count,
         "cancelled_chapter_count": cancelled_count,
-        "current_chapter_id": current_chapter_id,
-        "current_chapter_title": current_chapter_title,
+        "current_chapter_id": current["chapter_id"] if current else None,
+        "current_chapter_title": current["title"] if current else "",
         "requested_ai_model": job.requested_ai_model,
         "chapters": chapter_items,
         "can_cancel": batch_status in _ACTIVE_BATCH_STATUSES,
@@ -274,34 +302,21 @@ async def _job_response(
     }
 
 
-async def _load_active_job(
+async def _load_latest_job(
     db: AsyncSession,
     *,
     project_id: str,
+    active_only: bool = False,
 ) -> MemoirBookCompletionJob | None:
-    return await db.scalar(
-        select(MemoirBookCompletionJob)
-        .where(
-            MemoirBookCompletionJob.project_id == project_id,
-            MemoirBookCompletionJob.status.in_(_ACTIVE_BATCH_STATUSES),
-        )
-        .order_by(
-            MemoirBookCompletionJob.created_at.desc(),
-            MemoirBookCompletionJob.id.desc(),
-        )
-        .limit(1)
+    query = select(MemoirBookCompletionJob).where(
+        MemoirBookCompletionJob.project_id == project_id
     )
-
-
-async def _load_current_job(
-    db: AsyncSession,
-    *,
-    project_id: str,
-) -> MemoirBookCompletionJob | None:
+    if active_only:
+        query = query.where(
+            MemoirBookCompletionJob.status.in_(_ACTIVE_BATCH_STATUSES)
+        )
     return await db.scalar(
-        select(MemoirBookCompletionJob)
-        .where(MemoirBookCompletionJob.project_id == project_id)
-        .order_by(
+        query.order_by(
             MemoirBookCompletionJob.created_at.desc(),
             MemoirBookCompletionJob.id.desc(),
         )
@@ -376,7 +391,11 @@ async def enqueue_book_completion_job(
     req: MemoirBookCompletionJobRequest,
     allow_admin: bool = False,
 ) -> dict[str, object]:
-    active = await _load_active_job(db, project_id=project_id)
+    active = await _load_latest_job(
+        db,
+        project_id=project_id,
+        active_only=True,
+    )
     if active is not None:
         await _enqueue_missing_chapter_jobs(
             db,
@@ -450,7 +469,11 @@ async def enqueue_book_completion_job(
         await db.commit()
     except IntegrityError:
         await db.rollback()
-        active = await _load_active_job(db, project_id=project_id)
+        active = await _load_latest_job(
+            db,
+            project_id=project_id,
+            active_only=True,
+        )
         if active is None:
             raise
         job = active
@@ -471,7 +494,7 @@ async def get_current_book_completion_job(
     project_id: str,
     allow_admin: bool = False,
 ) -> dict[str, object]:
-    job = await _load_current_job(db, project_id=project_id)
+    job = await _load_latest_job(db, project_id=project_id)
     if job is not None and job.status == MemoirBookCompletionJobStatus.PENDING.value:
         await _enqueue_missing_chapter_jobs(
             db,
