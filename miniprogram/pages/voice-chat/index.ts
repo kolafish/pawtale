@@ -5,10 +5,10 @@ import type {
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
-  TTSAlignmentSegment,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-voice-session";
+import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
 import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";

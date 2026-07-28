@@ -3,7 +3,7 @@ import type {
   MemoirVoiceModuleProgress,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionSummary,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-voice-session";
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirVoiceProgress,

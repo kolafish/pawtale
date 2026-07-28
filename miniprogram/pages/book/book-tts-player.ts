@@ -1,7 +1,5 @@
-import type {
-  MemoirBookAudioResponse,
-  TTSAlignmentSegment,
-} from "../../domain/voice-chat";
+import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
+import type { MemoirBookAudioResponse } from "../../domain/memoir-book";
 import {
   playAudioFileSequence,
   type AudioPlaybackController,

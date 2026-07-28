@@ -1,10 +1,10 @@
+import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
 import type {
-  MemoirGuidanceMode,
   MemoirVoiceTranscriptIncludedFilter,
   MemoirVoiceTranscriptItem,
   MemoirVoiceSearchQueryFilters,
   MemoirVoiceSearchQueryParseResponse,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-transcript";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";

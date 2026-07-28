@@ -2,7 +2,7 @@ import type { MemoirIdentity, Project } from "../domain/memoir";
 import type {
   MemoirVoiceSessionDetail,
   VoiceChatTranscriptLine,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
 
 const STORE_KEY = "pawtale_memoir_session";
 

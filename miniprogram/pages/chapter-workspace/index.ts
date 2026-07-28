@@ -1,8 +1,6 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
-import type {
-  MemoirBookAudioResponse,
-  MemoirCompletionIssue,
-} from "../../domain/voice-chat";
+import type { MemoirBookAudioResponse } from "../../domain/memoir-book";
+import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import {
   AudioPlaybackController,
   playAudioFileSequence,

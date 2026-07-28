@@ -4,7 +4,7 @@ import type {
   MemoirVoiceSessionDetail,
   MemoirVoiceUtterance,
   VoiceChatTranscriptLine,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
 import {
   listMemoirCacheScopes,
   readMemoirCache,

@@ -4,9 +4,9 @@ import type {
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirBookPlanStructureCommandRequest,
-  MemoirAutomationEvent,
   MemoirImageAssetListResponse,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
+import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
 import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";

@@ -1,5 +1,5 @@
 import type { Project } from "../domain/memoir";
-import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/voice-chat";
+import type { MemoirGuidanceMode, MemoirGuidanceModule } from "../domain/memoir-voice-session";
 import type { MemoirNarratorGender } from "./memoir";
 
 export interface GuidanceOption<T extends string> {

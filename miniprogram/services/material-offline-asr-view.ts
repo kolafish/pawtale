@@ -1,4 +1,4 @@
-import type { MemoirMaterialOfflineASRState } from "../domain/voice-chat";
+import type { MemoirMaterialOfflineASRState } from "../domain/memoir-transcript";
 
 
 export interface MaterialOfflineASRView {

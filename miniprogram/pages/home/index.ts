@@ -2,8 +2,8 @@ import type {
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
-  MemoirVoiceTranscriptItem,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-voice-session";
+import type { MemoirVoiceTranscriptItem } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
 import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";

@@ -3,7 +3,7 @@ import type {
   MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
   MemoirBookOutputUpdateRequest,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
 import {
   BOOK_COVER_STYLE_OPTIONS,
   trimText,

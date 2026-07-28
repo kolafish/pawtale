@@ -1,6 +1,6 @@
 import type {
   MemoirBookPlanStructureCommandRequest,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
 import { pageUrl } from "../../services/page-input";
 import type { BookChapterView, BookData } from "./book-view-model";
 import { chapterCollectionData, trimText } from "./book-view-model";

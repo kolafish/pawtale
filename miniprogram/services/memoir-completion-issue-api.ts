@@ -2,7 +2,7 @@ import type {
   MemoirCompletionIssue,
   MemoirCompletionIssueCloseRequest,
   MemoirCompletionIssueCollection,
-} from "../domain/voice-chat";
+} from "../domain/memoir-completion-issue";
 import {
   memoirNarrativeProjectPath,
   memoirRequest,

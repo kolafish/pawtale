@@ -2,7 +2,7 @@ import type {
   MemoirChapterCompletionSummary,
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
-import type { MemoirCompletionIssue } from "../../domain/voice-chat";
+import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import { aiTaskProgressPercent, type AITaskProgressMode } from "../../services/ai-task-progress";
 import { definePage } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";

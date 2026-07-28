@@ -20,11 +20,11 @@ import type {
   MemoirBookPlanUpdateRequest,
   MemoirBookTitleSuggestionRequest,
   MemoirBookTitleSuggestionResponse,
-  MemoirAutomationEvent,
   MemoirImageAsset,
   MemoirImageAssetListResponse,
   MemoirImageAssetUpdateRequest,
-} from "../domain/voice-chat";
+} from "../domain/memoir-book";
+import type { MemoirAutomationEvent } from "../domain/memoir-voice-session";
 import {
   memoirNarrativeProjectPath,
   memoirProjectPath,

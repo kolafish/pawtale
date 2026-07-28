@@ -4,7 +4,7 @@ import type {
   MemoirChapterSectionMaterialSummary,
   MemoirChapterSectionSummary,
   MemoirSectionType,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
 import { chapterNextAction, type ChapterNextAction } from "./chapter-next-action";
 
 export interface ChapterSectionMaterialView extends MemoirChapterSectionMaterialSummary {

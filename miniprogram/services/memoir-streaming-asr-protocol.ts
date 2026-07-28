@@ -2,7 +2,7 @@ import type {
   VoiceChatErrorInfo,
   VoiceChatErrorKind,
   VoiceGatewayServerEvent,
-} from "../domain/voice-chat";
+} from "../domain/memoir-voice-session";
 
 const PCM_SAMPLE_RATE = 16000;
 const PCM_BYTES_PER_SAMPLE = 2;

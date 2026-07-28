@@ -1,4 +1,4 @@
-import type { MemoirGuidanceMode } from "../../domain/voice-chat";
+import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
 import { definePage } from "../../services/page-definition";
 import type { MemoirNarratorGender } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";

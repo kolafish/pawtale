@@ -1,15 +1,15 @@
+import type { TTSAlignmentSegment } from "../../domain/memoir-audio";
+import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
 import type {
-  MemoirCompletionIssue,
   MemoirGuidanceMode,
   MemoirInterviewType,
   MemoirSessionGoal,
   MemoirSpeakerRole,
   MemoirVoiceSessionDetail,
-  TTSAlignmentSegment,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-voice-session";
 import { voiceGuidanceLabel } from "../../services/memoir-project-profile";
 import type {
   MemoirCaptureStats,

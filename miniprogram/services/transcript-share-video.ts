@@ -5,7 +5,7 @@ import type {
   MemoirShareVideoJob,
   MemoirTranscriptShareVideoContext,
   MemoirTranscriptShareVideoSegment,
-} from "../domain/voice-chat";
+} from "../domain/memoir-transcript";
 import { ApiError } from "./request";
 import { isShareFileMessageCancelError } from "./share";
 import {

@@ -1,11 +1,11 @@
 import type {
-  MemoirAutomationEvent,
   MemoirBookOutput,
   MemoirBookOutputExportFormat,
   MemoirBookOutputExportLayout,
   MemoirBookOutputVersion,
   MemoirBookPlan,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
+import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
 import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,

@@ -2,7 +2,7 @@ import type {
   MemoirBookAudioResponse,
   MemoirBookOutput,
   MemoirBookOutputVersion,
-} from "../../domain/voice-chat";
+} from "../../domain/memoir-book";
 import { definePage } from "../../services/page-definition";
 import {
   createMemoirBookOutputTTS,
