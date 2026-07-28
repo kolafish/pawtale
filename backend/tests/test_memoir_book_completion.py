@@ -197,7 +197,7 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
         chapters=(
             BookReviewChapter(
                 chapter_id="chapter-1",
-                title="故园旧忆与家人琐记",
+                title="故园旧忆与 C2 家人琐记",
                 sort_order=1,
                 digest_id="digest-1",
                 digest_signature="digest-signature-1",
@@ -245,8 +245,11 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
 
     visible = json.dumps(review, ensure_ascii=False)
     assert "C1" not in visible
-    assert "C2" not in visible
-    assert "第1章《故园旧忆与家人琐记》" in visible
+    assert review["summary"] == (
+        "第1章《故园旧忆与 C2 家人琐记》 讲家庭，"
+        "第2章《工作与选择》 讲工作。"
+    )
+    assert "第1章《故园旧忆与 C2 家人琐记》" in visible
     assert "第2章《工作与选择》" in visible
     assert review["candidate_issues"] == []
     assert len(review["structure_guidance"]) == 8

@@ -108,11 +108,18 @@ def _user_visible_text(
 ) -> str:
     text = value if isinstance(value, str) else ""
     references = _chapter_references(context)
+    labels: dict[str, str] = {}
     for index, chapter in enumerate(context.chapters, start=1):
         reference = references.encode(chapter.chapter_id)
+        labels[reference] = f"第{index}章《{chapter.title}》"
+    if labels:
+        reference_pattern = "|".join(
+            re.escape(reference)
+            for reference in sorted(labels, key=len, reverse=True)
+        )
         text = re.sub(
-            rf"(?<![A-Za-z0-9]){re.escape(reference)}(?![A-Za-z0-9])",
-            f"第{index}章《{chapter.title}》",
+            rf"(?<![A-Za-z0-9])(?:{reference_pattern})(?![A-Za-z0-9])",
+            lambda match: labels[match.group(0)],
             text,
         )
     return _compact(text, limit=limit)
