@@ -258,7 +258,7 @@ async def revise_chapter_draft(
     )
     if latest.id != req.expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
-    if latest.input_signature != context.input_signature:
+    if not chapter_generation.chapter_draft_is_current(context, latest):
         raise HTTPException(status_code=409, detail="本章素材已变化，请先重新整理正文")
     latest_sections = list(latest.section_snapshot_json)
     if not latest_sections:

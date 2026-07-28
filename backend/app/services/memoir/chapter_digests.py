@@ -44,6 +44,7 @@ from app.services.memoir.semantic_state import semantic_json_signature
 
 
 CHAPTER_DIGEST_ENGINE = "llm_chapter_digest_v3"
+LEGACY_CHAPTER_SORT_ORDER_LIMIT = 100
 CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
     AITextWorkload.LONG_GENERATION_STRUCTURED
 )
@@ -100,6 +101,84 @@ class _ChapterDigestOutput(BaseModel):
     focus: str = ""
     structure_guidance: list[str] = Field(default_factory=list)
     candidate_issues: list[_ChapterDigestIssueOutput] = Field(default_factory=list)
+
+
+def _chapter_digest_input_signature(
+    *,
+    chapter_id: str,
+    chapter_title: str,
+    include_in_book: bool,
+    sections: tuple[ChapterDigestSection, ...],
+    legacy_sort_order: int | None = None,
+) -> str:
+    chapter: dict[str, object] = {
+        "id": chapter_id,
+        "title": chapter_title,
+        "include_in_book": include_in_book,
+    }
+    if legacy_sort_order is not None:
+        chapter["sort_order"] = legacy_sort_order
+    return semantic_json_signature(
+        {
+            "chapter": chapter,
+            "sections": [
+                {
+                    "id": item.section_id,
+                    "title": item.title,
+                    "type": item.section_type,
+                    "sort_order": item.sort_order,
+                    "digest_id": item.digest_id,
+                    "digest_signature": item.digest_signature,
+                    "digest_hash": semantic_json_signature(item.digest),
+                }
+                for item in sections
+            ],
+            "engine": CHAPTER_DIGEST_ENGINE,
+        }
+    )
+
+
+def _compatible_chapter_digest_input_signatures(
+    context: ChapterDigestContext,
+) -> frozenset[str]:
+    return frozenset(
+        {
+            context.input_signature,
+            *(
+                _chapter_digest_input_signature(
+                    chapter_id=context.chapter_id,
+                    chapter_title=context.chapter_title,
+                    include_in_book=context.include_in_book,
+                    sections=context.sections,
+                    legacy_sort_order=sort_order,
+                )
+                for sort_order in range(LEGACY_CHAPTER_SORT_ORDER_LIMIT)
+            ),
+        }
+    )
+
+
+def _select_compatible_chapter_digest(
+    context: ChapterDigestContext,
+    digests: list[MemoirChapterDigest],
+) -> MemoirChapterDigest | None:
+    compatible = _compatible_chapter_digest_input_signatures(context)
+
+    def priority(item: MemoirChapterDigest) -> int:
+        exact = item.input_signature == context.input_signature
+        ready = item.status == MemoirSemanticCacheStatus.READY.value
+        if exact and ready:
+            return 0
+        if ready:
+            return 1
+        if item.status == MemoirSemanticCacheStatus.STALE.value:
+            return 2
+        return 3 if exact else 4
+
+    candidates = [
+        item for item in digests if item.input_signature in compatible
+    ]
+    return min(candidates, key=priority, default=None)
 
 
 def _compact(value: object, *, limit: int) -> str:
@@ -267,36 +346,21 @@ async def load_chapter_digest_context(
             for material in section.materials
             if material.include_in_book
         )
-    payload = {
-        "chapter": {
-            "id": chapter.id,
-            "title": chapter.title,
-            "sort_order": chapter.sort_order,
-            "include_in_book": chapter.include_in_book,
-        },
-        "sections": [
-            {
-                "id": item.section_id,
-                "title": item.title,
-                "type": item.section_type,
-                "sort_order": item.sort_order,
-                "digest_id": item.digest_id,
-                "digest_signature": item.digest_signature,
-                "digest_hash": semantic_json_signature(item.digest),
-            }
-            for item in sections
-        ],
-        "engine": CHAPTER_DIGEST_ENGINE,
-    }
+    section_tuple = tuple(sections)
     return ChapterDigestContext(
         project_id=project_id,
         chapter_id=chapter.id,
         chapter_title=chapter.title,
         chapter_sort_order=chapter.sort_order,
         include_in_book=chapter.include_in_book,
-        sections=tuple(sections),
+        sections=section_tuple,
         allowed_material_ids=frozenset(material_ids),
-        input_signature=semantic_json_signature(payload),
+        input_signature=_chapter_digest_input_signature(
+            chapter_id=chapter.id,
+            chapter_title=chapter.title,
+            include_in_book=chapter.include_in_book,
+            sections=section_tuple,
+        ),
     )
 
 
@@ -305,32 +369,43 @@ async def get_current_chapter_digest(
     *,
     project_id: str,
     chapter_id: str,
+    context: ChapterDigestContext | None = None,
 ) -> MemoirChapterDigest | None:
     """Return the digest for the current section state without invoking AI."""
-    try:
-        context = await load_chapter_digest_context(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-        )
-    except HTTPException as exc:
-        if exc.status_code in {409, 422}:
-            return None
-        raise
-    return await db.scalar(
-        select(MemoirChapterDigest)
-        .where(
-            MemoirChapterDigest.project_id == project_id,
-            MemoirChapterDigest.chapter_id == chapter_id,
-            MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
-            MemoirChapterDigest.input_signature == context.input_signature,
-        )
-        .order_by(
-            MemoirChapterDigest.updated_at.desc(),
-            MemoirChapterDigest.id.desc(),
-        )
-        .limit(1)
+    if context is None:
+        try:
+            context = await load_chapter_digest_context(
+                db,
+                project_id=project_id,
+                chapter_id=chapter_id,
+            )
+        except HTTPException as exc:
+            if exc.status_code in {409, 422}:
+                return None
+            raise
+    compatible_signatures = _compatible_chapter_digest_input_signatures(
+        context
     )
+    digests = list(
+        (
+            await db.scalars(
+                select(MemoirChapterDigest)
+                .where(
+                    MemoirChapterDigest.project_id == project_id,
+                    MemoirChapterDigest.chapter_id == chapter_id,
+                    MemoirChapterDigest.engine == CHAPTER_DIGEST_ENGINE,
+                    MemoirChapterDigest.input_signature.in_(
+                        compatible_signatures
+                    ),
+                )
+                .order_by(
+                    MemoirChapterDigest.updated_at.desc(),
+                    MemoirChapterDigest.id.desc(),
+                )
+            )
+        ).all()
+    )
+    return _select_compatible_chapter_digest(context, digests)
 
 
 def _section_references(context: ChapterDigestContext) -> ModelReferenceMap:
@@ -488,6 +563,9 @@ async def generate_or_reuse_chapter_digest(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    compatible_signatures = _compatible_chapter_digest_input_signatures(
+        context
+    )
     previous = list(
         (
             await db.scalars(
@@ -501,19 +579,20 @@ async def generate_or_reuse_chapter_digest(
     )
     for item in previous:
         if (
-            item.input_signature != context.input_signature
+            item.input_signature not in compatible_signatures
             and item.status == MemoirSemanticCacheStatus.READY.value
         ):
             item.status = MemoirSemanticCacheStatus.STALE.value
             db.add(item)
-    existing = next(
-        (
-            item
-            for item in previous
-            if item.input_signature == context.input_signature
-        ),
-        None,
-    )
+    existing = _select_compatible_chapter_digest(context, previous)
+    if (
+        existing is not None
+        and existing.input_signature != context.input_signature
+        and existing.status == MemoirSemanticCacheStatus.STALE.value
+        and not force_regenerate
+    ):
+        existing.status = MemoirSemanticCacheStatus.READY.value
+        db.add(existing)
     if (
         existing is not None
         and existing.status == MemoirSemanticCacheStatus.READY.value
@@ -527,6 +606,11 @@ async def generate_or_reuse_chapter_digest(
             candidates=existing.digest_json.get("candidate_issues", []),
         )
         return existing
+    if (
+        existing is not None
+        and existing.input_signature != context.input_signature
+    ):
+        existing = None
     prompt = build_chapter_digest_prompt(context)
     client = ai_client or get_ai_service(ai_model)
     if progress_callback is not None:

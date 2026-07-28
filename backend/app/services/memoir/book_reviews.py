@@ -23,7 +23,6 @@ from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookReview,
-    MemoirChapterDigest,
 )
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
@@ -257,17 +256,16 @@ async def load_book_review_context(
             project_id=project_id,
             chapter_id=chapter.id,
         )
-        digest = await db.scalar(
-            select(MemoirChapterDigest).where(
-                MemoirChapterDigest.project_id == project_id,
-                MemoirChapterDigest.chapter_id == chapter.id,
-                MemoirChapterDigest.input_signature
-                == digest_context.input_signature,
-                MemoirChapterDigest.status
-                == MemoirSemanticCacheStatus.READY.value,
-            )
+        digest = await chapter_digests.get_current_chapter_digest(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            context=digest_context,
         )
-        if digest is None:
+        if (
+            digest is None
+            or digest.status != MemoirSemanticCacheStatus.READY.value
+        ):
             raise HTTPException(
                 status_code=409,
                 detail=f"章节“{chapter.title}”摘要缺失或已过期",

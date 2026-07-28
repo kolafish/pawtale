@@ -123,7 +123,7 @@ async def prepare_chapter(
             )
             .limit(1)
         )
-        if latest is None or latest.input_signature != context.input_signature:
+        if not chapter_generation.chapter_draft_is_current(context, latest):
             await chapter_generation.generate_and_save_chapter_draft(
                 db,
                 project_id=project_id,
