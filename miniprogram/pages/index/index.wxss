@@ -1,9 +1,7 @@
 .launch-page {
-  min-height: 100vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--ui-page-background);
   color: var(--ui-accent);
   font-size: 30rpx;
   font-weight: 800;

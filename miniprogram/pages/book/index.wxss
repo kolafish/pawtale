@@ -1,8 +1,5 @@
 .book-page {
-  min-height: 100vh;
   padding: 28rpx 32rpx 120rpx;
-  background: var(--ui-page-background);
-  box-sizing: border-box;
 }
 
 .book-share-button {
@@ -36,23 +33,8 @@
   border: 0;
 }
 
-.book-share-button-hover {
-  background: var(--ui-accent-surface-subtle);
-  transform: scale(0.96);
-  box-shadow:
-    0 0 0 1rpx rgba(168, 79, 67, 0.20),
-    0 4rpx 10rpx rgba(0, 0, 0, 0.05);
-}
-
 .error {
   margin-bottom: 24rpx;
-  padding: 22rpx 26rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
-  font-size: 28rpx;
-  line-height: 1.45;
-  word-break: break-word;
 }
 
 .status-panel,

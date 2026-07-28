@@ -1,4 +1,4 @@
-<view class="{{voiceChatPageClass}}">
+<view class="ui-page-shell {{voiceChatPageClass}}">
   <view class="top-bar">
     <view class="top-copy">
       <text class="mode-label">{{topModeLabel}}</text>
@@ -46,7 +46,7 @@
     </view>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
   <view wx:if="{{showErrorKindStrip}}" class="session-state-strip">
     <text class="session-state-error">{{errorKindText}}</text>
   </view>
@@ -220,7 +220,7 @@
     <view
       class="history-toggle"
       bindtap="toggleHistory"
-      hover-class="history-toggle-hover"
+      hover-class="ui-subtle-action-hover"
       aria-role="button"
       aria-expanded="{{historyExpanded}}"
       aria-label="{{historyToggleText}}本次已保存的讲述"

@@ -1,8 +1,5 @@
 .page {
-  min-height: 100vh;
-  box-sizing: border-box;
   padding: 28rpx;
-  background: var(--ui-page-background);
   color: var(--ui-text-primary);
 }
 

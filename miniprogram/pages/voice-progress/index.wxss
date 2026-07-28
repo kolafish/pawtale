@@ -1,7 +1,5 @@
 .progress-page {
-  min-height: 100vh;
   padding: 28rpx 34rpx 88rpx;
-  background: var(--ui-page-background);
 }
 
 .refresh-button,
@@ -178,10 +176,5 @@
 
 .error {
   margin-top: 24rpx;
-  padding: 22rpx 26rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
   font-size: 26rpx;
-  line-height: 1.45;
 }

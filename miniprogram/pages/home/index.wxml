@@ -1,17 +1,17 @@
-<view class="{{homePageClass}}">
+<view class="ui-page-shell {{homePageClass}}">
   <view class="header">
     <view class="header-main">
       <view class="header-copy">
         <text class="hello">{{greetingText}}</text>
         <text class="subtitle">余主任留声机</text>
       </view>
-      <button class="home-share-button" open-type="share" data-share-kind="home" hover-class="home-share-button-hover">
+      <button class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
         分享给家人
       </button>
     </view>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
@@ -56,7 +56,7 @@
       wx:if="{{hasProject}}"
       class="active-project-link"
       bindtap="openProjects"
-      hover-class="active-project-link-hover"
+      hover-class="ui-subtle-action-hover"
       aria-role="button"
       aria-label="当前回忆录 {{projectHeadingText}}，点击切换"
     >
@@ -96,7 +96,7 @@
       <view
         class="more-actions-toggle"
         bindtap="toggleMoreActions"
-        hover-class="more-actions-toggle-hover"
+        hover-class="ui-subtle-action-hover"
         aria-role="button"
         aria-expanded="{{showMoreActions}}"
         aria-label="{{moreActionsToggleAriaLabel}}"

@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{pageMetaText}}</text>
   </view>
@@ -46,7 +46,7 @@
     <text wx:if="{{voiceSearchStatusText}}" class="search-summary voice-search-status">{{voiceSearchStatusText}}</text>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
     <text class="empty-title">浏览讲述记录</text>

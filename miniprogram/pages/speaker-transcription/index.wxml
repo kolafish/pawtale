@@ -1,9 +1,9 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">本次转写仅在当前页面显示，不保存到素材库</text>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="{{controlPanelClass}}">
     <view class="control-head">

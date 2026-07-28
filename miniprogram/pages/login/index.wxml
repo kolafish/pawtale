@@ -1,4 +1,4 @@
-<view class="login-page">
+<view class="login-page ui-page-shell">
   <view class="brand-row">
     <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <view class="brand-copy">
@@ -11,7 +11,7 @@
     <text class="panel-title">欢迎登录</text>
     <text class="panel-copy">微信登录或使用已有 Pawtale 账号进入。</text>
 
-    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
     <view
       class="primary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
@@ -70,7 +70,7 @@
     <text class="panel-title">使用您的微信头像和昵称</text>
     <text class="panel-copy">头像和昵称由您主动选择，也可以稍后在“我的”页面修改。</text>
 
-    <view wx:if="{{error}}" class="error">{{error}}</view>
+    <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
     <view class="profile-avatar-row">
       <button
@@ -78,7 +78,7 @@
         open-type="chooseAvatar"
         bindchooseavatar="chooseWeChatAvatar"
         aria-label="选择微信头像"
-        hover-class="profile-avatar-picker-hover"
+        hover-class="ui-avatar-action-hover"
       >
         <image
           wx:if="{{profileAvatarPath}}"
@@ -122,7 +122,7 @@
       aria-role="button"
       aria-disabled="{{profileSaving}}"
       bindtap="skipWeChatProfile"
-      hover-class="skip-profile-button-hover"
+      hover-class="ui-subtle-action-hover"
     >
       稍后设置
     </view>

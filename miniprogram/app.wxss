@@ -47,6 +47,39 @@ image {
   box-sizing: border-box;
 }
 
+.ui-page-shell {
+  min-height: 100vh;
+  background: var(--ui-page-background);
+}
+
+.ui-error-banner {
+  padding: 22rpx 26rpx;
+  border-radius: 18rpx;
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
+  font-size: 28rpx;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.ui-accent-action-hover {
+  background: var(--ui-accent-surface-subtle);
+  transform: scale(0.96);
+  box-shadow:
+    0 0 0 1rpx rgba(168, 79, 67, 0.20),
+    0 4rpx 10rpx rgba(0, 0, 0, 0.05);
+}
+
+.ui-subtle-action-hover {
+  background: var(--ui-surface-subtle);
+  transform: scale(0.96);
+}
+
+.ui-avatar-action-hover {
+  transform: scale(0.96);
+  box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.10);
+}
+
 .tap-hover {
   opacity: 0.82;
 }

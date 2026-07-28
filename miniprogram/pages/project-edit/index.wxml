@@ -1,9 +1,9 @@
-<view class="project-edit-page">
+<view class="project-edit-page ui-page-shell">
   <view class="ui-page-context-row">
     <text class="ui-page-context">资料会用于语音访谈和小余追问</text>
   </view>
 
-  <view wx:if="{{error}}" class="error">{{error}}</view>
+  <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="form-panel">
     <view class="field">

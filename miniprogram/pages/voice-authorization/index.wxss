@@ -1,8 +1,5 @@
 .voice-authorization-page {
-  min-height: 100vh;
   padding: 28rpx 36rpx 160rpx;
-  background: var(--ui-page-background);
-  box-sizing: border-box;
 }
 
 .agreement-panel {

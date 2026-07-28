@@ -1,7 +1,5 @@
 .voice-settings-page {
-  min-height: 100vh;
   padding: 24rpx 36rpx 96rpx;
-  background: var(--ui-page-background);
 }
 
 .section {

@@ -1,19 +1,12 @@
 .image-assets-page {
-  min-height: 100vh;
-  box-sizing: border-box;
   padding: 28rpx 30rpx 36rpx;
-  background: var(--ui-page-background);
   color: var(--ui-text-primary);
 }
 
 .error {
   margin-bottom: 20rpx;
   padding: 20rpx 22rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
   font-size: 26rpx;
-  line-height: 1.45;
 }
 
 .summary-card {

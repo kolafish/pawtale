@@ -1,7 +1,5 @@
 .transcripts-page {
-  min-height: 100vh;
   padding: 28rpx 32rpx 120rpx;
-  background: var(--ui-page-background);
 }
 
 .search-panel {
@@ -135,13 +133,6 @@
 
 .error {
   margin-bottom: 24rpx;
-  padding: 22rpx 26rpx;
-  border-radius: 18rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
-  font-size: 28rpx;
-  line-height: 1.45;
-  word-break: break-word;
 }
 
 .empty-panel,
