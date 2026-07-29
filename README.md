@@ -4,6 +4,7 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 
 - Web 写作工作台：小说、公众号文章和回忆录编辑；
 - 微信小程序“老余口述”：低门槛语音访谈、讲述记录和回忆录成书；
+- 微信小程序“小鱼口述”：持续语音输入、文章编辑和无模板 AI 辅助；
 - FastAPI 后端：认证、项目数据、AI/语音 provider 编排、回忆录素材与成书服务。
 
 ## 当前产品
@@ -17,7 +18,7 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 - GitHub App 单向项目备份；
 - 管理员用户行为审计。
 
-### 微信小程序
+### “老余口述”小程序
 
 小程序以“首页、记录、书稿、我的”四个一级入口组织完整回忆录动线：
 
@@ -36,13 +37,18 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 
 小程序还提供话题地图、语音搜索、图片素材、分享视频、多人实时转写、AI/TTS 偏好和大字模式。
 
+### “小鱼口述”小程序
+
+小鱼以一篇文章为一个 `article` project，提供文章列表、键盘编辑、持续口述、revision 自动保存，以及“接着写、按要求改、检查文章”三项无固定模板的 AI 辅助。它不创建访谈、音频素材或回忆录成书数据。
+
 ## 仓库结构
 
 ```text
 Pawtale/
 ├── backend/                    # FastAPI、SQLAlchemy、后台任务和 provider 集成
 ├── frontend/                   # React Web 工作台
-├── miniprogram/                # 微信小程序
+├── miniprogram/                # “老余口述”回忆录小程序
+├── xiaoyu-miniprogram/         # “小鱼口述”文章小程序
 ├── docs/                       # 当前架构和测试文档
 ├── scripts/                    # 仓库级验证脚本
 ├── data/                       # 本地运行数据（不作为产品文档）
@@ -87,6 +93,14 @@ npm test
 
 使用微信开发者工具打开仓库根目录；`project.config.json` 已将 `miniprogram/` 配置为小程序根目录。开发和发布约束见 [miniprogram/README.md](./miniprogram/README.md)。
 
+小鱼口述单独验证：
+
+```bash
+cd xiaoyu-miniprogram && npm install && npm run typecheck && npm test
+```
+
+使用微信开发者工具打开 `xiaoyu-miniprogram/`，配置和边界见 [xiaoyu-miniprogram/README.md](./xiaoyu-miniprogram/README.md)。
+
 ## 常用验证
 
 ```bash
@@ -107,6 +121,7 @@ cd backend && venv/bin/ruff check app tests scripts && venv/bin/python -m pytest
 - [产品功能与用户动线](./PRODUCT.md)
 - [技术架构与开发边界](./TECH.md)
 - [小程序说明](./miniprogram/README.md)
+- [小鱼口述小程序说明](./xiaoyu-miniprogram/README.md)
 - [Web 前端说明](./frontend/README.md)
 - [后端说明](./backend/README.md)
 - [回忆录事实、访谈、成书与请求架构](./docs/MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md)

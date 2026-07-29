@@ -1,7 +1,11 @@
+import type { ArticleAIReviewSuggestion } from "../../domain/article";
 import { ApiError } from "../../services/request";
 import {
+  continueArticle,
   getArticle,
   getArticleDocument,
+  reviewArticle,
+  reviseArticle,
   updateArticleContent,
   updateArticleTitle,
 } from "../../services/articles";
@@ -13,6 +17,8 @@ import { definePage } from "../../services/page-definition";
 import { ensureRecorderAuthorization } from "../../services/recorder-authorization";
 
 type SaveState = "saved" | "unsaved" | "saving" | "conflict";
+type AIAction = "" | "continue" | "revise" | "review";
+type AIResultKind = "none" | "revision" | "review";
 
 interface EditorData {
   loading: boolean;
@@ -31,10 +37,22 @@ interface EditorData {
   dictationButtonText: string;
   dictationActive: boolean;
   dictationDisabled: boolean;
+  aiInstruction: string;
+  aiBusy: boolean;
+  aiAction: AIAction;
+  aiResultKind: AIResultKind;
+  aiProposal: string;
+  aiSummary: string;
+  aiSuggestions: ArticleAIReviewSuggestion[];
+  aiResultRevision: number;
 }
 
 interface InputEvent {
   detail: { value: string; cursor?: number };
+}
+
+interface AIActionEvent {
+  currentTarget: { dataset: { action?: AIAction } };
 }
 
 function countWords(text: string): number {
@@ -77,6 +95,19 @@ function dictationView(state: DictationState): Pick<
   };
 }
 
+function emptyAIResult(): Pick<
+  EditorData,
+  "aiResultKind" | "aiProposal" | "aiSummary" | "aiSuggestions" | "aiResultRevision"
+> {
+  return {
+    aiResultKind: "none",
+    aiProposal: "",
+    aiSummary: "",
+    aiSuggestions: [],
+    aiResultRevision: 0,
+  };
+}
+
 export function insertDictationText(
   prefix: string,
   spokenText: string,
@@ -106,6 +137,10 @@ definePage<EditorData>()({
     saveText: saveText("saved"),
     cursorPosition: 0,
     ...dictationView("idle"),
+    aiInstruction: "",
+    aiBusy: false,
+    aiAction: "",
+    ...emptyAIResult(),
   },
 
   saveTimer: null as ReturnType<typeof setTimeout> | null,
@@ -159,6 +194,7 @@ definePage<EditorData>()({
         cursorPosition: document.content.length,
         saveState: "saved",
         saveText: saveText("saved"),
+        ...emptyAIResult(),
       });
     } catch (error) {
       this.setData({ error: error instanceof Error ? error.message : "文章加载失败" });
@@ -178,12 +214,17 @@ definePage<EditorData>()({
       content,
       wordCount: countWords(content),
       cursorPosition: event.detail.cursor ?? content.length,
+      ...emptyAIResult(),
     });
     this.scheduleSave();
   },
 
   onTitleBlur() {
     void this.saveNow();
+  },
+
+  onAIInstructionInput(event: InputEvent) {
+    this.setData({ aiInstruction: event.detail.value });
   },
 
   async toggleDictation() {
@@ -255,6 +296,7 @@ definePage<EditorData>()({
       content: merged.content,
       cursorPosition: merged.cursor,
       wordCount: countWords(merged.content),
+      ...emptyAIResult(),
     });
     if (final) {
       this.scheduleSave();
@@ -287,6 +329,146 @@ definePage<EditorData>()({
       this.finishPromise = null;
     });
     return this.finishPromise;
+  },
+
+  async runAIAction(event: AIActionEvent) {
+    const action = event.currentTarget.dataset.action;
+    if (
+      !action
+      || !["continue", "revise", "review"].includes(action)
+      || this.data.aiBusy
+      || this.data.saveState === "conflict"
+    ) {
+      return;
+    }
+    if (!this.data.content.trim()) {
+      this.setData({ error: "请先写一些正文" });
+      return;
+    }
+    const instruction = this.data.aiInstruction.trim();
+    if (action === "revise" && !instruction) {
+      this.setData({ error: "请先写下你希望怎样修改" });
+      return;
+    }
+
+    this.setData({ aiBusy: true, aiAction: action, error: "" });
+    try {
+      await this.releaseDictationClient();
+      await this.saveNow();
+      if (this.data.saveState !== "saved") {
+        throw new Error(this.data.error || "请先完成正文保存");
+      }
+      const revision = this.data.contentRevision;
+      if (action === "continue") {
+        const result = await continueArticle(
+          this.data.projectId,
+          this.data.documentId,
+          revision,
+          instruction,
+        );
+        this.savedContent = result.content;
+        this.setData({
+          content: result.content,
+          contentRevision: result.content_revision,
+          cursorPosition: result.content.length,
+          wordCount: countWords(result.content),
+          saveState: "saved",
+          saveText: saveText("saved"),
+          ...emptyAIResult(),
+        });
+        wx.showToast({ title: "续写已加入正文", icon: "success" });
+        return;
+      }
+      if (action === "revise") {
+        const result = await reviseArticle(
+          this.data.projectId,
+          this.data.documentId,
+          revision,
+          instruction,
+        );
+        this.setData({
+          aiResultKind: "revision",
+          aiProposal: result.revised_text,
+          aiSummary: "AI 已生成一版全文修改，采用前不会替换正文。",
+          aiSuggestions: [],
+          aiResultRevision: result.content_revision,
+        });
+        return;
+      }
+      const result = await reviewArticle(
+        this.data.projectId,
+        this.data.documentId,
+        revision,
+      );
+      this.setData({
+        aiResultKind: "review",
+        aiProposal: "",
+        aiSummary: result.summary,
+        aiSuggestions: result.suggestions,
+        aiResultRevision: result.content_revision,
+      });
+    } catch (error) {
+      this.handleAIError(error);
+    } finally {
+      this.setData({ aiBusy: false, aiAction: "" });
+    }
+  },
+
+  async applyAIRevision() {
+    if (
+      this.data.aiBusy
+      || this.data.saveState === "conflict"
+      || !this.data.aiProposal
+    ) {
+      return;
+    }
+    if (
+      this.data.content !== this.savedContent
+      || this.data.contentRevision !== this.data.aiResultRevision
+    ) {
+      this.setData({ error: "正文已经变化，请重新生成修改建议" });
+      return;
+    }
+    this.setData({ aiBusy: true, aiAction: "revise", error: "" });
+    try {
+      const document = await updateArticleContent(
+        this.data.projectId,
+        this.data.documentId,
+        this.data.aiProposal,
+        this.data.contentRevision,
+      );
+      this.savedContent = this.data.aiProposal;
+      this.setData({
+        content: this.data.aiProposal,
+        contentRevision: document.content_revision,
+        cursorPosition: this.data.aiProposal.length,
+        wordCount: document.word_count,
+        saveState: "saved",
+        saveText: saveText("saved"),
+        ...emptyAIResult(),
+      });
+      wx.showToast({ title: "修改已采用", icon: "success" });
+    } catch (error) {
+      this.handleAIError(error);
+    } finally {
+      this.setData({ aiBusy: false, aiAction: "" });
+    }
+  },
+
+  dismissAIResult() {
+    this.setData(emptyAIResult());
+  },
+
+  handleAIError(error: unknown) {
+    if (error instanceof ApiError && error.statusCode === 409) {
+      this.setData({
+        saveState: "conflict",
+        saveText: saveText("conflict"),
+        error: "正文已在其他位置修改，请重新载入后再使用 AI。",
+      });
+      return;
+    }
+    this.setData({ error: error instanceof Error ? error.message : "AI 处理失败" });
   },
 
   scheduleSave() {

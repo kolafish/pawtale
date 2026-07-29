@@ -19,6 +19,7 @@
       value="{{title}}"
       maxlength="80"
       placeholder="文章标题"
+      disabled="{{aiBusy}}"
       bindinput="onTitleInput"
       bindblur="onTitleBlur"
     />
@@ -40,7 +41,7 @@
       </view>
       <button
         class="dictation-button pressable {{dictationState === 'recording' ? 'is-recording' : ''}}"
-        disabled="{{dictationDisabled || saveState === 'conflict'}}"
+        disabled="{{dictationDisabled || saveState === 'conflict' || aiBusy}}"
         bindtap="toggleDictation"
         hover-class="pressable-hover"
       >
@@ -55,8 +56,78 @@
       maxlength="-1"
       placeholder="从这里开始写。可以先把想到的都记下来。"
       bindinput="onContentInput"
-      disabled="{{saveState === 'conflict' || dictationActive}}"
+      disabled="{{saveState === 'conflict' || dictationActive || aiBusy}}"
       show-confirm-bar="{{false}}"
     ></textarea>
+
+    <view class="ai-panel">
+      <view class="ai-heading-row">
+        <text class="ai-heading">AI 写作助手</text>
+        <text class="ai-note">根据正文判断文体、目的和语气，不套固定格式。</text>
+      </view>
+      <textarea
+        class="ai-instruction"
+        value="{{aiInstruction}}"
+        maxlength="300"
+        placeholder="可以写要求，例如：语气自然一些、结尾更有力量（修改时必填）"
+        bindinput="onAIInstructionInput"
+        disabled="{{aiBusy || dictationActive || saveState === 'conflict'}}"
+        show-confirm-bar="{{false}}"
+      ></textarea>
+      <view class="ai-actions">
+        <button
+          class="ai-action pressable"
+          data-action="continue"
+          disabled="{{aiBusy || dictationActive || saveState === 'conflict'}}"
+          bindtap="runAIAction"
+          hover-class="pressable-hover"
+        >{{aiAction === "continue" ? "续写中" : "接着写"}}</button>
+        <button
+          class="ai-action pressable"
+          data-action="revise"
+          disabled="{{aiBusy || dictationActive || saveState === 'conflict'}}"
+          bindtap="runAIAction"
+          hover-class="pressable-hover"
+        >{{aiAction === "revise" ? "修改中" : "按要求改"}}</button>
+        <button
+          class="ai-action pressable"
+          data-action="review"
+          disabled="{{aiBusy || dictationActive || saveState === 'conflict'}}"
+          bindtap="runAIAction"
+          hover-class="pressable-hover"
+        >{{aiAction === "review" ? "检查中" : "检查文章"}}</button>
+      </view>
+    </view>
+
+    <view wx:if="{{aiResultKind !== 'none'}}" class="ai-result">
+      <text class="ai-result-summary">{{aiSummary}}</text>
+      <scroll-view wx:if="{{aiResultKind === 'revision'}}" scroll-y class="ai-proposal">
+        <text selectable>{{aiProposal}}</text>
+      </scroll-view>
+      <view
+        wx:for="{{aiSuggestions}}"
+        wx:key="index"
+        class="ai-suggestion"
+      >
+        <text wx:if="{{item.excerpt}}" class="ai-excerpt">“{{item.excerpt}}”</text>
+        <text class="ai-issue">{{item.issue}}</text>
+        <text class="ai-suggestion-copy">{{item.suggestion}}</text>
+      </view>
+      <view class="ai-result-actions">
+        <button
+          wx:if="{{aiResultKind === 'revision'}}"
+          class="apply-button pressable"
+          disabled="{{aiBusy || saveState === 'conflict'}}"
+          bindtap="applyAIRevision"
+          hover-class="pressable-hover"
+        >采用这版</button>
+        <button
+          class="dismiss-button pressable"
+          disabled="{{aiBusy}}"
+          bindtap="dismissAIResult"
+          hover-class="pressable-hover"
+        >收起</button>
+      </view>
+    </view>
   </view>
 </view>

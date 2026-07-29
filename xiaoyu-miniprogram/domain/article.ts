@@ -41,3 +41,27 @@ export interface ArticleDocument {
   content_revision: number;
   updated_at: string;
 }
+
+export interface ArticleAIContinueResponse {
+  content: string;
+  content_revision: number;
+  generated_chunk: string;
+}
+
+export interface ArticleAIReviseResponse {
+  revised_text: string;
+  original_text: string;
+  content_revision: number;
+}
+
+export interface ArticleAIReviewSuggestion {
+  excerpt: string;
+  issue: string;
+  suggestion: string;
+}
+
+export interface ArticleAIReviewResponse {
+  summary: string;
+  suggestions: ArticleAIReviewSuggestion[];
+  content_revision: number;
+}
