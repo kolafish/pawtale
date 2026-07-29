@@ -1,0 +1,111 @@
+.hero {
+  margin-bottom: 34rpx;
+}
+
+.eyebrow,
+.headline,
+.intro,
+.empty-title,
+.empty-hint,
+.article-title,
+.article-meta {
+  display: block;
+}
+
+.eyebrow {
+  color: var(--color-accent);
+  font-size: 25rpx;
+  font-weight: 700;
+  letter-spacing: 3rpx;
+}
+
+.headline {
+  margin-top: 12rpx;
+  color: var(--color-text);
+  font-size: 46rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+
+.intro {
+  margin-top: 16rpx;
+  color: var(--color-muted);
+  font-size: 29rpx;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.create-button {
+  height: 96rpx;
+  margin: 0 0 32rpx;
+  border-radius: 24rpx;
+  background: var(--color-accent);
+  box-shadow: 0 12rpx 24rpx rgba(38, 122, 120, 0.2);
+  color: #fff;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.create-button[disabled] {
+  background: #8aabaa;
+  color: #fff;
+}
+
+.article-card {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  margin-top: 24rpx;
+  padding: 30rpx 24rpx 30rpx 30rpx;
+}
+
+.article-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.article-title {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: 34rpx;
+  font-weight: 750;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.article-meta {
+  margin-top: 12rpx;
+  color: var(--color-muted);
+  font-size: 25rpx;
+}
+
+.delete-button {
+  flex: 0 0 auto;
+  min-width: 108rpx;
+  margin: 0;
+  padding: 0 22rpx;
+  border-radius: 20rpx;
+  background: var(--color-surface-soft);
+  color: var(--color-muted);
+  font-size: 27rpx;
+}
+
+.empty {
+  padding: 70rpx 32rpx;
+  color: var(--color-muted);
+  font-size: 29rpx;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.empty-title {
+  color: var(--color-text);
+  font-size: 33rpx;
+  font-weight: 700;
+}
+
+.empty-hint {
+  margin-top: 10rpx;
+}
