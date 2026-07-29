@@ -322,6 +322,7 @@ class DocumentAIReviseRequest(BaseModel):
     full_content: str | None = None   # context for selection mode
     ai_model: str | None = None
     debug: bool = False
+    expected_content_revision: int | None = Field(default=None, ge=0)
 
 
 class DocumentAIReviseResponse(BaseModel):
@@ -330,6 +331,30 @@ class DocumentAIReviseResponse(BaseModel):
     original_text: str      # original text for diff comparison
     scope: str              # "full" | "selection"
     ai_model: str
+    content_revision: int
+    debug_info: dict | None = None
+
+
+# ── Article AI Review ──────────────────────────────
+
+class ArticleAIReviewSuggestion(BaseModel):
+    excerpt: str = ""
+    issue: str
+    suggestion: str
+
+
+class DocumentAIReviewRequest(BaseModel):
+    ai_model: str | None = None
+    debug: bool = False
+    expected_content_revision: int | None = Field(default=None, ge=0)
+
+
+class DocumentAIReviewResponse(BaseModel):
+    document_id: str
+    summary: str
+    suggestions: list[ArticleAIReviewSuggestion] = Field(default_factory=list)
+    ai_model: str
+    content_revision: int
     debug_info: dict | None = None
 
 
@@ -350,6 +375,7 @@ class DocumentAIReviseMultiRequest(BaseModel):
         ]
     )
     debug: bool = False
+    expected_content_revision: int | None = Field(default=None, ge=0)
 
 
 class DocumentAIReviseMultiResultItem(BaseModel):
@@ -363,6 +389,7 @@ class DocumentAIReviseMultiResponse(BaseModel):
     document_id: str
     original_text: str
     scope: str
+    content_revision: int
     results: list[DocumentAIReviseMultiResultItem]
 
 

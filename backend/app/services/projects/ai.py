@@ -4,16 +4,20 @@ import logging
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.projects.types import ProjectType
 from app.domain.references import ReferenceType, coerce_setting_reference_type
-from app.models.projects import ReferenceItem
+from app.models.projects import Document, ReferenceItem
 from app.schemas.projects import (
     AnalyzeApplyRequest,
     AnalyzeApplyResponse,
     AnalyzedCharacter,
     AnalyzedOutline,
     AnalyzedSetting,
+    ArticleAIReviewSuggestion,
     DocumentAIContinueRequest,
     DocumentAIContinueResponse,
+    DocumentAIReviewRequest,
+    DocumentAIReviewResponse,
     DocumentAIReviseMultiRequest,
     DocumentAIReviseMultiResponse,
     DocumentAIReviseMultiResultItem,
@@ -23,6 +27,8 @@ from app.schemas.projects import (
     ProjectAnalyzeResponse,
     ReferenceItemBrief,
 )
+from app.services.article import ai as article_ai
+from app.services.ai_base import AITextServiceBase
 from app.services.ai_factory import get_ai_service
 import app.services.project_documents as project_docs
 from app.services.content_storage import read_content
@@ -30,6 +36,65 @@ from app.services.projects.access import get_document, load_project
 
 
 logger = logging.getLogger(__name__)
+
+
+def _check_expected_revision(
+    expected_revision: int | None,
+    actual_revision: int,
+) -> None:
+    if expected_revision is not None and expected_revision != actual_revision:
+        raise HTTPException(
+            status_code=409,
+            detail="文档内容已在其他位置更新，请刷新后再使用 AI",
+        )
+
+
+async def _check_revision_unchanged(
+    db: AsyncSession,
+    doc: Document,
+    base_revision: int,
+) -> None:
+    await db.refresh(doc, attribute_names=["content_revision"])
+    if doc.content_revision != base_revision:
+        raise HTTPException(
+            status_code=409,
+            detail="AI处理期间文档内容已更新，请基于最新内容重试",
+        )
+
+
+async def _revise_text(
+    *,
+    project_type: str,
+    ai_service: AITextServiceBase,
+    original_text: str,
+    instruction: str,
+    context: str | None,
+    requested_model: str | None,
+    debug: bool,
+) -> tuple[str, dict | None]:
+    if project_type == ProjectType.ARTICLE.value:
+        result = await article_ai.revise_article(
+            ai_service,
+            content=original_text,
+            instruction=instruction,
+            context=context,
+            requested_model=requested_model,
+            debug=debug,
+        )
+        return result.content, result.debug_info
+
+    result = await ai_service.revise_chapter(
+        original_content=original_text,
+        revision_instruction=instruction,
+        characters=[],
+        writing_style="细腻",
+        chapter_length="长",
+        debug=debug,
+    )
+    return (
+        (result.get("content") or "").strip(),
+        result.get("debug_info") if debug else None,
+    )
 
 
 async def analyze_project(
@@ -149,7 +214,7 @@ async def ai_continue_document(
     user_id: str,
     req: DocumentAIContinueRequest,
 ) -> DocumentAIContinueResponse:
-    await load_project(db, project_id, user_id)
+    project = await load_project(db, project_id, user_id)
     doc = await get_document(db, project_id, document_id)
     base_content_revision = doc.content_revision
     if (
@@ -167,31 +232,41 @@ async def ai_continue_document(
 
     ai_service = get_ai_service(req.ai_model)
     selected_ai_model = req.ai_model or ai_service.model_name
-    scene_payload = {
-        "name": "当前文本",
-        "description": "基于已有正文续写",
-        "location": None,
-        "time_weather": None,
-        "sensory_details": {},
-        "props": [],
-    }
-
     try:
-        story_result = await ai_service.generate_story(
-            characters=[],
-            scene=scene_payload,
-            mood="甜",
-            writing_style="细腻",
-            chapter_length="中",
-            previous_content=base_content[-4000:],
-            custom_direction=req.instruction,
-            chapter_number=1,
-            debug=req.debug,
-        )
+        if project.type == ProjectType.ARTICLE.value:
+            article_result = await article_ai.continue_article(
+                ai_service,
+                content=base_content[-8000:],
+                instruction=req.instruction,
+                requested_model=req.ai_model,
+                debug=req.debug,
+            )
+            generated_chunk = article_result.content
+            debug_info = article_result.debug_info
+        else:
+            story_result = await ai_service.generate_story(
+                characters=[],
+                scene={
+                    "name": "当前文本",
+                    "description": "基于已有正文续写",
+                    "location": None,
+                    "time_weather": None,
+                    "sensory_details": {},
+                    "props": [],
+                },
+                mood="甜",
+                writing_style="细腻",
+                chapter_length="中",
+                previous_content=base_content[-4000:],
+                custom_direction=req.instruction,
+                chapter_number=1,
+                debug=req.debug,
+            )
+            generated_chunk = (story_result.get("content") or "").strip()
+            debug_info = story_result.get("debug_info") if req.debug else None
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI续写失败: {str(e)}") from e
 
-    generated_chunk = (story_result.get("content") or "").strip()
     if not generated_chunk:
         raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
 
@@ -216,7 +291,7 @@ async def ai_continue_document(
         content_revision=doc.content_revision,
         generated_chunk=generated_chunk,
         ai_model=selected_ai_model,
-        debug_info=story_result.get("debug_info") if req.debug else None,
+        debug_info=debug_info,
     )
 
 
@@ -227,8 +302,13 @@ async def ai_revise_document(
     user_id: str,
     req: DocumentAIReviseRequest,
 ) -> DocumentAIReviseResponse:
-    await load_project(db, project_id, user_id)
-    await get_document(db, project_id, document_id)
+    project = await load_project(db, project_id, user_id)
+    doc = await get_document(db, project_id, document_id)
+    base_content_revision = doc.content_revision
+    _check_expected_revision(
+        req.expected_content_revision,
+        base_content_revision,
+    )
     ai_service = get_ai_service(req.ai_model)
     selected_ai_model = req.ai_model or ai_service.model_name
 
@@ -244,19 +324,20 @@ async def ai_revise_document(
         raise HTTPException(status_code=400, detail="没有可修改的内容")
 
     try:
-        revise_result = await ai_service.revise_chapter(
-            original_content=original_text,
-            revision_instruction=req.instruction,
-            characters=[],
-            writing_style="细腻",
-            chapter_length="长",
+        revised_text, debug_info = await _revise_text(
+            project_type=project.type,
+            ai_service=ai_service,
+            original_text=original_text,
+            instruction=req.instruction,
+            context=req.full_content if scope == "selection" else None,
+            requested_model=req.ai_model,
             debug=req.debug,
         )
     except Exception as e:
         logger.exception("AI revise failed for doc=%s project=%s", document_id, project_id)
         raise HTTPException(status_code=500, detail=f"AI修改失败: {str(e)}") from e
 
-    revised_text = (revise_result.get("content") or "").strip()
+    await _check_revision_unchanged(db, doc, base_content_revision)
     if not revised_text:
         raise HTTPException(status_code=502, detail="AI未返回可用修改内容")
 
@@ -266,7 +347,59 @@ async def ai_revise_document(
         original_text=original_text,
         scope=scope,
         ai_model=selected_ai_model,
-        debug_info=revise_result.get("debug_info") if req.debug else None,
+        content_revision=base_content_revision,
+        debug_info=debug_info,
+    )
+
+
+async def ai_review_document(
+    db: AsyncSession,
+    project_id: str,
+    document_id: str,
+    user_id: str,
+    req: DocumentAIReviewRequest,
+) -> DocumentAIReviewResponse:
+    project = await load_project(db, project_id, user_id)
+    if project.type != ProjectType.ARTICLE.value:
+        raise HTTPException(status_code=400, detail="仅文章项目支持文章检查")
+    doc = await get_document(db, project_id, document_id)
+    base_content_revision = doc.content_revision
+    _check_expected_revision(
+        req.expected_content_revision,
+        base_content_revision,
+    )
+    content = (await read_content(project_id, doc.id)).strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="请先写一些内容")
+
+    ai_service = get_ai_service(req.ai_model)
+    selected_ai_model = req.ai_model or ai_service.model_name
+    try:
+        result = await article_ai.review_article(
+            ai_service,
+            content=content,
+            requested_model=req.ai_model,
+            debug=req.debug,
+        )
+    except Exception as e:
+        logger.exception("Article AI review failed for doc=%s project=%s", document_id, project_id)
+        raise HTTPException(status_code=500, detail=f"AI检查失败: {str(e)}") from e
+
+    await _check_revision_unchanged(db, doc, base_content_revision)
+    return DocumentAIReviewResponse(
+        document_id=document_id,
+        summary=result.summary,
+        suggestions=[
+            ArticleAIReviewSuggestion(
+                excerpt=item.excerpt,
+                issue=item.issue,
+                suggestion=item.suggestion,
+            )
+            for item in result.suggestions
+        ],
+        ai_model=selected_ai_model,
+        content_revision=base_content_revision,
+        debug_info=result.debug_info,
     )
 
 
@@ -277,8 +410,13 @@ async def ai_revise_document_multi(
     user_id: str,
     req: DocumentAIReviseMultiRequest,
 ) -> DocumentAIReviseMultiResponse:
-    await load_project(db, project_id, user_id)
-    await get_document(db, project_id, document_id)
+    project = await load_project(db, project_id, user_id)
+    doc = await get_document(db, project_id, document_id)
+    base_content_revision = doc.content_revision
+    _check_expected_revision(
+        req.expected_content_revision,
+        base_content_revision,
+    )
 
     if req.selected_text:
         original_text = req.selected_text
@@ -294,31 +432,33 @@ async def ai_revise_document_multi(
     async def revise_with_model(model: str) -> DocumentAIReviseMultiResultItem:
         try:
             ai_service = get_ai_service(model)
-            revise_result = await ai_service.revise_chapter(
-                original_content=original_text,
-                revision_instruction=req.instruction,
-                characters=[],
-                writing_style="细腻",
-                chapter_length="长",
+            revised, debug_info = await _revise_text(
+                project_type=project.type,
+                ai_service=ai_service,
+                original_text=original_text,
+                instruction=req.instruction,
+                context=req.full_content if scope == "selection" else None,
+                requested_model=model,
                 debug=req.debug,
             )
-            revised = (revise_result.get("content") or "").strip()
             if not revised:
                 return DocumentAIReviseMultiResultItem(ai_model=model, error="AI未返回可用修改内容")
             return DocumentAIReviseMultiResultItem(
                 ai_model=model,
                 revised_text=revised,
-                debug_info=revise_result.get("debug_info") if req.debug else None,
+                debug_info=debug_info,
             )
         except Exception as e:
             logger.exception("AI revise-multi failed for model=%s doc=%s", model, document_id)
             return DocumentAIReviseMultiResultItem(ai_model=model, error=str(e))
 
     results = await asyncio.gather(*(revise_with_model(model) for model in req.models))
+    await _check_revision_unchanged(db, doc, base_content_revision)
 
     return DocumentAIReviseMultiResponse(
         document_id=document_id,
         original_text=original_text,
         scope=scope,
+        content_revision=base_content_revision,
         results=list(results),
     )
