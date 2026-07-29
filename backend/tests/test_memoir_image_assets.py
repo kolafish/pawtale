@@ -9,6 +9,7 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
     MemoirShareVideoJobStatus,
 )
+from app.migrations.memoir_images import migrate_memoir_image_schema
 from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
@@ -137,7 +138,12 @@ async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
     return user, project_id, chapters[0].id, asset.id
 
 
-async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, test_db, tmp_path, monkeypatch):
+async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscript(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
     user, project_id, chapter_id, asset_id = await _seed_image_asset(client, test_db, tmp_path, monkeypatch)
 
     output = await test_db.scalar(
@@ -157,8 +163,7 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
     place_response = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements",
         json={
-            "placement_type": "chapter_opening",
-            "chapter_id": chapter_id,
+            "placement_type": "chapter_inline",
             "display_size": "full_width",
         },
     )
@@ -166,6 +171,7 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
     placed = place_response.json()
     assert placed["include_in_book"] is True
     assert placed["placements"][0]["chapter_id"] == chapter_id
+    assert placed["placements"][0]["placement_type"] == "chapter_inline"
 
     caption_response = await client.patch(
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}",
@@ -181,6 +187,11 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
     assert illustrations[0]["image_asset_id"] == asset_id
     assert illustrations[0]["caption"] == "院子里的葡萄树"
     assert illustrations[0]["storage_path"].endswith("asset.png")
+    assert illustrations[0]["source_utterance_id"]
+    assert illustrations[0]["section_id"] == manuscript["chapters"][0]["sections"][0]["section_id"]
+    assert illustrations[0]["source_utterance_id"] in (
+        manuscript["chapters"][0]["sections"][0]["source_ref_ids"]
+    )
 
     exported = await book_outputs.export_book_output_file(
         test_db,
@@ -190,6 +201,89 @@ async def test_image_asset_api_places_image_and_syncs_latest_manuscript(client, 
     )
     assert exported.media_type == "application/pdf"
     assert exported.content.startswith(b"%PDF")
+
+
+async def test_image_migration_relocates_legacy_source_linked_appendix_and_resyncs_output(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    _, project_id, chapter_id, asset_id = await _seed_image_asset(
+        client,
+        test_db,
+        tmp_path,
+        monkeypatch,
+    )
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements",
+        json={
+            "placement_type": "chapter_inline",
+            "display_size": "full_width",
+        },
+    )
+    assert response.status_code == 201
+    placement_id = response.json()["placements"][0]["id"]
+
+    await test_db.execute(
+        text(
+            """
+            UPDATE memoir_book_image_placements
+            SET placement_type = 'appendix', chapter_id = NULL
+            WHERE id = :placement_id
+            """
+        ),
+        {"placement_id": placement_id},
+    )
+    output_version = await test_db.scalar(
+        select(MemoirBookOutputVersion)
+        .where(MemoirBookOutputVersion.project_id == project_id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+    )
+    assert output_version is not None
+    manuscript = dict(output_version.manuscript_json)
+    chapters = [dict(chapter) for chapter in manuscript["chapters"]]
+    legacy_illustration = dict(chapters[0]["illustrations"][0])
+    legacy_illustration["placement"] = "appendix"
+    legacy_illustration.pop("section_id", None)
+    chapters[0]["illustrations"] = []
+    manuscript["chapters"] = chapters
+    manuscript["image_appendix"] = [legacy_illustration]
+    manuscript["render_settings"] = {
+        **manuscript["render_settings"],
+        "photo_mode": "appendix",
+    }
+    output_version.manuscript_json = manuscript
+    await test_db.commit()
+
+    result = await migrate_memoir_image_schema(test_db.bind)
+    assert result["relocated_source_linked_placements"] == 1
+    changed_outputs = await image_assets.resync_all_latest_book_output_image_snapshots(
+        test_db
+    )
+    await test_db.commit()
+
+    placement = (
+        await test_db.execute(
+            text(
+                """
+                SELECT placement_type, chapter_id
+                FROM memoir_book_image_placements
+                WHERE id = :placement_id
+                """
+            ),
+            {"placement_id": placement_id},
+        )
+    ).one()
+    assert placement.placement_type == "chapter_inline"
+    assert placement.chapter_id == chapter_id
+    assert changed_outputs == 1
+    await test_db.refresh(output_version)
+    migrated_manuscript = output_version.manuscript_json
+    assert migrated_manuscript["image_appendix"] == []
+    migrated_illustration = migrated_manuscript["chapters"][0]["illustrations"][0]
+    assert migrated_illustration["placement"] == "chapter_inline"
+    assert migrated_illustration["section_id"]
 
 
 async def test_generated_image_download_is_branded_without_changing_clean_source(

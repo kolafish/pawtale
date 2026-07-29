@@ -5,6 +5,7 @@ from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.ttfonts import TTFont
 
 from app.schemas.memoir_book import MemoirBookCoverStyle
+from app.services.memoir import book_output_export
 from app.services.memoir.book_outputs import _cover_style as normalize_book_cover_style
 from app.services.memoir.book_output_export import (
     PDF_COVER_STYLES,
@@ -203,6 +204,78 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
     assert len(pages[-1].images) == 1
     assert "-dark-" in pages[-1].images[0].path.name
     assert "memoir-brand-v1" in pages[-1].images[0].path.name
+
+
+def test_chapter_inline_illustrations_render_after_their_source_section(monkeypatch):
+    manuscript = _sample_manuscript("第一小节正文。")
+    manuscript["chapters"][0]["sections"] = [
+        {
+            "section_id": "section-1",
+            "index": 1,
+            "title": "第一小节",
+            "section_type": "life_fragment",
+            "content": "第一小节正文。",
+            "char_count": 7,
+            "source_count": 1,
+            "source_ref_ids": ["utterance-1"],
+        },
+        {
+            "section_id": "section-2",
+            "index": 2,
+            "title": "第二小节",
+            "section_type": "life_fragment",
+            "content": "第二小节正文。",
+            "char_count": 7,
+            "source_count": 1,
+            "source_ref_ids": ["utterance-2"],
+        },
+    ]
+    manuscript["chapters"][0]["illustrations"] = [
+        {
+            "image_asset_id": "opening",
+            "storage_path": "unused-opening.png",
+            "placement": "chapter_opening",
+        },
+        {
+            "image_asset_id": "inline-2",
+            "storage_path": "unused-inline-2.png",
+            "placement": "chapter_inline",
+            "section_id": "section-2",
+            "source_utterance_id": "utterance-2",
+        },
+        {
+            "image_asset_id": "inline-1",
+            "storage_path": "unused-inline-1.png",
+            "placement": "chapter_inline",
+            "section_id": "section-1",
+            "source_utterance_id": "utterance-1",
+        },
+    ]
+
+    monkeypatch.setattr(
+        book_output_export,
+        "_add_illustration",
+        lambda builder, illustration: builder.add_text(
+            f"IMAGE:{illustration['image_asset_id']}"
+        ),
+    )
+    pages = _build_manuscript_pdf_pages(
+        title="外婆回忆录",
+        content="外婆回忆录",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+    rendered_text = [
+        command.text
+        for page in pages
+        for command in page.commands
+    ]
+
+    assert rendered_text.index("IMAGE:opening") < rendered_text.index("第一小节")
+    assert rendered_text.index("第一小节正文。") < rendered_text.index("IMAGE:inline-1")
+    assert rendered_text.index("IMAGE:inline-1") < rendered_text.index("第二小节")
+    assert rendered_text.index("第二小节正文。") < rendered_text.index("IMAGE:inline-2")
 
 
 def test_moonlit_courtyard_cover_style_uses_system_backgrounds():

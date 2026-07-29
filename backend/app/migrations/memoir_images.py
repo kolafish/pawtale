@@ -46,14 +46,83 @@ async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
     ]
 
 
-async def migrate_memoir_image_schema(engine: AsyncEngine) -> dict[str, list[str]]:
+async def _relocate_source_linked_appendix_placements(conn) -> int:
+    required_tables = (
+        "memoir_image_assets",
+        "memoir_book_image_placements",
+        "memoir_sections",
+        "memoir_section_materials",
+    )
+    for table_name in required_tables:
+        if not await table_exists(conn, table_name):
+            return 0
+    result = await conn.execute(
+        text(
+            """
+            UPDATE memoir_book_image_placements
+            SET placement_type = 'chapter_inline',
+                chapter_id = (
+                    SELECT section.chapter_id
+                    FROM memoir_image_assets AS asset
+                    JOIN memoir_section_materials AS material
+                      ON material.project_id = asset.project_id
+                     AND material.utterance_id = asset.source_utterance_id
+                    JOIN memoir_sections AS section
+                      ON section.project_id = material.project_id
+                     AND section.id = material.section_id
+                    WHERE asset.id = memoir_book_image_placements.image_asset_id
+                      AND asset.project_id = memoir_book_image_placements.project_id
+                      AND asset.source_type IN (
+                        'share_video_background',
+                        'chapter_illustration',
+                        'utterance_illustration'
+                      )
+                      AND material.include_in_book = 1
+                      AND section.include_in_book = 1
+                      AND section.status = 'active'
+                    LIMIT 1
+                ),
+                updated_at = CURRENT_TIMESTAMP
+            WHERE enabled = 1
+              AND placement_type = 'appendix'
+              AND EXISTS (
+                    SELECT 1
+                    FROM memoir_image_assets AS asset
+                    JOIN memoir_section_materials AS material
+                      ON material.project_id = asset.project_id
+                     AND material.utterance_id = asset.source_utterance_id
+                    JOIN memoir_sections AS section
+                      ON section.project_id = material.project_id
+                     AND section.id = material.section_id
+                    WHERE asset.id = memoir_book_image_placements.image_asset_id
+                      AND asset.project_id = memoir_book_image_placements.project_id
+                      AND asset.source_type IN (
+                        'share_video_background',
+                        'chapter_illustration',
+                        'utterance_illustration'
+                      )
+                      AND material.include_in_book = 1
+                      AND section.include_in_book = 1
+                      AND section.status = 'active'
+              )
+            """
+        )
+    )
+    return max(int(result.rowcount or 0), 0)
+
+
+async def migrate_memoir_image_schema(engine: AsyncEngine) -> dict[str, object]:
     changed_tables: list[str] = []
     async with engine.begin() as conn:
         for table in _memoir_image_tables_from_metadata():
             if not await table_exists(conn, table.name):
                 await conn.run_sync(lambda sync_conn, table=table: table.create(sync_conn, checkfirst=True))
                 changed_tables.append(table.name)
-    return {"changed_tables": changed_tables}
+        relocated_placements = await _relocate_source_linked_appendix_placements(conn)
+    return {
+        "changed_tables": changed_tables,
+        "relocated_source_linked_placements": relocated_placements,
+    }
 
 
 async def assert_memoir_image_schema(engine: AsyncEngine) -> None:

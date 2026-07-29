@@ -85,6 +85,16 @@
       </view>
 
       <view class="asset-actions">
+        <button
+          wx:if="{{item.source_utterance_id}}"
+          class="action-button primary-action"
+          data-id="{{item.id}}"
+          loading="{{placingTarget === item.id}}"
+          disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
+          bindtap="placeNearSource"
+        >
+          放在素材附近
+        </button>
         <picker
           wx:if="{{chapterOptions.length}}"
           range="{{chapterOptions}}"
@@ -93,11 +103,12 @@
           disabled="{{placingTarget === item.id || item.status !== 'ready'}}"
           bindchange="placeInChapter"
         >
-          <view class="action-button primary-action {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">
-            放入章节
+          <view class="action-button {{!item.source_utterance_id ? 'primary-action' : ''}} {{placingTarget === item.id || item.status !== 'ready' ? 'disabled' : ''}}">
+            {{item.source_utterance_id ? "放到章节开头" : "放入章节"}}
           </view>
         </picker>
         <button
+          wx:if="{{!item.source_utterance_id}}"
           class="action-button"
           data-id="{{item.id}}"
           loading="{{placingTarget === item.id}}"

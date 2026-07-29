@@ -344,6 +344,7 @@ export interface MemoirBookOutputSectionTableOfContentsItem {
 export interface MemoirBookOutputSection extends MemoirBookOutputSectionTableOfContentsItem {
   section_type: string;
   content: string;
+  source_ref_ids: string[];
 }
 
 export interface MemoirBookOutputTableOfContentsItem {
@@ -407,6 +408,8 @@ export interface MemoirBookManuscriptIllustration {
   placement: MemoirBookImagePlacementType;
   display_size: string;
   source_quote: string;
+  source_utterance_id?: string | null;
+  section_id?: string | null;
   disclosure: string;
 }
 

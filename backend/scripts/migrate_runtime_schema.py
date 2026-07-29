@@ -16,6 +16,8 @@ import json
 import sys
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -24,6 +26,9 @@ if str(BACKEND_DIR) not in sys.path:
 from app.config import get_settings
 from app.database import create_database_engine
 from app.migrations.runtime import migrate_runtime_schema
+from app.services.memoir.image_assets import (
+    resync_all_latest_book_output_image_snapshots,
+)
 from backup_runtime_data import create_backup, sqlite_database_path
 
 
@@ -44,6 +49,17 @@ async def run(skip_backup: bool) -> None:
     )
     try:
         result = await migrate_runtime_schema(migration_engine)
+        session_maker = async_sessionmaker(
+            migration_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+        async with session_maker() as db:
+            resynced_outputs = await resync_all_latest_book_output_image_snapshots(db)
+            await db.commit()
+        memoir_image_result = result.get("memoir_images")
+        if isinstance(memoir_image_result, dict):
+            memoir_image_result["resynced_book_outputs"] = resynced_outputs
     finally:
         await migration_engine.dispose()
 
