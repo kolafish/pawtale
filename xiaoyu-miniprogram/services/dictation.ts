@@ -261,12 +261,12 @@ export class ArticleDictationClient {
       } catch {
         // The page is leaving; close the transport even if ASR finalization timed out.
       }
+      this.unbindRecorder();
       if (this.socketOpen) {
         const stopped = this.waitForEvent("session.stopped", 3000);
         this.send({ type: "session.stop" });
         await stopped.catch(() => undefined);
       }
-      this.unbindRecorder();
       this.socket?.close({ code: 1000, reason: "dictation page closed" });
       this.socket = null;
       this.socketOpen = false;

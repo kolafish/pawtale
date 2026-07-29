@@ -146,6 +146,7 @@ test("dictation streams PCM frames and returns final text without interview even
   await stopping;
   const closing = runtime.client.close();
   await flushAsyncWork();
+  assert.deepEqual(runtime.recorderOffs, ["start", "frame", "stop", "error"]);
   runtime.socketCallbacks.message({
     data: JSON.stringify({ type: "session.stopped", state: "stopped" }),
   });
@@ -165,7 +166,6 @@ test("dictation streams PCM frames and returns final text without interview even
     { text: "正在口述", final: false },
     { text: "口述完成", final: true },
   ]);
-  assert.deepEqual(runtime.recorderOffs, ["start", "frame", "stop", "error"]);
   assert.equal(runtime.errors.length, 0);
 });
 
