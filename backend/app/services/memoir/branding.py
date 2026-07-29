@@ -9,9 +9,9 @@ from typing import Literal
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps, ImageStat
 
 
-BRAND_NAME = "余主任留声机"
+BRAND_NAME = "老余口述"
 BRAND_ATTRIBUTION = f"由{BRAND_NAME}协助整理"
-BRAND_VERSION = "memoir-brand-v1"
+BRAND_VERSION = "memoir-brand-v2"
 
 _APP_DIR = Path(__file__).resolve().parents[2]
 BRAND_MARK_PATH = _APP_DIR / "assets" / "branding" / "memoir-gramophone.png"

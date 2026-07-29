@@ -101,11 +101,11 @@ test("home exposes mini program share entry points", () => {
   assert.match(pageWxml, /open-type="share"/);
   assert.match(pageWxml, /分享给家人/);
   assert.deepEqual(page.onShareAppMessage(), {
-    title: "余主任留声机，把家里的故事慢慢讲下来",
+    title: "老余口述，把家里的故事慢慢讲下来",
     path: "/pages/home/index?from=share_home",
   });
   assert.deepEqual(page.onShareTimeline(), {
-    title: "余主任留声机，把家里的故事慢慢讲下来",
+    title: "老余口述，把家里的故事慢慢讲下来",
     query: "from=share_home",
   });
 });

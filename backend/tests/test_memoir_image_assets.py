@@ -356,7 +356,7 @@ async def test_generated_image_download_is_branded_without_changing_clean_source
     assert response.status_code == 200
     assert response.content != source_bytes
     assert source_path.read_bytes() == source_bytes
-    assert list(source_path.parent.glob("asset.memoir-brand-v1.png"))
+    assert list(source_path.parent.glob("asset.memoir-brand-v2.png"))
 
     thumbnail_response = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file?variant=thumbnail"
@@ -377,7 +377,7 @@ def test_user_uploaded_image_file_is_never_branded(tmp_path, monkeypatch):
     )
 
     assert image_assets.image_asset_file_path(asset, branded=True) == source_path
-    assert not list(tmp_path.glob("*.memoir-brand-v1.png"))
+    assert not list(tmp_path.glob("*.memoir-brand-v2.png"))
 
 
 async def test_image_assets_are_project_owner_scoped(client, test_db, tmp_path, monkeypatch):

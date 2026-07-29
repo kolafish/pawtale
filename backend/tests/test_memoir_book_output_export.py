@@ -29,9 +29,6 @@ from app.services.memoir.book_output_pdf_renderer import (
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
-from app.services.memoir.branding import BRAND_ATTRIBUTION
-
-
 EXPECTED_PDF_COVER_STYLES = {
     "classic_plain",
     "warm_gray",
@@ -200,10 +197,10 @@ def test_manuscript_pdf_pages_use_book_page_semantics():
         for page in chapter_pages
         for command in page.commands
     )
-    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert any(command.text == "由老余口述协助整理" for command in pages[-1].commands)
     assert len(pages[-1].images) == 1
     assert "-dark-" in pages[-1].images[0].path.name
-    assert "memoir-brand-v1" in pages[-1].images[0].path.name
+    assert "memoir-brand-v2" in pages[-1].images[0].path.name
 
 
 def test_chapter_inline_illustrations_render_after_their_source_section(monkeypatch):
@@ -302,7 +299,7 @@ def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
     assert pages[-1].background_image_path.name == "moonlit_courtyard_back_cover.jpg"
     assert any(command.text == "家庭回忆录" for command in pages[0].commands)
     assert any(command.text == "回望这一生" for command in pages[0].commands)
-    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert any(command.text == "由老余口述协助整理" for command in pages[-1].commands)
     assert len(pages[-1].images) == 1
     assert "-dark-" in pages[-1].images[0].path.name
 
@@ -343,7 +340,7 @@ def test_navy_gilt_cover_style_uses_system_backgrounds():
     assert pages[-1].background_image_path.name == "navy_gilt_back_cover.jpg"
     assert any(command.text == "家庭回忆录" for command in pages[0].commands)
     assert any(command.text == "回望这一生" for command in pages[0].commands)
-    assert any(command.text == BRAND_ATTRIBUTION for command in pages[-1].commands)
+    assert any(command.text == "由老余口述协助整理" for command in pages[-1].commands)
     assert len(pages[-1].images) == 1
     assert "-light-" in pages[-1].images[0].path.name
 

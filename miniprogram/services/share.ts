@@ -1,7 +1,7 @@
 const HOME_SHARE_QUERY = "from=share_home";
 const BOOK_SHARE_QUERY = "from=share_book";
 
-const HOME_SHARE_TITLE = "余主任留声机，把家里的故事慢慢讲下来";
+const HOME_SHARE_TITLE = "老余口述，把家里的故事慢慢讲下来";
 const HOME_SHARE_PATH = `/pages/home/index?${HOME_SHARE_QUERY}`;
 const BOOK_SHARE_FALLBACK_PATH = `/pages/book/index?${BOOK_SHARE_QUERY}`;
 const SHARE_TITLE_LIMIT = 18;
