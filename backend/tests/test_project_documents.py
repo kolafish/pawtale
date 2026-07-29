@@ -38,7 +38,7 @@ async def test_commit_document_update_restores_previous_content_when_commit_fail
     with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
         await write_content("project-1", "doc-1", "old content")
         db = _failing_db()
-        doc = SimpleNamespace(id="doc-1", word_count=0)
+        doc = SimpleNamespace(id="doc-1", word_count=0, content_revision=0)
 
         with pytest.raises(RuntimeError, match="commit failed"):
             await commit_document_update(db, "project-1", doc, "新内容 updated")

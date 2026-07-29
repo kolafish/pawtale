@@ -146,7 +146,7 @@ class TestAuthAPI:
     ):
         calls: list[str] = []
 
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             calls.append(code)
             return WeChatSession(openid="wechat-openid-1", unionid="wechat-unionid-1")
 
@@ -188,12 +188,142 @@ class TestAuthAPI:
         assert second.json()["needs_credentials"] is True
         assert calls == ["code-1", "code-2"]
 
+    async def test_wechat_login_reuses_union_user_across_miniprograms(
+        self,
+        anonymous_client,
+        test_db,
+        monkeypatch,
+    ):
+        calls: list[tuple[str, str]] = []
+
+        async def fake_exchange(code: str, miniprogram: str) -> WeChatSession:
+            calls.append((code, miniprogram))
+            return WeChatSession(
+                openid=f"{miniprogram}-openid",
+                unionid="shared-unionid",
+            )
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        laoyu = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "laoyu-code"},
+        )
+        await anonymous_client.post("/api/auth/logout")
+        xiaoyu = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "xiaoyu-code", "miniprogram": "xiaoyu"},
+        )
+
+        assert laoyu.status_code == 200
+        assert xiaoyu.status_code == 200
+        assert xiaoyu.json()["user"]["id"] == laoyu.json()["user"]["id"]
+        identities = (
+            await test_db.scalars(
+                select(AuthIdentity).where(
+                    AuthIdentity.provider_union_id == "shared-unionid"
+                )
+            )
+        ).all()
+        assert {identity.provider for identity in identities} == {
+            "wechat_miniprogram",
+            "wechat_miniprogram_xiaoyu",
+        }
+        assert calls == [
+            ("laoyu-code", "laoyu"),
+            ("xiaoyu-code", "xiaoyu"),
+        ]
+
+    async def test_wechat_openid_is_scoped_to_miniprogram(
+        self,
+        anonymous_client,
+        monkeypatch,
+    ):
+        async def fake_exchange(_code: str, _miniprogram: str) -> WeChatSession:
+            return WeChatSession(openid="same-openid")
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        laoyu = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "laoyu-code"},
+        )
+        await anonymous_client.post("/api/auth/logout")
+        xiaoyu = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "xiaoyu-code", "miniprogram": "xiaoyu"},
+        )
+
+        assert laoyu.status_code == 200
+        assert xiaoyu.status_code == 200
+        assert xiaoyu.json()["user"]["id"] != laoyu.json()["user"]["id"]
+
+    async def test_wechat_login_rejects_conflicting_union_owners(
+        self,
+        anonymous_client,
+        test_db,
+        monkeypatch,
+    ):
+        first = User(
+            email="first-union@example.com",
+            password_hash="hash",
+            display_name="第一位用户",
+        )
+        second = User(
+            email="second-union@example.com",
+            password_hash="hash",
+            display_name="第二位用户",
+        )
+        test_db.add_all([first, second])
+        await test_db.flush()
+        test_db.add_all(
+            [
+                AuthIdentity(
+                    user_id=first.id,
+                    provider="wechat_miniprogram",
+                    provider_user_id="laoyu-openid",
+                    provider_union_id="conflicting-union",
+                ),
+                AuthIdentity(
+                    user_id=second.id,
+                    provider="wechat_miniprogram_xiaoyu",
+                    provider_user_id="xiaoyu-openid",
+                    provider_union_id="conflicting-union",
+                ),
+            ]
+        )
+        await test_db.commit()
+
+        async def fake_exchange(_code: str, _miniprogram: str) -> WeChatSession:
+            return WeChatSession(
+                openid="laoyu-openid",
+                unionid="conflicting-union",
+            )
+
+        monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
+
+        response = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "code"},
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "微信身份关联冲突"
+
+    async def test_wechat_login_rejects_unknown_miniprogram(self, anonymous_client):
+        response = await anonymous_client.post(
+            "/api/auth/wechat-login",
+            json={"code": "code", "miniprogram": "unknown"},
+        )
+
+        assert response.status_code == 422
+
     async def test_set_credentials_enables_web_login_for_wechat_user(
         self,
         anonymous_client,
         monkeypatch,
     ):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid=f"openid-{code}")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -229,7 +359,7 @@ class TestAuthAPI:
         monkeypatch,
         tmp_path,
     ):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid=f"openid-{code}")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -306,7 +436,7 @@ class TestAuthAPI:
         assert avatar.json()["detail"] == "头像不存在"
 
     async def test_set_credentials_rejects_invalid_email(self, anonymous_client, monkeypatch):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid=f"openid-{code}")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -329,7 +459,7 @@ class TestAuthAPI:
         anonymous_client,
         monkeypatch,
     ):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid=f"openid-{code}")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -350,7 +480,7 @@ class TestAuthAPI:
         assert credentials.json()["user"]["display_name"] == "memoir-author"
 
     async def test_wechat_bind_links_existing_password_user(self, anonymous_client, monkeypatch):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid="bind-openid", unionid="bind-unionid")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -398,7 +528,7 @@ class TestAuthAPI:
         anonymous_client,
         monkeypatch,
     ):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             return WeChatSession(openid="shared-openid")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)
@@ -427,7 +557,7 @@ class TestAuthAPI:
         assert response.json()["detail"] == "缺少微信登录 code"
 
     async def test_wechat_login_reports_provider_error(self, anonymous_client, monkeypatch):
-        async def fake_exchange(code: str) -> WeChatSession:
+        async def fake_exchange(code: str, _miniprogram: str) -> WeChatSession:
             raise WeChatAuthError("微信小程序登录未配置")
 
         monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", fake_exchange)

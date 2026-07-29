@@ -30,7 +30,10 @@ class TestAIContinue:
 
             response = await client.post(
                 f"/api/projects/{project_id}/documents/{document_id}/ai-continue",
-                json={"ai_model": "claude-fable-5"},
+                json={
+                    "ai_model": "claude-fable-5",
+                    "expected_content_revision": 1,
+                },
             )
 
         assert response.status_code == 200
@@ -38,6 +41,26 @@ class TestAIContinue:
         assert data["document_id"] == document_id
         assert "他走过来" in data["content"]
         assert data["ai_model"] == "claude-fable-5"
+        assert data["content_revision"] == 2
+
+    async def test_ai_continue_rejects_stale_content_revision(self, client):
+        project_id, document_id = await create_document_with_content(
+            client,
+            "AI测试",
+            "这是已经保存的正文。",
+        )
+
+        response = await client.post(
+            f"/api/projects/{project_id}/documents/{document_id}/ai-continue",
+            json={"expected_content_revision": 0},
+        )
+
+        assert response.status_code == 409
+        current = await client.get(
+            f"/api/projects/{project_id}/documents/{document_id}"
+        )
+        assert current.json()["content"] == "这是已经保存的正文。"
+        assert current.json()["content_revision"] == 1
 
     async def test_ai_continue_with_instruction(self, client):
         project_id, document_id = await create_document_with_content(

@@ -33,6 +33,7 @@ from app.migrations.memoir_sections import (
     migrate_memoir_section_schema,
 )
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
+from app.migrations.projects import assert_project_schema, migrate_project_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
 from app.migrations.sqlite_integrity import assert_sqlite_foreign_key_integrity
 
@@ -45,6 +46,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
 
     memoir_schema_cutover = await migrate_memoir_schema_cutover(engine)
     auth = await migrate_auth_schema(engine)
+    projects = await migrate_project_schema(engine)
     audit = await migrate_audit_schema(engine)
     git_sync = await migrate_git_sync_schema(engine)
     memoir_voice = await migrate_memoir_voice_schema(engine)
@@ -59,6 +61,7 @@ async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     return {
         "memoir_schema_cutover": memoir_schema_cutover,
         "auth": auth,
+        "projects": projects,
         "audit": audit,
         "git_sync": git_sync,
         "memoir_voice": memoir_voice,
@@ -79,6 +82,7 @@ async def assert_runtime_schema(
 ) -> None:
     """Validate runtime schema without creating tables or altering columns."""
     await assert_base_runtime_schema(engine)
+    await assert_project_schema(engine)
     await assert_memoir_voice_schema(engine)
     await assert_memoir_image_schema(engine)
     await assert_memoir_section_schema(engine)

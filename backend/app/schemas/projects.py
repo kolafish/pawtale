@@ -35,6 +35,7 @@ class DocumentMeta(BaseModel):
     status: str = "draft"
     label: str | None = None
     word_count: int = 0
+    content_revision: int = 0
     sort_order: int = 0
     updated_at: datetime
 
@@ -131,6 +132,7 @@ class DocumentUpdate(BaseModel):
     status: str | None = None  # draft/revision/done
     label: str | None = None
     word_count_target: int | None = None
+    expected_content_revision: int | None = Field(default=None, ge=0)
 
 
 class DocumentResponse(BaseModel):
@@ -143,6 +145,7 @@ class DocumentResponse(BaseModel):
     label: str | None = None
     word_count_target: int | None = None
     word_count: int = 0
+    content_revision: int = 0
     sort_order: int = 0
     created_at: datetime
     updated_at: datetime
@@ -299,11 +302,13 @@ class DocumentAIContinueRequest(BaseModel):
     instruction: str | None = None
     ai_model: str | None = None
     debug: bool = False
+    expected_content_revision: int | None = Field(default=None, ge=0)
 
 
 class DocumentAIContinueResponse(BaseModel):
     document_id: str
     content: str
+    content_revision: int
     generated_chunk: str
     ai_model: str
     debug_info: dict | None = None

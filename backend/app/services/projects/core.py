@@ -72,11 +72,18 @@ async def _stage_project_delete_audit(
     )
 
 
-async def list_projects(db: AsyncSession, current_user: User) -> list[ProjectListItem]:
+async def list_projects(
+    db: AsyncSession,
+    current_user: User,
+    *,
+    project_type: ProjectType | None = None,
+) -> list[ProjectListItem]:
     current_user_is_admin = is_admin_user(current_user)
     filters = []
     if not current_user_is_admin:
         filters.append(Project.user_id == current_user.id)
+    if project_type is not None:
+        filters.append(Project.type == project_type.value)
     result = await db.execute(
         select(Project, User)
         .join(User, Project.user_id == User.id, isouter=True)

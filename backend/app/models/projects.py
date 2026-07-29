@@ -82,6 +82,12 @@ class Document(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     content: Mapped[str] = mapped_column(Text, default="")  # Existing DB column; content lives in files.
     word_count: Mapped[int] = mapped_column(Integer, default=0)
+    content_revision: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default="0",
+        nullable=False,
+    )
     synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="draft")  # draft/revision/done
     label: Mapped[str | None] = mapped_column(String(50), nullable=True)

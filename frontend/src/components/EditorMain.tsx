@@ -132,8 +132,20 @@ export function EditorMain({
 }: EditorMainProps) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [viewMode, setViewMode] = useState<EditorViewMode>('edit');
-  const saveStatusLabel = saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中...' : '未保存';
-  const saveStatusColor = saveStatus === 'saved' ? 'text-green-500' : saveStatus === 'saving' ? 'text-yellow-500' : 'text-gray-400';
+  const saveStatusLabel = saveStatus === 'saved'
+    ? '已保存'
+    : saveStatus === 'saving'
+      ? '保存中...'
+      : saveStatus === 'conflict'
+        ? '内容已在其他位置更新'
+        : '未保存';
+  const saveStatusColor = saveStatus === 'saved'
+    ? 'text-green-500'
+    : saveStatus === 'conflict'
+      ? 'text-red-500'
+      : saveStatus === 'saving'
+        ? 'text-yellow-500'
+        : 'text-gray-400';
 
   const handleSelect = (e: SyntheticEvent<HTMLTextAreaElement>) => {
     const target = e.currentTarget;

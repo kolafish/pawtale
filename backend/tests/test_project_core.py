@@ -41,6 +41,20 @@ class TestProjectAPI:
         assert response.status_code == 200
         assert response.json() == []
 
+    async def test_list_projects_filters_by_type(self, client):
+        article = await create_project(client, "一篇文章", "article")
+        await create_project(client, "一本小说", "novel")
+
+        response = await client.get("/api/projects", params={"type": "article"})
+
+        assert response.status_code == 200
+        assert [project["id"] for project in response.json()] == [article["id"]]
+
+    async def test_list_projects_rejects_unknown_type(self, client):
+        response = await client.get("/api/projects", params={"type": "unknown"})
+
+        assert response.status_code == 422
+
     async def test_create_project(self, client):
         response = await client.post("/api/projects", json=project_payload("我的小说"))
         assert response.status_code == 201

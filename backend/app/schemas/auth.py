@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -28,10 +29,12 @@ class AuthLoginRequest(BaseModel):
 
 class WeChatLoginRequest(BaseModel):
     code: str
+    miniprogram: Literal["laoyu", "xiaoyu"] = "laoyu"
 
 
 class WeChatBindRequest(BaseModel):
     code: str
+    miniprogram: Literal["laoyu", "xiaoyu"] = "laoyu"
 
 
 class AuthSetCredentialsRequest(BaseModel):

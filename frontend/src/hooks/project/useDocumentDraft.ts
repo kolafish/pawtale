@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { projectsApi } from '../../api';
 import type { Project } from '../../types';
 
-export type SaveStatus = 'saved' | 'saving' | 'unsaved';
+export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'conflict';
 
 export type DocumentSnapshot = {
   name: string;
@@ -66,6 +66,7 @@ export function useDocumentDraft({
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentSnapshotRef = useRef<DocumentSnapshot>(emptySnapshot());
   const lastSavedSnapshotRef = useRef<DocumentSnapshot>(emptySnapshot());
+  const contentRevisionRef = useRef(0);
   const isLoadingDocRef = useRef(false);
   const isReviewingRef = useRef(false);
 
@@ -89,13 +90,21 @@ export function useDocumentDraft({
       synopsis: snapshot.synopsis,
       status: snapshot.status,
       label: snapshot.label,
+      expected_content_revision: contentRevisionRef.current,
     }),
-    onSuccess: (_doc, variables) => {
+    onSuccess: (doc, variables) => {
+      contentRevisionRef.current = doc.content_revision;
       lastSavedSnapshotRef.current = variables.snapshot;
       setSaveStatus(
         snapshotsEqual(currentSnapshotRef.current, variables.snapshot) ? 'saved' : 'unsaved',
       );
       refreshProject();
+    },
+    onError: (error) => {
+      const status = (
+        error as { response?: { status?: number } }
+      ).response?.status;
+      setSaveStatus(status === 409 ? 'conflict' : 'unsaved');
     },
   });
 
@@ -124,15 +133,18 @@ export function useDocumentDraft({
     setLabel(nextLabel);
   }, []);
 
-  const markSnapshotSaved = useCallback((snapshot: DocumentSnapshot) => {
+  const markSnapshotSaved = useCallback((snapshot: DocumentSnapshot, contentRevision?: number) => {
     currentSnapshotRef.current = snapshot;
     lastSavedSnapshotRef.current = snapshot;
+    if (contentRevision !== undefined) {
+      contentRevisionRef.current = contentRevision;
+    }
     setSaveStatus('saved');
   }, []);
 
-  const replaceContentAsSaved = useCallback((content: string) => {
+  const replaceContentAsSaved = useCallback((content: string, contentRevision: number) => {
     const snapshot = { ...currentSnapshotRef.current, content };
-    markSnapshotSaved(snapshot);
+    markSnapshotSaved(snapshot, contentRevision);
     setDocumentContent(content);
   }, [markSnapshotSaved]);
 
@@ -149,7 +161,7 @@ export function useDocumentDraft({
     setSynopsis('');
     setStatus('draft');
     setLabel('');
-    markSnapshotSaved(emptySnapshot());
+    markSnapshotSaved(emptySnapshot(), 0);
   }, [markSnapshotSaved, setCurrentDocumentId]);
 
   const setIsReviewing = useCallback((value: boolean) => {
@@ -178,7 +190,10 @@ export function useDocumentDraft({
       setSynopsis(doc.synopsis || '');
       setStatus(doc.status);
       setLabel(doc.label || '');
-      markSnapshotSaved(createSnapshot(doc.name, doc.content, doc.synopsis || '', doc.status, doc.label || ''));
+      markSnapshotSaved(
+        createSnapshot(doc.name, doc.content, doc.synopsis || '', doc.status, doc.label || ''),
+        doc.content_revision,
+      );
       setCurrentDocumentId(docId);
     } finally {
       isLoadingDocRef.current = false;
@@ -198,7 +213,9 @@ export function useDocumentDraft({
     if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
     setSaveStatus('unsaved');
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
-    autoSaveTimerRef.current = setTimeout(() => saveCurrentIfDirty(), 3000);
+    autoSaveTimerRef.current = setTimeout(() => {
+      void saveCurrentIfDirty().catch(() => undefined);
+    }, 3000);
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
@@ -247,5 +264,6 @@ export function useDocumentDraft({
     markCurrentDocumentRenamed,
     resetDraft,
     setIsReviewing,
+    getContentRevision: () => contentRevisionRef.current,
   };
 }
