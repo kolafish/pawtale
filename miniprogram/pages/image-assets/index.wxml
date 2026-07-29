@@ -33,10 +33,29 @@
   <view wx:else class="asset-list">
     <view wx:for="{{items}}" wx:key="id" class="asset-card">
       <view class="asset-main">
-        <view class="asset-thumb" data-id="{{item.id}}" bindtap="previewAsset">
-          <image wx:if="{{item.localPath}}" class="asset-image" src="{{item.localPath}}" mode="aspectFill" />
-          <view wx:else class="asset-placeholder">
-            <text>图片</text>
+        <view
+          class="asset-thumb"
+          data-id="{{item.id}}"
+          aria-role="button"
+          aria-label="{{item.thumbnailState === 'failed' ? '重新加载图片预览' : '查看图片预览'}}"
+          bindtap="previewAsset"
+        >
+          <image
+            wx:if="{{item.localPath}}"
+            class="asset-image"
+            src="{{item.localPath}}"
+            mode="aspectFill"
+            data-id="{{item.id}}"
+            binderror="onThumbnailError"
+          />
+          <view wx:else class="asset-placeholder {{item.thumbnailState}}">
+            <text wx:if="{{item.thumbnailState === 'loading'}}">加载中</text>
+            <block wx:elif="{{item.thumbnailState === 'failed'}}">
+              <text>预览失败</text>
+              <text class="asset-placeholder-hint">点按重试</text>
+            </block>
+            <text wx:elif="{{item.status === 'ready'}}">点按预览</text>
+            <text wx:else>图片</text>
           </view>
         </view>
         <view class="asset-copy">

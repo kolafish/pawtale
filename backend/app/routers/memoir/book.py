@@ -1,3 +1,4 @@
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query
@@ -201,7 +202,7 @@ async def get_mobile_memoir_image_asset_file(
     )
     return FileResponse(
         path,
-        media_type=asset.mime_type or "image/jpeg",
+        media_type=mimetypes.guess_type(path.name)[0] or asset.mime_type or "image/jpeg",
         filename=f"{asset.id}{Path(path).suffix}",
     )
 

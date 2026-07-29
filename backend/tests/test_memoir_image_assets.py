@@ -546,7 +546,25 @@ async def test_generated_image_download_is_branded_without_changing_clean_source
         f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file?variant=thumbnail"
     )
     assert thumbnail_response.status_code == 200
-    assert thumbnail_response.content == source_bytes
+    assert thumbnail_response.headers["content-type"].startswith("image/jpeg")
+    assert thumbnail_response.content != source_bytes
+    with Image.open(BytesIO(thumbnail_response.content)) as thumbnail:
+        assert thumbnail.format == "JPEG"
+        assert thumbnail.size == (960, 540)
+    thumbnail_files = list(source_path.parent.glob("asset.memoir-thumb-v1.jpg"))
+    assert len(thumbnail_files) == 1
+    assert source_path.read_bytes() == source_bytes
+
+    asset = await test_db.get(MemoirImageAsset, asset_id)
+    assert asset is not None
+    await test_db.refresh(asset)
+    assert asset.thumbnail_storage_path.endswith("asset.memoir-thumb-v1.jpg")
+
+    cached_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/file?variant=thumbnail"
+    )
+    assert cached_response.status_code == 200
+    assert cached_response.content == thumbnail_response.content
 
 
 def test_user_uploaded_image_file_is_never_branded(tmp_path, monkeypatch):

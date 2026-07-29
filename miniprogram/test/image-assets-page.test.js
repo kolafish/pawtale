@@ -46,6 +46,8 @@ function imageAssetView(asset, localPath = "") {
   return {
     ...asset,
     localPath,
+    thumbnailState: localPath ? "ready" : "idle",
+    thumbnailError: "",
     titleText: asset.title,
     sourceLabel: "章节插图",
     statusText: "未使用",
@@ -81,7 +83,7 @@ function loadImageAssetsPage(apiExports = {}) {
   return loadPageModule("../pages/image-assets/index.ts");
 }
 
-test("image assets page batches thumbnails and uses the full file for preview", async () => {
+test("image assets page batches real thumbnails and previews the cached thumbnail", async () => {
   const assets = Array.from({ length: 9 }, (_, index) => imageAsset(`asset-${index + 1}`));
   const downloads = [];
   let activeDownloads = 0;
@@ -111,7 +113,7 @@ test("image assets page batches thumbnails and uses the full file for preview", 
   await page.downloadVisibleImages.call(context, assets, "project-1", 1);
 
   assert.equal(maxActiveDownloads, 4);
-  assert.equal(patchCount, 3);
+  assert.equal(patchCount, 4);
   assert.equal(context.data.items.every((item) => item.localPath.endsWith("-thumb.jpg")), true);
 
   const previews = [];
@@ -124,15 +126,71 @@ test("image assets page batches thumbnails and uses the full file for preview", 
     currentTarget: { dataset: { id: "asset-1" } },
   });
 
-  assert.deepEqual(downloads[downloads.length - 1], {
-    projectId: "project-1",
-    assetId: "asset-1",
-    thumbnail: false,
-  });
+  assert.equal(downloads.length, assets.length);
   assert.deepEqual(previews, [{
-    current: "/tmp/asset-1.jpg",
-    urls: ["/tmp/asset-1.jpg"],
+    current: "/tmp/asset-1-thumb.jpg",
+    urls: ["/tmp/asset-1-thumb.jpg"],
   }]);
+});
+
+test("image assets page exposes a failed thumbnail and retries it on tap", async () => {
+  const asset = imageAsset("asset-1");
+  let attempts = 0;
+  const previews = [];
+  const { page } = loadImageAssetsPage({
+    downloadMemoirImageAssetFile: async () => {
+      attempts += 1;
+      if (attempts === 1) {
+        throw new Error("图片下载超时");
+      }
+      return "/tmp/asset-1-thumb.jpg";
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project-1",
+    items: [imageAssetView(asset)],
+  });
+  context.loadToken = 1;
+
+  await page.downloadVisibleImages.call(context, [asset], "project-1", 1);
+
+  assert.equal(context.data.items[0].thumbnailState, "failed");
+  assert.equal(context.data.items[0].thumbnailError, "图片下载超时");
+  assert.equal(context.data.items[0].localPath, "");
+
+  global.wx = {
+    previewImage(options) {
+      previews.push(options);
+    },
+  };
+  await page.previewAsset.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(context.data.items[0].thumbnailState, "ready");
+  assert.equal(context.data.items[0].localPath, "/tmp/asset-1-thumb.jpg");
+  assert.deepEqual(previews, [{
+    current: "/tmp/asset-1-thumb.jpg",
+    urls: ["/tmp/asset-1-thumb.jpg"],
+  }]);
+});
+
+test("image assets page turns a native image decode failure into a retry state", () => {
+  const asset = imageAsset("asset-1");
+  const { page } = loadImageAssetsPage();
+  const context = pageContext(page, {
+    projectId: "project-1",
+    items: [imageAssetView(asset, "/tmp/asset-1-thumb.jpg")],
+  });
+
+  page.onThumbnailError.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+  });
+
+  assert.equal(context.data.items[0].thumbnailState, "failed");
+  assert.equal(context.data.items[0].localPath, "");
+  assert.match(context.data.items[0].thumbnailError, /点按重试/);
 });
 
 test("image assets page keeps successful placement removals when a later removal fails", async () => {
