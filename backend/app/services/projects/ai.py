@@ -151,6 +151,15 @@ async def ai_continue_document(
 ) -> DocumentAIContinueResponse:
     await load_project(db, project_id, user_id)
     doc = await get_document(db, project_id, document_id)
+    base_content_revision = doc.content_revision
+    if (
+        req.expected_content_revision is not None
+        and req.expected_content_revision != base_content_revision
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="文档内容已在其他位置更新，请刷新后再继续",
+        )
     content = await read_content(project_id, doc.id)
     base_content = content.strip()
     if not base_content:
@@ -187,11 +196,24 @@ async def ai_continue_document(
         raise HTTPException(status_code=502, detail="AI未返回可用续写内容")
 
     new_content = f"{content.rstrip()}\n\n{generated_chunk}"
-    await project_docs.commit_document_update(db, project_id, doc, new_content)
+    try:
+        await project_docs.commit_document_update(
+            db,
+            project_id,
+            doc,
+            new_content,
+            expected_content_revision=base_content_revision,
+        )
+    except project_docs.ContentRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="文档内容已在其他位置更新，请刷新后再继续",
+        ) from exc
 
     return DocumentAIContinueResponse(
         document_id=doc.id,
         content=new_content,
+        content_revision=doc.content_revision,
         generated_chunk=generated_chunk,
         ai_model=selected_ai_model,
         debug_info=story_result.get("debug_info") if req.debug else None,

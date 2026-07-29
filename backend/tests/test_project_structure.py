@@ -75,6 +75,30 @@ class TestDocumentAPI:
         assert data["content"] == "这是正文内容"
         assert data["status"] == "revision"
         assert data["word_count"] > 0
+        assert data["content_revision"] == 1
+
+    async def test_update_document_rejects_stale_content_revision(self, client):
+        project_id, _group_id = await create_project_with_group(client)
+        project = (await client.get(f"/api/projects/{project_id}")).json()
+        document_id = project["groups"][0]["documents"][0]["id"]
+
+        saved = await client.put(
+            f"/api/projects/{project_id}/documents/{document_id}",
+            json={"content": "第一端保存", "expected_content_revision": 0},
+        )
+        conflict = await client.put(
+            f"/api/projects/{project_id}/documents/{document_id}",
+            json={"content": "第二端覆盖", "expected_content_revision": 0},
+        )
+        current = await client.get(
+            f"/api/projects/{project_id}/documents/{document_id}"
+        )
+
+        assert saved.status_code == 200
+        assert saved.json()["content_revision"] == 1
+        assert conflict.status_code == 409
+        assert current.json()["content"] == "第一端保存"
+        assert current.json()["content_revision"] == 1
 
     async def test_delete_document(self, client):
         project_id, group_id = await create_project_with_group(client)

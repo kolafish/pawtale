@@ -3,6 +3,7 @@ import shutil
 from dataclasses import dataclass
 from uuid import uuid4
 
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.projects.types import ProjectType
@@ -16,6 +17,10 @@ from app.schemas.projects import (
     ReferenceItemBrief,
 )
 import app.services.content_storage as storage
+
+
+class ContentRevisionConflict(Exception):
+    pass
 
 
 def count_words(text: str) -> int:
@@ -42,6 +47,7 @@ def document_meta(doc: Document) -> DocumentMeta:
         status=doc.status or "draft",
         label=doc.label,
         word_count=doc.word_count,
+        content_revision=doc.content_revision,
         sort_order=doc.sort_order,
         updated_at=doc.updated_at,
     )
@@ -108,6 +114,7 @@ def document_response(doc: Document, content: str) -> DocumentResponse:
         label=doc.label,
         word_count_target=doc.word_count_target,
         word_count=doc.word_count,
+        content_revision=doc.content_revision,
         sort_order=doc.sort_order,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
@@ -151,18 +158,36 @@ async def commit_document_update(
     project_id: str,
     doc: Document,
     content: str | None,
+    *,
+    expected_content_revision: int | None = None,
 ) -> None:
+    document_id = doc.id
     snapshot: ContentSnapshot | None = None
-    if content is not None:
-        snapshot = await _snapshot_content(project_id, doc.id)
-        await storage.write_content(project_id, doc.id, content)
-        doc.word_count = count_words(content)
     try:
+        if content is not None:
+            snapshot = await _snapshot_content(project_id, document_id)
+            if expected_content_revision is None:
+                doc.content_revision += 1
+            else:
+                result = await db.execute(
+                    update(Document)
+                    .where(
+                        Document.id == document_id,
+                        Document.content_revision == expected_content_revision,
+                    )
+                    .values(content_revision=Document.content_revision + 1)
+                    .execution_options(synchronize_session=False)
+                )
+                if result.rowcount != 1:
+                    raise ContentRevisionConflict
+                doc.content_revision = expected_content_revision + 1
+            await storage.write_content(project_id, document_id, content)
+            doc.word_count = count_words(content)
         await db.commit()
     except Exception:
         await db.rollback()
         if snapshot is not None:
-            await _restore_content(project_id, doc.id, snapshot)
+            await _restore_content(project_id, document_id, snapshot)
         raise
 
 

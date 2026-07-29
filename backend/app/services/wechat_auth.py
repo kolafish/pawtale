@@ -17,10 +17,28 @@ class WeChatSession:
     unionid: str | None = None
 
 
-async def exchange_wechat_login_code(code: str) -> WeChatSession:
+def _miniprogram_credentials(settings, miniprogram: str) -> tuple[str, str]:
+    if miniprogram == "laoyu":
+        return settings.wechat_miniprogram_appid, settings.wechat_miniprogram_secret
+    if miniprogram == "xiaoyu":
+        return (
+            settings.wechat_xiaoyu_miniprogram_appid,
+            settings.wechat_xiaoyu_miniprogram_secret,
+        )
+    raise WeChatAuthError("不支持的微信小程序")
+
+
+async def exchange_wechat_login_code(
+    code: str,
+    miniprogram: str = "laoyu",
+) -> WeChatSession:
     settings = get_settings()
-    appid = settings.wechat_miniprogram_appid.strip()
-    secret = settings.wechat_miniprogram_secret.strip()
+    configured_appid, configured_secret = _miniprogram_credentials(
+        settings,
+        miniprogram,
+    )
+    appid = configured_appid.strip()
+    secret = configured_secret.strip()
     if not appid or not secret:
         raise WeChatAuthError("微信小程序登录未配置")
 

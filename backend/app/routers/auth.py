@@ -33,7 +33,10 @@ from app.services.wechat_auth import WeChatAuthError, WeChatSession, exchange_we
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-WECHAT_PROVIDER = "wechat_miniprogram"
+WECHAT_PROVIDERS = {
+    "laoyu": "wechat_miniprogram",
+    "xiaoyu": "wechat_miniprogram_xiaoyu",
+}
 WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户"
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
@@ -50,8 +53,8 @@ def _validate_password(password: str) -> None:
         raise HTTPException(status_code=400, detail="密码至少需要 8 个字符")
 
 
-def _provisional_wechat_email(openid: str) -> str:
-    digest = hashlib.sha256(openid.encode("utf-8")).hexdigest()[:24]
+def _provisional_wechat_email(provider: str, openid: str) -> str:
+    digest = hashlib.sha256(f"{provider}:{openid}".encode("utf-8")).hexdigest()[:24]
     return f"wechat_{digest}@wechat.local"
 
 
@@ -59,23 +62,48 @@ def _display_name_from_email(email: str) -> str:
     return email.split("@", 1)[0].strip() or "作者"
 
 
-async def _exchange_wechat_code(code: str) -> WeChatSession:
+async def _exchange_wechat_code(code: str, miniprogram: str) -> WeChatSession:
     normalized = code.strip()
     if not normalized:
         raise HTTPException(status_code=400, detail="缺少微信登录 code")
     try:
-        return await exchange_wechat_login_code(normalized)
+        return await exchange_wechat_login_code(normalized, miniprogram)
     except WeChatAuthError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-async def _find_wechat_identity(db: AsyncSession, openid: str) -> AuthIdentity | None:
+async def _find_wechat_identity(
+    db: AsyncSession,
+    provider: str,
+    openid: str,
+) -> AuthIdentity | None:
     return await db.scalar(
         select(AuthIdentity).where(
-            AuthIdentity.provider == WECHAT_PROVIDER,
+            AuthIdentity.provider == provider,
             AuthIdentity.provider_user_id == openid,
         )
     )
+
+
+async def _wechat_union_user_id(
+    db: AsyncSession,
+    unionid: str | None,
+) -> str | None:
+    if not unionid:
+        return None
+    user_ids = set(
+        (
+            await db.scalars(
+                select(AuthIdentity.user_id).where(
+                    AuthIdentity.provider.in_(WECHAT_PROVIDERS.values()),
+                    AuthIdentity.provider_union_id == unionid,
+                )
+            )
+        ).all()
+    )
+    if len(user_ids) > 1:
+        raise HTTPException(status_code=409, detail="微信身份关联冲突")
+    return next(iter(user_ids), None)
 
 
 def _auth_response(user: User) -> AuthResponse:
@@ -145,24 +173,32 @@ async def wechat_login(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ):
-    session = await _exchange_wechat_code(req.code)
-    identity = await _find_wechat_identity(db, session.openid)
+    provider = WECHAT_PROVIDERS[req.miniprogram]
+    session = await _exchange_wechat_code(req.code, req.miniprogram)
+    identity = await _find_wechat_identity(db, provider, session.openid)
+    union_user_id = await _wechat_union_user_id(db, session.unionid)
     if identity:
+        if union_user_id and union_user_id != identity.user_id:
+            raise HTTPException(status_code=409, detail="微信身份关联冲突")
         user = await db.get(User, identity.user_id)
         if user is None:
             raise HTTPException(status_code=409, detail="微信身份关联的用户不存在")
         if session.unionid and identity.provider_union_id != session.unionid:
             identity.provider_union_id = session.unionid
     else:
-        user = User(
-            email=_provisional_wechat_email(session.openid),
-            password_hash=hash_password(secrets.token_urlsafe(32)),
-            password_login_enabled=False,
-            display_name=WECHAT_PLACEHOLDER_DISPLAY_NAME,
-        )
+        user = await db.get(User, union_user_id) if union_user_id else None
+        if union_user_id and user is None:
+            raise HTTPException(status_code=409, detail="微信身份关联的用户不存在")
+        if user is None:
+            user = User(
+                email=_provisional_wechat_email(provider, session.openid),
+                password_hash=hash_password(secrets.token_urlsafe(32)),
+                password_login_enabled=False,
+                display_name=WECHAT_PLACEHOLDER_DISPLAY_NAME,
+            )
         identity = AuthIdentity(
             user=user,
-            provider=WECHAT_PROVIDER,
+            provider=provider,
             provider_user_id=session.openid,
             provider_union_id=session.unionid,
             profile_json={},
@@ -181,15 +217,19 @@ async def wechat_bind(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    session = await _exchange_wechat_code(req.code)
-    identity = await _find_wechat_identity(db, session.openid)
+    provider = WECHAT_PROVIDERS[req.miniprogram]
+    session = await _exchange_wechat_code(req.code, req.miniprogram)
+    identity = await _find_wechat_identity(db, provider, session.openid)
     if identity and identity.user_id != current_user.id:
+        raise HTTPException(status_code=409, detail="该微信已绑定其他账号")
+    union_user_id = await _wechat_union_user_id(db, session.unionid)
+    if union_user_id and union_user_id != current_user.id:
         raise HTTPException(status_code=409, detail="该微信已绑定其他账号")
     if identity is None:
         db.add(
             AuthIdentity(
                 user_id=current_user.id,
-                provider=WECHAT_PROVIDER,
+                provider=provider,
                 provider_user_id=session.openid,
                 provider_union_id=session.unionid,
                 profile_json={},

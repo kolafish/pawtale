@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     # WeChat Mini Program auth
     wechat_miniprogram_appid: str = ""
     wechat_miniprogram_secret: str = ""
+    wechat_xiaoyu_miniprogram_appid: str = ""
+    wechat_xiaoyu_miniprogram_secret: str = ""
     wechat_jscode2session_url: str = "https://api.weixin.qq.com/sns/jscode2session"
 
     # AI API Keys

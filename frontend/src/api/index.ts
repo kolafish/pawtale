@@ -72,6 +72,8 @@ export const auditApi = {
 // Projects API
 export const projectsApi = {
   list: () => api.get<ProjectListItem[]>('/projects').then(r => r.data),
+  listByType: (type: ProjectType) =>
+    api.get<ProjectListItem[]>('/projects', { params: { type } }).then(r => r.data),
   create: (data: { type: ProjectType; title: string; description?: string; word_count_target?: number; daily_word_goal?: number }) =>
     api.post<Project>('/projects', data).then(r => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then(r => r.data),
@@ -94,7 +96,7 @@ export const projectsApi = {
     api.post<WritingDocument>(`/projects/${projectId}/groups/${groupId}/documents`, { name: name || '未命名文档' }).then(r => r.data),
   getDocument: (projectId: string, docId: string) =>
     api.get<WritingDocument>(`/projects/${projectId}/documents/${docId}`).then(r => r.data),
-  updateDocument: (projectId: string, docId: string, data: { name?: string; content?: string; synopsis?: string; status?: string; label?: string; word_count_target?: number }) =>
+  updateDocument: (projectId: string, docId: string, data: { name?: string; content?: string; synopsis?: string; status?: string; label?: string; word_count_target?: number; expected_content_revision?: number }) =>
     api.put<WritingDocument>(`/projects/${projectId}/documents/${docId}`, data).then(r => r.data),
   deleteDocument: (projectId: string, docId: string) =>
     api.delete(`/projects/${projectId}/documents/${docId}`),
@@ -160,8 +162,8 @@ export const projectsApi = {
     api.post<ProjectGitSyncRunResponse>(`/projects/${projectId}/git-sync/run`).then(r => r.data),
 
   // AI Continue
-  aiContinue: (projectId: string, docId: string, data: { instruction?: string; ai_model?: string; debug?: boolean }) =>
-    api.post<{ document_id: string; content: string; generated_chunk: string; ai_model: string; debug_info?: AIDebugInfo }>(
+  aiContinue: (projectId: string, docId: string, data: { instruction?: string; ai_model?: string; debug?: boolean; expected_content_revision?: number }) =>
+    api.post<{ document_id: string; content: string; content_revision: number; generated_chunk: string; ai_model: string; debug_info?: AIDebugInfo }>(
       `/projects/${projectId}/documents/${docId}/ai-continue`, data
     ).then(r => r.data),
 

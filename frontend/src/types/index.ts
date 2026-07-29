@@ -191,6 +191,7 @@ export interface DocumentMeta {
   status: string;
   label?: string;
   word_count: number;
+  content_revision: number;
   sort_order: number;
   updated_at: string;
 }
@@ -205,6 +206,7 @@ export interface WritingDocument {
   label?: string;
   word_count_target?: number;
   word_count: number;
+  content_revision: number;
   sort_order: number;
   created_at: string;
   updated_at: string;

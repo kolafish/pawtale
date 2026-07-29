@@ -59,10 +59,15 @@ export function useProjectState() {
     mutationFn: async ({ projectId, docId, payload }: {
       projectId: string;
       docId: string;
-      payload: { instruction?: string; ai_model?: string; debug?: boolean };
+      payload: {
+        instruction?: string;
+        ai_model?: string;
+        debug?: boolean;
+        expected_content_revision?: number;
+      };
     }) => projectsApi.aiContinue(projectId, docId, payload),
     onSuccess: (result) => {
-      draft.replaceContentAsSaved(result.content);
+      draft.replaceContentAsSaved(result.content, result.content_revision);
       setDebugInfo(result.debug_info || null);
       refreshProject();
     },
@@ -78,6 +83,7 @@ export function useProjectState() {
         instruction: continueInstruction.trim() || undefined,
         ai_model: aiModel,
         debug: debugMode,
+        expected_content_revision: draft.getContentRevision(),
       },
     });
     setContinueInstruction('');

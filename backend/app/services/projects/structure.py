@@ -1,3 +1,4 @@
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -139,7 +140,19 @@ async def update_document(
         val = getattr(req, field, None)
         if val is not None:
             setattr(doc, field, val)
-    await project_docs.commit_document_update(db, project_id, doc, req.content)
+    try:
+        await project_docs.commit_document_update(
+            db,
+            project_id,
+            doc,
+            req.content,
+            expected_content_revision=req.expected_content_revision,
+        )
+    except project_docs.ContentRevisionConflict as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="文档内容已在其他位置更新，请刷新后再保存",
+        ) from exc
     await db.refresh(doc)
     content = await read_content(project_id, doc.id)
     return project_docs.document_response(doc, content)
