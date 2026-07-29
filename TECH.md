@@ -4,9 +4,9 @@
 
 ```text
 React Web ───────────────┐
-                         ├─ HTTP / session cookie ─┐
-WeChat Mini Program ─────┤                         │
-                         └─ WebSocket voice ───────┤
+Laoyu Mini Program ──────┼─ HTTP / session cookie ─┐
+Xiaoyu Mini Program ─────┤                          │
+                         └─ WebSocket voice ────────┤
                                                    v
                                       FastAPI application
                                       ├─ project services
@@ -80,10 +80,18 @@ backend/app/
 
 移动端 read model 与 Web 编辑 read model可以不同，但必须共享同一套持久化真相和领域服务。
 
+### 文章口述与 AI
+
+- `/api/projects/{project_id}/documents/{document_id}/dictation`：article owner 专用的临时 Streaming ASR gateway，不保存音频或访谈 session；
+- `/ai-continue`：按 revision 原子追加续写；
+- `/ai-revise`：返回候选修改，不直接覆盖正文；
+- `/ai-review`：返回动态 `{excerpt, issue, suggestion}`，不执行回忆录事实完整性检查。
+
 ## 认证与权限
 
 - Web 和小程序使用服务端 session cookie；
 - 微信登录由后端使用 `wx.login()` code 换取 openid，小程序不持有 AppSecret；
+- 老余与小鱼按 AppID 区分 identity provider，并在 UnionID 可用时关联同一用户；
 - 每个项目 API 都校验 owner、编辑权限或显式只读权限；
 - 回忆录音频、素材、章节、图片、导出和后台 job 均绑定 `project_id`；
 - `APP_ENV=production` 时必须使用至少 32 字符的非默认 `APP_SECRET_KEY`；
@@ -217,6 +225,8 @@ miniprogram/
 └── test/                           # Node 行为测试
 ```
 
+`xiaoyu-miniprogram/` 是独立的轻量发布单元，只包含文章列表、编辑器、dictation transport 和 article AI API；两套小程序共享后端合同，不互相导入页面或业务 service。
+
 小程序页面按职责分组：
 
 - 入口：home、login、projects、project-edit、me；
@@ -260,6 +270,10 @@ npm run build
 
 # 小程序
 cd miniprogram
+npm run typecheck
+npm test
+
+cd ../xiaoyu-miniprogram
 npm run typecheck
 npm test
 ```

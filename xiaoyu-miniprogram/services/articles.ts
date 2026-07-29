@@ -1,4 +1,7 @@
 import type {
+  ArticleAIContinueResponse,
+  ArticleAIReviewResponse,
+  ArticleAIReviseResponse,
   ArticleDocument,
   ArticleListItem,
   ArticleProject,
@@ -66,6 +69,59 @@ export function updateArticleContent(
         expected_content_revision: expectedContentRevision,
       },
       timeoutProfile: "mutation",
+    },
+  );
+}
+
+export function continueArticle(
+  projectId: string,
+  documentId: string,
+  expectedContentRevision: number,
+  instruction: string,
+): Promise<ArticleAIContinueResponse> {
+  return requestWithBackendSession<ArticleAIContinueResponse>(
+    `/api/projects/${projectId}/documents/${documentId}/ai-continue`,
+    {
+      method: "POST",
+      data: {
+        ...(instruction ? { instruction } : {}),
+        expected_content_revision: expectedContentRevision,
+      },
+      timeoutProfile: "generation",
+    },
+  );
+}
+
+export function reviseArticle(
+  projectId: string,
+  documentId: string,
+  expectedContentRevision: number,
+  instruction: string,
+): Promise<ArticleAIReviseResponse> {
+  return requestWithBackendSession<ArticleAIReviseResponse>(
+    `/api/projects/${projectId}/documents/${documentId}/ai-revise`,
+    {
+      method: "POST",
+      data: {
+        instruction,
+        expected_content_revision: expectedContentRevision,
+      },
+      timeoutProfile: "generation",
+    },
+  );
+}
+
+export function reviewArticle(
+  projectId: string,
+  documentId: string,
+  expectedContentRevision: number,
+): Promise<ArticleAIReviewResponse> {
+  return requestWithBackendSession<ArticleAIReviewResponse>(
+    `/api/projects/${projectId}/documents/${documentId}/ai-review`,
+    {
+      method: "POST",
+      data: { expected_content_revision: expectedContentRevision },
+      timeoutProfile: "generation",
     },
   );
 }

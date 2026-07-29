@@ -59,6 +59,21 @@ function loadEditorPage(overrides = {}, dictationRuntime = {}) {
     updateArticleContent: async () => ({
       content_revision: 5,
     }),
+    continueArticle: async () => ({
+      content: "原文\n\n续写",
+      content_revision: 5,
+      generated_chunk: "续写",
+    }),
+    reviseArticle: async () => ({
+      revised_text: "修改后的正文",
+      original_text: "原文",
+      content_revision: 4,
+    }),
+    reviewArticle: async () => ({
+      summary: "主题清楚。",
+      suggestions: [],
+      content_revision: 4,
+    }),
     ...overrides,
   });
   return loadPageModule("../../xiaoyu-miniprogram/pages/editor/index.ts");
@@ -147,4 +162,93 @@ test("editor replaces live partial text and saves only the final dictation", asy
   assert.deepEqual(updates, [
     ["project-1", "document-1", "原口述完成文", 4],
   ]);
+});
+
+test("editor saves first and applies AI continuation returned by the backend", async () => {
+  const calls = [];
+  global.wx = { showToast() {} };
+  const { page } = loadEditorPage({
+    continueArticle: async (...args) => {
+      calls.push(args);
+      return {
+        content: "原文\n\n接下来继续写。",
+        content_revision: 5,
+        generated_chunk: "接下来继续写。",
+      };
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+  context.setData({ aiInstruction: "顺着原来的语气" });
+
+  await page.runAIAction.call(context, {
+    currentTarget: { dataset: { action: "continue" } },
+  });
+
+  assert.deepEqual(calls, [
+    ["project-1", "document-1", 4, "顺着原来的语气"],
+  ]);
+  assert.equal(context.data.content, "原文\n\n接下来继续写。");
+  assert.equal(context.data.contentRevision, 5);
+  assert.equal(context.data.saveState, "saved");
+  delete global.wx;
+});
+
+test("editor previews an AI revision and applies it with revision protection", async () => {
+  const updates = [];
+  global.wx = { showToast() {} };
+  const { page } = loadEditorPage({
+    reviseArticle: async () => ({
+      revised_text: "更自然的正文",
+      original_text: "原文",
+      content_revision: 4,
+    }),
+    updateArticleContent: async (...args) => {
+      updates.push(args);
+      return { content_revision: 5, word_count: 6 };
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+  context.setData({ aiInstruction: "表达更自然" });
+
+  await page.runAIAction.call(context, {
+    currentTarget: { dataset: { action: "revise" } },
+  });
+  assert.equal(context.data.content, "原文");
+  assert.equal(context.data.aiProposal, "更自然的正文");
+
+  await page.applyAIRevision.call(context);
+
+  assert.deepEqual(updates, [
+    ["project-1", "document-1", "更自然的正文", 4],
+  ]);
+  assert.equal(context.data.content, "更自然的正文");
+  assert.equal(context.data.aiResultKind, "none");
+  delete global.wx;
+});
+
+test("editor presents article review suggestions without changing the article", async () => {
+  const { page } = loadEditorPage({
+    reviewArticle: async () => ({
+      summary: "主题明确，可以精简开头。",
+      suggestions: [{
+        excerpt: "原文",
+        issue: "开头略泛",
+        suggestion: "直接从核心观点切入",
+      }],
+      content_revision: 4,
+    }),
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+
+  await page.runAIAction.call(context, {
+    currentTarget: { dataset: { action: "review" } },
+  });
+
+  assert.equal(context.data.content, "原文");
+  assert.equal(context.data.aiResultKind, "review");
+  assert.equal(context.data.aiSummary, "主题明确，可以精简开头。");
+  assert.equal(context.data.aiSuggestions[0].suggestion, "直接从核心观点切入");
 });
