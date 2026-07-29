@@ -2,6 +2,7 @@ export interface ArticleListItem {
   id: string;
   type: "article";
   title: string;
+  can_edit: boolean;
   total_word_count: number;
   document_count: number;
   updated_at: string;

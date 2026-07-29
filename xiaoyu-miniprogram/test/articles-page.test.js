@@ -11,6 +11,7 @@ function article(id, title) {
     id,
     type: "article",
     title,
+    can_edit: true,
     total_word_count: 12,
     document_count: 1,
     updated_at: "2026-07-29T08:00:00Z",

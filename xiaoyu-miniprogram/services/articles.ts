@@ -5,8 +5,11 @@ import type {
 } from "../domain/article";
 import { requestWithBackendSession } from "./auth";
 
-export function listArticles(): Promise<ArticleListItem[]> {
-  return requestWithBackendSession<ArticleListItem[]>("/api/projects?type=article");
+export async function listArticles(): Promise<ArticleListItem[]> {
+  const articles = await requestWithBackendSession<ArticleListItem[]>(
+    "/api/projects?type=article",
+  );
+  return articles.filter((article) => article.can_edit);
 }
 
 export function createArticle(title = "未命名文章"): Promise<ArticleProject> {
