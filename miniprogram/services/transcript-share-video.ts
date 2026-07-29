@@ -340,17 +340,21 @@ function shareVideoJobStatusText(job: MemoirShareVideoJob): string {
     if (job.background_source === "custom" || job.background_source === "classic") {
       return "正在合成视频";
     }
-    if (job.background_status === "planning") {
-      return "正在分析口述画面";
+    if (job.background_status === "pending" || job.background_status === "planning") {
+      return "正在准备背景图";
     }
     if (job.background_status === "generating") {
       return (job.background_scene_count || 0) > 1 ? "正在生成多张背景图" : "正在生成背景图";
     }
-    if (job.background_status === "ready" || job.background_status === "partial") {
+    if (
+      job.background_status === "ready" ||
+      job.background_status === "partial" ||
+      job.background_status === "failed" ||
+      job.background_status === "fallback" ||
+      job.background_status === "disabled" ||
+      job.background_status === "classic"
+    ) {
       return "正在合成视频";
-    }
-    if (job.background_status === "pending") {
-      return "正在生成背景图";
     }
     return "正在生成视频";
   }
@@ -364,19 +368,15 @@ function isTransientPollError(error: unknown): boolean {
   return true;
 }
 
-function isSameShareVideoJobVersion(
+function isSameShareVideoJobView(
   current: MemoirShareVideoJob | null,
   next: MemoirShareVideoJob,
 ): boolean {
   return current === next || Boolean(
-    current?.updated_at &&
+    current &&
     current.id === next.id &&
-    current.updated_at === next.updated_at &&
     current.status === next.status &&
-    current.background_source === next.background_source &&
-    current.background_status === next.background_status &&
-    current.background_effective_mode === next.background_effective_mode &&
-    current.background_scene_count === next.background_scene_count &&
+    shareVideoJobStatusText(current) === shareVideoJobStatusText(next) &&
     current.error_message === next.error_message &&
     current.output?.download_url === next.output?.download_url &&
     current.output?.mime_type === next.output?.mime_type &&
@@ -610,7 +610,7 @@ export class TranscriptShareVideoController {
   private async applyJob(job: MemoirShareVideoJob, requestToken: number): Promise<void> {
     const running = job.status === "pending" || job.status === "running";
     this.patchState({
-      ...(!isSameShareVideoJobVersion(this.state.shareVideoJob, job) ? { shareVideoJob: job } : {}),
+      ...(!isSameShareVideoJobView(this.state.shareVideoJob, job) ? { shareVideoJob: job } : {}),
       shareVideoPolling: running,
       shareVideoStatusText: shareVideoJobStatusText(job),
       shareVideoStatusClass: job.status,
