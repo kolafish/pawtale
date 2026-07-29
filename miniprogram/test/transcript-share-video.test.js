@@ -56,6 +56,7 @@ function controllerFixture(overrides = {}) {
 }
 
 test("share video controller keeps the current phase label between running polls", async () => {
+  let pollCount = 0;
   const runningJob = shareVideoJob({
     status: "running",
     background_status: "generating",
@@ -64,7 +65,13 @@ test("share video controller keeps the current phase label between running polls
     output: null,
   });
   const { controller, patches, state } = controllerFixture({
-    getJob: async () => ({ ...runningJob }),
+    getJob: async () => {
+      pollCount += 1;
+      return {
+        ...runningJob,
+        updated_at: `2026-07-29T06:00:0${pollCount}.000Z`,
+      };
+    },
   });
 
   controller.resume("job-1");
@@ -79,6 +86,57 @@ test("share video controller keeps the current phase label between running polls
       .filter((patch) => Object.hasOwn(patch, "shareVideoStatusText"))
       .map((patch) => patch.shareVideoStatusText),
     ["正在生成视频", "正在生成多张背景图"],
+  );
+  controller.dispose();
+});
+
+test("share video controller presents background work as forward-only stages", async () => {
+  const jobs = [
+    shareVideoJob({
+      status: "running",
+      background_status: "pending",
+      background_scene_count: 0,
+      output: null,
+      updated_at: "2026-07-29T06:00:01.000Z",
+    }),
+    shareVideoJob({
+      status: "running",
+      background_status: "planning",
+      background_scene_count: 0,
+      output: null,
+      updated_at: "2026-07-29T06:00:02.000Z",
+    }),
+    shareVideoJob({
+      status: "running",
+      background_status: "generating",
+      background_scene_count: 1,
+      output: null,
+      updated_at: "2026-07-29T06:00:03.000Z",
+    }),
+    shareVideoJob({
+      status: "running",
+      background_status: "ready",
+      background_scene_count: 1,
+      output: null,
+      updated_at: "2026-07-29T06:00:04.000Z",
+    }),
+  ];
+  const { controller, patches, state } = controllerFixture({
+    getJob: async () => jobs.shift(),
+  });
+
+  controller.resume("job-1");
+  await controller.refresh("job-1");
+  await controller.refresh("job-1");
+  await controller.refresh("job-1");
+  await controller.refresh("job-1");
+
+  assert.equal(state().shareVideoStatusText, "正在合成视频");
+  assert.deepEqual(
+    patches
+      .filter((patch) => Object.hasOwn(patch, "shareVideoStatusText"))
+      .map((patch) => patch.shareVideoStatusText),
+    ["正在生成视频", "正在准备背景图", "正在生成背景图", "正在合成视频"],
   );
   controller.dispose();
 });
