@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from hashlib import sha256
 import mimetypes
+import os
 from pathlib import Path
+from uuid import uuid4
 
 from fastapi import HTTPException
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -42,6 +46,9 @@ from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsse
 
 
 AI_GENERATED_IMAGE_DISCLOSURE = "AI 根据讲述内容生成的意象插图，不是真实照片。"
+IMAGE_ASSET_THUMBNAIL_VERSION = "memoir-thumb-v1"
+IMAGE_ASSET_THUMBNAIL_MAX_SIZE = (960, 960)
+IMAGE_ASSET_THUMBNAIL_JPEG_QUALITY = 85
 MATERIAL_ANCHORED_IMAGE_SOURCE_TYPES = {
     MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
     MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value,
@@ -92,6 +99,61 @@ def _should_brand_download(asset: MemoirImageAsset) -> bool:
         and asset.provider != "user_upload"
         and metadata.get("share_video_background_source") != "custom_upload"
     )
+
+
+def _thumbnail_derivative_path(source_path: Path) -> Path:
+    return source_path.with_name(
+        f"{source_path.stem}.{IMAGE_ASSET_THUMBNAIL_VERSION}.jpg"
+    )
+
+
+def image_asset_thumbnail_derivative(source_path: Path) -> Path:
+    target_path = _thumbnail_derivative_path(source_path)
+    if (
+        target_path.exists()
+        and target_path.is_file()
+        and target_path.stat().st_mtime >= source_path.stat().st_mtime
+    ):
+        return target_path
+
+    try:
+        with Image.open(source_path) as source:
+            transposed = ImageOps.exif_transpose(source)
+            if "A" in transposed.getbands():
+                rgba = transposed.convert("RGBA")
+                image = Image.new("RGB", rgba.size, (255, 255, 255))
+                image.paste(rgba, mask=rgba.getchannel("A"))
+            else:
+                image = transposed.convert("RGB")
+            image.thumbnail(
+                IMAGE_ASSET_THUMBNAIL_MAX_SIZE,
+                Image.Resampling.LANCZOS,
+            )
+    except (Image.DecompressionBombError, UnidentifiedImageError, OSError) as exc:
+        raise HTTPException(status_code=422, detail="图片预览文件无法处理") from exc
+
+    temporary_path = target_path.with_name(
+        f".{target_path.name}.{os.getpid()}.{uuid4().hex}.tmp"
+    )
+    try:
+        image.save(
+            temporary_path,
+            format="JPEG",
+            quality=IMAGE_ASSET_THUMBNAIL_JPEG_QUALITY,
+            optimize=True,
+            progressive=True,
+        )
+        os.replace(temporary_path, target_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return target_path
+
+
+def _relative_data_storage_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(DATA_DIR.resolve()).as_posix()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="图片路径无效") from exc
 
 
 def image_asset_file_path(
@@ -536,7 +598,27 @@ async def load_image_asset_file(
     branded: bool = False,
 ) -> tuple[MemoirImageAsset, Path]:
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
-    return asset, image_asset_file_path(asset, thumbnail=thumbnail, branded=branded)
+    if thumbnail:
+        if asset.thumbnail_storage_path:
+            try:
+                return asset, _file_path(asset.thumbnail_storage_path)
+            except HTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+        source_path = _file_path(asset.storage_path)
+        path = await asyncio.to_thread(
+            image_asset_thumbnail_derivative,
+            source_path,
+        )
+        asset.thumbnail_storage_path = _relative_data_storage_path(path)
+        await db.commit()
+        return asset, path
+    path = await asyncio.to_thread(
+        image_asset_file_path,
+        asset,
+        branded=branded,
+    )
+    return asset, path
 
 
 def _asset_file_metadata(storage_path: str) -> tuple[str, int | None]:

@@ -32,8 +32,12 @@ interface ChapterOption {
   value: string;
 }
 
+type ThumbnailState = "idle" | "loading" | "ready" | "failed";
+
 interface ImageAssetView extends MemoirImageAsset {
   localPath: string;
+  thumbnailState: ThumbnailState;
+  thumbnailError: string;
   titleText: string;
   sourceLabel: string;
   statusText: string;
@@ -143,12 +147,14 @@ function assetTitle(asset: MemoirImageAsset): string {
 
 function buildAssetView(
   asset: MemoirImageAsset,
-  localPath = "",
-  detailsExpanded = false,
+  current?: ImageAssetView,
 ): ImageAssetView {
+  const localPath = current?.localPath || "";
   return {
     ...asset,
     localPath,
+    thumbnailState: localPath ? "ready" : (current?.thumbnailState || "idle"),
+    thumbnailError: localPath ? "" : (current?.thumbnailError || ""),
     titleText: assetTitle(asset),
     sourceLabel: sourceLabel(asset),
     statusText: statusText(asset),
@@ -156,7 +162,7 @@ function buildAssetView(
     createdAtText: formatBeijingDateTimeShort(asset.created_at) || "",
     captionDraft: trimText(asset.caption),
     captionChanged: false,
-    detailsExpanded,
+    detailsExpanded: current?.detailsExpanded || false,
     enabledPlacements: (asset.placements || []).filter((placement) => placement.enabled),
   };
 }
@@ -165,13 +171,8 @@ function buildAssetViews(
   response: MemoirImageAssetListResponse,
   currentItems: ImageAssetView[],
 ): ImageAssetView[] {
-  const localPaths = new Map(currentItems.map((item) => [item.id, item.localPath]));
-  const expandedItems = new Map(currentItems.map((item) => [item.id, item.detailsExpanded]));
-  return response.items.map((asset) => buildAssetView(
-    asset,
-    localPaths.get(asset.id) || "",
-    expandedItems.get(asset.id) || false,
-  ));
+  const currentById = new Map(currentItems.map((item) => [item.id, item]));
+  return response.items.map((asset) => buildAssetView(asset, currentById.get(asset.id)));
 }
 
 function assetCountData(items: ImageAssetView[]): Pick<
@@ -288,27 +289,52 @@ definePage<ImageAssetsData>()({
     const candidates = assets
       .filter((asset) => asset.status === "ready" && !downloadedIds.has(asset.id))
       .slice(0, MAX_AUTO_DOWNLOADED_THUMBNAILS);
+    const candidateIds = new Set(candidates.map((asset) => asset.id));
+    if (candidateIds.size) {
+      this.setData({
+        items: this.data.items.map((item) => (
+          candidateIds.has(item.id)
+            ? { ...item, thumbnailState: "loading", thumbnailError: "" }
+            : item
+        )),
+      });
+    }
     for (let offset = 0; offset < candidates.length; offset += THUMBNAIL_BATCH_SIZE) {
       const batch = candidates.slice(offset, offset + THUMBNAIL_BATCH_SIZE);
       const results = await Promise.all(batch.map(async (asset) => {
         try {
           const localPath = await downloadMemoirImageAssetFile(projectId, asset.id, true);
-          return [asset.id, localPath] as const;
-        } catch (_error) {
-          return null;
+          return {
+            assetId: asset.id,
+            localPath,
+            error: "",
+          };
+        } catch (error) {
+          return {
+            assetId: asset.id,
+            localPath: "",
+            error: error instanceof Error ? error.message : "图片预览加载失败",
+          };
         }
       }));
       if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
         return;
       }
-      const paths = new Map(results.filter((result) => result !== null));
-      if (paths.size) {
-        this.setData({
-          items: this.data.items.map((item) => (
-            paths.has(item.id) ? { ...item, localPath: paths.get(item.id) || "" } : item
-          )),
-        });
-      }
+      const resultById = new Map(results.map((result) => [result.assetId, result]));
+      this.setData({
+        items: this.data.items.map((item) => {
+          const result = resultById.get(item.id);
+          if (!result) {
+            return item;
+          }
+          return {
+            ...item,
+            localPath: result.localPath,
+            thumbnailState: result.localPath ? "ready" : "failed",
+            thumbnailError: result.error,
+          };
+        }),
+      });
     }
   },
 
@@ -319,15 +345,76 @@ definePage<ImageAssetsData>()({
   async previewAsset(event: DatasetEvent) {
     const assetId = datasetString(event, "id");
     const asset = this.assetById(assetId);
-    if (!asset) {
+    if (!asset || asset.status !== "ready") {
       return;
     }
-    try {
-      const current = await downloadMemoirImageAssetFile(this.data.projectId, asset.id, false);
-      wx.previewImage({ current, urls: [current] });
-    } catch (error) {
-      this.setData({ error: error instanceof Error ? error.message : "图片预览失败" });
+    if (asset.localPath) {
+      wx.previewImage({ current: asset.localPath, urls: [asset.localPath] });
+      return;
     }
+    const projectId = this.data.projectId;
+    const requestToken = this.loadToken;
+    this.setData({
+      error: "",
+      items: this.data.items.map((item) => (
+        item.id === assetId
+          ? { ...item, thumbnailState: "loading", thumbnailError: "" }
+          : item
+      )),
+    });
+    try {
+      const localPath = await downloadMemoirImageAssetFile(projectId, asset.id, true);
+      if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
+        return;
+      }
+      this.setData({
+        items: this.data.items.map((item) => (
+          item.id === assetId
+            ? {
+              ...item,
+              localPath,
+              thumbnailState: "ready",
+              thumbnailError: "",
+            }
+            : item
+        )),
+      });
+      wx.previewImage({ current: localPath, urls: [localPath] });
+    } catch (error) {
+      if (requestToken !== this.loadToken) {
+        return;
+      }
+      const message = error instanceof Error ? error.message : "图片预览失败";
+      this.setData({
+        error: message,
+        items: this.data.items.map((item) => (
+          item.id === assetId
+            ? {
+              ...item,
+              localPath: "",
+              thumbnailState: "failed",
+              thumbnailError: message,
+            }
+            : item
+        )),
+      });
+    }
+  },
+
+  onThumbnailError(event: DatasetEvent) {
+    const assetId = datasetString(event, "id");
+    this.setData({
+      items: this.data.items.map((item) => (
+        item.id === assetId
+          ? {
+            ...item,
+            localPath: "",
+            thumbnailState: "failed",
+            thumbnailError: "图片文件暂时无法显示，点按重试",
+          }
+          : item
+      )),
+    });
   },
 
   onCaptionInput(event: TextInputEvent) {
@@ -498,11 +585,7 @@ definePage<ImageAssetsData>()({
 
   replaceAsset(asset: MemoirImageAsset) {
     const current = this.assetById(asset.id);
-    const updatedView = buildAssetView(
-      asset,
-      current?.localPath || "",
-      current?.detailsExpanded || false,
-    );
+    const updatedView = buildAssetView(asset, current || undefined);
     const nextItems = this.data.items.map((item) => (
       item.id === asset.id ? updatedView : item
     ));
