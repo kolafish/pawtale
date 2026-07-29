@@ -74,7 +74,29 @@ function gatewayErrorMessage(code = ""): string {
   if (code.startsWith("asr_") || code.startsWith("provider_") || code.startsWith("volc")) {
     return "语音识别服务异常，请稍后重试";
   }
-  return code || "语音连接异常，请稍后重试";
+  return "语音连接异常，请稍后重试";
+}
+
+function connectionErrorMessage(message = ""): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("timeout") || normalized.includes("超时")) {
+    return "语音连接超时，请检查网络后重试";
+  }
+  if (normalized.includes("403") || normalized.includes("forbidden")) {
+    return "语音连接被拒绝，请返回后重试";
+  }
+  return "语音连接失败，请检查网络后重试";
+}
+
+function recorderErrorMessage(message = ""): string {
+  const normalized = message.toLowerCase();
+  if (normalized.includes("auth") || normalized.includes("permission")) {
+    return "没有麦克风权限，请在微信设置中允许使用麦克风";
+  }
+  if (normalized.includes("busy") || normalized.includes("is recording")) {
+    return "麦克风正在使用中，请稍后重试";
+  }
+  return "麦克风启动失败，请稍后重试";
 }
 
 function gatewayUrl(projectId: string, documentId: string): string {
@@ -135,7 +157,7 @@ export class ArticleDictationClient {
         url: gatewayUrl(this.options.projectId, this.options.documentId),
         header: cookie ? { Cookie: cookie } : {},
         fail(error: { errMsg?: string }) {
-          settle(() => reject(new Error(error.errMsg || "语音连接失败")));
+          settle(() => reject(new Error(connectionErrorMessage(error.errMsg))));
         },
       }) as SocketTask;
       this.socket = socket;
@@ -148,13 +170,16 @@ export class ArticleDictationClient {
           this.setState("ready");
           settle(resolve);
         }
+        if (event.type === "session.error") {
+          settle(() => reject(new Error(gatewayErrorMessage(event.error))));
+        }
         this.handleEvent(event);
       });
       socket.onError((error) => {
         if (this.closing) {
           return;
         }
-        const message = error.errMsg || "语音连接失败";
+        const message = connectionErrorMessage(error.errMsg);
         settle(() => reject(new Error(message)));
         this.fail(message);
       });
@@ -189,10 +214,7 @@ export class ArticleDictationClient {
     });
     try {
       this.startTimer = setTimeout(() => {
-        const error = new Error("麦克风启动超时，请重试");
-        this.startReject?.(error);
-        this.recorder?.stop();
-        this.fail(error.message);
+        this.fail("麦克风启动超时，请重试");
       }, RECORDER_START_TIMEOUT_MS);
       this.recorder?.start({
         duration: RECORDING_DURATION_MS,
@@ -204,9 +226,7 @@ export class ArticleDictationClient {
       });
     } catch (error) {
       this.clearStartTimer();
-      const readable = error instanceof Error ? error : new Error("麦克风启动失败");
-      this.startReject?.(readable);
-      this.fail(readable.message);
+      this.fail(recorderErrorMessage(error instanceof Error ? error.message : ""));
     }
     return this.startPromise;
   }
@@ -299,9 +319,7 @@ export class ArticleDictationClient {
 
   private readonly handleRecorderError = (error: { errMsg?: string }) => {
     this.clearStartTimer();
-    const message = error.errMsg || "麦克风启动失败";
-    this.startReject?.(new Error(message));
-    this.fail(message);
+    this.fail(recorderErrorMessage(error.errMsg));
   };
 
   private unbindRecorder(): void {
@@ -363,7 +381,7 @@ export class ArticleDictationClient {
     }
     this.socket.send({
       data: JSON.stringify(payload),
-      fail: (error) => this.fail(error.errMsg || "语音数据发送失败"),
+      fail: () => this.fail("语音数据发送失败，请重试"),
     });
   }
 
@@ -418,6 +436,9 @@ export class ArticleDictationClient {
     this.clearStartTimer();
     const capturing =
       this.state === "starting" || this.state === "recording" || this.state === "stopping";
+    if (this.state === "starting") {
+      this.startReject?.(new Error(message));
+    }
     this.turnStarted = false;
     if (capturing) {
       this.recorder?.stop();

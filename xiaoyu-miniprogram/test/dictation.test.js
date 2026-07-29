@@ -191,3 +191,53 @@ test("dictation stops the native recorder when the gateway fails", async () => {
   assert.deepEqual(runtime.errors, ["当前语音服务繁忙，请稍后再试"]);
   assert.equal(runtime.states.at(-1), "error");
 });
+
+test("dictation rejects a gateway error during connection without waiting for timeout", async () => {
+  const runtime = runtimeHarness();
+  const connecting = runtime.client.connect();
+  await flushAsyncWork();
+  runtime.socketCallbacks.open();
+
+  runtime.socketCallbacks.message({
+    data: JSON.stringify({
+      type: "session.error",
+      error: "article_dictation_unavailable",
+    }),
+  });
+
+  await assert.rejects(connecting, /当前文章不可口述/);
+  assert.deepEqual(runtime.errors, ["当前文章不可口述，请返回后重新打开"]);
+});
+
+test("dictation converts native recorder errors to actionable Chinese", async () => {
+  const runtime = runtimeHarness();
+  const connecting = runtime.client.connect();
+  await flushAsyncWork();
+  runtime.socketCallbacks.open();
+  runtime.socketCallbacks.message({ data: JSON.stringify({ type: "session.ready" }) });
+  await connecting;
+
+  const starting = runtime.client.start();
+  runtime.recorderCallbacks.error({ errMsg: "record:fail auth deny" });
+
+  await assert.rejects(starting, /没有麦克风权限/);
+  assert.deepEqual(runtime.errors, [
+    "没有麦克风权限，请在微信设置中允许使用麦克风",
+  ]);
+});
+
+test("dictation settles a pending recorder start when the socket closes", async () => {
+  const runtime = runtimeHarness();
+  const connecting = runtime.client.connect();
+  await flushAsyncWork();
+  runtime.socketCallbacks.open();
+  runtime.socketCallbacks.message({ data: JSON.stringify({ type: "session.ready" }) });
+  await connecting;
+
+  const starting = runtime.client.start();
+  runtime.socketCallbacks.close();
+
+  await assert.rejects(starting, /语音连接已关闭/);
+  assert.equal(runtime.recorder.stops, 1);
+  assert.equal(runtime.states.at(-1), "error");
+});
