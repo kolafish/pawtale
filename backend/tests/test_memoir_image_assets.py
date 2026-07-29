@@ -1,3 +1,5 @@
+from io import BytesIO
+
 from PIL import Image
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -16,10 +18,12 @@ from app.models.memoir import (
     MemoirBookImagePlacement,
     MemoirBookOutput,
     MemoirBookOutputVersion,
+    MemoirEditingJob,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
 )
 from app.services.memoir import book_output_export, book_outputs, image_assets
+from app.services.memoir import material_image_generation
 from app.services.memoir.book_output_manuscript import manuscript_from_snapshot
 from app.services.memoir.book_output_snapshots import chapter_snapshot
 from app.services.memoir.image_assets import (
@@ -27,12 +31,192 @@ from app.services.memoir.image_assets import (
     register_share_video_background_asset,
 )
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
+from app.services.memoir.share_video_backgrounds import (
+    VolcArkGeneratedImage,
+    build_share_video_background_prompt,
+)
+from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    run_test_editing_job,
 )
+
+
+def _png_bytes(size: tuple[int, int] = (1280, 720)) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", size, (232, 218, 196)).save(output, format="PNG")
+    return output.getvalue()
+
+
+def test_material_image_prompt_is_not_a_subtitle_background_prompt():
+    selected_text = "小时候院子里有一棵葡萄树，夏天一家人都坐在下面乘凉。"
+
+    _, illustration_prompt, _ = material_image_generation.build_material_image_prompt(
+        selected_text,
+        "old_album",
+    )
+    video_prompt = build_share_video_background_prompt(selected_text, "old_album").prompt
+
+    assert "适合放进家庭回忆录" in illustration_prompt
+    assert "构图完整，主体明确" in illustration_prompt
+    assert "不冒充真实历史照片" in illustration_prompt
+    assert "保留大面积干净留白" not in illustration_prompt
+    assert "方便后期叠加" not in illustration_prompt
+    assert "保留大面积干净留白" in video_prompt
+    assert "方便后期叠加" in video_prompt
+
+
+async def test_material_image_generation_creates_unplaced_toolbox_asset(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)
+    generated_prompts: list[str] = []
+
+    async def fake_generate(_service, prompt: str) -> VolcArkGeneratedImage:
+        generated_prompts.append(prompt)
+        return VolcArkGeneratedImage(
+            content=_png_bytes(),
+            mime_type="image/png",
+            model="fake-image-model",
+            usage={"generated_images": 1},
+        )
+
+    monkeypatch.setattr(
+        material_image_generation.VolcArkImageGenerationService,
+        "generate",
+        fake_generate,
+    )
+    register_memoir_editing_job_handlers()
+    project_id = await ensure_mobile_memoir_project(client)
+    text_value = "小时候院子里有一棵葡萄树，夏天一家人都坐在下面乘凉。"
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        project_id=project_id,
+        text=text_value,
+    )
+
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/image-generation/jobs",
+        json={
+            "start_char": 0,
+            "end_char": len(text_value),
+            "style_id": "old_album",
+        },
+    )
+
+    assert response.status_code == 202
+    pending = response.json()
+    assert pending["status"] == "pending"
+    assert pending["asset_status"] == "pending"
+    assert pending["selected_text"] == text_value
+    assert pending["start_char"] == 0
+    assert pending["end_char"] == len(text_value)
+
+    context_response = await client.get(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/context"
+    )
+    assert context_response.status_code == 200
+    assert context_response.json()["latest_image_job_id"] == pending["job_id"]
+
+    list_response = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets"
+    )
+    assert list_response.status_code == 200
+    queued_asset = list_response.json()["items"][0]
+    assert queued_asset["id"] == pending["asset_id"]
+    assert queued_asset["source_type"] == "utterance_illustration"
+    assert queued_asset["status"] == "pending"
+    assert queued_asset["include_in_book"] is False
+
+    assert await run_test_editing_job(test_db, pending["job_id"]) is True
+
+    completed_response = await client.get(
+        f"/api/mobile/memoir/image-generation/jobs/{pending['job_id']}"
+    )
+    assert completed_response.status_code == 200
+    completed = completed_response.json()
+    assert completed["status"] == "succeeded"
+    assert completed["asset_status"] == "ready"
+    assert completed["stage"] == "ready"
+    assert generated_prompts
+    assert "保留大面积干净留白" not in generated_prompts[0]
+
+    ready_list = (
+        await client.get(f"/api/mobile/memoir/projects/{project_id}/image-assets")
+    ).json()
+    ready_asset = ready_list["items"][0]
+    assert ready_asset["status"] == "ready"
+    assert ready_asset["include_in_book"] is False
+    assert ready_asset["provider"] == "volc_ark"
+    assert ready_asset["model"] == "fake-image-model"
+    assert ready_asset["width"] == 1280
+    assert ready_asset["height"] == 720
+    assert ready_asset["metadata_json"]["generation_stage"] == "ready"
+    assert ready_asset["metadata_json"]["disclosure"] == image_assets.AI_GENERATED_IMAGE_DISCLOSURE
+
+    file_response = await client.get(ready_asset["file_url"])
+    assert file_response.status_code == 200
+    assert file_response.headers["content-type"].startswith("image/png")
+
+
+async def test_material_image_generation_does_not_repeat_unknown_provider_call(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(material_image_generation, "DATA_DIR", tmp_path)
+    provider_calls = 0
+
+    async def unexpected_generate(_service, _prompt: str) -> VolcArkGeneratedImage:
+        nonlocal provider_calls
+        provider_calls += 1
+        raise AssertionError("stale image jobs must not repeat an unknown provider call")
+
+    monkeypatch.setattr(
+        material_image_generation.VolcArkImageGenerationService,
+        "generate",
+        unexpected_generate,
+    )
+    register_memoir_editing_job_handlers()
+    project_id = await ensure_mobile_memoir_project(client)
+    text_value = "母亲常在窗边缝补衣服。"
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        project_id=project_id,
+        text=text_value,
+    )
+    response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/image-generation/jobs",
+        json={"start_char": 0, "end_char": len(text_value), "style_id": "ink_paper"},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["job_id"]
+    job = await test_db.get(MemoirEditingJob, job_id)
+    assert job is not None
+    job.attempts = 1
+    await test_db.commit()
+
+    assert await run_test_editing_job(test_db, job_id) is False
+    assert provider_calls == 0
+
+    failed_response = await client.get(
+        f"/api/mobile/memoir/image-generation/jobs/{job_id}"
+    )
+    assert failed_response.status_code == 200
+    failed = failed_response.json()
+    assert failed["status"] == "failed"
+    assert failed["asset_status"] == "failed"
+    assert "避免重复付费" in failed["error_message"]
 
 async def _seed_image_asset(client, test_db, tmp_path, monkeypatch):
     monkeypatch.setattr(image_assets, "DATA_DIR", tmp_path)

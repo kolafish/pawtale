@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.models.users import User
+from app.schemas.memoir_images import (
+    MemoirMaterialImageGenerationJobResponse,
+    MemoirMaterialImageGenerationRequest,
+)
 from app.schemas.memoir_voice import (
     MemoirAssistantTTSRequest,
     MemoirAssistantTTSResponse,
@@ -63,6 +67,7 @@ from app.services.memoir import share_video_custom_backgrounds as memoir_share_v
 from app.services.memoir import share_video_jobs as memoir_share_video_jobs
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import material_offline_asr_jobs as memoir_material_offline_asr_jobs
+from app.services.memoir import material_image_generation as memoir_material_image_generation
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
@@ -472,6 +477,43 @@ async def get_mobile_memoir_voice_transcript_share_video_context(
         db,
         utterance_id,
         current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.post(
+    "/voice-transcripts/{utterance_id}/image-generation/jobs",
+    response_model=MemoirMaterialImageGenerationJobResponse,
+    status_code=202,
+)
+async def create_mobile_memoir_material_image_generation_job(
+    utterance_id: str,
+    req: MemoirMaterialImageGenerationRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_material_image_generation.create_material_image_generation_job(
+        db,
+        utterance_id=utterance_id,
+        user_id=current_user.id,
+        req=req,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
+@router.get(
+    "/image-generation/jobs/{job_id}",
+    response_model=MemoirMaterialImageGenerationJobResponse,
+)
+async def get_mobile_memoir_material_image_generation_job(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_material_image_generation.get_material_image_generation_job(
+        db,
+        job_id=job_id,
+        user_id=current_user.id,
         allow_admin=is_admin_user(current_user),
     )
 

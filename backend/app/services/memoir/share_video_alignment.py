@@ -13,7 +13,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.domain.memoir.types import (
+    MemoirEditingJobType,
+    MemoirImageAssetSourceType,
+    MemoirImageAssetStatus,
+)
 from app.models.memoir import (
+    MemoirEditingJob,
+    MemoirImageAsset,
     MemoirMaterialShareVideo,
     MemoirTranscriptAlignment,
     MemoirVoiceUtterance,
@@ -457,6 +464,41 @@ async def get_share_video_context(
         )
         .limit(1)
     )
+    latest_image_assets = (
+        await db.scalars(
+            select(MemoirImageAsset)
+            .where(
+                MemoirImageAsset.project_id == utterance.voice_session.project_id,
+                MemoirImageAsset.source_utterance_id == utterance.id,
+                MemoirImageAsset.source_type
+                == MemoirImageAssetSourceType.UTTERANCE_ILLUSTRATION.value,
+                MemoirImageAsset.status != MemoirImageAssetStatus.DELETED.value,
+            )
+            .order_by(
+                MemoirImageAsset.created_at.desc(),
+                MemoirImageAsset.id.desc(),
+            )
+            .limit(20)
+        )
+    ).all()
+    for asset in latest_image_assets:
+        metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
+        if metadata.get("transcript_text_hash") != result.text_hash:
+            continue
+        generation_job_id = str(metadata.get("generation_job_id") or "").strip()
+        if not generation_job_id:
+            continue
+        job_exists = await db.scalar(
+            select(MemoirEditingJob.id).where(
+                MemoirEditingJob.id == generation_job_id,
+                MemoirEditingJob.project_id == utterance.voice_session.project_id,
+                MemoirEditingJob.job_type
+                == MemoirEditingJobType.GENERATE_MATERIAL_IMAGE.value,
+            )
+        )
+        if job_exists:
+            response.latest_image_job_id = generation_job_id
+            break
     alignment = await db.scalar(
         select(MemoirTranscriptAlignment).where(MemoirTranscriptAlignment.utterance_id == utterance.id)
     )

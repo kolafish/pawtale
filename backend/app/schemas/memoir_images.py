@@ -3,16 +3,56 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.domain.memoir.types import (
     MemoirBookImagePlacementType,
+    MemoirEditingJobStatus,
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
 )
 
 
 MemoirImageDisplaySize = Literal["full_width", "half_width", "inline"]
+
+
+class MemoirMaterialImageGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_char: int = Field(ge=0)
+    end_char: int = Field(gt=0)
+    style_id: str | None = Field(default=None, max_length=80)
+
+    @field_validator("style_id")
+    @classmethod
+    def _valid_style_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @model_validator(mode="after")
+    def _valid_range(self) -> "MemoirMaterialImageGenerationRequest":
+        if self.end_char <= self.start_char:
+            raise ValueError("结束位置必须大于开始位置")
+        return self
+
+
+class MemoirMaterialImageGenerationJobResponse(BaseModel):
+    job_id: str
+    project_id: str
+    utterance_id: str
+    asset_id: str
+    status: MemoirEditingJobStatus
+    asset_status: MemoirImageAssetStatus
+    stage: str = "queued"
+    selected_text: str
+    start_char: int
+    end_char: int
+    style_id: str
+    error_message: str = ""
+    created_at: datetime
+    updated_at: datetime
 
 
 class MemoirBookImagePlacementResponse(BaseModel):

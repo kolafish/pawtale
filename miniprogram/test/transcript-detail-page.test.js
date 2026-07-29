@@ -194,15 +194,37 @@ function sampleShareVideoJob(overrides = {}) {
   };
 }
 
+function sampleMaterialImageJob(overrides = {}) {
+  return {
+    job_id: "image-job-1",
+    project_id: "project-1",
+    utterance_id: "utterance-share",
+    asset_id: "image-asset-1",
+    status: "succeeded",
+    asset_status: "ready",
+    stage: "ready",
+    selected_text: "爷爷退休后还在帮公司做事。",
+    start_char: 0,
+    end_char: 13,
+    style_id: "old_album",
+    error_message: "",
+    created_at: "2026-07-01T08:00:00.000Z",
+    updated_at: "2026-07-01T08:00:02.000Z",
+    ...overrides,
+  };
+}
+
 function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     convertMemoirInterviewQuestionToAnswer: unmockedAsync("convertMemoirInterviewQuestionToAnswer"),
+    createMemoirMaterialImageGenerationJob: unmockedAsync("createMemoirMaterialImageGenerationJob"),
     createMemoirTranscriptShareVideoJob: unmockedAsync("createMemoirTranscriptShareVideoJob"),
     deleteMemoirVoiceTranscript: unmockedAsync("deleteMemoirVoiceTranscript"),
     downloadMemoirShareVideoCustomBackgroundPreview: unmockedAsync(
       "downloadMemoirShareVideoCustomBackgroundPreview",
     ),
     downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
+    getMemoirMaterialImageGenerationJob: unmockedAsync("getMemoirMaterialImageGenerationJob"),
     getMemoirShareVideoJob: unmockedAsync("getMemoirShareVideoJob"),
     getMemoirTranscriptShareVideoContext: unmockedAsync("getMemoirTranscriptShareVideoContext"),
     getMemoirBookPlan: unmockedAsync("getMemoirBookPlan"),
@@ -911,6 +933,82 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 
+test("transcript detail page creates a standalone image and opens it in the toolbox", async () => {
+  const createCalls = [];
+  const pollCalls = [];
+  const navigations = [];
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
+        transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
+        display_text: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
+        display_char_count: 23,
+      }),
+      getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id),
+      createMemoirMaterialImageGenerationJob: async (id, startChar, endChar, styleId) => {
+        createCalls.push({ id, startChar, endChar, styleId });
+        return sampleMaterialImageJob({
+          utterance_id: id,
+          status: "pending",
+          asset_status: "pending",
+          stage: "queued",
+          start_char: startChar,
+          end_char: endChar,
+          style_id: styleId,
+        });
+      },
+      getMemoirMaterialImageGenerationJob: async (jobId) => {
+        pollCalls.push(jobId);
+        return sampleMaterialImageJob();
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-share" });
+  await page.toggleShareVideoPanel.call(context);
+  page.selectShareVideoSegment.call(context, {
+    currentTarget: { dataset: { index: 0 } },
+  });
+  global.wx = {
+    setStorageSync() {},
+  };
+  page.selectShareVideoBackgroundStyle.call(context, {
+    currentTarget: { dataset: { backgroundStyle: "storybook" } },
+  });
+
+  await page.createMaterialImage.call(context);
+
+  assert.deepEqual(createCalls, [{
+    id: "utterance-share",
+    startChar: 0,
+    endChar: 13,
+    styleId: "storybook",
+  }]);
+  assert.equal(context.data.materialImageJob.status, "pending");
+  assert.equal(context.data.materialImagePolling, true);
+  assert.equal(context.data.materialImageStatusText, "图片任务已创建，等待生成");
+
+  context.materialImageController.cancel();
+  await context.materialImageController.refresh("image-job-1");
+
+  assert.deepEqual(pollCalls, ["image-job-1"]);
+  assert.equal(context.data.materialImageJob.status, "succeeded");
+  assert.equal(context.data.materialImageStatusText, "图片已生成，已放入图片素材");
+  assert.equal(context.data.materialImagePolling, false);
+
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  page.openImageAssets.call(context);
+
+  assert.deepEqual(navigations, [
+    "/pages/image-assets/index?projectId=project-1",
+  ]);
+});
+
 test("transcript detail page restores the latest matching share video job after reload", async () => {
   const contextCalls = [];
   const pollCalls = [];
@@ -951,6 +1049,45 @@ test("transcript detail page restores the latest matching share video job after 
 
   context.shareVideoController.cancel();
   assert.equal(context.data.shareVideoPolling, false);
+});
+
+test("transcript detail page restores the latest standalone image job and selection", async () => {
+  const pollCalls = [];
+  const restoredJob = sampleMaterialImageJob({
+    utterance_id: "utterance-image-resume",
+    status: "running",
+    asset_status: "running",
+    stage: "generating",
+    start_char: 0,
+    end_char: 13,
+  });
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, {
+        latest_job_id: null,
+        latest_image_job_id: restoredJob.job_id,
+      }),
+      getMemoirMaterialImageGenerationJob: async (jobId) => {
+        pollCalls.push(jobId);
+        return restoredJob;
+      },
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance-image-resume" });
+  await page.toggleShareVideoPanel.call(context);
+
+  assert.deepEqual(pollCalls, ["image-job-1"]);
+  assert.equal(context.data.materialImageJob.status, "running");
+  assert.equal(context.data.materialImagePolling, true);
+  assert.equal(context.data.materialImageStatusText, "正在根据口述生成图片");
+  assert.equal(context.data.shareVideoSelectedStartIndex, 0);
+  assert.equal(context.data.shareVideoSelectedEndIndex, 0);
+  assert.equal(context.data.shareVideoSelectedText, "爷爷退休后还在帮公司做事。");
+
+  context.materialImageController.cancel();
 });
 
 test("transcript detail page uses backend background options as the configuration source", async () => {

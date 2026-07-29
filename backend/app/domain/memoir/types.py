@@ -94,6 +94,7 @@ class MemoirSectionMaterialAssignedBy(str, Enum):
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
+    GENERATE_MATERIAL_IMAGE = "generate_material_image"
     REGENERATE_CHAPTER_SECTIONS = "regenerate_chapter_sections"
     EVALUATE_INTERVIEW_POLICY_SHADOW = "evaluate_interview_policy_shadow"
     EVALUATE_INTERVIEW_POLICY_OUTCOME = "evaluate_interview_policy_outcome"
