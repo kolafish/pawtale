@@ -81,6 +81,14 @@ def _section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:
         content = safe_str(item.get("content"))
         if not section_id or not title or not content:
             continue
+        raw_source_ref_ids = item.get("used_material_ids")
+        source_ref_ids = [
+            source_ref_id
+            for raw_source_ref_id in (
+                raw_source_ref_ids if isinstance(raw_source_ref_ids, list) else []
+            )
+            if (source_ref_id := safe_str(raw_source_ref_id))
+        ]
         sections.append(
             MemoirBookOutputSectionResponse(
                 section_id=section_id,
@@ -91,6 +99,7 @@ def _section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:
                 char_count=positive_int(item.get("content_char_count"))
                 or len(content),
                 source_count=positive_int(item.get("source_count")),
+                source_ref_ids=source_ref_ids,
             )
         )
     return sections

@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
     MemoirBookImagePlacementType,
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
+    MemoirSectionStatus,
 )
 from app.models.memoir import (
     MemoirBookImagePlacement,
@@ -23,6 +24,8 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirImageAsset,
     MemoirMaterialShareVideo,
+    MemoirSection,
+    MemoirSectionMaterial,
 )
 from app.schemas.memoir_images import (
     MemoirBookImagePlacementCreateRequest,
@@ -39,6 +42,11 @@ from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsse
 
 
 AI_GENERATED_IMAGE_DISCLOSURE = "AI 根据讲述内容生成的意象插图，不是真实照片。"
+MATERIAL_ANCHORED_IMAGE_SOURCE_TYPES = {
+    MemoirImageAssetSourceType.SHARE_VIDEO_BACKGROUND.value,
+    MemoirImageAssetSourceType.CHAPTER_ILLUSTRATION.value,
+    MemoirImageAssetSourceType.UTTERANCE_ILLUSTRATION.value,
+}
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,48 @@ async def _chapter_titles(db: AsyncSession, chapter_ids: set[str]) -> dict[str, 
         )
     ).all()
     return {str(chapter_id): str(title or "") for chapter_id, title in rows}
+
+
+async def _source_material_locations(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    utterance_ids: set[str],
+) -> dict[str, tuple[str, str]]:
+    if not utterance_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(
+                MemoirSectionMaterial.utterance_id,
+                MemoirSection.id,
+                MemoirSection.chapter_id,
+            )
+            .join(
+                MemoirSection,
+                MemoirSection.id == MemoirSectionMaterial.section_id,
+            )
+            .where(
+                MemoirSectionMaterial.project_id == project_id,
+                MemoirSectionMaterial.utterance_id.in_(utterance_ids),
+                MemoirSectionMaterial.include_in_book.is_(True),
+                MemoirSection.project_id == project_id,
+                MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
+                MemoirSection.include_in_book.is_(True),
+            )
+        )
+    ).all()
+    return {
+        str(utterance_id): (str(section_id), str(chapter_id))
+        for utterance_id, section_id, chapter_id in rows
+    }
+
+
+def _uses_material_anchor(asset: MemoirImageAsset) -> bool:
+    return bool(
+        asset.source_utterance_id
+        and asset.source_type in MATERIAL_ANCHORED_IMAGE_SOURCE_TYPES
+    )
 
 
 def _placement_response(
@@ -302,16 +352,38 @@ async def create_image_placement(
     asset = await _load_asset(db, user_id=user_id, project_id=project_id, asset_id=asset_id)
     if asset.status != MemoirImageAssetStatus.READY.value:
         raise HTTPException(status_code=400, detail="图片还不可入书")
-    if req.placement_type in {
+    source_locations = await _source_material_locations(
+        db,
+        project_id=project_id,
+        utterance_ids={asset.source_utterance_id} if asset.source_utterance_id else set(),
+    )
+    source_location = source_locations.get(asset.source_utterance_id or "")
+    placement_type = req.placement_type
+    chapter_id = req.chapter_id
+    if (
+        placement_type == MemoirBookImagePlacementType.APPENDIX
+        and source_location
+        and _uses_material_anchor(asset)
+    ):
+        placement_type = MemoirBookImagePlacementType.CHAPTER_INLINE
+        chapter_id = source_location[1]
+    elif placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE and source_location:
+        chapter_id = source_location[1]
+    if placement_type in {
         MemoirBookImagePlacementType.CHAPTER_OPENING,
         MemoirBookImagePlacementType.CHAPTER_INLINE,
-    } and not req.chapter_id:
+    } and not chapter_id:
+        if placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE:
+            raise HTTPException(
+                status_code=400,
+                detail="没有找到图片对应的书稿素材位置，请选择章节",
+            )
         raise HTTPException(status_code=400, detail="请选择要放入的章节")
-    if req.chapter_id:
+    if chapter_id:
         chapter = await db.scalar(
             select(MemoirBookPlanChapter)
             .where(
-                MemoirBookPlanChapter.id == req.chapter_id,
+                MemoirBookPlanChapter.id == chapter_id,
                 MemoirBookPlanChapter.project_id == project_id,
             )
         )
@@ -321,19 +393,57 @@ async def create_image_placement(
         (
             item
             for item in asset.placements
-            if item.placement_type == req.placement_type.value
-            and (item.chapter_id or "") == (req.chapter_id or "")
+            if item.placement_type == placement_type.value
+            and (item.chapter_id or "") == (chapter_id or "")
         ),
         None,
     )
+    if (
+        not placement
+        and placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE
+        and source_location
+    ):
+        placement = next(
+            (
+                item
+                for item in asset.placements
+                if item.placement_type
+                == MemoirBookImagePlacementType.CHAPTER_INLINE.value
+            ),
+            None,
+        ) or next(
+            (
+                item
+                for item in asset.placements
+                if item.placement_type
+                == MemoirBookImagePlacementType.APPENDIX.value
+            ),
+            None,
+        )
+        if placement:
+            placement.placement_type = placement_type.value
+            placement.chapter_id = chapter_id
+    if (
+        placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE
+        and source_location
+    ):
+        for redundant in asset.placements:
+            if (
+                redundant is not placement
+                and redundant.enabled
+                and redundant.placement_type
+                == MemoirBookImagePlacementType.APPENDIX.value
+            ):
+                redundant.enabled = False
+                db.add(redundant)
     if not placement:
         next_sort_order = int(
             await db.scalar(
                 select(func.coalesce(func.max(MemoirBookImagePlacement.sort_order), -1))
                 .where(
                     MemoirBookImagePlacement.project_id == project_id,
-                    MemoirBookImagePlacement.placement_type == req.placement_type.value,
-                    MemoirBookImagePlacement.chapter_id == req.chapter_id,
+                    MemoirBookImagePlacement.placement_type == placement_type.value,
+                    MemoirBookImagePlacement.chapter_id == chapter_id,
                 )
             )
             or -1
@@ -341,8 +451,8 @@ async def create_image_placement(
         placement = MemoirBookImagePlacement(
             project_id=project_id,
             image_asset_id=asset.id,
-            placement_type=req.placement_type.value,
-            chapter_id=req.chapter_id,
+            placement_type=placement_type.value,
+            chapter_id=chapter_id,
             sort_order=next_sort_order,
         )
         asset.placements.append(placement)
@@ -438,7 +548,13 @@ def _asset_file_metadata(storage_path: str) -> tuple[str, int | None]:
     return mimetypes.guess_type(path.name)[0] or "image/jpeg", path.stat().st_size
 
 
-def _illustration_snapshot(asset: MemoirImageAsset, placement: MemoirBookImagePlacement) -> dict[str, object]:
+def _illustration_snapshot(
+    asset: MemoirImageAsset,
+    placement: MemoirBookImagePlacement,
+    *,
+    placement_type: str,
+    section_id: str | None,
+) -> dict[str, object]:
     metadata = asset.metadata_json if isinstance(asset.metadata_json, dict) else {}
     disclosure = _safe_text(metadata.get("disclosure")) or AI_GENERATED_IMAGE_DISCLOSURE
     caption = placement.caption_override or asset.caption or disclosure
@@ -448,9 +564,11 @@ def _illustration_snapshot(asset: MemoirImageAsset, placement: MemoirBookImagePl
         "mime_type": asset.mime_type,
         "caption": caption,
         "alt_text": asset.alt_text or asset.title,
-        "placement": placement.placement_type,
+        "placement": placement_type,
         "display_size": placement.display_size,
         "source_quote": asset.source_quote,
+        "source_utterance_id": asset.source_utterance_id,
+        "section_id": section_id,
         "disclosure": disclosure,
     }
 
@@ -477,17 +595,54 @@ async def manuscript_image_snapshots(
             )
         )
     ).scalars().all()
+    source_locations = await _source_material_locations(
+        db,
+        project_id=project_id,
+        utterance_ids={
+            placement.image_asset.source_utterance_id
+            for placement in placements
+            if placement.image_asset.source_utterance_id
+        },
+    )
     chapter_images: dict[str, list[dict[str, object]]] = {}
     appendix_images: list[dict[str, object]] = []
+    seen_targets: set[tuple[str, str, str, str]] = set()
     for placement in placements:
         asset = placement.image_asset
-        snapshot = _illustration_snapshot(asset, placement)
-        if placement.placement_type in {
+        source_location = source_locations.get(asset.source_utterance_id or "")
+        effective_type = placement.placement_type
+        chapter_id = placement.chapter_id
+        section_id: str | None = None
+        if source_location and (
+            placement.placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE.value
+            or (
+                placement.placement_type == MemoirBookImagePlacementType.APPENDIX.value
+                and _uses_material_anchor(asset)
+            )
+        ):
+            effective_type = MemoirBookImagePlacementType.CHAPTER_INLINE.value
+            section_id, chapter_id = source_location
+        snapshot = _illustration_snapshot(
+            asset,
+            placement,
+            placement_type=effective_type,
+            section_id=section_id,
+        )
+        target = (
+            asset.id,
+            effective_type,
+            chapter_id or "",
+            section_id or "",
+        )
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
+        if effective_type in {
             MemoirBookImagePlacementType.CHAPTER_OPENING.value,
             MemoirBookImagePlacementType.CHAPTER_INLINE.value,
-        } and placement.chapter_id:
-            chapter_images.setdefault(placement.chapter_id, []).append(snapshot)
-        elif placement.placement_type == MemoirBookImagePlacementType.APPENDIX.value:
+        } and chapter_id:
+            chapter_images.setdefault(chapter_id, []).append(snapshot)
+        elif effective_type == MemoirBookImagePlacementType.APPENDIX.value:
             appendix_images.append(snapshot)
     return chapter_images, appendix_images
 
@@ -496,37 +651,67 @@ async def sync_latest_book_output_image_snapshots(
     db: AsyncSession,
     *,
     project_id: str,
-) -> None:
+) -> bool:
     output = await db.scalar(
         select(MemoirBookOutput)
         .where(MemoirBookOutput.project_id == project_id)
         .options(selectinload(MemoirBookOutput.versions))
     )
     if not output or not output.versions:
-        return
+        return False
     latest = output.versions[-1]
     manuscript = latest.manuscript_json if isinstance(latest.manuscript_json, dict) else {}
     chapters = manuscript.get("chapters")
     if not isinstance(chapters, list):
-        return
+        return False
     chapter_images, appendix_images = await manuscript_image_snapshots(db, project_id=project_id)
+    changed = False
     for raw_chapter in chapters:
         if not isinstance(raw_chapter, dict):
             continue
         chapter_id = _safe_text(raw_chapter.get("chapter_id"), 80)
-        raw_chapter["illustrations"] = chapter_images.get(chapter_id, [])
-    manuscript["image_appendix"] = appendix_images
+        illustrations = chapter_images.get(chapter_id, [])
+        if raw_chapter.get("illustrations") != illustrations:
+            raw_chapter["illustrations"] = illustrations
+            changed = True
+    if manuscript.get("image_appendix") != appendix_images:
+        manuscript["image_appendix"] = appendix_images
+        changed = True
     settings = manuscript.get("render_settings")
     if isinstance(settings, dict):
         if any(chapter_images.values()):
-            settings["photo_mode"] = "chapter"
+            photo_mode = "chapter"
         elif appendix_images:
-            settings["photo_mode"] = "appendix"
+            photo_mode = "appendix"
         else:
-            settings["photo_mode"] = "none"
+            photo_mode = "none"
+        if settings.get("photo_mode") != photo_mode:
+            settings["photo_mode"] = photo_mode
+            changed = True
+    if not changed:
+        return False
     latest.manuscript_json = manuscript
     flag_modified(latest, "manuscript_json")
     invalidate_book_output(output)
+    return True
+
+
+async def resync_all_latest_book_output_image_snapshots(db: AsyncSession) -> int:
+    project_ids = (
+        await db.execute(
+            select(MemoirBookOutput.project_id)
+            .where(MemoirBookOutput.versions.any())
+            .distinct()
+        )
+    ).scalars().all()
+    changed_count = 0
+    for project_id in project_ids:
+        if await sync_latest_book_output_image_snapshots(
+            db,
+            project_id=str(project_id),
+        ):
+            changed_count += 1
+    return changed_count
 
 
 async def register_share_video_background_asset(

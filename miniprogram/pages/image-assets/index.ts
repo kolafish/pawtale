@@ -120,7 +120,11 @@ function placementText(asset: MemoirImageAsset): string {
   const appendixCount = enabled.filter((placement) => placement.placement_type === "appendix").length;
   const parts = chapterPlacements
     .slice(0, 2)
-    .map((placement) => `已放入：${placement.chapter_title || "未命名章节"}`);
+    .map((placement) => (
+      placement.placement_type === "chapter_inline"
+        ? `已放在素材附近：${placement.chapter_title || "未命名章节"}`
+        : `已放在章节开头：${placement.chapter_title || "未命名章节"}`
+    ));
   if (appendixCount) {
     parts.push("已加入书末图录");
   }
@@ -386,6 +390,17 @@ definePage<ImageAssetsData>()({
     await this.createPlacement(assetId, {
       placement_type: "chapter_opening",
       chapter_id: option.value,
+      display_size: "full_width",
+    });
+  },
+
+  async placeNearSource(event: DatasetEvent) {
+    const assetId = datasetString(event, "id");
+    if (!assetId) {
+      return;
+    }
+    await this.createPlacement(assetId, {
+      placement_type: "chapter_inline",
       display_size: "full_width",
     });
   },

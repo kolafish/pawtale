@@ -762,12 +762,10 @@ def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> 
     )
 
 
-def _add_chapter_illustrations(builder: PDFBookBuilder, chapter: dict[str, Any]) -> None:
-    illustrations = [
-        _dict(item)
-        for item in _list(chapter.get("illustrations"))
-        if _dict(item).get("placement") in {"chapter_opening", "chapter_inline"}
-    ]
+def _add_illustrations(
+    builder: PDFBookBuilder,
+    illustrations: list[dict[str, Any]],
+) -> None:
     if not illustrations:
         return
     builder.add_spacer(0.25)
@@ -830,7 +828,22 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         if intro:
             builder.add_body_text(intro, spacing_after=4)
 
-        _add_chapter_illustrations(builder, chapter)
+        illustrations = [
+            _dict(item)
+            for item in _list(chapter.get("illustrations"))
+            if _dict(item).get("placement") in {"chapter_opening", "chapter_inline"}
+        ]
+        opening_illustrations = [
+            illustration
+            for illustration in illustrations
+            if illustration.get("placement") == "chapter_opening"
+        ]
+        inline_illustrations = [
+            illustration
+            for illustration in illustrations
+            if illustration.get("placement") == "chapter_inline"
+        ]
+        _add_illustrations(builder, opening_illustrations)
         builder.add_spacer(0.5)
 
         sections = [
@@ -850,6 +863,24 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                     )
                 if section_content:
                     builder.add_body_text(section_content, spacing_after=4)
+                section_id = _str(section.get("section_id"))
+                anchored_illustrations = [
+                    illustration
+                    for illustration in inline_illustrations
+                    if _str(illustration.get("section_id")) == section_id
+                ]
+                _add_illustrations(builder, anchored_illustrations)
+            unanchored_illustrations = [
+                illustration
+                for illustration in inline_illustrations
+                if not _str(illustration.get("section_id"))
+                or not any(
+                    _str(section.get("section_id"))
+                    == _str(illustration.get("section_id"))
+                    for section in sections
+                )
+            ]
+            _add_illustrations(builder, unanchored_illustrations)
             continue
         content = _without_leading_quote_overlap(
             _str(chapter.get("content")),
@@ -857,6 +888,7 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
         )
         if content:
             builder.add_body_text(content)
+        _add_illustrations(builder, inline_illustrations)
 
 
 def _add_unconfirmed_facts(builder: PDFBookBuilder, facts: list[Any]) -> None:

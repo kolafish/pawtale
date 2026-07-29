@@ -29,6 +29,8 @@ function imageAsset(id, overrides = {}) {
     prompt_version: "v1",
     provider: "fake",
     model: "fake",
+    source_utterance_id: null,
+    source_chapter_id: null,
     source_chapter_title: "第一章",
     source_quote: "那年夏天。",
     metadata_json: {},
@@ -206,4 +208,40 @@ test("image assets page reveals secondary editing on demand and tracks caption c
     detail: { value: " 原说明 " },
   });
   assert.equal(context.data.items[0].captionChanged, false);
+});
+
+test("image assets page places a source-linked illustration near its material", async () => {
+  const asset = imageAsset("asset-1", { source_utterance_id: "utterance-1" });
+  const placementCalls = [];
+  const { page } = loadImageAssetsPage({
+    createMemoirBookImagePlacement: async (projectId, assetId, data) => {
+      placementCalls.push({ projectId, assetId, data });
+      return {
+        ...asset,
+        include_in_book: true,
+        placements: [],
+      };
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project-1",
+    items: [imageAssetView(asset)],
+  });
+  global.wx = {
+    showToast() {},
+  };
+
+  await page.placeNearSource.call(context, {
+    currentTarget: { dataset: { id: "asset-1" } },
+  });
+
+  assert.deepEqual(placementCalls, [{
+    projectId: "project-1",
+    assetId: "asset-1",
+    data: {
+      placement_type: "chapter_inline",
+      display_size: "full_width",
+    },
+  }]);
+  assert.equal(context.data.error, "");
 });
