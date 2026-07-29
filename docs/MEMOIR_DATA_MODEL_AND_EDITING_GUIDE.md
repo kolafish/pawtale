@@ -1009,7 +1009,27 @@ Digest 和 Review 的展示原则：
 
 图片不是口述事实。AI 生成图片进入书稿时应保留“意象插图，不是真实照片”的披露。
 
-### 10.3 分享视频
+### 10.3 根据讲述直接生成插图
+
+讲述详情页允许用户选择当前校正文中的连续片段，创建
+`generate_material_image` 可恢复后台任务。任务先创建
+`utterance_illustration` ImageAsset，并按 `pending / running / ready / failed`
+更新资产状态；完成后图片自动出现在图片素材页，但不自动创建
+BookImagePlacement，因此默认不收入书稿。用户在图片素材页编辑说明，并明确选择
+“放在素材附近”“放到章节开头”或保持未使用。
+
+直接插图和分享视频背景只共享风格选项，不共享具体 prompt：
+
+- 分享视频背景服务于字幕可读性，使用横版构图并为文字保留干净留白；
+- 直接插图服务于回忆录阅读和印刷，要求完整构图、明确主体，不为字幕预留空区；
+- 直接插图必须声明它是基于记忆的意象创作，避免可识别肖像和无素材依据的重大事实；
+- 两种图片都禁止模型生成文字、水印和 logo，并保留 provider、model、timeout、
+  elapsed、error type 等任务诊断信息。
+
+同一素材文字版本、字符范围和风格只保留一条当前直接插图任务。素材文字变化后使用
+新的 text hash 和资产签名，旧图片仍保留原 source quote，不会静默改写来源。
+
+### 10.4 分享视频
 
 `MemoirMaterialShareVideo` 和 `MemoirShareVideoOutput` 记录：
 
@@ -1124,7 +1144,7 @@ Job 保存状态、执行时间、租约、重试次数、去重 key、输入和
 | --- | --- | --- | --- |
 | 首页 | Project、进度快照、AutomationEvent | 最近进展、继续讲述/成书入口 | 项目入口与事件确认 |
 | 讲述记录 | VoiceUtterance、ChatMessage、Audio、章节读模型 | 素材摘要、时间、收录状态 | 搜索、恢复转写 |
-| 讲述详情 | Material + TranscriptVersion + Audio + SectionAssignment | 原音、原文、成书文字、问题、章节/小节 | 改文字、离线 ASR、移动、删除、分享视频 |
+| 讲述详情 | Material + TranscriptVersion + Audio + SectionAssignment | 原音、原文、成书文字、问题、章节/小节 | 改文字、离线 ASR、移动、删除、生成图片、分享视频 |
 | 话题地图 | FrameworkItem + Material match | 已聊/可聊/不想聊 | 用户决定、从话题开始访谈 |
 | 书稿首页 | BookPlan、Chapter、Draft、Output、AutomationEvent | 目录、每章进度、全书状态 | 章节结构、书名和输出操作 |
 | 全书补全 | Completion read model | 每章唯一下一步 | 进入准备、补讲、确认 |

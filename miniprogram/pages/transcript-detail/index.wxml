@@ -301,19 +301,21 @@
     <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card share-video-card">
       <view class="section-head">
         <view class="section-heading">
-          <text class="section-title">分享视频</text>
-          <text class="section-hint">选择校正文片段，生成带字幕高亮的视频。</text>
+          <text class="section-title">图片与分享视频</text>
+          <text class="section-hint">选择校正文片段，可以直接生成插图，也可以制作带字幕的视频。</text>
         </view>
-        <text class="section-count share-video-count {{shareVideoStatusClass}}">{{shareVideoStatusText || "未生成"}}</text>
+        <text class="section-count share-video-count {{(materialImageCreating || materialImagePolling) ? materialImageStatusClass : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? shareVideoStatusClass : (materialImageStatusClass || shareVideoStatusClass))}}">
+          {{(materialImageCreating || materialImagePolling) ? (materialImageStatusText || "图片生成中") : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? (shareVideoStatusText || "视频生成中") : (materialImageStatusText || shareVideoStatusText || "未生成"))}}
+        </text>
       </view>
       <view class="actions-row edit-choice-actions">
         <button
           class="primary-button"
           bindtap="toggleShareVideoPanel"
           loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
         >
-          {{shareVideoPanelOpen ? "收起视频" : "制作视频"}}
+          {{shareVideoPanelOpen ? "收起制作工具" : "制作图片或视频"}}
         </button>
       </view>
       <view wx:if="{{shareVideoPanelOpen}}" class="share-video-panel">
@@ -323,6 +325,9 @@
         <block wx:else>
           <view wx:if="{{shareVideoError}}" class="share-video-error">
             <text>{{shareVideoError}}</text>
+          </view>
+          <view wx:if="{{materialImageError}}" class="share-video-error">
+            <text>{{materialImageError}}</text>
           </view>
           <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments">
             <view
@@ -344,7 +349,7 @@
               <button
                 class="text-action-button"
                 bindtap="clearShareVideoSelection"
-                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
+                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
               >
                 重选
               </button>
@@ -354,7 +359,7 @@
           </view>
           <view class="share-video-background">
             <view class="share-video-background-head">
-              <text class="voice-edit-label">背景来源</text>
+              <text class="voice-edit-label">视频背景</text>
               <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
             </view>
             <view class="share-video-background-options">
@@ -371,11 +376,14 @@
               </view>
             </view>
           </view>
-          <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
+          <view class="share-video-background">
             <view class="share-video-background-head">
-              <text class="voice-edit-label">背景风格</text>
+              <text class="voice-edit-label">插图风格</text>
               <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
             </view>
+            <text class="share-video-background-help">
+              直接图片使用完整构图；视频选择 AI 背景时，会另行为字幕保留留白。
+            </text>
             <view class="share-video-background-options">
               <view
                 wx:for="{{shareVideoBackgroundStyleOptions}}"
@@ -392,7 +400,7 @@
           </view>
           <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
             <view class="share-video-background-head">
-              <text class="voice-edit-label">画面模式</text>
+              <text class="voice-edit-label">视频画面模式</text>
               <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
             </view>
             <view class="share-video-background-options">
@@ -411,12 +419,12 @@
           </view>
           <view wx:if="{{shareVideoBackgroundUsesCustom}}" class="share-video-background custom-background-panel">
             <view class="share-video-background-head">
-              <text class="voice-edit-label">自定义背景</text>
+              <text class="voice-edit-label">自定义视频背景</text>
               <button
                 class="text-action-button"
                 bindtap="chooseShareVideoCustomBackground"
                 loading="{{shareVideoCustomBackgroundUploading}}"
-                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
               >
                 {{shareVideoCustomBackgroundAssetId ? "更换图片" : "选择图片"}}
               </button>
@@ -433,10 +441,18 @@
           </view>
           <view class="actions-row share-video-actions">
             <button
+              class="ghost-button material-image-button"
+              bindtap="createMaterialImage"
+              loading="{{materialImageCreating || materialImagePolling}}"
+              disabled="{{!shareVideoSelectedText || convertingQuestionToAnswer || materialImageCreating || materialImagePolling || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+            >
+              {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}
+            </button>
+            <button
               class="primary-button"
               bindtap="createShareVideo"
               loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
+              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
             >
               {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
             </button>
@@ -448,6 +464,31 @@
               disabled="{{convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
             >
               {{shareVideoSharing ? "分享中" : "分享给微信"}}
+            </button>
+          </view>
+          <ai-task-progress
+            wx:if="{{materialImageCreating || materialImagePolling}}"
+            class="share-video-task-progress"
+            title="{{materialImageStatusText || '正在生成图片'}}"
+            detail="完成后会自动放入图片素材，默认不收入书稿"
+            mode="indeterminate"
+          />
+          <view
+            wx:elif="{{materialImageJob}}"
+            class="share-video-job {{materialImageStatusClass}} material-image-job"
+          >
+            <view class="material-image-job-copy">
+              <text class="share-video-job-title">{{materialImageStatusText}}</text>
+              <text wx:if="{{materialImageJob.status === 'succeeded'}}" class="share-video-job-meta">
+                默认不收入书稿，可在图片素材中编辑说明并决定放置位置。
+              </text>
+            </view>
+            <button
+              wx:if="{{materialImageJob.status === 'succeeded'}}"
+              class="text-action-button material-image-toolbox-link"
+              bindtap="openImageAssets"
+            >
+              去图片素材
             </button>
           </view>
           <ai-task-progress

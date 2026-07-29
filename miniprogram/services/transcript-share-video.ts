@@ -200,17 +200,16 @@ export function shareVideoSelectionPatch(
     statusText = "暂无可截取片段";
     statusClass = "failed";
   } else if (context && !selectedSegments.length) {
-    statusText = "选择一段校正文后生成视频";
+    statusText = "选择一段校正文后生成图片或视频";
   } else if (!allSelectable) {
     statusText = "这段文字暂不能截取";
     statusClass = "failed";
   } else if (durationMs < minSelectMs) {
-    statusText = `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)}，至少 ${formatTranscriptDurationSeconds(minSelectMs / 1000)}`;
+    statusText = `可以生成图片；视频至少需要 ${formatTranscriptDurationSeconds(minSelectMs / 1000)}`;
   } else if (durationMs > maxSelectMs) {
-    statusText = `已选 ${formatTranscriptDurationSeconds(durationMs / 1000)}，最多 ${formatTranscriptDurationSeconds(maxSelectMs / 1000)}`;
-    statusClass = "failed";
+    statusText = `可以生成图片；视频最多选择 ${formatTranscriptDurationSeconds(maxSelectMs / 1000)}`;
   } else if (selectedText) {
-    statusText = "可以生成视频";
+    statusText = "可以生成图片或视频";
     statusClass = "ready";
   }
   return {

@@ -22,12 +22,12 @@
 
   <view wx:if="{{loading && !items.length}}" class="empty-card">
     <text class="empty-title">正在同步图片素材</text>
-    <text class="empty-copy">生成过的分享视频背景会自动收集到这里。</text>
+    <text class="empty-copy">根据讲述生成的插图和分享视频背景都会自动收集到这里。</text>
   </view>
 
   <view wx:elif="{{!items.length}}" class="empty-card">
     <text class="empty-title">还没有图片素材</text>
-    <text class="empty-copy">之后生成分享视频背景、章节插图或封面候选时，会自动出现在这里。</text>
+    <text class="empty-copy">可在讲述详情选择内容直接生成插图；分享视频背景和封面候选也会自动出现在这里。</text>
   </view>
 
   <view wx:else class="asset-list">

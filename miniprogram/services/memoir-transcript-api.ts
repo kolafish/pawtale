@@ -1,4 +1,5 @@
 import type {
+  MemoirMaterialImageGenerationJob,
   MemoirShareVideoCustomBackgroundAsset,
   MemoirShareVideoJob,
   MemoirMaterialOfflineASRState,
@@ -50,6 +51,12 @@ interface ShareVideoJobRequest {
   background_style?: string;
   background_mode?: string;
   custom_background_asset_id?: string;
+}
+
+interface MaterialImageGenerationJobRequest {
+  start_char: number;
+  end_char: number;
+  style_id?: string;
 }
 
 export function listMemoirVoiceTranscripts(
@@ -112,6 +119,34 @@ export function createMemoirTranscriptShareVideoJob(
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
     },
+  );
+}
+
+export function createMemoirMaterialImageGenerationJob(
+  utteranceId: string,
+  startChar: number,
+  endChar: number,
+  styleId?: string,
+): Promise<MemoirMaterialImageGenerationJob> {
+  return memoirRequest<MemoirMaterialImageGenerationJob>(
+    `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/image-generation/jobs`,
+    {
+      method: "POST",
+      data: {
+        start_char: startChar,
+        end_char: endChar,
+        ...(styleId ? { style_id: styleId } : {}),
+      } satisfies MaterialImageGenerationJobRequest,
+      timeoutProfile: "mutation",
+    },
+  );
+}
+
+export function getMemoirMaterialImageGenerationJob(
+  jobId: string,
+): Promise<MemoirMaterialImageGenerationJob> {
+  return memoirRequest<MemoirMaterialImageGenerationJob>(
+    `/api/mobile/memoir/image-generation/jobs/${encodeURIComponent(jobId)}`,
   );
 }
 

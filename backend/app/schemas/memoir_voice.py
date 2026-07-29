@@ -409,6 +409,7 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     utterance_id: str
     audio_file_id: str
     latest_job_id: str | None = None
+    latest_image_job_id: str | None = None
     transcript_source: str
     transcript_text: str
     text_hash: str

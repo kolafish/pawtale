@@ -6,6 +6,7 @@ from app.services.memoir import book_review_answer_jobs
 from app.services.memoir import book_review_jobs
 from app.services.memoir import chapter_preparation_jobs
 from app.services.memoir import material_offline_asr_jobs
+from app.services.memoir import material_image_generation
 from app.services.memoir import material_organization
 from app.services.memoir import section_regeneration
 from app.services.memoir import voice_transcript_correction
@@ -23,6 +24,10 @@ def register_memoir_editing_job_handlers() -> None:
     register_editing_job_handler(
         MemoirEditingJobType.REPROCESS_MATERIAL_OFFLINE_ASR,
         material_offline_asr_jobs.run_material_offline_asr_job,
+    )
+    register_editing_job_handler(
+        MemoirEditingJobType.GENERATE_MATERIAL_IMAGE,
+        material_image_generation.run_material_image_generation_job,
     )
     register_editing_job_handler(
         MemoirEditingJobType.REGENERATE_CHAPTER_SECTIONS,

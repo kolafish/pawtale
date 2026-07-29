@@ -1028,6 +1028,14 @@
   line-height: 1.35;
 }
 
+.share-video-background-help {
+  display: block;
+  margin-top: 8rpx;
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
 .share-video-background-options {
   margin-top: 14rpx;
   display: grid;
@@ -1111,6 +1119,11 @@
   justify-content: flex-start;
 }
 
+.material-image-button {
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+}
+
 .share-video-task-progress {
   display: block;
   margin-top: 18rpx;
@@ -1153,6 +1166,24 @@
   color: var(--ui-text-secondary);
   font-size: 23rpx;
   line-height: 1.35;
+}
+
+.material-image-job {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.material-image-job-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.material-image-toolbox-link {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 8rpx;
 }
 
 .share-video-preview {

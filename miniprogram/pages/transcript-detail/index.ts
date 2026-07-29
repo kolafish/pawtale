@@ -2,8 +2,10 @@ import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
+  createMemoirMaterialImageGenerationJob,
   createMemoirTranscriptShareVideoJob,
   downloadMemoirShareVideoJob,
+  getMemoirMaterialImageGenerationJob,
   getMemoirShareVideoJob,
   getMemoirVoiceTranscript,
 } from "../../services/memoir-voice-api";
@@ -23,6 +25,10 @@ import {
   initialTranscriptShareVideoData,
   TranscriptShareVideoController,
 } from "../../services/transcript-share-video";
+import {
+  initialTranscriptMaterialImageTaskState,
+  TranscriptMaterialImageController,
+} from "../../services/transcript-material-image";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   OFFLINE_ASR_POLL_INTERVAL_MS,
@@ -48,6 +54,10 @@ definePage<TranscriptDetailData>()({
     getJob: getMemoirShareVideoJob,
     downloadJob: downloadMemoirShareVideoJob,
     shareFile: shareLocalFileMessage,
+  }),
+  materialImageController: new TranscriptMaterialImageController({
+    createJob: createMemoirMaterialImageGenerationJob,
+    getJob: getMemoirMaterialImageGenerationJob,
   }),
   loadToken: 0,
   voiceEditToken: 0,
@@ -98,10 +108,12 @@ definePage<TranscriptDetailData>()({
     assignmentPlacement: null,
     ...voiceEditStateData("idle"),
     ...initialTranscriptShareVideoData(),
+    ...initialTranscriptMaterialImageTaskState(),
   },
 
   async onLoad(options?: PageQuery) {
     this.shareVideoController.setStateListener((patch) => this.setData(patch));
+    this.materialImageController.setStateListener((patch) => this.setData(patch));
     this.resetShareVideoState();
     const utteranceId = queryParam(options, "id");
     this.setData({
@@ -179,5 +191,6 @@ definePage<TranscriptDetailData>()({
     this.stopPlayback();
     this.cancelVoiceEdit();
     this.shareVideoController.dispose();
+    this.materialImageController.dispose();
   },
 });

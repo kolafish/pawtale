@@ -24,6 +24,7 @@ import {
   shareVideoFileName,
   type TranscriptDetailData,
 } from "./transcript-detail-model";
+import { TranscriptMaterialImageController } from "../../services/transcript-material-image";
 
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
 type ShareVideoBackgroundEvent = PageDatasetEvent<{
@@ -35,6 +36,7 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
 interface TranscriptDetailShareVideoWorkflowHost {
   data: TranscriptDetailData;
   shareVideoController: TranscriptShareVideoController;
+  materialImageController: TranscriptMaterialImageController;
   shareVideoBackgroundUploadToken: number;
   setData(patch: Partial<TranscriptDetailData>): void;
   stopPlayback(): void;
@@ -50,6 +52,8 @@ export interface TranscriptDetailShareVideoWorkflowMethods {
   selectShareVideoBackgroundStyle(event: ShareVideoBackgroundEvent): void;
   selectShareVideoBackgroundMode(event: ShareVideoBackgroundEvent): void;
   chooseShareVideoCustomBackground(): Promise<void>;
+  createMaterialImage(): Promise<void>;
+  openImageAssets(): void;
   createShareVideo(): Promise<void>;
   shareGeneratedVideo(): Promise<void>;
 }
@@ -61,6 +65,7 @@ export const transcriptDetailShareVideoWorkflowMethods:
 TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoWorkflow> = {
   resetShareVideoState() {
     this.shareVideoController.reset();
+    this.materialImageController.reset();
     this.shareVideoBackgroundUploadToken += 1;
     this.setData(initialTranscriptShareVideoData());
   },
@@ -101,9 +106,14 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       if (job && (job.status === "pending" || job.status === "running")) {
         await this.shareVideoController.refresh(job.id);
       }
+      const imageJob = this.data.materialImageJob;
+      if (imageJob && (imageJob.status === "pending" || imageJob.status === "running")) {
+        await this.materialImageController.refresh(imageJob.job_id);
+      }
       return;
     }
     this.shareVideoController.reset();
+    this.materialImageController.reset();
     this.setData({
       ...initialTranscriptShareVideoData(),
       shareVideoPanelOpen: true,
@@ -139,6 +149,29 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
           });
         }
       }
+      if (context.latest_image_job_id) {
+        await this.materialImageController.refresh(context.latest_image_job_id);
+        const imageJob = this.data.materialImageJob;
+        if (imageJob && !context.latest_job_id) {
+          const firstSegmentIndex = context.segments.findIndex(
+            (segment) => segment.end_char > imageJob.start_char,
+          );
+          let lastSegmentIndex = -1;
+          for (let index = context.segments.length - 1; index >= 0; index -= 1) {
+            if (context.segments[index].start_char < imageJob.end_char) {
+              lastSegmentIndex = index;
+              break;
+            }
+          }
+          const statusText = this.data.materialImageStatusText;
+          const statusClass = this.data.materialImageStatusClass;
+          this.setData({
+            ...shareVideoSelectionPatch(context, firstSegmentIndex, lastSegmentIndex),
+            materialImageStatusText: statusText,
+            materialImageStatusClass: statusClass,
+          });
+        }
+      }
       trackAuditAction("transcript.detail_share_video_open", {}, { projectId: item.project_id });
     } catch (error) {
       this.setData({
@@ -160,7 +193,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
@@ -185,6 +220,7 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       }
     }
     this.shareVideoController.clearResult();
+    this.materialImageController.clearResult();
     this.setData({
       ...shareVideoSelectionPatch(context, nextStart, nextEnd),
     });
@@ -197,11 +233,14 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoCreating ||
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
-      this.data.shareVideoSharing
+      this.data.shareVideoSharing ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
     this.shareVideoController.clearResult();
+    this.materialImageController.clearResult();
     this.setData({
       ...shareVideoSelectionPatch(context, -1, -1),
     });
@@ -213,7 +252,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
@@ -235,7 +276,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
@@ -246,6 +289,7 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
     });
     saveShareVideoBackgroundSelection(backgroundPatch);
     this.shareVideoController.clearResult();
+    this.materialImageController.clearResult();
     this.setData({
       ...backgroundPatch,
     });
@@ -257,7 +301,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
@@ -282,7 +328,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }
@@ -365,6 +413,52 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
     }
   },
 
+  async createMaterialImage() {
+    const item = this.data.item;
+    if (
+      !item ||
+      !this.data.shareVideoContext ||
+      !this.data.shareVideoSelectedText ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling ||
+      this.data.shareVideoCreating ||
+      this.data.shareVideoPolling ||
+      this.data.shareVideoDownloadingPreview ||
+      this.data.shareVideoSharing ||
+      this.data.shareVideoCustomBackgroundUploading
+    ) {
+      return;
+    }
+    this.stopPlayback();
+    const job = await this.materialImageController.create({
+      utteranceId: item.id,
+      startChar: this.data.shareVideoSelectedStartChar,
+      endChar: this.data.shareVideoSelectedEndChar,
+      styleId: this.data.shareVideoBackgroundStyle,
+    });
+    if (job) {
+      trackAuditAction(
+        "transcript.detail_material_image_create",
+        {
+          asset_id: job.asset_id,
+          style_id: job.style_id,
+          selected_char_count: Array.from(job.selected_text).length,
+        },
+        { projectId: item.project_id },
+      );
+    }
+  },
+
+  openImageAssets() {
+    const projectId = this.data.item?.project_id || "";
+    if (!projectId) {
+      return;
+    }
+    wx.navigateTo({
+      url: `/pages/image-assets/index?projectId=${encodeURIComponent(projectId)}`,
+    });
+  },
+
   async createShareVideo() {
     const item = this.data.item;
     if (
@@ -375,7 +469,9 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       this.data.shareVideoPolling ||
       this.data.shareVideoDownloadingPreview ||
       this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
+      this.data.shareVideoCustomBackgroundUploading ||
+      this.data.materialImageCreating ||
+      this.data.materialImagePolling
     ) {
       return;
     }

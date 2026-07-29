@@ -105,6 +105,7 @@ export interface MemoirTranscriptShareVideoContext {
   utterance_id: string;
   audio_file_id: string;
   latest_job_id?: string | null;
+  latest_image_job_id?: string | null;
   transcript_source: string;
   transcript_text: string;
   text_hash: string;
@@ -121,6 +122,30 @@ export interface MemoirTranscriptShareVideoContext {
   background_styles: MemoirShareVideoBackgroundStyle[];
   background_modes: MemoirShareVideoBackgroundMode[];
   segments: MemoirTranscriptShareVideoSegment[];
+}
+
+export type MemoirMaterialImageGenerationJobStatus =
+  | "pending"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "skipped";
+
+export interface MemoirMaterialImageGenerationJob {
+  job_id: string;
+  project_id: string;
+  utterance_id: string;
+  asset_id: string;
+  status: MemoirMaterialImageGenerationJobStatus;
+  asset_status: "pending" | "running" | "ready" | "failed" | "deleted";
+  stage: string;
+  selected_text: string;
+  start_char: number;
+  end_char: number;
+  style_id: string;
+  error_message: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export type MemoirShareVideoJobStatus = "pending" | "running" | "succeeded" | "failed";
