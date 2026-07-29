@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirSpeakerRole
 from app.services.memoir import audio_files as memoir_audio_files
-from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.voice_gateway import VoiceGatewayClientError, VoiceGatewayTurnContext
+from app.services.asr.gateway import VoiceGatewayClientError, VoiceGatewayTurnContext
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 
 

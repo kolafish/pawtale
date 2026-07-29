@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
-from app.config import Settings
+from app.config import Settings, get_settings
 
 
 VOICE_GATEWAY_CAPACITY_REACHED = "voice_gateway_capacity_reached"
@@ -107,3 +107,8 @@ class VoiceGatewayCapacityManager:
                 max_active_sessions=self.limits.max_active_sessions,
                 max_active_sessions_per_user=self.limits.max_active_sessions_per_user,
             )
+
+
+voice_gateway_capacity_manager = VoiceGatewayCapacityManager(
+    VoiceGatewayCapacityLimits.from_settings(get_settings())
+)

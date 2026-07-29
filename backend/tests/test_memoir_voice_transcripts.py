@@ -42,7 +42,7 @@ from app.services.memoir import share_video_jobs
 from app.services.memoir import share_video_rendering
 from app.services.memoir import share_video_scene_planner
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
     _remove_obvious_oral_fillers,

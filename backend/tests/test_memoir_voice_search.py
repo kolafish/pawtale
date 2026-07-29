@@ -3,7 +3,7 @@ import base64
 
 import pytest
 
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_search import (
     MAX_VOICE_SEARCH_AUDIO_BYTES,
     ParsedVoiceSearchQuery,

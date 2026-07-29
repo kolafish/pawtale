@@ -6,7 +6,8 @@ import binascii
 import contextlib
 from typing import Any, Callable, Protocol, Sequence
 
-from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
+from app.services.asr.gateway import MAX_AUDIO_FRAME_BYTES
+from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.speaker_diarization import (
     SpeakerSegment,
@@ -14,7 +15,6 @@ from app.services.memoir.speaker_diarization import (
     live_text_after_confirmed_prefix,
     speaker_segments_from_asr_event,
 )
-from app.services.memoir.voice_gateway import MAX_AUDIO_FRAME_BYTES
 
 
 SpeakerTranscriberFactory = Callable[[], StreamingASRClient]

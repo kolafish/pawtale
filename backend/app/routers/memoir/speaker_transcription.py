@@ -8,25 +8,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth import get_current_user
 from app.database import get_db
 from app.models.users import User
+from app.routers.websocket_auth import (
+    authenticate_websocket,
+    reject_websocket,
+)
 from app.schemas.memoir_speaker_transcription import (
     SpeakerProofreadRequest,
     SpeakerProofreadResponse,
 )
-from app.routers.memoir.voice_gateway import (
-    _authenticate_websocket,
-    _reject_websocket,
+from app.services.asr.capacity import (
+    VoiceGatewayCapacityError,
     voice_gateway_capacity_manager,
+)
+from app.services.asr.factory import (
+    create_speaker_transcription_asr_client,
+    create_volc_streaming_asr_client,
 )
 from app.services.memoir.speaker_transcript_proofreading import (
     SpeakerProofreadContextLine,
     proofread_speaker_transcript_text,
 )
 from app.services.memoir.speaker_transcription import SpeakerTranscriptionSession
-from app.services.memoir.streaming_asr import (
-    create_speaker_transcription_asr_client,
-    create_volc_streaming_asr_client,
-)
-from app.services.memoir.voice_gateway_capacity import VoiceGatewayCapacityError
 
 
 router = APIRouter()
@@ -37,9 +39,9 @@ async def mobile_memoir_speaker_transcription_gateway(
     websocket: WebSocket,
     db: AsyncSession = Depends(get_db),
 ):
-    current_user = await _authenticate_websocket(websocket, db)
+    current_user = await authenticate_websocket(websocket, db)
     if current_user is None:
-        await _reject_websocket(websocket, "voice_gateway_auth_failed")
+        await reject_websocket(websocket, "voice_gateway_auth_failed")
         return
 
     current_user_id = current_user.id
@@ -47,7 +49,7 @@ async def mobile_memoir_speaker_transcription_gateway(
     try:
         capacity_lease = await voice_gateway_capacity_manager.acquire(current_user_id, transcription_session_id)
     except VoiceGatewayCapacityError as exc:
-        await _reject_websocket(websocket, exc.code)
+        await reject_websocket(websocket, exc.code)
         return
 
     try:

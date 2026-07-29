@@ -14,9 +14,7 @@ from typing import Any, Awaitable, Callable, Literal, Protocol
 
 from starlette.websockets import WebSocketDisconnect
 
-from app.domain.memoir.types import MemoirSpeakerRole
-from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
-from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +28,7 @@ class VoiceGatewayClient(Protocol):
 
 
 StreamingASRClientFactory = Callable[[], StreamingASRClient]
+TextNormalizer = Callable[[str], str]
 SessionStartHandler = Callable[[], Awaitable[None]]
 TurnStartHandler = Callable[["VoiceGatewayTurnContext"], Awaitable[None]]
 VoiceGatewayStopReason = Literal["client_stop", "transport_closed", "terminal_error"]
@@ -39,6 +38,11 @@ ASRFinalHandler = Callable[[StreamingASREvent], Awaitable[dict[str, Any] | None]
 ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 MAX_AUDIO_FRAME_BYTES = 256 * 1024
 ASR_PROVIDER_NO_STATUS_CLOSE_CODE = 1005
+DEFAULT_SPEAKER_ROLE = "narrator"
+
+
+def _identity_text(text: str) -> str:
+    return text
 
 
 class VoiceGatewayClientError(RuntimeError):
@@ -57,7 +61,7 @@ class VoiceGatewayState(str, Enum):
 
 @dataclass(frozen=True)
 class VoiceGatewayTurnContext:
-    speaker_role: str = MemoirSpeakerRole.NARRATOR.value
+    speaker_role: str = DEFAULT_SPEAKER_ROLE
     parent_message_id: str | None = None
     ai_model: str | None = None
 
@@ -73,6 +77,10 @@ class VoiceGatewaySession:
         on_stop: SessionStopHandler | None = None,
         on_audio_frame: AudioFrameHandler | None = None,
         on_asr_final: ASRFinalHandler | None = None,
+        text_normalizer: TextNormalizer = _identity_text,
+        default_speaker_role: str = DEFAULT_SPEAKER_ROLE,
+        allowed_speaker_roles: frozenset[str] = frozenset({DEFAULT_SPEAKER_ROLE}),
+        diagnostic_log_prefix: str = "streaming_asr_gateway",
         connection_id: str | None = None,
         diagnostics_context: dict[str, Any] | None = None,
     ) -> None:
@@ -83,6 +91,10 @@ class VoiceGatewaySession:
         self.on_stop = on_stop
         self.on_audio_frame = on_audio_frame
         self.on_asr_final = on_asr_final
+        self.text_normalizer = text_normalizer
+        self.default_speaker_role = default_speaker_role
+        self.allowed_speaker_roles = allowed_speaker_roles
+        self.diagnostic_log_prefix = diagnostic_log_prefix
         self.connection_id = connection_id or str(uuid.uuid4())
         self._diagnostics_context = diagnostics_context or {}
         self._asr_client: StreamingASRClient | None = None
@@ -92,7 +104,7 @@ class VoiceGatewaySession:
         self._terminal_stop = asyncio.Event()
         self._pending_final_event: StreamingASREvent | None = None
         self._latest_text_event: StreamingASREvent | None = None
-        self._turn_context = VoiceGatewayTurnContext()
+        self._turn_context = VoiceGatewayTurnContext(speaker_role=default_speaker_role)
         self._started_at = time.monotonic()
         self._turn_index = 0
         self._frame_count = 0
@@ -228,9 +240,9 @@ class VoiceGatewaySession:
         )
 
     def _turn_context_from_message(self, message: dict[str, Any]) -> VoiceGatewayTurnContext:
-        raw_role = message.get("speaker_role") or MemoirSpeakerRole.NARRATOR.value
+        raw_role = message.get("speaker_role") or self.default_speaker_role
         speaker_role = str(raw_role).strip()
-        if speaker_role not in {MemoirSpeakerRole.NARRATOR.value, MemoirSpeakerRole.INTERVIEWER.value}:
+        if speaker_role not in self.allowed_speaker_roles:
             raise VoiceGatewayClientError("unsupported_speaker_role")
         raw_parent_message_id = message.get("parent_message_id")
         parent_message_id = str(raw_parent_message_id).strip() if raw_parent_message_id else None
@@ -420,7 +432,7 @@ class VoiceGatewaySession:
         payload: dict[str, Any] = {
             "type": event_type,
             "state": self._state.value,
-            "text": normalize_memoir_asr_text(event.text),
+            "text": self.text_normalizer(event.text),
             "start_ms": event.start_ms,
             "end_ms": event.end_ms,
             "provider_payload": event.raw,
@@ -496,7 +508,8 @@ class VoiceGatewaySession:
         }
         logger.log(
             level,
-            "memoir_voice_gateway %s",
+            "%s %s",
+            self.diagnostic_log_prefix,
             json.dumps(diagnostic, ensure_ascii=False, sort_keys=True, default=str),
         )
 

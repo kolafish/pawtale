@@ -3,12 +3,12 @@ import json
 
 import pytest
 
-from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.streaming_asr import (
+from app.services.asr.factory import (
     create_realtime_volc_streaming_asr_client,
     create_volc_streaming_asr_client,
 )
-from app.services.memoir.volc_asr_protocol import (
+from app.services.asr.streaming import StreamingASREvent
+from app.services.asr.volc_protocol import (
     GZIP_COMPRESSION,
     JSON_SERIALIZATION,
     SERVER_ACK,
@@ -16,7 +16,7 @@ from app.services.memoir.volc_asr_protocol import (
     SERVER_FULL_RESPONSE,
     VolcASRProtocolCodec,
 )
-from app.services.memoir.volc_streaming_asr import (
+from app.services.asr.volc_streaming import (
     VolcStreamingASRClient,
     VolcStreamingASRConfig,
 )
@@ -366,7 +366,7 @@ def test_volc_client_start_sends_initial_request_with_sequence(monkeypatch):
         connect_calls.append({"args": args, "kwargs": kwargs})
         return FakeConnection()
 
-    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+    monkeypatch.setattr("app.services.asr.volc_streaming.websockets.connect", fake_connect)
 
     client = VolcStreamingASRClient(
         config=VolcStreamingASRConfig(
@@ -404,7 +404,7 @@ def test_volc_client_maps_resource_permission_rejection(monkeypatch):
     async def fake_connect(*_args, **_kwargs):
         raise FakeProviderReject("server rejected WebSocket connection: HTTP 403")
 
-    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+    monkeypatch.setattr("app.services.asr.volc_streaming.websockets.connect", fake_connect)
     client = VolcStreamingASRClient(
         config=VolcStreamingASRConfig(
             ws_url="wss://example.test",
@@ -432,7 +432,7 @@ def test_volc_client_maps_forbidden_provider_rejection_without_body(monkeypatch)
     async def fake_connect(*_args, **_kwargs):
         raise FakeProviderReject("server rejected WebSocket connection: HTTP 403")
 
-    monkeypatch.setattr("app.services.memoir.volc_streaming_asr.websockets.connect", fake_connect)
+    monkeypatch.setattr("app.services.asr.volc_streaming.websockets.connect", fake_connect)
     client = VolcStreamingASRClient(
         config=VolcStreamingASRConfig(
             ws_url="wss://example.test",

@@ -23,7 +23,7 @@ from app.models.projects import Project
 from app.schemas.memoir_voice import MemoirVoiceTranscriptItemResponse
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.audio_files import audio_file_path
-from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
+from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import (

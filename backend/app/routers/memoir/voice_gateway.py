@@ -4,34 +4,32 @@ import json
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth import SESSION_COOKIE_NAME, decode_session_token
-from app.config import get_settings
 from app.database import get_db
-from app.models.users import User
+from app.domain.memoir.types import MemoirSpeakerRole
+from app.routers.websocket_auth import (
+    authenticate_websocket as _authenticate_websocket,
+    reject_websocket as _reject_websocket,
+)
 from app.schemas.memoir_voice import (
     MemoirVoiceSessionStopRequest,
 )
-from app.services.memoir import voice_sessions as memoir_voice_sessions
-from app.services.memoir.streaming_asr import create_realtime_volc_streaming_asr_client
-from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
-from app.services.memoir.voice_gateway import VoiceGatewaySession, VoiceGatewayStopReason
-from app.services.memoir.voice_gateway_capacity import (
+from app.services.asr.capacity import (
     VoiceGatewayCapacityError,
-    VoiceGatewayCapacityLimits,
-    VoiceGatewayCapacityManager,
+    voice_gateway_capacity_manager,
 )
+from app.services.asr.factory import create_realtime_volc_streaming_asr_client
+from app.services.asr.gateway import VoiceGatewaySession, VoiceGatewayStopReason
+from app.services.memoir import voice_sessions as memoir_voice_sessions
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-voice_gateway_capacity_manager = VoiceGatewayCapacityManager(
-    VoiceGatewayCapacityLimits.from_settings(get_settings())
-)
 
 
 @router.websocket("/voice-sessions/{voice_session_id}/gateway")
@@ -125,6 +123,14 @@ async def mobile_memoir_voice_gateway(
             on_stop=on_stop,
             on_audio_frame=persistence.record_audio_frame,
             on_asr_final=persistence.persist_final,
+            text_normalizer=normalize_memoir_asr_text,
+            allowed_speaker_roles=frozenset(
+                {
+                    MemoirSpeakerRole.NARRATOR.value,
+                    MemoirSpeakerRole.INTERVIEWER.value,
+                }
+            ),
+            diagnostic_log_prefix="memoir_voice_gateway",
             connection_id=connection_id,
             diagnostics_context=diagnostics_context,
         )
@@ -185,31 +191,6 @@ async def mobile_memoir_voice_assistant_turn_stream(
         await stream_session.run()
     finally:
         await capacity_lease.release()
-
-
-async def _authenticate_websocket(websocket: WebSocket, db: AsyncSession) -> User | None:
-    session_cookie = websocket.cookies.get(SESSION_COOKIE_NAME)
-    if not session_cookie:
-        return None
-
-    user_id = decode_session_token(session_cookie)
-    if not user_id:
-        return None
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    return result.scalar_one_or_none()
-
-
-async def _reject_websocket(websocket: WebSocket, error: str) -> None:
-    await websocket.accept()
-    await websocket.send_json(
-        {
-            "type": "session.error",
-            "state": "failed",
-            "error": error,
-        }
-    )
-    await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
 
 
 def _log_voice_gateway_router_event(event: str, *, level: int = logging.INFO, **payload: object) -> None:

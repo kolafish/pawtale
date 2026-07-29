@@ -24,15 +24,16 @@ from app.models.memoir import (
 )
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import voice_transcript_correction
-from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.transcript_projection import source_text_hash
-from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
-from app.services.memoir.voice_gateway import (
+from app.services.asr.gateway import (
     MAX_AUDIO_FRAME_BYTES,
     VoiceGatewayClientError,
     VoiceGatewaySession,
     VoiceGatewayTurnContext,
 )
+from app.services.asr.streaming import StreamingASREvent
+from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
+from app.services.memoir.transcript_projection import source_text_hash
+from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
 from tests.memoir_helpers import post_mobile_memoir_voice_session
@@ -42,6 +43,7 @@ def test_voice_gateway_normalizes_asr_payload_text_without_rewriting_provider_pa
     session = VoiceGatewaySession(
         client=FakeGatewayClient(),
         asr_client_factory=lambda: FakeStreamingASRClient(),
+        text_normalizer=normalize_memoir_asr_text,
     )
 
     payload = session._asr_event_payload(
@@ -126,7 +128,7 @@ async def test_voice_gateway_logs_structured_diagnostics(caplog):
         diagnostics_context={"voice_session_id": "voice-1"},
     )
 
-    caplog.set_level(logging.INFO, logger="app.services.memoir.voice_gateway")
+    caplog.set_level(logging.INFO, logger="app.services.asr.gateway")
     run_task = asyncio.create_task(session.run())
     await _wait_for_event(client, "session.ready")
     await client.push({"type": "session.start"})
@@ -838,6 +840,9 @@ async def test_mobile_voice_gateway_transport_close_preserves_pending_audio_with
     assert calls["logs"][1]["pending_audio_size_bytes"] == 4096
     assert calls["logs"][2]["event"] == "pending_audio.preserved"
     assert calls["logs"][2]["pending_audio_path"] == "/tmp/recoverable.pcm.part"
+    assert calls["gateway_kwargs"]["text_normalizer"]("现在有几个张杰啊？") == "现在有几个章节啊？"
+    assert calls["gateway_kwargs"]["allowed_speaker_roles"] == {"narrator", "interviewer"}
+    assert calls["gateway_kwargs"]["diagnostic_log_prefix"] == "memoir_voice_gateway"
 
 
 async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio(
@@ -1543,7 +1548,7 @@ async def _wait_for_event_count(client: "FakeGatewayClient", event_type: str, co
 
 def _voice_gateway_diagnostics(records) -> list[dict[str, Any]]:
     diagnostics: list[dict[str, Any]] = []
-    prefix = "memoir_voice_gateway "
+    prefix = "streaming_asr_gateway "
     for record in records:
         message = record.getMessage()
         if not message.startswith(prefix):
