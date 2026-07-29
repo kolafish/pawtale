@@ -408,6 +408,14 @@ async def create_image_placement(
                 item
                 for item in asset.placements
                 if item.placement_type
+                == MemoirBookImagePlacementType.CHAPTER_INLINE.value
+            ),
+            None,
+        ) or next(
+            (
+                item
+                for item in asset.placements
+                if item.placement_type
                 == MemoirBookImagePlacementType.APPENDIX.value
             ),
             None,
@@ -415,6 +423,19 @@ async def create_image_placement(
         if placement:
             placement.placement_type = placement_type.value
             placement.chapter_id = chapter_id
+    if (
+        placement_type == MemoirBookImagePlacementType.CHAPTER_INLINE
+        and source_location
+    ):
+        for redundant in asset.placements:
+            if (
+                redundant is not placement
+                and redundant.enabled
+                and redundant.placement_type
+                == MemoirBookImagePlacementType.APPENDIX.value
+            ):
+                redundant.enabled = False
+                db.add(redundant)
     if not placement:
         next_sort_order = int(
             await db.scalar(
@@ -585,6 +606,7 @@ async def manuscript_image_snapshots(
     )
     chapter_images: dict[str, list[dict[str, object]]] = {}
     appendix_images: list[dict[str, object]] = []
+    seen_targets: set[tuple[str, str, str, str]] = set()
     for placement in placements:
         asset = placement.image_asset
         source_location = source_locations.get(asset.source_utterance_id or "")
@@ -606,6 +628,15 @@ async def manuscript_image_snapshots(
             placement_type=effective_type,
             section_id=section_id,
         )
+        target = (
+            asset.id,
+            effective_type,
+            chapter_id or "",
+            section_id or "",
+        )
+        if target in seen_targets:
+            continue
+        seen_targets.add(target)
         if effective_type in {
             MemoirBookImagePlacementType.CHAPTER_OPENING.value,
             MemoirBookImagePlacementType.CHAPTER_INLINE.value,

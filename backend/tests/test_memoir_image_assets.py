@@ -13,6 +13,7 @@ from app.migrations.memoir_images import migrate_memoir_image_schema
 from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
+    MemoirBookImagePlacement,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirImageAsset,
@@ -284,6 +285,61 @@ async def test_image_migration_relocates_legacy_source_linked_appendix_and_resyn
     migrated_illustration = migrated_manuscript["chapters"][0]["illustrations"][0]
     assert migrated_illustration["placement"] == "chapter_inline"
     assert migrated_illustration["section_id"]
+
+
+async def test_image_migration_disables_redundant_source_linked_appendix(
+    client,
+    test_db,
+    tmp_path,
+    monkeypatch,
+):
+    _, project_id, chapter_id, asset_id = await _seed_image_asset(
+        client,
+        test_db,
+        tmp_path,
+        monkeypatch,
+    )
+    response = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements",
+        json={
+            "placement_type": "chapter_inline",
+            "display_size": "full_width",
+        },
+    )
+    assert response.status_code == 201
+    legacy_appendix = MemoirBookImagePlacement(
+        project_id=project_id,
+        image_asset_id=asset_id,
+        placement_type="appendix",
+        chapter_id=None,
+        sort_order=1,
+        enabled=True,
+    )
+    test_db.add(legacy_appendix)
+    await test_db.commit()
+
+    result = await migrate_memoir_image_schema(test_db.bind)
+    assert result["relocated_source_linked_placements"] == 0
+    enabled_rows = (
+        await test_db.execute(
+            text(
+                """
+                SELECT placement_type, chapter_id
+                FROM memoir_book_image_placements
+                WHERE image_asset_id = :asset_id AND enabled = 1
+                """
+            ),
+            {"asset_id": asset_id},
+        )
+    ).all()
+
+    assert enabled_rows == [("chapter_inline", chapter_id)]
+    chapter_images, appendix_images = await image_assets.manuscript_image_snapshots(
+        test_db,
+        project_id=project_id,
+    )
+    assert len(chapter_images[chapter_id]) == 1
+    assert appendix_images == []
 
 
 async def test_generated_image_download_is_branded_without_changing_clean_source(

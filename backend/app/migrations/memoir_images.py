@@ -56,6 +56,47 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
     for table_name in required_tables:
         if not await table_exists(conn, table_name):
             return 0
+    await conn.execute(
+        text(
+            """
+            UPDATE memoir_book_image_placements
+            SET enabled = 0,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE enabled = 1
+              AND placement_type = 'appendix'
+              AND EXISTS (
+                    SELECT 1
+                    FROM memoir_book_image_placements AS inline_placement
+                    WHERE inline_placement.project_id =
+                          memoir_book_image_placements.project_id
+                      AND inline_placement.image_asset_id =
+                          memoir_book_image_placements.image_asset_id
+                      AND inline_placement.placement_type = 'chapter_inline'
+                      AND inline_placement.enabled = 1
+              )
+              AND EXISTS (
+                    SELECT 1
+                    FROM memoir_image_assets AS asset
+                    JOIN memoir_section_materials AS material
+                      ON material.project_id = asset.project_id
+                     AND material.utterance_id = asset.source_utterance_id
+                    JOIN memoir_sections AS section
+                      ON section.project_id = material.project_id
+                     AND section.id = material.section_id
+                    WHERE asset.id = memoir_book_image_placements.image_asset_id
+                      AND asset.project_id = memoir_book_image_placements.project_id
+                      AND asset.source_type IN (
+                        'share_video_background',
+                        'chapter_illustration',
+                        'utterance_illustration'
+                      )
+                      AND material.include_in_book = 1
+                      AND section.include_in_book = 1
+                      AND section.status = 'active'
+              )
+            """
+        )
+    )
     result = await conn.execute(
         text(
             """
