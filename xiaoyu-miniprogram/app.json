@@ -13,6 +13,11 @@
     "request": 60000,
     "connectSocket": 60000
   },
+  "permission": {
+    "scope.record": {
+      "desc": "用于持续口述并实时转换为文章文字"
+    }
+  },
   "style": "v2",
   "sitemapLocation": "sitemap.json"
 }

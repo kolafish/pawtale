@@ -5,7 +5,12 @@ import {
   updateArticleContent,
   updateArticleTitle,
 } from "../../services/articles";
+import {
+  ArticleDictationClient,
+  type DictationState,
+} from "../../services/dictation";
 import { definePage } from "../../services/page-definition";
+import { ensureRecorderAuthorization } from "../../services/recorder-authorization";
 
 type SaveState = "saved" | "unsaved" | "saving" | "conflict";
 
@@ -20,10 +25,16 @@ interface EditorData {
   wordCount: number;
   saveState: SaveState;
   saveText: string;
+  cursorPosition: number;
+  dictationState: DictationState;
+  dictationStatusText: string;
+  dictationButtonText: string;
+  dictationActive: boolean;
+  dictationDisabled: boolean;
 }
 
 interface InputEvent {
-  detail: { value: string };
+  detail: { value: string; cursor?: number };
 }
 
 function countWords(text: string): number {
@@ -41,6 +52,46 @@ function saveText(state: SaveState): string {
   }[state];
 }
 
+function dictationView(state: DictationState): Pick<
+  EditorData,
+  "dictationState" | "dictationStatusText" | "dictationButtonText"
+  | "dictationActive" | "dictationDisabled"
+> {
+  const views = {
+    idle: ["准备好后，点击开始口述", "开始口述", false, false],
+    connecting: ["正在连接语音识别", "连接中", false, true],
+    ready: ["可以继续口述", "开始口述", false, false],
+    starting: ["正在打开麦克风", "启动中", true, true],
+    recording: ["正在听你说", "停止口述", true, false],
+    stopping: ["正在整理最后一段文字", "识别中", true, true],
+    error: ["本次口述未完成，可以重试", "重新口述", false, false],
+  } satisfies Record<DictationState, [string, string, boolean, boolean]>;
+  const [dictationStatusText, dictationButtonText, dictationActive, dictationDisabled] =
+    views[state];
+  return {
+    dictationState: state,
+    dictationStatusText,
+    dictationButtonText,
+    dictationActive,
+    dictationDisabled,
+  };
+}
+
+export function insertDictationText(
+  prefix: string,
+  spokenText: string,
+  suffix: string,
+): { content: string; cursor: number } {
+  const spoken = spokenText.trim();
+  const leftSpace = /[a-zA-Z0-9]$/.test(prefix) && /^[a-zA-Z0-9]/.test(spoken) ? " " : "";
+  const rightSpace = /[a-zA-Z0-9]$/.test(spoken) && /^[a-zA-Z0-9]/.test(suffix) ? " " : "";
+  const insertion = `${leftSpace}${spoken}${rightSpace}`;
+  return {
+    content: `${prefix}${insertion}${suffix}`,
+    cursor: prefix.length + insertion.length,
+  };
+}
+
 definePage<EditorData>()({
   data: {
     loading: true,
@@ -53,12 +104,20 @@ definePage<EditorData>()({
     wordCount: 0,
     saveState: "saved" as SaveState,
     saveText: saveText("saved"),
+    cursorPosition: 0,
+    ...dictationView("idle"),
   },
 
   saveTimer: null as ReturnType<typeof setTimeout> | null,
   savePromise: null as Promise<void> | null,
   savedTitle: "",
   savedContent: "",
+  dictationClient: null as ArticleDictationClient | null,
+  dictationPrefix: "",
+  dictationSuffix: "",
+  dictationLatestText: "",
+  dictationFinalReceived: false,
+  finishPromise: null as Promise<void> | null,
 
   async onLoad(options: { projectId?: string }) {
     if (!options.projectId) {
@@ -70,15 +129,11 @@ definePage<EditorData>()({
   },
 
   onHide() {
-    void this.saveNow();
+    void this.finishPendingWork();
   },
 
   onUnload() {
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
-    }
-    void this.saveNow();
+    void this.finishPendingWork();
   },
 
   async loadArticle() {
@@ -101,6 +156,7 @@ definePage<EditorData>()({
         content: document.content,
         contentRevision: document.content_revision,
         wordCount: document.word_count,
+        cursorPosition: document.content.length,
         saveState: "saved",
         saveText: saveText("saved"),
       });
@@ -118,12 +174,119 @@ definePage<EditorData>()({
 
   onContentInput(event: InputEvent) {
     const content = event.detail.value;
-    this.setData({ content, wordCount: countWords(content) });
+    this.setData({
+      content,
+      wordCount: countWords(content),
+      cursorPosition: event.detail.cursor ?? content.length,
+    });
     this.scheduleSave();
   },
 
   onTitleBlur() {
     void this.saveNow();
+  },
+
+  async toggleDictation() {
+    if (this.data.dictationState === "recording") {
+      await this.stopDictation();
+      return;
+    }
+    if (this.data.dictationDisabled || this.data.saveState === "conflict") {
+      return;
+    }
+    await this.startDictation();
+  },
+
+  async startDictation() {
+    this.setData({ error: "" });
+    try {
+      await ensureRecorderAuthorization();
+      if (this.data.dictationState === "error") {
+        await this.releaseDictationClient();
+      }
+      const cursor = Math.max(0, Math.min(this.data.cursorPosition, this.data.content.length));
+      this.dictationPrefix = this.data.content.slice(0, cursor);
+      this.dictationSuffix = this.data.content.slice(cursor);
+      this.dictationLatestText = "";
+      this.dictationFinalReceived = false;
+      if (!this.dictationClient) {
+        this.dictationClient = new ArticleDictationClient({
+          projectId: this.data.projectId,
+          documentId: this.data.documentId,
+          callbacks: {
+            onState: (state) => this.applyDictationState(state),
+            onTranscript: (text, final) => this.applyDictationTranscript(text, final),
+            onError: (message) => this.handleDictationError(message),
+          },
+        });
+      }
+      await this.dictationClient.connect();
+      await this.dictationClient.start();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "口述启动失败";
+      this.setData({ error: message, ...dictationView("error") });
+    }
+  },
+
+  async stopDictation() {
+    try {
+      await this.dictationClient?.stop();
+    } catch (error) {
+      this.handleDictationError(error instanceof Error ? error.message : "口述停止失败");
+    }
+  },
+
+  applyDictationState(state: DictationState) {
+    if (state === "ready" && this.dictationLatestText && !this.dictationFinalReceived) {
+      this.scheduleSave();
+    }
+    this.setData(dictationView(state));
+  },
+
+  applyDictationTranscript(text: string, final: boolean) {
+    this.dictationLatestText = text.trim();
+    this.dictationFinalReceived = this.dictationFinalReceived || final;
+    const merged = insertDictationText(
+      this.dictationPrefix,
+      this.dictationLatestText,
+      this.dictationSuffix,
+    );
+    this.setData({
+      content: merged.content,
+      cursorPosition: merged.cursor,
+      wordCount: countWords(merged.content),
+    });
+    if (final) {
+      this.scheduleSave();
+    }
+  },
+
+  handleDictationError(message: string) {
+    if (this.dictationLatestText) {
+      this.scheduleSave();
+    }
+    this.setData({ error: message, ...dictationView("error") });
+  },
+
+  async releaseDictationClient() {
+    const client = this.dictationClient;
+    this.dictationClient = null;
+    if (client) {
+      await client.close();
+    }
+  },
+
+  finishPendingWork(): Promise<void> {
+    if (this.finishPromise) {
+      return this.finishPromise;
+    }
+    this.finishPromise = (async () => {
+      await this.releaseDictationClient();
+      await this.saveNow();
+    })().finally(() => {
+      this.finishPromise = null;
+    });
+    return this.finishPromise;
   },
 
   scheduleSave() {
@@ -226,6 +389,7 @@ definePage<EditorData>()({
       clearTimeout(this.saveTimer);
       this.saveTimer = null;
     }
+    await this.releaseDictationClient();
     await this.loadArticle();
   },
 });

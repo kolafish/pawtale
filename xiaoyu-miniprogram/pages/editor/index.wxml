@@ -30,13 +30,32 @@
 
     <view class="divider"></view>
 
+    <view class="dictation-panel {{dictationActive ? 'is-active' : ''}}">
+      <view class="dictation-copy">
+        <view class="dictation-status">
+          <view class="dictation-dot"></view>
+          <text>{{dictationStatusText}}</text>
+        </view>
+        <text class="dictation-hint">语音用于实时转文字，停止后自动保存正文。</text>
+      </view>
+      <button
+        class="dictation-button pressable {{dictationState === 'recording' ? 'is-recording' : ''}}"
+        disabled="{{dictationDisabled || saveState === 'conflict'}}"
+        bindtap="toggleDictation"
+        hover-class="pressable-hover"
+      >
+        {{dictationButtonText}}
+      </button>
+    </view>
+
     <textarea
       class="content-input"
       value="{{content}}"
+      cursor="{{cursorPosition}}"
       maxlength="-1"
       placeholder="从这里开始写。可以先把想到的都记下来。"
       bindinput="onContentInput"
-      disabled="{{saveState === 'conflict'}}"
+      disabled="{{saveState === 'conflict' || dictationActive}}"
       show-confirm-bar="{{false}}"
     ></textarea>
   </view>
