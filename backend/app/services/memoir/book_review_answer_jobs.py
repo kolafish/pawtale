@@ -102,6 +102,12 @@ async def _job_state(
         project_id=project_id,
         job=job,
     )
+    state["summary"] = (
+        book_review_answer_application.user_visible_application_summary(
+            state.get("summary"),
+            changed_chapter_count=state.get("changed_chapter_count"),
+        )
+    )
     active = state["can_cancel"] is True
     return {
         **state,
