@@ -12,7 +12,7 @@ from app.models.projects import Project
 from app.services.asr import ASRAudioFormat, StepFunASRService
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.audio_files import audio_file_path
-from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
+from app.services.asr.factory import create_volc_streaming_asr_client
 from app.services.memoir.voice_transcript_recovery import (
     ASR_RECOVERY_PCM_BYTES_PER_SAMPLE,
     ASR_RECOVERY_PCM_SAMPLE_RATE,

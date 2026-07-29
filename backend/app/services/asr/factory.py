@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from app.config import get_settings
-from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
-from app.services.memoir.volc_streaming_asr import VolcStreamingASRClient, VolcStreamingASRConfig
+from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
+from app.services.asr.volc_streaming import VolcStreamingASRClient, VolcStreamingASRConfig
 
 REALTIME_TEXT_ACCELERATE_SCORE = 10
 

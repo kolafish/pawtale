@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import get_settings
 from app.migrations.memoir_voice import assert_memoir_voice_schema
-from app.services.memoir.volc_asr_protocol import VolcASRProtocolCodec
-from app.services.memoir.volc_streaming_asr import VolcStreamingASRClient, VolcStreamingASRConfig
+from app.services.asr.volc_protocol import VolcASRProtocolCodec
+from app.services.asr.volc_streaming import VolcStreamingASRClient, VolcStreamingASRConfig
 
 
 DEFAULT_PROVIDER_TIMEOUT_SECONDS = 20.0

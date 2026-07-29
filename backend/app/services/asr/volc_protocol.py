@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from json import JSONDecodeError
 from typing import Any
 
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 
 
 PROTOCOL_VERSION = 0b0001

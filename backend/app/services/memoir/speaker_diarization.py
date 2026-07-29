@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 
 
 @dataclass(frozen=True)

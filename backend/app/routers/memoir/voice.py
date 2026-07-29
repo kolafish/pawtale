@@ -67,7 +67,7 @@ from app.services.memoir import transcript_voice_edit as memoir_transcript_voice
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
 from app.services.memoir.audio_files import audio_file_path
-from app.services.memoir.streaming_asr import create_volc_streaming_asr_client
+from app.services.asr.factory import create_volc_streaming_asr_client
 
 
 router = APIRouter()

@@ -21,7 +21,7 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
 from app.services.memoir.voice_transcripts import (
     prune_transcript_versions_for_utterance,

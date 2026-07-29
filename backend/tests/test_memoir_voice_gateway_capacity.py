@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import Settings
-from app.services.memoir.voice_gateway_capacity import (
+from app.services.asr.capacity import (
     VOICE_GATEWAY_CAPACITY_REACHED,
     VOICE_GATEWAY_USER_SESSION_EXISTS,
     VoiceGatewayCapacityError,

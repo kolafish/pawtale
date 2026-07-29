@@ -7,8 +7,8 @@ from typing import Any, AsyncIterator
 
 import websockets
 
-from app.services.memoir.asr import StreamingASREvent
-from app.services.memoir.volc_asr_protocol import VolcASRProtocolCodec
+from app.services.asr.streaming import StreamingASREvent
+from app.services.asr.volc_protocol import VolcASRProtocolCodec
 
 ASR_PROVIDER_ERROR = "asr_provider_error"
 ASR_PROVIDER_INVALID_FRAME = "asr_provider_invalid_frame"

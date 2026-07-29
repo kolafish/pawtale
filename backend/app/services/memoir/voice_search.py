@@ -15,7 +15,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir.asr import StreamingASRClient, StreamingASREvent
+from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 
 
 MAX_VOICE_SEARCH_AUDIO_BYTES = 2 * 1024 * 1024

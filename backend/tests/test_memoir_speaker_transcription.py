@@ -3,7 +3,7 @@ import base64
 from typing import Any
 
 from app.domain.memoir.types import MemoirCreatedBy
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.speaker_diarization import (
     live_text_after_confirmed_prefix,
     speaker_segments_from_asr_event,

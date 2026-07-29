@@ -31,7 +31,7 @@ from app.services.memoir import (
     sections,
     voice_transcript_correction,
 )
-from app.services.memoir.asr import StreamingASREvent
+from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_final_persistence import (
     VoiceFinalPersistenceService,
 )
