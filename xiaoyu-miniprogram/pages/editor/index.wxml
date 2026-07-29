@@ -1,0 +1,43 @@
+<view class="page editor-page">
+  <view wx:if="{{error}}" class="error-banner">
+    <text>{{error}}</text>
+    <button
+      wx:if="{{saveState === 'conflict'}}"
+      class="reload-button pressable"
+      bindtap="reloadArticle"
+      hover-class="pressable-hover"
+    >
+      重新载入
+    </button>
+  </view>
+
+  <view wx:if="{{loading}}" class="loading card">正在打开文章…</view>
+
+  <view wx:else class="paper card">
+    <input
+      class="title-input"
+      value="{{title}}"
+      maxlength="80"
+      placeholder="文章标题"
+      bindinput="onTitleInput"
+      bindblur="onTitleBlur"
+    />
+
+    <view class="status-row">
+      <text class="numeric">{{wordCount}} 字</text>
+      <text class="save-status save-{{saveState}}">{{saveText}}</text>
+    </view>
+
+    <view class="divider"></view>
+
+    <textarea
+      class="content-input"
+      value="{{content}}"
+      maxlength="-1"
+      placeholder="从这里开始写。可以先把想到的都记下来。"
+      bindinput="onContentInput"
+      disabled="{{saveState === 'conflict'}}"
+      show-confirm-bar="{{false}}"
+    ></textarea>
+  </view>
+</view>
