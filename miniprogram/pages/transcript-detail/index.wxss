@@ -883,6 +883,7 @@
 }
 
 .share-video-count {
+  width: 220rpx;
   max-width: 220rpx;
 }
 

@@ -479,8 +479,10 @@ export class TranscriptShareVideoController {
     }
     this.patchState({
       shareVideoPolling: true,
-      shareVideoStatusText: "正在生成视频",
-      shareVideoStatusClass: "running",
+      ...(!this.state.shareVideoStatusText ? {
+        shareVideoStatusText: "正在生成视频",
+        shareVideoStatusClass: "running",
+      } : {}),
     });
     try {
       const job = await this.options.getJob(jobId);
@@ -698,8 +700,17 @@ export class TranscriptShareVideoController {
   }
 
   private patchState(patch: Partial<TranscriptShareVideoTaskState>): void {
-    this.state = { ...this.state, ...patch };
-    this.listener?.(patch);
+    const changedPatch: Partial<TranscriptShareVideoTaskState> = {};
+    (Object.keys(patch) as Array<keyof TranscriptShareVideoTaskState>).forEach((key) => {
+      if (!Object.is(this.state[key], patch[key])) {
+        Object.assign(changedPatch, { [key]: patch[key] });
+      }
+    });
+    if (!Object.keys(changedPatch).length) {
+      return;
+    }
+    this.state = { ...this.state, ...changedPatch };
+    this.listener?.(changedPatch);
   }
 
   private replaceState(state: TranscriptShareVideoTaskState): void {
