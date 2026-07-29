@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "test": "node --require ../miniprogram/test/register-ts.js --test test/*.test.js",
+    "test": "node --require ./test/register-ts.js --test test/*.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
