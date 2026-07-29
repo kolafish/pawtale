@@ -9,6 +9,8 @@ from app.schemas.projects import (
     AnalyzeApplyResponse,
     DocumentAIContinueRequest,
     DocumentAIContinueResponse,
+    DocumentAIReviewRequest,
+    DocumentAIReviewResponse,
     DocumentAIReviseMultiRequest,
     DocumentAIReviseMultiResponse,
     DocumentAIReviseRequest,
@@ -70,6 +72,27 @@ async def ai_revise_document(
     current_user: User = Depends(get_current_user),
 ):
     return await project_ai.ai_revise_document(db, project_id, document_id, current_user.id, req)
+
+
+@router.post(
+    "/{project_id}/documents/{document_id}/ai-review",
+    response_model=DocumentAIReviewResponse,
+    response_model_exclude_none=True,
+)
+async def ai_review_document(
+    project_id: str,
+    document_id: str,
+    req: DocumentAIReviewRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await project_ai.ai_review_document(
+        db,
+        project_id,
+        document_id,
+        current_user.id,
+        req,
+    )
 
 
 @router.post(
