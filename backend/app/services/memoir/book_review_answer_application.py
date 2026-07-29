@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from dataclasses import dataclass
 import logging
+import re
 import time
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,7 +48,7 @@ from app.services.memoir.narrative.book_output_assembly import (
 
 
 logger = logging.getLogger(__name__)
-BOOK_REVIEW_ANSWER_APPLICATION_ENGINE = "llm_book_review_answer_application_v2"
+BOOK_REVIEW_ANSWER_APPLICATION_ENGINE = "llm_book_review_answer_application_v3"
 BOOK_REVIEW_ANSWER_APPLICATION_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。"
     "你只根据用户明确写下的回答调整已有书稿，不推测、不补造人生事实，"
@@ -66,7 +67,6 @@ class _SectionRevision(BaseModel):
 class _ApplicationOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    summary: str
     section_revisions: list[_SectionRevision] = Field(default_factory=list)
 
 
@@ -103,6 +103,48 @@ def _chapter_ids(snapshots: list[dict[str, object]]) -> list[str]:
         for snapshot in snapshots
         if (chapter_id := _text(snapshot.get("chapter_id")))
     ]
+
+
+_INTERNAL_MODEL_REFERENCE_PATTERN = re.compile(r"[CS]\d+")
+
+
+def user_visible_application_summary(
+    summary: object,
+    *,
+    changed_chapter_count: object,
+) -> str:
+    """Keep legacy model references out of user-visible job state."""
+    value = " ".join(summary.split())[:400] if isinstance(summary, str) else ""
+    if not value or not _INTERNAL_MODEL_REFERENCE_PATTERN.search(value):
+        return value
+    return (
+        "已根据你的回答调整相关章节。"
+        if isinstance(changed_chapter_count, int) and changed_chapter_count > 0
+        else "已核对这些回答，现有正文无需调整。"
+    )
+
+
+def _application_summary(
+    *,
+    snapshots: list[dict[str, object]],
+    changed_ids: set[str],
+) -> str:
+    if not changed_ids:
+        return "已核对这些回答，现有正文无需调整。"
+    titles = [
+        title
+        for snapshot in snapshots
+        if _text(snapshot.get("chapter_id")) in changed_ids
+        and (title := _text(snapshot.get("chapter_title")))
+    ]
+    if not titles:
+        return "已根据你的回答调整相关章节。"
+    labels = [f"《{title}》" for title in titles[:3]]
+    if len(titles) <= 3:
+        target = "、".join(labels)
+    else:
+        target = f"{'、'.join(labels)}等 {len(titles)} 个章节"
+    return f"已根据你的回答调整{target}的相关正文。"
 
 
 def _build_prompt(
@@ -156,7 +198,6 @@ def _build_prompt(
 
 请输出严格 JSON：
 {{
-  "summary": "一句话说明本次实际调整；如果无需改文，明确说明已核对但正文无需调整",
   "section_revisions": [
     {{
       "section_id": "需要修改的小节 section_id",
@@ -182,7 +223,7 @@ def _normalize_application(
     snapshots: list[dict[str, object]],
     context: book_review_answer_state.BookReviewAnswerContext,
     section_refs: ModelReferenceMap,
-) -> tuple[list[dict[str, object]], set[str], str]:
+) -> tuple[list[dict[str, object]], set[str]]:
     original_ids = _chapter_ids(snapshots)
     snapshots_by_id = {
         _text(snapshot.get("chapter_id")): deepcopy(snapshot)
@@ -235,8 +276,7 @@ def _normalize_application(
         snapshot["content_char_count"] = len(content)
 
     revised_snapshots = [snapshots_by_id[chapter_id] for chapter_id in original_ids]
-    summary = " ".join(generated.summary.split())[:400]
-    return revised_snapshots, changed_ids, summary
+    return revised_snapshots, changed_ids
 
 
 def _stored_illustrations(
@@ -306,12 +346,19 @@ async def apply_book_review_answers(
         context=context,
     ):
         marker = book_review_answer_state.application_marker(output)
+        changed_chapter_count = int(marker.get("changed_chapter_count") or 0)
         return BookReviewAnswerApplicationResult(
             output_version_id=baseline.id,
             output_version=baseline.version,
             applied_answer_count=len(context.answers),
-            changed_chapter_count=int(marker.get("changed_chapter_count") or 0),
-            summary=_text(marker.get("summary")) or "这些回答已经应用到书稿",
+            changed_chapter_count=changed_chapter_count,
+            summary=(
+                user_visible_application_summary(
+                    marker.get("summary"),
+                    changed_chapter_count=changed_chapter_count,
+                )
+                or "这些回答已经应用到书稿"
+            ),
             requested_ai_model=ai_model,
             resolved_ai_model=(
                 _text(marker.get("resolved_ai_model")) or ai_model
@@ -372,11 +419,15 @@ async def apply_book_review_answers(
             timeout=timeout_seconds,
             max_attempts=1,
         )
-        revised_snapshots, changed_ids, summary = _normalize_application(
+        revised_snapshots, changed_ids = _normalize_application(
             generated=generated.value,
             snapshots=snapshots,
             context=context,
             section_refs=section_refs,
+        )
+        summary = _application_summary(
+            snapshots=revised_snapshots,
+            changed_ids=changed_ids,
         )
         generation = {
             **generated.response.diagnostics(),
@@ -443,11 +494,6 @@ async def apply_book_review_answers(
     baseline = await db.get(MemoirBookOutputVersion, baseline.id)
     if output is None or baseline is None:
         raise BookReviewAnswerApplicationError("保存调整结果时书稿状态已变化")
-    summary = summary or (
-        "已根据回答调整相关章节"
-        if changed_ids
-        else "已核对这些回答，现有正文无需调整"
-    )
     applied_version = baseline
     if changed_ids:
         project = await db.get(Project, project_id)

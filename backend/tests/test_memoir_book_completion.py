@@ -170,7 +170,6 @@ class LayeredBookAI:
             }
         elif "请把用户对全书检查问题的回答应用到现有书稿" in user_prompt:
             payload = {
-                "summary": "保留两段学校经历，并把用户的说明写入第一章。",
                 "section_revisions": [
                     {
                         "section_id": section_ids[0],
@@ -378,7 +377,6 @@ def _install_ai(
 
 def test_book_review_answer_output_rejects_structure_changes():
     valid = {
-        "summary": "根据回答补充第一章正文。",
         "section_revisions": [
             {
                 "section_id": "S1",
@@ -393,6 +391,13 @@ def test_book_review_answer_output_rejects_structure_changes():
         ).model_dump()
         == valid
     )
+    with pytest.raises(ValueError):
+        book_review_answer_application._ApplicationOutput.model_validate(
+            {
+                **valid,
+                "summary": "补充 C3 章节并调整 S19 小节。",
+            }
+        )
     with pytest.raises(ValueError):
         book_review_answer_application._ApplicationOutput.model_validate(
             {
@@ -412,6 +417,20 @@ def test_book_review_answer_output_rejects_structure_changes():
                 ],
             }
         )
+
+
+def test_book_review_answer_summary_hides_legacy_model_references():
+    summary = (
+        book_review_answer_application.user_visible_application_summary(
+            "补充C3章节的关联说明，明确C4章节为同一人；调整C4小节S19。",
+            changed_chapter_count=2,
+        )
+    )
+
+    assert summary == "已根据你的回答调整相关章节。"
+    assert "C3" not in summary
+    assert "C4" not in summary
+    assert "S19" not in summary
 
 
 async def _book(client, test_db, *, chapter_count: int = 1):
@@ -1827,8 +1846,28 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert completed_body["already_applied"] is True
     assert completed_body["can_apply"] is False
     assert completed_body["resolved_ai_model"] == fake.model_name
-    assert "保留两段学校经历" in completed_body["summary"]
+    assert completed_body["summary"].startswith("已根据你的回答调整《")
+    assert "C1" not in completed_body["summary"]
+    assert "S1" not in completed_body["summary"]
     assert set(requested_models) == {None, "claude-opus-4-8"}
+
+    completed_job = await test_db.get(
+        MemoirEditingJob,
+        completed_body["job_id"],
+    )
+    assert completed_job is not None
+    completed_job.result_json = {
+        **completed_job.result_json,
+        "summary": "补充C3章节，明确C4章节，并调整C4小节S19。",
+    }
+    test_db.add(completed_job)
+    await test_db.commit()
+    legacy_completed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "answer-application/jobs/current"
+    )
+    assert legacy_completed.status_code == 200
+    assert legacy_completed.json()["summary"] == "已根据你的回答调整相关章节。"
 
     versions = list(
         (
