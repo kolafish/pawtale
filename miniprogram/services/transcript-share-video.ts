@@ -364,6 +364,26 @@ function isTransientPollError(error: unknown): boolean {
   return true;
 }
 
+function isSameShareVideoJobVersion(
+  current: MemoirShareVideoJob | null,
+  next: MemoirShareVideoJob,
+): boolean {
+  return current === next || Boolean(
+    current?.updated_at &&
+    current.id === next.id &&
+    current.updated_at === next.updated_at &&
+    current.status === next.status &&
+    current.background_source === next.background_source &&
+    current.background_status === next.background_status &&
+    current.background_effective_mode === next.background_effective_mode &&
+    current.background_scene_count === next.background_scene_count &&
+    current.error_message === next.error_message &&
+    current.output?.download_url === next.output?.download_url &&
+    current.output?.mime_type === next.output?.mime_type &&
+    current.output?.size_bytes === next.output?.size_bytes
+  );
+}
+
 export class TranscriptShareVideoController {
   private state = initialTranscriptShareVideoTaskState();
   private listener: ShareVideoStateListener | null = null;
@@ -590,7 +610,7 @@ export class TranscriptShareVideoController {
   private async applyJob(job: MemoirShareVideoJob, requestToken: number): Promise<void> {
     const running = job.status === "pending" || job.status === "running";
     this.patchState({
-      shareVideoJob: job,
+      ...(!isSameShareVideoJobVersion(this.state.shareVideoJob, job) ? { shareVideoJob: job } : {}),
       shareVideoPolling: running,
       shareVideoStatusText: shareVideoJobStatusText(job),
       shareVideoStatusClass: job.status,

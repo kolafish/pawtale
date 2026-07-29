@@ -22,6 +22,7 @@ function shareVideoJob(overrides = {}) {
       download_url: "/api/mobile/memoir/share-video/jobs/job-1/download",
     },
     error_message: "",
+    updated_at: "2026-07-29T06:00:00.000Z",
     ...overrides,
   };
 }
@@ -72,6 +73,7 @@ test("share video controller keeps the current phase label between running polls
 
   assert.equal(state().shareVideoPolling, true);
   assert.equal(state().shareVideoStatusText, "正在生成多张背景图");
+  assert.equal(patches.length, 2);
   assert.deepEqual(
     patches
       .filter((patch) => Object.hasOwn(patch, "shareVideoStatusText"))
