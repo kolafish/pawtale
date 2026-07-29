@@ -40,14 +40,83 @@
 
 .divider {
   height: 2rpx;
-  margin: 26rpx 0 30rpx;
+  margin: 26rpx 0;
   background: var(--color-border);
+}
+
+.dictation-panel {
+  display: flex;
+  align-items: center;
+  gap: 22rpx;
+  margin-bottom: 28rpx;
+  padding: 22rpx;
+  border: 2rpx solid var(--color-border);
+  border-radius: 24rpx;
+  background: var(--color-surface-soft);
+  transition-property: background-color, border-color;
+  transition-duration: 150ms;
+}
+
+.dictation-panel.is-active {
+  border-color: rgba(38, 122, 120, 0.52);
+  background: #e2f1ee;
+}
+
+.dictation-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.dictation-status {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  color: var(--color-text);
+  font-size: 27rpx;
+  font-weight: 700;
+}
+
+.dictation-dot {
+  width: 14rpx;
+  height: 14rpx;
+  border-radius: 999rpx;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 8rpx rgba(38, 122, 120, 0.12);
+}
+
+.dictation-hint {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--color-muted);
+  font-size: 23rpx;
+  line-height: 1.45;
+}
+
+.dictation-button {
+  flex: 0 0 auto;
+  min-width: 164rpx;
+  margin: 0;
+  padding: 0 24rpx;
+  border-radius: 20rpx;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+
+.dictation-button.is-recording {
+  background: var(--color-danger);
+}
+
+.dictation-button[disabled] {
+  background: #8aabaa;
+  color: #fff;
 }
 
 .content-input {
   width: 100%;
-  height: calc(100vh - 390rpx);
-  min-height: 720rpx;
+  height: calc(100vh - 570rpx);
+  min-height: 600rpx;
   color: var(--color-text);
   font-size: 32rpx;
   line-height: 1.85;

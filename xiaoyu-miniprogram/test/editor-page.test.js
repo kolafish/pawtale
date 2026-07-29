@@ -13,9 +13,20 @@ class TestApiError extends Error {
   }
 }
 
-function loadEditorPage(overrides = {}) {
+function loadEditorPage(overrides = {}, dictationRuntime = {}) {
   mockModule("../../xiaoyu-miniprogram/services/request.ts", {
     ApiError: TestApiError,
+  });
+  mockModule("../../xiaoyu-miniprogram/services/dictation.ts", {
+    ArticleDictationClient: dictationRuntime.ArticleDictationClient || class {
+      async connect() {}
+      async start() {}
+      async stop() {}
+      async close() {}
+    },
+  });
+  mockModule("../../xiaoyu-miniprogram/services/recorder-authorization.ts", {
+    ensureRecorderAuthorization: dictationRuntime.ensureRecorderAuthorization || (async () => {}),
   });
   mockModule("../../xiaoyu-miniprogram/services/articles.ts", {
     getArticle: async () => ({
@@ -89,4 +100,51 @@ test("editor stops overwriting and asks for reload on revision conflict", async 
   assert.equal(context.data.saveState, "conflict");
   assert.match(context.data.error, /其他位置修改/);
   assert.equal(context.data.content, "本地的新内容");
+});
+
+test("editor replaces live partial text and saves only the final dictation", async () => {
+  let callbacks;
+  const updates = [];
+  class FakeDictationClient {
+    constructor(options) {
+      callbacks = options.callbacks;
+    }
+    async connect() {
+      callbacks.onState("ready");
+    }
+    async start() {
+      callbacks.onState("recording");
+    }
+    async stop() {
+      callbacks.onState("stopping");
+      callbacks.onTranscript("口述完成", true);
+      callbacks.onState("ready");
+    }
+    async close() {}
+  }
+  const { page } = loadEditorPage({
+    updateArticleContent: async (...args) => {
+      updates.push(args);
+      return { content_revision: 5 };
+    },
+  }, {
+    ArticleDictationClient: FakeDictationClient,
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+  context.setData({ cursorPosition: 1 });
+
+  await page.startDictation.call(context);
+  callbacks.onTranscript("口述", false);
+  assert.equal(context.data.content, "原口述文");
+  assert.equal(context.data.dictationActive, true);
+
+  await page.stopDictation.call(context);
+  await page.saveNow.call(context);
+
+  assert.equal(context.data.content, "原口述完成文");
+  assert.equal(context.data.dictationActive, false);
+  assert.deepEqual(updates, [
+    ["project-1", "document-1", "原口述完成文", 4],
+  ]);
 });
