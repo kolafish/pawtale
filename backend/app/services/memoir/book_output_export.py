@@ -743,21 +743,12 @@ def _illustration_file_path(illustration: dict[str, Any]) -> Path | None:
     return resolved
 
 
-def _illustration_caption(illustration: dict[str, Any]) -> str:
-    caption = _str(illustration.get("caption"))
-    disclosure = _str(illustration.get("disclosure"))
-    if caption and disclosure and disclosure not in caption:
-        return f"{caption}\n{disclosure}"
-    return caption or disclosure
-
-
 def _add_illustration(builder: PDFBookBuilder, illustration: dict[str, Any]) -> None:
     path = _illustration_file_path(illustration)
     if not path:
         return
     builder.add_image(
         path,
-        caption=_illustration_caption(illustration),
         display_size=_str(illustration.get("display_size")) or "full_width",
     )
 
@@ -939,10 +930,7 @@ def _add_image_appendix(builder: PDFBookBuilder, illustrations: list[Any]) -> No
         return
     builder.new_page("插图", show_header=True, show_footer=True, body_numbering=True)
     builder.add_heading("插图")
-    for index, illustration in enumerate(images, start=1):
-        caption = _illustration_caption(illustration)
-        if caption:
-            illustration = {**illustration, "caption": f"{index}. {caption}"}
+    for illustration in images:
         _add_illustration(builder, illustration)
 
 

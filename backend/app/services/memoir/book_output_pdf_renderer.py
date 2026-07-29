@@ -415,7 +415,6 @@ class PDFBookBuilder:
         self,
         image_path: Path,
         *,
-        caption: str = "",
         display_size: str = "full_width",
         max_height: int | None = None,
     ) -> bool:
@@ -428,23 +427,12 @@ class PDFBookBuilder:
             width_ratio = 0.82
         box_width = int((self.layout.page_width - self.layout.margin_x * 2) * width_ratio)
         box_height = max_height or min(220, int(self.layout.page_height * 0.34))
-        caption_height = self.layout.line_height if caption else 0
-        self._ensure_space_height(box_height + caption_height + 18)
+        self._ensure_space_height(box_height + 18)
         page = self._ensure_page()
         x = self.layout.margin_x + int((self.layout.page_width - self.layout.margin_x * 2 - box_width) / 2)
         y = self.y - box_height
         page.images.append(PDFImageCommand(path=image_path, x=x, y=y, width=box_width, height=box_height))
-        self.y = y - 7
-        if caption:
-            self.add_text(
-                caption,
-                font_size=self.layout.small_font_size,
-                line_height=self.layout.line_height,
-                max_units=max(12, self.layout.max_line_units - 4),
-                spacing_after=8,
-            )
-        else:
-            self.y -= 8
+        self.y = y - 15
         return True
 
     def add_spacer(self, lines: float = 1.0) -> None:

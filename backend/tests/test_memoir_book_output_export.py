@@ -275,6 +275,55 @@ def test_chapter_inline_illustrations_render_after_their_source_section(monkeypa
     assert rendered_text.index("第二小节正文。") < rendered_text.index("IMAGE:inline-2")
 
 
+def test_book_illustrations_do_not_render_asset_metadata_as_visible_captions(
+    monkeypatch,
+    tmp_path,
+):
+    image_path = tmp_path / "illustration.png"
+    Image.new("RGB", (1280, 720), "#8a7967").save(image_path)
+    caption = "我上午去看了我爷爷，给他买了两盒西瓜。"
+    disclosure = "AI 根据讲述内容生成的意象插图，不是真实照片。"
+    illustration = {
+        "image_asset_id": "asset-1",
+        "storage_path": image_path.name,
+        "placement": "chapter_inline",
+        "section_id": "section-1",
+        "caption": caption,
+        "disclosure": disclosure,
+    }
+    manuscript = _sample_manuscript("这一段正文后面放一张插图。")
+    manuscript["chapters"][0]["illustrations"] = [illustration]
+    manuscript["image_appendix"] = [
+        {
+            **illustration,
+            "image_asset_id": "asset-2",
+            "placement": "appendix",
+        }
+    ]
+    monkeypatch.setattr(book_output_export, "DATA_DIR", tmp_path)
+
+    pages = _build_manuscript_pdf_pages(
+        title="外婆回忆录",
+        content="外婆回忆录",
+        manuscript=manuscript,
+        layout=PDF_LAYOUTS[MemoirBookOutputExportLayout.STANDARD],
+        show_source_appendix=None,
+    )
+    rendered_text = [
+        command.text
+        for page in pages
+        for command in page.commands
+    ]
+
+    assert caption not in rendered_text
+    assert disclosure not in rendered_text
+    assert sum(
+        command.path == image_path
+        for page in pages
+        for command in page.images
+    ) == 2
+
+
 def test_moonlit_courtyard_cover_style_uses_system_backgrounds():
     manuscript = _sample_manuscript(
         "因为是家乡，所以一想起来成都，心里面就觉得很温暖、很踏实。",
