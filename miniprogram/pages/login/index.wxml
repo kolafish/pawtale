@@ -2,7 +2,7 @@
   <view class="brand-row">
     <image class="brand-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <view class="brand-copy">
-      <text class="brand-title">余主任留声机</text>
+      <text class="brand-title">老余口述</text>
       <text class="brand-subtitle">语音访谈工作台</text>
     </view>
   </view>
