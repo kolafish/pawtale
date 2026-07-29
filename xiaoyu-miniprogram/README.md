@@ -29,7 +29,7 @@ npm test
 
 使用微信开发者工具直接打开 `xiaoyu-miniprogram/`。发布前需要：
 
-1. 将 `project.config.json` 的 `touristappid` 替换为“小鱼口述”的 AppID；
+1. `project.config.json` 已配置小鱼测试 AppID；正式发布前换成对应的正式 AppID；
 2. 在微信公众平台配置 `https://pawtale-api.spaceflows.cn` 和对应 WSS 合法域名；
 3. 在后端 `.env` 配置 `WECHAT_XIAOYU_MINIPROGRAM_APPID` 与 `WECHAT_XIAOYU_MINIPROGRAM_SECRET`；
 4. 完成麦克风和录音用途的隐私保护指引声明。
