@@ -364,6 +364,26 @@ function isTransientPollError(error: unknown): boolean {
   return true;
 }
 
+function isSameShareVideoJobVersion(
+  current: MemoirShareVideoJob | null,
+  next: MemoirShareVideoJob,
+): boolean {
+  return current === next || Boolean(
+    current?.updated_at &&
+    current.id === next.id &&
+    current.updated_at === next.updated_at &&
+    current.status === next.status &&
+    current.background_source === next.background_source &&
+    current.background_status === next.background_status &&
+    current.background_effective_mode === next.background_effective_mode &&
+    current.background_scene_count === next.background_scene_count &&
+    current.error_message === next.error_message &&
+    current.output?.download_url === next.output?.download_url &&
+    current.output?.mime_type === next.output?.mime_type &&
+    current.output?.size_bytes === next.output?.size_bytes
+  );
+}
+
 export class TranscriptShareVideoController {
   private state = initialTranscriptShareVideoTaskState();
   private listener: ShareVideoStateListener | null = null;
@@ -479,8 +499,10 @@ export class TranscriptShareVideoController {
     }
     this.patchState({
       shareVideoPolling: true,
-      shareVideoStatusText: "正在生成视频",
-      shareVideoStatusClass: "running",
+      ...(!this.state.shareVideoStatusText ? {
+        shareVideoStatusText: "正在生成视频",
+        shareVideoStatusClass: "running",
+      } : {}),
     });
     try {
       const job = await this.options.getJob(jobId);
@@ -588,7 +610,7 @@ export class TranscriptShareVideoController {
   private async applyJob(job: MemoirShareVideoJob, requestToken: number): Promise<void> {
     const running = job.status === "pending" || job.status === "running";
     this.patchState({
-      shareVideoJob: job,
+      ...(!isSameShareVideoJobVersion(this.state.shareVideoJob, job) ? { shareVideoJob: job } : {}),
       shareVideoPolling: running,
       shareVideoStatusText: shareVideoJobStatusText(job),
       shareVideoStatusClass: job.status,
@@ -698,8 +720,17 @@ export class TranscriptShareVideoController {
   }
 
   private patchState(patch: Partial<TranscriptShareVideoTaskState>): void {
-    this.state = { ...this.state, ...patch };
-    this.listener?.(patch);
+    const changedPatch: Partial<TranscriptShareVideoTaskState> = {};
+    (Object.keys(patch) as Array<keyof TranscriptShareVideoTaskState>).forEach((key) => {
+      if (!Object.is(this.state[key], patch[key])) {
+        Object.assign(changedPatch, { [key]: patch[key] });
+      }
+    });
+    if (!Object.keys(changedPatch).length) {
+      return;
+    }
+    this.state = { ...this.state, ...changedPatch };
+    this.listener?.(changedPatch);
   }
 
   private replaceState(state: TranscriptShareVideoTaskState): void {
