@@ -252,3 +252,26 @@ test("editor presents article review suggestions without changing the article", 
   assert.equal(context.data.aiSummary, "主题明确，可以精简开头。");
   assert.equal(context.data.aiSuggestions[0].suggestion, "直接从核心观点切入");
 });
+
+test("editor does not reapply an AI revision after entering conflict state", async () => {
+  let updates = 0;
+  const { page } = loadEditorPage({
+    updateArticleContent: async () => {
+      updates += 1;
+      return { content_revision: 5, word_count: 6 };
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { projectId: "project-1" });
+  context.setData({
+    saveState: "conflict",
+    aiResultKind: "revision",
+    aiProposal: "候选正文",
+    aiResultRevision: 4,
+  });
+
+  await page.applyAIRevision.call(context);
+
+  assert.equal(updates, 0);
+  assert.equal(context.data.content, "原文");
+});

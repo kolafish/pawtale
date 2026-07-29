@@ -47,7 +47,7 @@ Pawtale 是一个以项目为单位的 AI 内容创作系统。仓库包含：
 Pawtale/
 ├── backend/                    # FastAPI、SQLAlchemy、后台任务和 provider 集成
 ├── frontend/                   # React Web 工作台
-├── miniprogram/                # 微信小程序
+├── miniprogram/                # “老余口述”回忆录小程序
 ├── xiaoyu-miniprogram/         # “小鱼口述”文章小程序
 ├── docs/                       # 当前架构和测试文档
 ├── scripts/                    # 仓库级验证脚本

@@ -415,7 +415,11 @@ definePage<EditorData>()({
   },
 
   async applyAIRevision() {
-    if (this.data.aiBusy || !this.data.aiProposal) {
+    if (
+      this.data.aiBusy
+      || this.data.saveState === "conflict"
+      || !this.data.aiProposal
+    ) {
       return;
     }
     if (

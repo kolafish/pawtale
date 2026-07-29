@@ -117,7 +117,7 @@
         <button
           wx:if="{{aiResultKind === 'revision'}}"
           class="apply-button pressable"
-          disabled="{{aiBusy}}"
+          disabled="{{aiBusy || saveState === 'conflict'}}"
           bindtap="applyAIRevision"
           hover-class="pressable-hover"
         >采用这版</button>
