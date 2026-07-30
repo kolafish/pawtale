@@ -20,6 +20,9 @@ from app.schemas.memoir_projects import (
 from app.schemas.projects import ProjectResponse
 import app.services.project_documents as project_docs
 from app.services.memoir import project_deletion
+from app.services.memoir.project_ai_preferences import (
+    remember_project_transcript_polish_level,
+)
 from app.services.projects.access import load_project
 
 
@@ -215,6 +218,7 @@ async def create_mobile_memoir_project(
         description=req.description,
         metadata_json=_profile_metadata(req, include_defaults=True),
     )
+    remember_project_transcript_polish_level(project, req.transcript_polish_level)
     db.add(project)
     await db.flush()
     await initialize_project_template(db, project)
@@ -238,6 +242,8 @@ async def update_mobile_memoir_project(
     if req.description is not None:
         project.description = req.description
     project.metadata_json = _profile_metadata(req, existing_metadata=project.metadata_json)
+    if _field_was_set(req, "transcript_polish_level") and req.transcript_polish_level:
+        remember_project_transcript_polish_level(project, req.transcript_polish_level)
     project.updated_at = utcnow_naive()
     await db.commit()
     return await _load_memoir_project_response(db, project.id, user_id)

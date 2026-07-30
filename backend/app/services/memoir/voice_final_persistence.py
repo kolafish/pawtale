@@ -21,6 +21,7 @@ from app.models.projects import Project
 from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
+from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
 from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
 from app.services.memoir.voice_transcripts import (
@@ -116,6 +117,7 @@ class VoiceFinalPersistenceService:
         speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
         parent_message_id: str | None = None,
         ai_model: str | None = None,
+        transcript_polish_level: str | None = None,
     ) -> VoiceFinalPersistenceResult:
         owned_staged_audio = staged_audio
         try:
@@ -198,6 +200,11 @@ class VoiceFinalPersistenceService:
                 version_type=MemoirTranscriptVersionType.ASR_RAW,
             )
             if normalized_speaker_role == MemoirSpeakerRole.NARRATOR.value:
+                polish_level = await load_project_transcript_polish_level(
+                    self.db,
+                    voice_session.project_id,
+                    transcript_polish_level,
+                )
                 await voice_transcript_correction.schedule_transcript_correction_job(
                     self.db,
                     project_id=voice_session.project_id,
@@ -205,6 +212,7 @@ class VoiceFinalPersistenceService:
                     voice_session_id=voice_session.id,
                     raw_transcript_version_id=transcript_version.id,
                     ai_model=ai_model,
+                    transcript_polish_level=polish_level,
                 )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
@@ -227,6 +235,7 @@ class VoiceFinalPersistenceService:
         speaker_role: str = MemoirSpeakerRole.NARRATOR.value,
         parent_message_id: str | None = None,
         ai_model: str | None = None,
+        transcript_polish_level: str | None = None,
     ) -> VoiceFinalPersistenceResult:
         return await self.persist_segment(
             event,
@@ -235,6 +244,7 @@ class VoiceFinalPersistenceService:
             speaker_role=speaker_role,
             parent_message_id=parent_message_id,
             ai_model=ai_model,
+            transcript_polish_level=transcript_polish_level,
         )
 
     async def persist_unfinalized_audio(

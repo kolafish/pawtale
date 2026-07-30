@@ -16,6 +16,7 @@ from app.domain.memoir.types import (
     MemoirChatMessageRole,
     MemoirCreatedBy,
     MemoirInterviewType,
+    MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -62,7 +63,7 @@ from app.services.memoir.utterance_editing_pipeline import (
 )
 
 
-SYSTEM_PROMPT = "你是一位谨慎的中文口述稿校对助手，只做忠于原话的识别文字校正和口头语清理。"
+SYSTEM_PROMPT = "你是一位谨慎的中文口述稿编辑，按指定强度润色，但绝不改变或编造事实。"
 AI_CLEANUP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
 MAX_TRANSCRIPT_VERSIONS_PER_UTTERANCE_TYPE = 3
@@ -87,6 +88,20 @@ TRANSCRIPT_DELETE_CONFLICT_DETAIL = (
     "这条讲述已用于回忆录证据、追问结果或衍生内容，不能单独物理删除；"
     "如需彻底移除其可溯源数据，请删除整个回忆录项目。"
 )
+_POLISH_REQUIREMENTS = {
+    MemoirTranscriptPolishLevel.LOW: (
+        "- 去掉口头填充词、说话磕绊、赘词和没有信息增量的重复\n"
+        "- 除上述清理外，只整理基础标点和极少量语序；不书面化、不文学化，长度尽量接近原文"
+    ),
+    MemoirTranscriptPolishLevel.MEDIUM: (
+        "- 完成低档的全部清理，并适量调整口语化语序和用词，使表达自然、连贯、偏书面\n"
+        "- 可以轻度提炼和润色，但不概括事实、不合并或省略有信息量的细节，保留讲述者语气"
+    ),
+    MemoirTranscriptPolishLevel.HIGH: (
+        "- 完成低档的全部清理，并可较大幅度重组句式与表达层次，提炼重点、增强节奏和文采\n"
+        "- 可以压缩无信息量的铺陈，但不得省略具体事实与有意义的细节，仍保持第一人称讲述"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -195,21 +210,23 @@ def _build_cleanup_prompt(
     source_text: str,
     *,
     context: MemoirTranscriptCleanupContext | None = None,
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW,
 ) -> str:
     context_block = _cleanup_context_block(context)
-    return f"""请对下面这段实时语音识别出来的中文口述内容做一次忠于原文的清理。
+    polish_requirements = _POLISH_REQUIREMENTS[transcript_polish_level]
+    return f"""请按“{transcript_polish_level.value}”档对下面的中文口述识别文本做清理和润色。
 
-要求：
+共同边界：
 - 只修正 ASR 可能因方言、口音、同音词造成的明显错字或错词；无法确定时保留原文
 - 成书、目录、归章语境中，“张杰”“张洁”“张节”“章杰”很可能是“章节”；如果明显不是人名，要改成“章节”
 - 可参考下方近期上下文判断同音词、领域词和指代；上下文只用于校对判断，不得把当前句没有说出的信息补进输出
-- 必须去掉明显的口头填充词，比如句首或重复出现的“嗯”“啊”“呃”“那个”“这个”“就是”
-- 必须去掉同一句话里明显无信息增量的重复表达，例如“那个那个那个”“就是就是”
-- 可以整理基础标点和极少量语序，使句子可读
-- 不新增事实、人物、时间、地点、事件或情绪
-- 不扩写、不总结、不文学化、不替用户补充细节
-- 输出长度应接近原文；短句保持短
+- 不新增事实、人物、关系、时间、地点、事件、因果或情绪，不替讲述者补充细节
+- 保留原文的不确定性、实质信息和有意义的具体细节
+- 档位只控制语言改写强度，不允许改变事实含义
 - 直接输出清理后的第一人称正文，不要标题、列表、解释或引号
+
+本档要求：
+{polish_requirements}
 
 {context_block}
 原始口述内容：
@@ -247,6 +264,7 @@ async def generate_cleaned_transcript_text(
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
     context: MemoirTranscriptCleanupContext | None = None,
+    transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW,
     strict: bool = True,
 ) -> CleanedTranscriptText:
     source_text = source_text.strip()
@@ -261,7 +279,11 @@ async def generate_cleaned_transcript_text(
         generated = await generate_text_with_client(
             client,
             SYSTEM_PROMPT,
-            _build_cleanup_prompt(source_text, context=context),
+            _build_cleanup_prompt(
+                source_text,
+                context=context,
+                transcript_polish_level=transcript_polish_level,
+            ),
             requested_model=ai_model,
             temperature=0.2,
             max_tokens=policy.max_tokens,

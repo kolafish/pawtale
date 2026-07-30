@@ -39,6 +39,7 @@ ASR_FINISH_DRAIN_TIMEOUT_SECONDS = 10.0
 MAX_AUDIO_FRAME_BYTES = 256 * 1024
 ASR_PROVIDER_NO_STATUS_CLOSE_CODE = 1005
 DEFAULT_SPEAKER_ROLE = "narrator"
+TRANSCRIPT_POLISH_LEVELS = frozenset({"low", "medium", "high"})
 
 
 def _identity_text(text: str) -> str:
@@ -64,6 +65,7 @@ class VoiceGatewayTurnContext:
     speaker_role: str = DEFAULT_SPEAKER_ROLE
     parent_message_id: str | None = None
     ai_model: str | None = None
+    transcript_polish_level: str | None = None
 
 
 class VoiceGatewaySession:
@@ -250,10 +252,15 @@ class VoiceGatewaySession:
         ai_model = str(raw_ai_model).strip() if raw_ai_model else None
         if ai_model and len(ai_model) > 120:
             raise VoiceGatewayClientError("invalid_ai_model")
+        raw_polish_level = message.get("transcript_polish_level")
+        polish_level = str(raw_polish_level).strip() if raw_polish_level else None
+        if polish_level and polish_level not in TRANSCRIPT_POLISH_LEVELS:
+            raise VoiceGatewayClientError("invalid_transcript_polish_level")
         return VoiceGatewayTurnContext(
             speaker_role=speaker_role,
             parent_message_id=parent_message_id,
             ai_model=ai_model,
+            transcript_polish_level=polish_level,
         )
 
     async def _send_audio_frame(self, message: dict[str, Any]) -> None:

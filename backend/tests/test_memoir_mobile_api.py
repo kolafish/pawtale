@@ -98,6 +98,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     created = created_response.json()
     assert created["title"] == "母亲的回忆"
     assert created["type"] == "memoir"
+    assert created["metadata_json"]["transcript_polish_level"] == "low"
     assert created["metadata_json"]["memoir_profile"] == {
         "narrator_name": "",
         "narrator_gender": "female",
@@ -114,6 +115,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
             "narrator_origin": "四川绵阳",
             "narrator_age": 73,
             "default_guidance_mode": "free_narration",
+            "transcript_polish_level": "high",
         },
     )
     assert renamed_response.status_code == 200
@@ -122,6 +124,7 @@ async def test_mobile_memoir_projects_can_be_created_updated_and_activated(clien
     assert renamed["metadata_json"]["memoir_profile"]["narrator_origin"] == "四川绵阳"
     assert renamed["metadata_json"]["memoir_profile"]["narrator_age"] == 73
     assert renamed["metadata_json"]["memoir_profile"]["default_guidance_mode"] == "free_narration"
+    assert renamed["metadata_json"]["transcript_polish_level"] == "high"
 
     project_list_response = await client.get("/api/mobile/memoir/projects")
     project_list = project_list_response.json()
