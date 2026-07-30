@@ -5,7 +5,7 @@ import json
 import re
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +34,12 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
+from app.services.memoir.section_roles import (
+    PENDING_ASSIGNMENT_SECTION_ROLE,
+    PENDING_ASSIGNMENT_SECTION_TITLE,
+    SECTION_SYSTEM_ROLE_KEY,
+    requires_user_assignment,
+)
 from app.services.memoir.sections import assign_material_to_section
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -44,10 +50,11 @@ from app.services.memoir.transcript_projection import (
 
 SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录素材编辑。"
-    "请从整段讲述的主要叙事意图出发，把它作为一个完整素材归入最合适的小章节；"
+    "请从整段讲述的主要叙事意图出发，判断它应归入哪个已有小章节，"
+    "或者应暂时待归类；"
     "不要把一段话拆成多个事实或多个素材。"
 )
-ALLOWED_ACTIONS = {"assign_existing", "create_section", "leave_unassigned"}
+ALLOWED_ACTIONS = {"assign_existing", "leave_unassigned"}
 ALLOWED_SECTION_TYPES = {item.value for item in MemoirSectionType}
 
 
@@ -56,8 +63,6 @@ class MaterialOrganizationDecision:
     action: str
     section_id: str | None
     chapter_id: str | None
-    title: str
-    section_type: str
     confidence: float | None
     reason: str
 
@@ -83,8 +88,6 @@ class _MaterialOrganizationOutput(BaseModel):
     action: str
     section_id: str | None = None
     chapter_id: str | None = None
-    title: str = ""
-    section_type: str = ""
     confidence: float | None = None
     reason: str = ""
 
@@ -140,7 +143,11 @@ def material_organization_candidates(
             ],
         )
         for section in sections
-        if section.status == MemoirSectionStatus.ACTIVE.value
+        if (
+            section.status == MemoirSectionStatus.ACTIVE.value
+            and section.include_in_book
+            and not requires_user_assignment(section.metadata_json)
+        )
     ]
     return chapter_candidates, section_candidates
 
@@ -150,7 +157,6 @@ def build_material_organization_prompt(
     material_text: str,
     chapters: list[MaterialOrganizationChapterCandidate],
     sections: list[MaterialOrganizationSectionCandidate],
-    allow_leave_unassigned: bool = True,
 ) -> str:
     chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
@@ -173,31 +179,21 @@ def build_material_organization_prompt(
         }
         for chapter in chapters
     ]
-    organization_rule = (
-        "如果仅凭当前内容无法可靠归类，保留为未归类素材。"
-        if allow_leave_unassigned
-        else (
-            "这段讲述已经属于当前章节，必须归入一个已有小章节，"
-            "或在当前章节中新建小章节，不得保留为未归类素材。"
-        )
-    )
-    allowed_actions = (
-        "assign_existing|create_section|leave_unassigned"
-        if allow_leave_unassigned
-        else "assign_existing|create_section"
-    )
     return (
         "请判断下面这整段讲述应放在哪里。\n"
-        "优先选择语义连贯的已有小章节；只有现有小章节都不合适时才新建；"
-        f"{organization_rule}\n\n"
+        "根据讲述本身的内容和主题判断，不按素材数量或固定关键词归类。"
+        "如果它适合某个已有小章节，归入该小节；"
+        "如果现有小章节都不合适，选择最相关的已有章节并保留为待归类素材，"
+        "不要自动新建小节。\n\n"
         f"讲述：\n{material_text}\n\n"
         f"已有小章节：\n{json.dumps(candidates, ensure_ascii=False)}\n\n"
         f"可选章节：\n{json.dumps(chapter_candidates, ensure_ascii=False)}\n\n"
         "只返回 JSON："
-        f'{{"action":"{allowed_actions}",'
-        '"section_id":null,"chapter_id":null,"title":"",'
-        '"section_type":"event|life_fragment|person_portrait|life_stage_summary|viewpoint_reflection",'
+        '{"action":"assign_existing|leave_unassigned",'
+        '"section_id":null,"chapter_id":null,'
         '"confidence":0.0,"reason":""}'
+        "\nassign_existing 时填写 section_id；"
+        "leave_unassigned 时填写最相关的 chapter_id。"
     )
 
 
@@ -211,8 +207,6 @@ def normalize_material_organization_decision(
     action = _compact(data.get("action"), limit=40)
     section_id = _compact(data.get("section_id"), limit=36) or None
     chapter_id = _compact(data.get("chapter_id"), limit=36) or None
-    title = _compact(data.get("title"), limit=200)
-    section_type = _compact(data.get("section_type"), limit=40)
     reason = _compact(data.get("reason"), limit=300)
 
     if action not in ALLOWED_ACTIONS:
@@ -220,20 +214,12 @@ def normalize_material_organization_decision(
     if action == "assign_existing" and section_id not in allowed_section_ids:
         action = "leave_unassigned"
         section_id = None
-    if action == "create_section" and (
-        chapter_id not in allowed_chapter_ids or not title
-    ):
-        action = "leave_unassigned"
+    if action == "leave_unassigned" and chapter_id not in allowed_chapter_ids:
         chapter_id = None
-        title = ""
-    if section_type not in ALLOWED_SECTION_TYPES:
-        section_type = MemoirSectionType.LIFE_FRAGMENT.value
     return MaterialOrganizationDecision(
         action=action,
         section_id=section_id,
         chapter_id=chapter_id,
-        title=title,
-        section_type=section_type,
         confidence=_confidence(data.get("confidence")),
         reason=reason,
     )
@@ -245,7 +231,6 @@ async def decide_material_organization(
     chapters: list[MaterialOrganizationChapterCandidate],
     sections: list[MaterialOrganizationSectionCandidate],
     ai_client: AITextClient,
-    allow_leave_unassigned: bool = True,
 ) -> MaterialOrganizationDecision:
     chapter_refs = ModelReferenceMap("C", (chapter.id for chapter in chapters))
     section_refs = ModelReferenceMap("S", (section.id for section in sections))
@@ -253,7 +238,6 @@ async def decide_material_organization(
         material_text=material_text,
         chapters=chapters,
         sections=sections,
-        allow_leave_unassigned=allow_leave_unassigned,
     )
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     generated = await generate_structured_with_client(
@@ -268,9 +252,9 @@ async def decide_material_organization(
         max_attempts=policy.max_attempts,
     )
     payload = generated.value.model_dump()
-    if payload["action"] == "assign_existing":
+    if payload["action"] == "assign_existing" and payload["section_id"] is not None:
         payload["section_id"] = section_refs.decode(payload["section_id"])
-    elif payload["action"] == "create_section":
+    elif payload["action"] == "leave_unassigned" and payload["chapter_id"] is not None:
         payload["chapter_id"] = chapter_refs.decode(payload["chapter_id"])
     return normalize_material_organization_decision(
         payload,
@@ -341,6 +325,51 @@ async def _load_context(
     return utterance, chapters, sections
 
 
+async def _pending_assignment_section(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> MemoirSection:
+    sections = list(
+        (
+            await db.scalars(
+                select(MemoirSection)
+                .where(
+                    MemoirSection.project_id == project_id,
+                    MemoirSection.chapter_id == chapter_id,
+                )
+                .order_by(MemoirSection.sort_order, MemoirSection.id)
+            )
+        ).all()
+    )
+    existing = next(
+        (
+            section
+            for section in sections
+            if requires_user_assignment(section.metadata_json)
+            and section.status == MemoirSectionStatus.ACTIVE.value
+        ),
+        None,
+    )
+    if existing is not None:
+        return existing
+    section = MemoirSection(
+        project_id=project_id,
+        chapter_id=chapter_id,
+        title=PENDING_ASSIGNMENT_SECTION_TITLE,
+        section_type="life_fragment",
+        sort_order=max((item.sort_order for item in sections), default=-1) + 1,
+        include_in_book=False,
+        metadata_json={
+            SECTION_SYSTEM_ROLE_KEY: PENDING_ASSIGNMENT_SECTION_ROLE,
+        },
+    )
+    db.add(section)
+    await db.flush()
+    return section
+
+
 async def organize_material(
     db: AsyncSession,
     *,
@@ -409,7 +438,7 @@ async def organize_material(
         sections=section_candidates,
         ai_client=client,
     )
-    if decision.action == "leave_unassigned":
+    if decision.action == "leave_unassigned" and decision.chapter_id is None:
         return EditingJobResult(
             result_json={
                 "utterance_id": utterance_id,
@@ -419,27 +448,12 @@ async def organize_material(
         )
 
     section_id = decision.section_id
-    if decision.action == "create_section":
-        current_max_order = await db.scalar(
-            select(func.max(MemoirSection.sort_order)).where(
-                MemoirSection.project_id == project_id,
-                MemoirSection.chapter_id == decision.chapter_id,
-            )
-        )
-        next_order = (
-            int(current_max_order) + 1
-            if current_max_order is not None
-            else 0
-        )
-        section = MemoirSection(
+    if decision.action == "leave_unassigned":
+        section = await _pending_assignment_section(
+            db,
             project_id=project_id,
-            chapter_id=decision.chapter_id,
-            title=decision.title,
-            section_type=decision.section_type,
-            sort_order=next_order,
+            chapter_id=str(decision.chapter_id),
         )
-        db.add(section)
-        await db.flush()
         section_id = section.id
 
     if section_id is None:

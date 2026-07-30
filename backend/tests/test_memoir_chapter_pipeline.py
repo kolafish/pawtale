@@ -623,10 +623,31 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
     )
 
     assert len(fake.prompts) == 3
-    assert all(repeated_boundary not in prompt for prompt in fake.prompts)
+    assert repeated_boundary not in fake.prompts[0]
+    assert repeated_boundary in fake.prompts[1]
+    assert "完整正文" in fake.prompts[1]
     assert "小节开头大段重复了上一小节结尾" in fake.prompts[2]
     assert generated.sections[1].content == "退休了以后，好多人到处聘我去。"
     assert generated.content.count(repeated_boundary) == 1
+
+
+def test_previous_section_context_uses_digest_for_long_body():
+    context = _two_section_context()
+    long_body = "这一段正文很长。" * 300
+
+    result = chapter_generation.previous_section_context(
+        section=context.sections[0],
+        content=long_body,
+        continuity=chapter_generation.ChapterSectionContinuity(
+            summary="我从家中出发，同行的是老同事。",
+            focus="这次出发意味着重新开始。",
+            key_points=("老同事同行", "清晨从家出发"),
+        ),
+    )
+
+    assert long_body not in result
+    assert "摘要：我从家中出发，同行的是老同事。" in result
+    assert "关键要素（人物、地点、事件等）：老同事同行；清晨从家出发" in result
 
 
 async def _chapter(client, test_db):

@@ -509,7 +509,7 @@ async def test_section_api_excludes_and_rejects_interviewer_material(
     assert response.json()["detail"] == "只有已有文字的叙述者素材可以归入小章节"
 
 
-async def test_material_organization_appends_after_highest_section_order(
+async def test_material_organization_assigns_existing_or_keeps_pending(
     client,
     test_db,
 ):
@@ -519,43 +519,89 @@ async def test_material_organization_appends_after_highest_section_order(
     existing.sort_order = 4
     test_db.add(existing)
     await test_db.commit()
-    created = await create_test_voice_transcript(
+    organization_sections = list(
+        (
+            await test_db.scalars(
+                select(MemoirSection)
+                .where(MemoirSection.project_id == project_id)
+                .order_by(
+                    MemoirSection.chapter_id,
+                    MemoirSection.sort_order,
+                    MemoirSection.id,
+                )
+            )
+        ).all()
+    )
+    existing_ref = f"S{organization_sections.index(existing) + 1}"
+    assigned = await create_test_voice_transcript(
         client,
         test_db,
         "后来我又和朋友去走了另一条山路。",
         project_id=project_id,
     )
-    ai = FakeMaterialOrganizationAI(
+    assigned_ai = FakeMaterialOrganizationAI(
         {
-            "action": "create_section",
-            "chapter_id": "C1",
-            "title": "再次同行",
-            "section_type": "event",
+            "action": "assign_existing",
+            "section_id": existing_ref,
+            "chapter_id": None,
             "confidence": 0.9,
-            "reason": "新的独立经历",
+            "reason": "延续已有的同行经历",
         }
     )
-
-    result = await organize_material(
+    assigned_result = await organize_material(
         test_db,
         project_id=project_id,
-        utterance_id=created["utterance_id"],
+        utterance_id=assigned["utterance_id"],
         expected_text_hash=source_text_hash("后来我又和朋友去走了另一条山路。"),
-        expected_transcript_version_id=created["transcript_version_id"],
-        ai_client=ai,
+        expected_transcript_version_id=assigned["transcript_version_id"],
+        ai_client=assigned_ai,
+    )
+    assert assigned_result.result_json["section_id"] == existing.id
+
+    pending = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我还想讲一段暂时不知道该放在哪里的新经历。",
+        project_id=project_id,
+    )
+    pending_ai = FakeMaterialOrganizationAI(
+        {
+            "action": "leave_unassigned",
+            "section_id": None,
+            "chapter_id": "C1",
+            "confidence": 0.6,
+            "reason": "现有小节都不合适",
+        }
+    )
+    pending_result = await organize_material(
+        test_db,
+        project_id=project_id,
+        utterance_id=pending["utterance_id"],
+        expected_text_hash=source_text_hash(
+            "我还想讲一段暂时不知道该放在哪里的新经历。"
+        ),
+        expected_transcript_version_id=pending["transcript_version_id"],
+        ai_client=pending_ai,
     )
 
-    section = await test_db.scalar(
+    pending_section = await test_db.scalar(
         select(MemoirSection).where(
             MemoirSection.project_id == project_id,
-            MemoirSection.title == "再次同行",
+            MemoirSection.title == "待归类素材",
         )
     )
-    assert result.result_json["section_id"] == section.id
-    assert section.sort_order == 5
-    assert ai.calls == 1
-    assert chapters[0].id not in ai.prompts[0]
-    assert '"chapter_id": "C1"' in ai.prompts[0]
+    assert pending_section is not None
+    assert pending_result.result_json["section_id"] == pending_section.id
+    assert pending_section.chapter_id == chapters[0].id
+    assert pending_section.sort_order == 5
+    assert pending_section.include_in_book is False
+    assert pending_section.metadata_json["system_role"] == (
+        "pending_material_assignment"
+    )
+    assert assigned_ai.calls == pending_ai.calls == 1
+    assert chapters[0].id not in pending_ai.prompts[0]
+    assert "assign_existing|leave_unassigned" in pending_ai.prompts[0]
+    assert "create_section" not in pending_ai.prompts[0]
 
 
 async def test_section_regeneration_job_reports_progress_and_deduplicates(
