@@ -68,6 +68,24 @@ function revisionProposal(overrides = {}) {
   };
 }
 
+function revisionProposalMetadata(overrides = {}) {
+  const proposal = revisionProposal(overrides);
+  return {
+    ...proposal,
+    before: { ...proposal.before, manuscript: null },
+    after: { ...proposal.after, manuscript: null },
+  };
+}
+
+function revisionProposalPreview(version, overrides = {}) {
+  const proposal = revisionProposal(overrides);
+  const other = version === "before" ? "after" : "before";
+  return {
+    ...proposal,
+    [other]: { ...proposal[other], manuscript: null },
+  };
+}
+
 function revisionFeedbackJob(status = "idle") {
   return {
     job_id: status === "idle" ? null : "feedback-job-1",
@@ -88,16 +106,20 @@ function revisionFeedbackJob(status = "idle") {
 
 function loadRevisionPage({ api = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
-    getMemoirBookRevisionProposal: async () => revisionProposal(),
+    getMemoirBookRevisionProposal: async (_projectId, _proposalId, preview = "none") => (
+      preview === "none"
+        ? revisionProposalMetadata()
+        : revisionProposalPreview(preview)
+    ),
     enqueueMemoirBookRevisionFeedback: async () => revisionFeedbackJob("pending"),
     getMemoirBookRevisionFeedbackJob: async () => revisionFeedbackJob(),
-    applyMemoirBookRevisionProposal: async () => revisionProposal({
+    applyMemoirBookRevisionProposal: async () => revisionProposalMetadata({
       status: "applied",
       can_apply: false,
       can_dismiss: false,
       result_output_version_id: "version-2",
     }),
-    dismissMemoirBookRevisionProposal: async () => revisionProposal({
+    dismissMemoirBookRevisionProposal: async () => revisionProposalMetadata({
       status: "dismissed",
       can_apply: false,
       can_dismiss: false,
@@ -108,7 +130,7 @@ function loadRevisionPage({ api = {} } = {}) {
   return loadPageModule("../pages/book-revision/index.ts");
 }
 
-test("book revision page switches the changed sections and whole book together", () => {
+test("book revision page loads only the selected whole-book preview on demand", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   const template = fs.readFileSync(path.join(__dirname, "../pages/book-revision/index.wxml"), "utf8");
   const sectionLoopTag = template.match(/<view[^>]*wx:for="{{chapter\.sections}}"[^>]*>/)?.[0];
@@ -119,15 +141,49 @@ test("book revision page switches the changed sections and whole book together",
     /wx:if="{{!chapter\.sections\.length}}"[^>]*>{{chapter\.content}}/,
   );
 
-  const { revisionViewPatch } = loadRevisionPage().mod;
-  const proposal = revisionProposal();
+  const previewRequests = [];
+  const { mod, page } = loadRevisionPage({
+    api: {
+      getMemoirBookRevisionProposal: async (_projectId, _proposalId, preview = "none") => {
+        previewRequests.push(preview);
+        return preview === "none"
+          ? revisionProposalMetadata()
+          : revisionProposalPreview(preview, preview === "before"
+            ? { summary: "修改预览已更新。", updated_at: "2026-07-30T00:01:00" }
+            : {});
+      },
+    },
+  });
+  const { revisionViewPatch } = mod;
+  const proposal = revisionProposalMetadata();
   const after = revisionViewPatch(proposal);
   const before = revisionViewPatch(proposal, "before");
 
   assert.equal(after.changedChapters[0].sections[0].display_content, "修改后正文");
   assert.equal(before.changedChapters[0].sections[0].display_content, "修改前正文");
-  assert.equal(before.wholeChapters[0].sections[0].content, "修改前正文");
   assert.equal(after.proposal.comparison.before_chapter_order[0].title, "上学时光");
+  assert.equal("before" in after.proposal, false);
+  assert.equal("chapters" in after.proposal.comparison, false);
+  assert.equal("wholeChapters" in after, false);
+
+  const context = pageContext(page, {
+    projectId: "project-1",
+    proposalId: "proposal-1",
+    proposal,
+  });
+  context.revisionProposal = proposal;
+  await page.switchMode.call(context, {
+    currentTarget: { dataset: { mode: "whole" } },
+  });
+  assert.deepEqual(previewRequests, ["after"]);
+  assert.equal(context.data.wholeChapters[0].sections[0].content, "修改后正文");
+
+  await page.switchPreviewVersion.call(context, {
+    currentTarget: { dataset: { version: "before" } },
+  });
+  assert.deepEqual(previewRequests, ["after", "before"]);
+  assert.equal(context.data.wholeChapters[0].sections[0].content, "修改前正文");
+  assert.equal(context.data.proposal.summary, "修改预览已更新。");
 });
 
 test("book revision page confirms or dismisses the candidate without hidden actions", async () => {
@@ -145,7 +201,7 @@ test("book revision page confirms or dismisses the candidate without hidden acti
     api: {
       applyMemoirBookRevisionProposal: async (projectId, proposalId) => {
         actions.push(["apply", projectId, proposalId]);
-        return revisionProposal({
+        return revisionProposalMetadata({
           status: "applied",
           can_apply: false,
           can_dismiss: false,
@@ -154,18 +210,18 @@ test("book revision page confirms or dismisses the candidate without hidden acti
       },
       dismissMemoirBookRevisionProposal: async (projectId, proposalId) => {
         actions.push(["dismiss", projectId, proposalId]);
-        return revisionProposal({ status: "dismissed" });
+        return revisionProposalMetadata({ status: "dismissed" });
       },
     },
   });
   const context = pageContext(page, {
     projectId: "project-1",
     proposalId: "proposal-1",
-    proposal: revisionProposal(),
+    proposal: revisionProposalMetadata(),
   });
 
   await page.applyRevision.call(context);
-  context.data.proposal = revisionProposal();
+  context.data.proposal = revisionProposalMetadata();
   context.data.busy = false;
   await page.dismissRevision.call(context);
 
@@ -178,7 +234,7 @@ test("book revision page confirms or dismisses the candidate without hidden acti
 
 test("book revision feedback refreshes the candidate before final confirmation", async () => {
   const calls = [];
-  const proposal = revisionProposal();
+  const proposal = revisionProposalMetadata();
   global.wx = {
     showToast(options) {
       calls.push(["toast", options.title]);
@@ -198,7 +254,7 @@ test("book revision feedback refreshes the candidate before final confirmation",
         revisionFeedbackJob("succeeded"),
       getMemoirBookRevisionProposal: async () => {
         calls.push(["reload"]);
-        return revisionProposal({
+        return revisionProposalMetadata({
           summary: "已经按意见更新。",
           updated_at: "2026-07-30T00:01:00",
         });
@@ -247,13 +303,13 @@ test("book revision keeps submit error when polling only finds an older success"
       },
       getMemoirBookRevisionFeedbackJob: async () =>
         revisionFeedbackJob("succeeded"),
-      getMemoirBookRevisionProposal: async () => revisionProposal(),
+      getMemoirBookRevisionProposal: async () => revisionProposalMetadata(),
     },
   });
   const context = pageContext(page, {
     projectId: "project-1",
     proposalId: "proposal-1",
-    proposal: revisionProposal(),
+    proposal: revisionProposalMetadata(),
     feedbackText: "请统一前后章节的人物称谓。",
   });
   context.pageActive = true;

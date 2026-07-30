@@ -604,6 +604,7 @@ async def refine_book_revision_proposal(
     response = await book_revision_proposals.proposal_response(
         db,
         proposal=proposal,
+        preview="none",
     )
     candidate = _snapshots(proposal.candidate_chapter_snapshot_json)
     if (
@@ -672,6 +673,7 @@ async def refine_book_revision_proposal(
     current_response = await book_revision_proposals.proposal_response(
         db,
         proposal=current,
+        preview="none",
     )
     if (
         not current_response.can_apply

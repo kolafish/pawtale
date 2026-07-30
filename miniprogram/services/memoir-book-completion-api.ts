@@ -125,6 +125,8 @@ export interface MemoirBookRevisionPreviewVersion {
   manuscript?: MemoirBookManuscript | null;
 }
 
+export type MemoirBookRevisionPreview = "none" | "before" | "after" | "both";
+
 export interface MemoirBookRevisionProposal {
   id: string;
   project_id: string;
@@ -332,9 +334,10 @@ function bookRevisionProposalPath(
 export function getMemoirBookRevisionProposal(
   projectId: string,
   proposalId: string,
+  preview: MemoirBookRevisionPreview = "none",
 ): Promise<MemoirBookRevisionProposal> {
   return memoirRequest<MemoirBookRevisionProposal>(
-    bookRevisionProposalPath(projectId, proposalId),
+    `${bookRevisionProposalPath(projectId, proposalId)}?preview=${preview}`,
   );
 }
 
@@ -367,7 +370,7 @@ export function applyMemoirBookRevisionProposal(
   proposalId: string,
 ): Promise<MemoirBookRevisionProposal> {
   return memoirRequest<MemoirBookRevisionProposal>(
-    bookRevisionProposalPath(projectId, proposalId, "/apply"),
+    `${bookRevisionProposalPath(projectId, proposalId, "/apply")}?preview=none`,
     { method: "POST" },
   );
 }
@@ -377,7 +380,7 @@ export function dismissMemoirBookRevisionProposal(
   proposalId: string,
 ): Promise<MemoirBookRevisionProposal> {
   return memoirRequest<MemoirBookRevisionProposal>(
-    bookRevisionProposalPath(projectId, proposalId, "/dismiss"),
+    `${bookRevisionProposalPath(projectId, proposalId, "/dismiss")}?preview=none`,
     { method: "POST" },
   );
 }
