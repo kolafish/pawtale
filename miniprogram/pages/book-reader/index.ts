@@ -3,14 +3,18 @@ import type {
   MemoirBookOutput,
   MemoirBookOutputVersion,
 } from "../../domain/memoir-book";
+import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import { definePage } from "../../services/page-definition";
 import {
+  createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
+  getMemoirChapterWorkspace,
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
 } from "../../services/memoir-voice-api";
 import { routeAuthError } from "../../services/navigation";
 import { AudioPlaybackController } from "../../services/audio-playback";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
 import { VoiceAssistantTTSProgressRuntime } from "../../services/voice-assistant-tts-progress";
 import {
@@ -26,8 +30,10 @@ import {
 } from "../../services/share";
 import {
   bookOutputData,
+  readingParagraphs,
   trimText,
   type BookData,
+  type BookOutputChapterPreviewView,
 } from "../book/book-view-model";
 import {
   playBookAudioFiles,
@@ -52,7 +58,9 @@ type BookReaderData = Pick<
   loading: boolean;
   playbackError: string;
   projectId: string;
+  chapterId: string;
   versionId: string;
+  readerMode: "book" | "chapter";
   readerTitle: string;
   readerSubtitle: string;
 };
@@ -112,6 +120,59 @@ function readerData(
   };
 }
 
+function chapterReaderData(
+  workspace: MemoirChapterWorkspace,
+): ReturnType<typeof readerData> {
+  const sections = workspace.draft_sections
+    .filter((section) => trimText(section.title) && trimText(section.content))
+    .map((section, index) => {
+      const content = trimText(section.content);
+      return {
+        id: section.section_id,
+        index: index + 1,
+        indexText: `${index + 1}`,
+        title: trimText(section.title),
+        content,
+        paragraphs: readingParagraphs(content),
+        excerpt: content.slice(0, 72),
+        metaText: `${content.length} 字`,
+      };
+    });
+  const content = sections.length
+    ? sections.map((section) => `${section.title}\n\n${section.content}`).join("\n\n")
+    : trimText(workspace.draft_content);
+  const chapter: BookOutputChapterPreviewView = {
+    id: workspace.chapter_id,
+    chapterId: workspace.chapter_id,
+    index: 1,
+    indexText: "本章",
+    title: trimText(workspace.chapter_title) || "本章正文",
+    content,
+    excerpt: content.slice(0, 96),
+    metaText: `${sections.length} 个小节 · ${content.replace(/\s/g, "").length} 字`,
+    sections,
+  };
+  return {
+    bookContent: content,
+    bookCharCount: content.replace(/\s/g, "").length,
+    bookPreviewTitle: chapter.title,
+    bookPreviewTocItems: [],
+    bookPreviewChapters: content ? [chapter] : [],
+    bookManuscriptTitle: "",
+    bookManuscriptSubtitle: "",
+    bookVersionText: workspace.draft_version
+      ? `章节第 ${workspace.draft_version} 版`
+      : "当前章节稿",
+    bookViewingHistoricalVersion: false,
+    bookVersionNotice: "",
+    bookStaleNotice: workspace.draft_needs_rewrite
+      ? "本章素材已经变化，这里仍是更新正文前的版本。"
+      : "",
+    readerTitle: chapter.title,
+    readerSubtitle: chapter.metaText,
+  };
+}
+
 definePage<BookReaderData>()({
   audioPlayback: new AudioPlaybackController(),
   ttsProgress: new VoiceAssistantTTSProgressRuntime(),
@@ -122,7 +183,9 @@ definePage<BookReaderData>()({
     error: "",
     playbackError: "",
     projectId: "",
+    chapterId: "",
     versionId: "",
+    readerMode: "book",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -138,17 +201,26 @@ definePage<BookReaderData>()({
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
+    const chapterId = queryParam(query, "chapterId");
     const versionId = queryParam(query, "versionId");
-    this.setData({ projectId, versionId });
+    const readerMode = chapterId ? "chapter" : "book";
+    this.setData({ projectId, chapterId, versionId, readerMode });
     if (!projectId) {
       this.setData({ error: "缺少成书信息，暂时无法打开。" });
+      return;
+    }
+    if (chapterId) {
+      setPageNavigationTitle("整章预览");
+      await this.loadChapterReader(projectId, chapterId);
       return;
     }
     await this.loadBookReader(projectId, versionId);
   },
 
   onShow() {
-    enableMiniProgramShareMenu();
+    if (this.data.readerMode === "book") {
+      enableMiniProgramShareMenu();
+    }
   },
 
   onHide() {
@@ -187,8 +259,8 @@ definePage<BookReaderData>()({
     scrollReader({ scrollTop: 0 });
   },
 
-  async playBookAudio() {
-    const target = "book";
+  async playReaderAudio() {
+    const target = this.data.readerMode;
     if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
       this.stopPlayback();
       return;
@@ -208,10 +280,16 @@ definePage<BookReaderData>()({
       playbackError: "",
     });
     try {
-      const response = await createMemoirBookOutputTTS(
-        this.data.projectId,
-        readBookTTSRequest(),
-      );
+      const response = this.data.readerMode === "chapter"
+        ? await createMemoirBookChapterDraftTTS(
+            this.data.projectId,
+            this.data.chapterId,
+            readBookTTSRequest(),
+          )
+        : await createMemoirBookOutputTTS(
+            this.data.projectId,
+            readBookTTSRequest(),
+          );
       if (token !== this.playToken) {
         return;
       }
@@ -223,7 +301,9 @@ definePage<BookReaderData>()({
       }
       if (token === this.playToken) {
         this.setData({
-          playbackError: error instanceof Error ? error.message : "全书朗读失败",
+          playbackError: error instanceof Error
+            ? error.message
+            : `${this.data.readerMode === "chapter" ? "整章" : "全书"}朗读失败`,
         });
       }
     } finally {
@@ -264,6 +344,27 @@ definePage<BookReaderData>()({
         return;
       }
       this.setData({ error: error instanceof Error ? error.message : "成书打开失败" });
+    } finally {
+      this.setData({ loading: false });
+    }
+  },
+
+  async loadChapterReader(projectId: string, chapterId: string) {
+    this.stopPlayback();
+    this.setData({ loading: true, error: "", playbackError: "" });
+    try {
+      const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
+      this.setData(chapterReaderData(workspace));
+      if (!trimText(this.data.bookContent)) {
+        this.setData({ error: "本章正文还没有生成。" });
+      }
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "整章预览打开失败",
+      });
     } finally {
       this.setData({ loading: false });
     }

@@ -310,7 +310,8 @@ test("chapter workspace row actions avoid native button shrink wrapping", () => 
   assert.match(template, /bindtap="toggleDraftSectionVoiceInstruction"/);
   assert.match(template, /bindtap="submitDraftSectionAIInstruction"/);
   assert.match(template, /bindtap="playDraftSection"/);
-  assert.match(template, /bindtap="playDraftChapter"/);
+  assert.match(template, /bindtap="openChapterPreview"/);
+  assert.match(template, />整章预览<\/view>/);
   assert.match(template, /operationKind !== ''/);
   assert.match(template, /audioPhase === "preparing"/);
   assert.doesNotMatch(
@@ -1199,56 +1200,20 @@ test("chapter workspace reads one draft section with saved book voice settings",
   assert.equal(context.data.audioTarget, "");
 });
 
-test("chapter workspace reads the full chapter with saved book voice settings", async () => {
-  installWx();
-  const requests = [];
-  const played = [];
-  const { page } = loadWorkspacePage({
-    voiceApiExports: {
-      createMemoirBookChapterDraftTTS: async (...args) => {
-        requests.push(args);
-        return { audio_file_ids: ["audio-chapter-1", "audio-chapter-2"] };
-      },
-    },
-  });
+test("chapter workspace opens the full chapter reading preview", async () => {
+  const { navigations } = installWx();
+  const { page } = loadWorkspacePage();
   const context = pageContext(page);
-  let token = 0;
-  context.audioPlayback = {
-    nextToken() {
-      token += 1;
-      return token;
-    },
-    currentToken() {
-      return token;
-    },
-    stop() {
-      token += 1;
-    },
-    async playFile(audioFileId, playToken) {
-      played.push([audioFileId, playToken]);
-    },
-  };
   await page.onLoad.call(context, {
     projectId: "project-1",
     chapterId: "chapter-1",
   });
 
-  await page.playDraftChapter.call(context);
+  page.openChapterPreview.call(context);
 
-  assert.deepEqual(requests, [[
-    "project-1",
-    "chapter-1",
-    {
-      voice: "zh_female_xiaohe_uranus_bigtts",
-      speed_ratio: 1.5,
-    },
-  ]]);
-  assert.deepEqual(played, [
-    ["audio-chapter-1", 2],
-    ["audio-chapter-2", 2],
+  assert.deepEqual(navigations, [
+    "/pages/book-reader/index?projectId=project-1&chapterId=chapter-1",
   ]);
-  assert.equal(context.data.audioPhase, "idle");
-  assert.equal(context.data.audioTarget, "");
 });
 
 test("chapter workspace does not confirm a legacy flat draft without section boundaries", async () => {
