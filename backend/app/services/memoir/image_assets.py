@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 from dataclasses import dataclass
 from hashlib import sha256
 import mimetypes
@@ -18,6 +19,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import DATA_DIR
 from app.domain.memoir.types import (
     MemoirBookImagePlacementType,
+    MemoirCreatedBy,
     MemoirImageAssetSourceType,
     MemoirImageAssetStatus,
     MemoirSectionStatus,
@@ -42,6 +44,7 @@ from app.schemas.memoir_images import (
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.branding import branded_image_derivative
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.book_output_versions import append_book_output_version
 from app.services.memoir.share_video_backgrounds import ShareVideoBackgroundAsset
 
 
@@ -742,7 +745,11 @@ async def sync_latest_book_output_image_snapshots(
     if not output or not output.versions:
         return False
     latest = output.versions[-1]
-    manuscript = latest.manuscript_json if isinstance(latest.manuscript_json, dict) else {}
+    manuscript = (
+        deepcopy(latest.manuscript_json)
+        if isinstance(latest.manuscript_json, dict)
+        else {}
+    )
     chapters = manuscript.get("chapters")
     if not isinstance(chapters, list):
         return False
@@ -772,8 +779,18 @@ async def sync_latest_book_output_image_snapshots(
             changed = True
     if not changed:
         return False
-    latest.manuscript_json = manuscript
-    flag_modified(latest, "manuscript_json")
+    await append_book_output_version(
+        db,
+        output=output,
+        content=latest.content,
+        chapter_snapshot_json=[
+            item
+            for item in (latest.chapter_snapshot_json or [])
+            if isinstance(item, dict)
+        ],
+        manuscript_json=manuscript,
+        created_by=MemoirCreatedBy.SYSTEM,
+    )
     invalidate_book_output(output)
     return True
 

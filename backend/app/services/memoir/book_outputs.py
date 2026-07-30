@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +57,7 @@ from app.services.memoir.book_output_manuscript import (
     cover_style as _cover_style,
     fallback_title_suggestions as _fallback_title_suggestions,
     formal_book_title as _formal_book_title,
+    editable_manuscript as _editable_manuscript,
     manuscript_response as _manuscript_response,
     request_book_metadata_patch as _request_book_metadata_patch,
     stored_cover_style as _stored_cover_style,
@@ -77,6 +78,10 @@ from app.services.memoir.book_output_export import (
 )
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.book_output_versions import (
+    append_book_output_version,
+    book_output_version_title,
+)
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.voice_tts_types import TTSClient
 
@@ -100,11 +105,16 @@ def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookC
     return draft.versions[-1]
 
 
-def _output_version_response(version: MemoirBookOutputVersion, *, title: str) -> MemoirBookOutputVersionResponse:
+def _output_version_response(
+    version: MemoirBookOutputVersion,
+    *,
+    fallback_title: str,
+) -> MemoirBookOutputVersionResponse:
     snapshot = [
         item for item in (version.chapter_snapshot_json or [])
         if isinstance(item, dict)
     ]
+    title = book_output_version_title(version, fallback=fallback_title)
     manuscript = _manuscript_response(
         title=title,
         content=version.content,
@@ -142,7 +152,10 @@ def _output_response(
         for version in output.versions
     ]
     latest_version = (
-        _output_version_response(output.versions[-1], title=output.title)
+        _output_version_response(
+            output.versions[-1],
+            fallback_title=output.title,
+        )
         if output.versions
         else None
     )
@@ -326,15 +339,6 @@ def _output_stale_chapter_titles(
     return _snapshot_stale_chapter_titles(latest_version, current_snapshot, unavailable_titles)
 
 
-async def _latest_output_version_number(db: AsyncSession, output_id: str) -> int:
-    value = await db.scalar(
-        select(func.max(MemoirBookOutputVersion.version)).where(
-            MemoirBookOutputVersion.output_id == output_id
-        )
-    )
-    return int(value or 0)
-
-
 async def _load_output(
     db: AsyncSession,
     *,
@@ -384,7 +388,7 @@ async def get_book_output_version(
     )
     if version is None:
         raise HTTPException(status_code=404, detail="书稿版本不存在")
-    return _output_version_response(version, title=output.title)
+    return _output_version_response(version, fallback_title=output.title)
 
 
 async def book_output_response_or_none(
@@ -479,8 +483,7 @@ async def update_book_output(
     cover_style = _cover_style(req.cover_style) if "cover_style" in fields_set and req.cover_style else _stored_cover_style(latest)
     metadata_patch = _request_book_metadata_patch(req)
     content = _compose_book_content_from_snapshot(title=title, snapshot=snapshot)
-    latest.content = content
-    latest.manuscript_json = _updated_manuscript_payload(
+    manuscript_json = _updated_manuscript_payload(
         title=title,
         stored=latest.manuscript_json or {},
         content=content,
@@ -488,6 +491,15 @@ async def update_book_output(
         cover_style_value=cover_style,
         metadata_patch=metadata_patch,
     )
+    if content != latest.content or manuscript_json != latest.manuscript_json:
+        await append_book_output_version(
+            db,
+            output=output,
+            content=content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript_json,
+            created_by=MemoirCreatedBy.USER,
+        )
     output.title = title
     invalidate_book_output(output)
     output.metadata_json = {
@@ -515,7 +527,7 @@ async def regenerate_book_output_editorial_copy(
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
-    manuscript = _manuscript_response(
+    manuscript = _editable_manuscript(
         title=output.title,
         content=latest.content,
         snapshot=snapshot,
@@ -544,7 +556,16 @@ async def regenerate_book_output_editorial_copy(
         targets=targets,
         chapter_ids=chapter_ids,
     )
-    latest.manuscript_json = manuscript.model_dump(mode="json")
+    manuscript_json = manuscript.model_dump(mode="json")
+    if manuscript_json != latest.manuscript_json:
+        await append_book_output_version(
+            db,
+            output=output,
+            content=latest.content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript_json,
+            created_by=MemoirCreatedBy.AI,
+        )
     invalidate_book_output(output)
     output.metadata_json = {
         **(output.metadata_json or {}),
@@ -572,7 +593,7 @@ async def update_book_output_chapter_editorial_copy(
         raise HTTPException(status_code=404, detail="全书稿不存在")
     latest = output.versions[-1]
     snapshot = [item for item in (latest.chapter_snapshot_json or []) if isinstance(item, dict)]
-    manuscript = _manuscript_response(
+    manuscript = _editable_manuscript(
         title=output.title,
         content=latest.content,
         snapshot=snapshot,
@@ -589,7 +610,16 @@ async def update_book_output_chapter_editorial_copy(
         pull_quote_source_ref_id=req.pull_quote_source_ref_id,
     )
 
-    latest.manuscript_json = manuscript.model_dump(mode="json")
+    manuscript_json = manuscript.model_dump(mode="json")
+    if manuscript_json != latest.manuscript_json:
+        await append_book_output_version(
+            db,
+            output=output,
+            content=latest.content,
+            chapter_snapshot_json=snapshot,
+            manuscript_json=manuscript_json,
+            created_by=MemoirCreatedBy.USER,
+        )
     invalidate_book_output(output)
     output.metadata_json = {
         **(output.metadata_json or {}),
@@ -680,8 +710,9 @@ async def export_book_output_file(
     if not version:
         raise HTTPException(status_code=404, detail="全书版本不存在")
     content = version.content.strip()
+    title = book_output_version_title(version, fallback=output.title)
     manuscript = _manuscript_response(
-        title=output.title,
+        title=title,
         content=content,
         snapshot=[item for item in (version.chapter_snapshot_json or []) if isinstance(item, dict)],
         stored=version.manuscript_json,
@@ -696,7 +727,7 @@ async def export_book_output_file(
         return await asyncio.wait_for(
             asyncio.to_thread(
                 render_book_output_export,
-                title=output.title,
+                title=title,
                 version=version.version,
                 content=content,
                 manuscript=manuscript.model_dump(mode="json") if manuscript else {},

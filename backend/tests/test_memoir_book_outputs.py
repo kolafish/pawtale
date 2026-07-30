@@ -778,7 +778,9 @@ async def test_mobile_memoir_book_output_editorial_copy_generation_job_runs_in_b
     assert event.summary_text == "章首引语已重生成，可以预览或导出。"
     output = await test_db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     version = await test_db.scalar(
-        select(MemoirBookOutputVersion).where(MemoirBookOutputVersion.output_id == output.id)
+        select(MemoirBookOutputVersion)
+        .where(MemoirBookOutputVersion.output_id == output.id)
+        .order_by(MemoirBookOutputVersion.version.desc())
     )
     assert event.metadata_json["result_version_id"] == version.id
     assert version.manuscript_json["chapters"][0]["pull_quotes"] == [
@@ -928,14 +930,21 @@ async def test_mobile_memoir_book_output_exports_selected_version(client, test_d
         json={"title": "外婆慢慢说"},
     )
     assert second.status_code == 200
+    assert second.json()["latest_version"]["version"] == first_version.version + 1
 
     exported = await client.get(
         f"/api/mobile/memoir/projects/{project_id}/book-output/export?format=txt&version_id={first_version.id}"
     )
+    unchanged = await client.get(
+        f"/api/mobile/memoir/projects/{project_id}/book-output/versions/{first_version.id}"
+    )
 
     assert exported.status_code == 200
     assert "我小时候常在外婆家的院子里晒太阳。" in exported.text
-    assert exported.text.startswith("外婆慢慢说")
+    assert exported.text.startswith("外婆的回忆录")
+    assert unchanged.status_code == 200
+    assert unchanged.json()["content"] == first_version.content
+    assert unchanged.json()["manuscript"] == first_version.manuscript_json
 
 
 async def test_mobile_memoir_book_output_detects_stale_chapter_versions(client, test_db):

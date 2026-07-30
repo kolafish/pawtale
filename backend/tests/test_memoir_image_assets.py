@@ -464,7 +464,15 @@ async def test_image_migration_relocates_legacy_source_linked_appendix_and_resyn
     assert placement.chapter_id == chapter_id
     assert changed_outputs == 1
     await test_db.refresh(output_version)
-    migrated_manuscript = output_version.manuscript_json
+    assert output_version.manuscript_json["image_appendix"] == [legacy_illustration]
+    migrated_version = await test_db.scalar(
+        select(MemoirBookOutputVersion)
+        .where(MemoirBookOutputVersion.project_id == project_id)
+        .order_by(MemoirBookOutputVersion.version.desc())
+    )
+    assert migrated_version is not None
+    assert migrated_version.id != output_version.id
+    migrated_manuscript = migrated_version.manuscript_json
     assert migrated_manuscript["image_appendix"] == []
     migrated_illustration = migrated_manuscript["chapters"][0]["illustrations"][0]
     assert migrated_illustration["placement"] == "chapter_inline"
