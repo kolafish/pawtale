@@ -126,6 +126,7 @@ function confirmAction(title: string, content: string): Promise<boolean> {
 definePage<BookRevisionData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   feedbackVoiceToken: 0,
+  feedbackBaselineUpdatedAt: "",
   pageActive: false,
 
   data: {
@@ -231,16 +232,22 @@ definePage<BookRevisionData>()({
       this.stopFeedbackPolling();
       this.setData({
         feedbackBusy: active,
-        error: job.status === "failed"
-          ? job.error_message || "按意见调整失败"
-          : "",
+        ...(job.status === "failed"
+          ? { error: job.error_message || "按意见调整失败" }
+          : {}),
       });
       if (active) {
         this.scheduleFeedbackPoll();
       } else if (job.status === "succeeded" && wasActive) {
         if (await this.loadProposal(true)) {
-          this.setData({ feedbackText: "" });
-          wx.showToast({ title: "修改预览已更新", icon: "success" });
+          const updated = (
+            !this.feedbackBaselineUpdatedAt
+            || this.data.proposal?.updated_at !== this.feedbackBaselineUpdatedAt
+          );
+          if (updated) {
+            this.setData({ feedbackText: "", error: "" });
+            wx.showToast({ title: "修改预览已更新", icon: "success" });
+          }
         }
       }
     } catch (error) {
@@ -338,6 +345,7 @@ definePage<BookRevisionData>()({
       wx.showToast({ title: "请先输入或说出调整意见", icon: "none" });
       return;
     }
+    this.feedbackBaselineUpdatedAt = this.data.proposal.updated_at;
     this.setData({ feedbackBusy: true, error: "" });
     try {
       const job = await enqueueMemoirBookRevisionFeedback(
