@@ -39,6 +39,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.services.memoir import (
     book_completion_jobs,
+    book_editorial_revision,
     book_review_answer_application,
     book_review_jobs,
     book_reviews,
@@ -79,11 +80,13 @@ class LayeredBookAI:
         chapter_interview_issue: bool = False,
         chapter_manual_issue: bool = False,
         book_issue: bool = False,
+        book_actions: bool = False,
     ):
         self.section_issue = section_issue
         self.chapter_interview_issue = chapter_interview_issue
         self.chapter_manual_issue = chapter_manual_issue
         self.book_issue = book_issue
+        self.book_actions = book_actions
         self.system_prompts: list[str] = []
         self.prompts: list[str] = []
 
@@ -166,7 +169,40 @@ class LayeredBookAI:
                 "summary": "全书记录了几段重要成长经历。",
                 "strengths": ["人生阶段清楚"],
                 "structure_guidance": ["统一章节之间的过渡。"],
+                "editorial_actions": (
+                    [
+                        {
+                            "action_type": "remove_repetition",
+                            "title": "精简两章重复的学校经历",
+                            "reason": "两章都重复描述了同一场比赛。",
+                            "chapter_ids": chapter_ids[:2],
+                        },
+                        {
+                            "action_type": "improve_transition",
+                            "title": "补充学校到工作的衔接",
+                            "reason": "两章之间的时间跳转较突然。",
+                            "chapter_ids": chapter_ids[:2],
+                        },
+                        {
+                            "action_type": "reorder_chapters",
+                            "title": "先写第二段经历",
+                            "reason": "这样更符合回忆展开的顺序。",
+                            "chapter_ids": list(reversed(chapter_ids[:2])),
+                        },
+                    ]
+                    if self.book_actions
+                    else []
+                ),
                 "candidate_issues": candidates,
+            }
+        elif "请执行用户选中的全书编辑修改" in user_prompt:
+            payload = {
+                "section_revisions": [
+                    {
+                        "section_id": section_ids[0],
+                        "content": "那年参加学校比赛的经历留在这里，不再重复讲述。",
+                    }
+                ],
             }
         elif "请把用户对全书检查问题的回答应用到现有书稿" in user_prompt:
             payload = {
@@ -372,6 +408,7 @@ def _install_ai(
     monkeypatch.setattr(chapter_digests, "get_ai_service", factory)
     monkeypatch.setattr(chapter_generation, "get_ai_service", factory)
     monkeypatch.setattr(book_reviews, "get_ai_service", factory)
+    monkeypatch.setattr(book_editorial_revision, "get_ai_service", factory)
     monkeypatch.setattr(
         book_review_answer_application,
         "get_ai_service",
@@ -2016,6 +2053,119 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         .select_from(MemoirBookOutputVersion)
         .where(MemoirBookOutputVersion.project_id == project_id)
     ) == 2
+
+
+async def test_selected_editorial_actions_create_a_preview_before_applying(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    fake = LayeredBookAI(book_actions=True)
+    _install_ai(monkeypatch, fake)
+    bootstrapped = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/bootstrap"
+    )
+    assert bootstrapped.status_code == 200
+    for chapter in chapters:
+        await _create_current_draft(
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.CONFIRMED,
+        )
+
+    generated = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review",
+        json={"force_regenerate": False},
+    )
+    assert generated.status_code == 200, generated.text
+    actions = generated.json()["review"]["editorial_actions"]
+    assert {action["action_type"] for action in actions} == {
+        "remove_repetition",
+        "improve_transition",
+        "reorder_chapters",
+    }
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble"
+    )
+    assert assembled.status_code == 200, assembled.text
+    baseline_version_id = assembled.json()["output_version_id"]
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "editorial-revision/jobs",
+        json={"action_ids": [action["id"] for action in actions]},
+    )
+    assert queued.status_code == 202, queued.text
+    assert queued.json()["selected_action_count"] == 3
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued.json()["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+
+    completed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "editorial-revision/jobs/current"
+    )
+    assert completed.status_code == 200, completed.text
+    completed_body = completed.json()
+    assert completed_body["status"] == "succeeded"
+    assert completed_body["proposal_status"] == "ready"
+    assert await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirBookOutputVersion)
+        .where(MemoirBookOutputVersion.project_id == project_id)
+    ) == 1
+
+    proposal = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}"
+    )
+    assert proposal.status_code == 200, proposal.text
+    comparison = proposal.json()["comparison"]
+    assert comparison["chapter_order_changed"] is True
+    assert [
+        item["chapter_id"] for item in comparison["after_chapter_order"]
+    ] == [chapters[1].id, chapters[0].id]
+    assert comparison["changed_section_count"] == 1
+    assert proposal.json()["before"]["version"] == 1
+    assert proposal.json()["after"]["version"] == 2
+
+    applied = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/apply"
+    )
+    assert applied.status_code == 200, applied.text
+    applied_version_id = applied.json()["result_output_version_id"]
+    versions = list(
+        (
+            await test_db.scalars(
+                select(MemoirBookOutputVersion)
+                .where(MemoirBookOutputVersion.project_id == project_id)
+                .order_by(MemoirBookOutputVersion.version)
+            )
+        ).all()
+    )
+    assert [version.id for version in versions] == [
+        baseline_version_id,
+        applied_version_id,
+    ]
+    assert [
+        item["chapter_id"] for item in versions[-1].chapter_snapshot_json
+    ] == [chapters[1].id, chapters[0].id]
+    assert "不再重复讲述" in versions[-1].content
+
+    reassembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble"
+    )
+    assert reassembled.status_code == 200, reassembled.text
+    assert reassembled.json()["output_version_id"] == applied_version_id
 
 
 async def test_book_review_job_preserves_failure_and_can_retry(

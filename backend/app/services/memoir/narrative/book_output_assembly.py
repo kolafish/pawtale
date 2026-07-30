@@ -27,6 +27,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
 from app.services.memoir import (
+    book_editorial_actions,
     book_output_versions,
     book_review_answer_state,
     book_reviews,
@@ -201,6 +202,11 @@ async def assemble_book_output(
             output=output,
             version=previous_version,
             context=answer_context,
+        ) or book_editorial_actions.marker_matches_review(
+            output=output,
+            version=previous_version,
+            review=current_review,
+            answers_signature=answer_context.answers_signature,
         ):
             return MemoirBookAssemblyResponse(
                 project_id=project_id,

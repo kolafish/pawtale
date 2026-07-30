@@ -8,7 +8,7 @@
       <text class="revision-title">确认前，当前书稿不会改变</text>
       <text class="revision-summary">{{proposal.summary}}</text>
       <text class="revision-meta">
-        涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节
+        {{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节
       </text>
       <text wx:if="{{proposal.status === 'stale'}}" class="status-notice error">
         当前书稿已经变化，这版预览不能再确认，请返回后重新生成。
@@ -35,6 +35,24 @@
     </view>
 
     <view wx:if="{{mode === 'changes'}}" class="changed-list">
+      <view
+        wx:if="{{proposal.comparison.chapter_order_changed}}"
+        class="changed-chapter order-comparison"
+      >
+        <text class="chapter-label">章节顺序</text>
+        <text class="chapter-title">调整前</text>
+        <text
+          wx:for="{{proposal.comparison.before_chapter_order}}"
+          wx:key="chapter_id"
+          class="order-item"
+        >{{index + 1}}. {{item.title}}</text>
+        <text class="chapter-title order-after-title">调整后</text>
+        <text
+          wx:for="{{proposal.comparison.after_chapter_order}}"
+          wx:key="chapter_id"
+          class="order-item"
+        >{{index + 1}}. {{item.title}}</text>
+      </view>
       <view
         wx:for="{{changedChapters}}"
         wx:key="chapter_id"
@@ -64,7 +82,10 @@
           <text class="section-content" selectable>{{section.display_content}}</text>
         </view>
       </view>
-      <view wx:if="{{!changedChapters.length}}" class="state-card">
+      <view
+        wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed}}"
+        class="state-card"
+      >
         回答已经核对，正文没有需要改变的内容。
       </view>
     </view>

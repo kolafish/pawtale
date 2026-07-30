@@ -27,6 +27,13 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     cancelMemoirBookReviewAnswerApplicationJob: unmockedAsync(
       "cancelMemoirBookReviewAnswerApplicationJob",
     ),
+    enqueueMemoirBookEditorialRevisionJob: unmockedAsync(
+      "enqueueMemoirBookEditorialRevisionJob",
+    ),
+    getMemoirBookEditorialRevisionJob: async () => editorialRevisionJob(),
+    cancelMemoirBookEditorialRevisionJob: unmockedAsync(
+      "cancelMemoirBookEditorialRevisionJob",
+    ),
     getMemoirBookReview: async () => null,
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
@@ -96,6 +103,29 @@ function readyOverview() {
   };
 }
 
+function confirmedOverview() {
+  const overview = readyOverview();
+  return {
+    ...overview,
+    completed_chapters: overview.total_chapters,
+    chapters: overview.chapters.map((chapter) => ({
+      ...chapter,
+      state: "confirmed",
+      next_action: {
+        kind: "complete",
+        title: "本章已确认",
+        detail: "正文已经收入书稿。",
+        action_text: "",
+        disabled: true,
+        issue_id: null,
+      },
+      active_issue: null,
+      headline: "本章已确认",
+      detail: "正文已经收入书稿。",
+    })),
+  };
+}
+
 function bulkJob(overrides = {}) {
   return {
     job_id: null,
@@ -128,6 +158,7 @@ function bookReview(overrides = {}) {
       summary: "全书围绕家庭与成长展开。",
       strengths: ["人物主线清楚"],
       structure_guidance: ["合并两章重复的学校经历"],
+      editorial_actions: [],
     },
     error_message: "",
     ...overrides,
@@ -169,6 +200,24 @@ function answerApplicationJob(overrides = {}) {
     resolved_ai_model: null,
     already_applied: false,
     can_apply: false,
+    can_cancel: false,
+    can_retry: false,
+    error_message: "",
+    ...overrides,
+  };
+}
+
+function editorialRevisionJob(overrides = {}) {
+  return {
+    job_id: null,
+    project_id: "project-1",
+    status: "idle",
+    stage: "",
+    selected_action_count: 0,
+    proposal_id: null,
+    proposal_status: null,
+    requested_ai_model: null,
+    resolved_ai_model: null,
     can_cancel: false,
     can_retry: false,
     error_message: "",
@@ -335,21 +384,7 @@ test("book completion opens book title settings directly", () => {
 test("book completion submits saved answers and opens the generated revision preview", async () => {
   const requests = [];
   const navigations = [];
-  const overview = readyOverview();
-  overview.completed_chapters = 2;
-  overview.chapters = overview.chapters.map((chapter) => ({
-    ...chapter,
-    state: "confirmed",
-    next_action: {
-      kind: "complete",
-      title: "本章已确认",
-      detail: "正文已经收入书稿。",
-      action_text: "",
-      disabled: true,
-      issue_id: null,
-    },
-    active_issue: null,
-  }));
+  const overview = confirmedOverview();
   let currentJob = answerApplicationJob({
     answer_count: 2,
     can_apply: true,
@@ -408,25 +443,71 @@ test("book completion submits saved answers and opens the generated revision pre
   delete global.wx;
 });
 
+test("book completion generates a preview only for selected editorial actions", async () => {
+  const requests = [];
+  const navigations = [];
+  const review = bookReview({
+    review: {
+      summary: "全书围绕家庭与成长展开。",
+      strengths: ["人物主线清楚"],
+      structure_guidance: [],
+      editorial_actions: [{
+        id: "action/1",
+        action_type: "remove_repetition",
+        title: "压缩两章重复的学校经历",
+        reason: "两章都完整讲述了同一场比赛。",
+        chapter_ids: ["chapter-1", "chapter-2"],
+      }],
+    },
+  });
+  let currentJob = editorialRevisionJob();
+  global.wx = {
+    showToast() {},
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionOverview: async () => confirmedOverview(),
+      getMemoirBookReview: async () => review,
+      getMemoirBookOutput: async () => ({ id: "output-1" }),
+      getMemoirBookEditorialRevisionJob: async () => currentJob,
+      enqueueMemoirBookEditorialRevisionJob: async (projectId, actionIds) => {
+        requests.push([projectId, actionIds]);
+        currentJob = editorialRevisionJob({
+          job_id: "editorial-job-1",
+          status: "succeeded",
+          stage: "completed",
+          selected_action_count: 1,
+          proposal_id: "proposal/1",
+          proposal_status: "ready",
+        });
+        return currentJob;
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+
+  await page.onShow.call(context);
+  page.toggleEditorialAction.call(context, {
+    currentTarget: { dataset: { actionId: "action/1" } },
+  });
+  await page.generateEditorialRevision.call(context);
+  page.openEditorialRevision.call(context);
+
+  assert.deepEqual(requests, [["project/1", ["action/1"]]]);
+  assert.equal(context.data.editorialRevisionJob.proposal_status, "ready");
+  assert.deepEqual(navigations, [
+    "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
+  ]);
+  page.onHide.call(context);
+  delete global.wx;
+});
+
 test("book completion submits the cross-chapter review to the background", async () => {
   const reviewRequests = [];
-  const overview = readyOverview();
-  overview.completed_chapters = 2;
-  overview.chapters = overview.chapters.map((chapter) => ({
-    ...chapter,
-    state: "confirmed",
-    next_action: {
-      kind: "complete",
-      title: "本章已确认",
-      detail: "正文已经收入书稿。",
-      action_text: "",
-      disabled: true,
-      issue_id: null,
-    },
-    active_issue: null,
-    headline: "本章已确认",
-    detail: "正文已经收入书稿。",
-  }));
+  const overview = confirmedOverview();
   let currentReview = null;
   let currentReviewJob = reviewJob();
   global.wx = { showToast() {} };
@@ -642,21 +723,7 @@ test("book completion restores and can cancel an active full-book review after r
   };
   global.clearTimeout = () => {};
   global.wx = { showToast() {} };
-  const overview = readyOverview();
-  overview.completed_chapters = 2;
-  overview.chapters = overview.chapters.map((chapter) => ({
-    ...chapter,
-    state: "confirmed",
-    next_action: {
-      kind: "complete",
-      title: "本章已确认",
-      detail: "正文已经收入书稿。",
-      action_text: "",
-      disabled: true,
-      issue_id: null,
-    },
-    active_issue: null,
-  }));
+  const overview = confirmedOverview();
   let currentReviewJob = reviewJob({
     job_id: "review-job-1",
     status: "running",

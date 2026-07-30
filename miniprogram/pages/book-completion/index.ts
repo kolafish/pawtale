@@ -9,8 +9,10 @@ import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirBookReviewJob,
   cancelMemoirBookReviewAnswerApplicationJob,
+  cancelMemoirBookEditorialRevisionJob,
   cancelMemoirBookCompletionJob,
   enqueueMemoirBookReviewAnswerApplicationJob,
+  enqueueMemoirBookEditorialRevisionJob,
   enqueueMemoirBookCompletionJob,
   enqueueMemoirBookReviewJob,
   enqueueMemoirChapterPreparationJob,
@@ -19,10 +21,13 @@ import {
   getMemoirBookOutput,
   getMemoirBookReview,
   getMemoirBookReviewAnswerApplicationJob,
+  getMemoirBookEditorialRevisionJob,
   getMemoirBookReviewJob,
   listMemoirCompletionIssues,
   type MemoirBookReview,
   type MemoirBookReviewAnswerApplicationJob,
+  type MemoirBookEditorialAction,
+  type MemoirBookEditorialRevisionJob,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
@@ -44,6 +49,11 @@ interface ChapterView extends MemoirChapterCompletionSummary {
   actionText: string;
   chapterClass: string;
   disabled: boolean;
+}
+
+interface EditorialActionView extends MemoirBookEditorialAction {
+  typeLabel: string;
+  selected: boolean;
 }
 
 interface BookCompletionData {
@@ -93,14 +103,41 @@ interface BookCompletionData {
   answerApplicationCanCancel: boolean;
   applyingAnswers: boolean;
   answerApplicationCancelling: boolean;
+  editorialRevisionJob: MemoirBookEditorialRevisionJob | null;
+  selectedEditorialActionIds: string[];
+  editorialActionViews: EditorialActionView[];
+  editorialRevisionProgressVisible: boolean;
+  editorialRevisionProgressTitle: string;
+  editorialRevisionProgressDetail: string;
+  editorialRevisionProgressClass: string;
+  editorialRevisionCanCancel: boolean;
+  generatingEditorialRevision: boolean;
+  editorialRevisionCancelling: boolean;
   bookOutputAvailable: boolean;
 }
 
 interface ChapterDataset {
   chapterId?: string;
+  actionId?: string;
 }
 
 type ChapterTapEvent = PageDatasetEvent<ChapterDataset>;
+
+function editorialActionViews(
+  review: MemoirBookReview | null,
+  selectedIds: string[],
+): EditorialActionView[] {
+  const labels = {
+    remove_repetition: "去重复",
+    improve_transition: "补衔接",
+    reorder_chapters: "调顺序",
+  };
+  return (review?.review.editorial_actions || []).map((action) => ({
+    ...action,
+    typeLabel: labels[action.action_type],
+    selected: selectedIds.includes(action.id),
+  }));
+}
 
 export function bookReviewViewPatch(
   review: MemoirBookReview | null,
@@ -109,15 +146,24 @@ export function bookReviewViewPatch(
   BookCompletionData,
   "bookReview" | "requiredBookIssues" | "optionalBookIssues"
 > {
-  const current = review?.status === "ready"
+  const normalizedReview = review
+    ? {
+      ...review,
+      review: {
+        ...review.review,
+        editorial_actions: review.review.editorial_actions || [],
+      },
+    }
+    : null;
+  const current = normalizedReview?.status === "ready"
     ? issues.filter((issue) => (
       issue.scope === "book"
-      && issue.input_signature === review.input_signature
+      && issue.input_signature === normalizedReview.input_signature
       && issue.status !== "closed"
     ))
     : [];
   return {
-    bookReview: review,
+    bookReview: normalizedReview,
     requiredBookIssues: current.filter(
       (issue) => issue.channel === "manual_review",
     ),
@@ -139,6 +185,65 @@ function answerApplicationJobActive(
   job: MemoirBookReviewAnswerApplicationJob,
 ): boolean {
   return job.status === "pending" || job.status === "running";
+}
+
+function editorialRevisionJobActive(
+  job: MemoirBookEditorialRevisionJob,
+): boolean {
+  return job.status === "pending" || job.status === "running";
+}
+
+export function editorialRevisionJobView(
+  job: MemoirBookEditorialRevisionJob | null,
+): Pick<
+  BookCompletionData,
+  | "editorialRevisionProgressVisible"
+  | "editorialRevisionProgressTitle"
+  | "editorialRevisionProgressDetail"
+  | "editorialRevisionProgressClass"
+  | "editorialRevisionCanCancel"
+> {
+  if (!job || job.status === "idle" || job.status === "succeeded") {
+    return {
+      editorialRevisionProgressVisible: false,
+      editorialRevisionProgressTitle: "",
+      editorialRevisionProgressDetail: "",
+      editorialRevisionProgressClass: "",
+      editorialRevisionCanCancel: false,
+    };
+  }
+  if (editorialRevisionJobActive(job)) {
+    const titles: Partial<
+      Record<MemoirBookEditorialRevisionJob["stage"], string>
+    > = {
+      queued: "修改预览已提交",
+      assembling: "正在准备当前书稿",
+      revising: "正在执行所选编辑建议",
+      saving: "正在保存修改预览",
+    };
+    return {
+      editorialRevisionProgressVisible: true,
+      editorialRevisionProgressTitle: (
+        titles[job.stage] || "正在生成修改预览"
+      ),
+      editorialRevisionProgressDetail: "完成后仍需查看前后内容并确认",
+      editorialRevisionProgressClass: "active",
+      editorialRevisionCanCancel: job.can_cancel,
+    };
+  }
+  return {
+    editorialRevisionProgressVisible: true,
+    editorialRevisionProgressTitle: (
+      job.status === "failed" ? "修改预览未完成" : "已停止生成修改预览"
+    ),
+    editorialRevisionProgressDetail: (
+      job.error_message || "所选建议仍然保留，可以重新生成。"
+    ),
+    editorialRevisionProgressClass: (
+      job.status === "failed" ? "failed" : "cancelled"
+    ),
+    editorialRevisionCanCancel: false,
+  };
 }
 
 export function answerApplicationJobView(
@@ -509,6 +614,16 @@ definePage<BookCompletionData>()({
     answerApplicationCanCancel: false,
     applyingAnswers: false,
     answerApplicationCancelling: false,
+    editorialRevisionJob: null,
+    selectedEditorialActionIds: [],
+    editorialActionViews: [],
+    editorialRevisionProgressVisible: false,
+    editorialRevisionProgressTitle: "",
+    editorialRevisionProgressDetail: "",
+    editorialRevisionProgressClass: "",
+    editorialRevisionCanCancel: false,
+    generatingEditorialRevision: false,
+    editorialRevisionCancelling: false,
     bookOutputAvailable: false,
   },
 
@@ -581,6 +696,19 @@ definePage<BookCompletionData>()({
     });
   },
 
+  openEditorialRevision() {
+    const proposalId = this.data.editorialRevisionJob?.proposal_id;
+    if (!this.data.projectId || !proposalId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-revision/index", {
+        projectId: this.data.projectId,
+        proposalId,
+      }),
+    });
+  },
+
   async loadOverview(silent = false) {
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
@@ -614,6 +742,7 @@ definePage<BookCompletionData>()({
         issueCollection,
         bookOutput,
         answerApplicationJob,
+        editorialRevisionJob,
       ] = view.allChaptersConfirmed
         ? await Promise.all([
           getMemoirBookReview(this.data.projectId),
@@ -621,14 +750,19 @@ definePage<BookCompletionData>()({
           listMemoirCompletionIssues(this.data.projectId),
           optionalApiResource(getMemoirBookOutput(this.data.projectId)),
           getMemoirBookReviewAnswerApplicationJob(this.data.projectId),
+          getMemoirBookEditorialRevisionJob(this.data.projectId),
         ])
-        : [null, null, { issues: [] }, null, null];
+        : [null, null, { issues: [] }, null, null, null];
       const reviewJobActive = Boolean(
         bookReviewJob && bookReviewJobActive(bookReviewJob),
       );
       const applicationActive = Boolean(
         answerApplicationJob
         && answerApplicationJobActive(answerApplicationJob),
+      );
+      const editorialRevisionActive = Boolean(
+        editorialRevisionJob
+        && editorialRevisionJobActive(editorialRevisionJob),
       );
       const finishedBookReview = (
         this.data.checkingBook
@@ -641,14 +775,33 @@ definePage<BookCompletionData>()({
         && !applicationActive
         && answerApplicationJob?.status !== "idle"
       );
+      const finishedEditorialRevision = (
+        this.data.generatingEditorialRevision
+        && !editorialRevisionActive
+        && editorialRevisionJob?.status !== "idle"
+      );
       const finishedWholeBook = (
         this.data.recheckingAll
         && !batchActive
         && bulkCheckJob.status !== "idle"
       );
+      const selectedEditorialActionIds = (
+        this.data.selectedEditorialActionIds.filter(
+          (actionId) => (
+            bookReview?.review.editorial_actions?.some(
+              (action) => action.id === actionId,
+            ) === true
+          ),
+        )
+      );
       this.setData({
         ...view,
         ...bookReviewViewPatch(bookReview, issueCollection.issues),
+        selectedEditorialActionIds,
+        editorialActionViews: editorialActionViews(
+          bookReview,
+          selectedEditorialActionIds,
+        ),
         bookOutputAvailable: Boolean(bookOutput),
         ...bookReviewJobView(bookReviewJob),
         bookReviewJob,
@@ -656,6 +809,9 @@ definePage<BookCompletionData>()({
         ...answerApplicationJobView(answerApplicationJob),
         answerApplicationJob,
         applyingAnswers: applicationActive,
+        ...editorialRevisionJobView(editorialRevisionJob),
+        editorialRevisionJob,
+        generatingEditorialRevision: editorialRevisionActive,
         ...bookCompletionJobView(
           view.allChaptersConfirmed ? null : bulkCheckJob,
         ),
@@ -672,6 +828,7 @@ definePage<BookCompletionData>()({
         batchActive
         || reviewJobActive
         || applicationActive
+        || editorialRevisionActive
         || overview.chapters.some((item) => item.state === "preparing")
       ) {
         this.schedulePolling();
@@ -723,6 +880,13 @@ definePage<BookCompletionData>()({
               : "none",
           });
         }
+        if (finishedEditorialRevision) {
+          const succeeded = editorialRevisionJob?.status === "succeeded";
+          wx.showToast({
+            title: succeeded ? "修改预览已生成" : "修改预览未完成",
+            icon: succeeded ? "success" : "none",
+          });
+        }
       }
     } catch (error) {
       if (routeAuthError(error)) {
@@ -737,6 +901,7 @@ definePage<BookCompletionData>()({
         || this.data.recheckingAll
         || this.data.checkingBook
         || this.data.applyingAnswers
+        || this.data.generatingEditorialRevision
       ) {
         this.schedulePolling();
       }
@@ -987,6 +1152,106 @@ definePage<BookCompletionData>()({
       });
     } finally {
       this.setData({ answerApplicationCancelling: false });
+    }
+  },
+
+  toggleEditorialAction(event: ChapterTapEvent) {
+    const actionId = datasetString(event, "actionId");
+    if (
+      !actionId
+      || this.data.generatingEditorialRevision
+      || this.data.editorialRevisionCancelling
+    ) {
+      return;
+    }
+    const selected = this.data.selectedEditorialActionIds;
+    const selectedEditorialActionIds = selected.includes(actionId)
+      ? selected.filter((value) => value !== actionId)
+      : [...selected, actionId];
+    this.setData({
+      selectedEditorialActionIds,
+      editorialActionViews: editorialActionViews(
+        this.data.bookReview,
+        selectedEditorialActionIds,
+      ),
+    });
+  },
+
+  async generateEditorialRevision() {
+    const actionIds = this.data.selectedEditorialActionIds;
+    if (
+      !actionIds.length
+      || this.data.generatingEditorialRevision
+      || this.data.editorialRevisionCancelling
+      || (
+        Boolean(this.data.answerApplicationJob?.answer_count)
+        && !this.data.answerApplicationJob?.already_applied
+      )
+    ) {
+      return;
+    }
+    this.setData({
+      generatingEditorialRevision: true,
+      error: "",
+      editorialRevisionProgressVisible: true,
+      editorialRevisionProgressTitle: "正在提交修改预览",
+      editorialRevisionProgressDetail: "完成后仍需查看前后内容并确认",
+      editorialRevisionProgressClass: "active",
+      editorialRevisionCanCancel: false,
+    });
+    try {
+      await enqueueMemoirBookEditorialRevisionJob(
+        this.data.projectId,
+        actionIds,
+      );
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      const message = error instanceof Error
+        ? error.message
+        : "生成修改预览失败";
+      this.setData({ generatingEditorialRevision: false });
+      await this.loadOverview(true);
+      if (
+        !this.data.editorialRevisionJob
+        || !editorialRevisionJobActive(this.data.editorialRevisionJob)
+      ) {
+        this.setData({ error: message });
+      }
+    }
+  },
+
+  async cancelEditorialRevision() {
+    const job = this.data.editorialRevisionJob;
+    if (
+      !job?.job_id
+      || !editorialRevisionJobActive(job)
+      || this.data.editorialRevisionCancelling
+    ) {
+      return;
+    }
+    this.setData({
+      editorialRevisionCancelling: true,
+      editorialRevisionCanCancel: false,
+      error: "",
+    });
+    try {
+      await cancelMemoirBookEditorialRevisionJob(
+        this.data.projectId,
+        job.job_id,
+      );
+      await this.loadOverview(true);
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "停止生成修改预览失败",
+      });
+    } finally {
+      this.setData({ editorialRevisionCancelling: false });
     }
   },
 

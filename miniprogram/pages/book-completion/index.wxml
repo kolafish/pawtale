@@ -57,6 +57,59 @@
           >{{index + 1}}. {{item}}</text>
         </view>
 
+        <view wx:if="{{editorialActionViews.length}}" class="editorial-actions">
+          <text class="review-group-title">可生成修改预览</text>
+          <text class="editorial-actions-detail">
+            只执行您选中的建议。确认预览前，当前书稿不会改变。
+          </text>
+          <view
+            wx:for="{{editorialActionViews}}"
+            wx:key="id"
+            class="editorial-action {{item.selected ? 'selected' : ''}}"
+            data-action-id="{{item.id}}"
+            bindtap="toggleEditorialAction"
+            aria-role="checkbox"
+            aria-checked="{{item.selected}}"
+          >
+            <view class="editorial-action-heading">
+              <text class="editorial-action-type">{{item.typeLabel}}</text>
+              <text class="editorial-action-check">{{item.selected ? "已选择" : "选择"}}</text>
+            </view>
+            <text class="editorial-action-title">{{item.title}}</text>
+            <text class="editorial-action-reason">{{item.reason}}</text>
+          </view>
+          <view
+            wx:if="{{editorialRevisionProgressVisible}}"
+            class="answer-application-progress {{editorialRevisionProgressClass}}"
+          >
+            <ai-task-progress
+              title="{{editorialRevisionProgressTitle}}"
+              detail="{{editorialRevisionProgressDetail}}"
+              mode="{{editorialRevisionProgressClass === 'active' ? 'indeterminate' : 'hidden'}}"
+              can-cancel="{{editorialRevisionCanCancel && !editorialRevisionCancelling}}"
+              cancel-text="停止生成"
+              bindcancel="cancelEditorialRevision"
+            />
+          </view>
+          <text
+            wx:if="{{answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied}}"
+            class="editorial-actions-warning"
+          >请先处理根据问题回答生成的修改预览，再执行全书编辑建议。</text>
+          <view
+            wx:if="{{editorialRevisionJob && editorialRevisionJob.proposal_status === 'ready' && editorialRevisionJob.proposal_id}}"
+            class="apply-answers-action ui-block-action ui-pressable"
+            aria-role="button"
+            bindtap="openEditorialRevision"
+          >查看全书修改预览</view>
+          <view
+            wx:else
+            class="apply-answers-action ui-block-action ui-pressable {{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied) ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied)}}"
+            bindtap="generateEditorialRevision"
+          >{{selectedEditorialActionIds.length ? "生成所选修改预览" : "请先选择建议"}}</view>
+        </view>
+
         <view wx:if="{{bookOutputAvailable}}" class="review-book-settings">
           <text class="review-book-settings-copy">
             如果问题只是书名、全书定位或出版信息不合适，可以直接修改，不需要录音补讲。

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.domain.memoir.types import (
     MemoirBookRevisionProposalStatus,
@@ -18,6 +18,11 @@ class MemoirBookReviewGenerateRequest(BaseModel):
 
 
 class MemoirBookReviewAnswerApplyRequest(BaseModel):
+    ai_model: str | None = None
+
+
+class MemoirBookEditorialRevisionRequest(BaseModel):
+    action_ids: list[str] = Field(min_length=1)
     ai_model: str | None = None
 
 
@@ -101,6 +106,21 @@ class MemoirBookReviewAnswerApplicationJobResponse(BaseModel):
     error_message: str = ""
 
 
+class MemoirBookEditorialRevisionJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    status: MemoirBookReviewJobStatus
+    stage: MemoirBookReviewAnswerApplicationStage = ""
+    selected_action_count: int = 0
+    proposal_id: str | None = None
+    proposal_status: MemoirBookRevisionProposalStatus | None = None
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    can_cancel: bool = False
+    can_retry: bool = False
+    error_message: str = ""
+
+
 class MemoirBookRevisionPreviewVersion(BaseModel):
     version: int
     manuscript: MemoirBookManuscript | None = None
@@ -121,6 +141,11 @@ class MemoirBookRevisionChapterComparison(BaseModel):
     sections: list[MemoirBookRevisionSectionComparison]
 
 
+class MemoirBookRevisionChapterOrderItem(BaseModel):
+    chapter_id: str
+    title: str
+
+
 class MemoirBookRevisionComparison(BaseModel):
     changed_chapter_count: int
     changed_section_count: int
@@ -128,6 +153,13 @@ class MemoirBookRevisionComparison(BaseModel):
     after_char_count: int
     char_count_delta: int
     chapters: list[MemoirBookRevisionChapterComparison]
+    chapter_order_changed: bool = False
+    before_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(
+        default_factory=list
+    )
+    after_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(
+        default_factory=list
+    )
 
 
 class MemoirBookRevisionProposalResponse(BaseModel):
