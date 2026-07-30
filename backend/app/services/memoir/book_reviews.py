@@ -34,7 +34,11 @@ from app.services.ai_timeouts import (
 )
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
-from app.services.memoir import chapter_digests, completion_issues
+from app.services.memoir import (
+    book_editorial_actions,
+    chapter_digests,
+    completion_issues,
+)
 from app.services.memoir.book_output_manuscript import formal_book_title
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
@@ -91,12 +95,28 @@ class _BookReviewIssueOutput(BaseModel):
     ]
 
 
+class _BookReviewEditorialActionOutput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action_type: Literal[
+        "remove_repetition",
+        "improve_transition",
+        "reorder_chapters",
+    ]
+    title: str
+    reason: str
+    chapter_ids: list[str] = Field(default_factory=list)
+
+
 class _BookReviewOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     summary: str
     strengths: list[str] = Field(default_factory=list)
     structure_guidance: list[str] = Field(default_factory=list)
+    editorial_actions: list[_BookReviewEditorialActionOutput] = Field(
+        default_factory=list
+    )
     candidate_issues: list[_BookReviewIssueOutput] = Field(default_factory=list)
 
 
@@ -366,7 +386,15 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 {{
   "summary": "全书目前的整体面貌",
   "strengths": ["已经成立的主线或结构优点"],
-  "structure_guidance": ["只需编辑处理的跨章顺序、去重、过渡或篇幅建议"],
+  "structure_guidance": ["只供用户参考、不能直接执行的结构建议"],
+  "editorial_actions": [
+    {{
+      "action_type": "remove_repetition|improve_transition|reorder_chapters",
+      "title": "用户能直接理解的一句话修改标题",
+      "reason": "为什么需要这项修改，以及预期改善",
+      "chapter_ids": ["涉及章节；调整顺序时按建议顺序排列"]
+    }}
+  ],
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|impact|meaning|clarity|structure|privacy|conflict",
@@ -382,14 +410,17 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 要求：
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
-- 纯编辑问题写入 structure_guidance，不要求用户补讲。
-- 书名、全书定位、主题取舍、章节顺序、合并、删减、过渡和篇幅调整都属于 editorial_change；优先写入 structure_guidance，不生成语音补讲问题。
+- 只有明确属于去除跨章重复、改善相邻章节衔接、调整现有章节顺序的问题，才写入 editorial_actions。
+- 不能直接执行或不属于上述三类的编辑建议写入 structure_guidance，不要求用户补讲。
+- 不得建议新建、删除、合并章节，不得改变小节数量或归属。
+- reorder_chapters 的 chapter_ids 至少包含两个章节，并按建议的新顺序排列；另外两类按涉及范围排列。
+- 书名、全书定位、主题取舍等属于 editorial_change，但本次不能自动执行，应写入 structure_guidance。
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建摘要中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
-- summary、strengths、structure_guidance、question 和 reason 会直接展示给用户；其中必须使用章节标题或“第几章＋标题”，不得出现 C1、C2 等内部短编号。
+- summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；其中必须使用章节标题或“第几章＋标题”，不得出现 C1、C2 等内部短编号。
 """
 
 
@@ -493,6 +524,51 @@ def normalize_book_review(
             structure_guidance.append(guidance)
         if len(structure_guidance) >= 8:
             break
+    editorial_actions: list[dict[str, object]] = []
+    raw_actions = payload.get("editorial_actions")
+    references = _chapter_references(context)
+    current_order = [chapter.chapter_id for chapter in context.chapters]
+    for raw_action in raw_actions if isinstance(raw_actions, list) else []:
+        if not isinstance(raw_action, dict):
+            continue
+        action_type = _compact(raw_action.get("action_type"), limit=32)
+        if action_type not in book_editorial_actions.BOOK_EDITORIAL_ACTION_TYPES:
+            continue
+        title = _user_visible_text(
+            raw_action.get("title"),
+            context=context,
+            limit=120,
+        )
+        reason = _user_visible_text(
+            raw_action.get("reason"),
+            context=context,
+            limit=300,
+        )
+        chapter_ids = references.decode_many(
+            raw_action.get("chapter_ids"),
+            limit=len(context.chapters),
+        )
+        if not title or not reason or not chapter_ids:
+            continue
+        if action_type == "reorder_chapters":
+            if len(chapter_ids) < 2:
+                continue
+            current_subset = [
+                chapter_id
+                for chapter_id in current_order
+                if chapter_id in chapter_ids
+            ]
+            if current_subset == chapter_ids:
+                continue
+        normalized: dict[str, object] = {
+            "action_type": action_type,
+            "title": title,
+            "reason": reason,
+            "chapter_ids": chapter_ids,
+        }
+        normalized["id"] = book_editorial_actions.action_id(normalized)
+        if normalized not in editorial_actions:
+            editorial_actions.append(normalized)
     return {
         "summary": summary,
         "strengths": _user_visible_string_list(
@@ -502,6 +578,7 @@ def normalize_book_review(
             item_limit=240,
         ),
         "structure_guidance": structure_guidance,
+        "editorial_actions": editorial_actions,
         "candidate_issues": issues,
     }
 

@@ -187,6 +187,20 @@
   white-space: pre-wrap;
 }
 
+.order-after-title {
+  margin-top: 24rpx;
+  padding-top: 22rpx;
+  border-top: 1rpx solid var(--ui-divider);
+}
+
+.order-item {
+  display: block;
+  margin-top: 10rpx;
+  color: var(--ui-text-secondary);
+  font-size: 27rpx;
+  line-height: 42rpx;
+}
+
 .state-card {
   margin-top: 24rpx;
   padding: 30rpx;

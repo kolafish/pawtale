@@ -26,6 +26,7 @@ from app.schemas.memoir_book_review import (
     MemoirBookRevisionProposalResponse,
 )
 from app.services.memoir import (
+    book_editorial_actions,
     book_output_versions,
     book_review_answer_state,
     book_reviews,
@@ -59,6 +60,22 @@ def build_comparison(
     before: list[dict[str, object]],
     after: list[dict[str, object]],
 ) -> dict[str, object]:
+    before_order = [
+        {
+            "chapter_id": _text(chapter.get("chapter_id")),
+            "title": _text(chapter.get("chapter_title")),
+        }
+        for chapter in before
+        if _text(chapter.get("chapter_id"))
+    ]
+    after_order = [
+        {
+            "chapter_id": _text(chapter.get("chapter_id")),
+            "title": _text(chapter.get("chapter_title")),
+        }
+        for chapter in after
+        if _text(chapter.get("chapter_id"))
+    ]
     before_by_id = {chapter_id: snapshot for snapshot in before if (chapter_id := _text(snapshot.get("chapter_id")))}
     changed_chapters: list[dict[str, object]] = []
     changed_section_count = 0
@@ -110,6 +127,9 @@ def build_comparison(
         "after_char_count": after_char_count,
         "char_count_delta": after_char_count - before_char_count,
         "chapters": changed_chapters,
+        "chapter_order_changed": before_order != after_order,
+        "before_chapter_order": before_order,
+        "after_chapter_order": after_order,
     }
 
 
@@ -267,6 +287,37 @@ async def proposal_response(
             )
             if context.answers_signature != expected_answers_signature:
                 status = MemoirBookRevisionProposalStatus.STALE
+        elif (
+            proposal.selected_actions_json.get("source")
+            == book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE
+        ):
+            answer_context = await book_review_answer_state.load_answer_context(
+                db,
+                review=review,
+            )
+            raw_action_ids = proposal.selected_actions_json.get("action_ids")
+            try:
+                selected = book_editorial_actions.selected_review_actions(
+                    review.review_json,
+                    (
+                        [str(value) for value in raw_action_ids]
+                        if isinstance(raw_action_ids, list)
+                        else []
+                    ),
+                )
+            except ValueError:
+                status = MemoirBookRevisionProposalStatus.STALE
+            else:
+                if (
+                    book_editorial_actions.actions_signature(selected)
+                    != proposal.selected_actions_json.get("actions_signature")
+                    or answer_context.answers_signature
+                    != proposal.selected_actions_json.get(
+                        "answers_signature",
+                        "",
+                    )
+                ):
+                    status = MemoirBookRevisionProposalStatus.STALE
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
     after_snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
     before_manuscript = manuscript_response(
@@ -346,13 +397,49 @@ async def apply_proposal(
         or review.input_signature != proposal.review_input_signature
     ):
         raise ValueError("全书检查结果已经变化，请重新生成修改预览")
-    context = await book_review_answer_state.load_answer_context(
-        db,
-        review=review,
-    )
-    expected_answers_signature = _text(proposal.selected_actions_json.get("answers_signature"))
-    if not expected_answers_signature or context.answers_signature != expected_answers_signature:
-        raise ValueError("问题回答已经变化，请重新生成修改预览")
+    source = proposal.selected_actions_json.get("source")
+    context = None
+    selected_editorial_actions: list[dict[str, Any]] = []
+    if source == "book_review_answers":
+        context = await book_review_answer_state.load_answer_context(
+            db,
+            review=review,
+        )
+        expected_answers_signature = _text(
+            proposal.selected_actions_json.get("answers_signature")
+        )
+        if (
+            not expected_answers_signature
+            or context.answers_signature != expected_answers_signature
+        ):
+            raise ValueError("问题回答已经变化，请重新生成修改预览")
+    elif source == book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE:
+        context = await book_review_answer_state.load_answer_context(
+            db,
+            review=review,
+        )
+        raw_action_ids = proposal.selected_actions_json.get("action_ids")
+        selected_editorial_actions = (
+            book_editorial_actions.selected_review_actions(
+                review.review_json,
+                (
+                    [str(value) for value in raw_action_ids]
+                    if isinstance(raw_action_ids, list)
+                    else []
+                ),
+            )
+        )
+        if (
+            book_editorial_actions.actions_signature(
+                selected_editorial_actions
+            )
+            != proposal.selected_actions_json.get("actions_signature")
+            or context.answers_signature
+            != proposal.selected_actions_json.get("answers_signature", "")
+        ):
+            raise ValueError("所选编辑建议已经变化，请重新生成修改预览")
+    else:
+        raise ValueError("修改预览来源无效")
 
     snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
     content = book_content_from_chapter_snapshots(
@@ -382,12 +469,13 @@ async def apply_proposal(
         await db.flush()
 
     changed_chapter_count = int(proposal.comparison_json.get("changed_chapter_count") or 0)
-    output.status = MemoirOutputStatus.DRAFT.value
-    output.metadata_json = {
+    metadata = {
         **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
-        "source": "book_review_answers",
+        "source": str(source),
         "book_tts": None,
-        book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY: {
+    }
+    if source == "book_review_answers" and context is not None:
+        metadata[book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY] = {
             "review_input_signature": review.input_signature,
             "answers_signature": context.answers_signature,
             "output_version_id": applied_version.id,
@@ -398,8 +486,25 @@ async def apply_proposal(
             "resolved_ai_model": _text(proposal.generation_json.get("model")),
             "engine": _text(proposal.generation_json.get("engine")),
             "proposal_id": proposal.id,
-        },
-    }
+        }
+    else:
+        metadata[
+            book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY
+        ] = {
+            "review_input_signature": review.input_signature,
+            "action_ids": [
+                str(action.get("id") or "")
+                for action in selected_editorial_actions
+            ],
+            "actions_signature": book_editorial_actions.actions_signature(
+                selected_editorial_actions
+            ),
+            "answers_signature": context.answers_signature if context else "",
+            "output_version_id": applied_version.id,
+            "proposal_id": proposal.id,
+        }
+    output.status = MemoirOutputStatus.DRAFT.value
+    output.metadata_json = metadata
     output.updated_at = utcnow_naive()
     proposal.status = MemoirBookRevisionProposalStatus.APPLIED.value
     proposal.result_output_version_id = applied_version.id

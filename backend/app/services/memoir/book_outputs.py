@@ -36,7 +36,11 @@ from app.schemas.memoir_book import (
 )
 from app.services.file_exports import ExportFile
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir import book_review_answer_state, book_reviews
+from app.services.memoir import (
+    book_editorial_actions,
+    book_review_answer_state,
+    book_reviews,
+)
 from app.services.memoir.book_audio import (
     audio_cache_payload,
     audio_response,
@@ -411,6 +415,7 @@ async def book_output_response_or_none(
             raise
         current_review = None
     answer_application_current = False
+    editorial_revision_current = False
     pending_answer_application = False
     if current_review is not None:
         answer_context = await book_review_answer_state.load_answer_context(
@@ -424,8 +429,18 @@ async def book_output_response_or_none(
                 context=answer_context,
             )
         )
+        editorial_revision_current = (
+            book_editorial_actions.marker_matches_review(
+                output=output,
+                version=output.versions[-1] if output.versions else None,
+                review=current_review,
+                answers_signature=answer_context.answers_signature,
+            )
+        )
         pending_answer_application = bool(
-            answer_context.answers and not answer_application_current
+            answer_context.answers
+            and not answer_application_current
+            and not editorial_revision_current
         )
     return _output_response(
         output,
@@ -434,7 +449,7 @@ async def book_output_response_or_none(
             if pending_answer_application
             else (
                 []
-                if answer_application_current
+                if answer_application_current or editorial_revision_current
                 else _output_stale_chapter_titles(
                     output,
                     plan,

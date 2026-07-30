@@ -51,6 +51,9 @@ function revisionProposal(overrides = {}) {
       before_char_count: 5,
       after_char_count: 5,
       char_count_delta: 0,
+      chapter_order_changed: false,
+      before_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
+      after_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
       chapters: [{
         chapter_id: "chapter-1",
         title: "上学时光",
@@ -112,6 +115,7 @@ test("book revision page is registered and switches between before and after tex
   assert.equal(after.changedChapters[0].sections[0].display_content, "修改后正文");
   assert.equal(before.changedChapters[0].sections[0].display_content, "修改前正文");
   assert.equal(before.wholeChapters[0].sections[0].content, "修改前正文");
+  assert.equal(after.proposal.comparison.before_chapter_order[0].title, "上学时光");
 });
 
 test("book revision page confirms or dismisses the candidate without hidden actions", async () => {

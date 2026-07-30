@@ -24,8 +24,22 @@ export interface MemoirBookReview {
     summary: string;
     strengths: string[];
     structure_guidance: string[];
+    editorial_actions: MemoirBookEditorialAction[];
   };
   error_message: string;
+}
+
+export type MemoirBookEditorialActionType =
+  | "remove_repetition"
+  | "improve_transition"
+  | "reorder_chapters";
+
+export interface MemoirBookEditorialAction {
+  id: string;
+  action_type: MemoirBookEditorialActionType;
+  title: string;
+  reason: string;
+  chapter_ids: string[];
 }
 
 export interface MemoirBookReviewJob {
@@ -80,6 +94,29 @@ export interface MemoirBookReviewAnswerApplicationJob {
   error_message: string;
 }
 
+export interface MemoirBookEditorialRevisionJob {
+  job_id: string | null;
+  project_id: string;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage:
+    | ""
+    | "queued"
+    | "assembling"
+    | "revising"
+    | "saving"
+    | "completed"
+    | "failed"
+    | "cancelled";
+  selected_action_count: number;
+  proposal_id: string | null;
+  proposal_status: MemoirBookRevisionProposalStatus | null;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  can_cancel: boolean;
+  can_retry: boolean;
+  error_message: string;
+}
+
 export type MemoirBookRevisionProposalStatus =
   | "ready"
   | "applied"
@@ -120,6 +157,9 @@ export interface MemoirBookRevisionProposal {
     after_char_count: number;
     char_count_delta: number;
     chapters: MemoirBookRevisionChapterComparison[];
+    chapter_order_changed: boolean;
+    before_chapter_order: Array<{ chapter_id: string; title: string }>;
+    after_chapter_order: Array<{ chapter_id: string; title: string }>;
   };
   before: MemoirBookRevisionPreviewVersion;
   after: MemoirBookRevisionPreviewVersion;
@@ -274,6 +314,40 @@ export function cancelMemoirBookReviewAnswerApplicationJob(
 ): Promise<MemoirBookReviewAnswerApplicationJob> {
   return memoirRequest<MemoirBookReviewAnswerApplicationJob>(
     `${bookReviewPath(projectId)}/answer-application/jobs/${encodeURIComponent(jobId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function enqueueMemoirBookEditorialRevisionJob(
+  projectId: string,
+  actionIds: string[],
+): Promise<MemoirBookEditorialRevisionJob> {
+  return memoirAIRequest<
+    MemoirBookEditorialRevisionJob,
+    { action_ids: string[]; ai_model: null }
+  >(
+    `${bookReviewPath(projectId)}/editorial-revision/jobs`,
+    { action_ids: actionIds, ai_model: null },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookEditorialRevisionJob(
+  projectId: string,
+): Promise<MemoirBookEditorialRevisionJob> {
+  return memoirRequest<MemoirBookEditorialRevisionJob>(
+    `${bookReviewPath(projectId)}/editorial-revision/jobs/current`,
+  );
+}
+
+export function cancelMemoirBookEditorialRevisionJob(
+  projectId: string,
+  jobId: string,
+): Promise<MemoirBookEditorialRevisionJob> {
+  return memoirRequest<MemoirBookEditorialRevisionJob>(
+    `${bookReviewPath(projectId)}/editorial-revision/jobs/${
+      encodeURIComponent(jobId)
+    }`,
     { method: "DELETE" },
   );
 }

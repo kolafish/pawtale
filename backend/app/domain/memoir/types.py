@@ -116,6 +116,7 @@ class MemoirEditingJobType(str, Enum):
     GENERATE_BOOK_EDITORIAL_COPY = "generate_book_editorial_copy"
     GENERATE_BOOK_REVIEW = "generate_book_review"
     APPLY_BOOK_REVIEW_ANSWERS = "apply_book_review_answers"
+    GENERATE_BOOK_REVISION_PROPOSAL = "generate_book_revision_proposal"
     PREPARE_CHAPTER = "prepare_chapter"
 
 
