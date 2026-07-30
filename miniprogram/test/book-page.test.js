@@ -211,11 +211,11 @@ test("book page exposes finished-book share entry points", () => {
     projectId: "project/1",
     projectTitle: "外婆回忆录",
     bookPreviewTitle: "外婆回忆录",
-    bookContent: "外婆回忆录正文",
+    bookContentAvailable: true,
   });
 
   assert.match(pageWxml, /open-type="share"/);
-  assert.match(pageWxml, /wx:if="{{bookContent}}"/);
+  assert.match(pageWxml, /wx:if="{{bookContentAvailable}}"/);
   assert.match(pageWxml, /分享成书/);
   assert.deepEqual(page.onShareAppMessage.call(context), {
     title: "送你一本《外婆回忆录》",
@@ -399,7 +399,7 @@ test("book page routes progress export actions to the full-book export page", ()
   const { mod, page } = loadBookPage();
   const context = pageContext(page, {
     projectId: "project/1",
-    bookContent: "全书正文",
+    bookContentAvailable: true,
   });
 
   assert.equal(
@@ -464,6 +464,11 @@ test("book page progress counts generated and confirmed chapters", () => {
   assert.equal(mod.bookProgressText(chapters), "1/2 章已确认，2 章已有正文");
   assert.equal(chapters[0].draftStatusText, "已确认");
   assert.equal(chapters[1].draftStatusText, "待确认");
+  assert.equal("draft" in chapters[0], false);
+  assert.equal("draftContent" in chapters[0], false);
+  assert.equal("source_refs" in chapters[0], false);
+  assert.equal("sections" in chapters[0], false);
+  assert.equal("metadata_json" in chapters[0], false);
 });
 
 test("book page excludes hidden chapters from full-book generation readiness", () => {
@@ -482,6 +487,7 @@ test("book page excludes hidden chapters from full-book generation readiness", (
   assert.equal(context.data.allChaptersConfirmed, true);
   assert.equal(context.data.canGenerateBook, true);
   assert.equal(context.data.progressText, "1/1 章已确认，1 章已有正文");
+  assert.equal("plan" in context.data, false);
 });
 
 test("book page stores only the full-book summary needed by the home view", () => {
@@ -498,14 +504,20 @@ test("book page stores only the full-book summary needed by the home view", () =
   page.applyBookOutput.call(context, output);
   const data = context.data;
 
-  assert.equal(data.bookOutput, output);
-  assert.equal(data.bookContent, "全书正文");
+  assert.equal(context.bookOutput, output);
+  assert.equal(data.bookContentAvailable, true);
   assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
   assert.equal(data.bookStaleNotice, "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。");
   assert.equal(data.bookActionText, "更新书稿");
   assert.equal("bookPreviewChapters" in data, false);
   assert.equal("bookTitleInput" in data, false);
+  assert.equal("bookOutput" in data, false);
+  assert.equal("bookContent" in data, false);
+
+  page.applyPlan.call(context, samplePlan("draft"));
+  assert.equal(context.bookOutput, null);
+  assert.equal(context.data.bookContentAvailable, false);
 });
 
 test("book page stays on the book tab when login is required", async () => {
@@ -579,10 +591,7 @@ test("book page builds chapter structure controls from source refs", () => {
   assert.equal(chapters[0].canMoveUp, false);
   assert.equal(chapters[0].canMoveDown, true);
   assert.equal(chapters[1].canMoveUp, true);
-  assert.equal(chapters[0].sourceViews.length, 2);
-  assert.equal(chapters[0].sourceViews[0].previewText, "外婆家的院子");
-  assert.equal(chapters[0].sourceViews[0].recordNumber, 1);
-  assert.equal(chapters[0].sourceViews[0].labelText, "语音记录 1 · 素材 1 · 06-17 08:00 · 6 字");
+  assert.equal(chapters[0].sourceViews.length, 0);
   assert.equal(chapters[0].sourceToggleText, "查看 2 条");
   assert.deepEqual(chapters[0].mergeTargetOptions, [
     { label: "第 2 章 第一次离家", value: "chapter-2" },
@@ -609,6 +618,10 @@ test("book page toggles chapter source details", () => {
 
   assert.equal(context.data.chapters[0].sourceListExpanded, true);
   assert.equal(context.data.chapters[0].sourceToggleText, "收起素材");
+  assert.equal(context.data.chapters[0].sourceViews.length, 2);
+  assert.equal(context.data.chapters[0].sourceViews[0].previewText, "外婆家的院子");
+  assert.equal(context.data.chapters[0].sourceViews[0].recordNumber, 1);
+  assert.equal(context.data.chapters[0].sourceViews[0].labelText, "语音记录 1 · 素材 1 · 06-17 08:00 · 6 字");
 });
 
 test("book page marks assigned sources as supplemental chapter work", () => {
@@ -689,10 +702,13 @@ test("book page confirms chapters with trimmed user edits and original source re
   const context = pageContext(page, {
     projectId: "project/1",
     projectTitle: "外婆回忆录",
-    plan,
     planTitle: "  用户确认目录  ",
     chapters,
   });
+  context.bookPlan = plan;
+  context.bookChapterSources = Object.fromEntries(
+    plan.chapters.map((chapter) => [chapter.id, chapter.source_refs]),
+  );
 
   await page.confirmPlan.call(context);
 
@@ -820,8 +836,8 @@ test("book page reorders chapters through structure command", async () => {
   assert.equal(context.data.planStructureBusyDirection, "");
   assert.equal(draftReads, 0);
   assert.equal(outputReads, 0);
-  assert.equal(context.data.bookOutput.is_stale, true);
-  assert.deepEqual(context.data.bookOutput.stale_chapter_titles, ["第一次离家", "外婆家的童年"]);
+  assert.equal(context.bookOutput.is_stale, true);
+  assert.deepEqual(context.bookOutput.stale_chapter_titles, ["第一次离家", "外婆家的童年"]);
   assert.equal(context.data.bookActionText, "更新书稿");
 });
 
@@ -872,6 +888,9 @@ test("book page splits selected chapter sources into a new chapter", async () =>
   });
   assert.equal(context.data.chapters[0].splitSelectedCount, 0);
 
+  page.toggleChapterSources.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
   page.toggleSplitSource.call(context, {
     currentTarget: { dataset: { id: "chapter-1", utteranceId: "utterance-3" } },
   });
@@ -996,7 +1015,8 @@ test("book page assembles confirmed chapter drafts and updates the full-book pro
     },
   });
   assert.equal(context.data.generatingBook, false);
-  assert.equal(context.data.bookContent, "全书第二版正文");
+  assert.equal(context.data.bookContentAvailable, true);
+  assert.equal(context.bookOutput.latest_version.content, "全书第二版正文");
 });
 
 test("book page shows assembly errors without leaving the page busy", async () => {
@@ -1101,9 +1121,9 @@ test("book page does not synthesize stale full-book audio while the book is upda
   });
   const context = pageContext(page, {
     projectId: "project/1",
-    bookContent: "更新前的全书正文",
     generatingBook: true,
   });
+  page.applyBookOutput.call(context, sampleBookOutput(1, "更新前的全书正文"));
 
   await page.playBookOutputAudio.call(context);
 
@@ -1127,6 +1147,9 @@ test("book page shows chapter narration toast after preflight passes", async () 
     "chapter-1": sampleDraft(1, "draft"),
   });
   const context = pageContext(page, { projectId: "project/1", chapters });
+  context.bookDraftsByChapterId = {
+    "chapter-1": sampleDraft(1, "draft"),
+  };
   context.playAudioFiles = async () => {};
 
   await page.playChapterAudioById.call(context, "chapter-1", { showPreparingToast: true });

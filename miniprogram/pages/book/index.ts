@@ -11,7 +11,7 @@ import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
 import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
-import type { BookChapterView, BookHomeData } from "./book-view-model";
+import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
 import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import { promptRequiredText } from "../../services/text-prompt";
 import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
@@ -83,6 +83,7 @@ import {
   buildChapterViews,
   chapterCollectionData,
   guestBookData,
+  latestBookContent,
   latestDraftContent,
   planStage,
   stageText,
@@ -162,6 +163,10 @@ definePage<BookPageData>()({
   bookGenerationPollAttempts: 0,
   automationEvents: [] as MemoirAutomationEvent[],
   bookLoadSequence: 0,
+  bookPlan: null as MemoirBookPlan | null,
+  bookChapterSources: {} as BookChapterSources,
+  bookDraftsByChapterId: {} as Record<string, MemoirBookChapterDraft | null>,
+  bookOutput: null as MemoirBookOutput | null,
 
   data: {
     pageClass: "book-page",
@@ -178,7 +183,6 @@ definePage<BookPageData>()({
     projectId: "",
     projectTitle: "我的回忆录",
     projectNarratorName: "",
-    plan: null,
     planTitle: "",
     stage: "empty",
     stageText: "等待生成章节",
@@ -191,8 +195,7 @@ definePage<BookPageData>()({
     canGenerateBook: false,
     progressText: "还没有章节",
     titleBusyTarget: "",
-    bookOutput: null,
-    bookContent: "",
+    bookContentAvailable: false,
     bookCharCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
@@ -242,7 +245,7 @@ definePage<BookPageData>()({
       projectId: this.data.projectId,
       projectTitle: this.data.projectTitle,
       bookTitle: this.data.bookPreviewTitle || this.data.planTitle,
-      hasBookContent: Boolean(this.data.bookContent),
+      hasBookContent: this.data.bookContentAvailable,
     });
   },
 
@@ -275,6 +278,10 @@ definePage<BookPageData>()({
         return;
       }
       if (isAuthError(error)) {
+        this.bookPlan = null;
+        this.bookChapterSources = {};
+        this.bookDraftsByChapterId = {};
+        this.bookOutput = null;
         this.setData(guestBookData());
         return;
       }
@@ -415,22 +422,30 @@ definePage<BookPageData>()({
   },
 
   applyPlan(plan: MemoirBookPlan | null, draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {}) {
+    this.bookPlan = plan;
+    this.bookChapterSources = Object.fromEntries(
+      (plan?.chapters || []).map((chapter) => [chapter.id, chapter.source_refs]),
+    );
+    this.bookDraftsByChapterId = draftsByChapterId;
     const chapters = plan
       ? buildChapterViews(plan, draftsByChapterId, this.data.splitSourceSelections)
       : [];
     const stage = planStage(plan);
+    if (stage !== "drafting") {
+      this.bookOutput = null;
+    }
     this.setData({
-      plan,
       planTitle: plan?.title || `${this.data.projectTitle || "我的回忆录"}章节规划`,
       stage,
       stageText: stageText(stage),
       chapterStructureEditing: stage === "drafting" ? this.data.chapterStructureEditing : false,
-      ...chapterCollectionData(chapters, this.data.splitSourceSelections),
+      ...chapterCollectionData(chapters, this.bookChapterSources, this.data.splitSourceSelections),
       ...(stage === "drafting" ? {} : bookHomeOutputData(null)),
     });
   },
 
   applyBookOutput(output: MemoirBookOutput | null) {
+    this.bookOutput = output;
     this.setData(bookHomeOutputData(output));
   },
 
@@ -454,6 +469,7 @@ definePage<BookPageData>()({
     this.setData({
       ...chapterCollectionData(
         chapters,
+        this.bookChapterSources,
         this.data.splitSourceSelections,
       ),
       automationEventItems: buildAutomationEventViews(
@@ -601,10 +617,10 @@ definePage<BookPageData>()({
   },
 
   async confirmPlan() {
-    if (!this.data.projectId || this.data.confirmingPlan || !this.data.plan) {
+    if (!this.data.projectId || this.data.confirmingPlan || !this.bookPlan) {
       return;
     }
-    const chapters = toPlanInput(this.data.chapters);
+    const chapters = toPlanInput(this.data.chapters, this.bookChapterSources);
     if (!chapters.length) {
       this.setData({ error: "至少保留一个章节" });
       return;
@@ -663,7 +679,7 @@ definePage<BookPageData>()({
   },
 
   toggleChapterStructureEditing() {
-    if (this.data.stage !== "drafting" || !this.data.plan || this.data.updatingPlanStructure) {
+    if (this.data.stage !== "drafting" || !this.bookPlan || this.data.updatingPlanStructure) {
       return;
     }
     this.stopPlayback();
@@ -696,7 +712,7 @@ definePage<BookPageData>()({
       label: "AI 重新起名",
       run: () => this.generateChapterTitleById(chapterId),
     });
-    const canShowAudioAction = Boolean(chapter.draft?.latest_version)
+    const canShowAudioAction = chapter.draftAvailable
       && (!this.data.ttsBusyTarget || this.data.playingTarget === chapter.ttsTarget);
     if (canShowAudioAction) {
       actions.push({
@@ -724,7 +740,7 @@ definePage<BookPageData>()({
     if (!this.data.projectId) {
       return;
     }
-    if (!this.data.bookContent) {
+    if (!this.data.bookContentAvailable) {
       this.setData({ error: "请先生成书稿" });
       return;
     }
@@ -846,11 +862,11 @@ definePage<BookPageData>()({
     if (!id || this.data.confirmingPlan || this.data.updatingPlanStructure || this.data.chapters.length <= 1) {
       return;
     }
-    if (this.data.projectId && this.data.plan) {
+    if (this.data.projectId && this.bookPlan) {
       await this.applyPlanStructureCommand({ type: "delete_chapter", chapter_id: id }, "章节已删除");
       return;
     }
-    const patch = removeLocalChapterPatch(this.data, id);
+    const patch = removeLocalChapterPatch(this.data, this.bookChapterSources, id);
     if (patch) {
       this.setData(patch);
     }
@@ -885,10 +901,10 @@ definePage<BookPageData>()({
     const toIndex = direction === "up" ? fromIndex - 1 : fromIndex + 1;
     const chapters = [...previousChapters];
     [chapters[fromIndex], chapters[toIndex]] = [chapters[toIndex], chapters[fromIndex]];
-    this.setData(chapterCollectionData(chapters, this.data.splitSourceSelections));
+    this.setData(chapterCollectionData(chapters, this.bookChapterSources, this.data.splitSourceSelections));
     const plan = await this.applyPlanStructureCommand(command, "章节顺序已调整");
     if (!plan) {
-      this.setData(chapterCollectionData(previousChapters, this.data.splitSourceSelections));
+      this.setData(chapterCollectionData(previousChapters, this.bookChapterSources, this.data.splitSourceSelections));
     }
   },
 
@@ -937,7 +953,12 @@ definePage<BookPageData>()({
     if (this.data.updatingPlanStructure) {
       return;
     }
-    const patch = toggleBookSplitSourcePatch(this.data, chapterId, utteranceId);
+    const patch = toggleBookSplitSourcePatch(
+      this.data,
+      this.bookChapterSources,
+      chapterId,
+      utteranceId,
+    );
     if (patch) {
       this.setData(patch);
     }
@@ -966,11 +987,11 @@ definePage<BookPageData>()({
 
   toggleChapterSources(event: DatasetEvent) {
     const chapterId = datasetString(event, "id");
-    this.setData(toggleBookChapterSourcesPatch(this.data, chapterId));
+    this.setData(toggleBookChapterSourcesPatch(this.data, this.bookChapterSources, chapterId));
   },
 
   async applyPlanStructureCommand(command: MemoirBookPlanStructureCommandRequest, toastTitle: string) {
-    if (!this.data.projectId || !this.data.plan || this.data.updatingPlanStructure) {
+    if (!this.data.projectId || !this.bookPlan || this.data.updatingPlanStructure) {
       return null;
     }
     this.stopPlayback();
@@ -990,20 +1011,13 @@ definePage<BookPageData>()({
         const movedChapterTitles = plan.chapters
           .filter((chapter) => previousSortOrderByChapterId.get(chapter.id) !== chapter.sort_order)
           .map((chapter) => chapter.title);
-        const draftsByChapterId = this.data.chapters.reduce<Record<string, MemoirBookChapterDraft | null>>(
-          (memo, chapter) => {
-            memo[chapter.id] = chapter.draft;
-            return memo;
-          },
-          {},
-        );
-        this.applyPlan(plan, draftsByChapterId);
-        if (this.data.bookOutput?.latest_version && movedChapterTitles.length) {
+        this.applyPlan(plan, this.bookDraftsByChapterId);
+        if (this.bookOutput?.latest_version && movedChapterTitles.length) {
           this.applyBookOutput({
-            ...this.data.bookOutput,
+            ...this.bookOutput,
             is_stale: true,
             stale_chapter_titles: Array.from(new Set([
-              ...(this.data.bookOutput.stale_chapter_titles || []),
+              ...(this.bookOutput.stale_chapter_titles || []),
               ...movedChapterTitles,
             ])),
           });
@@ -1039,7 +1053,7 @@ definePage<BookPageData>()({
     this.stopPlayback();
     this.setData({ generatingBook: true, error: "" });
     try {
-      const settings = bookGenerationSettings(this.data.bookOutput, {
+      const settings = bookGenerationSettings(this.bookOutput, {
         title: defaultBookTitle(this.data.planTitle, this.data.projectTitle),
         narratorName: this.data.projectNarratorName,
       });
@@ -1075,7 +1089,8 @@ definePage<BookPageData>()({
     if (this.data.ttsBusyTarget) {
       return;
     }
-    if (!chapter.draft?.latest_version) {
+    const draft = this.bookDraftsByChapterId[chapterId] || null;
+    if (!draft?.latest_version) {
       this.patchChapter(chapterId, { draftError: "请先生成章节稿" });
       return;
     }
@@ -1093,7 +1108,7 @@ definePage<BookPageData>()({
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(latestDraftContent(chapter.draft)));
+      await this.playAudioFiles(response, target, token, trimText(latestDraftContent(draft)));
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -1116,7 +1131,7 @@ definePage<BookPageData>()({
       this.stopPlayback();
       return;
     }
-    if (!this.data.plan || !this.data.chapters.length) {
+    if (!this.bookPlan || !this.data.chapters.length) {
       wx.showToast({ title: "先生成章节规划", icon: "none" });
       return;
     }
@@ -1131,7 +1146,7 @@ definePage<BookPageData>()({
     this.stopPlayback();
     const token = this.audioPlayback.nextToken();
     this.playToken = token;
-    const activeText = bookOutlineNarrationText(this.data.plan.title, this.data.chapters);
+    const activeText = bookOutlineNarrationText(this.bookPlan.title, this.data.chapters);
     this.setData({
       ttsBusyTarget: target,
       error: "",
@@ -1165,7 +1180,8 @@ definePage<BookPageData>()({
       this.stopPlayback();
       return;
     }
-    if (!this.data.bookContent) {
+    const bookContent = latestBookContent(this.bookOutput);
+    if (!bookContent) {
       wx.showToast({ title: "先生成全书稿", icon: "none" });
       return;
     }
@@ -1190,7 +1206,7 @@ definePage<BookPageData>()({
         return;
       }
       this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(this.data.bookContent));
+      await this.playAudioFiles(response, target, token, trimText(bookContent));
     } catch (error) {
       if (routeAuthError(error, "login")) {
         return;
@@ -1280,6 +1296,7 @@ definePage<BookPageData>()({
     this.setData({
       ...chapterCollectionData(
         chapters,
+        this.bookChapterSources,
         this.data.splitSourceSelections,
       ),
     });

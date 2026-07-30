@@ -2,7 +2,7 @@
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{projectTitle || "我的回忆录"}} · {{stageText}}</text>
     <button
-      wx:if="{{bookContent}}"
+      wx:if="{{bookContentAvailable}}"
       class="book-share-button"
       open-type="share"
       data-share-kind="book"
@@ -48,7 +48,7 @@
         <text class="status-pill">{{stageText}}</text>
       </view>
       <text class="status-meta">
-        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContent ? "已生成书稿" : progressText}}
+        {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContentAvailable ? "已生成书稿" : progressText}}
       </text>
       <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
     </view>
@@ -61,7 +61,7 @@
         继续逐章整理
       </button>
       <button
-        wx:elif="{{!bookContent || bookStaleNotice}}"
+        wx:elif="{{!bookContentAvailable || bookStaleNotice}}"
         class="primary-button small"
         loading="{{generatingBook}}"
         disabled="{{updatingPlanStructure || generatingBook || !canGenerateBook}}"
@@ -78,7 +78,7 @@
         查看与导出
       </button>
       <button
-        wx:if="{{bookContent}}"
+        wx:if="{{bookContentAvailable}}"
         class="ghost-button small"
         loading="{{ttsBusyTarget === 'book'}}"
         disabled="{{generatingBook || (ttsBusyTarget && ttsBusyTarget !== 'book') || (playingTarget && playingTarget !== 'book')}}"
@@ -220,11 +220,11 @@
   </block>
 
   <block wx:else>
-  <view wx:if="{{loading && !plan}}" class="empty-panel">
+  <view wx:if="{{loading && stage === 'empty'}}" class="empty-panel">
     <text>正在加载</text>
   </view>
 
-  <view wx:elif="{{!plan}}" class="empty-panel">
+  <view wx:elif="{{stage === 'empty'}}" class="empty-panel">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">从讲述记录生成章节</text>
     <text class="empty-copy">系统会先把当前回忆录里的讲述内容划分为若干章节。你确认章节后，再逐章生成正文。</text>
@@ -286,7 +286,7 @@
       <view class="source-summary-row">
         <text class="source-preview">{{item.sourceSummary}}</text>
         <button
-          wx:if="{{item.sourceViews.length}}"
+          wx:if="{{item.sourceCount}}"
           class="source-toggle-button"
           data-id="{{item.id}}"
           bindtap="toggleChapterSources"
