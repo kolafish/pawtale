@@ -1,13 +1,13 @@
 <view class="revision-page ui-page-shell">
   <view wx:if="{{loading}}" class="state-card">正在准备修改预览...</view>
-  <view wx:elif="{{error && !proposal}}" class="state-card error">{{error}}</view>
+  <view wx:elif="{{error && !proposal}}" class="ui-error-banner">{{error}}</view>
 
   <block wx:elif="{{proposal}}">
     <view class="revision-intro">
       <text class="revision-kicker">书稿修改预览</text>
       <text class="revision-title">确认前，当前书稿不会改变</text>
       <text class="revision-summary">{{proposal.summary}}</text>
-      <text class="revision-meta">
+      <text class="revision-meta ui-tabular">
         {{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节
       </text>
       <text wx:if="{{proposal.status === 'stale'}}" class="status-notice error">
@@ -23,15 +23,28 @@
 
     <view class="mode-switch" aria-label="预览范围">
       <view
-        class="mode-option {{mode === 'changes' ? 'active' : ''}}"
+        class="mode-option ui-pressable {{mode === 'changes' ? 'active' : ''}}"
         data-mode="changes"
         bindtap="switchMode"
       >只看修改处</view>
       <view
-        class="mode-option {{mode === 'whole' ? 'active' : ''}}"
+        class="mode-option ui-pressable {{mode === 'whole' ? 'active' : ''}}"
         data-mode="whole"
         bindtap="switchMode"
       >查看全书</view>
+    </view>
+
+    <view class="version-switch" aria-label="预览版本">
+      <view
+        class="version-option ui-pressable {{previewVersion === 'before' ? 'active' : ''}}"
+        data-version="before"
+        bindtap="switchPreviewVersion"
+      >修改前</view>
+      <view
+        class="version-option ui-pressable {{previewVersion === 'after' ? 'active' : ''}}"
+        data-version="after"
+        bindtap="switchPreviewVersion"
+      >修改后</view>
     </view>
 
     <view wx:if="{{mode === 'changes'}}" class="changed-list">
@@ -67,18 +80,8 @@
           wx:for-item="section"
           class="changed-section"
         >
-          <view class="section-heading">
-            <view>
-              <text class="section-label">小节</text>
-              <text class="section-title">{{section.title}}</text>
-            </view>
-            <view
-              class="version-toggle"
-              data-section-id="{{section.section_id}}"
-              bindtap="toggleSectionVersion"
-            >切换到{{section.display_label === "修改后" ? "修改前" : "修改后"}}</view>
-          </view>
-          <text class="version-label">{{section.display_label}}</text>
+          <text class="section-label">小节</text>
+          <text class="section-title">{{section.title}}</text>
           <text class="section-content" selectable>{{section.display_content}}</text>
         </view>
       </view>
@@ -91,18 +94,6 @@
     </view>
 
     <view wx:else class="whole-book">
-      <view class="version-switch" aria-label="全书版本">
-        <view
-          class="version-option {{wholeVersion === 'before' ? 'active' : ''}}"
-          data-version="before"
-          bindtap="switchWholeVersion"
-        >修改前</view>
-        <view
-          class="version-option {{wholeVersion === 'after' ? 'active' : ''}}"
-          data-version="after"
-          bindtap="switchWholeVersion"
-        >修改后</view>
-      </view>
       <view
         wx:for="{{wholeChapters}}"
         wx:key="chapter_id"
@@ -125,7 +116,7 @@
       </view>
     </view>
 
-    <view wx:if="{{error}}" class="state-card error">{{error}}</view>
+    <view wx:if="{{error}}" class="ui-error-banner">{{error}}</view>
 
     <view class="revision-actions">
       <view

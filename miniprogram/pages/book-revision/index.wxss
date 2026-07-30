@@ -7,9 +7,7 @@
 .changed-chapter,
 .whole-chapter,
 .state-card {
-  box-sizing: border-box;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 12rpx;
+  border-radius: 20rpx;
   background: var(--ui-surface);
   box-shadow: var(--ui-card-shadow);
 }
@@ -27,7 +25,6 @@
 .chapter-title,
 .section-label,
 .section-title,
-.version-label,
 .section-content {
   display: block;
   overflow-wrap: anywhere;
@@ -47,6 +44,12 @@
   font-size: 40rpx;
   font-weight: 800;
   line-height: 54rpx;
+  text-wrap: balance;
+}
+
+.revision-summary,
+.status-notice {
+  text-wrap: pretty;
 }
 
 .revision-summary {
@@ -61,7 +64,6 @@
   color: var(--ui-text-muted);
   font-size: 24rpx;
   line-height: 36rpx;
-  font-variant-numeric: tabular-nums;
 }
 
 .status-notice {
@@ -79,8 +81,7 @@
   color: var(--ui-success-text);
 }
 
-.status-notice.error,
-.state-card.error {
+.status-notice.error {
   background: var(--ui-danger-surface);
   color: var(--ui-danger-text);
 }
@@ -92,7 +93,7 @@
   gap: 8rpx;
   margin-top: 24rpx;
   padding: 8rpx;
-  border-radius: 12rpx;
+  border-radius: 16rpx;
   background: var(--ui-surface-subtle);
 }
 
@@ -112,7 +113,7 @@
 .version-option.active {
   background: var(--ui-surface);
   color: var(--ui-accent-strong);
-  box-shadow: 0 1rpx 8rpx rgba(46, 33, 28, 0.1);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .changed-list,
@@ -131,6 +132,7 @@
   font-size: 34rpx;
   font-weight: 800;
   line-height: 48rpx;
+  text-wrap: balance;
 }
 
 .changed-section,
@@ -140,43 +142,12 @@
   border-top: 1rpx solid var(--ui-divider);
 }
 
-.section-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20rpx;
-}
-
-.section-heading > view:first-child {
-  min-width: 0;
-}
-
 .section-title {
   margin-top: 4rpx;
   font-size: 29rpx;
   font-weight: 700;
   line-height: 42rpx;
-}
-
-.version-toggle {
-  display: flex;
-  flex: 0 0 auto;
-  min-height: 80rpx;
-  align-items: center;
-  padding: 0 20rpx;
-  border-radius: 999rpx;
-  background: var(--ui-accent-surface);
-  color: var(--ui-accent-strong);
-  font-size: 24rpx;
-  font-weight: 700;
-}
-
-.version-label {
-  margin-top: 20rpx;
-  color: var(--ui-accent);
-  font-size: 24rpx;
-  font-weight: 700;
-  line-height: 36rpx;
+  text-wrap: balance;
 }
 
 .section-content {
@@ -209,14 +180,17 @@
   line-height: 42rpx;
 }
 
+.revision-page .ui-error-banner {
+  margin-top: 24rpx;
+}
+
 .revision-actions {
   margin-top: 30rpx;
 }
 
 .primary-action,
 .secondary-action {
-  min-height: 96rpx;
-  border-radius: 10rpx;
+  border-radius: 12rpx;
   font-size: 29rpx;
   font-weight: 800;
 }
@@ -228,7 +202,7 @@
 
 .secondary-action {
   margin-top: 16rpx;
-  border: 1rpx solid var(--ui-border);
   background: var(--ui-surface);
   color: var(--ui-text-secondary);
+  box-shadow: var(--ui-control-shadow);
 }

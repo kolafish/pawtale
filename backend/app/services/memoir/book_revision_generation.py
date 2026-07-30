@@ -496,10 +496,6 @@ async def apply_book_review_answers(
             "answers_signature": current_context.answers_signature,
             "issue_ids": [answer.issue_id for answer in current_context.answers],
         },
-        comparison=book_revision_proposals.build_comparison(
-            before=snapshots,
-            after=generated.snapshots,
-        ),
         generation=generated.generation,
         summary=summary,
     )
@@ -724,10 +720,6 @@ async def generate_editorial_revision_proposal(
             "actions_signature": expected_actions_signature,
             "answers_signature": current_answers.answers_signature,
         },
-        comparison=book_revision_proposals.build_comparison(
-            before=original_snapshots,
-            after=revised_snapshots,
-        ),
         generation=generation,
         summary=_editorial_summary(actions),
     )

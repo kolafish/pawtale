@@ -25,7 +25,6 @@ type PreviewVersion = "before" | "after";
 
 interface RevisionSectionView extends MemoirBookRevisionSectionComparison {
   display_content: string;
-  display_label: string;
 }
 
 interface RevisionChapterView {
@@ -50,8 +49,7 @@ interface BookRevisionData {
   error: string;
   proposal: MemoirBookRevisionProposal | null;
   mode: RevisionMode;
-  wholeVersion: PreviewVersion;
-  beforeSectionIds: string[];
+  previewVersion: PreviewVersion;
   changedChapters: RevisionChapterView[];
   wholeChapters: WholeChapterView[];
 }
@@ -59,7 +57,6 @@ interface BookRevisionData {
 type RevisionDatasetEvent = PageDatasetEvent<{
   mode?: string;
   version?: string;
-  sectionId?: string;
 }>;
 
 function wholeBookChapters(
@@ -78,30 +75,24 @@ function wholeBookChapters(
 
 export function revisionViewPatch(
   proposal: MemoirBookRevisionProposal,
-  beforeSectionIds: string[] = [],
-  wholeVersion: PreviewVersion = "after",
+  previewVersion: PreviewVersion = "after",
 ): Pick<
   BookRevisionData,
-  "proposal" | "beforeSectionIds" | "changedChapters" | "wholeChapters"
+  "proposal" | "previewVersion" | "changedChapters" | "wholeChapters"
 > {
-  const beforeIds = new Set(beforeSectionIds);
   return {
     proposal,
-    beforeSectionIds,
+    previewVersion,
     changedChapters: proposal.comparison.chapters.map((chapter) => ({
       ...chapter,
-      sections: chapter.sections.map((section) => {
-        const showingBefore = beforeIds.has(section.section_id);
-        return {
-          ...section,
-          display_content: showingBefore
-            ? section.before_content
-            : section.after_content,
-          display_label: showingBefore ? "修改前" : "修改后",
-        };
-      }),
+      sections: chapter.sections.map((section) => ({
+        ...section,
+        display_content: previewVersion === "before"
+          ? section.before_content
+          : section.after_content,
+      })),
     })),
-    wholeChapters: wholeBookChapters(proposal, wholeVersion),
+    wholeChapters: wholeBookChapters(proposal, previewVersion),
   };
 }
 
@@ -127,8 +118,7 @@ definePage<BookRevisionData>()({
     error: "",
     proposal: null,
     mode: "changes",
-    wholeVersion: "after",
-    beforeSectionIds: [],
+    previewVersion: "after",
     changedChapters: [],
     wholeChapters: [],
   },
@@ -153,11 +143,7 @@ definePage<BookRevisionData>()({
       );
       this.setData({
         loading: false,
-        ...revisionViewPatch(
-          proposal,
-          this.data.beforeSectionIds,
-          this.data.wholeVersion,
-        ),
+        ...revisionViewPatch(proposal, this.data.previewVersion),
       });
     } catch (error) {
       if (routeAuthError(error)) {
@@ -177,32 +163,13 @@ definePage<BookRevisionData>()({
     }
   },
 
-  switchWholeVersion(event: RevisionDatasetEvent) {
+  switchPreviewVersion(event: RevisionDatasetEvent) {
     const version = datasetString(event, "version");
     const proposal = this.data.proposal;
     if (!proposal || (version !== "before" && version !== "after")) {
       return;
     }
-    this.setData({
-      wholeVersion: version,
-      wholeChapters: wholeBookChapters(proposal, version),
-    });
-  },
-
-  toggleSectionVersion(event: RevisionDatasetEvent) {
-    const sectionId = datasetString(event, "sectionId");
-    const proposal = this.data.proposal;
-    if (!proposal || !sectionId) {
-      return;
-    }
-    const beforeSectionIds = this.data.beforeSectionIds.includes(sectionId)
-      ? this.data.beforeSectionIds.filter((value) => value !== sectionId)
-      : [...this.data.beforeSectionIds, sectionId];
-    this.setData(revisionViewPatch(
-      proposal,
-      beforeSectionIds,
-      this.data.wholeVersion,
-    ));
+    this.setData(revisionViewPatch(proposal, version));
   },
 
   async applyRevision() {
@@ -223,11 +190,7 @@ definePage<BookRevisionData>()({
       );
       this.setData({
         busy: false,
-        ...revisionViewPatch(
-          proposal,
-          this.data.beforeSectionIds,
-          this.data.wholeVersion,
-        ),
+        ...revisionViewPatch(proposal, this.data.previewVersion),
       });
       wx.showToast({ title: "修改已写入书稿", icon: "success" });
     } catch (error) {

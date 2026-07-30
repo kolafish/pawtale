@@ -1013,27 +1013,28 @@ async def generate_chapter(
         if current is None:
             if client is None:
                 raise ValueError("chapter generation client is missing")
+            previous = (
+                full_sections[section_index - 1]
+                if section_index > 0
+                else None
+            )
+            previous_content = (
+                completed_sections[-1].content if completed_sections else ""
+            )
             generated_section = await generate_chapter_section(
                 context,
                 section=section,
                 editorial_guidance=editorial_guidance,
                 chapter_sections=full_sections,
-                previous_section_content=(
-                    completed_sections[-1].content
-                    if completed_sections
-                    else ""
-                ),
-                previous_section=(
-                    full_sections[section_index - 1]
-                    if section_index > 0
-                    else None
-                ),
-                previous_section_continuity=(
-                    (section_continuity or {}).get(
-                        full_sections[section_index - 1].section_id
-                    )
-                    if section_index > 0
-                    else None
+                previous_section_content=previous_content,
+                preceding_section_context=previous_section_context(
+                    section=previous,
+                    content=previous_content,
+                    continuity=(
+                        (section_continuity or {}).get(previous.section_id)
+                        if previous is not None
+                        else None
+                    ),
                 ),
                 ai_model=ai_model,
                 ai_client=client,
@@ -1075,8 +1076,7 @@ async def generate_chapter_section(
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...],
     previous_section_content: str = "",
-    previous_section: ChapterSectionInput | None = None,
-    previous_section_continuity: ChapterSectionContinuity | None = None,
+    preceding_section_context: str = "",
     current_section_content: str = "",
     revision_instruction: str = "",
     ai_model: str | None = None,
@@ -1090,11 +1090,7 @@ async def generate_chapter_section(
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
         revision_instruction=revision_instruction,
-        previous_section_context=previous_section_context(
-            section=previous_section,
-            content=previous_section_content,
-            continuity=previous_section_continuity,
-        ),
+        previous_section_context=preceding_section_context,
     )
     last_error: Exception | None = None
     policy = ai_text_workload_policy(
@@ -1446,9 +1442,10 @@ async def revise_and_save_chapter_draft_section_with_ai(
         ] != expected_section_ids
     ):
         raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再修改")
+    previous = before.sections[target_index - 1] if target_index > 0 else None
     previous_section_content = (
         str(latest_sections[target_index - 1].get("content") or "").strip()
-        if target_index > 0
+        if previous is not None
         else ""
     )
     target = before.sections[target_index]
@@ -1461,15 +1458,14 @@ async def revise_and_save_chapter_draft_section_with_ai(
         editorial_guidance=editorial_guidance,
         chapter_sections=before.sections,
         previous_section_content=previous_section_content,
-        previous_section=(
-            before.sections[target_index - 1]
-            if target_index > 0
-            else None
-        ),
-        previous_section_continuity=(
-            continuity.get(before.sections[target_index - 1].section_id)
-            if target_index > 0
-            else None
+        preceding_section_context=previous_section_context(
+            section=previous,
+            content=previous_section_content,
+            continuity=(
+                continuity.get(previous.section_id)
+                if previous is not None
+                else None
+            ),
         ),
         current_section_content=str(
             latest_sections[target_index].get("content") or ""
