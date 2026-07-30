@@ -6,17 +6,34 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base, register_models
 
 
-TABLE_NAME = "memoir_book_reviews"
-REQUIRED_COLUMNS = {
-    "id",
-    "project_id",
-    "input_signature",
-    "engine",
-    "status",
-    "review_json",
-    "error_message",
-    "created_at",
-    "updated_at",
+REQUIRED_TABLE_COLUMNS = {
+    "memoir_book_reviews": {
+        "id",
+        "project_id",
+        "input_signature",
+        "engine",
+        "status",
+        "review_json",
+        "error_message",
+        "created_at",
+        "updated_at",
+    },
+    "memoir_book_revision_proposals": {
+        "id",
+        "project_id",
+        "review_id",
+        "review_input_signature",
+        "base_output_version_id",
+        "status",
+        "selected_actions_json",
+        "candidate_chapter_snapshot_json",
+        "comparison_json",
+        "generation_json",
+        "summary",
+        "result_output_version_id",
+        "created_at",
+        "updated_at",
+    },
 }
 
 
@@ -29,28 +46,35 @@ async def migrate_memoir_book_schema(
         tables = await conn.run_sync(
             lambda sync_conn: set(inspect(sync_conn).get_table_names())
         )
-        if TABLE_NAME not in tables:
-            await conn.run_sync(
-                lambda sync_conn: Base.metadata.tables[TABLE_NAME].create(
-                    sync_conn,
-                    checkfirst=True,
+        for table_name in REQUIRED_TABLE_COLUMNS:
+            if table_name not in tables:
+                await conn.run_sync(
+                    lambda sync_conn, name=table_name: Base.metadata.tables[name].create(
+                        sync_conn,
+                        checkfirst=True,
+                    )
                 )
-            )
-            changed_tables.append(TABLE_NAME)
+                changed_tables.append(table_name)
     return {"changed_tables": changed_tables, "changed_columns": []}
 
 
 async def assert_memoir_book_schema(engine: AsyncEngine) -> None:
     async with engine.connect() as conn:
-        columns = await conn.run_sync(
-            lambda sync_conn: {
-                column["name"]
-                for column in inspect(sync_conn).get_columns(TABLE_NAME)
-            }
+        tables = await conn.run_sync(
+            lambda sync_conn: set(inspect(sync_conn).get_table_names())
         )
-    missing = REQUIRED_COLUMNS - columns
-    if missing:
-        raise RuntimeError(
-            f"{TABLE_NAME} is missing required columns: "
-            + ", ".join(sorted(missing))
-        )
+        for table_name, required_columns in REQUIRED_TABLE_COLUMNS.items():
+            if table_name not in tables:
+                raise RuntimeError(f"{table_name} is missing")
+            columns = await conn.run_sync(
+                lambda sync_conn, name=table_name: {
+                    column["name"]
+                    for column in inspect(sync_conn).get_columns(name)
+                }
+            )
+            missing = required_columns - columns
+            if missing:
+                raise RuntimeError(
+                    f"{table_name} is missing required columns: "
+                    + ", ".join(sorted(missing))
+                )

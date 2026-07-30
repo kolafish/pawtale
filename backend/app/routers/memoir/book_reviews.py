@@ -11,11 +11,13 @@ from app.schemas.memoir_book_review import (
     MemoirBookReviewGenerateRequest,
     MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
+    MemoirBookRevisionProposalResponse,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import (
     book_review_answer_jobs,
     book_review_jobs,
+    book_revision_proposals,
     book_reviews,
 )
 from app.services.memoir.project_ai_preferences import select_project_ai_model
@@ -214,3 +216,94 @@ async def cancel_memoir_book_review_answer_application_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/book-review/revision-proposals/{proposal_id}",
+    response_model=MemoirBookRevisionProposalResponse,
+)
+async def get_memoir_book_revision_proposal(
+    project_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await load_memoir_project(
+        db,
+        project_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+    proposal = await book_revision_proposals.load_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+    )
+    return await book_revision_proposals.proposal_response(
+        db,
+        proposal=proposal,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-review/revision-proposals/{proposal_id}/apply",
+    response_model=MemoirBookRevisionProposalResponse,
+)
+async def apply_memoir_book_revision_proposal(
+    project_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await load_memoir_project(
+        db,
+        project_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+    proposal = await book_revision_proposals.load_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+    )
+    try:
+        response = await book_revision_proposals.apply_proposal(
+            db,
+            proposal=proposal,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    return response
+
+
+@router.post(
+    "/projects/{project_id}/book-review/revision-proposals/{proposal_id}/dismiss",
+    response_model=MemoirBookRevisionProposalResponse,
+)
+async def dismiss_memoir_book_revision_proposal(
+    project_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await load_memoir_project(
+        db,
+        project_id,
+        current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+    proposal = await book_revision_proposals.load_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+    )
+    try:
+        response = await book_revision_proposals.dismiss_proposal(
+            db,
+            proposal=proposal,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.commit()
+    return response

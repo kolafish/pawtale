@@ -169,7 +169,7 @@ export function answerApplicationJobView(
       queued: "书稿调整已提交",
       assembling: "正在准备当前书稿",
       revising: "正在把回答写入相关章节",
-      saving: "正在保存新的书稿版本",
+      saving: "正在生成修改预览",
     };
     return {
       answerApplicationProgressVisible: true,
@@ -177,7 +177,7 @@ export function answerApplicationJobView(
         stageTitles[job.stage] || "正在根据回答调整书稿"
       ),
       answerApplicationProgressDetail: (
-        "任务在后台执行，离开页面后仍会继续，并保留原来的书稿版本"
+        "任务在后台执行，完成后先预览，确认后才会修改书稿"
       ),
       answerApplicationProgressMode: "indeterminate",
       answerApplicationProgressClass: "active",
@@ -568,6 +568,19 @@ definePage<BookCompletionData>()({
     });
   },
 
+  openBookRevision() {
+    const proposalId = this.data.answerApplicationJob?.proposal_id;
+    if (!this.data.projectId || !proposalId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/book-revision/index", {
+        projectId: this.data.projectId,
+        proposalId,
+      }),
+    });
+  },
+
   async loadOverview(silent = false) {
     if (!this.data.projectId) {
       this.setData({ loading: false, error: "没有找到这本书" });
@@ -699,7 +712,7 @@ definePage<BookCompletionData>()({
         }
         if (finishedAnswerApplication) {
           const toastTitle = answerApplicationJob?.status === "succeeded"
-            ? "回答已应用到书稿"
+            ? "修改预览已生成"
             : (answerApplicationJob?.status === "cancelled"
               ? "已停止调整书稿"
               : "书稿调整未完成");
@@ -918,7 +931,7 @@ definePage<BookCompletionData>()({
       answerApplicationProgressVisible: true,
       answerApplicationProgressTitle: "正在提交书稿调整",
       answerApplicationProgressDetail: (
-        "提交后可以离开页面，回答和原书稿版本都会保留"
+        "提交后可以离开页面，完成后仍需预览并确认"
       ),
       answerApplicationProgressMode: "indeterminate",
       answerApplicationProgressClass: "active",

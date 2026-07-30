@@ -82,12 +82,18 @@
           class="answer-application {{answerApplicationJob.already_applied ? 'applied' : ''}}"
         >
           <text class="answer-application-title">
-            {{answerApplicationJob.already_applied ? "回答已经写入书稿" : answerApplicationJob.answer_count + " 条回答已经保存"}}
+            {{answerApplicationJob.already_applied
+              ? "回答已经写入书稿"
+              : (answerApplicationJob.proposal_status === "ready"
+                ? "修改预览已经生成"
+                : answerApplicationJob.answer_count + " 条回答已经保存")}}
           </text>
           <text class="answer-application-detail">
             {{answerApplicationJob.already_applied
               ? (answerApplicationJob.summary || "相关章节已经根据您的回答完成调整，并保留了原来的书稿版本。")
-              : "可以一次性把这些回答应用到关联章节，生成一个新的书稿版本。"}}
+              : (answerApplicationJob.proposal_status === "ready"
+                ? (answerApplicationJob.summary || "请先查看修改前后内容，确认后才会写入书稿。")
+                : "可以根据这些回答生成修改预览，确认前不会改变当前书稿。")}}
           </text>
           <view
             wx:if="{{answerApplicationProgressVisible}}"
@@ -109,12 +115,18 @@
             bindtap="openAdjustedBook"
           >查看调整后的书稿</view>
           <view
+            wx:elif="{{answerApplicationJob.proposal_status === 'ready' && answerApplicationJob.proposal_id}}"
+            class="apply-answers-action ui-block-action ui-pressable"
+            aria-role="button"
+            bindtap="openBookRevision"
+          >查看修改预览</view>
+          <view
             wx:elif="{{answerApplicationJob.can_apply}}"
             class="apply-answers-action ui-block-action ui-pressable {{applyingAnswers || answerApplicationCancelling ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{applyingAnswers || answerApplicationCancelling}}"
             bindtap="applyBookReviewAnswers"
-          >{{answerApplicationJob.can_retry ? "重新根据回答调整书稿" : "根据回答调整书稿"}}</view>
+          >{{answerApplicationJob.can_retry ? "重新生成修改预览" : "生成修改预览"}}</view>
         </view>
 
         <text

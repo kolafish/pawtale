@@ -305,19 +305,23 @@ def test_section_ai_revision_normalizes_required_instruction():
         )
 
 
-async def test_book_review_migration_creates_only_the_review_cache():
+async def test_book_review_migration_creates_review_and_revision_proposal_tables():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(text("DROP TABLE memoir_book_revision_proposals"))
             await conn.execute(text("DROP TABLE memoir_book_reviews"))
 
         first = await migrate_memoir_book_schema(engine)
         second = await migrate_memoir_book_schema(engine)
 
         assert first == {
-            "changed_tables": ["memoir_book_reviews"],
+            "changed_tables": [
+                "memoir_book_reviews",
+                "memoir_book_revision_proposals",
+            ],
             "changed_columns": [],
         }
         assert second == {
@@ -427,7 +431,7 @@ def test_book_review_answer_summary_hides_legacy_model_references():
         )
     )
 
-    assert summary == "已根据你的回答调整相关章节。"
+    assert summary == "修改预览已准备，包含根据回答生成的相关章节调整。"
     assert "C3" not in summary
     assert "C4" not in summary
     assert "S19" not in summary
@@ -1762,11 +1766,10 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         "stage": "",
         "answer_count": 1,
         "unresolved_count": 0,
-        "applied_answer_count": 0,
         "changed_chapter_count": 0,
         "summary": "",
-        "output_version_id": None,
-        "output_version": None,
+        "proposal_id": None,
+        "proposal_status": None,
         "requested_ai_model": None,
         "resolved_ai_model": None,
         "already_applied": False,
@@ -1841,12 +1844,13 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert completed_body["status"] == "succeeded"
     assert completed_body["stage"] == "completed"
     assert completed_body["answer_count"] == 1
-    assert completed_body["applied_answer_count"] == 1
     assert completed_body["changed_chapter_count"] == 1
-    assert completed_body["already_applied"] is True
+    assert completed_body["proposal_id"]
+    assert completed_body["proposal_status"] == "ready"
+    assert completed_body["already_applied"] is False
     assert completed_body["can_apply"] is False
     assert completed_body["resolved_ai_model"] == fake.model_name
-    assert completed_body["summary"].startswith("已根据你的回答调整《")
+    assert completed_body["summary"].startswith("修改预览已准备，包含《")
     assert "C1" not in completed_body["summary"]
     assert "S1" not in completed_body["summary"]
     assert set(requested_models) == {None, "claude-opus-4-8"}
@@ -1867,7 +1871,68 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         "answer-application/jobs/current"
     )
     assert legacy_completed.status_code == 200
-    assert legacy_completed.json()["summary"] == "已根据你的回答调整相关章节。"
+    assert (
+        legacy_completed.json()["summary"]
+        == "修改预览已准备，包含根据回答生成的相关章节调整。"
+    )
+
+    versions = list(
+        (
+            await test_db.scalars(
+                select(MemoirBookOutputVersion)
+                .where(MemoirBookOutputVersion.project_id == project_id)
+                .order_by(MemoirBookOutputVersion.version)
+            )
+        ).all()
+    )
+    assert len(versions) == 1
+    assert "我决定都保留在书里" not in versions[0].content
+
+    proposal = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}"
+    )
+    assert proposal.status_code == 200, proposal.text
+    proposal_body = proposal.json()
+    assert proposal_body["status"] == "ready"
+    assert proposal_body["can_apply"] is True
+    assert proposal_body["comparison"]["changed_chapter_count"] == 1
+    assert proposal_body["comparison"]["changed_section_count"] == 1
+    before_content = proposal_body["before"]["manuscript"]["chapters"][0]["content"]
+    after_content = proposal_body["after"]["manuscript"]["chapters"][0]["content"]
+    assert "我决定都保留在书里" not in before_content
+    assert "我决定都保留在书里" in after_content
+
+    review_record = await test_db.get(MemoirBookReview, generated.json()["id"])
+    assert review_record is not None
+    review_record.status = "failed"
+    test_db.add(review_record)
+    await test_db.commit()
+    stale = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}"
+    )
+    assert stale.status_code == 200
+    assert stale.json()["status"] == "stale"
+    assert stale.json()["can_apply"] is False
+    rejected = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/apply"
+    )
+    assert rejected.status_code == 409
+    review_record.status = "ready"
+    test_db.add(review_record)
+    await test_db.commit()
+
+    applied = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/apply"
+    )
+    assert applied.status_code == 200, applied.text
+    applied_body = applied.json()
+    assert applied_body["status"] == "applied"
+    assert applied_body["can_apply"] is False
+    assert applied_body["result_output_version_id"]
 
     versions = list(
         (
@@ -1879,7 +1944,6 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         ).all()
     )
     assert len(versions) == 2
-    assert "我决定都保留在书里" not in versions[0].content
     assert "我决定都保留在书里" in versions[1].content
     assert versions[1].created_by == "ai"
     assert [
@@ -1936,7 +2000,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert current_output.json()["is_stale"] is False
     assert (
         current_output.json()["latest_version"]["id"]
-        == completed_body["output_version_id"]
+        == applied_body["result_output_version_id"]
     )
 
     reassembled = await client.post(
@@ -1945,7 +2009,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert reassembled.status_code == 200, reassembled.text
     assert (
         reassembled.json()["output_version_id"]
-        == completed_body["output_version_id"]
+        == applied_body["result_output_version_id"]
     )
     assert await test_db.scalar(
         select(func.count())

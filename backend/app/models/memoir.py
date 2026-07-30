@@ -25,6 +25,7 @@ from app.clock import utcnow_naive
 from app.database import Base
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
+    MemoirBookRevisionProposalStatus,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueOutcome,
@@ -1268,4 +1269,88 @@ class MemoirBookOutputVersion(Base):
         "MemoirBookOutput",
         back_populates="versions",
         foreign_keys=[output_id],
+    )
+
+
+class MemoirBookRevisionProposal(Base):
+    __tablename__ = "memoir_book_revision_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({_enum_values(MemoirBookRevisionProposalStatus)})",
+            name="ck_memoir_book_revision_proposals_status",
+        ),
+        Index(
+            "ix_memoir_book_revision_proposals_project_status",
+            "project_id",
+            "status",
+            "updated_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        default=lambda: str(uuid.uuid4()),
+    )
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    review_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_reviews.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    review_input_signature: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        index=True,
+    )
+    base_output_version_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_output_versions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirBookRevisionProposalStatus.READY.value,
+        nullable=False,
+        index=True,
+    )
+    selected_actions_json: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    candidate_chapter_snapshot_json: Mapped[list] = mapped_column(
+        JSON,
+        default=list,
+        nullable=False,
+    )
+    comparison_json: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    generation_json: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        nullable=False,
+    )
+    summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    result_output_version_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_book_output_versions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
+        onupdate=utcnow_naive,
     )
