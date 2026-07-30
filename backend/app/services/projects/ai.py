@@ -27,6 +27,7 @@ from app.schemas.projects import (
     ProjectAnalyzeResponse,
     ReferenceItemBrief,
 )
+from app.services import ai_project_analysis, ai_revision, ai_story
 from app.services.article import ai as article_ai
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_factory import get_ai_service
@@ -36,6 +37,16 @@ from app.services.projects.access import get_document, load_project
 
 
 logger = logging.getLogger(__name__)
+
+
+def _require_project_type(
+    project_type: str,
+    *,
+    allowed: set[ProjectType],
+    detail: str,
+) -> None:
+    if project_type not in {item.value for item in allowed}:
+        raise HTTPException(status_code=400, detail=detail)
 
 
 def _check_expected_revision(
@@ -82,8 +93,10 @@ async def _revise_text(
             debug=debug,
         )
         return result.content, result.debug_info
-
-    result = await ai_service.revise_chapter(
+    if project_type != ProjectType.NOVEL.value:
+        raise HTTPException(status_code=400, detail="回忆录请使用专属编辑流程")
+    result = await ai_revision.revise_chapter(
+        ai_service,
         original_content=original_text,
         revision_instruction=instruction,
         characters=[],
@@ -104,6 +117,11 @@ async def analyze_project(
     req: ProjectAnalyzeRequest,
 ) -> ProjectAnalyzeResponse:
     project = await load_project(db, project_id, user_id)
+    _require_project_type(
+        project.type,
+        allowed={ProjectType.NOVEL},
+        detail="仅小说项目支持项目分析",
+    )
     raw_parts: list[tuple[str, str]] = []
     for group in project.groups:
         for doc in group.documents or []:
@@ -129,7 +147,11 @@ async def analyze_project(
     ai_service = get_ai_service(req.ai_model)
 
     try:
-        result = await ai_service.analyze_project_content(combined, debug=req.debug)
+        result = await ai_project_analysis.analyze_project_content(
+            ai_service,
+            combined,
+            debug=req.debug,
+        )
     except Exception as e:
         logger.exception("AI analyze failed for project=%s", project_id)
         raise HTTPException(status_code=500, detail=f"AI分析失败: {str(e)}") from e
@@ -149,7 +171,12 @@ async def apply_analysis(
     user_id: str,
     req: AnalyzeApplyRequest,
 ) -> AnalyzeApplyResponse:
-    await load_project(db, project_id, user_id)
+    project = await load_project(db, project_id, user_id)
+    _require_project_type(
+        project.type,
+        allowed={ProjectType.NOVEL},
+        detail="仅小说项目支持应用项目分析",
+    )
     created: list[ReferenceItem] = []
 
     for char in req.characters:
@@ -215,6 +242,11 @@ async def ai_continue_document(
     req: DocumentAIContinueRequest,
 ) -> DocumentAIContinueResponse:
     project = await load_project(db, project_id, user_id)
+    _require_project_type(
+        project.type,
+        allowed={ProjectType.NOVEL, ProjectType.ARTICLE},
+        detail="回忆录请使用专属成书流程",
+    )
     doc = await get_document(db, project_id, document_id)
     base_content_revision = doc.content_revision
     if (
@@ -244,7 +276,8 @@ async def ai_continue_document(
             generated_chunk = article_result.content
             debug_info = article_result.debug_info
         else:
-            story_result = await ai_service.generate_story(
+            story_result = await ai_story.generate_story(
+                ai_service,
                 characters=[],
                 scene={
                     "name": "当前文本",
@@ -303,6 +336,11 @@ async def ai_revise_document(
     req: DocumentAIReviseRequest,
 ) -> DocumentAIReviseResponse:
     project = await load_project(db, project_id, user_id)
+    _require_project_type(
+        project.type,
+        allowed={ProjectType.NOVEL, ProjectType.ARTICLE},
+        detail="回忆录请使用专属编辑流程",
+    )
     doc = await get_document(db, project_id, document_id)
     base_content_revision = doc.content_revision
     _check_expected_revision(
@@ -411,6 +449,11 @@ async def ai_revise_document_multi(
     req: DocumentAIReviseMultiRequest,
 ) -> DocumentAIReviseMultiResponse:
     project = await load_project(db, project_id, user_id)
+    _require_project_type(
+        project.type,
+        allowed={ProjectType.NOVEL, ProjectType.ARTICLE},
+        detail="回忆录请使用专属编辑流程",
+    )
     doc = await get_document(db, project_id, document_id)
     base_content_revision = doc.content_revision
     _check_expected_revision(

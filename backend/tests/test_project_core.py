@@ -73,7 +73,6 @@ class TestProjectAPI:
         cases = {
             "novel": ("第一卷", "未命名文档"),
             "article": ("正文", "未命名文章"),
-            "memoir": ("回忆片段", "第一次记录"),
         }
         for project_type, (group_name, document_name) in cases.items():
             response = await client.post("/api/projects", json=project_payload(f"{project_type} 项目", project_type))
@@ -85,6 +84,14 @@ class TestProjectAPI:
             assert len(data["groups"][0]["documents"]) == 1
             assert data["groups"][0]["documents"][0]["name"] == document_name
             assert data["references"] == []
+
+        memoir = await client.post(
+            "/api/projects",
+            json=project_payload("memoir 项目", "memoir"),
+        )
+        assert memoir.status_code == 201
+        assert memoir.json()["groups"] == []
+        assert memoir.json()["references"] == []
 
     async def test_get_project(self, client):
         project = await create_project(client, "测试项目")

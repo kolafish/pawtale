@@ -4,6 +4,24 @@ from unittest.mock import AsyncMock, patch
 from project_helpers import create_project, create_project_with_document
 
 
+def patch_novel_story(result: dict):
+    return patch(
+        "app.services.projects.ai.ai_story.generate_story",
+        new=AsyncMock(return_value=result),
+    )
+
+
+def patch_novel_revision(
+    result: dict | None = None,
+    *,
+    side_effect=None,
+):
+    return patch(
+        "app.services.projects.ai.ai_revision.revise_chapter",
+        new=AsyncMock(return_value=result, side_effect=side_effect),
+    )
+
+
 async def create_document_with_content(client, title: str, content: str) -> tuple[str, str]:
     project_id, document_id = await create_project_with_document(client, title)
     response = await client.put(
@@ -23,9 +41,11 @@ class TestAIContinue:
             "AI测试",
             "窗外下着雨，她站在便利店门口。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_story({"content": "他走过来递了把伞。"}),
+        ):
             mock_service = AsyncMock()
-            mock_service.generate_story = AsyncMock(return_value={"content": "他走过来递了把伞。"})
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -68,9 +88,11 @@ class TestAIContinue:
             "AI测试",
             "窗外下着雨，她站在便利店门口。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_story({"content": "突然一辆车停在她面前。"}),
+        ):
             mock_service = AsyncMock()
-            mock_service.generate_story = AsyncMock(return_value={"content": "突然一辆车停在她面前。"})
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -109,11 +131,13 @@ class TestAIRevise:
             "修改测试",
             "她走进咖啡馆，看到了他。两人对视一眼，又各自移开了目光。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision(
+                {"content": "她推开咖啡馆的玻璃门，一眼便看到了坐在角落的他。两人目光交错，随即默契地各自移开。"}
+            ),
+        ):
             mock_service = AsyncMock()
-            mock_service.revise_chapter = AsyncMock(return_value={
-                "content": "她推开咖啡馆的玻璃门，一眼便看到了坐在角落的他。两人目光交错，随即默契地各自移开。",
-            })
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -134,9 +158,13 @@ class TestAIRevise:
             "修改测试",
             "她走进咖啡馆，看到了他。两人对视一眼，又各自移开了目光。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision(
+                {"content": "两人目光交汇的瞬间，时间仿佛静止了。"}
+            ),
+        ):
             mock_service = AsyncMock()
-            mock_service.revise_chapter = AsyncMock(return_value={"content": "两人目光交汇的瞬间，时间仿佛静止了。"})
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -181,16 +209,23 @@ class TestAIRevise:
             "修改测试",
             "她走进咖啡馆，看到了他。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision(
+                {
+                    "content": "修改后的内容",
+                    "debug_info": {
+                        "request": {
+                            "provider": "claude",
+                            "model": "claude-fable-5",
+                        },
+                        "response": {"raw_text": "原始响应"},
+                        "meta": {"truncated": False},
+                    },
+                }
+            ),
+        ):
             mock_service = AsyncMock()
-            mock_service.revise_chapter = AsyncMock(return_value={
-                "content": "修改后的内容",
-                "debug_info": {
-                    "request": {"provider": "claude", "model": "claude-fable-5"},
-                    "response": {"raw_text": "原始响应"},
-                    "meta": {"truncated": False},
-                },
-            })
             mock_service.model_name = "claude-opus-4-8"
             mock_get_service.return_value = mock_service
 
@@ -213,9 +248,11 @@ class TestAIReviseMulti:
             "多模型测试",
             "她走进咖啡馆，看到了他。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision({"content": "修改后内容"}),
+        ):
             mock_service = AsyncMock()
-            mock_service.revise_chapter = AsyncMock(return_value={"content": "修改后内容"})
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -237,11 +274,17 @@ class TestAIReviseMulti:
             "多模型测试",
             "她走进咖啡馆，看到了他。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        async def revise(client, **_kwargs):
+            if client is fail_service:
+                raise Exception("API timeout")
+            return {"content": "好的内容"}
+
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision(side_effect=revise),
+        ):
             ok_service = AsyncMock()
-            ok_service.revise_chapter = AsyncMock(return_value={"content": "好的内容"})
             fail_service = AsyncMock()
-            fail_service.revise_chapter = AsyncMock(side_effect=Exception("API timeout"))
 
             def pick_service(model):
                 return ok_service if model == "deepseek" else fail_service
@@ -267,9 +310,11 @@ class TestAIReviseMulti:
             "多模型测试",
             "她走进咖啡馆，看到了他。",
         )
-        with patch("app.services.projects.ai.get_ai_service") as mock_get_service:
+        with (
+            patch("app.services.projects.ai.get_ai_service") as mock_get_service,
+            patch_novel_revision({"content": "修改片段"}),
+        ):
             mock_service = AsyncMock()
-            mock_service.revise_chapter = AsyncMock(return_value={"content": "修改片段"})
             mock_get_service.return_value = mock_service
 
             response = await client.post(
@@ -285,3 +330,27 @@ class TestAIReviseMulti:
         data = response.json()
         assert data["scope"] == "selection"
         assert data["original_text"] == "看到了他"
+
+
+async def test_memoir_rejects_generic_project_ai(client):
+    project = await create_project(client, "父亲的回忆", "memoir")
+
+    analyzed = await client.post(
+        f"/api/projects/{project['id']}/analyze",
+        json={},
+    )
+    continued = await client.post(
+        f"/api/projects/{project['id']}/documents/legacy-document/ai-continue",
+        json={},
+    )
+    applied = await client.post(
+        f"/api/projects/{project['id']}/analyze/apply",
+        json={},
+    )
+
+    assert analyzed.status_code == 400
+    assert analyzed.json()["detail"] == "仅小说项目支持项目分析"
+    assert continued.status_code == 400
+    assert continued.json()["detail"] == "回忆录请使用专属成书流程"
+    assert applied.status_code == 400
+    assert applied.json()["detail"] == "仅小说项目支持应用项目分析"
