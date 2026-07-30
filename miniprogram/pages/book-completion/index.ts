@@ -3,7 +3,10 @@ import type {
   MemoirBookCompletionOverview,
 } from "../../domain/chapter-completion";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
-import { aiTaskProgressPercent, type AITaskProgressMode } from "../../services/ai-task-progress";
+import {
+  aiTaskProgressPercent,
+  type AITaskProgressView,
+} from "../../services/ai-task-progress";
 import { definePage } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
 import {
@@ -22,9 +25,11 @@ import {
   getMemoirBookReviewJob,
   listMemoirCompletionIssues,
   type MemoirBookReview,
+  type MemoirBookAnswerApplicationJob,
   type MemoirBookEditorialAction,
+  type MemoirBookEditorialRevisionJob,
   type MemoirBookRevisionJob,
-  type MemoirBookRevisionJobSource,
+  type MemoirBookRevisionCommandSource,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
@@ -53,6 +58,33 @@ interface EditorialActionView extends MemoirBookEditorialAction {
   selected: boolean;
 }
 
+interface TaskProgressView extends AITaskProgressView {
+  visible: boolean;
+  className: string;
+  canCancel: boolean;
+}
+
+const HIDDEN_TASK_PROGRESS: TaskProgressView = {
+  visible: false,
+  title: "",
+  detail: "",
+  progressMode: "hidden",
+  progress: 0,
+  className: "",
+  canCancel: false,
+};
+
+function activeTaskProgress(title: string, detail: string): TaskProgressView {
+  return {
+    ...HIDDEN_TASK_PROGRESS,
+    visible: true,
+    title,
+    detail,
+    progressMode: "indeterminate",
+    className: "active",
+  };
+}
+
 interface BookCompletionData {
   projectId: string;
   projectTitle: string;
@@ -68,13 +100,7 @@ interface BookCompletionData {
   bulkCheckTitle: string;
   bulkCheckDetail: string;
   bulkCheckJob: MemoirBookCompletionJob | null;
-  bulkCheckProgressVisible: boolean;
-  bulkCheckProgressTitle: string;
-  bulkCheckProgressDetail: string;
-  bulkCheckProgressMode: AITaskProgressMode;
-  bulkCheckProgressPercent: number;
-  bulkCheckProgressClass: string;
-  bulkCheckCanCancel: boolean;
+  bulkCheckProgress: TaskProgressView;
   bulkCheckCancelling: boolean;
   preparingChapterId: string;
   recheckingAll: boolean;
@@ -82,32 +108,17 @@ interface BookCompletionData {
   requiredBookIssues: MemoirCompletionIssue[];
   optionalBookIssues: MemoirCompletionIssue[];
   bookReviewJob: MemoirBookReviewJob | null;
-  bookReviewProgressVisible: boolean;
-  bookReviewProgressTitle: string;
-  bookReviewProgressDetail: string;
-  bookReviewProgressMode: AITaskProgressMode;
-  bookReviewProgressPercent: number;
-  bookReviewProgressClass: string;
-  bookReviewCanCancel: boolean;
+  bookReviewProgress: TaskProgressView;
   bookReviewCancelling: boolean;
   checkingBook: boolean;
-  answerApplicationJob: MemoirBookRevisionJob | null;
-  answerApplicationProgressVisible: boolean;
-  answerApplicationProgressTitle: string;
-  answerApplicationProgressDetail: string;
-  answerApplicationProgressMode: AITaskProgressMode;
-  answerApplicationProgressClass: string;
-  answerApplicationCanCancel: boolean;
+  answerApplicationJob: MemoirBookAnswerApplicationJob | null;
+  answerApplicationProgress: TaskProgressView;
   applyingAnswers: boolean;
   answerApplicationCancelling: boolean;
-  editorialRevisionJob: MemoirBookRevisionJob | null;
+  editorialRevisionJob: MemoirBookEditorialRevisionJob | null;
   selectedEditorialActionIds: string[];
   editorialActionViews: EditorialActionView[];
-  editorialRevisionProgressVisible: boolean;
-  editorialRevisionProgressTitle: string;
-  editorialRevisionProgressDetail: string;
-  editorialRevisionProgressClass: string;
-  editorialRevisionCanCancel: boolean;
+  editorialRevisionProgress: TaskProgressView;
   generatingEditorialRevision: boolean;
   editorialRevisionCancelling: boolean;
   bookOutputAvailable: boolean;
@@ -182,28 +193,12 @@ function revisionJobActive(job: MemoirBookRevisionJob): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
-interface RevisionJobView {
-  visible: boolean;
-  title: string;
-  detail: string;
-  mode: AITaskProgressMode;
-  className: string;
-  canCancel: boolean;
-}
-
 export function revisionJobView(
   job: MemoirBookRevisionJob | null,
-  source: MemoirBookRevisionJobSource,
-): RevisionJobView {
+  source: MemoirBookRevisionCommandSource,
+): TaskProgressView {
   if (!job || job.status === "idle" || job.status === "succeeded") {
-    return {
-      visible: false,
-      title: "",
-      detail: "",
-      mode: "hidden",
-      className: "",
-      canCancel: false,
-    };
+    return HIDDEN_TASK_PROGRESS;
   }
   const applyingAnswers = source === "review_answers";
   if (revisionJobActive(job)) {
@@ -225,7 +220,8 @@ export function revisionJobView(
       detail: applyingAnswers
         ? "任务在后台执行，完成后先预览，确认后才会修改书稿"
         : "完成后仍需查看前后内容并确认",
-      mode: "indeterminate",
+      progressMode: "indeterminate",
+      progress: 0,
       className: "active",
       canCancel: job.can_cancel,
     };
@@ -241,7 +237,8 @@ export function revisionJobView(
         ? "回答仍然保留，可以重新调整。"
         : "所选建议仍然保留，可以重新生成。"
     ),
-    mode: "hidden",
+    progressMode: "hidden",
+    progress: 0,
     className: failed ? "failed" : "cancelled",
     canCancel: false,
   };
@@ -249,37 +246,9 @@ export function revisionJobView(
 
 export function bookReviewJobView(
   job: MemoirBookReviewJob | null,
-): Pick<
-  BookCompletionData,
-  | "bookReviewProgressVisible"
-  | "bookReviewProgressTitle"
-  | "bookReviewProgressDetail"
-  | "bookReviewProgressMode"
-  | "bookReviewProgressPercent"
-  | "bookReviewProgressClass"
-  | "bookReviewCanCancel"
-> {
-  if (!job || job.status === "idle") {
-    return {
-      bookReviewProgressVisible: false,
-      bookReviewProgressTitle: "",
-      bookReviewProgressDetail: "",
-      bookReviewProgressMode: "hidden",
-      bookReviewProgressPercent: 0,
-      bookReviewProgressClass: "",
-      bookReviewCanCancel: false,
-    };
-  }
-  if (job.status === "succeeded") {
-    return {
-      bookReviewProgressVisible: false,
-      bookReviewProgressTitle: "",
-      bookReviewProgressDetail: "",
-      bookReviewProgressMode: "hidden",
-      bookReviewProgressPercent: 0,
-      bookReviewProgressClass: "",
-      bookReviewCanCancel: false,
-    };
+): TaskProgressView {
+  if (!job || job.status === "idle" || job.status === "succeeded") {
+    return HIDDEN_TASK_PROGRESS;
   }
   if (bookReviewJobActive(job)) {
     const preparing = job.stage === "preparing_chapters";
@@ -300,77 +269,60 @@ export function bookReviewJobView(
         ? "检查已经完成，正在保存结果"
         : "任务正在后台执行，离开页面后进度会继续保存");
     return {
-      bookReviewProgressVisible: true,
-      bookReviewProgressTitle: stageTitle,
-      bookReviewProgressDetail: detail,
-      bookReviewProgressMode: preparing && job.total_chapter_count
+      visible: true,
+      title: stageTitle,
+      detail,
+      progressMode: preparing && job.total_chapter_count
         ? "determinate"
         : "indeterminate",
-      bookReviewProgressPercent: preparing
+      progress: preparing
         ? aiTaskProgressPercent(
           job.processed_chapter_count,
           job.total_chapter_count,
         )
         : 0,
-      bookReviewProgressClass: "active",
-      bookReviewCanCancel: job.can_cancel,
+      className: "active",
+      canCancel: job.can_cancel,
     };
   }
   if (job.status === "failed") {
     return {
-      bookReviewProgressVisible: true,
-      bookReviewProgressTitle: "全书检查未完成",
-      bookReviewProgressDetail: job.error_message || "可以重新检查当前版本。",
-      bookReviewProgressMode: "hidden",
-      bookReviewProgressPercent: 0,
-      bookReviewProgressClass: "failed",
-      bookReviewCanCancel: false,
+      visible: true,
+      title: "全书检查未完成",
+      detail: job.error_message || "可以重新检查当前版本。",
+      progressMode: "hidden",
+      progress: 0,
+      className: "failed",
+      canCancel: false,
     };
   }
   if (job.status === "cancelled") {
     return {
-      bookReviewProgressVisible: true,
-      bookReviewProgressTitle: "全书检查已停止",
-      bookReviewProgressDetail: "已经保存的章节摘要仍会保留，可以重新检查。",
-      bookReviewProgressMode: "hidden",
-      bookReviewProgressPercent: 0,
-      bookReviewProgressClass: "cancelled",
-      bookReviewCanCancel: false,
+      visible: true,
+      title: "全书检查已停止",
+      detail: "已经保存的章节摘要仍会保留，可以重新检查。",
+      progressMode: "hidden",
+      progress: 0,
+      className: "cancelled",
+      canCancel: false,
     };
   }
   return {
-    bookReviewProgressVisible: true,
-    bookReviewProgressTitle: "全书检查已完成",
-    bookReviewProgressDetail: "检查结果已经保存。",
-    bookReviewProgressMode: "hidden",
-    bookReviewProgressPercent: 0,
-    bookReviewProgressClass: "succeeded",
-    bookReviewCanCancel: false,
+    visible: true,
+    title: "全书检查已完成",
+    detail: "检查结果已经保存。",
+    progressMode: "hidden",
+    progress: 0,
+    className: "succeeded",
+    canCancel: false,
   };
 }
 
 export function bookCompletionJobView(
   job: MemoirBookCompletionJob | null,
-): Pick<
-  BookCompletionData,
-  | "bulkCheckProgressVisible"
-  | "bulkCheckProgressTitle"
-  | "bulkCheckProgressDetail"
-  | "bulkCheckProgressMode"
-  | "bulkCheckProgressPercent"
-  | "bulkCheckProgressClass"
-  | "bulkCheckCanCancel"
-> {
+): TaskProgressView {
   if (!job || job.status === "idle") {
-    return {
-      bulkCheckProgressVisible: false,
-      bulkCheckProgressTitle: "",
-      bulkCheckProgressDetail: "",
-      bulkCheckProgressMode: "hidden",
-      bulkCheckProgressPercent: 0,
-      bulkCheckProgressClass: "",
-      bulkCheckCanCancel: false,
-    };
+    return HIDDEN_TASK_PROGRESS;
   }
   const processedText = `已处理 ${job.processed_chapter_count}/${job.total_chapter_count} 章`;
   if (bookCompletionJobActive(job)) {
@@ -378,50 +330,50 @@ export function bookCompletionJobView(
       ? ` · ${job.failed_chapter_count} 章未完成`
       : "";
     return {
-      bulkCheckProgressVisible: true,
-      bulkCheckProgressTitle: job.current_chapter_title
+      visible: true,
+      title: job.current_chapter_title
         ? `正在检查《${job.current_chapter_title}》`
         : "正在准备全书检查",
-      bulkCheckProgressDetail: `${processedText}${failureText}，每章完成后都会保存`,
-      bulkCheckProgressMode: job.total_chapter_count ? "determinate" : "indeterminate",
-      bulkCheckProgressPercent: aiTaskProgressPercent(
+      detail: `${processedText}${failureText}，每章完成后都会保存`,
+      progressMode: job.total_chapter_count ? "determinate" : "indeterminate",
+      progress: aiTaskProgressPercent(
         job.processed_chapter_count,
         job.total_chapter_count,
       ),
-      bulkCheckProgressClass: "active",
-      bulkCheckCanCancel: job.can_cancel,
+      className: "active",
+      canCancel: job.can_cancel,
     };
   }
   if (job.status === "failed") {
     return {
-      bulkCheckProgressVisible: true,
-      bulkCheckProgressTitle: `${job.failed_chapter_count} 章检查未完成`,
-      bulkCheckProgressDetail: `${processedText}，已完成结果已保留，可以重新检查失败章节。`,
-      bulkCheckProgressMode: "hidden",
-      bulkCheckProgressPercent: 0,
-      bulkCheckProgressClass: "failed",
-      bulkCheckCanCancel: false,
+      visible: true,
+      title: `${job.failed_chapter_count} 章检查未完成`,
+      detail: `${processedText}，已完成结果已保留，可以重新检查失败章节。`,
+      progressMode: "hidden",
+      progress: 0,
+      className: "failed",
+      canCancel: false,
     };
   }
   if (job.status === "cancelled") {
     return {
-      bulkCheckProgressVisible: true,
-      bulkCheckProgressTitle: "全书检查已停止",
-      bulkCheckProgressDetail: `${processedText}，已完成结果已保留。`,
-      bulkCheckProgressMode: "hidden",
-      bulkCheckProgressPercent: 0,
-      bulkCheckProgressClass: "cancelled",
-      bulkCheckCanCancel: false,
+      visible: true,
+      title: "全书检查已停止",
+      detail: `${processedText}，已完成结果已保留。`,
+      progressMode: "hidden",
+      progress: 0,
+      className: "cancelled",
+      canCancel: false,
     };
   }
   return {
-    bulkCheckProgressVisible: true,
-    bulkCheckProgressTitle: "全书检查已完成",
-    bulkCheckProgressDetail: `${processedText}，请查看各章当前最重要的一步。`,
-    bulkCheckProgressMode: "hidden",
-    bulkCheckProgressPercent: 0,
-    bulkCheckProgressClass: "succeeded",
-    bulkCheckCanCancel: false,
+    visible: true,
+    title: "全书检查已完成",
+    detail: `${processedText}，请查看各章当前最重要的一步。`,
+    progressMode: "hidden",
+    progress: 0,
+    className: "succeeded",
+    canCancel: false,
   };
 }
 
@@ -518,13 +470,7 @@ definePage<BookCompletionData>()({
     bulkCheckTitle: "",
     bulkCheckDetail: "",
     bulkCheckJob: null,
-    bulkCheckProgressVisible: false,
-    bulkCheckProgressTitle: "",
-    bulkCheckProgressDetail: "",
-    bulkCheckProgressMode: "hidden",
-    bulkCheckProgressPercent: 0,
-    bulkCheckProgressClass: "",
-    bulkCheckCanCancel: false,
+    bulkCheckProgress: HIDDEN_TASK_PROGRESS,
     bulkCheckCancelling: false,
     preparingChapterId: "",
     recheckingAll: false,
@@ -532,32 +478,17 @@ definePage<BookCompletionData>()({
     requiredBookIssues: [],
     optionalBookIssues: [],
     bookReviewJob: null,
-    bookReviewProgressVisible: false,
-    bookReviewProgressTitle: "",
-    bookReviewProgressDetail: "",
-    bookReviewProgressMode: "hidden",
-    bookReviewProgressPercent: 0,
-    bookReviewProgressClass: "",
-    bookReviewCanCancel: false,
+    bookReviewProgress: HIDDEN_TASK_PROGRESS,
     bookReviewCancelling: false,
     checkingBook: false,
     answerApplicationJob: null,
-    answerApplicationProgressVisible: false,
-    answerApplicationProgressTitle: "",
-    answerApplicationProgressDetail: "",
-    answerApplicationProgressMode: "hidden",
-    answerApplicationProgressClass: "",
-    answerApplicationCanCancel: false,
+    answerApplicationProgress: HIDDEN_TASK_PROGRESS,
     applyingAnswers: false,
     answerApplicationCancelling: false,
     editorialRevisionJob: null,
     selectedEditorialActionIds: [],
     editorialActionViews: [],
-    editorialRevisionProgressVisible: false,
-    editorialRevisionProgressTitle: "",
-    editorialRevisionProgressDetail: "",
-    editorialRevisionProgressClass: "",
-    editorialRevisionCanCancel: false,
+    editorialRevisionProgress: HIDDEN_TASK_PROGRESS,
     generatingEditorialRevision: false,
     editorialRevisionCancelling: false,
     bookOutputAvailable: false,
@@ -747,25 +678,16 @@ definePage<BookCompletionData>()({
           selectedEditorialActionIds,
         ),
         bookOutputAvailable: Boolean(bookOutput),
-        ...bookReviewJobView(bookReviewJob),
+        bookReviewProgress: bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,
-        answerApplicationProgressVisible: answerProgress.visible,
-        answerApplicationProgressTitle: answerProgress.title,
-        answerApplicationProgressDetail: answerProgress.detail,
-        answerApplicationProgressMode: answerProgress.mode,
-        answerApplicationProgressClass: answerProgress.className,
-        answerApplicationCanCancel: answerProgress.canCancel,
+        answerApplicationProgress: answerProgress,
         answerApplicationJob,
         applyingAnswers: applicationActive,
-        editorialRevisionProgressVisible: editorialProgress.visible,
-        editorialRevisionProgressTitle: editorialProgress.title,
-        editorialRevisionProgressDetail: editorialProgress.detail,
-        editorialRevisionProgressClass: editorialProgress.className,
-        editorialRevisionCanCancel: editorialProgress.canCancel,
+        editorialRevisionProgress: editorialProgress,
         editorialRevisionJob,
         generatingEditorialRevision: editorialRevisionActive,
-        ...bookCompletionJobView(
+        bulkCheckProgress: bookCompletionJobView(
           view.allChaptersConfirmed ? null : bulkCheckJob,
         ),
         bulkCheckJob: (
@@ -928,13 +850,10 @@ definePage<BookCompletionData>()({
     this.setData({
       recheckingAll: true,
       error: "",
-      bulkCheckProgressVisible: true,
-      bulkCheckProgressTitle: "正在提交章节检查",
-      bulkCheckProgressDetail: "任务提交后可以离开页面，进度会继续保存",
-      bulkCheckProgressMode: "indeterminate",
-      bulkCheckProgressPercent: 0,
-      bulkCheckProgressClass: "active",
-      bulkCheckCanCancel: false,
+      bulkCheckProgress: activeTaskProgress(
+        "正在提交章节检查",
+        "任务提交后可以离开页面，进度会继续保存",
+      ),
       chapters: this.data.chapters.map((item) => chapterView(item, "", true)),
     });
     try {
@@ -972,13 +891,10 @@ definePage<BookCompletionData>()({
     this.setData({
       checkingBook: true,
       error: "",
-      bookReviewProgressVisible: true,
-      bookReviewProgressTitle: "正在提交全书检查",
-      bookReviewProgressDetail: "任务提交后可以离开页面，进度会继续保存",
-      bookReviewProgressMode: "indeterminate",
-      bookReviewProgressPercent: 0,
-      bookReviewProgressClass: "active",
-      bookReviewCanCancel: false,
+      bookReviewProgress: activeTaskProgress(
+        "正在提交全书检查",
+        "任务提交后可以离开页面，进度会继续保存",
+      ),
     });
     try {
       await enqueueMemoirBookReviewJob(
@@ -1013,7 +929,10 @@ definePage<BookCompletionData>()({
     }
     this.setData({
       bookReviewCancelling: true,
-      bookReviewCanCancel: false,
+      bookReviewProgress: {
+        ...this.data.bookReviewProgress,
+        canCancel: false,
+      },
       error: "",
     });
     try {
@@ -1046,14 +965,10 @@ definePage<BookCompletionData>()({
     this.setData({
       applyingAnswers: true,
       error: "",
-      answerApplicationProgressVisible: true,
-      answerApplicationProgressTitle: "正在提交书稿调整",
-      answerApplicationProgressDetail: (
-        "提交后可以离开页面，完成后仍需预览并确认"
+      answerApplicationProgress: activeTaskProgress(
+        "正在提交书稿调整",
+        "提交后可以离开页面，完成后仍需预览并确认",
       ),
-      answerApplicationProgressMode: "indeterminate",
-      answerApplicationProgressClass: "active",
-      answerApplicationCanCancel: false,
     });
     try {
       await enqueueMemoirBookRevisionJob(
@@ -1090,7 +1005,10 @@ definePage<BookCompletionData>()({
     }
     this.setData({
       answerApplicationCancelling: true,
-      answerApplicationCanCancel: false,
+      answerApplicationProgress: {
+        ...this.data.answerApplicationProgress,
+        canCancel: false,
+      },
       error: "",
     });
     try {
@@ -1151,11 +1069,10 @@ definePage<BookCompletionData>()({
     this.setData({
       generatingEditorialRevision: true,
       error: "",
-      editorialRevisionProgressVisible: true,
-      editorialRevisionProgressTitle: "正在提交修改预览",
-      editorialRevisionProgressDetail: "完成后仍需查看前后内容并确认",
-      editorialRevisionProgressClass: "active",
-      editorialRevisionCanCancel: false,
+      editorialRevisionProgress: activeTaskProgress(
+        "正在提交修改预览",
+        "完成后仍需查看前后内容并确认",
+      ),
     });
     try {
       await enqueueMemoirBookRevisionJob(
@@ -1193,7 +1110,10 @@ definePage<BookCompletionData>()({
     }
     this.setData({
       editorialRevisionCancelling: true,
-      editorialRevisionCanCancel: false,
+      editorialRevisionProgress: {
+        ...this.data.editorialRevisionProgress,
+        canCancel: false,
+      },
       error: "",
     });
     try {
@@ -1226,7 +1146,10 @@ definePage<BookCompletionData>()({
     }
     this.setData({
       bulkCheckCancelling: true,
-      bulkCheckCanCancel: false,
+      bulkCheckProgress: {
+        ...this.data.bulkCheckProgress,
+        canCancel: false,
+      },
       error: "",
     });
     try {

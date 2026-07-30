@@ -271,14 +271,14 @@ test("book completion uses only persisted chapter counts for whole-book progress
     can_retry: true,
   }));
 
-  assert.equal(active.bulkCheckProgressTitle, "正在检查《参加工作》");
-  assert.equal(active.bulkCheckProgressDetail, "已处理 2/4 章，每章完成后都会保存");
-  assert.equal(active.bulkCheckProgressMode, "determinate");
-  assert.equal(active.bulkCheckProgressPercent, 50);
-  assert.equal(active.bulkCheckCanCancel, true);
-  assert.equal(failed.bulkCheckProgressTitle, "1 章检查未完成");
-  assert.match(failed.bulkCheckProgressDetail, /已完成结果已保留/);
-  assert.equal(failed.bulkCheckProgressMode, "hidden");
+  assert.equal(active.title, "正在检查《参加工作》");
+  assert.equal(active.detail, "已处理 2/4 章，每章完成后都会保存");
+  assert.equal(active.progressMode, "determinate");
+  assert.equal(active.progress, 50);
+  assert.equal(active.canCancel, true);
+  assert.equal(failed.title, "1 章检查未完成");
+  assert.match(failed.detail, /已完成结果已保留/);
+  assert.equal(failed.progressMode, "hidden");
 });
 
 test("book review progress uses persisted stages without inventing model percentages", () => {
@@ -301,19 +301,19 @@ test("book review progress uses persisted stages without inventing model percent
     can_cancel: true,
   }));
 
-  assert.equal(preparing.bookReviewProgressTitle, "正在准备《参加工作》");
-  assert.equal(preparing.bookReviewProgressPercent, 50);
-  assert.equal(preparing.bookReviewProgressMode, "determinate");
-  assert.equal(reviewing.bookReviewProgressTitle, "正在检查全书");
-  assert.equal(reviewing.bookReviewProgressMode, "indeterminate");
-  assert.equal(reviewing.bookReviewProgressPercent, 0);
+  assert.equal(preparing.title, "正在准备《参加工作》");
+  assert.equal(preparing.progress, 50);
+  assert.equal(preparing.progressMode, "determinate");
+  assert.equal(reviewing.title, "正在检查全书");
+  assert.equal(reviewing.progressMode, "indeterminate");
+  assert.equal(reviewing.progress, 0);
   assert.equal(bookReviewJobView(reviewJob({
     job_id: "review-job-1",
     status: "succeeded",
     stage: "completed",
     total_chapter_count: 4,
     processed_chapter_count: 4,
-  })).bookReviewProgressVisible, false);
+  })).visible, false);
 });
 
 test("book answer application reports its real background stage", () => {
@@ -336,7 +336,7 @@ test("book answer application reports its real background stage", () => {
   }), "review_answers");
 
   assert.equal(revising.title, "正在把回答写入相关章节");
-  assert.equal(revising.mode, "indeterminate");
+  assert.equal(revising.progressMode, "indeterminate");
   assert.equal(revising.canCancel, true);
   assert.equal(failed.title, "书稿调整未完成");
   assert.equal(failed.detail, "模型暂时不可用");
@@ -421,7 +421,7 @@ test("book completion submits saved answers and opens the generated revision pre
   assert.deepEqual(requests, [["project/1", "review_answers"]]);
   assert.equal(context.data.applyingAnswers, true);
   assert.equal(
-    context.data.answerApplicationProgressTitle,
+    context.data.answerApplicationProgress.title,
     "书稿调整已提交",
   );
   context.data.answerApplicationJob = answerApplicationJob({
@@ -546,7 +546,7 @@ test("book completion submits the cross-chapter review to the background", async
 
   assert.deepEqual(reviewRequests, [["project-1", false]]);
   assert.equal(context.data.checkingBook, true);
-  assert.equal(context.data.bookReviewProgressTitle, "全书检查已提交");
+  assert.equal(context.data.bookReviewProgress.title, "全书检查已提交");
   assert.equal(context.data.bookReview, null);
 
   currentReview = bookReview();
@@ -622,7 +622,7 @@ test("book completion can check only chapters that have not been checked", async
 
   assert.deepEqual(batchRequests, [["project-1", null]]);
   assert.equal(context.data.recheckingAll, true);
-  assert.equal(context.data.bulkCheckProgressMode, "determinate");
+  assert.equal(context.data.bulkCheckProgress.progressMode, "determinate");
 });
 
 test("book completion keeps a submit error when only an older finished job exists", async () => {
@@ -705,8 +705,8 @@ test("book completion restores and polls an active chapter batch after reopening
 
     assert.equal(context.data.recheckingAll, true);
     assert.equal(context.data.bulkCheckVisible, true);
-    assert.equal(context.data.bulkCheckProgressPercent, 50);
-    assert.equal(context.data.bulkCheckProgressTitle, "正在检查《学校里的比赛》");
+    assert.equal(context.data.bulkCheckProgress.progress, 50);
+    assert.equal(context.data.bulkCheckProgress.title, "正在检查《学校里的比赛》");
     assert.equal(scheduled.length, 1);
     assert.equal(scheduled[0][1], 1500);
     page.onHide.call(context);
@@ -761,8 +761,8 @@ test("book completion restores and can cancel an active full-book review after r
     await page.onShow.call(context);
 
     assert.equal(context.data.checkingBook, true);
-    assert.equal(context.data.bookReviewProgressTitle, "正在检查全书");
-    assert.equal(context.data.bookReviewProgressMode, "indeterminate");
+    assert.equal(context.data.bookReviewProgress.title, "正在检查全书");
+    assert.equal(context.data.bookReviewProgress.progressMode, "indeterminate");
     assert.equal(scheduled.length, 1);
     assert.equal(scheduled[0][1], 1500);
 
@@ -770,7 +770,7 @@ test("book completion restores and can cancel an active full-book review after r
 
     assert.deepEqual(cancellations, [["project-1", "review-job-1"]]);
     assert.equal(context.data.checkingBook, false);
-    assert.equal(context.data.bookReviewProgressTitle, "全书检查已停止");
+    assert.equal(context.data.bookReviewProgress.title, "全书检查已停止");
     page.onHide.call(context);
   } finally {
     global.setTimeout = originalSetTimeout;
@@ -817,8 +817,8 @@ test("book completion preserves partial results and can cancel remaining checks"
 
   await page.loadOverview.call(context);
   assert.equal(context.data.recheckingAll, false);
-  assert.equal(context.data.bulkCheckProgressTitle, "1 章检查未完成");
-  assert.match(context.data.bulkCheckProgressDetail, /已完成结果已保留/);
+  assert.equal(context.data.bulkCheckProgress.title, "1 章检查未完成");
+  assert.match(context.data.bulkCheckProgress.detail, /已完成结果已保留/);
 
   currentJob = bulkJob({
     job_id: "book-job-2",
@@ -834,8 +834,8 @@ test("book completion preserves partial results and can cancel remaining checks"
   await page.cancelBulkCheck.call(context);
 
   assert.deepEqual(cancellations, [["project-1", "book-job-2"]]);
-  assert.equal(context.data.bulkCheckProgressTitle, "全书检查已停止");
-  assert.match(context.data.bulkCheckProgressDetail, /已完成结果已保留/);
+  assert.equal(context.data.bulkCheckProgress.title, "全书检查已停止");
+  assert.match(context.data.bulkCheckProgress.detail, /已完成结果已保留/);
 });
 
 test("book completion resumes polling after a transient recheck refresh failure", async () => {

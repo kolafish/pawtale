@@ -328,27 +328,36 @@ definePage<ChapterWorkspacePageData>()({
 
   applyWorkspace(workspace: MemoirChapterWorkspace) {
     const summary = workspace.completion_summary;
-    summary.detail = readableReviewText(summary.detail, workspace);
-    summary.next_action.detail = readableReviewText(
-      summary.next_action.detail,
-      workspace,
-    );
-    if (summary.active_issue) {
-      summary.active_issue.question = readableReviewText(
-        summary.active_issue.question,
-        workspace,
-      );
-    }
-    setPageNavigationTitle(workspace.chapter_title || "本章正文");
+    const viewWorkspace = {
+      ...workspace,
+      completion_summary: {
+        ...summary,
+        detail: readableReviewText(summary.detail, workspace),
+        next_action: {
+          ...summary.next_action,
+          detail: readableReviewText(summary.next_action.detail, workspace),
+        },
+        active_issue: summary.active_issue
+          ? {
+            ...summary.active_issue,
+            question: readableReviewText(
+              summary.active_issue.question,
+              workspace,
+            ),
+          }
+          : summary.active_issue,
+      },
+    };
+    setPageNavigationTitle(viewWorkspace.chapter_title || "本章正文");
     this.setData({
-      workspace,
+      workspace: viewWorkspace,
       ...chapterWorkspaceViewPatch(
-        workspace,
+        viewWorkspace,
         this.data.expandedSectionIds,
         this.data.expandedDraftSectionIds,
       ),
       structureExpanded:
-        !workspace.draft_sections.length
+        !viewWorkspace.draft_sections.length
         || this.data.structureExpanded,
       loading: false,
       error: "",

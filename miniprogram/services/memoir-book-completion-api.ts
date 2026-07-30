@@ -68,7 +68,13 @@ export interface MemoirBookReviewJob {
 
 export type MemoirBookRevisionJobSource =
   | "review_answers"
-  | "editorial_actions";
+  | "editorial_actions"
+  | "proposal_feedback";
+
+export type MemoirBookRevisionCommandSource = Exclude<
+  MemoirBookRevisionJobSource,
+  "proposal_feedback"
+>;
 
 export interface MemoirBookRevisionJob {
   job_id: string | null;
@@ -83,21 +89,38 @@ export interface MemoirBookRevisionJob {
     | "completed"
     | "failed"
     | "cancelled";
-  answer_count?: number;
-  unresolved_count?: number;
-  changed_chapter_count?: number;
-  summary?: string;
-  selected_action_count?: number;
   proposal_id: string | null;
   proposal_status: MemoirBookRevisionProposalStatus | null;
   requested_ai_model: string | null;
   resolved_ai_model: string | null;
-  already_applied?: boolean;
-  can_apply?: boolean;
   can_cancel: boolean;
   can_retry: boolean;
   error_message: string;
 }
+
+export interface MemoirBookAnswerApplicationJob extends MemoirBookRevisionJob {
+  answer_count: number;
+  unresolved_count: number;
+  changed_chapter_count: number;
+  summary: string;
+  already_applied: boolean;
+  can_apply: boolean;
+}
+
+export interface MemoirBookEditorialRevisionJob extends MemoirBookRevisionJob {
+  selected_action_count: number;
+}
+
+export interface MemoirBookRevisionFeedbackJob extends MemoirBookRevisionJob {
+  changed_chapter_count: number;
+  summary: string;
+}
+
+export type MemoirBookRevisionJobForSource<
+  Source extends MemoirBookRevisionCommandSource,
+> = Source extends "review_answers"
+  ? MemoirBookAnswerApplicationJob
+  : MemoirBookEditorialRevisionJob;
 
 export type MemoirBookRevisionProposalStatus =
   | "ready"
@@ -273,7 +296,7 @@ export function cancelMemoirBookReviewJob(
 
 function bookRevisionJobPath(
   projectId: string,
-  source: MemoirBookRevisionJobSource,
+  source: MemoirBookRevisionCommandSource,
   suffix = "",
 ): string {
   const segment = source === "review_answers"
@@ -282,36 +305,42 @@ function bookRevisionJobPath(
   return `${bookReviewPath(projectId)}/${segment}/jobs${suffix}`;
 }
 
-export function enqueueMemoirBookRevisionJob(
+export function enqueueMemoirBookRevisionJob<
+  Source extends MemoirBookRevisionCommandSource,
+>(
   projectId: string,
-  source: MemoirBookRevisionJobSource,
+  source: Source,
   actionIds: string[] = [],
-): Promise<MemoirBookRevisionJob> {
+): Promise<MemoirBookRevisionJobForSource<Source>> {
   const payload = source === "review_answers"
     ? { ai_model: null }
     : { action_ids: actionIds, ai_model: null };
-  return memoirAIRequest<MemoirBookRevisionJob, typeof payload>(
+  return memoirAIRequest<MemoirBookRevisionJobForSource<Source>, typeof payload>(
     bookRevisionJobPath(projectId, source),
     payload,
     { timeoutProfile: "mutation" },
   );
 }
 
-export function getMemoirBookRevisionJob(
+export function getMemoirBookRevisionJob<
+  Source extends MemoirBookRevisionCommandSource,
+>(
   projectId: string,
-  source: MemoirBookRevisionJobSource,
-): Promise<MemoirBookRevisionJob> {
-  return memoirRequest<MemoirBookRevisionJob>(
+  source: Source,
+): Promise<MemoirBookRevisionJobForSource<Source>> {
+  return memoirRequest<MemoirBookRevisionJobForSource<Source>>(
     bookRevisionJobPath(projectId, source, "/current"),
   );
 }
 
-export function cancelMemoirBookRevisionJob(
+export function cancelMemoirBookRevisionJob<
+  Source extends MemoirBookRevisionCommandSource,
+>(
   projectId: string,
   jobId: string,
-  source: MemoirBookRevisionJobSource,
-): Promise<MemoirBookRevisionJob> {
-  return memoirRequest<MemoirBookRevisionJob>(
+  source: Source,
+): Promise<MemoirBookRevisionJobForSource<Source>> {
+  return memoirRequest<MemoirBookRevisionJobForSource<Source>>(
     bookRevisionJobPath(
       projectId,
       source,
@@ -345,9 +374,9 @@ export function enqueueMemoirBookRevisionFeedback(
   projectId: string,
   proposalId: string,
   feedback: string,
-): Promise<MemoirBookRevisionJob> {
+): Promise<MemoirBookRevisionFeedbackJob> {
   return memoirAIRequest<
-    MemoirBookRevisionJob,
+    MemoirBookRevisionFeedbackJob,
     { feedback: string; ai_model: null }
   >(
     bookRevisionProposalPath(projectId, proposalId, "/feedback/jobs"),
@@ -359,8 +388,8 @@ export function enqueueMemoirBookRevisionFeedback(
 export function getMemoirBookRevisionFeedbackJob(
   projectId: string,
   proposalId: string,
-): Promise<MemoirBookRevisionJob> {
-  return memoirRequest<MemoirBookRevisionJob>(
+): Promise<MemoirBookRevisionFeedbackJob> {
+  return memoirRequest<MemoirBookRevisionFeedbackJob>(
     bookRevisionProposalPath(projectId, proposalId, "/feedback/jobs/current"),
   );
 }

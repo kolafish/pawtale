@@ -1410,6 +1410,34 @@ test("required review keeps an existing draft from being confirmed", async () =>
   assert.equal(context.data.canConfirmChapter, false);
 });
 
+test("chapter workspace derives readable review text without mutating the API response", () => {
+  installWx();
+  const apiWorkspace = workspace({
+    completion_summary: summary({
+      detail: "请核对 S1。",
+      next_action: {
+        ...summary().next_action,
+        detail: "先查看 S1。",
+      },
+      active_issue: {
+        id: "issue-1",
+        question: "S1 是否准确？",
+        status: "pending",
+      },
+    }),
+  });
+  const { page } = loadWorkspacePage({ currentWorkspace: apiWorkspace });
+  const context = pageContext(page);
+
+  page.applyWorkspace.call(context, apiWorkspace);
+
+  assert.equal(apiWorkspace.completion_summary.detail, "请核对 S1。");
+  assert.equal(apiWorkspace.completion_summary.next_action.detail, "先查看 S1。");
+  assert.equal(apiWorkspace.completion_summary.active_issue.question, "S1 是否准确？");
+  assert.match(context.data.workspace.completion_summary.detail, /第1小节/);
+  assert.match(context.data.workspace.completion_summary.active_issue.question, /第1小节/);
+});
+
 test("chapter workspace can rewrite while optional suggestions remain open", async () => {
   const { toasts, modals } = installWx();
   const calls = [];

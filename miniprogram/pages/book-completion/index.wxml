@@ -22,15 +22,15 @@
       </text>
 
       <view
-        wx:if="{{bookReviewProgressVisible}}"
-        class="book-review-progress {{bookReviewProgressClass}}"
+        wx:if="{{bookReviewProgress.visible}}"
+        class="book-review-progress {{bookReviewProgress.className}}"
       >
         <ai-task-progress
-          title="{{bookReviewProgressTitle}}"
-          detail="{{bookReviewProgressDetail}}"
-          mode="{{bookReviewProgressMode}}"
-          progress="{{bookReviewProgressPercent}}"
-          can-cancel="{{bookReviewCanCancel && !bookReviewCancelling}}"
+          title="{{bookReviewProgress.title}}"
+          detail="{{bookReviewProgress.detail}}"
+          mode="{{bookReviewProgress.progressMode}}"
+          progress="{{bookReviewProgress.progress}}"
+          can-cancel="{{bookReviewProgress.canCancel && !bookReviewCancelling}}"
           cancel-text="停止全书检查"
           bindcancel="cancelBookReview"
         />
@@ -79,14 +79,14 @@
             <text class="editorial-action-reason">{{item.reason}}</text>
           </view>
           <view
-            wx:if="{{editorialRevisionProgressVisible}}"
-            class="answer-application-progress {{editorialRevisionProgressClass}}"
+            wx:if="{{editorialRevisionProgress.visible}}"
+            class="answer-application-progress {{editorialRevisionProgress.className}}"
           >
             <ai-task-progress
-              title="{{editorialRevisionProgressTitle}}"
-              detail="{{editorialRevisionProgressDetail}}"
-              mode="{{editorialRevisionProgressClass === 'active' ? 'indeterminate' : 'hidden'}}"
-              can-cancel="{{editorialRevisionCanCancel && !editorialRevisionCancelling}}"
+              title="{{editorialRevisionProgress.title}}"
+              detail="{{editorialRevisionProgress.detail}}"
+              mode="{{editorialRevisionProgress.progressMode}}"
+              can-cancel="{{editorialRevisionProgress.canCancel && !editorialRevisionCancelling}}"
               cancel-text="停止生成"
               bindcancel="cancelEditorialRevision"
             />
@@ -153,14 +153,14 @@
                 : "可以根据这些回答生成修改预览，确认前不会改变当前书稿。")}}
           </text>
           <view
-            wx:if="{{answerApplicationProgressVisible}}"
-            class="answer-application-progress {{answerApplicationProgressClass}}"
+            wx:if="{{answerApplicationProgress.visible}}"
+            class="answer-application-progress {{answerApplicationProgress.className}}"
           >
             <ai-task-progress
-              title="{{answerApplicationProgressTitle}}"
-              detail="{{answerApplicationProgressDetail}}"
-              mode="{{answerApplicationProgressMode}}"
-              can-cancel="{{answerApplicationCanCancel && !answerApplicationCancelling}}"
+              title="{{answerApplicationProgress.title}}"
+              detail="{{answerApplicationProgress.detail}}"
+              mode="{{answerApplicationProgress.progressMode}}"
+              can-cancel="{{answerApplicationProgress.canCancel && !answerApplicationCancelling}}"
               cancel-text="停止调整"
               bindcancel="cancelAnswerApplication"
             />
@@ -217,15 +217,15 @@
       <text class="completion-notice-title">{{bulkCheckTitle}}</text>
       <text class="completion-notice-detail">{{bulkCheckDetail}}</text>
       <view
-        wx:if="{{bulkCheckProgressVisible}}"
-        class="bulk-check-progress {{bulkCheckProgressClass}}"
+        wx:if="{{bulkCheckProgress.visible}}"
+        class="bulk-check-progress {{bulkCheckProgress.className}}"
       >
         <ai-task-progress
-          title="{{bulkCheckProgressTitle}}"
-          detail="{{bulkCheckProgressDetail}}"
-          mode="{{bulkCheckProgressMode}}"
-          progress="{{bulkCheckProgressPercent}}"
-          can-cancel="{{bulkCheckCanCancel && !bulkCheckCancelling}}"
+          title="{{bulkCheckProgress.title}}"
+          detail="{{bulkCheckProgress.detail}}"
+          mode="{{bulkCheckProgress.progressMode}}"
+          progress="{{bulkCheckProgress.progress}}"
+          can-cancel="{{bulkCheckProgress.canCancel && !bulkCheckCancelling}}"
           cancel-text="停止后续检查"
           bindcancel="cancelBulkCheck"
         />
