@@ -3,53 +3,8 @@ from __future__ import annotations
 from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookPlanChapter
 
 
-READING_PARAGRAPH_TARGET_CHARS = 140
-_SENTENCE_ENDINGS = "。！？!?"
-_SENTENCE_CLOSERS = "”’\"'」』】）)"
-
-
 def _safe_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
-
-
-def reading_paragraphs(value: object) -> list[str]:
-    text = _safe_str(value).replace("\r\n", "\n").replace("\r", "\n")
-    explicit = [line.strip() for line in text.split("\n") if line.strip()]
-    if len(explicit) != 1:
-        return explicit
-
-    sentences: list[str] = []
-    start = 0
-    for index, char in enumerate(text):
-        if char not in _SENTENCE_ENDINGS:
-            continue
-        end = index + 1
-        while end < len(text) and text[end] in _SENTENCE_CLOSERS:
-            end += 1
-        sentence = text[start:end].strip()
-        if sentence:
-            sentences.append(sentence)
-        start = end
-    remainder = text[start:].strip()
-    if remainder:
-        sentences.append(remainder)
-    if len(sentences) < 2:
-        return explicit
-
-    paragraphs: list[str] = []
-    current = ""
-    for sentence in sentences:
-        if current and len(current) + len(sentence) > READING_PARAGRAPH_TARGET_CHARS:
-            paragraphs.append(current)
-            current = ""
-        current += sentence
-    if current:
-        paragraphs.append(current)
-    return paragraphs
-
-
-def reading_content(value: object) -> str:
-    return "\n".join(reading_paragraphs(value))
 
 
 def normalized_section_snapshots(value: object) -> list[dict[str, object]]:

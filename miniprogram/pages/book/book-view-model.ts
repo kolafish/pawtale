@@ -513,48 +513,12 @@ function bookOralSourceCountText(count: number): string {
   return count > 0 ? `${count} 条口述` : "暂无口述";
 }
 
-const READING_PARAGRAPH_TARGET_CHARS = 140;
-const SENTENCE_ENDINGS = "。！？!?";
-const SENTENCE_CLOSERS = "”’\"'」』】）)";
-
 export function readingParagraphs(value: string): string[] {
-  const text = trimText(value).replace(/\r\n?/g, "\n");
-  const explicit = text.split("\n").map(trimText).filter(Boolean);
-  if (explicit.length !== 1) {
-    return explicit;
-  }
-  const sentences: string[] = [];
-  let start = 0;
-  for (let index = 0; index < text.length; index += 1) {
-    if (!SENTENCE_ENDINGS.includes(text[index])) {
-      continue;
-    }
-    let end = index + 1;
-    while (end < text.length && SENTENCE_CLOSERS.includes(text[end])) {
-      end += 1;
-    }
-    const sentence = trimText(text.slice(start, end));
-    if (sentence) {
-      sentences.push(sentence);
-    }
-    start = end;
-  }
-  const remainder = trimText(text.slice(start));
-  if (remainder) {
-    sentences.push(remainder);
-  }
-  if (sentences.length < 2) {
-    return explicit;
-  }
-  return sentences.reduce<string[]>((paragraphs, sentence) => {
-    const last = paragraphs[paragraphs.length - 1] || "";
-    if (!last || last.length + sentence.length > READING_PARAGRAPH_TARGET_CHARS) {
-      paragraphs.push(sentence);
-    } else {
-      paragraphs[paragraphs.length - 1] = last + sentence;
-    }
-    return paragraphs;
-  }, []);
+  return trimText(value)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map(trimText)
+    .filter(Boolean);
 }
 
 export function bookOutputPreviewTitle(

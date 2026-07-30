@@ -15,6 +15,7 @@ const {
   sampleBookManuscript,
   sampleBookOutput,
 } = require("./book-fixtures");
+const { readingParagraphs } = require("../pages/book/book-view-model.ts");
 
 function sampleFinishedBook(content = "全书正文") {
   return sampleBookOutput(1, content, false, [], [], sampleBookManuscript());
@@ -48,6 +49,7 @@ test("book reader page is registered as the finished-book route", () => {
   assert.match(pageWxml, /bindtap="playReaderAudio"/);
   assert.match(pageWxml, /朗读全书/);
   assert.match(pageWxml, /<book-tts-player/);
+  assert.match(pageWxml, /current-text="{{readerMode === 'chapter' \? '' : bookTTSCurrentText}}"/);
   assert.doesNotMatch(pageWxml, /导出|重写|输入书名/);
 });
 
@@ -83,8 +85,8 @@ test("book reader page loads the finished book by project id", async () => {
   assert.equal(context.data.error, "");
 });
 
-test("book reader previews one current chapter with section titles and paragraphs", async () => {
-  const longContent = [
+test("reader paragraphs only honor line breaks saved by the language model", () => {
+  const unbrokenContent = [
     "十九年前，我们因为一次偶然的点赞认识。",
     "后来虽然不常见面，但每次联系都觉得很亲切。",
     "那些年各自忙着生活，偶尔会在朋友圈里知道对方的近况。",
@@ -92,6 +94,21 @@ test("book reader previews one current chapter with section titles and paragraph
     "一路上聊起从前，才发现很多记忆并没有因为时间过去而消失。",
     "回到家以后，我仍然记得山路上的风和大家说笑的声音。",
   ].join("");
+
+  assert.deepEqual(readingParagraphs(unbrokenContent), [unbrokenContent]);
+  assert.deepEqual(
+    readingParagraphs(`${unbrokenContent}\n\n第二段由模型明确换行。`),
+    [unbrokenContent, "第二段由模型明确换行。"],
+  );
+});
+
+test("book reader previews and highlights one current chapter", async () => {
+  const paragraphs = [
+    "十九年前，我们因为一次偶然的点赞认识。后来虽然不常见面，但每次联系都觉得很亲切。",
+    "那些年各自忙着生活，直到这个春天，我们终于约着一起去西山看山桃花。",
+  ];
+  const longContent = paragraphs.join("\n\n");
+  const secondContent = "山路上很安静。后来他主动伸手拉了我一把。";
   const { page } = loadBookReaderPage({
     getMemoirChapterWorkspace: async () => ({
       project_id: "project-1",
@@ -112,6 +129,11 @@ test("book reader previews one current chapter with section titles and paragraph
         title: "十九年点赞之交的淡交过往",
         content: longContent,
         used_material_ids: ["utterance-1"],
+      }, {
+        section_id: "section-2",
+        title: "爬山途中的细碎关照",
+        content: secondContent,
+        used_material_ids: ["utterance-2"],
       }],
     }),
   });
@@ -125,14 +147,29 @@ test("book reader previews one current chapter with section titles and paragraph
   assert.equal(context.data.readerMode, "chapter");
   assert.equal(context.data.readerTitle, "山桃花开的心动");
   assert.equal(context.data.bookPreviewChapters[0].sections[0].title, "十九年点赞之交的淡交过往");
-  assert.ok(context.data.bookPreviewChapters[0].sections[0].paragraphs.length > 1);
-  assert.equal(
-    context.data.bookPreviewChapters[0].sections[0].paragraphs.join(""),
-    longContent,
+  assert.deepEqual(
+    context.data.bookPreviewChapters[0].sections[0].paragraphs,
+    paragraphs,
   );
   assert.equal(
     context.data.bookContent,
-    `十九年点赞之交的淡交过往\n\n${longContent}`,
+    `十九年点赞之交的淡交过往\n\n${longContent}\n\n爬山途中的细碎关照\n\n${secondContent}`,
+  );
+
+  const activeText = Array.from(context.data.bookContent);
+  const currentTextStart = context.data.bookContent.indexOf("主动伸手");
+  page.onBookTTSProgressPatch.call(context, {
+    ttsSpokenText: activeText.slice(0, currentTextStart).join(""),
+    ttsCurrentText: activeText[currentTextStart],
+    ttsRemainingText: activeText.slice(currentTextStart + 1).join(""),
+    ttsProgressPercent: 20,
+  });
+
+  assert.equal(context.data.readerHighlightSectionId, "section-2");
+  assert.equal(context.data.readerHighlightParagraphIndex, 0);
+  assert.equal(
+    context.data.readerHighlightCurrent,
+    "后来他主动伸手拉了我一把。",
   );
 });
 
