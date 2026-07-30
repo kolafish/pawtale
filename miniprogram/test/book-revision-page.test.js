@@ -13,30 +13,15 @@ const {
 function revisionProposal(overrides = {}) {
   const beforeSection = {
     section_id: "section-1",
-    index: 1,
     title: "旧校舍",
-    char_count: 4,
-    source_count: 1,
-    section_type: "event",
     content: "修改前正文",
-    source_ref_ids: [],
   };
   const afterSection = { ...beforeSection, content: "修改后正文" };
   const chapter = (section) => ({
     chapter_id: "chapter-1",
-    index: 1,
     title: "上学时光",
-    subtitle: "",
-    intro: "",
-    time_hint: "",
-    place_hint: "",
-    pull_quotes: [],
-    people_notes: [],
-    uncertain_facts: [],
     content: section.content,
     sections: [section],
-    source_refs: [],
-    illustrations: [],
   });
   return {
     id: "proposal-1",
@@ -103,14 +88,14 @@ function loadRevisionPage({ api = {} } = {}) {
   return loadPageModule("../pages/book-revision/index.ts");
 }
 
-test("book revision page is registered and switches between before and after text", () => {
+test("book revision page switches the changed sections and whole book together", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-revision/index"));
 
   const { revisionViewPatch } = loadRevisionPage().mod;
   const proposal = revisionProposal();
   const after = revisionViewPatch(proposal);
-  const before = revisionViewPatch(proposal, ["section-1"], "before");
+  const before = revisionViewPatch(proposal, "before");
 
   assert.equal(after.changedChapters[0].sections[0].display_content, "修改后正文");
   assert.equal(before.changedChapters[0].sections[0].display_content, "修改前正文");
