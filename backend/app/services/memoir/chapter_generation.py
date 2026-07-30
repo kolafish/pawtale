@@ -32,10 +32,6 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
 )
-from app.schemas.memoir_chapter_pipeline import (
-    MemoirLayeredChapterDraftResponse,
-    MemoirLayeredChapterDraftVersionResponse,
-)
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -1638,54 +1634,3 @@ async def confirm_chapter_draft(
     db.add(draft)
     await db.flush()
     return draft, latest
-
-
-async def get_chapter_draft(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
-    draft = await db.scalar(
-        select(MemoirBookChapterDraft).where(
-            MemoirBookChapterDraft.project_id == project_id,
-            MemoirBookChapterDraft.chapter_id == chapter_id,
-        )
-    )
-    latest = await _latest_version(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if draft is None or latest is None:
-        raise HTTPException(status_code=404, detail="章节正文尚未生成")
-    return draft, latest
-
-
-def draft_response(
-    draft: MemoirBookChapterDraft,
-    version: MemoirBookChapterDraftVersion,
-) -> MemoirLayeredChapterDraftResponse:
-    return MemoirLayeredChapterDraftResponse(
-        id=draft.id,
-        project_id=draft.project_id,
-        chapter_id=draft.chapter_id,
-        status=draft.status,
-        latest_version=MemoirLayeredChapterDraftVersionResponse(
-            id=version.id,
-            draft_id=version.draft_id,
-            project_id=version.project_id,
-            chapter_id=version.chapter_id,
-            version=version.version,
-            content=version.content,
-            sections=list(version.section_snapshot_json),
-            input_signature=version.input_signature,
-            used_material_ids=list(version.used_material_ids_json),
-            material_snapshot=list(version.material_snapshot_json),
-            created_by=version.created_by,
-            model=version.model,
-            created_at=version.created_at,
-        ),
-        created_at=draft.created_at,
-        updated_at=draft.updated_at,
-    )
