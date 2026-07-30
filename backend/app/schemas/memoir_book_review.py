@@ -86,39 +86,33 @@ MemoirBookReviewAnswerApplicationStage = Literal[
 ]
 
 
-class MemoirBookReviewAnswerApplicationJobResponse(BaseModel):
+class MemoirBookRevisionJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
     status: MemoirBookReviewJobStatus
     stage: MemoirBookReviewAnswerApplicationStage = ""
+    proposal_id: str | None = None
+    proposal_status: MemoirBookRevisionProposalStatus | None = None
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    can_cancel: bool = False
+    can_retry: bool = False
+    error_message: str = ""
+
+
+class MemoirBookReviewAnswerApplicationJobResponse(
+    MemoirBookRevisionJobResponse
+):
     answer_count: int = 0
     unresolved_count: int = 0
     changed_chapter_count: int = 0
     summary: str = ""
-    proposal_id: str | None = None
-    proposal_status: MemoirBookRevisionProposalStatus | None = None
-    requested_ai_model: str | None = None
-    resolved_ai_model: str | None = None
     already_applied: bool = False
     can_apply: bool = False
-    can_cancel: bool = False
-    can_retry: bool = False
-    error_message: str = ""
 
 
-class MemoirBookEditorialRevisionJobResponse(BaseModel):
-    job_id: str | None = None
-    project_id: str
-    status: MemoirBookReviewJobStatus
-    stage: MemoirBookReviewAnswerApplicationStage = ""
+class MemoirBookEditorialRevisionJobResponse(MemoirBookRevisionJobResponse):
     selected_action_count: int = 0
-    proposal_id: str | None = None
-    proposal_status: MemoirBookRevisionProposalStatus | None = None
-    requested_ai_model: str | None = None
-    resolved_ai_model: str | None = None
-    can_cancel: bool = False
-    can_retry: bool = False
-    error_message: str = ""
 
 
 class MemoirBookRevisionPreviewVersion(BaseModel):

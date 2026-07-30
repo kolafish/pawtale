@@ -17,9 +17,8 @@ from app.schemas.memoir_book_review import (
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir import (
-    book_editorial_revision_jobs,
-    book_review_answer_jobs,
     book_review_jobs,
+    book_revision_jobs,
     book_revision_proposals,
     book_reviews,
 )
@@ -166,11 +165,12 @@ async def enqueue_memoir_book_review_answer_application_job(
 ):
     try:
         return await (
-            book_review_answer_jobs.enqueue_book_review_answer_application_job(
+            book_revision_jobs.enqueue_book_revision_job(
                 db,
                 user_id=current_user.id,
                 project_id=project_id,
-                req=req,
+                source="review_answers",
+                ai_model=req.ai_model,
                 allow_admin=is_admin_user(current_user),
             )
         )
@@ -188,10 +188,11 @@ async def get_current_memoir_book_review_answer_application_job(
     current_user: User = Depends(get_current_user),
 ):
     return await (
-        book_review_answer_jobs.get_book_review_answer_application_job(
+        book_revision_jobs.get_book_revision_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
+            source="review_answers",
             allow_admin=is_admin_user(current_user),
         )
     )
@@ -209,10 +210,11 @@ async def cancel_memoir_book_review_answer_application_job(
 ):
     try:
         return await (
-            book_review_answer_jobs.cancel_book_review_answer_application_job(
+            book_revision_jobs.cancel_book_revision_job(
                 db,
                 user_id=current_user.id,
                 project_id=project_id,
+                source="review_answers",
                 job_id=job_id,
                 allow_admin=is_admin_user(current_user),
             )
@@ -233,11 +235,13 @@ async def enqueue_memoir_book_editorial_revision_job(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await book_editorial_revision_jobs.enqueue_editorial_revision_job(
+        return await book_revision_jobs.enqueue_book_revision_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
-            req=req,
+            source="editorial_actions",
+            ai_model=req.ai_model,
+            action_ids=req.action_ids,
             allow_admin=is_admin_user(current_user),
         )
     except ValueError as exc:
@@ -253,10 +257,11 @@ async def get_current_memoir_book_editorial_revision_job(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await book_editorial_revision_jobs.get_editorial_revision_job(
+    return await book_revision_jobs.get_book_revision_job(
         db,
         user_id=current_user.id,
         project_id=project_id,
+        source="editorial_actions",
         allow_admin=is_admin_user(current_user),
     )
 
@@ -272,10 +277,11 @@ async def cancel_memoir_book_editorial_revision_job(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return await book_editorial_revision_jobs.cancel_editorial_revision_job(
+        return await book_revision_jobs.cancel_book_revision_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
+            source="editorial_actions",
             job_id=job_id,
             allow_admin=is_admin_user(current_user),
         )
