@@ -810,6 +810,43 @@ class TestCallLlmContract:
         assert result[0] == "doubao"
 
     @pytest.mark.asyncio
+    async def test_volc_structured_generation_uses_json_schema(self):
+        service = VolcArkTextService()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "model": "doubao-seed-2-0-pro-260215",
+            "status": "completed",
+            "output": [{
+                "type": "message",
+                "content": [{
+                    "type": "output_text",
+                    "text": '{"ok": true}',
+                }],
+            }],
+        }
+        mock_resp.raise_for_status = MagicMock()
+
+        with patch("httpx.AsyncClient") as mock_client:
+            inst = AsyncMock()
+            inst.post = AsyncMock(return_value=mock_resp)
+            inst.__aenter__ = AsyncMock(return_value=inst)
+            inst.__aexit__ = AsyncMock(return_value=None)
+            mock_client.return_value = inst
+
+            result = await service.generate_structured(
+                "system",
+                "user",
+                output_model=_StructuredProbe,
+                requested_model="doubao-seed-2-0-pro-260215",
+            )
+
+        assert result.value.ok is True
+        text_format = inst.post.call_args.kwargs["json"]["text"]["format"]
+        assert text_format["type"] == "json_schema"
+        assert text_format["strict"] is True
+        assert text_format["schema"]["properties"]["ok"]["type"] == "boolean"
+
+    @pytest.mark.asyncio
     async def test_deepseek_uses_text_provider_concurrency_limit(self, monkeypatch):
         service = DeepSeekTextService()
         service.max_concurrent_requests = 7
