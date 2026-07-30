@@ -14,8 +14,8 @@ from app.schemas.memoir_book_review import MemoirBookReviewAnswerApplyRequest
 from app.services.memoir import (
     book_editorial_actions,
     book_output_versions,
-    book_review_answer_application,
     book_review_answer_state,
+    book_revision_generation,
     book_reviews,
     editing_jobs,
 )
@@ -119,7 +119,7 @@ async def _job_state(
         job=job,
     )
     state["summary"] = (
-        book_review_answer_application.user_visible_application_summary(
+        book_revision_generation.user_visible_application_summary(
             state.get("summary"),
             changed_chapter_count=state.get("changed_chapter_count"),
         )
@@ -283,7 +283,7 @@ async def run_book_review_answer_application_job(
             str(payload.get("user_id") or ""),
             allow_admin=payload.get("allow_admin") is True,
         )
-        result = await book_review_answer_application.apply_book_review_answers(
+        result = await book_revision_generation.apply_book_review_answers(
             db,
             project_id=job.project_id,
             expected_review_input_signature=str(
@@ -308,7 +308,7 @@ async def run_book_review_answer_application_job(
                 "cancelled": True,
             },
         )
-    except book_review_answer_application.BookReviewAnswerApplicationError as exc:
+    except book_revision_generation.BookRevisionError as exc:
         return EditingJobResult(
             status=MemoirEditingJobStatus.FAILED,
             result_json={
