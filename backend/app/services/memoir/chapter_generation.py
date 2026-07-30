@@ -45,7 +45,10 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
-from app.services.memoir.section_digests import mark_section_digests_stale
+from app.services.memoir.section_digests import (
+    get_current_section_digest,
+    mark_section_digests_stale,
+)
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -66,6 +69,7 @@ CHAPTER_SECTION_REVISION_SYSTEM_PROMPT = (
 CHAPTER_SECTION_GENERATION_ATTEMPTS = 2
 CHAPTER_SECTION_BOUNDARY_OVERLAP_MIN_CHARS = 40
 CHAPTER_SECTION_BOUNDARY_LOOKBACK_CHARS = 300
+CHAPTER_PREVIOUS_SECTION_FULL_TEXT_LIMIT = 1600
 logger = logging.getLogger(__name__)
 
 
@@ -100,6 +104,13 @@ class ChapterGenerationContext:
     sections: tuple[ChapterSectionInput, ...]
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
+
+
+@dataclass(frozen=True)
+class ChapterSectionContinuity:
+    summary: str
+    focus: str
+    key_points: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -574,6 +585,7 @@ def build_chapter_generation_prompt(
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     current_section_content: str = "",
     revision_instruction: str = "",
+    previous_section_context: str = "",
 ) -> str:
     section_refs = ModelReferenceMap(
         "S",
@@ -656,6 +668,9 @@ def build_chapter_generation_prompt(
 编辑建议：
 {guidance}
 
+前一小节衔接参考：
+{previous_section_context or "（这是本章第一个小节）"}
+
 按既定顺序排列的允许素材：
 {blocks}
 
@@ -679,7 +694,8 @@ def build_chapter_generation_prompt(
 - 每个输入 section_id 必须出现且只能出现一次，不新增、删除或合并小节。
 - 只有本次按用户要求修改且要求涉及标题时，才可修改输入标题。
 - 每个小节只能使用列在该小节下的素材，不能把素材移动到其他小节。
-- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡。
+- 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
+- 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。
 - 只能使用输入中的事实和感受，可以调整顺序、合并重复。
 - 不要为了完整而虚构时间、地点、人物、因果或心理活动。
 - 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
@@ -735,6 +751,67 @@ def _string_list(value: object, *, limit: int, item_limit: int) -> list[str]:
         if len(result) >= limit:
             break
     return result
+
+
+async def load_section_continuity(
+    db: AsyncSession,
+    *,
+    context: ChapterGenerationContext,
+) -> dict[str, ChapterSectionContinuity]:
+    result: dict[str, ChapterSectionContinuity] = {}
+    for section in context.sections:
+        digest = await get_current_section_digest(
+            db,
+            project_id=context.project_id,
+            section_id=section.section_id,
+        )
+        if digest is None or not isinstance(digest.digest_json, dict):
+            continue
+        result[section.section_id] = ChapterSectionContinuity(
+            summary=" ".join(
+                str(digest.digest_json.get("summary") or "").split()
+            )[:600],
+            focus=" ".join(
+                str(digest.digest_json.get("focus") or "").split()
+            )[:300],
+            key_points=tuple(
+                _string_list(
+                    digest.digest_json.get("covered_points"),
+                    limit=8,
+                    item_limit=120,
+                )
+            ),
+        )
+    return result
+
+
+def previous_section_context(
+    *,
+    section: ChapterSectionInput | None,
+    content: str,
+    continuity: ChapterSectionContinuity | None,
+) -> str:
+    body = content.strip()
+    if section is None or not body:
+        return ""
+    if len("".join(body.split())) <= CHAPTER_PREVIOUS_SECTION_FULL_TEXT_LIMIT:
+        return f"标题：{section.title}\n完整正文：\n{body}"
+    if continuity is not None and (
+        continuity.summary or continuity.focus or continuity.key_points
+    ):
+        points = "；".join(continuity.key_points) or "（无单独要点）"
+        return (
+            f"标题：{section.title}\n"
+            f"摘要：{continuity.summary or '（无）'}\n"
+            f"重点：{continuity.focus or '（无）'}\n"
+            f"关键要素（人物、地点、事件等）：{points}"
+        )
+    compact = " ".join(body.split())
+    return (
+        f"标题：{section.title}\n"
+        f"正文开头节选：{compact[:240]}\n"
+        f"正文结尾节选：{compact[-240:]}"
+    )
 
 
 def normalize_generated_chapter(
@@ -872,6 +949,7 @@ async def generate_chapter(
     chapter_sections: tuple[ChapterSectionInput, ...] | None = None,
     preserved_sections: tuple[GeneratedChapterSection, ...] = (),
     preserved_model: str | None = None,
+    section_continuity: dict[str, ChapterSectionContinuity] | None = None,
 ) -> GeneratedChapter:
     client = (
         ai_client or get_ai_service(ai_model)
@@ -928,7 +1006,7 @@ async def generate_chapter(
             )
         )
     completed_sections: list[GeneratedChapterSection] = []
-    for section in full_sections:
+    for section_index, section in enumerate(full_sections):
         current = preserved_by_id.get(section.section_id)
         if current is None:
             current = generated_targets_by_id.get(section.section_id)
@@ -944,6 +1022,18 @@ async def generate_chapter(
                     completed_sections[-1].content
                     if completed_sections
                     else ""
+                ),
+                previous_section=(
+                    full_sections[section_index - 1]
+                    if section_index > 0
+                    else None
+                ),
+                previous_section_continuity=(
+                    (section_continuity or {}).get(
+                        full_sections[section_index - 1].section_id
+                    )
+                    if section_index > 0
+                    else None
                 ),
                 ai_model=ai_model,
                 ai_client=client,
@@ -985,6 +1075,8 @@ async def generate_chapter_section(
     editorial_guidance: list[str],
     chapter_sections: tuple[ChapterSectionInput, ...],
     previous_section_content: str = "",
+    previous_section: ChapterSectionInput | None = None,
+    previous_section_continuity: ChapterSectionContinuity | None = None,
     current_section_content: str = "",
     revision_instruction: str = "",
     ai_model: str | None = None,
@@ -998,6 +1090,11 @@ async def generate_chapter_section(
         chapter_sections=chapter_sections,
         current_section_content=current_section_content,
         revision_instruction=revision_instruction,
+        previous_section_context=previous_section_context(
+            section=previous_section,
+            content=previous_section_content,
+            continuity=previous_section_continuity,
+        ),
     )
     last_error: Exception | None = None
     policy = ai_text_workload_policy(
@@ -1201,6 +1298,7 @@ async def generate_and_save_chapter_draft(
         chapter_id=chapter_id,
     )
     plan = chapter_draft_generation_plan(before, latest_before)
+    continuity = await load_section_continuity(db, context=before)
     generated = await generate_chapter(
         plan.target_context,
         editorial_guidance=editorial_guidance,
@@ -1211,6 +1309,7 @@ async def generate_and_save_chapter_draft(
         chapter_sections=before.sections,
         preserved_sections=plan.preserved_sections,
         preserved_model=plan.previous_model,
+        section_continuity=continuity,
     )
     db.expire_all()
     after = await load_chapter_generation_context(
@@ -1354,6 +1453,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
     )
     target = before.sections[target_index]
     revision_instruction = instruction_text.strip()
+    continuity = await load_section_continuity(db, context=before)
     await db.commit()
     generated = await generate_chapter_section(
         before,
@@ -1361,6 +1461,16 @@ async def revise_and_save_chapter_draft_section_with_ai(
         editorial_guidance=editorial_guidance,
         chapter_sections=before.sections,
         previous_section_content=previous_section_content,
+        previous_section=(
+            before.sections[target_index - 1]
+            if target_index > 0
+            else None
+        ),
+        previous_section_continuity=(
+            continuity.get(before.sections[target_index - 1].section_id)
+            if target_index > 0
+            else None
+        ),
         current_section_content=str(
             latest_sections[target_index].get("content") or ""
         ).strip(),
