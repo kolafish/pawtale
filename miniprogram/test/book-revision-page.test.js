@@ -198,7 +198,10 @@ test("book revision feedback refreshes the candidate before final confirmation",
         revisionFeedbackJob("succeeded"),
       getMemoirBookRevisionProposal: async () => {
         calls.push(["reload"]);
-        return revisionProposal({ summary: "已经按意见更新。" });
+        return revisionProposal({
+          summary: "已经按意见更新。",
+          updated_at: "2026-07-30T00:01:00",
+        });
       },
     },
   });
@@ -233,4 +236,33 @@ test("book revision feedback refreshes the candidate before final confirmation",
   assert.equal(context.data.feedbackText, "");
   assert.equal(context.data.proposal.summary, "已经按意见更新。");
   assert.ok(calls.some(([kind]) => kind === "reload"));
+});
+
+test("book revision keeps submit error when polling only finds an older success", async () => {
+  global.wx = { showToast() {} };
+  const { page } = loadRevisionPage({
+    api: {
+      enqueueMemoirBookRevisionFeedback: async () => {
+        throw new Error("network unavailable");
+      },
+      getMemoirBookRevisionFeedbackJob: async () =>
+        revisionFeedbackJob("succeeded"),
+      getMemoirBookRevisionProposal: async () => revisionProposal(),
+    },
+  });
+  const context = pageContext(page, {
+    projectId: "project-1",
+    proposalId: "proposal-1",
+    proposal: revisionProposal(),
+    feedbackText: "请统一前后章节的人物称谓。",
+  });
+  context.pageActive = true;
+  context.feedbackPoller = { cancel() {}, schedule() { return true; } };
+
+  await page.submitFeedback.call(context);
+  await page.refreshFeedbackJob.call(context);
+
+  assert.equal(context.data.feedbackBusy, false);
+  assert.equal(context.data.feedbackText, "请统一前后章节的人物称谓。");
+  assert.equal(context.data.error, "network unavailable");
 });
