@@ -22,7 +22,9 @@ function sampleFinishedBook(content = "全书正文") {
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
   mockModule("../services/memoir-voice-api.ts", {
+    createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
     createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
+    getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
     getMemoirBookOutput: async () => sampleFinishedBook(),
     getMemoirBookOutputVersion: unmockedAsync("getMemoirBookOutputVersion"),
     ...voiceApiExports,
@@ -42,7 +44,8 @@ test("book reader page is registered as the finished-book route", () => {
   assert.ok(appJson.pages.includes("pages/book-reader/index"));
   assert.equal(pageJson.navigationBarTitleText, "成书阅读");
   assert.match(pageWxml, /成书阅读/);
-  assert.match(pageWxml, /bindtap="playBookAudio"/);
+  assert.match(pageWxml, /整章预览/);
+  assert.match(pageWxml, /bindtap="playReaderAudio"/);
   assert.match(pageWxml, /朗读全书/);
   assert.match(pageWxml, /<book-tts-player/);
   assert.doesNotMatch(pageWxml, /导出|重写|输入书名/);
@@ -73,7 +76,64 @@ test("book reader page loads the finished book by project id", async () => {
     context.data.bookPreviewChapters[0].sections.map((section) => section.content),
     ["我小时候常在院子里晒太阳。", "外婆总在屋里屋外忙碌。"],
   );
+  assert.deepEqual(
+    context.data.bookPreviewChapters[0].sections[0].paragraphs,
+    ["我小时候常在院子里晒太阳。"],
+  );
   assert.equal(context.data.error, "");
+});
+
+test("book reader previews one current chapter with section titles and paragraphs", async () => {
+  const longContent = [
+    "十九年前，我们因为一次偶然的点赞认识。",
+    "后来虽然不常见面，但每次联系都觉得很亲切。",
+    "那些年各自忙着生活，偶尔会在朋友圈里知道对方的近况。",
+    "直到这个春天，我们终于约着一起去西山看山桃花。",
+    "一路上聊起从前，才发现很多记忆并没有因为时间过去而消失。",
+    "回到家以后，我仍然记得山路上的风和大家说笑的声音。",
+  ].join("");
+  const { page } = loadBookReaderPage({
+    getMemoirChapterWorkspace: async () => ({
+      project_id: "project-1",
+      chapter_id: "chapter-1",
+      chapter_title: "山桃花开的心动",
+      completion_summary: {},
+      draft_needs_rewrite: false,
+      can_rewrite_draft: false,
+      pending_assignment_material_count: 0,
+      pending_completion_source_count: 0,
+      pending_new_source_count: 0,
+      sections: [],
+      draft_version_id: "version-1",
+      draft_version: 2,
+      draft_content: longContent,
+      draft_sections: [{
+        section_id: "section-1",
+        title: "十九年点赞之交的淡交过往",
+        content: longContent,
+        used_material_ids: ["utterance-1"],
+      }],
+    }),
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  assert.equal(context.data.readerMode, "chapter");
+  assert.equal(context.data.readerTitle, "山桃花开的心动");
+  assert.equal(context.data.bookPreviewChapters[0].sections[0].title, "十九年点赞之交的淡交过往");
+  assert.ok(context.data.bookPreviewChapters[0].sections[0].paragraphs.length > 1);
+  assert.equal(
+    context.data.bookPreviewChapters[0].sections[0].paragraphs.join(""),
+    longContent,
+  );
+  assert.equal(
+    context.data.bookContent,
+    `十九年点赞之交的淡交过往\n\n${longContent}`,
+  );
 });
 
 test("book reader page shares the same finished-book route", async () => {
@@ -227,7 +287,7 @@ test("book reader reads the latest full book with saved book voice settings", as
     playCalls.push(args);
   };
 
-  await page.playBookAudio.call(context);
+  await page.playReaderAudio.call(context);
 
   assert.deepEqual(requests, [[
     "project/1",
@@ -256,7 +316,7 @@ test("book reader does not mismatch latest audio with historical text", async ()
     bookViewingHistoricalVersion: true,
   });
 
-  await page.playBookAudio.call(context);
+  await page.playReaderAudio.call(context);
 
   assert.equal(requestCount, 0);
   assert.match(context.data.playbackError, /历史版本/);
@@ -274,9 +334,51 @@ test("book reader keeps the full text visible when narration fails", async () =>
     bookViewingHistoricalVersion: false,
   });
 
-  await page.playBookAudio.call(context);
+  await page.playReaderAudio.call(context);
 
   assert.equal(context.data.error, "");
   assert.equal(context.data.bookContent, "仍然可以阅读的全书正文");
   assert.equal(context.data.playbackError, "朗读服务暂时不可用");
+});
+
+test("chapter reader uses the existing chapter TTS and progress pipeline", async () => {
+  const requests = [];
+  const playCalls = [];
+  const { page } = loadBookReaderPage({
+    createMemoirBookChapterDraftTTS: async (...args) => {
+      requests.push(args);
+      return {
+        audio_file_ids: ["audio-chapter-1"],
+        audio_file_durations_seconds: [1.2],
+        provider: "fake",
+        model: "fake-tts",
+        mime_type: "audio/mpeg",
+        chunk_count: 1,
+        source_text_hash: "hash",
+        duration_seconds: 1.2,
+        alignment: [],
+      };
+    },
+  }, {
+    readBookTTSRequest: () => ({ voice: "voice-1", speed_ratio: 1.25 }),
+  });
+  const context = pageContext(page, {
+    readerMode: "chapter",
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    bookContent: "第一小节\n\n整章正文。",
+  });
+  context.playAudioFiles = async (...args) => {
+    playCalls.push(args);
+  };
+
+  await page.playReaderAudio.call(context);
+
+  assert.deepEqual(requests, [[
+    "project-1",
+    "chapter-1",
+    { voice: "voice-1", speed_ratio: 1.25 },
+  ]]);
+  assert.equal(playCalls[0][1], "chapter");
+  assert.equal(playCalls[0][3], "第一小节\n\n整章正文。");
 });

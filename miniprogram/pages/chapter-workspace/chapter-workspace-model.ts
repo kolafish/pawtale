@@ -18,7 +18,6 @@ import type {
 export const PREPARATION_POLL_INTERVAL_MS = 1500;
 export const SECTION_REGENERATION_POLL_INTERVAL_MS = 1500;
 export const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
-export const CHAPTER_AUDIO_TARGET = "chapter";
 
 export function readableReviewText(
   text: string,

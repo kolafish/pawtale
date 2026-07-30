@@ -12,6 +12,7 @@ from app.services.memoir.book_manuscript_cleanup import (
     formal_book_title,
     sanitize_manuscript_payload,
 )
+from app.services.memoir.book_output_snapshots import reading_content
 
 from app.services.memoir.book_output_pdf_renderer import (
     PDF_LAYOUTS,
@@ -853,7 +854,10 @@ def _add_chapters(builder: PDFBookBuilder, chapters: list[Any]) -> None:
                         quote,
                     )
                 if section_content:
-                    builder.add_body_text(section_content, spacing_after=4)
+                    builder.add_body_text(
+                        reading_content(section_content),
+                        spacing_after=4,
+                    )
                 section_id = _str(section.get("section_id"))
                 anchored_illustrations = [
                     illustration

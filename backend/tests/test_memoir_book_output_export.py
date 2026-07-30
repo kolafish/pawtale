@@ -29,6 +29,10 @@ from app.services.memoir.book_output_pdf_renderer import (
     _optimized_pdf_image_source,
     _wrap_pdf_line,
 )
+from app.services.memoir.book_output_snapshots import (
+    reading_content,
+    reading_paragraphs,
+)
 EXPECTED_PDF_COVER_STYLES = {
     "classic_plain",
     "warm_gray",
@@ -36,6 +40,25 @@ EXPECTED_PDF_COVER_STYLES = {
     "moonlit_courtyard",
     "navy_gilt",
 }
+
+
+def test_reading_layout_preserves_text_while_splitting_long_legacy_blocks():
+    content = "".join(
+        [
+            "十九年前，我们因为一次偶然的点赞认识。",
+            "后来虽然不常见面，但每次联系都觉得很亲切。",
+            "那些年各自忙着生活，偶尔会在朋友圈里知道对方的近况。",
+            "直到这个春天，我们终于约着一起去西山看山桃花。",
+            "一路上聊起从前，才发现很多记忆并没有因为时间过去而消失。",
+            "回到家以后，我仍然记得山路上的风和大家说笑的声音。",
+        ]
+    )
+
+    paragraphs = reading_paragraphs(content)
+
+    assert len(paragraphs) > 1
+    assert "".join(paragraphs) == content
+    assert reading_content("第一段。\n\n第二段。") == "第一段。\n第二段。"
 
 
 def test_pdf_font_assets_use_the_intended_weights():

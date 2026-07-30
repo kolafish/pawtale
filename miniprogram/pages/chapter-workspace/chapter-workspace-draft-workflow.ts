@@ -7,7 +7,6 @@ import { trackAuditAction } from "../../services/audit-tracker";
 import {
   confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
-  createMemoirBookChapterDraftTTS,
   reviseMemoirBookChapterDraft,
   reviseMemoirChapterDraftSectionWithAI,
 } from "../../services/memoir-voice-api";
@@ -24,7 +23,6 @@ import {
 import { readBookTTSRequest } from "../../services/tts-settings";
 import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
 import {
-  CHAPTER_AUDIO_TARGET,
   CLOSED_DRAFT_SECTION_EDITOR,
   DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
   type ChapterWorkspaceOperationKind,
@@ -373,26 +371,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         readBookTTSRequest(),
       ),
       "小节朗读失败",
-    );
-  },
-
-  async playDraftChapter() {
-    if (
-      !this.data.workspace?.draft_version_id
-      || !this.data.workspace.draft_content.trim()
-      || !this.data.projectId
-      || !this.data.chapterId
-    ) {
-      return;
-    }
-    await this.playDraftAudio(
-      CHAPTER_AUDIO_TARGET,
-      () => createMemoirBookChapterDraftTTS(
-        this.data.projectId,
-        this.data.chapterId,
-        readBookTTSRequest(),
-      ),
-      "整章朗读失败",
     );
   },
 

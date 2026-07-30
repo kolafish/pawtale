@@ -3,7 +3,7 @@
     <view class="book-tts-heading">
       <text class="book-tts-title">{{title}}</text>
       <text class="book-tts-status">
-        {{phase === "preparing" ? "正在准备音频…" : (phase === "playing" ? "正在朗读…" : "本次朗读已完成")}}
+        {{phase === "preparing" ? "正在准备音频…" : (phase === "playing" ? ("正在朗读 · " + progress + "%") : "本次朗读已完成")}}
       </text>
     </view>
     <view

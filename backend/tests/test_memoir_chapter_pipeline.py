@@ -255,6 +255,16 @@ def test_chapter_generation_preserves_explicit_section_boundaries():
     assert generated.used_material_ids == ("material-1", "material-2")
 
 
+def test_chapter_generation_prompt_requests_natural_paragraphs():
+    prompt = chapter_generation.build_chapter_generation_prompt(
+        _two_section_context(),
+        editorial_guidance=[],
+    )
+
+    assert "正文按时间、场景、事件推进或感受转折自然分段" in prompt
+    assert "段落之间用换行分隔" in prompt
+
+
 def test_chapter_generation_rejects_reordered_sections():
     with pytest.raises(ValueError, match="complete section order"):
         chapter_generation.normalize_generated_chapter(

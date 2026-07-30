@@ -372,6 +372,24 @@ definePage<ChapterWorkspacePageData>()({
     });
   },
 
+  openChapterPreview() {
+    if (
+      !this.data.workspace?.draft_version_id
+      || !this.data.workspace.draft_content.trim()
+      || Boolean(this.data.operationKind)
+      || Boolean(this.data.editingSectionId)
+    ) {
+      return;
+    }
+    this.stopDraftSectionPlayback();
+    wx.navigateTo({
+      url: pageUrl("/pages/book-reader/index", {
+        projectId: this.data.projectId,
+        chapterId: this.data.chapterId,
+      }),
+    });
+  },
+
   async runNextAction() {
     const action = this.data.nextAction;
     if (
