@@ -1903,6 +1903,27 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert "我决定都保留在书里" not in before_content
     assert "我决定都保留在书里" in after_content
 
+    review_record = await test_db.get(MemoirBookReview, generated.json()["id"])
+    assert review_record is not None
+    review_record.status = "failed"
+    test_db.add(review_record)
+    await test_db.commit()
+    stale = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}"
+    )
+    assert stale.status_code == 200
+    assert stale.json()["status"] == "stale"
+    assert stale.json()["can_apply"] is False
+    rejected = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/apply"
+    )
+    assert rejected.status_code == 409
+    review_record.status = "ready"
+    test_db.add(review_record)
+    await test_db.commit()
+
     applied = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/"
         f"revision-proposals/{completed_body['proposal_id']}/apply"

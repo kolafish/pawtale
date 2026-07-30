@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirBookRevisionProposalStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
+    MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
     MemoirBookOutput,
@@ -255,6 +256,7 @@ async def proposal_response(
             latest is None
             or latest.id != baseline.id
             or review is None
+            or review.status != MemoirSemanticCacheStatus.READY.value
             or review.input_signature != proposal.review_input_signature
         ):
             status = MemoirBookRevisionProposalStatus.STALE
@@ -338,7 +340,11 @@ async def apply_proposal(
         db,
         project_id=proposal.project_id,
     )
-    if review is None or review.input_signature != proposal.review_input_signature:
+    if (
+        review is None
+        or review.status != MemoirSemanticCacheStatus.READY.value
+        or review.input_signature != proposal.review_input_signature
+    ):
         raise ValueError("全书检查结果已经变化，请重新生成修改预览")
     context = await book_review_answer_state.load_answer_context(
         db,
