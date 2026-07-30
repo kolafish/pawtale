@@ -8,8 +8,8 @@ from app.services.ai_calls import (
     AIInvalidStructuredOutputError,
     AIOutputTruncatedError,
 )
-from app.services.ai_base import AITextServiceBase
 import app.services.ai_story as ai_story
+import app.services.ai_revision as ai_revision
 from app.services.ai_project_analysis import normalize_project_analysis
 from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.ai_text import DeepSeekTextService
@@ -34,49 +34,6 @@ class _StructuredListProbe(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_issues: list[_StructuredIssueProbe]
-
-
-# ── Helper Unit Tests ──────────────────────────
-
-
-class TestExtractJson:
-    def test_fenced_json_block(self):
-        content = '```json\n{"key": "value"}\n```'
-        assert AITextServiceBase._extract_json(content) == '{"key": "value"}'
-
-    def test_fenced_block_without_json_label(self):
-        content = '```\n{"key": "value"}\n```'
-        assert AITextServiceBase._extract_json(content) == '{"key": "value"}'
-
-    def test_plain_json(self):
-        content = '{"key": "value"}'
-        assert AITextServiceBase._extract_json(content) == '{"key": "value"}'
-
-    def test_text_around_json(self):
-        content = '这是说明\n```json\n{"k": 1}\n```\n后续文字'
-        assert AITextServiceBase._extract_json(content) == '{"k": 1}'
-
-
-class TestExtractJsonPayload:
-    def test_fenced_json(self):
-        content = '```json\n{"a": 1}\n```'
-        assert AITextServiceBase._extract_json_payload(content) == {"a": 1}
-
-    def test_plain_json(self):
-        assert AITextServiceBase._extract_json_payload('{"a": 1}') == {"a": 1}
-
-    def test_json_with_surrounding_text(self):
-        content = '以下是结果：\n{"a": 1}\n以上'
-        assert AITextServiceBase._extract_json_payload(content) == {"a": 1}
-
-    def test_empty_string(self):
-        assert AITextServiceBase._extract_json_payload("") == {}
-
-    def test_invalid_json(self):
-        assert AITextServiceBase._extract_json_payload("not json") == {}
-
-    def test_returns_dict_only(self):
-        assert AITextServiceBase._extract_json_payload("[1, 2, 3]") == {}
 
 
 class TestBuildCharDescriptions:
@@ -254,7 +211,8 @@ class TestTemplateMethodBothServices:
     @pytest.mark.asyncio
     async def test_revise_chapter(self, service):
         with patch.object(service, "_call_llm", _make_mock_response("修改后的内容")):
-            result = await service.revise_chapter(
+            result = await ai_revision.revise_chapter(
+                service,
                 original_content="原始内容",
                 revision_instruction="改得更好",
                 characters=[],
@@ -266,7 +224,8 @@ class TestTemplateMethodBothServices:
         with patch.object(service, "_call_llm", _make_mock_response_raw(
             "修改后的内容", {"choices": [{"message": {"content": "修改后的内容"}}]}
         )):
-            result = await service.revise_chapter(
+            result = await ai_revision.revise_chapter(
+                service,
                 original_content="原始内容",
                 revision_instruction="改得更好",
                 characters=[],
@@ -288,7 +247,8 @@ class TestTemplateMethodBothServices:
 A. 坐下来
 B. 转身离开"""
         with patch.object(service, "_call_llm", _make_mock_response(story_response)):
-            result = await service.generate_story(
+            result = await ai_story.generate_story(
+                service,
                 characters=[{"name": "小雨", "personality": ["温柔"]}],
                 scene={"name": "咖啡馆", "description": "安静"},
                 mood="甜",

@@ -1,4 +1,4 @@
-from project_helpers import create_project_id, create_project_with_group
+from project_helpers import create_project, create_project_id, create_project_with_group
 
 
 class TestGroupAPI:
@@ -9,6 +9,17 @@ class TestGroupAPI:
         response = await client.post(f"/api/projects/{project_id}/groups", json={"name": "第二卷"})
         assert response.status_code == 201
         assert response.json()["name"] == "第二卷"
+
+    async def test_memoir_rejects_generic_document_structure(self, client):
+        project = await create_project(client, "父亲的回忆", "memoir")
+
+        response = await client.post(
+            f"/api/projects/{project['id']}/groups",
+            json={"name": "回忆片段"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "回忆录不使用通用文档结构"
 
     async def test_update_group(self, client):
         project_id = await create_project_id(client)
