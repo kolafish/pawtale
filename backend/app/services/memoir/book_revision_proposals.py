@@ -426,18 +426,14 @@ async def apply_proposal(
             snapshots=snapshots,
             content=content,
         )
-        applied_version = MemoirBookOutputVersion(
-            output_id=output.id,
-            project_id=proposal.project_id,
-            plan_id=output.plan_id,
-            version=baseline.version + 1,
+        applied_version = await book_output_versions.append_book_output_version(
+            db,
+            output=output,
             content=content,
             chapter_snapshot_json=snapshots,
             manuscript_json=manuscript_json,
-            created_by=MemoirCreatedBy.AI.value,
+            created_by=MemoirCreatedBy.AI,
         )
-        db.add(applied_version)
-        await db.flush()
 
     changed_chapter_count = int(
         build_comparison(before=before_snapshots, after=snapshots)[

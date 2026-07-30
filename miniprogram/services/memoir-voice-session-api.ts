@@ -59,6 +59,7 @@ export function createMemoirVoiceSession(
     {
       method: "POST",
       data,
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -145,6 +146,7 @@ export function markMemoirAutomationEventsVoicePlayed(
     {
       method: "POST",
       data,
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -158,6 +160,7 @@ export function createMemoirVoiceNoAnswerPrompt(
     {
       method: "POST",
       data,
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -172,6 +175,7 @@ export function createMemoirAssistantTTS(
     {
       method: "POST",
       data,
+      invalidatesSnapshots: false,
     },
   );
 }

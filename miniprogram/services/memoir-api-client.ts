@@ -14,6 +14,7 @@ interface MemoirRequestOptions {
   data?: unknown;
   header?: Record<string, string>;
   timeoutProfile?: RequestTimeoutProfile;
+  invalidatesSnapshots?: boolean;
 }
 
 type QueryValue = string | number | boolean | null | undefined;
@@ -30,12 +31,13 @@ export async function memoirRequest<T>(
   path: string,
   options: MemoirRequestOptions = {},
 ): Promise<T> {
-  const method = options.method || "GET";
+  const { invalidatesSnapshots = true, ...requestOptions } = options;
+  const method = requestOptions.method || "GET";
   const response = await requestWithBackendSession<T>(path, {
-    ...options,
-    timeoutProfile: options.timeoutProfile ?? (method === "GET" ? "interactive" : "mutation"),
+    ...requestOptions,
+    timeoutProfile: requestOptions.timeoutProfile ?? (method === "GET" ? "interactive" : "mutation"),
   });
-  if (method !== "GET") {
+  if (method !== "GET" && invalidatesSnapshots) {
     markCurrentUserMemoirSnapshotsStale();
   }
   return response;

@@ -555,6 +555,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     "http://backend.local:8000/api/mobile/memoir/voice-transcripts/utterance%2F1/share-video/jobs",
   );
   assert.equal(apiRequests[1].method, "POST");
+  assert.equal(apiRequests[1].timeout, 60000);
   assert.deepEqual(apiRequests[1].data, {
     start_char: 0,
     end_char: 13,

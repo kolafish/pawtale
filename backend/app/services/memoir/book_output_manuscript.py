@@ -468,7 +468,29 @@ def manuscript_response(
 ) -> MemoirBookManuscript | None:
     if isinstance(stored, dict) and stored:
         try:
-            return MemoirBookManuscript.model_validate(sanitize_manuscript_payload(title=title, manuscript=stored))
+            return MemoirBookManuscript.model_validate(stored)
+        except ValueError:
+            try:
+                return MemoirBookManuscript.model_validate(
+                    sanitize_manuscript_payload(title=title, manuscript=stored)
+                )
+            except ValueError:
+                pass
+    return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
+
+
+def editable_manuscript(
+    *,
+    title: str,
+    content: str,
+    snapshot: list[dict[str, object]],
+    stored: object,
+) -> MemoirBookManuscript | None:
+    if isinstance(stored, dict) and stored:
+        try:
+            return MemoirBookManuscript.model_validate(
+                sanitize_manuscript_payload(title=title, manuscript=stored)
+            )
         except ValueError:
             pass
     return manuscript_from_snapshot(title=title, content=content, snapshot=snapshot)
@@ -483,7 +505,12 @@ def updated_manuscript_payload(
     cover_style_value: str | None,
     metadata_patch: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    manuscript = manuscript_response(title=title, content=content, snapshot=snapshot, stored=stored)
+    manuscript = editable_manuscript(
+        title=title,
+        content=content,
+        snapshot=snapshot,
+        stored=stored,
+    )
     if not manuscript:
         return {}
     metadata = effective_book_metadata(project=None, stored=stored, patch=metadata_patch, include_empty=True)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -47,19 +47,6 @@ from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
 from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.image_assets import manuscript_image_snapshots
-
-
-async def _latest_output_version_number(
-    db: AsyncSession,
-    *,
-    output_id: str,
-) -> int:
-    value = await db.scalar(
-        select(func.max(MemoirBookOutputVersion.version)).where(
-            MemoirBookOutputVersion.output_id == output_id
-        )
-    )
-    return int(value or 0)
 
 
 def _latest_chapter_version(
@@ -271,18 +258,14 @@ async def assemble_book_output(
         chapter_illustrations_by_chapter=chapter_illustrations,
         image_appendix=image_appendix,
     )
-    version = MemoirBookOutputVersion(
-        output_id=output.id,
-        project_id=project_id,
-        plan_id=plan.id,
-        version=await _latest_output_version_number(db, output_id=output.id) + 1,
+    version = await book_output_versions.append_book_output_version(
+        db,
+        output=output,
         content=content,
         chapter_snapshot_json=chapter_snapshots,
         manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
-        created_by=MemoirCreatedBy.SYSTEM.value,
+        created_by=MemoirCreatedBy.SYSTEM,
     )
-    db.add(version)
-    await db.flush()
     return MemoirBookAssemblyResponse(
         project_id=project_id,
         output_id=output.id,
