@@ -252,9 +252,9 @@ async def decide_material_organization(
         max_attempts=policy.max_attempts,
     )
     payload = generated.value.model_dump()
-    if payload["section_id"] is not None:
+    if payload["action"] == "assign_existing" and payload["section_id"] is not None:
         payload["section_id"] = section_refs.decode(payload["section_id"])
-    if payload["chapter_id"] is not None:
+    elif payload["action"] == "leave_unassigned" and payload["chapter_id"] is not None:
         payload["chapter_id"] = chapter_refs.decode(payload["chapter_id"])
     return normalize_material_organization_decision(
         payload,
@@ -348,6 +348,7 @@ async def _pending_assignment_section(
             section
             for section in sections
             if requires_user_assignment(section.metadata_json)
+            and section.status == MemoirSectionStatus.ACTIVE.value
         ),
         None,
     )
