@@ -253,6 +253,7 @@ export function createMemoirBookChapterDraftTTS(
       method: "POST",
       data,
       timeoutProfile: "generation",
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -273,6 +274,7 @@ export function createMemoirBookChapterDraftSectionTTS(
       method: "POST",
       data,
       timeoutProfile: "generation",
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -287,6 +289,7 @@ export function createMemoirBookPlanOutlineTTS(
       method: "POST",
       data,
       timeoutProfile: "generation",
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -301,6 +304,7 @@ export function createMemoirBookOutputTTS(
       method: "POST",
       data,
       timeoutProfile: "generation",
+      invalidatesSnapshots: false,
     },
   );
 }
@@ -352,6 +356,7 @@ export function suggestMemoirBookOutputTitles(
   return memoirAIRequest<MemoirBookTitleSuggestionResponse, MemoirBookTitleSuggestionRequest>(
     memoirProjectPath(projectId, "/book-output/title-suggestions"),
     data,
+    { invalidatesSnapshots: false },
   );
 }
 

@@ -130,6 +130,7 @@ export function createMemoirTranscriptShareVideoJob(
       ...(options.backgroundMode ? { background_mode: options.backgroundMode } : {}),
       ...(options.customBackgroundAssetId ? { custom_background_asset_id: options.customBackgroundAssetId } : {}),
     },
+    { timeoutProfile: "mutation" },
   );
 }
 
@@ -302,6 +303,7 @@ export function previewMemoirVoiceTranscriptVoiceEdit(
       instruction_text: instructionText,
       ai_model: aiModel?.trim() || null,
     },
+    { invalidatesSnapshots: false },
   );
 }
 
@@ -327,6 +329,7 @@ export function transcribeMemoirVoiceSearchAudio(
       audio_base64: audioBase64,
       mime_type: mimeType,
     },
+    invalidatesSnapshots: false,
   });
 }
 
@@ -343,5 +346,6 @@ export function parseMemoirVoiceSearchQuery(
       text,
       ai_model: aiModel?.trim() || null,
     },
+    { invalidatesSnapshots: false },
   );
 }
