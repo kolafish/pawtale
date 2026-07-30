@@ -18,6 +18,7 @@
 }
 
 .book-tts-heading {
+  flex: 1;
   min-width: 0;
 }
 
@@ -41,7 +42,8 @@
   font-size: 24rpx;
   line-height: 1.45;
   font-variant-numeric: tabular-nums;
-  text-wrap: pretty;
+  overflow-wrap: normal;
+  white-space: nowrap;
 }
 
 .book-tts-action {
