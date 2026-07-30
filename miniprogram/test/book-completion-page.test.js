@@ -161,11 +161,10 @@ function answerApplicationJob(overrides = {}) {
     stage: "",
     answer_count: 0,
     unresolved_count: 0,
-    applied_answer_count: 0,
     changed_chapter_count: 0,
     summary: "",
-    output_version_id: null,
-    output_version: null,
+    proposal_id: null,
+    proposal_status: null,
     requested_ai_model: null,
     resolved_ai_model: null,
     already_applied: false,
@@ -333,7 +332,7 @@ test("book completion opens book title settings directly", () => {
   ]);
 });
 
-test("book completion submits saved answers and opens the adjusted manuscript", async () => {
+test("book completion submits saved answers and opens the generated revision preview", async () => {
   const requests = [];
   const navigations = [];
   const overview = readyOverview();
@@ -395,9 +394,15 @@ test("book completion submits saved answers and opens the adjusted manuscript", 
     context.data.answerApplicationProgressTitle,
     "书稿调整已提交",
   );
-  page.openAdjustedBook.call(context);
+  context.data.answerApplicationJob = answerApplicationJob({
+    status: "succeeded",
+    answer_count: 2,
+    proposal_id: "proposal/1",
+    proposal_status: "ready",
+  });
+  page.openBookRevision.call(context);
   assert.deepEqual(navigations, [
-    "/pages/book-export/index?projectId=project%2F1&action=preview",
+    "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
   ]);
   page.onHide.call(context);
   delete global.wx;

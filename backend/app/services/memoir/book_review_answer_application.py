@@ -11,13 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.clock import utcnow_naive
-from app.domain.memoir.types import MemoirCreatedBy, MemoirOutputStatus
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
 )
-from app.models.projects import Project
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -31,15 +28,10 @@ from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import (
     book_output_versions,
     book_review_answer_state,
+    book_revision_proposals,
     book_reviews,
 )
-from app.services.memoir.book_output_manuscript import (
-    effective_book_metadata,
-    manuscript_from_snapshot,
-    stored_cover_style,
-)
 from app.services.memoir.book_output_snapshots import (
-    book_content_from_chapter_snapshots,
     sectioned_chapter_content,
 )
 from app.services.memoir.narrative.book_output_assembly import (
@@ -72,9 +64,7 @@ class _ApplicationOutput(BaseModel):
 
 @dataclass(frozen=True)
 class BookReviewAnswerApplicationResult:
-    output_version_id: str
-    output_version: int
-    applied_answer_count: int
+    proposal_id: str | None
     changed_chapter_count: int
     summary: str
     requested_ai_model: str | None
@@ -118,7 +108,7 @@ def user_visible_application_summary(
     if not value or not _INTERNAL_MODEL_REFERENCE_PATTERN.search(value):
         return value
     return (
-        "已根据你的回答调整相关章节。"
+        "修改预览已准备，包含根据回答生成的相关章节调整。"
         if isinstance(changed_chapter_count, int) and changed_chapter_count > 0
         else "已核对这些回答，现有正文无需调整。"
     )
@@ -138,13 +128,13 @@ def _application_summary(
         and (title := _text(snapshot.get("chapter_title")))
     ]
     if not titles:
-        return "已根据你的回答调整相关章节。"
+        return "修改预览已准备，包含相关章节的正文调整。"
     labels = [f"《{title}》" for title in titles[:3]]
     if len(titles) <= 3:
         target = "、".join(labels)
     else:
         target = f"{'、'.join(labels)}等 {len(titles)} 个章节"
-    return f"已根据你的回答调整{target}的相关正文。"
+    return f"修改预览已准备，包含{target}的相关正文调整。"
 
 
 def _build_prompt(
@@ -279,31 +269,6 @@ def _normalize_application(
     return revised_snapshots, changed_ids
 
 
-def _stored_illustrations(
-    manuscript: object,
-) -> tuple[dict[str, list[dict[str, object]]], list[dict[str, object]]]:
-    if not isinstance(manuscript, dict):
-        return {}, []
-    illustrations: dict[str, list[dict[str, object]]] = {}
-    raw_chapters = manuscript.get("chapters")
-    for chapter in raw_chapters if isinstance(raw_chapters, list) else []:
-        if not isinstance(chapter, dict):
-            continue
-        chapter_id = _text(chapter.get("chapter_id"))
-        raw_items = chapter.get("illustrations")
-        if chapter_id and isinstance(raw_items, list):
-            illustrations[chapter_id] = [
-                item for item in raw_items if isinstance(item, dict)
-            ]
-    raw_appendix = manuscript.get("image_appendix")
-    appendix = (
-        [item for item in raw_appendix if isinstance(item, dict)]
-        if isinstance(raw_appendix, list)
-        else []
-    )
-    return illustrations, appendix
-
-
 async def apply_book_review_answers(
     db: AsyncSession,
     *,
@@ -348,9 +313,7 @@ async def apply_book_review_answers(
         marker = book_review_answer_state.application_marker(output)
         changed_chapter_count = int(marker.get("changed_chapter_count") or 0)
         return BookReviewAnswerApplicationResult(
-            output_version_id=baseline.id,
-            output_version=baseline.version,
-            applied_answer_count=len(context.answers),
+            proposal_id=_text(marker.get("proposal_id")) or None,
             changed_chapter_count=changed_chapter_count,
             summary=(
                 user_visible_application_summary(
@@ -490,75 +453,31 @@ async def apply_book_review_answers(
     ):
         raise BookReviewAnswerApplicationError("调整期间全书或回答已变化，请重试")
 
-    output = await db.get(MemoirBookOutput, current_output.id)
     baseline = await db.get(MemoirBookOutputVersion, baseline.id)
-    if output is None or baseline is None:
+    if baseline is None:
         raise BookReviewAnswerApplicationError("保存调整结果时书稿状态已变化")
-    applied_version = baseline
-    if changed_ids:
-        project = await db.get(Project, project_id)
-        if project is None:
-            raise BookReviewAnswerApplicationError("项目不存在")
-        content = book_content_from_chapter_snapshots(
-            title=output.title,
-            snapshots=revised_snapshots,
-        )
-        illustrations, image_appendix = _stored_illustrations(
-            baseline.manuscript_json
-        )
-        manuscript = manuscript_from_snapshot(
-            title=output.title,
-            content=content,
-            snapshot=revised_snapshots,
-            cover_style_value=stored_cover_style(baseline),
-            metadata=effective_book_metadata(
-                project=project,
-                stored=baseline.manuscript_json,
-            ),
-            chapter_illustrations_by_chapter=illustrations,
-            image_appendix=image_appendix,
-        )
-        applied_version = MemoirBookOutputVersion(
-            output_id=output.id,
-            project_id=project_id,
-            plan_id=output.plan_id,
-            version=baseline.version + 1,
-            content=content,
-            chapter_snapshot_json=revised_snapshots,
-            manuscript_json=(
-                manuscript.model_dump(mode="json") if manuscript else {}
-            ),
-            created_by=MemoirCreatedBy.AI.value,
-        )
-        db.add(applied_version)
-        await db.flush()
-
-    output.status = MemoirOutputStatus.DRAFT.value
-    output.metadata_json = {
-        **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
-        "source": "book_review_answers",
-        "book_tts": None,
-        book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY: {
-            "review_input_signature": current_review.input_signature,
+    comparison = book_revision_proposals.build_comparison(
+        before=snapshots,
+        after=revised_snapshots,
+    )
+    proposal = await book_revision_proposals.create_ready_proposal(
+        db,
+        review=current_review,
+        baseline=baseline,
+        candidate_snapshots=revised_snapshots,
+        selected_actions={
+            "source": "book_review_answers",
             "answers_signature": current_context.answers_signature,
-            "output_version_id": applied_version.id,
-            "applied_issue_ids": [
+            "issue_ids": [
                 answer.issue_id for answer in current_context.answers
             ],
-            "applied_answer_count": len(current_context.answers),
-            "changed_chapter_count": len(changed_ids),
-            "summary": summary,
-            "resolved_ai_model": generated.response.resolved_model,
-            "engine": BOOK_REVIEW_ANSWER_APPLICATION_ENGINE,
         },
-    }
-    output.updated_at = utcnow_naive()
-    db.add(output)
-    await db.flush()
+        comparison=comparison,
+        generation=generation,
+        summary=summary,
+    )
     return BookReviewAnswerApplicationResult(
-        output_version_id=applied_version.id,
-        output_version=applied_version.version,
-        applied_answer_count=len(current_context.answers),
+        proposal_id=proposal.id,
         changed_chapter_count=len(changed_ids),
         summary=summary,
         requested_ai_model=ai_model,

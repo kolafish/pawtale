@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookOutput,
+    MemoirBookRevisionProposal,
     MemoirEditingJob,
 )
 from app.schemas.memoir_book_review import MemoirBookReviewAnswerApplyRequest
@@ -85,6 +86,12 @@ async def _job_state(
         db,
         project_id=project_id,
     )
+    proposal: MemoirBookRevisionProposal | None = None
+    if job is not None:
+        proposal_id = str((job.result_json or {}).get("proposal_id") or "")
+        if proposal_id:
+            proposal = await db.get(MemoirBookRevisionProposal, proposal_id)
+    proposal_status = proposal.status if proposal is not None else None
     if job is None:
         return {
             "project_id": project_id,
@@ -114,11 +121,14 @@ async def _job_state(
         "answer_count": answer_count,
         "unresolved_count": unresolved_count,
         "already_applied": already_applied,
+        "proposal_id": proposal.id if proposal is not None else None,
+        "proposal_status": proposal_status,
         "can_apply": (
             answer_count > 0
             and unresolved_count == 0
             and not already_applied
             and not active
+            and proposal_status != "ready"
         ),
     }
 
@@ -191,11 +201,10 @@ async def enqueue_book_review_answer_application_job(
     job.result_json = {
         "stage": "queued",
         "answer_count": len(context.answers),
-        "applied_answer_count": 0,
         "changed_chapter_count": 0,
         "summary": "",
-        "output_version_id": None,
-        "output_version": None,
+        "proposal_id": None,
+        "proposal_status": None,
         "requested_ai_model": selected_ai_model,
         "resolved_ai_model": None,
     }
@@ -314,11 +323,10 @@ async def run_book_review_answer_application_job(
         result_json={
             **progress,
             "stage": "completed",
-            "applied_answer_count": result.applied_answer_count,
             "changed_chapter_count": result.changed_chapter_count,
             "summary": result.summary,
-            "output_version_id": result.output_version_id,
-            "output_version": result.output_version,
+            "proposal_id": result.proposal_id,
+            "proposal_status": "ready" if result.proposal_id else None,
             "requested_ai_model": result.requested_ai_model,
             "resolved_ai_model": result.resolved_ai_model,
             "generation": result.generation,

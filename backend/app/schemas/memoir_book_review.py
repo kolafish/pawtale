@@ -5,7 +5,11 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from app.domain.memoir.types import MemoirSemanticCacheStatus
+from app.domain.memoir.types import (
+    MemoirBookRevisionProposalStatus,
+    MemoirSemanticCacheStatus,
+)
+from app.schemas.memoir_book import MemoirBookManuscript
 
 
 class MemoirBookReviewGenerateRequest(BaseModel):
@@ -84,11 +88,10 @@ class MemoirBookReviewAnswerApplicationJobResponse(BaseModel):
     stage: MemoirBookReviewAnswerApplicationStage = ""
     answer_count: int = 0
     unresolved_count: int = 0
-    applied_answer_count: int = 0
     changed_chapter_count: int = 0
     summary: str = ""
-    output_version_id: str | None = None
-    output_version: int | None = None
+    proposal_id: str | None = None
+    proposal_status: MemoirBookRevisionProposalStatus | None = None
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     already_applied: bool = False
@@ -96,3 +99,48 @@ class MemoirBookReviewAnswerApplicationJobResponse(BaseModel):
     can_cancel: bool = False
     can_retry: bool = False
     error_message: str = ""
+
+
+class MemoirBookRevisionPreviewVersion(BaseModel):
+    version: int
+    manuscript: MemoirBookManuscript | None = None
+
+
+class MemoirBookRevisionSectionComparison(BaseModel):
+    section_id: str
+    title: str
+    before_content: str
+    after_content: str
+    before_char_count: int
+    after_char_count: int
+
+
+class MemoirBookRevisionChapterComparison(BaseModel):
+    chapter_id: str
+    title: str
+    sections: list[MemoirBookRevisionSectionComparison]
+
+
+class MemoirBookRevisionComparison(BaseModel):
+    changed_chapter_count: int
+    changed_section_count: int
+    before_char_count: int
+    after_char_count: int
+    char_count_delta: int
+    chapters: list[MemoirBookRevisionChapterComparison]
+
+
+class MemoirBookRevisionProposalResponse(BaseModel):
+    id: str
+    project_id: str
+    status: MemoirBookRevisionProposalStatus
+    summary: str
+    base_output_version_id: str
+    result_output_version_id: str | None = None
+    comparison: MemoirBookRevisionComparison
+    before: MemoirBookRevisionPreviewVersion
+    after: MemoirBookRevisionPreviewVersion
+    can_apply: bool
+    can_dismiss: bool
+    created_at: datetime
+    updated_at: datetime

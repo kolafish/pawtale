@@ -1,4 +1,5 @@
 import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
+import type { MemoirBookManuscript } from "../domain/memoir-book";
 import {
   memoirNarrativeProjectPath,
   memoirAIRequest,
@@ -66,11 +67,10 @@ export interface MemoirBookReviewAnswerApplicationJob {
     | "cancelled";
   answer_count: number;
   unresolved_count: number;
-  applied_answer_count: number;
   changed_chapter_count: number;
   summary: string;
-  output_version_id: string | null;
-  output_version: number | null;
+  proposal_id: string | null;
+  proposal_status: MemoirBookRevisionProposalStatus | null;
   requested_ai_model: string | null;
   resolved_ai_model: string | null;
   already_applied: boolean;
@@ -78,6 +78,55 @@ export interface MemoirBookReviewAnswerApplicationJob {
   can_cancel: boolean;
   can_retry: boolean;
   error_message: string;
+}
+
+export type MemoirBookRevisionProposalStatus =
+  | "ready"
+  | "applied"
+  | "dismissed"
+  | "stale";
+
+export interface MemoirBookRevisionSectionComparison {
+  section_id: string;
+  title: string;
+  before_content: string;
+  after_content: string;
+  before_char_count: number;
+  after_char_count: number;
+}
+
+export interface MemoirBookRevisionChapterComparison {
+  chapter_id: string;
+  title: string;
+  sections: MemoirBookRevisionSectionComparison[];
+}
+
+export interface MemoirBookRevisionPreviewVersion {
+  version: number;
+  manuscript?: MemoirBookManuscript | null;
+}
+
+export interface MemoirBookRevisionProposal {
+  id: string;
+  project_id: string;
+  status: MemoirBookRevisionProposalStatus;
+  summary: string;
+  base_output_version_id: string;
+  result_output_version_id: string | null;
+  comparison: {
+    changed_chapter_count: number;
+    changed_section_count: number;
+    before_char_count: number;
+    after_char_count: number;
+    char_count_delta: number;
+    chapters: MemoirBookRevisionChapterComparison[];
+  };
+  before: MemoirBookRevisionPreviewVersion;
+  after: MemoirBookRevisionPreviewVersion;
+  can_apply: boolean;
+  can_dismiss: boolean;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface MemoirChapterPreparationJob {
@@ -226,6 +275,45 @@ export function cancelMemoirBookReviewAnswerApplicationJob(
   return memoirRequest<MemoirBookReviewAnswerApplicationJob>(
     `${bookReviewPath(projectId)}/answer-application/jobs/${encodeURIComponent(jobId)}`,
     { method: "DELETE" },
+  );
+}
+
+function bookRevisionProposalPath(
+  projectId: string,
+  proposalId: string,
+  suffix = "",
+): string {
+  return `${bookReviewPath(projectId)}/revision-proposals/${
+    encodeURIComponent(proposalId)
+  }${suffix}`;
+}
+
+export function getMemoirBookRevisionProposal(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionProposal> {
+  return memoirRequest<MemoirBookRevisionProposal>(
+    bookRevisionProposalPath(projectId, proposalId),
+  );
+}
+
+export function applyMemoirBookRevisionProposal(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionProposal> {
+  return memoirRequest<MemoirBookRevisionProposal>(
+    bookRevisionProposalPath(projectId, proposalId, "/apply"),
+    { method: "POST" },
+  );
+}
+
+export function dismissMemoirBookRevisionProposal(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionProposal> {
+  return memoirRequest<MemoirBookRevisionProposal>(
+    bookRevisionProposalPath(projectId, proposalId, "/dismiss"),
+    { method: "POST" },
   );
 }
 

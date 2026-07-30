@@ -17,6 +17,7 @@ DIRECT_PROJECT_TABLES = (
     "memoir_book_plan_chapters",
     "memoir_book_plans",
     "memoir_book_reviews",
+    "memoir_book_revision_proposals",
     "memoir_chapter_digests",
     "memoir_chat_messages",
     "memoir_completion_issues",

@@ -72,6 +72,13 @@ class MemoirBookChapterDraftStatus(str, Enum):
     CONFIRMED = "confirmed"
 
 
+class MemoirBookRevisionProposalStatus(str, Enum):
+    READY = "ready"
+    APPLIED = "applied"
+    DISMISSED = "dismissed"
+    STALE = "stale"
+
+
 class MemoirSectionType(str, Enum):
     EVENT = "event"
     LIFE_FRAGMENT = "life_fragment"
