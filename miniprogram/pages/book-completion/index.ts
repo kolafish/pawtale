@@ -8,11 +8,9 @@ import { definePage } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirBookReviewJob,
-  cancelMemoirBookReviewAnswerApplicationJob,
-  cancelMemoirBookEditorialRevisionJob,
+  cancelMemoirBookRevisionJob,
   cancelMemoirBookCompletionJob,
-  enqueueMemoirBookReviewAnswerApplicationJob,
-  enqueueMemoirBookEditorialRevisionJob,
+  enqueueMemoirBookRevisionJob,
   enqueueMemoirBookCompletionJob,
   enqueueMemoirBookReviewJob,
   enqueueMemoirChapterPreparationJob,
@@ -20,14 +18,13 @@ import {
   getMemoirBookCompletionOverview,
   getMemoirBookOutput,
   getMemoirBookReview,
-  getMemoirBookReviewAnswerApplicationJob,
-  getMemoirBookEditorialRevisionJob,
+  getMemoirBookRevisionJob,
   getMemoirBookReviewJob,
   listMemoirCompletionIssues,
   type MemoirBookReview,
-  type MemoirBookReviewAnswerApplicationJob,
   type MemoirBookEditorialAction,
-  type MemoirBookEditorialRevisionJob,
+  type MemoirBookRevisionJob,
+  type MemoirBookRevisionJobSource,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-voice-api";
@@ -94,7 +91,7 @@ interface BookCompletionData {
   bookReviewCanCancel: boolean;
   bookReviewCancelling: boolean;
   checkingBook: boolean;
-  answerApplicationJob: MemoirBookReviewAnswerApplicationJob | null;
+  answerApplicationJob: MemoirBookRevisionJob | null;
   answerApplicationProgressVisible: boolean;
   answerApplicationProgressTitle: string;
   answerApplicationProgressDetail: string;
@@ -103,7 +100,7 @@ interface BookCompletionData {
   answerApplicationCanCancel: boolean;
   applyingAnswers: boolean;
   answerApplicationCancelling: boolean;
-  editorialRevisionJob: MemoirBookEditorialRevisionJob | null;
+  editorialRevisionJob: MemoirBookRevisionJob | null;
   selectedEditorialActionIds: string[];
   editorialActionViews: EditorialActionView[];
   editorialRevisionProgressVisible: boolean;
@@ -181,133 +178,72 @@ function bookReviewJobActive(job: MemoirBookReviewJob): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
-function answerApplicationJobActive(
-  job: MemoirBookReviewAnswerApplicationJob,
-): boolean {
+function revisionJobActive(job: MemoirBookRevisionJob): boolean {
   return job.status === "pending" || job.status === "running";
 }
 
-function editorialRevisionJobActive(
-  job: MemoirBookEditorialRevisionJob,
-): boolean {
-  return job.status === "pending" || job.status === "running";
+interface RevisionJobView {
+  visible: boolean;
+  title: string;
+  detail: string;
+  mode: AITaskProgressMode;
+  className: string;
+  canCancel: boolean;
 }
 
-export function editorialRevisionJobView(
-  job: MemoirBookEditorialRevisionJob | null,
-): Pick<
-  BookCompletionData,
-  | "editorialRevisionProgressVisible"
-  | "editorialRevisionProgressTitle"
-  | "editorialRevisionProgressDetail"
-  | "editorialRevisionProgressClass"
-  | "editorialRevisionCanCancel"
-> {
+export function revisionJobView(
+  job: MemoirBookRevisionJob | null,
+  source: MemoirBookRevisionJobSource,
+): RevisionJobView {
   if (!job || job.status === "idle" || job.status === "succeeded") {
     return {
-      editorialRevisionProgressVisible: false,
-      editorialRevisionProgressTitle: "",
-      editorialRevisionProgressDetail: "",
-      editorialRevisionProgressClass: "",
-      editorialRevisionCanCancel: false,
+      visible: false,
+      title: "",
+      detail: "",
+      mode: "hidden",
+      className: "",
+      canCancel: false,
     };
   }
-  if (editorialRevisionJobActive(job)) {
+  const applyingAnswers = source === "review_answers";
+  if (revisionJobActive(job)) {
     const titles: Partial<
-      Record<MemoirBookEditorialRevisionJob["stage"], string>
+      Record<MemoirBookRevisionJob["stage"], string>
     > = {
-      queued: "修改预览已提交",
+      queued: applyingAnswers ? "书稿调整已提交" : "修改预览已提交",
       assembling: "正在准备当前书稿",
-      revising: "正在执行所选编辑建议",
-      saving: "正在保存修改预览",
+      revising: applyingAnswers
+        ? "正在把回答写入相关章节"
+        : "正在执行所选编辑建议",
+      saving: applyingAnswers ? "正在生成修改预览" : "正在保存修改预览",
     };
     return {
-      editorialRevisionProgressVisible: true,
-      editorialRevisionProgressTitle: (
-        titles[job.stage] || "正在生成修改预览"
+      visible: true,
+      title: titles[job.stage] || (
+        applyingAnswers ? "正在根据回答调整书稿" : "正在生成修改预览"
       ),
-      editorialRevisionProgressDetail: "完成后仍需查看前后内容并确认",
-      editorialRevisionProgressClass: "active",
-      editorialRevisionCanCancel: job.can_cancel,
+      detail: applyingAnswers
+        ? "任务在后台执行，完成后先预览，确认后才会修改书稿"
+        : "完成后仍需查看前后内容并确认",
+      mode: "indeterminate",
+      className: "active",
+      canCancel: job.can_cancel,
     };
   }
+  const failed = job.status === "failed";
   return {
-    editorialRevisionProgressVisible: true,
-    editorialRevisionProgressTitle: (
-      job.status === "failed" ? "修改预览未完成" : "已停止生成修改预览"
+    visible: true,
+    title: applyingAnswers
+      ? (failed ? "书稿调整未完成" : "书稿调整已停止")
+      : (failed ? "修改预览未完成" : "已停止生成修改预览"),
+    detail: job.error_message || (
+      applyingAnswers
+        ? "回答仍然保留，可以重新调整。"
+        : "所选建议仍然保留，可以重新生成。"
     ),
-    editorialRevisionProgressDetail: (
-      job.error_message || "所选建议仍然保留，可以重新生成。"
-    ),
-    editorialRevisionProgressClass: (
-      job.status === "failed" ? "failed" : "cancelled"
-    ),
-    editorialRevisionCanCancel: false,
-  };
-}
-
-export function answerApplicationJobView(
-  job: MemoirBookReviewAnswerApplicationJob | null,
-): Pick<
-  BookCompletionData,
-  | "answerApplicationProgressVisible"
-  | "answerApplicationProgressTitle"
-  | "answerApplicationProgressDetail"
-  | "answerApplicationProgressMode"
-  | "answerApplicationProgressClass"
-  | "answerApplicationCanCancel"
-> {
-  if (!job || job.status === "idle" || job.status === "succeeded") {
-    return {
-      answerApplicationProgressVisible: false,
-      answerApplicationProgressTitle: "",
-      answerApplicationProgressDetail: "",
-      answerApplicationProgressMode: "hidden",
-      answerApplicationProgressClass: "",
-      answerApplicationCanCancel: false,
-    };
-  }
-  if (answerApplicationJobActive(job)) {
-    const stageTitles: Partial<
-      Record<MemoirBookReviewAnswerApplicationJob["stage"], string>
-    > = {
-      queued: "书稿调整已提交",
-      assembling: "正在准备当前书稿",
-      revising: "正在把回答写入相关章节",
-      saving: "正在生成修改预览",
-    };
-    return {
-      answerApplicationProgressVisible: true,
-      answerApplicationProgressTitle: (
-        stageTitles[job.stage] || "正在根据回答调整书稿"
-      ),
-      answerApplicationProgressDetail: (
-        "任务在后台执行，完成后先预览，确认后才会修改书稿"
-      ),
-      answerApplicationProgressMode: "indeterminate",
-      answerApplicationProgressClass: "active",
-      answerApplicationCanCancel: job.can_cancel,
-    };
-  }
-  if (job.status === "failed") {
-    return {
-      answerApplicationProgressVisible: true,
-      answerApplicationProgressTitle: "书稿调整未完成",
-      answerApplicationProgressDetail: (
-        job.error_message || "回答仍然保留，可以重新调整。"
-      ),
-      answerApplicationProgressMode: "hidden",
-      answerApplicationProgressClass: "failed",
-      answerApplicationCanCancel: false,
-    };
-  }
-  return {
-    answerApplicationProgressVisible: true,
-    answerApplicationProgressTitle: "书稿调整已停止",
-    answerApplicationProgressDetail: "回答仍然保留，可以重新调整。",
-    answerApplicationProgressMode: "hidden",
-    answerApplicationProgressClass: "cancelled",
-    answerApplicationCanCancel: false,
+    mode: "hidden",
+    className: failed ? "failed" : "cancelled",
+    canCancel: false,
   };
 }
 
@@ -749,8 +685,8 @@ definePage<BookCompletionData>()({
           getMemoirBookReviewJob(this.data.projectId),
           listMemoirCompletionIssues(this.data.projectId),
           optionalApiResource(getMemoirBookOutput(this.data.projectId)),
-          getMemoirBookReviewAnswerApplicationJob(this.data.projectId),
-          getMemoirBookEditorialRevisionJob(this.data.projectId),
+          getMemoirBookRevisionJob(this.data.projectId, "review_answers"),
+          getMemoirBookRevisionJob(this.data.projectId, "editorial_actions"),
         ])
         : [null, null, { issues: [] }, null, null, null];
       const reviewJobActive = Boolean(
@@ -758,11 +694,11 @@ definePage<BookCompletionData>()({
       );
       const applicationActive = Boolean(
         answerApplicationJob
-        && answerApplicationJobActive(answerApplicationJob),
+        && revisionJobActive(answerApplicationJob),
       );
       const editorialRevisionActive = Boolean(
         editorialRevisionJob
-        && editorialRevisionJobActive(editorialRevisionJob),
+        && revisionJobActive(editorialRevisionJob),
       );
       const finishedBookReview = (
         this.data.checkingBook
@@ -794,6 +730,14 @@ definePage<BookCompletionData>()({
           ),
         )
       );
+      const answerProgress = revisionJobView(
+        answerApplicationJob,
+        "review_answers",
+      );
+      const editorialProgress = revisionJobView(
+        editorialRevisionJob,
+        "editorial_actions",
+      );
       this.setData({
         ...view,
         ...bookReviewViewPatch(bookReview, issueCollection.issues),
@@ -806,10 +750,19 @@ definePage<BookCompletionData>()({
         ...bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,
-        ...answerApplicationJobView(answerApplicationJob),
+        answerApplicationProgressVisible: answerProgress.visible,
+        answerApplicationProgressTitle: answerProgress.title,
+        answerApplicationProgressDetail: answerProgress.detail,
+        answerApplicationProgressMode: answerProgress.mode,
+        answerApplicationProgressClass: answerProgress.className,
+        answerApplicationCanCancel: answerProgress.canCancel,
         answerApplicationJob,
         applyingAnswers: applicationActive,
-        ...editorialRevisionJobView(editorialRevisionJob),
+        editorialRevisionProgressVisible: editorialProgress.visible,
+        editorialRevisionProgressTitle: editorialProgress.title,
+        editorialRevisionProgressDetail: editorialProgress.detail,
+        editorialRevisionProgressClass: editorialProgress.className,
+        editorialRevisionCanCancel: editorialProgress.canCancel,
         editorialRevisionJob,
         generatingEditorialRevision: editorialRevisionActive,
         ...bookCompletionJobView(
@@ -1103,7 +1056,10 @@ definePage<BookCompletionData>()({
       answerApplicationCanCancel: false,
     });
     try {
-      await enqueueMemoirBookReviewAnswerApplicationJob(this.data.projectId);
+      await enqueueMemoirBookRevisionJob(
+        this.data.projectId,
+        "review_answers",
+      );
       await this.loadOverview(true);
     } catch (error) {
       if (routeAuthError(error)) {
@@ -1116,7 +1072,7 @@ definePage<BookCompletionData>()({
       await this.loadOverview(true);
       if (
         !this.data.answerApplicationJob
-        || !answerApplicationJobActive(this.data.answerApplicationJob)
+        || !revisionJobActive(this.data.answerApplicationJob)
       ) {
         this.setData({ error: message });
       }
@@ -1127,7 +1083,7 @@ definePage<BookCompletionData>()({
     const job = this.data.answerApplicationJob;
     if (
       !job?.job_id
-      || !answerApplicationJobActive(job)
+      || !revisionJobActive(job)
       || this.data.answerApplicationCancelling
     ) {
       return;
@@ -1138,9 +1094,10 @@ definePage<BookCompletionData>()({
       error: "",
     });
     try {
-      await cancelMemoirBookReviewAnswerApplicationJob(
+      await cancelMemoirBookRevisionJob(
         this.data.projectId,
         job.job_id,
+        "review_answers",
       );
       await this.loadOverview(true);
     } catch (error) {
@@ -1201,8 +1158,9 @@ definePage<BookCompletionData>()({
       editorialRevisionCanCancel: false,
     });
     try {
-      await enqueueMemoirBookEditorialRevisionJob(
+      await enqueueMemoirBookRevisionJob(
         this.data.projectId,
+        "editorial_actions",
         actionIds,
       );
       await this.loadOverview(true);
@@ -1217,7 +1175,7 @@ definePage<BookCompletionData>()({
       await this.loadOverview(true);
       if (
         !this.data.editorialRevisionJob
-        || !editorialRevisionJobActive(this.data.editorialRevisionJob)
+        || !revisionJobActive(this.data.editorialRevisionJob)
       ) {
         this.setData({ error: message });
       }
@@ -1228,7 +1186,7 @@ definePage<BookCompletionData>()({
     const job = this.data.editorialRevisionJob;
     if (
       !job?.job_id
-      || !editorialRevisionJobActive(job)
+      || !revisionJobActive(job)
       || this.data.editorialRevisionCancelling
     ) {
       return;
@@ -1239,9 +1197,10 @@ definePage<BookCompletionData>()({
       error: "",
     });
     try {
-      await cancelMemoirBookEditorialRevisionJob(
+      await cancelMemoirBookRevisionJob(
         this.data.projectId,
         job.job_id,
+        "editorial_actions",
       );
       await this.loadOverview(true);
     } catch (error) {

@@ -20,20 +20,13 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     enqueueMemoirBookReviewJob: unmockedAsync("enqueueMemoirBookReviewJob"),
     getMemoirBookReviewJob: async () => reviewJob(),
     cancelMemoirBookReviewJob: unmockedAsync("cancelMemoirBookReviewJob"),
-    enqueueMemoirBookReviewAnswerApplicationJob: unmockedAsync(
-      "enqueueMemoirBookReviewAnswerApplicationJob",
+    enqueueMemoirBookRevisionJob: unmockedAsync("enqueueMemoirBookRevisionJob"),
+    getMemoirBookRevisionJob: async (_projectId, source) => (
+      source === "review_answers"
+        ? answerApplicationJob()
+        : editorialRevisionJob()
     ),
-    getMemoirBookReviewAnswerApplicationJob: async () => answerApplicationJob(),
-    cancelMemoirBookReviewAnswerApplicationJob: unmockedAsync(
-      "cancelMemoirBookReviewAnswerApplicationJob",
-    ),
-    enqueueMemoirBookEditorialRevisionJob: unmockedAsync(
-      "enqueueMemoirBookEditorialRevisionJob",
-    ),
-    getMemoirBookEditorialRevisionJob: async () => editorialRevisionJob(),
-    cancelMemoirBookEditorialRevisionJob: unmockedAsync(
-      "cancelMemoirBookEditorialRevisionJob",
-    ),
+    cancelMemoirBookRevisionJob: unmockedAsync("cancelMemoirBookRevisionJob"),
     getMemoirBookReview: async () => null,
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
@@ -324,15 +317,15 @@ test("book review progress uses persisted stages without inventing model percent
 });
 
 test("book answer application reports its real background stage", () => {
-  const { answerApplicationJobView } = loadBookCompletionPage().mod;
-  const revising = answerApplicationJobView(answerApplicationJob({
+  const { revisionJobView } = loadBookCompletionPage().mod;
+  const revising = revisionJobView(answerApplicationJob({
     job_id: "apply-job-1",
     status: "running",
     stage: "revising",
     answer_count: 2,
     can_cancel: true,
-  }));
-  const failed = answerApplicationJobView(answerApplicationJob({
+  }), "review_answers");
+  const failed = revisionJobView(answerApplicationJob({
     job_id: "apply-job-1",
     status: "failed",
     stage: "failed",
@@ -340,13 +333,13 @@ test("book answer application reports its real background stage", () => {
     can_apply: true,
     can_retry: true,
     error_message: "模型暂时不可用",
-  }));
+  }), "review_answers");
 
-  assert.equal(revising.answerApplicationProgressTitle, "正在把回答写入相关章节");
-  assert.equal(revising.answerApplicationProgressMode, "indeterminate");
-  assert.equal(revising.answerApplicationCanCancel, true);
-  assert.equal(failed.answerApplicationProgressTitle, "书稿调整未完成");
-  assert.equal(failed.answerApplicationProgressDetail, "模型暂时不可用");
+  assert.equal(revising.title, "正在把回答写入相关章节");
+  assert.equal(revising.mode, "indeterminate");
+  assert.equal(revising.canCancel, true);
+  assert.equal(failed.title, "书稿调整未完成");
+  assert.equal(failed.detail, "模型暂时不可用");
 });
 
 test("book completion returns to the book hub for generation and chapter management", () => {
@@ -400,9 +393,11 @@ test("book completion submits saved answers and opens the generated revision pre
       getMemoirBookCompletionOverview: async () => overview,
       getMemoirBookReview: async () => bookReview(),
       getMemoirBookOutput: async () => ({ id: "output-1" }),
-      getMemoirBookReviewAnswerApplicationJob: async () => currentJob,
-      enqueueMemoirBookReviewAnswerApplicationJob: async (projectId) => {
-        requests.push(projectId);
+      getMemoirBookRevisionJob: async (_projectId, source) => (
+        source === "review_answers" ? currentJob : editorialRevisionJob()
+      ),
+      enqueueMemoirBookRevisionJob: async (projectId, source) => {
+        requests.push([projectId, source]);
         currentJob = answerApplicationJob({
           job_id: "apply-job-1",
           status: "pending",
@@ -423,7 +418,7 @@ test("book completion submits saved answers and opens the generated revision pre
   assert.equal(context.data.answerApplicationJob.can_apply, true);
   await page.applyBookReviewAnswers.call(context);
 
-  assert.deepEqual(requests, ["project/1"]);
+  assert.deepEqual(requests, [["project/1", "review_answers"]]);
   assert.equal(context.data.applyingAnswers, true);
   assert.equal(
     context.data.answerApplicationProgressTitle,
@@ -472,9 +467,11 @@ test("book completion generates a preview only for selected editorial actions", 
       getMemoirBookCompletionOverview: async () => confirmedOverview(),
       getMemoirBookReview: async () => review,
       getMemoirBookOutput: async () => ({ id: "output-1" }),
-      getMemoirBookEditorialRevisionJob: async () => currentJob,
-      enqueueMemoirBookEditorialRevisionJob: async (projectId, actionIds) => {
-        requests.push([projectId, actionIds]);
+      getMemoirBookRevisionJob: async (_projectId, source) => (
+        source === "editorial_actions" ? currentJob : answerApplicationJob()
+      ),
+      enqueueMemoirBookRevisionJob: async (projectId, source, actionIds) => {
+        requests.push([projectId, source, actionIds]);
         currentJob = editorialRevisionJob({
           job_id: "editorial-job-1",
           status: "succeeded",
@@ -500,7 +497,11 @@ test("book completion generates a preview only for selected editorial actions", 
   await page.generateEditorialRevision.call(context);
   page.openEditorialRevision.call(context);
 
-  assert.deepEqual(requests, [["project/1", ["action/1"]]]);
+  assert.deepEqual(requests, [[
+    "project/1",
+    "editorial_actions",
+    ["action/1"],
+  ]]);
   assert.equal(context.data.editorialRevisionJob.proposal_status, "ready");
   assert.deepEqual(navigations, [
     "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
