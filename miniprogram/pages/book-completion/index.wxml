@@ -196,7 +196,7 @@
         {{bookReview.error_message || "本次全书检查没有完成，可以重新检查。"}}
       </text>
       <text wx:else class="book-review-summary">
-        检查跨章重复、断裂、人物突现、篇幅失衡和需要您决定的取舍，不会按固定数量凑问题。
+        检查跨章重复、衔接断裂、人物交代不清和篇幅失衡，必要时请您做出取舍。
       </text>
 
       <view
