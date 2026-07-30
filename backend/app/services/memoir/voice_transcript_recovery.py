@@ -25,6 +25,9 @@ from app.services.memoir import voice_transcript_correction
 from app.services.memoir.audio_files import audio_file_path
 from app.services.asr.streaming import StreamingASRClient, StreamingASREvent
 from app.services.memoir.material_roles import is_narrator_material
+from app.services.memoir.project_ai_preferences import (
+    load_project_transcript_polish_level,
+)
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import (
     get_voice_transcript,
@@ -52,6 +55,7 @@ async def recover_voice_transcript_from_audio(
     *,
     asr_client_factory: StreamingASRClientFactory,
     provider: str = "volc_streaming_asr",
+    transcript_polish_level: str | None = None,
     allow_admin: bool = False,
 ) -> MemoirVoiceTranscriptItemResponse:
     utterance = await _load_recoverable_utterance(
@@ -78,6 +82,7 @@ async def recover_voice_transcript_from_audio(
         utterance,
         recovered_event,
         provider=provider,
+        transcript_polish_level=transcript_polish_level,
     )
     return await get_voice_transcript(
         db,
@@ -294,6 +299,7 @@ async def _apply_recovered_transcript(
     event: StreamingASREvent,
     *,
     provider: str,
+    transcript_polish_level: str | None,
 ) -> None:
     content = (event.text or "").strip()
     if not content:
@@ -359,12 +365,18 @@ async def _apply_recovered_transcript(
         version_type=MemoirTranscriptVersionType.ASR_RAW,
     )
     if speaker_role == MemoirSpeakerRole.NARRATOR.value:
+        polish_level = await load_project_transcript_polish_level(
+            db,
+            voice_session.project_id,
+            transcript_polish_level,
+        )
         await voice_transcript_correction.schedule_transcript_correction_job(
             db,
             project_id=voice_session.project_id,
             utterance_id=utterance.id,
             voice_session_id=voice_session.id,
             raw_transcript_version_id=transcript_version.id,
+            transcript_polish_level=polish_level,
         )
     await db.commit()
 

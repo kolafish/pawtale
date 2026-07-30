@@ -37,13 +37,13 @@ class FakeCleanupAI:
     provider_name = "fake-ai"
     model_name = "fake-model"
 
-    def __init__(self, text: str = "爷爷退休后还在帮公司跑事情。") -> None:
-        self.text = text
+    def __init__(self, text: str | list[str] = "爷爷退休后还在帮公司跑事情。") -> None:
+        self.responses = [text] if isinstance(text, str) else text
         self.calls: list[dict[str, object]] = []
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, **kwargs) -> str:
         self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt, "kwargs": kwargs})
-        return self.text
+        return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
 
 
 def test_multi_asr_verification_prompt_uses_narrator_origin():
@@ -177,6 +177,10 @@ async def test_offline_asr_reprocess_dry_run_skips_writes_and_user_edits(test_db
 
 async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_text(test_db):
     project, voice_session = await _create_project(test_db)
+    project.metadata_json = {
+        **(project.metadata_json or {}),
+        "transcript_polish_level": "high",
+    }
     project_id = project.id
     audio_file = await _add_audio(test_db)
     question_message = MemoirChatMessage(
@@ -224,7 +228,10 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
             ),
         ]
 
-    fake_ai = FakeCleanupAI("爷爷退休以后还在帮公司跑事情。")
+    fake_ai = FakeCleanupAI([
+        "爷爷退休以后还在帮公司跑事情。",
+        "爷爷退休以后仍在为公司奔波。",
+    ])
     result = await reprocess_offline_asr(
         test_db,
         project_id=project_id,
@@ -239,7 +246,7 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     refreshed = await test_db.get(MemoirVoiceUtterance, utterance.id)
     refreshed_message = await test_db.get(MemoirChatMessage, answer_message.id)
     assert refreshed.transcript_raw == "爷爷退休后还在帮公司跑事情。"
-    assert refreshed.transcript_edited == "爷爷退休以后还在帮公司跑事情。"
+    assert refreshed.transcript_edited == "爷爷退休以后仍在为公司奔波。"
     assert refreshed.provider == VOLC_OFFLINE_ASR_PROVIDER
     recognition_metadata = refreshed.provider_payload_json["material_offline_asr"]
     assert recognition_metadata["narrator_origin"] == "四川成都"
@@ -247,12 +254,16 @@ async def test_offline_asr_reprocess_writes_multi_asr_versions_and_corrected_tex
     assert recognition_metadata["dialect_label"] == "四川话"
     assert recognition_metadata["dialect_enhancement_enabled"] is True
     assert recognition_metadata["providers"] == ["volc", "stepfun"]
-    assert refreshed_message.content_text == "爷爷退休以后还在帮公司跑事情。"
+    assert recognition_metadata["transcript_polish_level"] == "high"
+    assert recognition_metadata["polish_provider"] == "fake-ai"
+    assert refreshed_message.content_text == "爷爷退休以后仍在为公司奔波。"
     assert refreshed_message.content_status == MemoirChatContentStatus.CORRECTED.value
     assert "来自四川成都" in fake_ai.calls[0]["user_prompt"]
     assert "四川及重庆方言常见词" in fake_ai.calls[0]["user_prompt"]
     assert "新凡 => 新繁" in fake_ai.calls[0]["user_prompt"]
     assert "爷爷退休以后还在忙什么？" in fake_ai.calls[0]["user_prompt"]
+    assert "重组句式与表达层次" in fake_ai.calls[1]["user_prompt"]
+    assert "新凡 => 新繁" in fake_ai.calls[1]["user_prompt"]
 
     versions = (
         await test_db.execute(

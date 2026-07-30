@@ -25,7 +25,10 @@ from app.services.memoir.offline_asr_reprocessing import (
     reprocess_offline_asr_utterance,
 )
 from app.services.memoir.material_roles import is_narrator_material
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    load_project_transcript_polish_level,
+    select_project_ai_model,
+)
 
 
 async def _load_owned_material(
@@ -56,6 +59,7 @@ async def enqueue_material_offline_asr(
     utterance_id: str,
     user_id: str,
     ai_model: str | None = None,
+    transcript_polish_level: str | None = None,
     providers: Sequence[str] | str = DEFAULT_OFFLINE_ASR_PROVIDERS,
     allow_admin: bool = False,
 ) -> MemoirMaterialOfflineASRStateResponse:
@@ -68,6 +72,11 @@ async def enqueue_material_offline_asr(
     normalized_providers = normalize_offline_asr_providers(providers)
     project = utterance.voice_session.project
     selected_ai_model = select_project_ai_model(project, ai_model)
+    selected_polish_level = await load_project_transcript_polish_level(
+        db,
+        project.id,
+        transcript_polish_level,
+    )
     dialect_profile = resolve_memoir_dialect_profile(memoir_narrator_origin(project))
     await enqueue_editing_job(
         db,
@@ -77,6 +86,7 @@ async def enqueue_material_offline_asr(
             "utterance_id": utterance.id,
             "providers": list(normalized_providers),
             "ai_model": selected_ai_model,
+            "transcript_polish_level": selected_polish_level.value,
             "source": "user_material_offline_asr",
             **dialect_profile.metadata(),
         },
@@ -105,5 +115,8 @@ async def run_material_offline_asr_job(
         utterance_id=utterance_id,
         providers=providers if isinstance(providers, list) else DEFAULT_OFFLINE_ASR_PROVIDERS,
         ai_model=str(payload.get("ai_model") or "").strip() or None,
+        transcript_polish_level=str(
+            payload.get("transcript_polish_level") or ""
+        ).strip() or None,
     )
     return EditingJobResult(result_json=result)

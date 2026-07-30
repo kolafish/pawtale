@@ -53,7 +53,11 @@ from app.services.memoir.book_source_links import (
     plan_source_ref_dicts_by_chapter as _plan_source_ref_dicts_by_chapter,
     source_ref_utterance_ids as _source_ref_utterance_ids,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    normalize_transcript_polish_level,
+    project_transcript_polish_level,
+    select_project_ai_model,
+)
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
@@ -1179,10 +1183,16 @@ async def cleanup_voice_transcript(
         utterance.voice_session.project,
         req.ai_model,
     )
+    polish_level = (
+        normalize_transcript_polish_level(req.transcript_polish_level)
+        if req.transcript_polish_level is not None
+        else project_transcript_polish_level(utterance.voice_session.project)
+    )
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=selected_ai_model,
         ai_client=ai_client,
+        transcript_polish_level=polish_level,
         strict=True,
     )
     return await _apply_edited_text(

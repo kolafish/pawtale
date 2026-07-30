@@ -1797,7 +1797,8 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     )
 
     response = await client.post(
-        f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}/recover-transcription"
+        f"/api/mobile/memoir/voice-transcripts/{persisted['utterance_id']}/recover-transcription",
+        json={"transcript_polish_level": "medium"},
     )
 
     assert response.status_code == 200
@@ -1836,6 +1837,7 @@ async def test_mobile_memoir_recovers_unfinalized_audio_transcription(
     assert version.source_artifact_id == utterance.id
     assert correction_job is not None
     assert correction_job.payload_json["raw_transcript_version_id"] == version.id
+    assert correction_job.payload_json["transcript_polish_level"] == "medium"
 
 
 async def test_mobile_memoir_recovers_long_unfinalized_audio_in_segments(
@@ -2396,20 +2398,22 @@ async def test_mobile_memoir_delete_transcript_removes_section_material_and_mark
 
 async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_db, monkeypatch):
     created = await create_test_voice_transcript(client, test_db)
+    cleanup_ai = CapturingAIClient("我小时候住在外婆家。")
     monkeypatch.setattr(
         "app.services.memoir.voice_transcripts.get_ai_service",
-        lambda model=None: FakeAIClient(),
+        lambda model=None: cleanup_ai,
     )
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/cleanup",
-        json={"ai_model": "deepseek"},
+        json={"ai_model": "deepseek", "transcript_polish_level": "high"},
     )
 
     assert response.status_code == 200
     item = response.json()
     assert item["transcript_raw"] == "嗯，我小时候就是住在外婆家。"
     assert item["transcript_edited"] == "我小时候住在外婆家。"
+    assert "重组句式与表达层次" in cleanup_ai.prompt
 
     message = await test_db.scalar(select(MemoirChatMessage).where(MemoirChatMessage.id == created["message_id"]))
     version = await test_db.scalar(

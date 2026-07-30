@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,
     MemoirCreatedBy,
+    MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
 )
 from app.domain.projects.types import ProjectType
@@ -41,13 +42,19 @@ from app.services.memoir.material_roles import (
     is_narrator_material,
     narrator_material_clause,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    normalize_transcript_polish_level,
+    project_transcript_polish_level,
+    select_project_ai_model,
+)
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
 from app.services.memoir.voice_transcripts import (
+    MemoirTranscriptCleanupContext,
     _sync_included_transcript_edit,
+    generate_cleaned_transcript_text,
     prune_transcript_versions_for_utterance,
 )
 
@@ -417,6 +424,7 @@ async def reprocess_offline_asr_utterance(
     *,
     utterance_id: str,
     ai_model: str | None = None,
+    transcript_polish_level: str | None = None,
     providers: Sequence[str] | str = DEFAULT_OFFLINE_ASR_PROVIDERS,
     asr_runner: ASRRunner | None = None,
     ai_client: AITextClient | None = None,
@@ -434,6 +442,11 @@ async def reprocess_offline_asr_utterance(
 
     project = utterance.voice_session.project
     selected_ai_model = select_project_ai_model(project, ai_model)
+    polish_level = (
+        normalize_transcript_polish_level(transcript_polish_level)
+        if transcript_polish_level is not None
+        else project_transcript_polish_level(project)
+    )
     baseline_raw = utterance.transcript_raw or ""
     baseline_edited = utterance.transcript_edited or ""
     question_context = await _latest_question_context(db, utterance)
@@ -466,6 +479,26 @@ async def reprocess_offline_asr_utterance(
         ai_model=selected_ai_model,
         ai_client=ai_client,
     )
+    corrected_text = verified.text
+    corrected_provider = verified.provider
+    polish_provider: str | None = None
+    if polish_level != MemoirTranscriptPolishLevel.LOW:
+        polished = await generate_cleaned_transcript_text(
+            verified.text,
+            ai_model=selected_ai_model,
+            ai_client=ai_client,
+            context=MemoirTranscriptCleanupContext(
+                scene="offline_multi_asr",
+                dialect_glossary=tuple(
+                    f"{entry.source} => {entry.target}" for entry in dialect_glossary
+                ),
+                recent_assistant_messages=(question_context,) if question_context else (),
+            ),
+            transcript_polish_level=polish_level,
+        )
+        corrected_text = polished.content
+        corrected_provider = polished.provider or verified.provider
+        polish_provider = polished.provider
     db.expunge_all()
     utterance = await load_reprocess_utterance(db, utterance_id)
     if utterance is None:
@@ -489,14 +522,16 @@ async def reprocess_offline_asr_utterance(
             and verified.response_model
             and verified.resolved_model != verified.response_model
         ),
+        "transcript_polish_level": polish_level.value,
+        "polish_provider": polish_provider,
         "applied_at": applied_at,
     }
     await _apply_reprocessed_transcript(
         db,
         utterance,
         asr_results=asr_results,
-        corrected_text=verified.text,
-        corrected_provider=verified.provider,
+        corrected_text=corrected_text,
+        corrected_provider=corrected_provider,
         ai_model=selected_ai_model,
         recognition_metadata=recognition_metadata,
     )
@@ -504,7 +539,7 @@ async def reprocess_offline_asr_utterance(
     return {
         "utterance_id": utterance.id,
         **recognition_metadata,
-        "corrected_text_length": len(verified.text),
+        "corrected_text_length": len(corrected_text),
     }
 
 
