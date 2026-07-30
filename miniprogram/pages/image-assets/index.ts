@@ -19,7 +19,7 @@ import {
   getMemoirBookPlan,
   listMemoirImageAssets,
   updateMemoirImageAsset,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-api";
 import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import {

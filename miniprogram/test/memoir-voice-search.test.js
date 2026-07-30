@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 function loadVoiceSearchService({ voiceApiExports = {}, privacyExports = {}, authorizationExports = {} } = {}) {
-  const voiceApiPath = require.resolve("../services/memoir-voice-api.ts");
+  const voiceApiPath = require.resolve("../services/memoir-transcript-api.ts");
   const privacyPath = require.resolve("../services/wechat-privacy.ts");
   const authorizationPath = require.resolve("../services/voice-authorization.ts");
   const recorderResourcePath = require.resolve("../services/recorder-resource.ts");

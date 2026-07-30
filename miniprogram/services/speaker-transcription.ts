@@ -1,6 +1,6 @@
 import { ApiError, cleanBaseUrl, readBackendConfig } from "./request";
 import { arrayBufferToBase64, estimatePcm16Level } from "./memoir-streaming-asr-protocol";
-import { backendSessionCookieHeader } from "./memoir-voice-api";
+import { backendSessionCookieHeader } from "./memoir-voice-session-api";
 import { sharedRecorderResource, WechatRecorderResource } from "./recorder-resource";
 import { wechatRecorderErrorMessage } from "./wechat-privacy";
 

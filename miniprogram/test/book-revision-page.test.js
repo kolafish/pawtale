@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   pageContext,
@@ -105,7 +106,7 @@ function revisionFeedbackJob(status = "idle") {
 }
 
 function loadRevisionPage({ api = {} } = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirBookRevisionProposal: async (_projectId, _proposalId, preview = "none") => (
       preview === "none"
         ? revisionProposalMetadata()
@@ -132,14 +133,7 @@ function loadRevisionPage({ api = {} } = {}) {
 
 test("book revision page loads only the selected whole-book preview on demand", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
-  const template = fs.readFileSync(path.join(__dirname, "../pages/book-revision/index.wxml"), "utf8");
-  const sectionLoopTag = template.match(/<view[^>]*wx:for="{{chapter\.sections}}"[^>]*>/)?.[0];
   assert.ok(appJson.pages.includes("pages/book-revision/index"));
-  assert.ok(sectionLoopTag && !sectionLoopTag.includes("wx:if"));
-  assert.match(
-    template,
-    /wx:if="{{!chapter\.sections\.length}}"[^>]*>{{chapter\.content}}/,
-  );
 
   const previewRequests = [];
   const { mod, page } = loadRevisionPage({

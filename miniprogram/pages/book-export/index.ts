@@ -18,10 +18,10 @@ import {
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
   getMemoirBookPlan,
-  listMemoirAutomationEvents,
   suggestMemoirBookOutputTitles,
   updateMemoirBookOutput,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-api";
+import { listMemoirAutomationEvents } from "../../services/memoir-voice-session-api";
 import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";

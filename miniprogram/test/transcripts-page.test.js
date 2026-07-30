@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   pageContext,
@@ -14,7 +15,7 @@ function loadTranscriptsPage({ authExports = {}, voiceApiExports = {}, voiceSear
     getMemoirIdentity: unmockedAsync("getMemoirIdentity"),
     ...authExports,
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     listMemoirVoiceTranscripts: unmockedAsync("listMemoirVoiceTranscripts"),
     parseMemoirVoiceSearchQuery: unmockedAsync("parseMemoirVoiceSearchQuery"),
     recoverMemoirVoiceTranscript: unmockedAsync("recoverMemoirVoiceTranscript"),

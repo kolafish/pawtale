@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   clearModule,
   loadPageModule,
   mockModule,
@@ -44,7 +45,7 @@ function loadVoiceChatPage({
     ...streamingExports,
   });
   clearModule("../services/streaming-voice-controller.ts");
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     createMemoirAssistantTTS: unmockedAsync("createMemoirAssistantTTS"),
     createMemoirVoiceNoAnswerPrompt: unmockedAsync("createMemoirVoiceNoAnswerPrompt"),
     downloadMemoirVoiceAudio: async () => "",

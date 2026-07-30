@@ -13,7 +13,7 @@ import {
   type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
-import { createMemoirAssistantTTS } from "../../services/memoir-voice-api";
+import { createMemoirAssistantTTS } from "../../services/memoir-voice-session-api";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
 import {

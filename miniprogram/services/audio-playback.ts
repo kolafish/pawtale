@@ -1,4 +1,4 @@
-import { downloadMemoirVoiceAudio } from "./memoir-voice-api";
+import { downloadMemoirVoiceAudio } from "./memoir-audio-api";
 
 export type DownloadAudioFile = (audioFileId: string) => Promise<string>;
 

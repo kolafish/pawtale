@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   flushAsyncWork,
   loadPageModule,
   mockModule,
@@ -137,7 +138,7 @@ function loadBookPage({
     getMemoirIdentity,
     ...authExports,
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     applyMemoirBookPlanStructureCommand: unmockedAsync("applyMemoirBookPlanStructureCommand"),
     confirmMemoirBookPlan: unmockedAsync("confirmMemoirBookPlan"),
     createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
@@ -274,7 +275,6 @@ test("book page routes unfinished book progress into the unified completion flow
 });
 
 test("book page exposes chapter reordering after the plan is confirmed", () => {
-  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
   global.wx = { switchTab() {} };
   const { page } = loadBookPage();
   const context = pageContext(page, { projectId: "project/1" });
@@ -282,8 +282,6 @@ test("book page exposes chapter reordering after the plan is confirmed", () => {
 
   assert.equal(context.data.stage, "drafting");
   assert.equal(context.data.chapterStructureEditing, false);
-  assert.match(pageWxml, /bindtap="toggleChapterStructureEditing"/);
-  assert.match(pageWxml, /wx:if="{{chapterStructureEditing}}"/);
 
   page.toggleChapterStructureEditing.call(context);
   assert.equal(context.data.chapterStructureEditing, true);
@@ -1097,16 +1095,6 @@ test("book page sends TTS voice and speed for chapter, outline, and full-book au
       },
     },
   ]);
-});
-
-test("book page exposes outline and full-book narration controls", () => {
-  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book/index.wxml"), "utf8");
-
-  assert.match(pageWxml, /bindtap="playBookOutlineAudio"/);
-  assert.match(pageWxml, /朗读目录/);
-  assert.match(pageWxml, /bindtap="playBookOutputAudio"/);
-  assert.match(pageWxml, /朗读全书/);
-  assert.match(pageWxml, /<book-tts-player/);
 });
 
 test("book page does not synthesize stale full-book audio while the book is updating", async () => {

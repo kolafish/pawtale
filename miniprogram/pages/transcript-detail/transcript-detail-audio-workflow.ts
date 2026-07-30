@@ -3,7 +3,7 @@ import { trackAuditAction } from "../../services/audit-tracker";
 import {
   getMemoirVoiceTranscript,
   startMemoirMaterialOfflineASR,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-transcript-api";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   answerAudioFallbackDuration,

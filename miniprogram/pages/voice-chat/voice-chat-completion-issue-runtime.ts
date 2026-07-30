@@ -6,7 +6,7 @@ import type { MemoirSessionGoal } from "../../domain/memoir-voice-session";
 import {
   closeMemoirCompletionIssue,
   listMemoirCompletionIssues,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-completion-issue-api";
 
 const REFRESH_INTERVAL_MS = 1200;
 

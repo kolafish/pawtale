@@ -7,7 +7,7 @@ import {
   setAccountCredentials,
   updateBackendProfile,
 } from "../../services/auth";
-import { getMemoirVoiceProgress } from "../../services/memoir-voice-api";
+import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
 import { isAuthError, navigateToLogin } from "../../services/navigation";
 import { type PageTextInputEvent } from "../../services/page-input";
 import {

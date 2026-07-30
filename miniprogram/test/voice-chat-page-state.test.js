@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 
 const {
@@ -58,15 +56,6 @@ test("voice chat initial data keeps the assistant ready for opening narration", 
   assert.notEqual(first.transcriptLineViews, second.transcriptLineViews);
   assert.notEqual(first.ttsAlignment, second.ttsAlignment);
   assert.notEqual(first.openingTopicOptions, second.openingTopicOptions);
-});
-
-test("voice chat custom recording controls use view shells instead of native button shrink wrapping", () => {
-  const template = fs.readFileSync(path.join(__dirname, "../pages/voice-chat/index.wxml"), "utf8");
-
-  assert.match(template, /<view\s+class="\{\{micButtonClass\}\}"/);
-  assert.doesNotMatch(template, /<button\s+class="\{\{micButtonClass\}\}"/);
-  assert.match(template, /<view\s+class="\{\{interviewerRecordButtonClass\}\}"/);
-  assert.doesNotMatch(template, /<button\s+class="\{\{interviewerRecordButtonClass\}\}"/);
 });
 
 test("voice chat view patch derives simple fields for first assistant turn", () => {

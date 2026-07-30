@@ -10,11 +10,18 @@ const {
   samplePlan,
 } = require("./book-fixtures");
 
-function resetMemoirVoiceApiModules() {
+function resetMemoirApiModules() {
   delete require.cache[require.resolve("../services/auth.ts")];
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/ai-model-settings.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  [
+    "memoir-book-api",
+    "memoir-book-completion-api",
+    "memoir-transcript-api",
+    "memoir-voice-session-api",
+  ].forEach((name) => {
+    delete require.cache[require.resolve(`../services/${name}.ts`)];
+  });
 }
 
 function installBookApiWxMock({ requests = [], downloads = [], aiModel = "doubao-seed-2-0-pro-260215" } = {}) {
@@ -118,8 +125,8 @@ test("voice no-answer prompt API posts attempt without selected AI model", async
       });
     },
   };
-  resetMemoirVoiceApiModules();
-  const { createMemoirVoiceNoAnswerPrompt } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { createMemoirVoiceNoAnswerPrompt } = require("../services/memoir-voice-session-api.ts");
 
   await createMemoirVoiceNoAnswerPrompt("voice/1", { attempt: 1 });
 
@@ -205,13 +212,13 @@ test("project automation event APIs encode routes and payloads", async () => {
       throw new Error(`unexpected request: ${options.url}`);
     },
   };
-  resetMemoirVoiceApiModules();
+  resetMemoirApiModules();
   const {
     acknowledgeMemoirAutomationEvent,
     acknowledgeDismissibleMemoirAutomationEvents,
     listMemoirAutomationEvents,
     markMemoirAutomationEventsVoicePlayed,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-voice-session-api.ts");
 
   const events = await listMemoirAutomationEvents("project/1", 5);
   const acknowledged = await acknowledgeMemoirAutomationEvent("project/1", "event/1");
@@ -289,8 +296,8 @@ test("voice search transcription API posts recorded audio", async () => {
       });
     },
   };
-  resetMemoirVoiceApiModules();
-  const { transcribeMemoirVoiceSearchAudio } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { transcribeMemoirVoiceSearchAudio } = require("../services/memoir-transcript-api.ts");
 
   const response = await transcribeMemoirVoiceSearchAudio("cGNt", "audio/pcm");
 
@@ -350,8 +357,8 @@ test("voice search query parse API posts text and selected AI model", async () =
       });
     },
   };
-  resetMemoirVoiceApiModules();
-  const { parseMemoirVoiceSearchQuery } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { parseMemoirVoiceSearchQuery } = require("../services/memoir-transcript-api.ts");
 
   const response = await parseMemoirVoiceSearchQuery("帮我找外婆家院子", "deepseek");
 
@@ -398,8 +405,8 @@ test("question conversion API posts miniprogram mutation source", async () => {
       options.success({ statusCode: 200, data: {}, cookies: [], header: {} });
     },
   };
-  resetMemoirVoiceApiModules();
-  const { convertMemoirInterviewQuestionToAnswer } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { convertMemoirInterviewQuestionToAnswer } = require("../services/memoir-transcript-api.ts");
 
   await convertMemoirInterviewQuestionToAnswer("project/1", "message/1");
 
@@ -528,13 +535,13 @@ test("share video APIs encode routes and download preview with session cookie", 
       options.success({ statusCode: 200, tempFilePath: "/tmp/share.mp4", header: {}, errMsg: "downloadFile:ok" });
     },
   };
-  resetMemoirVoiceApiModules();
+  resetMemoirApiModules();
   const {
     createMemoirTranscriptShareVideoJob,
     downloadMemoirShareVideoJob,
     getMemoirShareVideoJob,
     getMemoirTranscriptShareVideoContext,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-transcript-api.ts");
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
   const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
@@ -636,11 +643,11 @@ test("share video custom background upload and preview use backend session", asy
       options.success({ statusCode: 200, tempFilePath: "/tmp/processed-background.jpg", header: {}, errMsg: "downloadFile:ok" });
     },
   };
-  resetMemoirVoiceApiModules();
+  resetMemoirApiModules();
   const {
     downloadMemoirShareVideoCustomBackgroundPreview,
     uploadMemoirShareVideoCustomBackground,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-transcript-api.ts");
 
   const uploaded = await uploadMemoirShareVideoCustomBackground("project/1", "/tmp/family.png");
   const previewPath = await downloadMemoirShareVideoCustomBackgroundPreview(uploaded);
@@ -670,8 +677,11 @@ test("share video custom background upload and preview use backend session", asy
 test("book service APIs encode backend routes and selected AI model", async () => {
   const requests = [];
   installBookApiWxMock({ requests });
-  resetMemoirVoiceApiModules();
-  const api = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const api = {
+    ...require("../services/memoir-book-api.ts"),
+    ...require("../services/memoir-book-completion-api.ts"),
+  };
   const base = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1";
   const narrativeBase = "http://backend.local:8000/api/memoir/projects/project%2F1";
   const selectedModel = "doubao-seed-2-0-pro-260215";
@@ -746,8 +756,8 @@ test("book service APIs encode backend routes and selected AI model", async () =
 test("book output export download encodes route and session cookie", async () => {
   const downloads = [];
   installBookApiWxMock({ downloads });
-  resetMemoirVoiceApiModules();
-  const { downloadMemoirBookOutputExport } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { downloadMemoirBookOutputExport } = require("../services/memoir-book-api.ts");
 
   const path = await downloadMemoirBookOutputExport("project/1", "pdf", "version/1");
   await downloadMemoirBookOutputExport("project/1", "pdf", "version/1", "standard", false);

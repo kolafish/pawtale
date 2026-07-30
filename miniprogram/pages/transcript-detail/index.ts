@@ -8,7 +8,7 @@ import {
   getMemoirMaterialImageGenerationJob,
   getMemoirShareVideoJob,
   getMemoirVoiceTranscript,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-transcript-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import {
   shareLocalFileMessage,

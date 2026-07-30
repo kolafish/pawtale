@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   clearModule,
   loadPageModule,
   mockModule,
@@ -215,7 +216,7 @@ function sampleMaterialImageJob(overrides = {}) {
 }
 
 function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     convertMemoirInterviewQuestionToAnswer: unmockedAsync("convertMemoirInterviewQuestionToAnswer"),
     createMemoirMaterialImageGenerationJob: unmockedAsync("createMemoirMaterialImageGenerationJob"),
     createMemoirTranscriptShareVideoJob: unmockedAsync("createMemoirTranscriptShareVideoJob"),

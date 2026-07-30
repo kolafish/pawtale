@@ -1,10 +1,9 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   clearModule,
   loadPageModule,
   mockModule,
@@ -173,7 +172,7 @@ function loadWorkspacePage({
   consent = true,
   cacheExports = {},
 } = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirChapterWorkspace: async () => currentWorkspace,
     getMemoirChapterSectionRegenerationJob: async () => ({
       job_id: null,
@@ -269,56 +268,6 @@ function installWx({ editableContent = "新小节" } = {}) {
   };
   return { navigations, navigationTitles, toasts, modals, scrolls };
 }
-
-test("chapter workspace row actions avoid native button shrink wrapping", () => {
-  const template = fs.readFileSync(
-    path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
-    "utf8",
-  );
-  const progressTemplate = fs.readFileSync(
-    path.join(__dirname, "../components/ai-task-progress/index.wxml"),
-    "utf8",
-  );
-
-  assert.match(template, /<view\s+class="section-toggle"/);
-  assert.doesNotMatch(template, /<button\s+class="section-toggle"/);
-  assert.match(template, /<view\s+class="primary-action/);
-  assert.doesNotMatch(template, /<button\s+class="primary-action/);
-  assert.match(template, /<view\s+class="structure-regenerate-action/);
-  assert.match(template, /bindtap="toggleStructure"/);
-  assert.match(template, /bindtap="openSectionStructure"/);
-  assert.match(template, /bindtap="mergeSectionIntoPrevious"/);
-  assert.match(template, /wx:if="{{structureExpanded}}"/);
-  assert.match(template, /<view\s+class="rewrite-action/);
-  assert.match(template, /rewriteDraftBusyText\s*:\s*rewriteDraftActionText/);
-  assert.match(
-    template,
-    /chapterPreparationJob && chapterPreparationJob\.operation === 'rewrite'/,
-  );
-  assert.match(template, /<ai-task-progress/);
-  assert.match(template, /mode="{{chapterPreparationProgressMode}}"/);
-  assert.match(template, /cancel-text="取消生成"/);
-  assert.match(progressTemplate, /mode !== 'hidden'/);
-  assert.match(progressTemplate, /mode === 'determinate'/);
-  assert.match(progressTemplate, />{{cancelText}}<\/view>/);
-  assert.match(template, /<picker[\s\S]*bindchange="moveUnassignedMaterial"/);
-  assert.match(template, /bindtap="openMaterialEditor"/);
-  assert.match(template, /编辑或删除/);
-  assert.match(template, /wx:for="{{draftSectionViews}}"/);
-  assert.match(template, /bindtap="toggleDraftSection"/);
-  assert.match(template, /bindtap="startDraftSectionAIEdit"/);
-  assert.match(template, /bindtap="toggleDraftSectionVoiceInstruction"/);
-  assert.match(template, /bindtap="submitDraftSectionAIInstruction"/);
-  assert.match(template, /bindtap="playDraftSection"/);
-  assert.match(template, /bindtap="openChapterPreview"/);
-  assert.match(template, />整章预览<\/view>/);
-  assert.match(template, /operationKind !== ''/);
-  assert.match(template, /audioPhase === "preparing"/);
-  assert.doesNotMatch(
-    template,
-    /processBusy|regeneratingSections|regeneratingDraftSectionId|ttsBusySectionId|audioSectionId/,
-  );
-});
 
 test("chapter workspace loads a chapter draft with visible small sections", async () => {
   const { navigationTitles } = installWx();

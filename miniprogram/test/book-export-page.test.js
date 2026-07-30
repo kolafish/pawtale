@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadPageModule, mockModule, pageContext } = require("./page-harness");
+const { mockMemoirApiModules, loadPageModule, mockModule, pageContext } = require("./page-harness");
 
 const {
   sampleAutomationEvent,
@@ -58,7 +58,7 @@ function sampleBookOutput() {
 }
 
 function loadBookExportPage(voiceApiExports = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirBookPlan: async () => samplePlan(),
     getMemoirBookOutput: async () => sampleBookOutput(),
     getMemoirBookOutputVersion: async () => sampleBookOutputVersion(1, "全书第一版正文"),

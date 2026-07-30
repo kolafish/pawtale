@@ -1,12 +1,12 @@
 import type { MemoirIdentity } from "./memoir";
+import type { MemoirAutomationEventListResponse } from "./memoir-voice-session";
 import type {
-  MemoirAutomationEventListResponse,
   MemoirBookChapterDraft,
   MemoirBookOutput,
   MemoirBookPlan,
   MemoirImageAssetListResponse,
-  MemoirVoiceTranscriptItem,
-} from "./voice-chat";
+} from "./memoir-book";
+import type { MemoirVoiceTranscriptItem } from "./memoir-transcript";
 
 export interface MemoirHomeSnapshot {
   server_revision: number;

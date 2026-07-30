@@ -5,6 +5,16 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 
+function resetMemoirApiModules() {
+  [
+    "memoir-audio-api",
+    "memoir-transcript-api",
+    "memoir-voice-session-api",
+  ].forEach((name) => {
+    delete require.cache[require.resolve(`../services/${name}.ts`)];
+  });
+}
+
 function streamingAsrModule() {
   global.wx = {
     getRecorderManager() {
@@ -412,9 +422,12 @@ test("builds voice gateway URLs from runtime backend config", () => {
     setStorageSync() {},
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   const { readBackendConfig } = require("../services/request.ts");
-  const { assistantTurnStreamUrl, voiceGatewayUrl } = require("../services/memoir-voice-api.ts");
+  const {
+    assistantTurnStreamUrl,
+    voiceGatewayUrl,
+  } = require("../services/memoir-voice-session-api.ts");
 
   assert.deepEqual(readBackendConfig(), {
     httpBaseUrl: "https://api.example.com/",
@@ -480,11 +493,11 @@ test("fetches and stops a voice session through backend API", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   const {
     getMemoirVoiceSession,
     stopMemoirVoiceSession,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-voice-session-api.ts");
 
   const result = await getMemoirVoiceSession("voice/1");
   const stopped = await stopMemoirVoiceSession("voice/1");
@@ -562,13 +575,15 @@ test("fetches voice session list and progress through backend API", async () => 
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   const {
     createMemoirVoiceSession,
     getMemoirVoiceProgress,
     listMemoirVoiceSessions,
+  } = require("../services/memoir-voice-session-api.ts");
+  const {
     listMemoirVoiceTranscripts,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-transcript-api.ts");
 
   await createMemoirVoiceSession({ guidance_mode: "free_narration" }, { projectId: "project/1" });
   await listMemoirVoiceSessions({ projectId: "project/1", effectiveOnly: true, limit: 10, offset: 5 });
@@ -674,12 +689,12 @@ test("updates and deletes voice transcripts through backend API", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   const {
     deleteMemoirVoiceTranscript,
     previewMemoirVoiceTranscriptVoiceEdit,
     updateMemoirVoiceTranscript,
-  } = require("../services/memoir-voice-api.ts");
+  } = require("../services/memoir-transcript-api.ts");
 
   const preview = await previewMemoirVoiceTranscriptVoiceEdit("utterance/1", "这里不是外婆，是奶奶", "deepseek");
   const result = await updateMemoirVoiceTranscript("utterance/1", "校正文");
@@ -738,8 +753,8 @@ test("download voice audio explains missing downloadFile domain", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
-  const { downloadMemoirVoiceAudio } = require("../services/memoir-voice-api.ts");
+  resetMemoirApiModules();
+  const { downloadMemoirVoiceAudio } = require("../services/memoir-audio-api.ts");
 
   await assert.rejects(
     downloadMemoirVoiceAudio("audio/1"),
@@ -785,7 +800,7 @@ test("streaming ASR connect rejects on socket error before open", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -846,7 +861,7 @@ test("streaming ASR connect times out while backend session check is pending", a
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -911,7 +926,7 @@ test("streaming ASR ignores a socket that opens after connect timeout", async ()
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -983,7 +998,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1081,7 +1096,7 @@ test("streaming ASR emits diagnostics when socket send fails", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1249,7 +1264,7 @@ test("streaming ASR stop before recorder start does not call recorder stop", asy
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1321,7 +1336,7 @@ test("streaming ASR reports captured audio frame stats", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1407,7 +1422,7 @@ test("streaming ASR waits for voice before auto-stopping after silence", async (
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1509,7 +1524,7 @@ test("streaming ASR auto-stops auto-listen when no voice answers", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1598,7 +1613,7 @@ test("streaming ASR no-answer timeout does not depend on silent frame callbacks"
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1686,7 +1701,7 @@ test("streaming ASR close drains active audio before closing socket", async () =
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
@@ -1787,7 +1802,7 @@ test("streaming ASR stops recorder when gateway reports an error", async () => {
     },
   };
   delete require.cache[require.resolve("../services/request.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  resetMemoirApiModules();
   delete require.cache[require.resolve("../services/memoir-streaming-asr.ts")];
   const { MemoirStreamingAsrClient } = require("../services/memoir-streaming-asr.ts");
   const client = new MemoirStreamingAsrClient({
