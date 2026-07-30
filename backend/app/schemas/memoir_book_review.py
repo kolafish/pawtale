@@ -26,6 +26,11 @@ class MemoirBookEditorialRevisionRequest(BaseModel):
     ai_model: str | None = None
 
 
+class MemoirBookRevisionFeedbackRequest(BaseModel):
+    feedback: str = Field(min_length=1, max_length=1000)
+    ai_model: str | None = None
+
+
 class MemoirBookReviewResponse(BaseModel):
     id: str
     project_id: str
@@ -113,6 +118,11 @@ class MemoirBookReviewAnswerApplicationJobResponse(
 
 class MemoirBookEditorialRevisionJobResponse(MemoirBookRevisionJobResponse):
     selected_action_count: int = 0
+
+
+class MemoirBookRevisionFeedbackJobResponse(MemoirBookRevisionJobResponse):
+    changed_chapter_count: int = 0
+    summary: str = ""
 
 
 class MemoirBookRevisionPreviewVersion(BaseModel):

@@ -13,6 +13,8 @@ from app.schemas.memoir_book_review import (
     MemoirBookReviewGenerateRequest,
     MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
+    MemoirBookRevisionFeedbackJobResponse,
+    MemoirBookRevisionFeedbackRequest,
     MemoirBookRevisionProposalResponse,
 )
 from app.services.memoir.access import load_memoir_project
@@ -313,6 +315,55 @@ async def get_memoir_book_revision_proposal(
     return await book_revision_proposals.proposal_response(
         db,
         proposal=proposal,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/book-review/revision-proposals/"
+    "{proposal_id}/feedback/jobs",
+    response_model=MemoirBookRevisionFeedbackJobResponse,
+    status_code=202,
+)
+async def enqueue_memoir_book_revision_feedback_job(
+    project_id: str,
+    proposal_id: str,
+    req: MemoirBookRevisionFeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await book_revision_jobs.enqueue_book_revision_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            source="proposal_feedback",
+            proposal_id=proposal_id,
+            feedback=req.feedback,
+            ai_model=req.ai_model,
+            allow_admin=is_admin_user(current_user),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/projects/{project_id}/book-review/revision-proposals/"
+    "{proposal_id}/feedback/jobs/current",
+    response_model=MemoirBookRevisionFeedbackJobResponse,
+)
+async def get_current_memoir_book_revision_feedback_job(
+    project_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await book_revision_jobs.get_book_revision_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        source="proposal_feedback",
+        proposal_id=proposal_id,
+        allow_admin=is_admin_user(current_user),
     )
 
 

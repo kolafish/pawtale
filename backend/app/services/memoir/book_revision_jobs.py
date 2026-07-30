@@ -18,22 +18,30 @@ from app.services.memoir import (
     book_output_versions,
     book_review_answer_state,
     book_revision_generation,
+    book_revision_proposals,
     book_reviews,
     editing_jobs,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.project_ai_preferences import select_project_ai_model
+from app.services.memoir.semantic_state import semantic_json_signature
 
 
-BookRevisionJobSource = Literal["review_answers", "editorial_actions"]
+BookRevisionJobSource = Literal[
+    "review_answers",
+    "editorial_actions",
+    "proposal_feedback",
+]
 _JOB_TYPES = {
     "review_answers": MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS,
     "editorial_actions": MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
+    "proposal_feedback": MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
 }
 _DEDUPE_PREFIXES = {
     "review_answers": "apply-book-review-answers",
     "editorial_actions": "generate-book-revision-proposal",
+    "proposal_feedback": "refine-book-revision-proposal",
 }
 
 
@@ -41,8 +49,19 @@ def _source_for_job(job: MemoirEditingJob) -> BookRevisionJobSource:
     if job.job_type == MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS.value:
         return "review_answers"
     if job.job_type == MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL.value:
+        if (job.payload_json or {}).get("source") == "proposal_feedback":
+            return "proposal_feedback"
         return "editorial_actions"
     raise ValueError("不支持的全书修改任务")
+
+
+def _dedupe_key(
+    source: BookRevisionJobSource,
+    project_id: str,
+    proposal_id: str | None,
+) -> str:
+    suffix = f":{proposal_id}" if source == "proposal_feedback" else ""
+    return f"{_DEDUPE_PREFIXES[source]}:{project_id}{suffix}"
 
 
 async def _load_job(
@@ -50,13 +69,14 @@ async def _load_job(
     *,
     project_id: str,
     source: BookRevisionJobSource,
+    proposal_id: str | None = None,
     job_id: str | None = None,
 ) -> MemoirEditingJob | None:
     return await editing_jobs.load_project_editing_job(
         db,
         project_id=project_id,
         job_type=_JOB_TYPES[source],
-        dedupe_key=f"{_DEDUPE_PREFIXES[source]}:{project_id}",
+        dedupe_key=_dedupe_key(source, project_id, proposal_id),
         job_id=job_id,
     )
 
@@ -119,6 +139,14 @@ async def _job_state(
         return {
             **result,
             "selected_action_count": int(state.get("selected_action_count") or 0),
+        }
+    if source == "proposal_feedback":
+        return {
+            **result,
+            "changed_chapter_count": int(
+                state.get("changed_chapter_count") or 0
+            ),
+            "summary": str(state.get("summary") or ""),
         }
 
     answer_count, unresolved_count, already_applied = await _answer_state(
@@ -192,6 +220,8 @@ async def enqueue_book_revision_job(
     source: BookRevisionJobSource,
     ai_model: str | None,
     action_ids: list[str] | None = None,
+    proposal_id: str | None = None,
+    feedback: str | None = None,
     allow_admin: bool = False,
 ) -> dict[str, object]:
     project = await load_memoir_project(
@@ -200,7 +230,12 @@ async def enqueue_book_revision_job(
         user_id,
         allow_admin=allow_admin,
     )
-    existing = await _load_job(db, project_id=project_id, source=source)
+    existing = await _load_job(
+        db,
+        project_id=project_id,
+        source=source,
+        proposal_id=proposal_id,
+    )
     if (
         existing is not None
         and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
@@ -212,7 +247,10 @@ async def enqueue_book_revision_job(
             job=existing,
         )
 
-    review = await book_reviews.get_current_book_review(db, project_id=project_id)
+    review = await book_reviews.get_current_book_review(
+        db,
+        project_id=project_id,
+    )
     if review is None or review.status != "ready":
         raise ValueError("请先完成当前版本的全书检查")
     selected_ai_model = select_project_ai_model(project, ai_model)
@@ -252,7 +290,7 @@ async def enqueue_book_revision_job(
             changed_chapter_count=0,
             summary="",
         )
-    else:
+    elif source == "editorial_actions":
         selected_ids = [
             value.strip()
             for value in dict.fromkeys(action_ids or [])
@@ -272,12 +310,41 @@ async def enqueue_book_revision_job(
             actions_signature=book_editorial_actions.actions_signature(actions),
         )
         result["selected_action_count"] = len(actions)
+    else:
+        feedback_text = (feedback or "").strip()
+        if not proposal_id or not feedback_text:
+            raise ValueError("请先输入对这版修改的调整意见")
+        proposal = await book_revision_proposals.load_proposal(
+            db,
+            project_id=project_id,
+            proposal_id=proposal_id,
+        )
+        proposal_response = await book_revision_proposals.proposal_response(
+            db,
+            proposal=proposal,
+        )
+        if not proposal_response.can_apply:
+            raise ValueError("这个修改预览已经不能继续调整")
+        payload.update(
+            source="proposal_feedback",
+            proposal_id=proposal.id,
+            feedback=feedback_text,
+            candidate_signature=semantic_json_signature(
+                proposal.candidate_chapter_snapshot_json
+            ),
+        )
+        result.update(
+            proposal_id=proposal.id,
+            proposal_status=proposal.status,
+            changed_chapter_count=0,
+            summary="",
+        )
 
     job = await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=_JOB_TYPES[source],
-        dedupe_key=f"{_DEDUPE_PREFIXES[source]}:{project_id}",
+        dedupe_key=_dedupe_key(source, project_id, proposal_id),
         replace_completed=True,
         payload_json=payload,
     )
@@ -299,6 +366,7 @@ async def get_book_revision_job(
     user_id: str,
     project_id: str,
     source: BookRevisionJobSource,
+    proposal_id: str | None = None,
     allow_admin: bool = False,
 ) -> dict[str, object]:
     await load_memoir_project(
@@ -311,7 +379,12 @@ async def get_book_revision_job(
         db,
         project_id=project_id,
         source=source,
-        job=await _load_job(db, project_id=project_id, source=source),
+        job=await _load_job(
+            db,
+            project_id=project_id,
+            source=source,
+            proposal_id=proposal_id,
+        ),
     )
 
 
@@ -322,6 +395,7 @@ async def cancel_book_revision_job(
     project_id: str,
     source: BookRevisionJobSource,
     job_id: str,
+    proposal_id: str | None = None,
     allow_admin: bool = False,
 ) -> dict[str, object]:
     await load_memoir_project(
@@ -334,6 +408,7 @@ async def cancel_book_revision_job(
         db,
         project_id=project_id,
         source=source,
+        proposal_id=proposal_id,
         job_id=job_id,
     )
     if job is None:
@@ -389,7 +464,7 @@ async def run_book_revision_job(
                 ai_model=ai_model,
                 progress_callback=update_progress,
             )
-        else:
+        elif source == "editorial_actions":
             raw_action_ids = payload.get("action_ids")
             generated = await (
                 book_revision_generation.generate_editorial_revision_proposal(
@@ -405,6 +480,20 @@ async def run_book_revision_job(
                         [str(value) for value in raw_action_ids]
                         if isinstance(raw_action_ids, list)
                         else []
+                    ),
+                    ai_model=ai_model,
+                    progress_callback=update_progress,
+                )
+            )
+        else:
+            generated = (
+                await book_revision_generation.refine_book_revision_proposal(
+                    db,
+                    project_id=job.project_id,
+                    proposal_id=str(payload.get("proposal_id") or ""),
+                    feedback=str(payload.get("feedback") or ""),
+                    expected_candidate_signature=str(
+                        payload.get("candidate_signature") or ""
                     ),
                     ai_model=ai_model,
                     progress_callback=update_progress,
@@ -447,7 +536,7 @@ async def run_book_revision_job(
         "resolved_ai_model": generated.resolved_ai_model,
         "generation": generated.generation,
     }
-    if source == "review_answers":
+    if source in {"review_answers", "proposal_feedback"}:
         result.update(
             changed_chapter_count=generated.changed_chapter_count,
             summary=generated.summary,

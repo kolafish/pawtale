@@ -215,6 +215,15 @@ class LayeredBookAI:
                     }
                 ],
             }
+        elif "请根据用户反馈调整当前尚未确认的书稿修改预览" in user_prompt:
+            payload = {
+                "section_revisions": [
+                    {
+                        "section_id": section_ids[0],
+                        "content": "两段经历都保留，相关人物统一称为老同学。",
+                    }
+                ],
+            }
         else:
             section_materials = _prompt_section_materials(user_prompt)
             is_revision = "用户修改要求：" in user_prompt
@@ -1891,6 +1900,71 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert "我决定都保留在书里" not in before_content
     assert "我决定都保留在书里" in after_content
 
+    feedback_job = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/feedback/jobs",
+        json={
+            "feedback": "保留两段经历，但请统一相关人物的称谓。",
+            "ai_model": "claude-opus-4-8",
+        },
+    )
+    assert feedback_job.status_code == 202, feedback_job.text
+    feedback_job_body = feedback_job.json()
+    assert feedback_job_body["status"] == "pending"
+    assert feedback_job_body["proposal_id"] == completed_body["proposal_id"]
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            feedback_job_body["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+    refined = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/feedback/jobs/current"
+    )
+    assert refined.status_code == 200, refined.text
+    assert refined.json()["status"] == "succeeded"
+    assert refined.json()["changed_chapter_count"] == 1
+    proposal = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}"
+    )
+    assert proposal.status_code == 200, proposal.text
+    proposal_body = proposal.json()
+    assert proposal_body["id"] == completed_body["proposal_id"]
+    assert "老同学" in proposal_body["after"]["manuscript"]["chapters"][0]["content"]
+    versions = list(
+        (
+            await test_db.scalars(
+                select(MemoirBookOutputVersion).where(
+                    MemoirBookOutputVersion.project_id == project_id
+                )
+            )
+        ).all()
+    )
+    assert len(versions) == 1
+
+    second_feedback = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}/feedback/jobs",
+        json={"feedback": "再精简一些。"},
+    )
+    assert second_feedback.status_code == 202, second_feedback.text
+    assert second_feedback.json()["job_id"] == feedback_job_body["job_id"]
+    assert second_feedback.json()["status"] == "pending"
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            feedback_job_body["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+
     review_record = await test_db.get(MemoirBookReview, generated.json()["id"])
     assert review_record is not None
     review_record.status = "failed"
@@ -1932,7 +2006,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         ).all()
     )
     assert len(versions) == 2
-    assert "我决定都保留在书里" in versions[1].content
+    assert "老同学" in versions[1].content
     assert versions[1].created_by == "ai"
     assert [
         item["chapter_id"]

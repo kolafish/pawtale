@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.clock import utcnow_naive
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
@@ -35,10 +36,12 @@ from app.services.memoir import (
 )
 from app.services.memoir.book_output_snapshots import sectioned_chapter_content
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+from app.services.memoir.semantic_state import semantic_json_signature
 
 
 ANSWER_ENGINE = "llm_book_review_answer_application_v3"
 EDITORIAL_ENGINE = "llm_book_editorial_revision_v1"
+FEEDBACK_ENGINE = "llm_book_revision_feedback_v1"
 ANSWER_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。"
     "你只根据用户明确写下的回答调整已有书稿，不推测、不补造人生事实，"
@@ -46,6 +49,10 @@ ANSWER_SYSTEM_PROMPT = (
 )
 EDITORIAL_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。你只执行用户选中的去重复或补衔接修改，不新增、推测或改变人生事实。"
+)
+FEEDBACK_SYSTEM_PROMPT = (
+    "你是一位克制的中文回忆录编辑。"
+    "你根据用户最新反馈调整尚未确认的书稿修改预览，不推测、不补造人生事实。"
 )
 ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
 logger = logging.getLogger(__name__)
@@ -502,6 +509,188 @@ async def apply_book_review_answers(
     return BookRevisionResult(
         proposal_id=proposal.id,
         changed_chapter_count=len(generated.changed_chapter_ids),
+        selected_action_count=0,
+        summary=summary,
+        requested_ai_model=ai_model,
+        resolved_ai_model=generated.resolved_ai_model,
+        generation=generated.generation,
+    )
+
+
+def _feedback_prompt(
+    *,
+    baseline: list[dict[str, object]],
+    candidate: list[dict[str, object]],
+    feedback: str,
+    chapter_refs: ModelReferenceMap,
+    section_refs: ModelReferenceMap,
+) -> str:
+    baseline_sections = {
+        _text(section.get("section_id")): _text(section.get("content"))
+        for chapter in baseline
+        for section in _sections(chapter)
+        if _text(section.get("section_id"))
+    }
+    chapters: list[str] = []
+    for chapter in candidate:
+        chapter_id = _text(chapter.get("chapter_id"))
+        section_texts: list[str] = []
+        for section in _sections(chapter):
+            section_id = _text(section.get("section_id"))
+            if not section_id:
+                continue
+            current_content = _text(section.get("content"))
+            original_content = baseline_sections.get(section_id, "")
+            original = (
+                f"\n修改前原文：\n{original_content}"
+                if original_content != current_content
+                else ""
+            )
+            section_texts.append(
+                f"section_id: {section_refs.encode(section_id)}\n"
+                f"小节名：{_text(section.get('title'))}"
+                f"{original}\n当前预览正文：\n{current_content}"
+            )
+        chapters.append(
+            f"chapter_id: {chapter_refs.encode(chapter_id)}\n"
+            f"章节名：{_text(chapter.get('chapter_title'))}\n"
+            + "\n\n".join(section_texts)
+        )
+    return f"""请根据用户反馈调整当前尚未确认的书稿修改预览。
+
+用户最新反馈：
+{feedback}
+
+当前修改预览：
+{chr(10).join(chapters)}
+
+请输出严格 JSON：
+{{
+  "section_revisions": [
+    {{
+      "section_id": "需要继续调整的小节短编号",
+      "content": "调整后的完整小节正文"
+    }}
+  ]
+}}
+
+要求：
+- 以用户最新反馈为准，只调整反馈涉及的正文。
+- 保留当前预览中未被反馈否定的修改。
+- 涉及跨章人物、时间或称谓时，在相关章节中保持一致。
+- 只使用修改前原文、当前预览和用户反馈中已有的事实，不得推测或补造。
+- 不得改变章节或小节的顺序、标题、数量、收录状态及归属关系。
+- section_id 只能使用输入中的短编号；返回修改后的完整小节正文。
+- 不需要继续调整的小节不要返回。
+"""
+
+
+async def refine_book_revision_proposal(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    proposal_id: str,
+    feedback: str,
+    expected_candidate_signature: str,
+    ai_model: str | None,
+    progress_callback: ProgressCallback | None = None,
+    ai_client: AITextClient | None = None,
+) -> BookRevisionResult:
+    proposal = await book_revision_proposals.load_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+    )
+    response = await book_revision_proposals.proposal_response(
+        db,
+        proposal=proposal,
+    )
+    candidate = _snapshots(proposal.candidate_chapter_snapshot_json)
+    if (
+        not response.can_apply
+        or semantic_json_signature(candidate) != expected_candidate_signature
+    ):
+        raise BookRevisionError("修改预览已经变化，请重新查看后再提交反馈")
+    baseline = await db.get(
+        MemoirBookOutputVersion,
+        proposal.base_output_version_id,
+    )
+    if baseline is None:
+        raise BookRevisionError("修改前的书稿版本已不可用")
+    baseline_snapshots = _snapshots(baseline.chapter_snapshot_json)
+    allowed_chapter_ids = {
+        chapter_id
+        for snapshot in candidate
+        if (chapter_id := _text(snapshot.get("chapter_id")))
+    }
+    chapter_refs, section_refs = _reference_maps(
+        candidate,
+        allowed_chapter_ids,
+        stale_message="当前修改预览已经变化，请重新打开",
+    )
+    if progress_callback is not None:
+        await progress_callback({"stage": "revising"})
+    generated = await _generate_revisions(
+        project_id=project_id,
+        snapshots=candidate,
+        allowed_chapter_ids=allowed_chapter_ids,
+        section_refs=section_refs,
+        system_prompt=FEEDBACK_SYSTEM_PROMPT,
+        prompt=_feedback_prompt(
+            baseline=baseline_snapshots,
+            candidate=candidate,
+            feedback=feedback,
+            chapter_refs=chapter_refs,
+            section_refs=section_refs,
+        ),
+        engine=FEEDBACK_ENGINE,
+        error_message="按反馈调整修改预览时遇到问题，请稍后重试",
+        ai_model=ai_model,
+        ai_client=ai_client,
+    )
+    comparison = book_revision_proposals.build_comparison(
+        before=baseline_snapshots,
+        after=generated.snapshots,
+    )
+    changed_chapter_count = int(comparison["changed_chapter_count"])
+    changed_section_count = int(comparison["changed_section_count"])
+    summary = (
+        f"已按反馈更新修改预览，当前涉及 {changed_chapter_count} 章、"
+        f"{changed_section_count} 个小节。"
+        if changed_chapter_count
+        else "已核对反馈，当前预览无需修改正文。"
+    )
+
+    if progress_callback is not None:
+        await progress_callback({"stage": "saving"})
+    db.expire_all()
+    current = await book_revision_proposals.load_proposal(
+        db,
+        project_id=project_id,
+        proposal_id=proposal_id,
+    )
+    current_response = await book_revision_proposals.proposal_response(
+        db,
+        proposal=current,
+    )
+    if (
+        not current_response.can_apply
+        or semantic_json_signature(
+            _snapshots(current.candidate_chapter_snapshot_json)
+        )
+        != expected_candidate_signature
+    ):
+        raise BookRevisionError("调整期间修改预览已经变化，请重新提交反馈")
+    current.candidate_chapter_snapshot_json = generated.snapshots
+    current.comparison_json = {}
+    current.generation_json = generated.generation
+    current.summary = summary
+    current.updated_at = utcnow_naive()
+    db.add(current)
+    await db.flush()
+    return BookRevisionResult(
+        proposal_id=current.id,
+        changed_chapter_count=changed_chapter_count,
         selected_action_count=0,
         summary=summary,
         requested_ai_model=ai_model,
