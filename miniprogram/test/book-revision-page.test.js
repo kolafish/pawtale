@@ -90,7 +90,14 @@ function loadRevisionPage({ api = {} } = {}) {
 
 test("book revision page switches the changed sections and whole book together", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+  const template = fs.readFileSync(path.join(__dirname, "../pages/book-revision/index.wxml"), "utf8");
+  const sectionLoopTag = template.match(/<view[^>]*wx:for="{{chapter\.sections}}"[^>]*>/)?.[0];
   assert.ok(appJson.pages.includes("pages/book-revision/index"));
+  assert.ok(sectionLoopTag && !sectionLoopTag.includes("wx:if"));
+  assert.match(
+    template,
+    /wx:if="{{!chapter\.sections\.length}}"[^>]*>{{chapter\.content}}/,
+  );
 
   const { revisionViewPatch } = loadRevisionPage().mod;
   const proposal = revisionProposal();

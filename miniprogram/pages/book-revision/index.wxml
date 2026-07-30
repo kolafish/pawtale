@@ -103,7 +103,6 @@
         <text class="chapter-label">{{chapter.index_text}}</text>
         <text class="chapter-title">{{chapter.title}}</text>
         <view
-          wx:if="{{chapter.sections.length}}"
           wx:for="{{chapter.sections}}"
           wx:key="section_id"
           wx:for-item="section"
@@ -112,7 +111,7 @@
           <text class="section-title">{{section.title}}</text>
           <text class="section-content" selectable>{{section.content}}</text>
         </view>
-        <text wx:else class="section-content" selectable>{{chapter.content}}</text>
+        <text wx:if="{{!chapter.sections.length}}" class="section-content" selectable>{{chapter.content}}</text>
       </view>
     </view>
 
