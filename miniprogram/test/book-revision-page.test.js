@@ -68,9 +68,29 @@ function revisionProposal(overrides = {}) {
   };
 }
 
+function revisionFeedbackJob(status = "idle") {
+  return {
+    job_id: status === "idle" ? null : "feedback-job-1",
+    project_id: "project-1",
+    status,
+    stage: status === "succeeded" ? "completed" : (
+      status === "idle" ? "" : "queued"
+    ),
+    proposal_id: "proposal-1",
+    proposal_status: "ready",
+    requested_ai_model: null,
+    resolved_ai_model: null,
+    can_cancel: status === "pending" || status === "running",
+    can_retry: status === "failed",
+    error_message: "",
+  };
+}
+
 function loadRevisionPage({ api = {} } = {}) {
   mockModule("../services/memoir-voice-api.ts", {
     getMemoirBookRevisionProposal: async () => revisionProposal(),
+    enqueueMemoirBookRevisionFeedback: async () => revisionFeedbackJob("pending"),
+    getMemoirBookRevisionFeedbackJob: async () => revisionFeedbackJob(),
     applyMemoirBookRevisionProposal: async () => revisionProposal({
       status: "applied",
       can_apply: false,
@@ -154,4 +174,63 @@ test("book revision page confirms or dismisses the candidate without hidden acti
     ["dismiss", "project-1", "proposal-1"],
     "back",
   ]);
+});
+
+test("book revision feedback refreshes the candidate before final confirmation", async () => {
+  const calls = [];
+  const proposal = revisionProposal();
+  global.wx = {
+    showToast(options) {
+      calls.push(["toast", options.title]);
+    },
+  };
+  const { page } = loadRevisionPage({
+    api: {
+      enqueueMemoirBookRevisionFeedback: async (
+        projectId,
+        proposalId,
+        feedback,
+      ) => {
+        calls.push(["feedback", projectId, proposalId, feedback]);
+        return revisionFeedbackJob("pending");
+      },
+      getMemoirBookRevisionFeedbackJob: async () =>
+        revisionFeedbackJob("succeeded"),
+      getMemoirBookRevisionProposal: async () => {
+        calls.push(["reload"]);
+        return revisionProposal({ summary: "已经按意见更新。" });
+      },
+    },
+  });
+  let pollScheduled = false;
+  const context = pageContext(page, {
+    projectId: "project-1",
+    proposalId: "proposal-1",
+    proposal,
+    feedbackText: "请统一前后章节的人物称谓。",
+  });
+  context.pageActive = true;
+  context.feedbackPoller = {
+    cancel() {},
+    schedule() {
+      pollScheduled = true;
+      return true;
+    },
+  };
+
+  await page.submitFeedback.call(context);
+  assert.equal(context.data.feedbackBusy, true);
+  assert.equal(pollScheduled, true);
+  await page.refreshFeedbackJob.call(context);
+
+  assert.deepEqual(calls[0], [
+    "feedback",
+    "project-1",
+    "proposal-1",
+    "请统一前后章节的人物称谓。",
+  ]);
+  assert.equal(context.data.feedbackBusy, false);
+  assert.equal(context.data.feedbackText, "");
+  assert.equal(context.data.proposal.summary, "已经按意见更新。");
+  assert.ok(calls.some(([kind]) => kind === "reload"));
 });
