@@ -4,6 +4,10 @@ import type {
   MemoirBookOutputVersion,
 } from "../../domain/memoir-book";
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import {
   createMemoirBookChapterDraftTTS,
@@ -58,6 +62,7 @@ type BookReaderData = Pick<
   | "bookVersionNotice"
   | "bookStaleNotice"
 > & BookTTSState & {
+  pageClass: string;
   loading: boolean;
   playbackError: string;
   projectId: string;
@@ -85,6 +90,7 @@ interface ChapterParagraphRange {
 
 const SENTENCE_ENDINGS = "。！？!?";
 const SENTENCE_CLOSERS = "”’\"'」』】）)";
+const PAGE_CLASS = "book-reader-page ui-page-shell ui-accessible-page";
 
 type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
@@ -270,6 +276,7 @@ definePage<BookReaderData>()({
   readerHighlightKey: "",
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     error: "",
     playbackError: "",
@@ -314,6 +321,7 @@ definePage<BookReaderData>()({
   },
 
   onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     if (this.data.readerMode === "book") {
       enableMiniProgramShareMenu();
     }

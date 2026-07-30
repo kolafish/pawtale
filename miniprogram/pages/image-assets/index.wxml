@@ -1,4 +1,4 @@
-<view class="image-assets-page ui-page-shell">
+<view class="{{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">统一管理生成图片，选择可入书的插图</text>
   </view>

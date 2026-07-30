@@ -6,6 +6,10 @@ import type {
   MemoirBookPlan,
 } from "../../domain/memoir-book";
 import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
@@ -131,6 +135,7 @@ type BookExportData = Pick<
   | "bookEditorialCopyBusyTarget"
   | "generatingBook"
 > & {
+  pageClass: string;
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;
@@ -141,6 +146,7 @@ type BookExportData = Pick<
 
 const BOOK_DESIGN_AUTOSAVE_DELAY_MS = 900;
 const BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS = 3000;
+const PAGE_CLASS = "page book-export-page ui-page-shell ui-accessible-page";
 const BOOK_EXPORT_FORMATS: readonly MemoirBookOutputExportFormat[] = ["pdf", "txt"];
 const BOOK_EXPORT_LAYOUTS: readonly MemoirBookOutputExportLayout[] = ["standard", "large_print"];
 
@@ -181,6 +187,7 @@ definePage<BookExportData>()({
   bookPlan: null as MemoirBookPlan | null,
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     error: "",
     projectId: "",
@@ -218,6 +225,10 @@ definePage<BookExportData>()({
       return;
     }
     await this.loadBookExportPage(projectId);
+  },
+
+  onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
   },
 
   onUnload() {

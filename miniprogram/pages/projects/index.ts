@@ -1,4 +1,8 @@
 import type { MemoirProjectListResponse, Project } from "../../domain/memoir";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { getMemoirIdentity } from "../../services/auth";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -19,6 +23,7 @@ interface ProjectDataset {
 }
 
 type DatasetEvent = PageDatasetEvent<ProjectDataset>;
+const PAGE_CLASS = "projects-page ui-page-shell ui-accessible-page";
 
 interface ProjectItem extends Project {
   active: boolean;
@@ -29,6 +34,7 @@ interface ProjectItem extends Project {
 }
 
 interface ProjectsData {
+  pageClass: string;
   loading: boolean;
   busy: boolean;
   deletingId: string;
@@ -86,6 +92,7 @@ function chooseProjectMoreAction(): Promise<number | null> {
 
 definePage<ProjectsData>()({
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     busy: false,
     deletingId: "",
@@ -99,6 +106,7 @@ definePage<ProjectsData>()({
   },
 
   async onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     if (!this.data.loading && !this.data.busy) {
       await this.loadProjects();
     }

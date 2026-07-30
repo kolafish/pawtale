@@ -1,4 +1,4 @@
-<view class="page book-export-page ui-page-shell">
+<view class="{{pageClass}}">
   <view wx:if="{{loading}}" class="state-card">
     <text>正在加载全书...</text>
   </view>

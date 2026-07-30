@@ -1,4 +1,4 @@
-<view class="book-reader-page ui-page-shell">
+<view class="{{pageClass}}">
   <view wx:if="{{loading}}" class="reader-state">
     <text>正在打开成书...</text>
   </view>

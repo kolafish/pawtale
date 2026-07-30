@@ -1,4 +1,8 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { definePage } from "../../services/page-definition";
 import {
@@ -48,6 +52,8 @@ import { PollingTimer } from "../../services/polling-timer";
 
 export { chapterWorkspaceViewPatch };
 
+const PAGE_CLASS = "workspace-page ui-page-shell ui-accessible-page";
+
 definePage<ChapterWorkspacePageData>()({
   audioPlayback: new AudioPlaybackController(),
   playToken: 0,
@@ -61,6 +67,7 @@ definePage<ChapterWorkspacePageData>()({
   draftSectionVoiceInstructionToken: 0,
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: true,
     error: "",
     projectId: "",
@@ -125,6 +132,7 @@ definePage<ChapterWorkspacePageData>()({
   },
 
   async onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     this.pageVisible = true;
     if (this.loadedOnce) {
       await Promise.all([

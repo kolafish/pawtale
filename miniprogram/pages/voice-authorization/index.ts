@@ -3,15 +3,27 @@ import {
   syncVoiceAuthorizationConsent,
   VOICE_AUTHORIZATION_VERSION,
 } from "../../services/voice-authorization";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 
+const PAGE_CLASS = "voice-authorization-page ui-page-shell ui-accessible-page";
+
 interface VoiceAuthorizationData {
+  pageClass: string;
   version: string;
 }
 
 definePage<VoiceAuthorizationData>()({
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     version: VOICE_AUTHORIZATION_VERSION,
+  },
+
+  onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
   },
 
   async agreeAndBack() {
