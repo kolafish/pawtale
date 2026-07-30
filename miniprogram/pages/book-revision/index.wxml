@@ -93,6 +93,8 @@
       </view>
     </view>
 
+    <view wx:elif="{{wholeLoading}}" class="state-card">正在加载整书预览...</view>
+
     <view wx:else class="whole-book">
       <view
         wx:for="{{wholeChapters}}"

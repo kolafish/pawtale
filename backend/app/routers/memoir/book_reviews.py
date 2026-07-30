@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -298,6 +300,7 @@ async def cancel_memoir_book_editorial_revision_job(
 async def get_memoir_book_revision_proposal(
     project_id: str,
     proposal_id: str,
+    preview: Literal["none", "before", "after", "both"] = "both",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -315,6 +318,7 @@ async def get_memoir_book_revision_proposal(
     return await book_revision_proposals.proposal_response(
         db,
         proposal=proposal,
+        preview=preview,
     )
 
 
@@ -374,6 +378,7 @@ async def get_current_memoir_book_revision_feedback_job(
 async def apply_memoir_book_revision_proposal(
     project_id: str,
     proposal_id: str,
+    preview: Literal["none", "before", "after", "both"] = "both",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -392,6 +397,7 @@ async def apply_memoir_book_revision_proposal(
         response = await book_revision_proposals.apply_proposal(
             db,
             proposal=proposal,
+            preview=preview,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -406,6 +412,7 @@ async def apply_memoir_book_revision_proposal(
 async def dismiss_memoir_book_revision_proposal(
     project_id: str,
     proposal_id: str,
+    preview: Literal["none", "before", "after", "both"] = "both",
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -424,6 +431,7 @@ async def dismiss_memoir_book_revision_proposal(
         response = await book_revision_proposals.dismiss_proposal(
             db,
             proposal=proposal,
+            preview=preview,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

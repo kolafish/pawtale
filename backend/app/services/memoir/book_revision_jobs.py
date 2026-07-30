@@ -322,6 +322,7 @@ async def enqueue_book_revision_job(
         proposal_response = await book_revision_proposals.proposal_response(
             db,
             proposal=proposal,
+            preview="none",
         )
         if not proposal_response.can_apply:
             raise ValueError("这个修改预览已经不能继续调整")

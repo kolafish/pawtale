@@ -10,6 +10,7 @@ import {
   getMemoirBookRevisionFeedbackJob,
   getMemoirBookRevisionProposal,
   type MemoirBookRevisionProposal,
+  type MemoirBookRevisionPreviewVersion,
   type MemoirBookRevisionSectionComparison,
 } from "../../services/memoir-voice-api";
 import {
@@ -52,16 +53,31 @@ interface WholeChapterView {
   content: string;
 }
 
+interface RevisionProposalView extends Pick<
+  MemoirBookRevisionProposal,
+  "status" | "summary" | "can_apply" | "can_dismiss" | "updated_at"
+> {
+  comparison: Pick<
+    MemoirBookRevisionProposal["comparison"],
+    | "changed_chapter_count"
+    | "changed_section_count"
+    | "chapter_order_changed"
+    | "before_chapter_order"
+    | "after_chapter_order"
+  >;
+}
+
 interface BookRevisionData {
   projectId: string;
   proposalId: string;
   loading: boolean;
   busy: boolean;
   error: string;
-  proposal: MemoirBookRevisionProposal | null;
+  proposal: RevisionProposalView | null;
   mode: RevisionMode;
   previewVersion: PreviewVersion;
   changedChapters: RevisionChapterView[];
+  wholeLoading: boolean;
   wholeChapters: WholeChapterView[];
   feedbackText: string;
   feedbackBusy: boolean;
@@ -74,10 +90,9 @@ type RevisionDatasetEvent = PageDatasetEvent<{
 }>;
 
 function wholeBookChapters(
-  proposal: MemoirBookRevisionProposal,
-  version: PreviewVersion,
+  preview: MemoirBookRevisionPreviewVersion,
 ): WholeChapterView[] {
-  const chapters = proposal[version].manuscript?.chapters || [];
+  const chapters = preview.manuscript?.chapters || [];
   return chapters.map((chapter: MemoirBookManuscriptChapter, index) => ({
     chapter_id: chapter.chapter_id,
     index_text: `第 ${index + 1} 章`,
@@ -92,10 +107,23 @@ export function revisionViewPatch(
   previewVersion: PreviewVersion = "after",
 ): Pick<
   BookRevisionData,
-  "proposal" | "previewVersion" | "changedChapters" | "wholeChapters"
+  "proposal" | "previewVersion" | "changedChapters"
 > {
   return {
-    proposal,
+    proposal: {
+      status: proposal.status,
+      summary: proposal.summary,
+      can_apply: proposal.can_apply,
+      can_dismiss: proposal.can_dismiss,
+      updated_at: proposal.updated_at,
+      comparison: {
+        changed_chapter_count: proposal.comparison.changed_chapter_count,
+        changed_section_count: proposal.comparison.changed_section_count,
+        chapter_order_changed: proposal.comparison.chapter_order_changed,
+        before_chapter_order: proposal.comparison.before_chapter_order,
+        after_chapter_order: proposal.comparison.after_chapter_order,
+      },
+    },
     previewVersion,
     changedChapters: proposal.comparison.chapters.map((chapter) => ({
       ...chapter,
@@ -106,7 +134,6 @@ export function revisionViewPatch(
           : section.after_content,
       })),
     })),
-    wholeChapters: wholeBookChapters(proposal, previewVersion),
   };
 }
 
@@ -127,6 +154,9 @@ definePage<BookRevisionData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   feedbackVoiceToken: 0,
   feedbackBaselineUpdatedAt: "",
+  revisionProposal: null as MemoirBookRevisionProposal | null,
+  wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
+  wholeLoadSequence: 0,
   pageActive: false,
 
   data: {
@@ -139,6 +169,7 @@ definePage<BookRevisionData>()({
     mode: "changes",
     previewVersion: "after",
     changedChapters: [],
+    wholeLoading: false,
     wholeChapters: [],
     feedbackText: "",
     feedbackBusy: false,
@@ -191,10 +222,18 @@ definePage<BookRevisionData>()({
         this.data.projectId,
         this.data.proposalId,
       );
+      this.revisionProposal = proposal;
+      this.wholeChapterCache = {};
+      this.wholeLoadSequence += 1;
       this.setData({
         loading: false,
+        wholeLoading: false,
+        wholeChapters: [],
         ...revisionViewPatch(proposal, this.data.previewVersion),
       });
+      if (this.data.mode === "whole") {
+        await this.loadWholePreview(this.data.previewVersion);
+      }
       return true;
     } catch (error) {
       if (routeAuthError(error)) {
@@ -203,6 +242,51 @@ definePage<BookRevisionData>()({
       this.setData({
         loading: false,
         error: error instanceof Error ? error.message : "修改预览加载失败",
+      });
+      return false;
+    }
+  },
+
+  async loadWholePreview(version: PreviewVersion) {
+    const cached = this.wholeChapterCache[version];
+    if (cached) {
+      this.setData({ wholeChapters: cached, wholeLoading: false });
+      return true;
+    }
+    const sequence = ++this.wholeLoadSequence;
+    this.setData({ wholeLoading: true, wholeChapters: [], error: "" });
+    try {
+      const proposal = await getMemoirBookRevisionProposal(
+        this.data.projectId,
+        this.data.proposalId,
+        version,
+      );
+      if (sequence !== this.wholeLoadSequence) {
+        return false;
+      }
+      const preview = proposal[version];
+      if (!preview.manuscript) {
+        throw new Error("整书预览内容不可用");
+      }
+      const chapters = wholeBookChapters(preview);
+      if (proposal.updated_at !== this.revisionProposal?.updated_at) {
+        this.wholeChapterCache = {};
+      }
+      this.revisionProposal = proposal;
+      this.wholeChapterCache[version] = chapters;
+      this.setData({
+        ...revisionViewPatch(proposal, version),
+        wholeLoading: false,
+        wholeChapters: chapters,
+      });
+      return true;
+    } catch (error) {
+      if (sequence !== this.wholeLoadSequence || routeAuthError(error)) {
+        return false;
+      }
+      this.setData({
+        wholeLoading: false,
+        error: error instanceof Error ? error.message : "整书预览加载失败",
       });
       return false;
     }
@@ -373,20 +457,29 @@ definePage<BookRevisionData>()({
     }
   },
 
-  switchMode(event: RevisionDatasetEvent) {
+  async switchMode(event: RevisionDatasetEvent) {
     const mode = datasetString(event, "mode");
     if (mode === "changes" || mode === "whole") {
       this.setData({ mode });
+      if (mode === "whole") {
+        await this.loadWholePreview(this.data.previewVersion);
+      }
     }
   },
 
-  switchPreviewVersion(event: RevisionDatasetEvent) {
+  async switchPreviewVersion(event: RevisionDatasetEvent) {
     const version = datasetString(event, "version");
-    const proposal = this.data.proposal;
+    const proposal = this.revisionProposal;
     if (!proposal || (version !== "before" && version !== "after")) {
       return;
     }
-    this.setData(revisionViewPatch(proposal, version));
+    this.setData({
+      ...revisionViewPatch(proposal, version),
+      wholeChapters: this.wholeChapterCache[version] || [],
+    });
+    if (this.data.mode === "whole") {
+      await this.loadWholePreview(version);
+    }
   },
 
   async applyRevision() {
@@ -410,6 +503,7 @@ definePage<BookRevisionData>()({
         this.data.projectId,
         this.data.proposalId,
       );
+      this.revisionProposal = proposal;
       this.setData({
         busy: false,
         ...revisionViewPatch(proposal, this.data.previewVersion),

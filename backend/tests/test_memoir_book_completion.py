@@ -1887,7 +1887,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
 
     proposal = await client.get(
         f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{completed_body['proposal_id']}"
+        f"revision-proposals/{completed_body['proposal_id']}?preview=none"
     )
     assert proposal.status_code == 200, proposal.text
     proposal_body = proposal.json()
@@ -1895,8 +1895,20 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert proposal_body["can_apply"] is True
     assert proposal_body["comparison"]["changed_chapter_count"] == 1
     assert proposal_body["comparison"]["changed_section_count"] == 1
-    before_content = proposal_body["before"]["manuscript"]["chapters"][0]["content"]
-    after_content = proposal_body["after"]["manuscript"]["chapters"][0]["content"]
+    assert proposal_body["before"]["manuscript"] is None
+    assert proposal_body["after"]["manuscript"] is None
+    before_preview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}?preview=before"
+    )
+    after_preview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{completed_body['proposal_id']}?preview=after"
+    )
+    before_content = before_preview.json()["before"]["manuscript"]["chapters"][0]["content"]
+    after_content = after_preview.json()["after"]["manuscript"]["chapters"][0]["content"]
+    assert before_preview.json()["after"]["manuscript"] is None
+    assert after_preview.json()["before"]["manuscript"] is None
     assert "我决定都保留在书里" not in before_content
     assert "我决定都保留在书里" in after_content
 
@@ -1930,7 +1942,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
     assert refined.json()["changed_chapter_count"] == 1
     proposal = await client.get(
         f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{completed_body['proposal_id']}"
+        f"revision-proposals/{completed_body['proposal_id']}?preview=after"
     )
     assert proposal.status_code == 200, proposal.text
     proposal_body = proposal.json()

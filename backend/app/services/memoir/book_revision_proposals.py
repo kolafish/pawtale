@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -321,6 +321,7 @@ async def proposal_response(
     db: AsyncSession,
     *,
     proposal: MemoirBookRevisionProposal,
+    preview: Literal["none", "before", "after", "both"] = "both",
 ) -> MemoirBookRevisionProposalResponse:
     output, baseline, project = await _proposal_records(db, proposal=proposal)
     status = MemoirBookRevisionProposalStatus(proposal.status)
@@ -335,29 +336,34 @@ async def proposal_response(
             status = MemoirBookRevisionProposalStatus.STALE
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
     after_snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
-    before_manuscript = manuscript_response(
-        title=output.title,
-        content=baseline.content,
-        snapshot=before_snapshots,
-        stored=baseline.manuscript_json,
+    before_manuscript = (
+        manuscript_response(
+            title=output.title,
+            content=baseline.content,
+            snapshot=before_snapshots,
+            stored=baseline.manuscript_json,
+        )
+        if preview in {"before", "both"}
+        else None
     )
-    after_content = book_content_from_chapter_snapshots(
-        title=output.title,
-        snapshots=after_snapshots,
-    )
-    after_manuscript_json = _candidate_manuscript(
-        project=project,
-        output=output,
-        baseline=baseline,
-        snapshots=after_snapshots,
-        content=after_content,
-    )
-    after_manuscript = manuscript_response(
-        title=output.title,
-        content=after_content,
-        snapshot=after_snapshots,
-        stored=after_manuscript_json,
-    )
+    after_manuscript = None
+    if preview in {"after", "both"}:
+        after_content = book_content_from_chapter_snapshots(
+            title=output.title,
+            snapshots=after_snapshots,
+        )
+        after_manuscript = manuscript_response(
+            title=output.title,
+            content=after_content,
+            snapshot=after_snapshots,
+            stored=_candidate_manuscript(
+                project=project,
+                output=output,
+                baseline=baseline,
+                snapshots=after_snapshots,
+                content=after_content,
+            ),
+        )
     comparison = MemoirBookRevisionComparison.model_validate(
         build_comparison(before=before_snapshots, after=after_snapshots)
     )
@@ -392,9 +398,10 @@ async def apply_proposal(
     db: AsyncSession,
     *,
     proposal: MemoirBookRevisionProposal,
+    preview: Literal["none", "before", "after", "both"] = "both",
 ) -> MemoirBookRevisionProposalResponse:
     if proposal.status == MemoirBookRevisionProposalStatus.APPLIED.value:
-        return await proposal_response(db, proposal=proposal)
+        return await proposal_response(db, proposal=proposal, preview=preview)
     if proposal.status != MemoirBookRevisionProposalStatus.READY.value:
         raise ValueError("这个修改预览已经不能确认")
     output, baseline, project = await _proposal_records(db, proposal=proposal)
@@ -483,13 +490,14 @@ async def apply_proposal(
     db.add(output)
     db.add(proposal)
     await db.flush()
-    return await proposal_response(db, proposal=proposal)
+    return await proposal_response(db, proposal=proposal, preview=preview)
 
 
 async def dismiss_proposal(
     db: AsyncSession,
     *,
     proposal: MemoirBookRevisionProposal,
+    preview: Literal["none", "before", "after", "both"] = "both",
 ) -> MemoirBookRevisionProposalResponse:
     if proposal.status == MemoirBookRevisionProposalStatus.APPLIED.value:
         raise ValueError("已经使用的修改版本不能放弃")
@@ -498,4 +506,4 @@ async def dismiss_proposal(
         proposal.updated_at = utcnow_naive()
         db.add(proposal)
         await db.flush()
-    return await proposal_response(db, proposal=proposal)
+    return await proposal_response(db, proposal=proposal, preview=preview)
