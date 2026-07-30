@@ -108,6 +108,7 @@ test("book reader previews and highlights one current chapter", async () => {
     "那些年各自忙着生活，直到这个春天，我们终于约着一起去西山看山桃花。",
   ];
   const longContent = paragraphs.join("\n\n");
+  const secondContent = "山路上很安静。后来他主动伸手拉了我一把。";
   const { page } = loadBookReaderPage({
     getMemoirChapterWorkspace: async () => ({
       project_id: "project-1",
@@ -128,6 +129,11 @@ test("book reader previews and highlights one current chapter", async () => {
         title: "十九年点赞之交的淡交过往",
         content: longContent,
         used_material_ids: ["utterance-1"],
+      }, {
+        section_id: "section-2",
+        title: "爬山途中的细碎关照",
+        content: secondContent,
+        used_material_ids: ["utterance-2"],
       }],
     }),
   });
@@ -147,11 +153,11 @@ test("book reader previews and highlights one current chapter", async () => {
   );
   assert.equal(
     context.data.bookContent,
-    `十九年点赞之交的淡交过往\n\n${longContent}`,
+    `十九年点赞之交的淡交过往\n\n${longContent}\n\n爬山途中的细碎关照\n\n${secondContent}`,
   );
 
   const activeText = Array.from(context.data.bookContent);
-  const currentTextStart = context.data.bookContent.indexOf("后来虽然") + 2;
+  const currentTextStart = context.data.bookContent.indexOf("主动伸手");
   page.onBookTTSProgressPatch.call(context, {
     ttsSpokenText: activeText.slice(0, currentTextStart).join(""),
     ttsCurrentText: activeText[currentTextStart],
@@ -159,11 +165,11 @@ test("book reader previews and highlights one current chapter", async () => {
     ttsProgressPercent: 20,
   });
 
-  assert.equal(context.data.readerHighlightSectionId, "section-1");
+  assert.equal(context.data.readerHighlightSectionId, "section-2");
   assert.equal(context.data.readerHighlightParagraphIndex, 0);
   assert.equal(
     context.data.readerHighlightCurrent,
-    "后来虽然不常见面，但每次联系都觉得很亲切。",
+    "后来他主动伸手拉了我一把。",
   );
 });
 
