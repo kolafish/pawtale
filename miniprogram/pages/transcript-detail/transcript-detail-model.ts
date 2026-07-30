@@ -3,7 +3,9 @@ import type {
   MemoirMaterialOfflineASRState,
   MemoirVoiceTranscriptItem,
 } from "../../domain/memoir-transcript";
-import type { MemoirSectionMaterialPlacementRequest } from "../../services/memoir-voice-api";
+import type {
+  MemoirSectionMaterialPlacementRequest,
+} from "../../services/memoir-chapter-workspace-api";
 import { materialOfflineASRView } from "../../services/material-offline-asr-view";
 import { formatPlaybackClock } from "../../services/time";
 import {

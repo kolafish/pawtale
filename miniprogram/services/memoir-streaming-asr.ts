@@ -6,7 +6,7 @@ import type {
   VoiceGatewayClientEvent,
   VoiceGatewayServerEvent,
 } from "../domain/memoir-voice-session";
-import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-api";
+import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-session-api";
 import { readSelectedAIModel } from "./ai-model-settings";
 import { readSelectedTranscriptPolishLevel } from "./transcript-polish-settings";
 import {

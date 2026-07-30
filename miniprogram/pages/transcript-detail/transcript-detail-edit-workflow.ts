@@ -2,13 +2,13 @@ import { trackAuditAction } from "../../services/audit-tracker";
 import {
   convertMemoirInterviewQuestionToAnswer,
   deleteMemoirVoiceTranscript,
-  getMemoirBookPlan,
   getMemoirVoiceTranscript,
-  placeMemoirChapterMaterial,
   previewMemoirVoiceTranscriptVoiceEdit,
   recoverMemoirVoiceTranscript,
   updateMemoirVoiceTranscript,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-transcript-api";
+import { getMemoirBookPlan } from "../../services/memoir-book-api";
+import { placeMemoirChapterMaterial } from "../../services/memoir-chapter-workspace-api";
 import {
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,

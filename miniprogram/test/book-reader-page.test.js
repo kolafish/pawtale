@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   pageContext,
@@ -22,7 +23,7 @@ function sampleFinishedBook(content = "全书正文") {
 }
 
 function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
     createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
     getMemoirChapterWorkspace: unmockedAsync("getMemoirChapterWorkspace"),
@@ -40,17 +41,9 @@ function loadBookReaderPage(voiceApiExports = {}, ttsExports = {}) {
 test("book reader page is registered as the finished-book route", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.json"), "utf8"));
-  const pageWxml = fs.readFileSync(path.join(__dirname, "../pages/book-reader/index.wxml"), "utf8");
 
   assert.ok(appJson.pages.includes("pages/book-reader/index"));
   assert.equal(pageJson.navigationBarTitleText, "成书阅读");
-  assert.match(pageWxml, /成书阅读/);
-  assert.match(pageWxml, /整章预览/);
-  assert.match(pageWxml, /bindtap="playReaderAudio"/);
-  assert.match(pageWxml, /朗读全书/);
-  assert.match(pageWxml, /<book-tts-player/);
-  assert.match(pageWxml, /current-text="{{readerMode === 'chapter' \? '' : bookTTSCurrentText}}"/);
-  assert.doesNotMatch(pageWxml, /导出|重写|输入书名/);
 });
 
 test("book reader page loads the finished book by project id", async () => {

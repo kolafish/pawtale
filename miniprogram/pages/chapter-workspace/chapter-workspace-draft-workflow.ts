@@ -8,8 +8,8 @@ import {
   confirmMemoirBookChapterDraft,
   createMemoirBookChapterDraftSectionTTS,
   reviseMemoirBookChapterDraft,
-  reviseMemoirChapterDraftSectionWithAI,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-api";
+import { reviseMemoirChapterDraftSectionWithAI } from "../../services/memoir-chapter-workspace-api";
 import {
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,

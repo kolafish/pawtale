@@ -1,15 +1,17 @@
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirChapterPreparationJob,
-  cancelMemoirChapterSectionRegenerationJob,
   enqueueMemoirChapterPreparationJob,
   getMemoirChapterPreparationJob,
+  type MemoirChapterPreparationJob,
+} from "../../services/memoir-book-completion-api";
+import {
+  cancelMemoirChapterSectionRegenerationJob,
   getMemoirChapterSectionRegenerationJob,
   mergeMemoirChapterSections,
   regenerateMemoirChapterSections,
-  type MemoirChapterPreparationJob,
   type MemoirChapterSectionRegenerationJob,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,

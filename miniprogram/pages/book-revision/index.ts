@@ -16,7 +16,7 @@ import {
   type MemoirBookRevisionProposal,
   type MemoirBookRevisionPreviewVersion,
   type MemoirBookRevisionSectionComparison,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-completion-api";
 import {
   recordMemoirVoiceSearchQuery,
   stopMemoirVoiceSearchRecording,

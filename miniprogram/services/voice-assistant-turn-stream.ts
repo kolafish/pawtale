@@ -1,5 +1,5 @@
 import { readSelectedAIModel } from "./ai-model-settings";
-import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-api";
+import { assistantTurnStreamUrl, backendSessionCookieHeader } from "./memoir-voice-session-api";
 import type { StreamingSpeechPCMFrame } from "./streaming-speech-playback";
 import { readChatTTSSettings } from "./tts-settings";
 

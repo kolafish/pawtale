@@ -23,11 +23,9 @@ import {
   enqueueMemoirChapterPreparationJob,
   getMemoirBookCompletionJob,
   getMemoirBookCompletionOverview,
-  getMemoirBookOutput,
   getMemoirBookReview,
   getMemoirBookRevisionJob,
   getMemoirBookReviewJob,
-  listMemoirCompletionIssues,
   type MemoirBookReview,
   type MemoirBookAnswerApplicationJob,
   type MemoirBookEditorialAction,
@@ -36,7 +34,9 @@ import {
   type MemoirBookRevisionCommandSource,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-completion-api";
+import { getMemoirBookOutput } from "../../services/memoir-book-api";
+import { listMemoirCompletionIssues } from "../../services/memoir-completion-issue-api";
 import { routeAuthError } from "../../services/navigation";
 import { optionalApiResource } from "../../services/request";
 import {

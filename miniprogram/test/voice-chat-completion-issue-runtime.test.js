@@ -2,7 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { clearModule, mockModule } = require("./page-harness");
+const { mockMemoirApiModules, clearModule, mockModule } = require("./page-harness");
 
 function issue(status, patch = {}) {
   return {
@@ -42,7 +42,7 @@ function runtimeState() {
 
 test("completion issue verification stops when the answer closes the issue", async () => {
   let refreshCalls = 0;
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     listMemoirCompletionIssues: async () => {
       refreshCalls += 1;
       const current = refreshCalls >= 3
@@ -82,7 +82,7 @@ test("completion issue verification stops when the answer closes the issue", asy
 
 test("not remembered closes only the current completion issue", async () => {
   const requests = [];
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     closeMemoirCompletionIssue: async (projectId, issueId, data) => {
       requests.push({ projectId, issueId, data });
       return issue("closed", { outcome: data.outcome });

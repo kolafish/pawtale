@@ -19,6 +19,9 @@ import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace
 import {
   acknowledgeMemoirAutomationEvent,
   acknowledgeDismissibleMemoirAutomationEvents,
+  listMemoirAutomationEvents,
+} from "../../services/memoir-voice-session-api";
+import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
@@ -28,12 +31,11 @@ import {
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
-  getMemoirBookSnapshot,
   getMemoirBookOutput,
-  listMemoirAutomationEvents,
   updateMemoirBookChapterTitle,
   updateMemoirBookOutput,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-api";
+import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
 import {
   isAuthError,

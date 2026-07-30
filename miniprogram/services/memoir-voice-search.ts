@@ -1,4 +1,4 @@
-import { transcribeMemoirVoiceSearchAudio } from "./memoir-voice-api";
+import { transcribeMemoirVoiceSearchAudio } from "./memoir-transcript-api";
 import { sharedRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
 import { ensureRecorderPrivacyAuthorization, wechatPrivacyErrorMessage } from "./wechat-privacy";

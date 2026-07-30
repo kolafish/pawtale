@@ -1,9 +1,9 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import type { MemoirCompletionIssue } from "../../domain/memoir-completion-issue";
+import { type MemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
 import {
-  type MemoirChapterPreparationJob,
   type MemoirChapterSectionRegenerationJob,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-chapter-workspace-api";
 import {
   aiTaskProgressPercent,
   type AITaskProgressMode,

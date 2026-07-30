@@ -26,7 +26,7 @@ import {
   getMemoirVoiceSession,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-voice-session-api";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   VoiceAssistantTTSProgressRuntime,

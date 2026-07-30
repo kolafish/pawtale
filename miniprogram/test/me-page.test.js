@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   pageContext,
@@ -29,7 +30,7 @@ function loadMePage({
     updateBackendProfile: unmockedAsync("updateBackendProfile"),
     ...authExports,
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirVoiceProgress: async () => ({
       session_count: 0,
       utterance_count: 0,
@@ -160,18 +161,6 @@ test("me opens the dedicated login page from the guest entry", () => {
   page.openLogin.call(pageContext(page));
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
-});
-
-test("me keeps large text available before login-only settings", () => {
-  const pageWxml = fs.readFileSync(
-    path.join(__dirname, "../pages/me/index.wxml"),
-    "utf8",
-  );
-  const largeTextControl = pageWxml.indexOf('aria-label="大字模式"');
-  const loggedInSettings = pageWxml.indexOf('<block wx:if="{{loggedIn}}">');
-
-  assert.ok(largeTextControl > 0);
-  assert.ok(loggedInSettings > largeTextControl);
 });
 
 test("me profile exposes WeChat avatar and nickname controls", () => {

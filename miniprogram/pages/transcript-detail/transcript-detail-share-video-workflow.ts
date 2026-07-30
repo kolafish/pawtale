@@ -1,12 +1,10 @@
-import type {
-  MemoirShareVideoCustomBackgroundAsset,
-} from "../../domain/memoir-transcript";
+import type { MemoirShareVideoCustomBackgroundAsset } from "../../domain/memoir-transcript";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   downloadMemoirShareVideoCustomBackgroundPreview,
   getMemoirTranscriptShareVideoContext,
   uploadMemoirShareVideoCustomBackground,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-transcript-api";
 import {
   datasetNumber,
   datasetString,

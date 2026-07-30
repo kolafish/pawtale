@@ -2,7 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { clearModule, mockModule } = require("./page-harness");
+const { mockMemoirApiModules, clearModule, mockModule } = require("./page-harness");
 
 function speakerTranscriptionModule() {
   delete require.cache[require.resolve("../services/speaker-transcription.ts")];
@@ -15,7 +15,7 @@ function speakerTranscriptionModuleWithSocketMocks() {
     cleanBaseUrl: (value) => value.replace(/\/$/, ""),
     readBackendConfig: () => ({ wsBaseUrl: "wss://example.test" }),
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     backendSessionCookieHeader: async () => "session=abc",
   });
   mockModule("../services/wechat-privacy.ts", {

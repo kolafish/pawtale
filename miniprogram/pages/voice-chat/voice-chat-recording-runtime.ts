@@ -11,7 +11,7 @@ import {
   type MemoirStreamingAsrClientEvent,
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
-import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-api";
+import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {

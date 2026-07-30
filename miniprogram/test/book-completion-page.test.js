@@ -6,13 +6,14 @@ const path = require("node:path");
 const test = require("node:test");
 const {
   loadPageModule,
+  mockMemoirApiModules,
   mockModule,
   pageContext,
   unmockedAsync,
 } = require("./page-harness");
 
 function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirBookCompletionJob: async () => bulkJob(),
     getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
     enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),

@@ -12,7 +12,7 @@ import { definePage } from "../../services/page-definition";
 import {
   getMemoirVoiceProgress,
   listMemoirVoiceSessions,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-voice-session-api";
 import { getMemoirIdentity } from "../../services/auth";
 import { routeAuthError } from "../../services/navigation";
 import {

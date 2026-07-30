@@ -12,10 +12,10 @@ import { definePage } from "../../services/page-definition";
 import {
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
-  getMemoirChapterWorkspace,
   getMemoirBookOutput,
   getMemoirBookOutputVersion,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-book-api";
+import { getMemoirChapterWorkspace } from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";

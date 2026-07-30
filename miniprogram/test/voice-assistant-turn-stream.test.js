@@ -84,7 +84,7 @@ test("assistant turn stream sends pcm frame protocol and emits audio frames", as
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/ai-model-settings.ts")];
   delete require.cache[require.resolve("../services/tts-settings.ts")];
-  delete require.cache[require.resolve("../services/memoir-voice-api.ts")];
+  delete require.cache[require.resolve("../services/memoir-voice-session-api.ts")];
   delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
   const { VoiceAssistantTurnStreamClient } = require("../services/voice-assistant-turn-stream.ts");
   const formats = [];

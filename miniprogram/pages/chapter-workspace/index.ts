@@ -7,12 +7,14 @@ import { AudioPlaybackController } from "../../services/audio-playback";
 import { definePage } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
-  enqueueMemoirChapterPreparationJob,
-  getMemoirChapterWorkspace,
   listMemoirCompletionIssues,
+} from "../../services/memoir-completion-issue-api";
+import { enqueueMemoirChapterPreparationJob } from "../../services/memoir-book-completion-api";
+import {
+  getMemoirChapterWorkspace,
   placeMemoirChapterMaterial,
   type MemoirSectionMaterialPlacementRequest,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import {
   pageUrl,

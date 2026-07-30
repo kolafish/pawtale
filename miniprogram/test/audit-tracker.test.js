@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 
 function trackerModule() {
@@ -47,10 +49,12 @@ function successResponse(options) {
   });
 }
 
-test("audit tracker maps the finished-book reader to book analytics", () => {
+test("audit tracker maps every registered page to product analytics", () => {
   const tracker = trackerModule();
-
-  assert.equal(tracker.auditFeatureForPage("/pages/book-reader/index"), "book.view");
+  const app = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "app.json"), "utf8"));
+  for (const page of app.pages) {
+    assert.notEqual(tracker.auditFeatureForPage(page), "page.view", page);
+  }
   tracker.__resetAuditTrackerForTest();
 });
 

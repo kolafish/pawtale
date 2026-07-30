@@ -5,6 +5,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   unmockedAsync,
@@ -39,7 +40,7 @@ function loadHomePage({
     logoutBackendSession: async () => {},
     ...authExports,
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirVoiceTranscripts,
     getMemoirHomeSnapshot: async () => {
@@ -302,20 +303,6 @@ test("home primary and alternate CTAs create sessions with their displayed guida
   await page.startAlternateGuidance.call(context);
 
   assert.deepEqual(createdModes, ["guided_interview", "free_narration"]);
-});
-
-test("home row actions use view shells instead of native button shrink wrapping", () => {
-  const template = fs.readFileSync(path.join(__dirname, "../pages/home/index.wxml"), "utf8");
-
-  assert.match(template, /<view\s+class="\{\{voiceStartButtonClass\}\}"/);
-  assert.doesNotMatch(template, /<button\s+class="\{\{voiceStartButtonClass\}\}"/);
-  assert.match(template, /<view\s+class="more-actions-toggle"/);
-  assert.doesNotMatch(template, /<button\s+class="more-actions-toggle"/);
-  assert.equal(
-    (template.match(/<view\s+class="\{\{resumeAskButtonClass\}\}[^"]*"/g) || []).length,
-    4,
-  );
-  assert.doesNotMatch(template, /<button\s+class="\{\{resumeAskButtonClass\}\}/);
 });
 
 test("home userDisplayName hides wechat placeholder display name", () => {

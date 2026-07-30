@@ -12,7 +12,7 @@ import {
   listMemoirVoiceTranscripts,
   parseMemoirVoiceSearchQuery,
   recoverMemoirVoiceTranscript,
-} from "../../services/memoir-voice-api";
+} from "../../services/memoir-transcript-api";
 import { getMemoirIdentity } from "../../services/auth";
 import {
   isAuthError,

@@ -2,7 +2,7 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { loadPageModule, mockModule } = require("./page-harness");
+const { mockMemoirApiModules, loadPageModule, mockModule } = require("./page-harness");
 
 function sampleSession(id, status) {
   return {
@@ -49,7 +49,7 @@ function loadProgressPage({ authExports = {}, voiceApiExports = {} } = {}) {
     getMemoirIdentity: async () => defaultIdentity(),
     ...authExports,
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     getMemoirVoiceProgress: async () => ({
       session_count: 0,
       active_session_count: 0,

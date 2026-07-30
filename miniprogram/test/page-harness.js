@@ -28,6 +28,19 @@ function mockModule(relativePath, exports) {
   };
 }
 
+function mockMemoirApiModules(exports) {
+  [
+    "memoir-audio-api",
+    "memoir-book-api",
+    "memoir-book-completion-api",
+    "memoir-chapter-workspace-api",
+    "memoir-completion-issue-api",
+    "memoir-snapshot-api",
+    "memoir-transcript-api",
+    "memoir-voice-session-api",
+  ].forEach((name) => mockModule(`../services/${name}.ts`, exports));
+}
+
 function unmockedAsync(methodName) {
   return async () => {
     throw new Error(`${methodName} was not mocked`);
@@ -130,6 +143,7 @@ module.exports = {
   flushAsyncWork,
   loadComponentModule,
   loadPageModule,
+  mockMemoirApiModules,
   mockModule,
   pageContext,
   unmockedAsync,

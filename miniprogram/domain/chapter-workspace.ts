@@ -1,8 +1,5 @@
 import type { MemoirChapterCompletionSummary } from "./chapter-completion";
-import type {
-  MemoirChapterDraftSection,
-  MemoirChapterSectionSummary,
-} from "./voice-chat";
+import type { MemoirChapterDraftSection, MemoirChapterSectionSummary } from "./memoir-book";
 
 export interface MemoirChapterWorkspace {
   server_revision: number;

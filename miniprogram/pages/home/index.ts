@@ -12,10 +12,8 @@ import {
   memoirStoryTitle,
 } from "../../services/memoir-display-copy";
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
-import {
-  createMemoirVoiceSession,
-  getMemoirHomeSnapshot,
-} from "../../services/memoir-voice-api";
+import { createMemoirVoiceSession } from "../../services/memoir-voice-session-api";
+import { getMemoirHomeSnapshot } from "../../services/memoir-snapshot-api";
 import {
   dismissHomeLaunch,
   resolveHomeLaunch,

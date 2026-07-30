@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  mockMemoirApiModules,
   loadPageModule,
   mockModule,
   pageContext,
@@ -64,7 +65,7 @@ function loadImageAssetsPage(apiExports = {}) {
   mockModule("../services/auth.ts", {
     getMemoirIdentity: async () => ({ active_project_id: "project-1" }),
   });
-  mockModule("../services/memoir-voice-api.ts", {
+  mockMemoirApiModules({
     createMemoirBookImagePlacement: unmockedAsync("createMemoirBookImagePlacement"),
     deleteMemoirBookImagePlacement: unmockedAsync("deleteMemoirBookImagePlacement"),
     deleteMemoirImageAsset: unmockedAsync("deleteMemoirImageAsset"),
