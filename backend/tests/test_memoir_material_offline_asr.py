@@ -16,6 +16,7 @@ async def _set_narrator_origin(test_db, project_id: str, origin: str) -> None:
     assert project is not None
     metadata = dict(project.metadata_json or {})
     metadata["memoir_profile"] = {"narrator_origin": origin}
+    metadata["transcript_polish_level"] = "medium"
     project.metadata_json = metadata
     await test_db.commit()
 
@@ -54,12 +55,14 @@ async def test_material_offline_asr_endpoint_queues_and_runs_one_sichuan_dialect
     assert len(jobs) == 1
     assert jobs[0].payload_json["utterance_id"] == created["utterance_id"]
     assert jobs[0].payload_json["dialect_label"] == "四川话"
+    assert jobs[0].payload_json["transcript_polish_level"] == "medium"
 
     detail = await client.get(f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}")
     assert detail.status_code == 200
     assert detail.json()["offline_asr"] == duplicate.json()
 
     async def fake_reprocess(db, **kwargs):
+        assert kwargs["transcript_polish_level"] == "medium"
         db.expunge_all()
         return {
             "utterance_id": kwargs["utterance_id"],

@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
     MemoirInterviewType,
     MemoirSessionGoal,
     MemoirShareVideoJobStatus,
+    MemoirTranscriptPolishLevel,
     MemoirVoiceSessionStatus,
 )
 from app.schemas.memoir_automation import (
@@ -303,6 +304,7 @@ class MemoirVoiceTranscriptSectionAssignmentResponse(BaseModel):
 
 class MemoirMaterialOfflineASRRequest(BaseModel):
     ai_model: str | None = None
+    transcript_polish_level: MemoirTranscriptPolishLevel | None = None
 
     @field_validator("ai_model")
     @classmethod
@@ -559,6 +561,11 @@ class MemoirVoiceTranscriptUpdateRequest(BaseModel):
 
 class MemoirVoiceTranscriptCleanupRequest(BaseModel):
     ai_model: str | None = None
+    transcript_polish_level: MemoirTranscriptPolishLevel | None = None
+
+
+class MemoirVoiceTranscriptRecoveryRequest(BaseModel):
+    transcript_polish_level: MemoirTranscriptPolishLevel | None = None
 
 
 class MemoirVoiceTranscriptVoiceEditPreviewRequest(BaseModel):

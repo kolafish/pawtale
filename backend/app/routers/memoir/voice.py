@@ -40,6 +40,7 @@ from app.schemas.memoir_voice import (
     MemoirVoiceSearchTranscriptionRequest,
     MemoirVoiceSearchTranscriptionResponse,
     MemoirVoiceTranscriptCleanupRequest,
+    MemoirVoiceTranscriptRecoveryRequest,
     MemoirVoiceTranscriptItemResponse,
     MemoirVoiceTranscriptListResponse,
     MemoirTranscriptShareVideoContextResponse,
@@ -460,6 +461,7 @@ async def enqueue_mobile_memoir_material_offline_asr(
         utterance_id=utterance_id,
         user_id=current_user.id,
         ai_model=req.ai_model,
+        transcript_polish_level=req.transcript_polish_level,
         allow_admin=is_admin_user(current_user),
     )
 
@@ -616,6 +618,7 @@ async def update_mobile_memoir_voice_transcript(
 )
 async def recover_mobile_memoir_voice_transcript(
     utterance_id: str,
+    req: MemoirVoiceTranscriptRecoveryRequest | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -626,6 +629,9 @@ async def recover_mobile_memoir_voice_transcript(
         asr_client_factory=lambda: create_volc_streaming_asr_client(
             current_user.id,
             f"transcript-recovery-{utterance_id}-{uuid.uuid4().hex}",
+        ),
+        transcript_polish_level=(
+            req.transcript_polish_level if req is not None else None
         ),
         allow_admin=is_admin_user(current_user),
     )
