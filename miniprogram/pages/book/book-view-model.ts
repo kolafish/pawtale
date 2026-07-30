@@ -45,7 +45,7 @@ export interface ChapterPickerOption {
   value: string;
 }
 
-export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
+export interface BookChapterSourceView extends Pick<MemoirBookChapterSourceRef, "utterance_id"> {
   sourceIndex: number;
   recordNumber: number;
   labelText: string;
@@ -55,7 +55,10 @@ export interface BookChapterSourceView extends MemoirBookChapterSourceRef {
   splitSelected: boolean;
 }
 
-export interface BookChapterView extends MemoirBookPlanChapter {
+export interface BookChapterView extends Pick<
+  MemoirBookPlanChapter,
+  "id" | "title" | "sort_order" | "include_in_book"
+> {
   editingTitle: string;
   titleChanged: boolean;
   ttsTarget: string;
@@ -77,8 +80,8 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   pendingNewSourceCount: number;
   removedSourceCount: number;
   sourceChangeNotice: string;
-  draft: MemoirBookChapterDraft | null;
-  draftContent: string;
+  draftAvailable: boolean;
+  draftConfirmed: boolean;
   draftCharCount: number;
   draftChanged: boolean;
   draftStatusText: string;
@@ -89,6 +92,8 @@ export interface BookChapterView extends MemoirBookPlanChapter {
   draftBusy: boolean;
   draftError: string;
 }
+
+export type BookChapterSources = Record<string, MemoirBookChapterSourceRef[]>;
 
 export interface BookOutputTocView {
   id: string;
@@ -296,6 +301,9 @@ export interface BookData {
 
 export type BookHomeData = Omit<
   BookData,
+  | "plan"
+  | "bookOutput"
+  | "bookContent"
   | "bookPreviewTocItems"
   | "bookPreviewChapters"
   | "bookPreviewChaptersExpanded"
@@ -337,7 +345,9 @@ export type BookHomeData = Omit<
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
   | "bookEditorialCopyBusyTarget"
->;
+> & {
+  bookContentAvailable: boolean;
+};
 
 export function positiveFiniteSeconds(value: number | null | undefined): number {
   const number = Number(value);
@@ -1025,8 +1035,7 @@ export function bookOutputData(
 
 export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
   BookHomeData,
-  | "bookOutput"
-  | "bookContent"
+  | "bookContentAvailable"
   | "bookCharCount"
   | "bookPreviewTitle"
   | "bookStaleNotice"
@@ -1034,8 +1043,7 @@ export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
 > {
   const content = latestBookContent(output);
   return {
-    bookOutput: output,
-    bookContent: content,
+    bookContentAvailable: Boolean(content),
     bookCharCount: trimText(content).length,
     bookPreviewTitle: bookOutputPreviewTitle(output),
     bookStaleNotice: bookOutputStaleNotice(output),
@@ -1108,7 +1116,7 @@ function chapterSourceView(
   const key = sourceRefKey(ref);
   const recordNumber = recordNumbers[key] || index + 1;
   return {
-    ...ref,
+    utterance_id: ref.utterance_id,
     sourceIndex: index + 1,
     recordNumber,
     labelText: `语音记录 ${recordNumber} · 素材 ${index + 1} · ${createdAtText} · ${charCount} 字`,
@@ -1121,25 +1129,31 @@ function chapterSourceView(
 
 function decorateChapterStructureOptions(
   chapters: BookChapterView[],
+  chapterSources: BookChapterSources,
   splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
   const options = chapters.map(chapterOption);
-  const recordNumbers = planSourceRecordNumbers(chapters);
+  const recordNumbers = planSourceRecordNumbers(
+    chapters.map((chapter) => ({ source_refs: chapterSources[chapter.id] || [] })),
+  );
   return chapters.map((chapter, index) => {
+    const sourceRefs = chapterSources[chapter.id] || [];
     const targetOptions = options.filter((option) => option.value !== chapter.id);
     const selectedSourceIds = new Set(splitSelections[chapter.id] || []);
-    const selectedCount = chapter.source_refs.filter((ref) => selectedSourceIds.has(ref.utterance_id)).length;
+    const selectedCount = sourceRefs.filter((ref) => selectedSourceIds.has(ref.utterance_id)).length;
     return {
       ...chapter,
       chapterSummaryMetaText: chapterSummaryMetaText(chapter),
-      sourceViews: chapter.source_refs.map((ref, sourceIndex) => (
-        chapterSourceView(ref, sourceIndex, recordNumbers, selectedSourceIds)
-      )),
-      sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${chapter.source_refs.length} 条`,
+      sourceViews: chapter.sourceListExpanded
+        ? sourceRefs.map((ref, sourceIndex) => (
+          chapterSourceView(ref, sourceIndex, recordNumbers, selectedSourceIds)
+        ))
+        : [],
+      sourceToggleText: chapter.sourceListExpanded ? "收起素材" : `查看 ${sourceRefs.length} 条`,
       mergeTargetOptions: targetOptions,
       splitSelectedCount: selectedCount,
       splitActionText: selectedCount ? `拆出所选 ${selectedCount} 条` : "拆出所选",
-      canSplitSelectedSources: selectedCount > 0 && selectedCount < chapter.source_refs.length,
+      canSplitSelectedSources: selectedCount > 0 && selectedCount < sourceRefs.length,
       canMoveUp: index > 0,
       canMoveDown: index < chapters.length - 1,
     };
@@ -1153,7 +1167,7 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
   const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
   const confirmedDraftCount = includedChapters.filter(
     (chapter) => (
-      chapter.draft?.status === "confirmed"
+      chapter.draftConfirmed
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
@@ -1171,6 +1185,7 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
 
 export function chapterCollectionData(
   chapters: BookChapterView[],
+  chapterSources: BookChapterSources,
   splitSelections: Record<string, string[]> = {},
 ): Pick<
   BookData,
@@ -1181,7 +1196,7 @@ export function chapterCollectionData(
   | "canGenerateBook"
   | "progressText"
 > {
-  const decorated = decorateChapterStructureOptions(chapters, splitSelections);
+  const decorated = decorateChapterStructureOptions(chapters, chapterSources, splitSelections);
   return {
     chapters: decorated,
     ...chapterStateData(decorated),
@@ -1199,14 +1214,14 @@ function chapterSummaryMetaText(
     | "sectionCount"
     | "sourceCount"
     | "draftCharCount"
-    | "draft"
+    | "draftAvailable"
     | "draftStatusText"
   >,
 ): string {
   const sourceText = bookOralSourceCountText(chapter.sourceCount);
   const inclusionText = chapter.include_in_book === false ? "不收入本书 · " : "";
   const sectionText = chapter.sectionCount ? `${chapter.sectionCount} 个小节 · ` : "";
-  if (!chapter.draft?.latest_version) {
+  if (!chapter.draftAvailable) {
     return `${inclusionText}${sectionText}${sourceText} · 尚未生成正文`;
   }
   return `${inclusionText}${sectionText}${sourceText} · ${chapter.draftCharCount} 字 · ${chapter.draftStatusText}`;
@@ -1234,9 +1249,12 @@ export function buildChapterViews(
   draftsByChapterId: Record<string, MemoirBookChapterDraft | null> = {},
   splitSelections: Record<string, string[]> = {},
 ): BookChapterView[] {
-  const chapters = [...plan.chapters]
+  const sortedChapters = [...plan.chapters]
     .sort((left, right) => left.sort_order - right.sort_order)
-    .map((chapter) => {
+  const chapterSources = Object.fromEntries(
+    sortedChapters.map((chapter) => [chapter.id, chapter.source_refs]),
+  );
+  const chapters = sortedChapters.map((chapter) => {
       const draft = draftsByChapterId[chapter.id] || null;
       const content = latestDraftContent(draft);
       const assignedPendingCount = responseCount(chapter.pending_source_count);
@@ -1259,11 +1277,14 @@ export function buildChapterViews(
         sectionCount,
         sourceCount: chapter.source_refs.length,
         draftCharCount,
-        draft,
+        draftAvailable: Boolean(draft?.latest_version),
         draftStatusText: statusText,
       };
       return {
-        ...chapter,
+        id: chapter.id,
+        title: chapter.title,
+        sort_order: chapter.sort_order,
+        include_in_book: chapter.include_in_book !== false,
         editingTitle: chapter.title,
         titleChanged: false,
         ttsTarget: `chapter:${chapter.id}`,
@@ -1290,8 +1311,8 @@ export function buildChapterViews(
           assignedCompletionCount,
           assignedNewCount,
         ),
-        draft,
-        draftContent: content,
+        draftAvailable: Boolean(draft?.latest_version),
+        draftConfirmed: draft?.status === "confirmed",
         draftCharCount,
         draftChanged: false,
         draftStatusText: statusText,
@@ -1317,7 +1338,7 @@ export function buildChapterViews(
         draftError: "",
       };
     });
-  return decorateChapterStructureOptions(chapters, splitSelections);
+  return decorateChapterStructureOptions(chapters, chapterSources, splitSelections);
 }
 
 export function bookProgressText(chapters: BookChapterView[]): string {
@@ -1327,12 +1348,12 @@ export function bookProgressText(chapters: BookChapterView[]): string {
   }
   const confirmed = includedChapters.filter(
     (chapter) => (
-      chapter.draft?.status === "confirmed"
+      chapter.draftConfirmed
       && !chapter.pendingSourceCount
       && !chapter.removedSourceCount
     ),
   ).length;
-  const generated = includedChapters.filter((chapter) => Boolean(chapter.draft?.latest_version)).length;
+  const generated = includedChapters.filter((chapter) => chapter.draftAvailable).length;
   return `${confirmed}/${includedChapters.length} 章已确认，${generated} 章已有正文`;
 }
 
@@ -1359,7 +1380,6 @@ export function guestBookData(): Partial<BookHomeData> {
     projectId: "",
     projectTitle: "我的回忆录",
     projectNarratorName: "",
-    plan: null,
     planTitle: "",
     stage: "empty",
     stageText: stageText("empty"),
@@ -1372,8 +1392,7 @@ export function guestBookData(): Partial<BookHomeData> {
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},
     titleBusyTarget: "",
-    bookOutput: null,
-    bookContent: "",
+    bookContentAvailable: false,
     bookCharCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
@@ -1404,10 +1423,13 @@ export function guestBookData(): Partial<BookHomeData> {
   };
 }
 
-export function toPlanInput(chapters: BookChapterView[]): MemoirBookPlanChapterInput[] {
+export function toPlanInput(
+  chapters: BookChapterView[],
+  chapterSources: BookChapterSources,
+): MemoirBookPlanChapterInput[] {
   return chapters.map((chapter) => ({
     title: trimText(chapter.editingTitle),
     include_in_book: chapter.include_in_book !== false,
-    source_refs: chapter.source_refs,
+    source_refs: chapterSources[chapter.id] || [],
   }));
 }
