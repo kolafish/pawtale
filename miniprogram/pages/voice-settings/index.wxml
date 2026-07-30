@@ -49,7 +49,7 @@
   </view>
 
   <view class="section">
-    <text class="section-title">文字润色强度</text>
+    <text class="section-title">素材与正文润色强度</text>
     <view class="settings-list">
       <view
         wx:for="{{transcriptPolishOptions}}"

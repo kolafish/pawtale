@@ -20,6 +20,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueStatus,
     MemoirCreatedBy,
     MemoirSectionStatus,
+    MemoirTranscriptPolishLevel,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -45,6 +46,10 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir.project_ai_preferences import (
+    load_project_transcript_polish_level,
+    text_polish_requirements,
+)
 from app.services.memoir.section_digests import (
     get_current_section_digest,
     mark_section_digests_stale,
@@ -56,7 +61,7 @@ from app.services.memoir.semantic_state import (
 from app.services.memoir.transcript_projection import current_material_text
 
 
-CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v2"
+CHAPTER_GENERATION_ENGINE = "llm_layered_sectioned_chapter_draft_v3"
 CHAPTER_GENERATION_SYSTEM_PROMPT = (
     "你是一位中文回忆录编辑。"
     "只使用允许的原始讲述整理成第一人称完整章节，不创造事实。"
@@ -104,6 +109,7 @@ class ChapterGenerationContext:
     sections: tuple[ChapterSectionInput, ...]
     materials: tuple[ChapterMaterialInput, ...]
     input_signature: str
+    polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW
 
 
 @dataclass(frozen=True)
@@ -428,6 +434,7 @@ def chapter_draft_generation_plan(
             sections=tuple(target_sections),
             materials=target_materials,
             input_signature=context.input_signature,
+            polish_level=context.polish_level,
         ),
         preserved_sections=tuple(preserved_sections),
         previous_model=latest.model if latest is not None else None,
@@ -544,6 +551,7 @@ async def load_chapter_generation_context(
             )
     if not materials:
         raise HTTPException(status_code=422, detail="章节没有可用于生成正文的素材")
+    polish_level = await load_project_transcript_polish_level(db, project_id)
     signature = semantic_json_signature(
         {
             "chapter": {
@@ -566,6 +574,7 @@ async def load_chapter_generation_context(
                 for item in materials
             ],
             "engine": CHAPTER_GENERATION_ENGINE,
+            "polish_level": polish_level.value,
         }
     )
     return ChapterGenerationContext(
@@ -575,6 +584,7 @@ async def load_chapter_generation_context(
         sections=tuple(sections),
         materials=tuple(materials),
         input_signature=signature,
+        polish_level=polish_level,
     )
 
 
@@ -631,6 +641,7 @@ def build_chapter_generation_prompt(
         for item in editorial_guidance[:8]
         if item.strip()
     ) or "（无额外编辑建议）"
+    polish_requirements = text_polish_requirements(context.polish_level)
     generation_scope = (
         "- 本次只生成标记为“本次生成”的一个小节，sections 数组只能包含这一项；"
         "不得复述其他小节的内容。\n"
@@ -668,6 +679,9 @@ def build_chapter_generation_prompt(
 编辑建议：
 {guidance}
 
+文字润色强度：{context.polish_level.value}
+{polish_requirements}
+
 前一小节衔接参考：
 {previous_section_context or "（这是本章第一个小节）"}
 
@@ -697,10 +711,9 @@ def build_chapter_generation_prompt(
 - 前一小节内容只用于自然衔接和避免重复，不是本小节可新增事实的来源。
 - 结合完整小节顺序安排本节开头和结尾；只在本节素材支持时自然承接，不强行添加过渡，也不要复述前一小节。
 - 只能使用输入中的事实和感受，可以调整顺序、合并重复。
-- 正文按时间、场景、事件推进或感受转折自然分段，段落之间用换行分隔。
+- 正文根据内容自然分段，段落之间用换行分隔。
 - 不要为了完整而虚构时间、地点、人物、因果或心理活动。
 - 不在正文中出现 section_id、material_id、编辑指令、“叙述者”等后台术语。
-- 同一次讲述保持连续，不把一条 Material 拆散后穿插到多处。
 """
 
 
@@ -715,6 +728,7 @@ def _single_section_context(
         sections=(section,),
         materials=section.materials,
         input_signature=context.input_signature,
+        polish_level=context.polish_level,
     )
 
 
@@ -1223,6 +1237,7 @@ def _section_input_signature(
     return semantic_json_signature(
         {
             "engine": CHAPTER_GENERATION_ENGINE,
+            "polish_level": context.polish_level.value,
             "chapter": {
                 "id": context.chapter_id,
                 "title": context.chapter_title,
@@ -1535,6 +1550,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
         "section_type": target_input.section_type,
         "section_version": target_input.section_version,
         "sort_order": target_input.sort_order,
+        "input_signature": _section_input_signature(after, target_input),
         "content": current.content,
         "used_material_ids": list(current.used_material_ids),
     }
