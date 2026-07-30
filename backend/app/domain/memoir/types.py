@@ -24,6 +24,12 @@ class MemoirGuidanceMode(str, Enum):
     GUIDED_INTERVIEW = "guided_interview"
 
 
+class MemoirTranscriptPolishLevel(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+
 class MemoirSessionGoal(str, Enum):
     OPEN_NARRATION = "open_narration"
     BOOK_COMPLETION = "book_completion"

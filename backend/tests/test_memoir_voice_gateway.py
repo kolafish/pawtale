@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
+    MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -57,6 +58,22 @@ def test_voice_gateway_normalizes_asr_payload_text_without_rewriting_provider_pa
 
     assert payload["text"] == "现在有几个章节啊？"
     assert payload["provider_payload"] == {"provider_text": "现在有几个张杰啊？"}
+
+
+def test_voice_gateway_validates_transcript_polish_level():
+    session = VoiceGatewaySession(
+        client=FakeGatewayClient(),
+        asr_client_factory=lambda: FakeStreamingASRClient(),
+    )
+
+    context = session._turn_context_from_message(
+        {"type": "session.start", "transcript_polish_level": "high"}
+    )
+    assert context.transcript_polish_level == "high"
+    with pytest.raises(VoiceGatewayClientError, match="invalid_transcript_polish_level"):
+        session._turn_context_from_message(
+            {"type": "session.start", "transcript_polish_level": "unknown"}
+        )
 
 
 async def test_voice_gateway_streams_audio_and_forwards_asr_events():
@@ -860,6 +877,11 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     )
     voice_session_id = create_response.json()["session"]["id"]
     project_id = create_response.json()["session"]["project_id"]
+    settings_response = await client.patch(
+        f"/api/mobile/memoir/projects/{project_id}",
+        json={"transcript_polish_level": "high"},
+    )
+    assert settings_response.status_code == 200
     persistence = VoiceGatewayPersistence(
         db=test_db,
         voice_session_id=voice_session_id,
@@ -938,6 +960,7 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert correction_job.dedupe_key == f"correct_transcript:{utterance.id}"
     assert correction_job.payload_json["utterance_id"] == utterance.id
     assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
+    assert correction_job.payload_json["transcript_polish_level"] == "high"
     assert MemoirEditingJobType.ORGANIZE_MATERIAL.value not in jobs_by_type
     assert MemoirEditingJobType.UPDATE_TOPIC_MAP.value not in jobs_by_type
 
@@ -1059,6 +1082,7 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
         assert strict is False
         assert kwargs["context"].scene == "voice_chat"
         assert kwargs["context"].guidance_mode == "free_narration"
+        assert kwargs["transcript_polish_level"] == MemoirTranscriptPolishLevel.LOW
         return CleanedTranscriptText(
             content="我小时候住在外婆家。",
             provider="fake-ai",
@@ -1120,6 +1144,8 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
     assert message.metadata_json["auto_corrected"] is True
     assert message.metadata_json["correction_status"] == "succeeded"
     assert message.metadata_json["correction_provider"] == "fake-ai"
+    assert message.metadata_json["correction_polish_level"] == "low"
+    assert message.metadata_json["correction_polish_fallback"] is False
     assert utterance is not None
     assert utterance.transcript_raw == "嗯，我小时候就是住在外婆家。"
     assert utterance.transcript_edited == "我小时候住在外婆家。"

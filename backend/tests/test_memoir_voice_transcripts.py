@@ -18,6 +18,7 @@ from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirEditingJobType,
     MemoirShareVideoJobStatus,
+    MemoirTranscriptPolishLevel,
     MemoirTranscriptVersionType,
 )
 from app.models.memoir import (
@@ -45,6 +46,7 @@ from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
+    _build_cleanup_prompt,
     _remove_obvious_oral_fillers,
     generate_cleaned_transcript_text,
 )
@@ -2754,6 +2756,21 @@ async def test_generate_cleaned_transcript_text_uses_fallback_when_not_strict():
     assert result.content == "今天下雨了，雨下的很大。"
     assert result.provider is None
     assert result.created_by == MemoirCreatedBy.SYSTEM
+
+
+@pytest.mark.parametrize(
+    ("level", "requirement"),
+    [
+        (MemoirTranscriptPolishLevel.LOW, "说话磕绊、赘词和没有信息增量的重复"),
+        (MemoirTranscriptPolishLevel.MEDIUM, "自然、连贯、偏书面"),
+        (MemoirTranscriptPolishLevel.HIGH, "重组句式与表达层次"),
+    ],
+)
+def test_cleanup_prompt_applies_selected_polish_level(level, requirement):
+    prompt = _build_cleanup_prompt("嗯，我我小时候住在那里。", transcript_polish_level=level)
+
+    assert requirement in prompt
+    assert "不新增事实、人物、关系、时间、地点、事件、因果或情绪" in prompt
 
 
 async def test_generate_cleaned_transcript_text_sends_recent_context_to_llm():

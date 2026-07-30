@@ -18,7 +18,10 @@ from app.models.memoir import (
 )
 from app.services.memoir import completion_interviews, editing_jobs, sections
 from app.services.memoir.editing_jobs import EditingJobResult
-from app.services.memoir.project_ai_preferences import load_project_ai_model
+from app.services.memoir.project_ai_preferences import (
+    load_project_ai_model,
+    normalize_transcript_polish_level,
+)
 from app.services.memoir.utterance_editing_pipeline import (
     schedule_material_organization_for_ready_utterance,
 )
@@ -37,6 +40,7 @@ async def schedule_transcript_correction_job(
     voice_session_id: str,
     raw_transcript_version_id: str,
     ai_model: str | None = None,
+    transcript_polish_level: str | None = None,
 ) -> MemoirEditingJob:
     return await editing_jobs.enqueue_editing_job(
         db,
@@ -47,6 +51,9 @@ async def schedule_transcript_correction_job(
             "voice_session_id": voice_session_id,
             "raw_transcript_version_id": raw_transcript_version_id,
             "ai_model": (ai_model or "").strip() or None,
+            "transcript_polish_level": normalize_transcript_polish_level(
+                transcript_polish_level
+            ).value,
         },
         dedupe_key=f"correct_transcript:{utterance_id}",
     )
@@ -117,6 +124,9 @@ async def run_transcript_correction_job(
         job.project_id,
         str(payload.get("ai_model") or "").strip() or None,
     )
+    polish_level = normalize_transcript_polish_level(
+        payload.get("transcript_polish_level")
+    )
 
     source_text = (utterance.transcript_raw or "").strip()
     if not source_text:
@@ -185,6 +195,7 @@ async def run_transcript_correction_job(
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=ai_model,
+        transcript_polish_level=polish_level,
         context=await load_voice_transcript_cleanup_context(
             db,
             utterance.voice_session,
@@ -217,6 +228,8 @@ async def run_transcript_correction_job(
             "correction_resolved_model": cleaned.resolved_model,
             "correction_response_model": cleaned.response_model,
             "correction_created_by": cleaned.created_by.value,
+            "correction_polish_level": polish_level.value,
+            "correction_polish_fallback": cleaned.provider is None,
             "corrected_transcript_version_id": corrected_version.id,
         }
         db.add(message)
@@ -253,6 +266,8 @@ async def run_transcript_correction_job(
             "resolved_model": cleaned.resolved_model,
             "response_model": cleaned.response_model,
             "created_by": cleaned.created_by.value,
+            "transcript_polish_level": polish_level.value,
+            "polish_fallback": cleaned.provider is None,
             "organization_job_id": organization_job.id if organization_job else None,
         }
     )
