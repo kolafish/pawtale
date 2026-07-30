@@ -57,6 +57,7 @@ from app.services.memoir.project_ai_preferences import (
     normalize_transcript_polish_level,
     project_transcript_polish_level,
     select_project_ai_model,
+    text_polish_requirements,
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
@@ -92,22 +93,6 @@ TRANSCRIPT_DELETE_CONFLICT_DETAIL = (
     "这条讲述已用于回忆录证据、追问结果或衍生内容，不能单独物理删除；"
     "如需彻底移除其可溯源数据，请删除整个回忆录项目。"
 )
-_POLISH_REQUIREMENTS = {
-    MemoirTranscriptPolishLevel.LOW: (
-        "- 去掉口头填充词、说话磕绊、赘词和没有信息增量的重复\n"
-        "- 除上述清理外，只整理基础标点和极少量语序；不书面化、不文学化，长度尽量接近原文"
-    ),
-    MemoirTranscriptPolishLevel.MEDIUM: (
-        "- 完成低档的全部清理，并适量调整口语化语序和用词，使表达自然、连贯、偏书面\n"
-        "- 可以轻度提炼和润色，但不概括事实、不合并或省略有信息量的细节，保留讲述者语气"
-    ),
-    MemoirTranscriptPolishLevel.HIGH: (
-        "- 完成低档的全部清理，并可较大幅度重组句式与表达层次，提炼重点、增强节奏和文采\n"
-        "- 可以压缩无信息量的铺陈，但不得省略具体事实与有意义的细节，仍保持第一人称讲述"
-    ),
-}
-
-
 @dataclass(frozen=True)
 class CleanedTranscriptText:
     content: str
@@ -217,7 +202,7 @@ def _build_cleanup_prompt(
     transcript_polish_level: MemoirTranscriptPolishLevel = MemoirTranscriptPolishLevel.LOW,
 ) -> str:
     context_block = _cleanup_context_block(context)
-    polish_requirements = _POLISH_REQUIREMENTS[transcript_polish_level]
+    polish_requirements = text_polish_requirements(transcript_polish_level)
     return f"""请按“{transcript_polish_level.value}”档对下面的中文口述识别文本做清理和润色。
 
 共同边界：

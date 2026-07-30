@@ -533,6 +533,10 @@ async def _create_current_draft(
             "section_type": section.section_type,
             "section_version": section.section_version,
             "sort_order": section.sort_order,
+            "input_signature": chapter_generation._section_input_signature(
+                context,
+                section,
+            ),
             "content": version.content,
             "used_material_ids": [
                 material.material_id for material in section.materials

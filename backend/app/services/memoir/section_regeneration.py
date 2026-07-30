@@ -274,7 +274,6 @@ def _build_section_structure_prompt(
     return (
         "任务：先从全章视角设计一组语义清晰、互不重复的小节。\n"
         "按事件、人物、阶段或反思主题自然分组，不强制小节数量；"
-        "标题要具体，避免用空泛的“回忆”“经历”。"
         "这里只设计候选小节，不做逐条归类。\n\n"
         f"章节：\n{chapter_json}\n\n"
         f"讲述概览：\n{outlines_json}\n\n"

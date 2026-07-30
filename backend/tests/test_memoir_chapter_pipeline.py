@@ -12,6 +12,7 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirSectionMaterialAssignedBy,
     MemoirSemanticCacheStatus,
+    MemoirTranscriptPolishLevel,
 )
 from app.migrations.memoir_chapters import (
     assert_memoir_chapter_schema,
@@ -256,13 +257,19 @@ def test_chapter_generation_preserves_explicit_section_boundaries():
 
 
 def test_chapter_generation_prompt_requests_natural_paragraphs():
-    prompt = chapter_generation.build_chapter_generation_prompt(
+    context = replace(
         _two_section_context(),
+        polish_level=MemoirTranscriptPolishLevel.HIGH,
+    )
+    prompt = chapter_generation.build_chapter_generation_prompt(
+        context,
         editorial_guidance=[],
     )
 
-    assert "正文按时间、场景、事件推进或感受转折自然分段" in prompt
-    assert "段落之间用换行分隔" in prompt
+    assert "正文根据内容自然分段，段落之间用换行分隔" in prompt
+    assert "可较大幅度重组句式与表达层次" in prompt
+    assert "按时间、场景、事件推进或感受转折" not in prompt
+    assert "不把一条 Material 拆散后穿插到多处" not in prompt
 
 
 def test_chapter_generation_rejects_reordered_sections():
@@ -548,6 +555,17 @@ async def test_chapter_generation_reuses_unchanged_draft_sections():
     assert [
         section.section_id
         for section in renamed_plan.target_context.sections
+    ] == ["section-1", "section-2"]
+    stronger_plan = chapter_generation.chapter_draft_generation_plan(
+        replace(
+            context,
+            polish_level=MemoirTranscriptPolishLevel.HIGH,
+        ),
+        latest,
+    )
+    assert [
+        section.section_id
+        for section in stronger_plan.target_context.sections
     ] == ["section-1", "section-2"]
 
     fake = ChangedSectionAI()
