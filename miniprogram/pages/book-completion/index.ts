@@ -1183,6 +1183,7 @@ definePage<BookCompletionData>()({
       !actionIds.length
       || this.data.generatingEditorialRevision
       || this.data.editorialRevisionCancelling
+      || this.data.requiredBookIssues.length > 0
       || (
         Boolean(this.data.answerApplicationJob?.answer_count)
         && !this.data.answerApplicationJob?.already_applied

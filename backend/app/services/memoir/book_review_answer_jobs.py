@@ -12,6 +12,7 @@ from app.models.memoir import (
 )
 from app.schemas.memoir_book_review import MemoirBookReviewAnswerApplyRequest
 from app.services.memoir import (
+    book_editorial_actions,
     book_output_versions,
     book_review_answer_application,
     book_review_answer_state,
@@ -68,10 +69,18 @@ async def _current_answer_state(
     return (
         len(context.answers),
         context.unresolved_count,
-        book_review_answer_state.marker_matches_context(
-            output=output,
-            version=latest,
-            context=context,
+        (
+            book_review_answer_state.marker_matches_context(
+                output=output,
+                version=latest,
+                context=context,
+            )
+            or book_editorial_actions.marker_matches_review(
+                output=output,
+                version=latest,
+                review=review,
+                answers_signature=context.answers_signature,
+            )
         ),
     )
 

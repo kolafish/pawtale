@@ -77,6 +77,8 @@ async def _require_applied_answers(
         db,
         review=review,
     )
+    if context.unresolved_count:
+        raise ValueError("请先处理完所有需要确认的问题")
     if not context.answers:
         return
     output = await db.scalar(

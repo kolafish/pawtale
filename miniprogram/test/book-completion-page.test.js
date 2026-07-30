@@ -493,6 +493,10 @@ test("book completion generates a preview only for selected editorial actions", 
   page.toggleEditorialAction.call(context, {
     currentTarget: { dataset: { actionId: "action/1" } },
   });
+  context.data.requiredBookIssues = [{ id: "issue-1" }];
+  await page.generateEditorialRevision.call(context);
+  assert.deepEqual(requests, []);
+  context.data.requiredBookIssues = [];
   await page.generateEditorialRevision.call(context);
   page.openEditorialRevision.call(context);
 

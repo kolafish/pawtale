@@ -1739,7 +1739,7 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         test_db,
         chapter_count=3,
     )
-    fake = LayeredBookAI(book_issue=True)
+    fake = LayeredBookAI(book_issue=True, book_actions=True)
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
     assert (
@@ -1768,6 +1768,18 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         )
     )
     assert issue is not None
+    blocked_editorial = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "editorial-revision/jobs",
+        json={
+            "action_ids": [
+                action["id"]
+                for action in generated.json()["review"]["editorial_actions"]
+            ]
+        },
+    )
+    assert blocked_editorial.status_code == 409
+    assert "先处理完所有需要确认的问题" in blocked_editorial.json()["detail"]
     blocked_state = await client.get(
         f"/api/memoir/projects/{project_id}/book-review/"
         "answer-application/jobs/current"
@@ -2053,6 +2065,44 @@ async def test_book_review_answers_create_and_preserve_a_new_book_version(
         .select_from(MemoirBookOutputVersion)
         .where(MemoirBookOutputVersion.project_id == project_id)
     ) == 2
+
+    editorial_job = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "editorial-revision/jobs",
+        json={
+            "action_ids": [
+                action["id"]
+                for action in generated.json()["review"]["editorial_actions"]
+            ]
+        },
+    )
+    assert editorial_job.status_code == 202, editorial_job.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            editorial_job.json()["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+    editorial_state = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "editorial-revision/jobs/current"
+    )
+    editorial_applied = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{editorial_state.json()['proposal_id']}/apply"
+    )
+    assert editorial_applied.status_code == 200, editorial_applied.text
+
+    preserved_answer_state = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        "answer-application/jobs/current"
+    )
+    assert preserved_answer_state.status_code == 200
+    assert preserved_answer_state.json()["already_applied"] is True
+    assert preserved_answer_state.json()["can_apply"] is False
 
 
 async def test_selected_editorial_actions_create_a_preview_before_applying(

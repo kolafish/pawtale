@@ -92,7 +92,11 @@
             />
           </view>
           <text
-            wx:if="{{answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied}}"
+            wx:if="{{requiredBookIssues.length}}"
+            class="editorial-actions-warning"
+          >请先处理完需要确认的问题，再执行全书编辑建议。</text>
+          <text
+            wx:elif="{{answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied}}"
             class="editorial-actions-warning"
           >请先处理根据问题回答生成的修改预览，再执行全书编辑建议。</text>
           <view
@@ -103,9 +107,9 @@
           >查看全书修改预览</view>
           <view
             wx:else
-            class="apply-answers-action ui-block-action ui-pressable {{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied) ? 'is-disabled' : ''}}"
+            class="apply-answers-action ui-block-action ui-pressable {{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || requiredBookIssues.length || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied) ? 'is-disabled' : ''}}"
             aria-role="button"
-            aria-disabled="{{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied)}}"
+            aria-disabled="{{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || requiredBookIssues.length || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied)}}"
             bindtap="generateEditorialRevision"
           >{{selectedEditorialActionIds.length ? "生成所选修改预览" : "请先选择建议"}}</view>
         </view>

@@ -86,7 +86,7 @@
         wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed}}"
         class="state-card"
       >
-        回答已经核对，正文没有需要改变的内容。
+        已核对所选修改，正文和章节顺序没有变化。
       </view>
     </view>
 
