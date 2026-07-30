@@ -1,9 +1,12 @@
 from collections.abc import AsyncIterator
+import time
 
 import httpx
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.services.ai_base import AITextServiceBase
+from app.services.ai_calls import AITextCallResult, build_text_call_result
 from app.services.ai_timeouts import (
     AIProviderTimeoutError,
     effective_ai_text_timeout_seconds,
@@ -44,6 +47,7 @@ class VolcArkTextService(AITextServiceBase):
         max_tokens: int = 4000,
         timeout: float | None = None,
         return_raw: bool = False,
+        text_format: dict[str, object] | None = None,
     ) -> str | tuple[str, dict]:
         request_timeout = effective_ai_text_timeout_seconds(timeout)
         payload = {
@@ -66,6 +70,8 @@ class VolcArkTextService(AITextServiceBase):
             payload["instructions"] = system_prompt
         if self.thinking_type:
             payload["thinking"] = {"type": self.thinking_type}
+        if text_format is not None:
+            payload["text"] = {"format": text_format}
 
         async def request() -> dict:
             try:
@@ -101,6 +107,44 @@ class VolcArkTextService(AITextServiceBase):
         if return_raw:
             return content, result
         return content
+
+    async def _generate_structured_once(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        output_model: type[BaseModel],
+        requested_model: str | None,
+        temperature: float,
+        max_tokens: int,
+        timeout: float | None,
+        attempt_count: int,
+    ) -> tuple[AITextCallResult, object | None]:
+        started_at = time.monotonic()
+        raw = await self._call_llm(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            return_raw=True,
+            text_format={
+                "type": "json_schema",
+                "name": "structured_result",
+                "strict": True,
+                "schema": output_model.model_json_schema(),
+            },
+        )
+        return (
+            build_text_call_result(
+                raw,
+                client=self,
+                requested_model=requested_model,
+                elapsed_ms=round((time.monotonic() - started_at) * 1000),
+                attempt_count=attempt_count,
+            ),
+            None,
+        )
 
     async def stream_llm(
         self,
