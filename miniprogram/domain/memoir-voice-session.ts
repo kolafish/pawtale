@@ -1,5 +1,6 @@
 import type { TTSAlignmentSegment } from "./memoir-audio";
 import type { MemoirBookChapterDraftStatus } from "./memoir-book";
+import type { MemoirTranscriptPolishLevel } from "./memoir";
 
 export type MemoirGuidanceMode = "free_narration" | "guided_interview";
 export type MemoirInterviewType = "ai_interview" | "human_interview";
@@ -242,6 +243,7 @@ export type VoiceGatewayClientEvent =
       speaker_role?: MemoirSpeakerRole;
       parent_message_id?: string;
       ai_model?: string;
+      transcript_polish_level?: MemoirTranscriptPolishLevel;
     }
   | { type: "audio.frame"; audio: string }
   | { type: "audio.end" }

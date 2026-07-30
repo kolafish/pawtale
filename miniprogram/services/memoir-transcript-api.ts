@@ -11,6 +11,7 @@ import type {
   MemoirVoiceTranscriptListResponse,
   MemoirVoiceTranscriptVoiceEditPreviewResponse,
 } from "../domain/memoir-transcript";
+import type { MemoirTranscriptPolishLevel } from "../domain/memoir";
 import {
   memoirAIRequest,
   memoirRequest,
@@ -25,6 +26,7 @@ import {
   cleanBaseUrl,
   readBackendConfig,
 } from "./request";
+import { readSelectedTranscriptPolishLevel } from "./transcript-polish-settings";
 
 interface VoiceTranscriptListOptions {
   projectId?: string;
@@ -87,9 +89,18 @@ export function startMemoirMaterialOfflineASR(
   utteranceId: string,
   aiModel?: string,
 ): Promise<MemoirMaterialOfflineASRState> {
-  return memoirAIRequest<MemoirMaterialOfflineASRState, { ai_model: string | null }>(
+  return memoirAIRequest<
+    MemoirMaterialOfflineASRState,
+    {
+      ai_model: string | null;
+      transcript_polish_level?: MemoirTranscriptPolishLevel;
+    }
+  >(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/offline-asr`,
-    { ai_model: aiModel?.trim() || null },
+    {
+      ai_model: aiModel?.trim() || null,
+      transcript_polish_level: readSelectedTranscriptPolishLevel(),
+    },
     { timeoutProfile: "mutation" },
   );
 }
@@ -269,6 +280,9 @@ export function recoverMemoirVoiceTranscript(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/recover-transcription`,
     {
       method: "POST",
+      data: {
+        transcript_polish_level: readSelectedTranscriptPolishLevel(),
+      },
       timeoutProfile: "generation",
     },
   );

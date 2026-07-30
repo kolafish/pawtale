@@ -1,4 +1,5 @@
 import type {
+  MemoirTranscriptPolishLevel,
   MemoirProjectListResponse,
   Project,
 } from "../domain/memoir";
@@ -18,6 +19,7 @@ export interface MemoirProjectInput {
   narrator_origin?: string;
   narrator_age?: number | null;
   default_guidance_mode?: MemoirGuidanceMode;
+  transcript_polish_level?: MemoirTranscriptPolishLevel;
 }
 
 export function listMemoirProjects(): Promise<MemoirProjectListResponse> {

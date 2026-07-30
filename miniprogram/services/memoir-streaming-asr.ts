@@ -8,6 +8,7 @@ import type {
 } from "../domain/memoir-voice-session";
 import { backendSessionCookieHeader, voiceGatewayUrl } from "./memoir-voice-api";
 import { readSelectedAIModel } from "./ai-model-settings";
+import { readSelectedTranscriptPolishLevel } from "./transcript-polish-settings";
 import {
   arrayBufferToBase64,
   classifyVoiceClientConnectionError,
@@ -501,6 +502,7 @@ export class MemoirStreamingAsrClient {
       speaker_role: this.currentSpeakerRole,
       parent_message_id: this.currentParentMessageId || undefined,
       ai_model: readSelectedAIModel(),
+      transcript_polish_level: readSelectedTranscriptPolishLevel(),
     });
     this.options.callbacks.onStatus("listening");
     this.emitCaptureStats("recording");
