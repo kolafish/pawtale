@@ -4,6 +4,10 @@ import type {
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionSummary,
 } from "../../domain/memoir-voice-session";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import {
   getMemoirVoiceProgress,
@@ -31,6 +35,7 @@ interface ModuleProgressView extends MemoirVoiceModuleProgress {
 }
 
 interface ProgressData {
+  pageClass: string;
   loading: boolean;
   error: string;
   activeProjectId: string;
@@ -45,6 +50,7 @@ interface ProgressDataset {
 }
 
 type DatasetEvent = PageDatasetEvent<ProgressDataset>;
+const PAGE_CLASS = "progress-page ui-page-shell ui-accessible-page";
 
 const MODULE_LABELS: Record<string, string> = {
   person: "人物",
@@ -143,6 +149,7 @@ function toModuleView(item: MemoirVoiceModuleProgress): ModuleProgressView {
 
 definePage<ProgressData>()({
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     error: "",
     activeProjectId: "",
@@ -153,6 +160,7 @@ definePage<ProgressData>()({
   },
 
   async onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     await this.loadProgress();
   },
 

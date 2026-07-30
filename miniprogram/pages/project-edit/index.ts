@@ -1,4 +1,8 @@
 import type { MemoirGuidanceMode } from "../../domain/memoir-voice-session";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import type { MemoirNarratorGender } from "../../services/memoir";
 import { getMemoirIdentity } from "../../services/auth";
@@ -34,6 +38,7 @@ interface Option<T extends string> {
 }
 
 interface ProjectEditData {
+  pageClass: string;
   loading: boolean;
   saving: boolean;
   error: string;
@@ -50,6 +55,7 @@ interface ProjectEditData {
 
 const GENDER_VALUES: readonly MemoirNarratorGender[] = ["male", "female", "unspecified"];
 const GUIDANCE_VALUES: readonly MemoirGuidanceMode[] = ["free_narration", "guided_interview"];
+const PAGE_CLASS = "project-edit-page ui-page-shell ui-accessible-page";
 
 function ageFromText(value: string): number | null {
   const trimmed = value.trim();
@@ -65,6 +71,7 @@ function ageFromText(value: string): number | null {
 
 definePage<ProjectEditData>()({
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     saving: false,
     error: "",
@@ -84,6 +91,10 @@ definePage<ProjectEditData>()({
       { value: "free_narration", label: "自己慢慢讲" },
       { value: "guided_interview", label: "小余陪着问" },
     ],
+  },
+
+  onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
   },
 
   async onLoad(query?: PageQuery) {

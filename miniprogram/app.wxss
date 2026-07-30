@@ -108,6 +108,99 @@ image {
   line-height: 1.5;
 }
 
+.ui-accessible-page.large-text {
+  --ui-hit-size: 96rpx;
+}
+
+.ui-accessible-page.large-text .brand-title,
+.ui-accessible-page.large-text .hero-title,
+.ui-accessible-page.large-text .page-title,
+.ui-accessible-page.large-text .reader-title,
+.ui-accessible-page.large-text .revision-title,
+.ui-accessible-page.large-text .status-title {
+  font-size: 60rpx;
+  line-height: 1.35;
+}
+
+.ui-accessible-page.large-text .summary-value {
+  font-size: 50rpx;
+}
+
+.ui-accessible-page.large-text .asset-title,
+.ui-accessible-page.large-text .book-design-title,
+.ui-accessible-page.large-text .book-review-title,
+.ui-accessible-page.large-text .chapter-title,
+.ui-accessible-page.large-text .draft-section-title,
+.ui-accessible-page.large-text .empty-title,
+.ui-accessible-page.large-text .module-title,
+.ui-accessible-page.large-text .panel-title,
+.ui-accessible-page.large-text .project-title,
+.ui-accessible-page.large-text .section-name,
+.ui-accessible-page.large-text .section-header,
+.ui-accessible-page.large-text .section-title,
+.ui-accessible-page.large-text .session-title,
+.ui-accessible-page.large-text .settings-toggle-title {
+  font-size: 44rpx;
+  line-height: 1.45;
+}
+
+.ui-accessible-page.large-text .book-review-summary,
+.ui-accessible-page.large-text .chapter-finished-detail,
+.ui-accessible-page.large-text .empty-copy,
+.ui-accessible-page.large-text .page-detail,
+.ui-accessible-page.large-text .panel-copy,
+.ui-accessible-page.large-text .reader-subtitle,
+.ui-accessible-page.large-text .review-list-item,
+.ui-accessible-page.large-text .revision-summary,
+.ui-accessible-page.large-text .section-detail,
+.ui-accessible-page.large-text .status-detail {
+  font-size: 32rpx;
+  line-height: 1.6;
+}
+
+.ui-accessible-page.large-text .book-content,
+.ui-accessible-page.large-text .book-output-text,
+.ui-accessible-page.large-text .chapter-content,
+.ui-accessible-page.large-text .draft-content,
+.ui-accessible-page.large-text .paragraph,
+.ui-accessible-page.large-text .section-content,
+.ui-accessible-page.large-text .small-section-content {
+  font-size: 36rpx;
+  line-height: 1.75;
+}
+
+.ui-accessible-page.large-text .chapter-meta,
+.ui-accessible-page.large-text .hero-meta,
+.ui-accessible-page.large-text .module-meta,
+.ui-accessible-page.large-text .project-hint,
+.ui-accessible-page.large-text .project-meta,
+.ui-accessible-page.large-text .reader-meta,
+.ui-accessible-page.large-text .reader-notice,
+.ui-accessible-page.large-text .revision-meta,
+.ui-accessible-page.large-text .section-meta,
+.ui-accessible-page.large-text .session-meta,
+.ui-accessible-page.large-text .summary-label {
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+.ui-accessible-page.large-text button,
+.ui-accessible-page.large-text input,
+.ui-accessible-page.large-text textarea,
+.ui-accessible-page.large-text .draft-section-action,
+.ui-accessible-page.large-text .material-assignment-action,
+.ui-accessible-page.large-text .primary-action,
+.ui-accessible-page.large-text .reader-audio-action,
+.ui-accessible-page.large-text .rewrite-action,
+.ui-accessible-page.large-text .secondary-action,
+.ui-accessible-page.large-text .settings-toggle,
+.ui-accessible-page.large-text .structure-regenerate-action,
+.ui-accessible-page.large-text .ui-block-action {
+  min-height: 48px;
+  font-size: 32rpx;
+  line-height: 1.4;
+}
+
 .ui-pressable {
   transition-property: transform, opacity, background-color, box-shadow;
   transition-duration: 150ms;

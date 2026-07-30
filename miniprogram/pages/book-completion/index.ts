@@ -7,6 +7,10 @@ import {
   aiTaskProgressPercent,
   type AITaskProgressView,
 } from "../../services/ai-task-progress";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
 import {
@@ -45,6 +49,7 @@ import {
 
 
 const POLL_INTERVAL_MS = 1500;
+const PAGE_CLASS = "completion-page ui-page-shell ui-accessible-page";
 
 interface ChapterView extends MemoirChapterCompletionSummary {
   stateText: string;
@@ -86,6 +91,7 @@ function activeTaskProgress(title: string, detail: string): TaskProgressView {
 }
 
 interface BookCompletionData {
+  pageClass: string;
   projectId: string;
   projectTitle: string;
   loading: boolean;
@@ -456,6 +462,7 @@ definePage<BookCompletionData>()({
   pageVisible: false,
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     projectId: "",
     projectTitle: "",
     loading: true,
@@ -502,6 +509,7 @@ definePage<BookCompletionData>()({
   },
 
   async onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     this.pageVisible = true;
     await this.loadOverview();
   },

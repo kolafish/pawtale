@@ -5,6 +5,10 @@ import {
   loginWithWeChat,
   updateBackendProfile,
 } from "../../services/auth";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { relaunchHome } from "../../services/navigation";
 import { definePage } from "../../services/page-definition";
 import {
@@ -13,6 +17,7 @@ import {
 } from "../../services/user-profile";
 
 const WECHAT_PLACEHOLDER_DISPLAY_NAME = "微信用户";
+const PAGE_CLASS = "login-page ui-page-shell ui-accessible-page";
 
 interface InputEvent {
   detail: {
@@ -27,6 +32,7 @@ interface ChooseAvatarEvent {
 }
 
 interface LoginData {
+  pageClass: string;
   email: string;
   password: string;
   accountMode: boolean;
@@ -50,6 +56,7 @@ export function needsWeChatProfileSetup(user: BackendAuthUser): boolean {
 
 definePage<LoginData>()({
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     email: "",
     password: "",
     accountMode: false,
@@ -60,6 +67,10 @@ definePage<LoginData>()({
     profileDisplayName: "",
     profileAvatarPath: "",
     error: "",
+  },
+
+  onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
   },
 
   changeEmail(event: InputEvent) {

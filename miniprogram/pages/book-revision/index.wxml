@@ -1,4 +1,4 @@
-<view class="revision-page ui-page-shell">
+<view class="{{pageClass}}">
   <view wx:if="{{loading}}" class="state-card">正在准备修改预览...</view>
   <view wx:elif="{{error && !proposal}}" class="ui-error-banner">{{error}}</view>
 

@@ -2,6 +2,10 @@ import type {
   MemoirBookManuscriptChapter,
   MemoirBookOutputSection,
 } from "../../domain/memoir-book";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import {
   applyMemoirBookRevisionProposal,
@@ -34,6 +38,7 @@ type PreviewVersion = "before" | "after";
 type FeedbackVoicePhase = "idle" | "listening" | "transcribing";
 const FEEDBACK_POLL_INTERVAL_MS = 1500;
 const FEEDBACK_VOICE_MAX_DURATION_MS = 30000;
+const PAGE_CLASS = "revision-page ui-page-shell ui-accessible-page";
 
 interface RevisionSectionView extends MemoirBookRevisionSectionComparison {
   display_content: string;
@@ -68,6 +73,7 @@ interface RevisionProposalView extends Pick<
 }
 
 interface BookRevisionData {
+  pageClass: string;
   projectId: string;
   proposalId: string;
   loading: boolean;
@@ -160,6 +166,7 @@ definePage<BookRevisionData>()({
   pageActive: false,
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     projectId: "",
     proposalId: "",
     loading: true,
@@ -190,6 +197,7 @@ definePage<BookRevisionData>()({
   },
 
   onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     this.pageActive = true;
     if (
       !this.data.loading

@@ -73,6 +73,10 @@ export function accessibilityPageClass(
   return largeTextEnabled ? `${baseClass} large-text` : baseClass;
 }
 
+export function accessibilityPagePatch(baseClass: string): { pageClass: string } {
+  return { pageClass: accessibilityPageClass(baseClass) };
+}
+
 export function saveLargeTextEnabled(largeTextEnabled: boolean): AccessibilitySettings {
   return saveAccessibilitySettings({ largeTextEnabled });
 }

@@ -237,6 +237,7 @@ export function scrollToSection(selector: string) {
 }
 
 export interface ChapterWorkspacePageData {
+  pageClass: string;
   loading: boolean;
   error: string;
   projectId: string;

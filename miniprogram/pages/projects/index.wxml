@@ -1,4 +1,4 @@
-<view class="projects-page ui-page-shell">
+<view class="{{pageClass}}">
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="action-bar">

@@ -5,6 +5,10 @@ import type {
   MemoirImageAsset,
   MemoirImageAssetListResponse,
 } from "../../domain/memoir-book";
+import {
+  accessibilityPageClass,
+  accessibilityPagePatch,
+} from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 import { getMemoirIdentity } from "../../services/auth";
 import {
@@ -50,6 +54,7 @@ interface ImageAssetView extends MemoirImageAsset {
 }
 
 interface ImageAssetsData {
+  pageClass: string;
   loading: boolean;
   error: string;
   projectId: string;
@@ -73,6 +78,7 @@ type TextInputEvent = PageTextInputEvent<ImageAssetDataset>;
 
 const THUMBNAIL_BATCH_SIZE = 4;
 const MAX_AUTO_DOWNLOADED_THUMBNAILS = 24;
+const PAGE_CLASS = "image-assets-page ui-page-shell ui-accessible-page";
 
 function trimText(value: string | null | undefined): string {
   return (value || "").trim();
@@ -201,6 +207,7 @@ definePage<ImageAssetsData>()({
   loadToken: 0,
 
   data: {
+    pageClass: accessibilityPageClass(PAGE_CLASS),
     loading: false,
     error: "",
     projectId: "",
@@ -222,6 +229,7 @@ definePage<ImageAssetsData>()({
   },
 
   async onShow() {
+    this.setData(accessibilityPagePatch(PAGE_CLASS));
     await this.loadImageAssets();
   },
 
