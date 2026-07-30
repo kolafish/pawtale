@@ -97,6 +97,13 @@
   background: var(--ui-surface-subtle);
 }
 
+.version-switch {
+  position: sticky;
+  top: 16rpx;
+  z-index: 4;
+  box-shadow: var(--ui-card-shadow-raised);
+}
+
 .mode-option,
 .version-option {
   display: flex;
