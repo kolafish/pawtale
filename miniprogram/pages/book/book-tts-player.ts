@@ -30,6 +30,7 @@ export interface BookTTSHost {
   audioPlayback: AudioPlaybackController;
   ttsProgress: VoiceAssistantTTSProgressRuntime;
   playToken: number;
+  onBookTTSProgressPatch?(patch: VoiceAssistantTTSProgressPatch): void;
 }
 
 export function applyBookTTSProgressPatch(
@@ -42,6 +43,7 @@ export function applyBookTTSProgressPatch(
     bookTTSRemainingText: patch.ttsRemainingText,
     bookTTSProgressPercent: patch.ttsProgressPercent,
   });
+  host.onBookTTSProgressPatch?.(patch);
 }
 
 export async function playBookAudioFiles(

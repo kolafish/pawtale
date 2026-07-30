@@ -315,6 +315,12 @@
   margin-top: 20rpx;
 }
 
+.reader-sentence-highlight {
+  border-radius: 4rpx;
+  background: var(--ui-warning-surface);
+  color: var(--ui-text-primary);
+}
+
 .chapter-content,
 .book-content {
   margin-top: 24rpx;

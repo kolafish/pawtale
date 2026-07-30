@@ -16,7 +16,10 @@ import { routeAuthError } from "../../services/navigation";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { setPageNavigationTitle } from "../../services/page-navigation";
 import { readBookTTSRequest } from "../../services/tts-settings";
-import { VoiceAssistantTTSProgressRuntime } from "../../services/voice-assistant-tts-progress";
+import {
+  VoiceAssistantTTSProgressRuntime,
+  type VoiceAssistantTTSProgressPatch,
+} from "../../services/voice-assistant-tts-progress";
 import {
   datasetString,
   queryParam,
@@ -63,9 +66,25 @@ type BookReaderData = Pick<
   readerMode: "book" | "chapter";
   readerTitle: string;
   readerSubtitle: string;
+  readerHighlightSectionId: string;
+  readerHighlightParagraphIndex: number;
+  readerHighlightBefore: string;
+  readerHighlightCurrent: string;
+  readerHighlightAfter: string;
 };
 
 type ReaderDatasetEvent = PageDatasetEvent<{ index?: string }>;
+
+interface ChapterParagraphRange {
+  sectionId: string;
+  paragraphIndex: number;
+  text: string;
+  start: number;
+  end: number;
+}
+
+const SENTENCE_ENDINGS = "。！？!?";
+const SENTENCE_CLOSERS = "”’\"'」』】）)";
 
 type WxWithPageScrollTo = typeof wx & {
   pageScrollTo?: (options: { selector?: string; scrollTop?: number; duration?: number }) => void;
@@ -76,6 +95,76 @@ function scrollReader(options: { selector?: string; scrollTop?: number }) {
   if (typeof pageScrollTo === "function") {
     pageScrollTo({ ...options, duration: 280 });
   }
+}
+
+function textLength(value: string): number {
+  return Array.from(value).length;
+}
+
+function chapterParagraphRanges(
+  sections: BookOutputChapterPreviewView["sections"],
+): ChapterParagraphRange[] {
+  const ranges: ChapterParagraphRange[] = [];
+  let chapterOffset = 0;
+  sections.forEach((section, sectionIndex) => {
+    chapterOffset += textLength(section.title) + 2;
+    let searchOffset = 0;
+    section.paragraphs.forEach((paragraph, paragraphIndex) => {
+      const startInContent = section.content.indexOf(paragraph, searchOffset);
+      if (startInContent < 0) {
+        return;
+      }
+      const start = chapterOffset + textLength(section.content.slice(0, startInContent));
+      ranges.push({
+        sectionId: section.id,
+        paragraphIndex,
+        text: paragraph,
+        start,
+        end: start + textLength(paragraph),
+      });
+      searchOffset = startInContent + paragraph.length;
+    });
+    chapterOffset += textLength(section.content);
+    if (sectionIndex < sections.length - 1) {
+      chapterOffset += 2;
+    }
+  });
+  return ranges;
+}
+
+function sentenceHighlight(
+  range: ChapterParagraphRange,
+  currentTextStart: number,
+): { before: string; current: string; after: string } {
+  const characters = Array.from(range.text);
+  const currentIndex = currentTextStart - range.start;
+  let sentenceStart = 0;
+  for (let index = 0; index < characters.length; index += 1) {
+    if (!SENTENCE_ENDINGS.includes(characters[index])) {
+      continue;
+    }
+    let sentenceEnd = index + 1;
+    while (
+      sentenceEnd < characters.length
+      && SENTENCE_CLOSERS.includes(characters[sentenceEnd])
+    ) {
+      sentenceEnd += 1;
+    }
+    if (currentIndex < sentenceEnd) {
+      return {
+        before: characters.slice(0, sentenceStart).join(""),
+        current: characters.slice(sentenceStart, sentenceEnd).join(""),
+        after: characters.slice(sentenceEnd).join(""),
+      };
+    }
+    sentenceStart = sentenceEnd;
+    index = sentenceEnd - 1;
+  }
+  return {
+    before: characters.slice(0, sentenceStart).join(""),
+    current: characters.slice(sentenceStart).join(""),
+    after: "",
+  };
 }
 
 function readerData(
@@ -177,6 +266,8 @@ definePage<BookReaderData>()({
   audioPlayback: new AudioPlaybackController(),
   ttsProgress: new VoiceAssistantTTSProgressRuntime(),
   playToken: 0,
+  chapterParagraphRanges: [] as ChapterParagraphRange[],
+  readerHighlightKey: "",
 
   data: {
     loading: false,
@@ -186,6 +277,11 @@ definePage<BookReaderData>()({
     chapterId: "",
     versionId: "",
     readerMode: "book",
+    readerHighlightSectionId: "",
+    readerHighlightParagraphIndex: -1,
+    readerHighlightBefore: "",
+    readerHighlightCurrent: "",
+    readerHighlightAfter: "",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -322,12 +418,61 @@ definePage<BookReaderData>()({
     return playBookAudioFiles(this, response, target, token, activeText);
   },
 
+  onBookTTSProgressPatch(patch: VoiceAssistantTTSProgressPatch) {
+    if (this.data.readerMode !== "chapter" || !patch.ttsCurrentText) {
+      this.clearReaderHighlight();
+      return;
+    }
+    const currentTextStart = textLength(patch.ttsSpokenText);
+    const range = this.chapterParagraphRanges.find(
+      (item) => currentTextStart >= item.start && currentTextStart < item.end,
+    );
+    if (!range) {
+      this.clearReaderHighlight();
+      return;
+    }
+    const highlight = sentenceHighlight(range, currentTextStart);
+    const key = [
+      range.sectionId,
+      range.paragraphIndex,
+      highlight.before.length,
+      highlight.current.length,
+    ].join(":");
+    if (key === this.readerHighlightKey) {
+      return;
+    }
+    this.readerHighlightKey = key;
+    this.setData({
+      readerHighlightSectionId: range.sectionId,
+      readerHighlightParagraphIndex: range.paragraphIndex,
+      readerHighlightBefore: highlight.before,
+      readerHighlightCurrent: highlight.current,
+      readerHighlightAfter: highlight.after,
+    });
+  },
+
+  clearReaderHighlight() {
+    if (!this.readerHighlightKey && !this.data.readerHighlightCurrent) {
+      return;
+    }
+    this.readerHighlightKey = "";
+    this.setData({
+      readerHighlightSectionId: "",
+      readerHighlightParagraphIndex: -1,
+      readerHighlightBefore: "",
+      readerHighlightCurrent: "",
+      readerHighlightAfter: "",
+    });
+  },
+
   stopPlayback() {
     stopBookPlayback(this);
+    this.clearReaderHighlight();
   },
 
   async loadBookReader(projectId: string, versionId = "") {
     this.stopPlayback();
+    this.chapterParagraphRanges = [];
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const output = await getMemoirBookOutput(projectId);
@@ -354,7 +499,11 @@ definePage<BookReaderData>()({
     this.setData({ loading: true, error: "", playbackError: "" });
     try {
       const workspace = await getMemoirChapterWorkspace(projectId, chapterId);
-      this.setData(chapterReaderData(workspace));
+      const data = chapterReaderData(workspace);
+      this.chapterParagraphRanges = chapterParagraphRanges(
+        data.bookPreviewChapters[0]?.sections || [],
+      );
+      this.setData(data);
       if (!trimText(this.data.bookContent)) {
         this.setData({ error: "本章正文还没有生成。" });
       }

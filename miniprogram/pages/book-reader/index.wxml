@@ -37,7 +37,7 @@
         phase="{{ttsBusyTarget ? 'preparing' : (playingTarget ? 'playing' : 'completed')}}"
         progress="{{bookTTSProgressPercent}}"
         spoken-text="{{readerMode === 'chapter' ? '' : bookTTSSpokenText}}"
-        current-text="{{bookTTSCurrentText}}"
+        current-text="{{readerMode === 'chapter' ? '' : bookTTSCurrentText}}"
         remaining-text="{{readerMode === 'chapter' ? '' : bookTTSRemainingText}}"
         bindstop="stopPlayback"
       />
@@ -86,13 +86,20 @@
             <text class="small-section-index">小节 {{section.indexText}}</text>
             <text class="small-section-title">{{section.title}}</text>
             <view class="small-section-paragraph-list">
-              <text
+              <view
                 wx:for="{{section.paragraphs}}"
                 wx:key="*this"
                 wx:for-item="paragraph"
+                wx:for-index="paragraphIndex"
                 class="small-section-content"
-                selectable
-              >{{paragraph}}</text>
+              >
+                <block wx:if="{{readerMode === 'chapter' && section.id === readerHighlightSectionId && paragraphIndex === readerHighlightParagraphIndex}}">
+                  <text selectable>{{readerHighlightBefore}}</text>
+                  <text class="reader-sentence-highlight" selectable>{{readerHighlightCurrent}}</text>
+                  <text selectable>{{readerHighlightAfter}}</text>
+                </block>
+                <text wx:else selectable>{{paragraph}}</text>
+              </view>
             </view>
           </view>
         </view>
