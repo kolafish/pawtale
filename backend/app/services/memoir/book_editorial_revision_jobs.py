@@ -14,9 +14,9 @@ from app.models.memoir import (
 from app.schemas.memoir_book_review import MemoirBookEditorialRevisionRequest
 from app.services.memoir import (
     book_editorial_actions,
-    book_editorial_revision,
     book_output_versions,
     book_review_answer_state,
+    book_revision_generation,
     book_reviews,
     editing_jobs,
 )
@@ -245,7 +245,7 @@ async def run_editorial_revision_job(
             str(payload.get("user_id") or ""),
             allow_admin=payload.get("allow_admin") is True,
         )
-        result = await book_editorial_revision.generate_editorial_revision_proposal(
+        result = await book_revision_generation.generate_editorial_revision_proposal(
             db,
             project_id=job.project_id,
             expected_review_input_signature=str(
@@ -269,7 +269,7 @@ async def run_editorial_revision_job(
                 "cancelled": True,
             },
         )
-    except book_editorial_revision.EditorialRevisionError as exc:
+    except book_revision_generation.BookRevisionError as exc:
         return EditingJobResult(
             status=MemoirEditingJobStatus.FAILED,
             result_json={

@@ -39,8 +39,7 @@ from app.schemas.memoir_narrative import (
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.services.memoir import (
     book_completion_jobs,
-    book_editorial_revision,
-    book_review_answer_application,
+    book_revision_generation,
     book_review_jobs,
     book_reviews,
     chapter_preparation_jobs,
@@ -408,12 +407,7 @@ def _install_ai(
     monkeypatch.setattr(chapter_digests, "get_ai_service", factory)
     monkeypatch.setattr(chapter_generation, "get_ai_service", factory)
     monkeypatch.setattr(book_reviews, "get_ai_service", factory)
-    monkeypatch.setattr(book_editorial_revision, "get_ai_service", factory)
-    monkeypatch.setattr(
-        book_review_answer_application,
-        "get_ai_service",
-        factory,
-    )
+    monkeypatch.setattr(book_revision_generation, "get_ai_service", factory)
 
 
 def test_book_review_answer_output_rejects_structure_changes():
@@ -427,27 +421,27 @@ def test_book_review_answer_output_rejects_structure_changes():
     }
 
     assert (
-        book_review_answer_application._ApplicationOutput.model_validate(
+        book_revision_generation._RevisionOutput.model_validate(
             valid
         ).model_dump()
         == valid
     )
     with pytest.raises(ValueError):
-        book_review_answer_application._ApplicationOutput.model_validate(
+        book_revision_generation._RevisionOutput.model_validate(
             {
                 **valid,
                 "summary": "补充 C3 章节并调整 S19 小节。",
             }
         )
     with pytest.raises(ValueError):
-        book_review_answer_application._ApplicationOutput.model_validate(
+        book_revision_generation._RevisionOutput.model_validate(
             {
                 **valid,
                 "chapter_order": ["C1"],
             }
         )
     with pytest.raises(ValueError):
-        book_review_answer_application._ApplicationOutput.model_validate(
+        book_revision_generation._RevisionOutput.model_validate(
             {
                 **valid,
                 "section_revisions": [
@@ -462,7 +456,7 @@ def test_book_review_answer_output_rejects_structure_changes():
 
 def test_book_review_answer_summary_hides_legacy_model_references():
     summary = (
-        book_review_answer_application.user_visible_application_summary(
+        book_revision_generation.user_visible_application_summary(
             "补充C3章节的关联说明，明确C4章节为同一人；调整C4小节S19。",
             changed_chapter_count=2,
         )
