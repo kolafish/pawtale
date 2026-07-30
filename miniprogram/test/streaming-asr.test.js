@@ -1023,6 +1023,7 @@ test("streaming ASR starts provider only after recording starts", async () => {
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, "session.start");
   assert.equal(sent[0].speaker_role, "interviewer");
+  assert.equal(sent[0].transcript_polish_level, undefined);
   assert.equal(captureStats.at(-1).state, "recording");
   delete global.wx;
 });

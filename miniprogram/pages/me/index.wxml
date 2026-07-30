@@ -188,7 +188,7 @@
         >
           <view class="settings-row-copy">
             <text class="action-title">语音与 AI</text>
-            <text class="action-meta">模型、音色、语速与访谈环境。</text>
+            <text class="action-meta">模型、文字润色、音色、语速与访谈环境。</text>
           </view>
           <view class="settings-row-tail">
             <text class="row-value">{{aiModelLabel}}</text>

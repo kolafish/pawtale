@@ -1,4 +1,5 @@
 export type ProjectType = "novel" | "article" | "memoir";
+export type MemoirTranscriptPolishLevel = "low" | "medium" | "high";
 
 export interface User {
   id: string;
