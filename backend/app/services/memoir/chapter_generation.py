@@ -307,8 +307,6 @@ def _preserved_draft_section(
     context: ChapterGenerationContext,
     section: ChapterSectionInput,
     snapshot: object,
-    *,
-    legacy_material_snapshot: list[dict[str, object]],
 ) -> GeneratedChapterSection | None:
     if not isinstance(snapshot, dict):
         return None
@@ -341,23 +339,10 @@ def _preserved_draft_section(
         or set(used_material_ids) - allowed_material_ids
     ):
         return None
-    stored_input_signature = str(
-        snapshot.get("input_signature") or ""
-    )
-    if stored_input_signature:
-        if stored_input_signature != _section_input_signature(
-            context,
-            section,
-        ):
-            return None
-    elif (
-        len(used_material_ids) != len(current_material_ids)
-        or set(used_material_ids) != set(current_material_ids)
-        or legacy_material_snapshot != _section_source_snapshot(section)
+    if snapshot.get("input_signature") != _section_input_signature(
+        context,
+        section,
     ):
-        # Legacy snapshots did not store a per-section source signature.
-        # Reuse them only when they prove complete coverage of the current
-        # material set; otherwise regenerate conservatively.
         return None
     return GeneratedChapterSection(
         section_id=section.section_id,
@@ -377,17 +362,6 @@ def chapter_draft_generation_plan(
         else []
     )
     snapshots_by_id: dict[str, object] = {}
-    material_snapshots_by_section: dict[str, list[dict[str, object]]] = {}
-    if latest is not None:
-        for item in getattr(latest, "material_snapshot_json", []):
-            if not isinstance(item, dict):
-                continue
-            section_id = str(item.get("section_id") or "")
-            if section_id:
-                material_snapshots_by_section.setdefault(
-                    section_id,
-                    [],
-                ).append(dict(item))
     duplicate_ids: set[str] = set()
     for snapshot in snapshots:
         if not isinstance(snapshot, dict):
@@ -410,10 +384,6 @@ def chapter_draft_generation_plan(
                 context,
                 section,
                 snapshots_by_id.get(section.section_id),
-                legacy_material_snapshot=material_snapshots_by_section.get(
-                    section.section_id,
-                    [],
-                ),
             )
         )
         if preserved is None:
