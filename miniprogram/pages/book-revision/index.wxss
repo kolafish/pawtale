@@ -191,6 +191,39 @@
   margin-top: 24rpx;
 }
 
+.feedback-card {
+  margin-top: 30rpx;
+}
+
+.feedback-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 176rpx;
+  margin-top: 22rpx;
+  padding: 20rpx;
+  border-radius: 12rpx;
+  background: var(--ui-surface-subtle);
+  color: var(--ui-text-primary);
+  font-size: 27rpx;
+  line-height: 42rpx;
+}
+
+.feedback-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 14rpx;
+  margin-top: 18rpx;
+}
+
+.feedback-actions .secondary-action {
+  margin-top: 0;
+}
+
+.feedback-voice.recording {
+  background: var(--ui-danger-surface);
+  color: var(--ui-danger-text);
+}
+
 .revision-actions {
   margin-top: 30rpx;
 }

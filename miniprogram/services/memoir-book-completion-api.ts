@@ -338,6 +338,30 @@ export function getMemoirBookRevisionProposal(
   );
 }
 
+export function enqueueMemoirBookRevisionFeedback(
+  projectId: string,
+  proposalId: string,
+  feedback: string,
+): Promise<MemoirBookRevisionJob> {
+  return memoirAIRequest<
+    MemoirBookRevisionJob,
+    { feedback: string; ai_model: null }
+  >(
+    bookRevisionProposalPath(projectId, proposalId, "/feedback/jobs"),
+    { feedback, ai_model: null },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookRevisionFeedbackJob(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionJob> {
+  return memoirRequest<MemoirBookRevisionJob>(
+    bookRevisionProposalPath(projectId, proposalId, "/feedback/jobs/current"),
+  );
+}
+
 export function applyMemoirBookRevisionProposal(
   projectId: string,
   proposalId: string,

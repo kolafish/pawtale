@@ -115,21 +115,54 @@
       </view>
     </view>
 
+    <view wx:if="{{proposal.can_apply}}" class="revision-intro feedback-card">
+      <text class="chapter-label">继续调整</text>
+      <text class="chapter-title">这版还需要怎么改？</text>
+      <text class="revision-summary">
+        输入或说出意见，AI 会更新当前预览；确认使用前不会写入正式书稿。
+      </text>
+      <textarea
+        class="feedback-input"
+        value="{{feedbackText}}"
+        maxlength="1000"
+        disabled="{{busy || feedbackBusy || feedbackVoicePhase !== 'idle'}}"
+        placeholder="请输入希望保留或继续调整的内容"
+        bindinput="changeFeedbackText"
+      />
+      <view class="feedback-actions">
+        <view
+          class="feedback-voice secondary-action ui-block-action ui-pressable {{feedbackVoicePhase === 'listening' ? 'recording' : ''}} {{busy || feedbackBusy || feedbackVoicePhase === 'transcribing' ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{busy || feedbackBusy || feedbackVoicePhase === 'transcribing'}}"
+          bindtap="toggleFeedbackVoice"
+        >{{feedbackVoicePhase === "listening" ? "结束录音" : (feedbackVoicePhase === "transcribing" ? "正在识别…" : "语音输入")}}</view>
+        <view
+          class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
+          aria-role="button"
+          aria-disabled="{{busy || feedbackBusy || feedbackVoicePhase !== 'idle'}}"
+          bindtap="submitFeedback"
+        >{{feedbackBusy ? "正在调整…" : "按意见调整"}}</view>
+      </view>
+      <text wx:if="{{feedbackBusy}}" class="revision-meta">
+        AI 正在更新修改预览，离开页面后任务也会继续。
+      </text>
+    </view>
+
     <view wx:if="{{error}}" class="ui-error-banner">{{error}}</view>
 
     <view class="revision-actions">
       <view
         wx:if="{{proposal.can_apply}}"
-        class="primary-action ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
+        class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{busy}}"
+        aria-disabled="{{busy || feedbackBusy || feedbackVoicePhase !== 'idle'}}"
         bindtap="applyRevision"
-      >{{busy ? "正在确认…" : "确认使用这版修改"}}</view>
+      >{{feedbackBusy ? "请等待调整完成" : (busy ? "正在确认…" : "确认使用这版修改")}}</view>
       <view
         wx:if="{{proposal.can_dismiss}}"
-        class="secondary-action ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
+        class="secondary-action ui-block-action ui-pressable {{busy || feedbackBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{busy}}"
+        aria-disabled="{{busy || feedbackBusy || feedbackVoicePhase !== 'idle'}}"
         bindtap="dismissRevision"
       >放弃这版修改</view>
       <view
