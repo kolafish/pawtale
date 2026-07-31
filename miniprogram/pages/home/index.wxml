@@ -92,6 +92,21 @@
       {{voiceStartNoteText}}
     </text>
 
+    <view
+      wx:if="{{hasProject}}"
+      class="narration-overview-link"
+      bindtap="openNarrationOverview"
+      hover-class="ui-subtle-action-hover"
+      aria-role="button"
+      aria-label="打开讲述概览"
+    >
+      <view class="narration-overview-copy">
+        <text class="narration-overview-title">讲述概览</text>
+        <text class="narration-overview-hint">回顾聊过的话题和最近讲述</text>
+      </view>
+      <text class="narration-overview-action">查看 ›</text>
+    </view>
+
     <view wx:if="{{showResumeActions}}" class="resume-actions">
       <view
         class="more-actions-toggle"
@@ -114,16 +129,6 @@
         >
           <text>{{alternateModeButtonTitle}}</text>
           <text class="resume-action-hint">换一种讲述方式</text>
-        </view>
-        <view
-          class="{{resumeAskButtonClass}} topic-map"
-          bindtap="openTopicMap"
-          hover-class="{{resumeAskButtonHoverClass}}"
-          aria-role="button"
-          aria-disabled="{{creatingVoice}}"
-        >
-          <text>看看聊过的话题</text>
-          <text class="resume-action-hint">回顾已经讲过的内容</text>
         </view>
         <view
           class="{{resumeAskButtonClass}} completion"

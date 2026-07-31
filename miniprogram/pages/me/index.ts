@@ -433,13 +433,6 @@ definePage<MeData>()({
     wx.navigateTo({ url: "/pages/projects/index" });
   },
 
-  openVoiceProgress() {
-    if (!this.data.projectCount) {
-      return;
-    }
-    wx.navigateTo({ url: "/pages/voice-progress/index" });
-  },
-
   openVoiceSettings() {
     wx.navigateTo({ url: "/pages/voice-settings/index" });
   },

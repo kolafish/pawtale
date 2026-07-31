@@ -1,59 +1,45 @@
 <view class="{{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">{{projectTitle ? (projectTitle + " · 当前回忆录") : "当前回忆录的讲述进度"}}</text>
-    <button class="refresh-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadProgress">刷新</button>
+    <text class="ui-page-context">{{projectTitle ? (projectTitle + " · 讲述概览") : "当前回忆录的讲述概览"}}</text>
+    <button class="refresh-button ui-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadOverview">刷新</button>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="summary-grid">
     <view class="summary-item">
-      <text class="summary-value">{{progress.session_count || 0}}</text>
+      <text class="summary-value ui-tabular">{{progress.session_count || 0}}</text>
       <text class="summary-label">讲述次数</text>
     </view>
     <view class="summary-item">
-      <text class="summary-value">{{progress.utterance_count || 0}}</text>
+      <text class="summary-value ui-tabular">{{progress.utterance_count || 0}}</text>
       <text class="summary-label">讲述记录</text>
     </view>
     <view class="summary-item">
-      <text class="summary-value">{{progress.total_user_char_count || 0}}</text>
-      <text class="summary-label">字</text>
+      <text class="summary-value ui-tabular">{{progress.total_user_char_count || 0}}</text>
+      <text class="summary-label">文字</text>
     </view>
     <view class="summary-item">
-      <text class="summary-value">{{progress.assistant_message_count || 0}}</text>
+      <text class="summary-value ui-tabular">{{progress.assistant_message_count || 0}}</text>
       <text class="summary-label">小余追问</text>
     </view>
   </view>
 
   <view class="section">
     <view class="section-header">
-      <text>模块覆盖</text>
-      <text class="section-meta">{{modules.length}} 类</text>
-    </view>
-    <view wx:if="{{!modules.length}}" class="empty-state">还没有形成模块覆盖数据。</view>
-    <view wx:for="{{modules}}" wx:key="module" class="module-row">
-      <view>
-        <text class="module-title">{{item.label}}</text>
-        <text class="module-meta">{{item.session_count}} 次讲述 · {{item.utterance_count}} 段讲述 · {{item.user_char_count}} 字</text>
-      </view>
-    </view>
-  </view>
-
-  <view class="section">
-    <view class="section-header">
-      <text>最近讲述</text>
-      <text class="section-meta">{{sessions.length}} 次</text>
+      <text class="section-title">最近讲述</text>
+      <text class="section-meta ui-tabular">{{sessions.length}} 次</text>
     </view>
     <view wx:if="{{!sessions.length}}" class="empty-state">还没有语音访谈记录。</view>
     <view wx:for="{{sessions}}" wx:key="id" class="session-card">
       <view class="session-head">
-        <view>
+        <view class="session-copy">
           <text class="session-title">{{item.modeText}} · {{item.moduleText}}</text>
           <text class="session-meta">{{item.updatedText}} · {{item.statusText}}</text>
         </view>
         <button
           wx:if="{{item.canContinue}}"
-          class="continue-button"
+          class="continue-button ui-button"
           data-id="{{item.id}}"
           bindtap="continueSession"
         >
@@ -69,4 +55,63 @@
       <text wx:if="{{item.last_message_text}}" class="last-message">{{item.last_message_text}}</text>
     </view>
   </view>
+
+  <view class="section topic-section">
+    <text class="section-kicker">人生话题</text>
+    <text class="section-title topic-headline">{{topicHeadline}}</text>
+    <text class="topic-detail">{{topicDetail}}</text>
+    <view class="map-note">
+      <text class="map-note-title">按自己的节奏来</text>
+      <text class="map-note-text">“还可以聊”只是一个方向，不是欠着没完成。小余不会因为这里空着就打断您正在讲的故事。</text>
+    </view>
+
+    <view wx:if="{{loading && !topicModules.length}}" class="empty-state">正在看看聊过的话题...</view>
+    <view wx:else class="module-list">
+      <view wx:for="{{topicModules}}" wx:key="module_key" class="topic-module">
+        <text class="module-title">{{item.title}}</text>
+        <view class="topic-list">
+          <view
+            wx:for="{{item.items}}"
+            wx:for-item="topic"
+            wx:key="id"
+            class="{{topic.itemClass}}"
+          >
+            <view class="topic-heading">
+              <text class="topic-title">{{topic.title}}</text>
+              <text class="state-chip">{{topic.state_text}}</text>
+            </view>
+            <text class="topic-intent">{{topic.intent}}</text>
+            <text class="state-detail">{{topic.state_detail}}</text>
+            <view
+              wx:if="{{topic.user_resolution === 'none'}}"
+              class="topic-start-action ui-block-action {{topic.startDisabled ? 'is-disabled' : ''}}"
+              data-item-id="{{topic.id}}"
+              catchtap="startFromTopic"
+              hover-class="{{topic.startDisabled ? 'none' : 'topic-start-action-hover'}}"
+              aria-role="button"
+              aria-disabled="{{topic.startDisabled}}"
+            >
+              {{topic.startText}}
+            </view>
+            <view
+              class="topic-choice-action ui-block-action {{topic.actionDisabled ? 'is-disabled' : ''}}"
+              data-item-id="{{topic.id}}"
+              catchtap="chooseResolution"
+              hover-class="{{topic.actionDisabled ? 'none' : 'topic-choice-action-hover'}}"
+              aria-role="button"
+              aria-disabled="{{topic.actionDisabled}}"
+            >
+              {{topic.actionText}}
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{!topicModules.length && !loading}}" class="empty-state">
+        <text>暂时还没有可展示的话题。</text>
+        <text>您仍然可以先自由讲一段。</text>
+      </view>
+    </view>
+  </view>
+
 </view>

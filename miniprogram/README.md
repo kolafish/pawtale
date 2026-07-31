@@ -41,9 +41,8 @@
 ### 语音与素材
 
 - `pages/voice-chat`：录音、partial/final 转写、动态追问、流式播放、自动续听、用户打断和断线恢复；
-- `pages/topic-map`：查看已经讲过的话题，并记录“够了/不适合/不想聊”等用户决定；
+- `pages/voice-progress`：汇总当前回忆录的讲述数据、最近会话和聊过的人生话题，并记录“够了/不适合/不想聊”等用户决定；
 - `pages/transcript-detail`：回听、阅读/编辑切换、人工校正、重新识别、清理、删除和分享视频；
-- `pages/voice-progress`：当前回忆录会话和真实进度快照；
 
 ### 成书
 

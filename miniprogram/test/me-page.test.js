@@ -536,7 +536,7 @@ test("me saves Web login credentials without overriding wechat nickname", async 
   assert.equal(context.data.passwordLoginEnabled, true);
 });
 
-test("me keeps memoir management, voice progress, and voice settings as separate entries", () => {
+test("me keeps memoir management and voice settings as separate entries", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -546,30 +546,13 @@ test("me keeps memoir management, voice progress, and voice settings as separate
   const { page } = loadMePage();
   const context = pageContext(page, { projectCount: 1 });
 
-  page.openVoiceProgress.call(context);
   page.openProjects.call(context);
   page.openVoiceSettings.call(context);
 
   assert.deepEqual(navigations, [
-    "/pages/voice-progress/index",
     "/pages/projects/index",
     "/pages/voice-settings/index",
   ]);
-});
-
-test("me does not open voice progress before a memoir exists", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadMePage();
-  const context = pageContext(page, { projectCount: 0 });
-
-  page.openVoiceProgress.call(context);
-
-  assert.deepEqual(navigations, []);
 });
 
 test("me clears the current user's memoir snapshots on logout", async () => {
