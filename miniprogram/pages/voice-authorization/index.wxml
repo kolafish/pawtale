@@ -30,8 +30,8 @@
     </view>
   </view>
 
-  <view class="actions">
-    <button class="ghost-button" bindtap="disagreeAndBack">暂不同意</button>
-    <button class="primary-button" bindtap="agreeAndBack">同意并返回</button>
+  <view class="actions ui-fixed-action-dock">
+    <button class="ghost-button ui-button" bindtap="disagreeAndBack">暂不同意</button>
+    <button class="primary-button ui-button" bindtap="agreeAndBack">同意并返回</button>
   </view>
 </view>
