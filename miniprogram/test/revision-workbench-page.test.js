@@ -169,7 +169,7 @@ function loadRevisionPage({ api = {} } = {}) {
       "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
-  return loadPageModule("../pages/book-revision/index.ts");
+  return loadPageModule("../pages/revision-workbench/index.ts");
 }
 
 test("book revision plan presents proposed book information before drafting", () => {
@@ -223,7 +223,7 @@ test("book revision preview exposes before and after book information", () => {
 
 test("book revision page loads only the selected whole-book preview on demand", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
-  assert.ok(appJson.pages.includes("pages/book-revision/index"));
+  assert.ok(appJson.pages.includes("pages/revision-workbench/index"));
 
   const previewRequests = [];
   const { mod, page } = loadRevisionPage({
