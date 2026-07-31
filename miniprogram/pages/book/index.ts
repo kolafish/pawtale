@@ -25,7 +25,6 @@ import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
-  createMemoirBookOutputTTS,
   createMemoirBookPlanOutlineTTS,
   assembleMemoirBookOutput,
   generateMemoirBookChapterTitle,
@@ -85,7 +84,6 @@ import {
   buildChapterViews,
   chapterCollectionData,
   guestBookData,
-  latestBookContent,
   latestDraftContent,
   planStage,
   stageText,
@@ -122,6 +120,10 @@ export function bookCompletionPageUrl(projectId: string, projectTitle: string): 
     projectId,
     projectTitle,
   });
+}
+
+export function bookReaderPageUrl(projectId: string): string {
+  return pageUrl("/pages/book-reader/index", { projectId });
 }
 
 interface BookDataset {
@@ -750,6 +752,14 @@ definePage<BookPageData>()({
     wx.navigateTo({ url: bookExportPageUrl(this.data.projectId, action) });
   },
 
+  openBookReader() {
+    if (!this.data.projectId || !this.data.bookContentAvailable || this.data.bookStaleNotice) {
+      return;
+    }
+    this.stopPlayback();
+    wx.navigateTo({ url: bookReaderPageUrl(this.data.projectId) });
+  },
+
   openBookCompletion() {
     if (!this.data.projectId || this.data.stage !== "drafting") {
       return;
@@ -1176,62 +1186,10 @@ definePage<BookPageData>()({
     }
   },
 
-  async playBookOutputAudio() {
-    const target = "book";
-    if (this.data.playingTarget === target || this.data.ttsBusyTarget === target) {
-      this.stopPlayback();
-      return;
-    }
-    const bookContent = latestBookContent(this.bookOutput);
-    if (!bookContent) {
-      wx.showToast({ title: "先生成全书稿", icon: "none" });
-      return;
-    }
-    if (
-      !this.data.projectId
-      || this.data.ttsBusyTarget
-      || this.data.updatingPlanStructure
-      || this.data.generatingBook
-    ) {
-      return;
-    }
-    this.stopPlayback();
-    const token = this.audioPlayback.nextToken();
-    this.playToken = token;
-    this.setData({
-      ttsBusyTarget: target,
-      error: "",
-    });
-    try {
-      const response = await this.requestBookAudio(target);
-      if (token !== this.playToken) {
-        return;
-      }
-      this.setData({ ttsBusyTarget: "" });
-      await this.playAudioFiles(response, target, token, trimText(bookContent));
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      if (token === this.playToken) {
-        this.setData({
-          error: error instanceof Error ? error.message : "全书朗读失败",
-        });
-      }
-    } finally {
-      if (token === this.playToken && this.data.ttsBusyTarget === target) {
-        this.setData({ ttsBusyTarget: "" });
-      }
-    }
-  },
-
   async requestBookAudio(target: string) {
     const request = readBookTTSRequest();
     if (target === "outline") {
       return createMemoirBookPlanOutlineTTS(this.data.projectId, request);
-    }
-    if (target === "book") {
-      return createMemoirBookOutputTTS(this.data.projectId, request);
     }
     if (target.startsWith("chapter:")) {
       return createMemoirBookChapterDraftTTS(this.data.projectId, target.slice("chapter:".length), request);

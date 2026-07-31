@@ -25,6 +25,7 @@ import {
 } from "../../services/memoir-project-profile";
 import { isAuthError, navigateToLogin } from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
+import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
@@ -87,7 +88,6 @@ interface HomeData {
   voiceStartNoteText: string;
   resumeAskButtonClass: string;
   resumeAskButtonHoverClass: string;
-  completionButtonTitle: string;
   showResumeActions: boolean;
   showMoreActions: boolean;
   moreActionsToggleText: string;
@@ -119,7 +119,6 @@ type HomeViewPatch = Pick<
   | "voiceStartNoteText"
   | "resumeAskButtonClass"
   | "resumeAskButtonHoverClass"
-  | "completionButtonTitle"
   | "showResumeActions"
   | "moreActionsToggleText"
   | "moreActionsToggleAriaLabel"
@@ -282,7 +281,6 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
         ),
     resumeAskButtonClass: blocked ? "resume-ask-button button-blocked" : "resume-ask-button",
     resumeAskButtonHoverClass: blocked ? "none" : "resume-ask-button-hover",
-    completionButtonTitle: "帮我补全这本书",
     showResumeActions: state.hasProject && !state.needsLogin && !state.loading,
     moreActionsToggleText: state.showMoreActions ? "收起其他方式" : "其他讲述与整理方式",
     moreActionsToggleAriaLabel: state.showMoreActions ? "收起其他讲述与整理方式" : "展开其他讲述与整理方式",
@@ -379,7 +377,6 @@ definePage<HomeData>()({
     voiceStartNoteText: "先起个名字，我再听您讲。",
     resumeAskButtonClass: "resume-ask-button",
     resumeAskButtonHoverClass: "resume-ask-button-hover",
-    completionButtonTitle: "帮我补全这本书",
     showResumeActions: false,
     showMoreActions: false,
     moreActionsToggleText: "其他讲述与整理方式",
@@ -559,16 +556,12 @@ definePage<HomeData>()({
     setHomeData(this, { showMoreActions: !this.data.showMoreActions });
   },
 
-  startBookCompletion() {
+  openBookWorkspace() {
     if (!this.canStartVoiceChat(false)) {
       return;
     }
-    wx.navigateTo({
-      url: pageUrl("/pages/book-completion/index", {
-        projectId: this.data.projectId,
-        projectTitle: this.data.projectDisplayTitle || this.data.projectTitle,
-      }),
-    });
+    writeBookWorkspaceNavigationTarget("chapters");
+    wx.switchTab({ url: "/pages/book/index" });
   },
 
   openNarrationOverview() {

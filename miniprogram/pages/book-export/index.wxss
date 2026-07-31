@@ -146,6 +146,10 @@
   gap: 16rpx;
 }
 
+.export-section-title {
+  margin-top: 4rpx;
+}
+
 .export-action-hint {
   margin-top: -8rpx;
   padding: 0 4rpx;

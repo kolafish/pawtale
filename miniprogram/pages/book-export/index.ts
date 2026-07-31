@@ -191,7 +191,7 @@ definePage<BookExportData>()({
     loading: false,
     error: "",
     projectId: "",
-    planTitle: "预览与导出",
+    planTitle: "阅读与导出",
     totalChapterCount: 0,
     bookOutputAvailable: false,
     bookPreviewChaptersExpanded: true,
@@ -251,7 +251,7 @@ definePage<BookExportData>()({
       if (routeAuthError(error, "login")) {
         return;
       }
-      this.setData({ error: error instanceof Error ? error.message : "预览与导出页加载失败" });
+      this.setData({ error: error instanceof Error ? error.message : "阅读与导出页加载失败" });
     } finally {
       this.setData({ loading: false });
     }

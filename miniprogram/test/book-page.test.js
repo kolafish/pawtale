@@ -142,7 +142,6 @@ function loadBookPage({
     applyMemoirBookPlanStructureCommand: unmockedAsync("applyMemoirBookPlanStructureCommand"),
     confirmMemoirBookPlan: unmockedAsync("confirmMemoirBookPlan"),
     createMemoirBookChapterDraftTTS: unmockedAsync("createMemoirBookChapterDraftTTS"),
-    createMemoirBookOutputTTS: unmockedAsync("createMemoirBookOutputTTS"),
     createMemoirBookPlanOutlineTTS: unmockedAsync("createMemoirBookPlanOutlineTTS"),
     assembleMemoirBookOutput: unmockedAsync("assembleMemoirBookOutput"),
     updateMemoirBookOutput: unmockedAsync("updateMemoirBookOutput"),
@@ -387,7 +386,7 @@ test("book page hides and restores a chapter without deleting its content", asyn
   assert.equal(context.data.totalChapterCount, 2);
 });
 
-test("book page routes progress export actions to the full-book export page", () => {
+test("book page routes reading and export actions to their focused pages", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -399,16 +398,23 @@ test("book page routes progress export actions to the full-book export page", ()
     projectId: "project/1",
     bookContentAvailable: true,
   });
+  context.stopPlayback = () => {};
 
   assert.equal(
     mod.bookExportPageUrl("project/1", "print_pdf"),
     "/pages/book-export/index?projectId=project%2F1&action=print_pdf",
   );
+  assert.equal(
+    mod.bookReaderPageUrl("project/1"),
+    "/pages/book-reader/index?projectId=project%2F1",
+  );
 
+  page.openBookReader.call(context);
   page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "preview" } } });
   page.openBookExportPage.call(context, { currentTarget: { dataset: { action: "reading_pdf" } } });
 
   assert.deepEqual(navigations, [
+    "/pages/book-reader/index?projectId=project%2F1",
     "/pages/book-export/index?projectId=project%2F1&action=preview",
     "/pages/book-export/index?projectId=project%2F1&action=reading_pdf",
   ]);
@@ -1038,7 +1044,7 @@ test("book page shows assembly errors without leaving the page busy", async () =
   assert.equal(context.data.generatingBook, false);
 });
 
-test("book page sends TTS voice and speed for chapter, outline, and full-book audio", async () => {
+test("book page sends TTS voice and speed for chapter and outline audio", async () => {
   const calls = [];
   const { page } = loadBookPage({
     voiceApiExports: {
@@ -1048,10 +1054,6 @@ test("book page sends TTS voice and speed for chapter, outline, and full-book au
       },
       createMemoirBookPlanOutlineTTS: async (projectId, data) => {
         calls.push({ kind: "outline", projectId, data });
-        return sampleAudioResponse();
-      },
-      createMemoirBookOutputTTS: async (projectId, data) => {
-        calls.push({ kind: "book", projectId, data });
         return sampleAudioResponse();
       },
     },
@@ -1066,7 +1068,6 @@ test("book page sends TTS voice and speed for chapter, outline, and full-book au
 
   await page.requestBookAudio.call(context, "outline");
   await page.requestBookAudio.call(context, "chapter:chapter-1");
-  await page.requestBookAudio.call(context, "book");
 
   assert.deepEqual(calls, [
     {
@@ -1086,37 +1087,7 @@ test("book page sends TTS voice and speed for chapter, outline, and full-book au
         speed_ratio: 1.5,
       },
     },
-    {
-      kind: "book",
-      projectId: "project/1",
-      data: {
-        voice: "zh_male_m191_uranus_bigtts",
-        speed_ratio: 1.5,
-      },
-    },
   ]);
-});
-
-test("book page does not synthesize stale full-book audio while the book is updating", async () => {
-  let requestCount = 0;
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      createMemoirBookOutputTTS: async () => {
-        requestCount += 1;
-        return sampleAudioResponse();
-      },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    generatingBook: true,
-  });
-  page.applyBookOutput.call(context, sampleBookOutput(1, "更新前的全书正文"));
-
-  await page.playBookOutputAudio.call(context);
-
-  assert.equal(requestCount, 0);
-  assert.equal(context.data.ttsBusyTarget, "");
 });
 
 test("book page shows chapter narration toast after preflight passes", async () => {

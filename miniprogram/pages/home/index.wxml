@@ -132,13 +132,13 @@
         </view>
         <view
           class="{{resumeAskButtonClass}} completion"
-          bindtap="startBookCompletion"
+          bindtap="openBookWorkspace"
           hover-class="{{resumeAskButtonHoverClass}}"
           aria-role="button"
           aria-disabled="{{creatingVoice}}"
         >
-          <text>{{completionButtonTitle}}</text>
-          <text class="resume-action-hint">查找全书还缺的内容</text>
+          <text>整理书稿</text>
+          <text class="resume-action-hint">查看章节进度和待补内容</text>
         </view>
         <view
           class="{{resumeAskButtonClass}}"

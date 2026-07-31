@@ -10,7 +10,7 @@
   <block wx:else>
     <view class="export-hero">
       <view>
-        <text class="eyebrow">预览与导出</text>
+        <text class="eyebrow">成书中心</text>
         <text class="hero-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
         <text class="hero-meta">
           {{totalChapterCount}} 章 · {{bookCharCount || 0}} 字 · {{bookContent ? "已生成书稿" : "尚未生成书稿"}}
@@ -79,6 +79,7 @@
         <text wx:if="{{!bookPreviewChapters.length}}" class="book-output-text" selectable>{{bookContent}}</text>
       </view>
 
+      <text class="section-title export-section-title">导出文件</text>
       <view class="export-settings">
         <view class="setting-row">
           <view>
@@ -139,7 +140,7 @@
         bindtap="toggleBookSettings"
       >
         <view class="settings-toggle-copy">
-          <text class="settings-toggle-title">成书信息与更多设置</text>
+          <text class="settings-toggle-title">成书设置</text>
           <text class="settings-toggle-meta">书名、封面、前后记、书稿结构和历史版本</text>
         </view>
         <text class="settings-toggle-action">{{showBookSettings ? "收起" : "展开"}}</text>
