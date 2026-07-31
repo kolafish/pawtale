@@ -20,6 +20,13 @@ import {
   type MemoirBookRevisionSectionComparison,
 } from "../../services/memoir-book-completion-api";
 import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
+import {
+  applyMemoirChapterSectionRevision,
+  dismissMemoirChapterSectionRevision,
+  enqueueMemoirChapterSectionRevision,
+  getMemoirChapterSectionRevisionJob,
+  getMemoirChapterSectionRevisionProposal,
+} from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
@@ -30,6 +37,7 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { PollingTimer } from "../../services/polling-timer";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 
 
 type RevisionMode = "changes" | "whole";
@@ -99,6 +107,9 @@ interface RevisionWorkbenchData {
   pageClass: string;
   scope: RevisionScope;
   projectId: string;
+  chapterId: string;
+  sectionId: string;
+  sectionTitle: string;
   proposalId: string;
   loading: boolean;
   busy: boolean;
@@ -210,6 +221,13 @@ function confirmAction(title: string, content: string): Promise<boolean> {
   });
 }
 
+function matchesSectionOperation(
+  job: object,
+  operation: "feedback" | "draft",
+): boolean {
+  return !("operation" in job) || job.operation === operation;
+}
+
 definePage<RevisionWorkbenchData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
@@ -223,6 +241,9 @@ definePage<RevisionWorkbenchData>()({
     pageClass: accessibilityPageClass(PAGE_CLASS),
     scope: "book",
     projectId: "",
+    chapterId: "",
+    sectionId: "",
+    sectionTitle: "",
     proposalId: "",
     loading: true,
     busy: false,
@@ -241,19 +262,39 @@ definePage<RevisionWorkbenchData>()({
   },
 
   async onLoad(query: PageQuery = {}) {
-    const scope = queryParam(query, "scope");
+    const scope: RevisionScope = queryParam(query, "scope") === "chapter_section"
+      ? "chapter_section"
+      : "book";
     const projectId = queryParam(query, "projectId");
+    const chapterId = queryParam(query, "chapterId");
+    const sectionId = queryParam(query, "sectionId");
+    const sectionTitle = queryParam(query, "sectionTitle");
     const proposalId = queryParam(query, "proposalId");
     this.setData({
-      scope: scope === "chapter_section" ? scope : "book",
+      scope,
       projectId,
+      chapterId,
+      sectionId,
+      sectionTitle,
       proposalId,
       feedbackDictationUrl: projectId
         ? memoirProjectDictationUrl(projectId)
         : "",
     });
-    if (scope !== "book" || !projectId || !proposalId) {
+    setPageNavigationTitle(
+      scope === "chapter_section" ? "调整小节正文" : "确认书稿修改",
+    );
+    if (
+      !projectId
+      || (scope === "book" && !proposalId)
+      || (scope === "chapter_section" && (!chapterId || !sectionId))
+    ) {
       this.setData({ loading: false, error: "缺少修改预览信息" });
+      return;
+    }
+    if (scope === "chapter_section" && !proposalId) {
+      this.setData({ loading: false });
+      await this.refreshFeedbackJob();
       return;
     }
     if (await this.loadProposal()) {
@@ -269,9 +310,11 @@ definePage<RevisionWorkbenchData>()({
     this.pageActive = true;
     if (
       !this.data.loading
-      && this.data.proposal
       && this.data.projectId
-      && this.data.proposalId
+      && (
+        (this.data.proposal && this.data.proposalId)
+        || (this.data.scope === "chapter_section" && !this.data.proposalId)
+      )
     ) {
       void this.refreshFeedbackJob();
       void this.refreshDraftJob();
@@ -295,10 +338,17 @@ definePage<RevisionWorkbenchData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
-      const proposal = await getMemoirBookRevisionProposal(
-        this.data.projectId,
-        this.data.proposalId,
-      );
+      const proposal = this.data.scope === "chapter_section"
+        ? await getMemoirChapterSectionRevisionProposal(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          this.data.proposalId,
+        )
+        : await getMemoirBookRevisionProposal(
+          this.data.projectId,
+          this.data.proposalId,
+        );
       this.revisionProposal = proposal;
       this.wholeChapterCache = {};
       this.wholeLoadSequence += 1;
@@ -325,6 +375,9 @@ definePage<RevisionWorkbenchData>()({
   },
 
   async loadWholePreview(version: PreviewVersion) {
+    if (this.data.scope !== "book") {
+      return false;
+    }
     const cached = this.wholeChapterCache[version];
     if (cached) {
       this.setData({ wholeChapters: cached, wholeLoading: false });
@@ -395,18 +448,71 @@ definePage<RevisionWorkbenchData>()({
     });
   },
 
-  async refreshFeedbackJob() {
-    const wasActive = this.data.feedbackBusy;
+  async refreshInitialJob() {
     try {
-      const job = await getMemoirBookRevisionFeedbackJob(
+      const job = await getMemoirChapterSectionRevisionJob(
         this.data.projectId,
-        this.data.proposalId,
+        this.data.chapterId,
+        this.data.sectionId,
       );
+      if (job.proposal_id) {
+        this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+        if (await this.loadProposal(true)) {
+          await Promise.all([
+            this.refreshFeedbackJob(),
+            this.refreshDraftJob(),
+          ]);
+        }
+        return;
+      }
       const active = job.status === "pending" || job.status === "running";
       this.stopFeedbackPolling();
       this.setData({
         feedbackBusy: active,
         ...(job.status === "failed"
+          ? { error: job.error_message || "生成修改思路失败" }
+          : {}),
+      });
+      if (active) {
+        this.scheduleFeedbackPoll();
+      }
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        feedbackBusy: false,
+        error: error instanceof Error ? error.message : "修改进度加载失败",
+      });
+    }
+  },
+
+  async refreshFeedbackJob() {
+    if (this.data.scope === "chapter_section" && !this.data.proposalId) {
+      await this.refreshInitialJob();
+      return;
+    }
+    const wasActive = this.data.feedbackBusy;
+    try {
+      const job = this.data.scope === "chapter_section"
+        ? await getMemoirChapterSectionRevisionJob(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+        )
+        : await getMemoirBookRevisionFeedbackJob(
+          this.data.projectId,
+          this.data.proposalId,
+        );
+      const active = (
+        job.status === "pending" || job.status === "running"
+      ) && matchesSectionOperation(job, "feedback");
+      const failed = job.status === "failed"
+        && matchesSectionOperation(job, "feedback");
+      this.stopFeedbackPolling();
+      this.setData({
+        feedbackBusy: active,
+        ...(failed
           ? { error: job.error_message || "按意见调整失败" }
           : {}),
       });
@@ -443,17 +549,30 @@ definePage<RevisionWorkbenchData>()({
   },
 
   async refreshDraftJob() {
+    if (!this.data.proposalId) {
+      return;
+    }
     const wasActive = this.data.draftBusy;
     try {
-      const job = await getMemoirBookRevisionDraftJob(
-        this.data.projectId,
-        this.data.proposalId,
-      );
-      const active = job.status === "pending" || job.status === "running";
+      const job = this.data.scope === "chapter_section"
+        ? await getMemoirChapterSectionRevisionJob(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+        )
+        : await getMemoirBookRevisionDraftJob(
+          this.data.projectId,
+          this.data.proposalId,
+        );
+      const active = (
+        job.status === "pending" || job.status === "running"
+      ) && matchesSectionOperation(job, "draft");
+      const failed = job.status === "failed"
+        && matchesSectionOperation(job, "draft");
       this.stopDraftPolling();
       this.setData({
         draftBusy: active,
-        ...(job.status === "failed"
+        ...(failed
           ? { error: job.error_message || "生成修改稿失败" }
           : {}),
       });
@@ -489,27 +608,69 @@ definePage<RevisionWorkbenchData>()({
     const feedback = String(
       event?.detail.value ?? this.data.feedbackText,
     ).trim();
-    if (
-      this.data.proposal?.status !== "ready"
-      || !this.data.proposal.can_dismiss
-      || this.data.busy
-      || this.data.feedbackBusy
-      || this.data.draftBusy
-    ) {
+    if (this.data.busy || this.data.feedbackBusy || this.data.draftBusy) {
       return;
     }
     if (!feedback) {
       wx.showToast({ title: "请先输入或说出调整意见", icon: "none" });
       return;
     }
+    if (!this.data.proposal) {
+      if (this.data.scope !== "chapter_section") {
+        return;
+      }
+      this.setData({ feedbackBusy: true, error: "" });
+      try {
+        const job = await enqueueMemoirChapterSectionRevision(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          "plan",
+          null,
+          feedback,
+        );
+        const active = job.status === "pending" || job.status === "running";
+        this.setData({ feedbackBusy: active });
+        if (active) {
+          this.scheduleFeedbackPoll();
+        } else if (job.status === "succeeded" && job.proposal_id) {
+          this.setData({ proposalId: job.proposal_id, feedbackText: "" });
+          await this.loadProposal(true);
+        }
+      } catch (error) {
+        if (routeAuthError(error)) {
+          return;
+        }
+        this.setData({
+          feedbackBusy: false,
+          error: error instanceof Error ? error.message : "提交修改意见失败",
+        });
+      }
+      return;
+    }
+    if (
+      this.data.proposal.status !== "ready"
+      || !this.data.proposal.can_dismiss
+    ) {
+      return;
+    }
     this.feedbackBaselineUpdatedAt = this.data.proposal.updated_at;
     this.setData({ feedbackBusy: true, error: "" });
     try {
-      const job = await enqueueMemoirBookRevisionFeedback(
-        this.data.projectId,
-        this.data.proposalId,
-        feedback,
-      );
+      const job = this.data.scope === "chapter_section"
+        ? await enqueueMemoirChapterSectionRevision(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          "feedback",
+          this.data.proposalId,
+          feedback,
+        )
+        : await enqueueMemoirBookRevisionFeedback(
+          this.data.projectId,
+          this.data.proposalId,
+          feedback,
+        );
       const active = job.status === "pending" || job.status === "running";
       this.setData({ feedbackBusy: active });
       if (active) {
@@ -542,10 +703,19 @@ definePage<RevisionWorkbenchData>()({
     }
     this.setData({ draftBusy: true, error: "" });
     try {
-      const job = await enqueueMemoirBookRevisionDraft(
-        this.data.projectId,
-        this.data.proposalId,
-      );
+      const job = this.data.scope === "chapter_section"
+        ? await enqueueMemoirChapterSectionRevision(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          "draft",
+          this.data.proposalId,
+          null,
+        )
+        : await enqueueMemoirBookRevisionDraft(
+          this.data.projectId,
+          this.data.proposalId,
+        );
       const active = job.status === "pending" || job.status === "running";
       this.setData({ draftBusy: active });
       if (active) {
@@ -567,6 +737,9 @@ definePage<RevisionWorkbenchData>()({
 
   async switchMode(event: RevisionDatasetEvent) {
     const mode = datasetString(event, "mode");
+    if (this.data.scope !== "book" && mode === "whole") {
+      return;
+    }
     if (mode === "changes" || mode === "whole") {
       this.setData({ mode });
       if (mode === "whole") {
@@ -601,22 +774,36 @@ definePage<RevisionWorkbenchData>()({
     }
     if (!await confirmAction(
       "确认使用这版修改？",
-      "确认后会生成新的正式书稿版本，原版本仍会保留。",
+      this.data.scope === "chapter_section"
+        ? "确认后会生成新的章节正文版本，修改前版本仍会保留。"
+        : "确认后会生成新的正式书稿版本，原版本仍会保留。",
     )) {
       return;
     }
     this.setData({ busy: true, error: "" });
     try {
-      const proposal = await applyMemoirBookRevisionProposal(
-        this.data.projectId,
-        this.data.proposalId,
-      );
+      const proposal = this.data.scope === "chapter_section"
+        ? await applyMemoirChapterSectionRevision(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          this.data.proposalId,
+        )
+        : await applyMemoirBookRevisionProposal(
+          this.data.projectId,
+          this.data.proposalId,
+        );
       this.revisionProposal = proposal;
       this.setData({
         busy: false,
         ...revisionViewPatch(proposal, this.data.previewVersion),
       });
-      wx.showToast({ title: "修改已写入书稿", icon: "success" });
+      wx.showToast({
+        title: this.data.scope === "chapter_section"
+          ? "修改已写入本章"
+          : "修改已写入书稿",
+        icon: "success",
+      });
     } catch (error) {
       if (routeAuthError(error)) {
         return;
@@ -645,10 +832,19 @@ definePage<RevisionWorkbenchData>()({
     }
     this.setData({ busy: true, error: "" });
     try {
-      await dismissMemoirBookRevisionProposal(
-        this.data.projectId,
-        this.data.proposalId,
-      );
+      if (this.data.scope === "chapter_section") {
+        await dismissMemoirChapterSectionRevision(
+          this.data.projectId,
+          this.data.chapterId,
+          this.data.sectionId,
+          this.data.proposalId,
+        );
+      } else {
+        await dismissMemoirBookRevisionProposal(
+          this.data.projectId,
+          this.data.proposalId,
+        );
+      }
       wx.navigateBack();
     } catch (error) {
       if (routeAuthError(error)) {
@@ -662,6 +858,10 @@ definePage<RevisionWorkbenchData>()({
   },
 
   openAppliedBook() {
+    if (this.data.scope === "chapter_section") {
+      wx.navigateBack();
+      return;
+    }
     if (!this.data.projectId) {
       return;
     }

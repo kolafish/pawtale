@@ -9,10 +9,10 @@ import {
   createMemoirBookChapterDraftSectionTTS,
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-book-api";
-import { reviseMemoirChapterDraftSectionWithAI } from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
+  pageUrl,
   type PageDatasetEvent,
   type PageTextInputEvent,
 } from "../../services/page-input";
@@ -22,7 +22,6 @@ import {
   CLOSED_DRAFT_SECTION_EDITOR,
   type ChapterWorkspaceOperationKind,
   type ChapterWorkspacePageData,
-  type DraftSectionEditingMode,
 } from "./chapter-workspace-model";
 
 interface ChapterWorkspaceDraftHost {
@@ -42,23 +41,13 @@ function defineChapterWorkspaceDraftMethods<TMethods extends object>(
 }
 
 export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
-  openDraftSectionEditor(
-    event: PageDatasetEvent<{ id?: string }>,
-    editingMode: Exclude<DraftSectionEditingMode, "">,
-  ) {
+  openDraftSectionEditor(event: PageDatasetEvent<{ id?: string }>) {
     const workspace = this.data.workspace;
     const sectionId = datasetString(event, "id");
     const section = workspace?.draft_sections.find(
       (item) => item.section_id === sectionId,
     );
     if (!workspace?.draft_version_id || !section) {
-      return;
-    }
-    if (editingMode === "ai" && workspace.draft_needs_rewrite) {
-      wx.showToast({
-        title: "请先更新有变化的小节正文",
-        icon: "none",
-      });
       return;
     }
     if (
@@ -78,16 +67,15 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         workspace,
         expandedSectionIds,
       ),
-      editingMode,
+      editingMode: "manual",
       editingSectionId: section.section_id,
       editingSectionContent: section.content,
-      draftSectionAIInstruction: "",
       error: "",
     });
   },
 
   startDraftSectionEdit(event: PageDatasetEvent<{ id?: string }>) {
-    this.openDraftSectionEditor(event, "manual");
+    this.openDraftSectionEditor(event);
   },
 
   changeDraftSectionContent(event: PageTextInputEvent) {
@@ -105,35 +93,35 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
   },
 
   startDraftSectionAIEdit(event: PageDatasetEvent<{ id?: string }>) {
-    this.openDraftSectionEditor(event, "ai");
-  },
-
-  changeDraftSectionAIInstruction(event: PageTextInputEvent) {
-    if (this.data.editingMode !== "ai") {
-      return;
-    }
-    this.setData({ draftSectionAIInstruction: event.detail.value });
-  },
-
-  async submitDraftSectionAIInstruction(event: PageTextInputEvent) {
-    const sectionId = this.data.editingSectionId;
-    const instructionText = event.detail.value.trim();
-    if (
-      this.data.editingMode !== "ai"
-      || !sectionId
-      || this.data.operationKind
-    ) {
-      return;
-    }
-    if (!instructionText) {
-      wx.showToast({ title: "请先说出或输入修改要求", icon: "none" });
-      return;
-    }
-    this.setData({ error: "" });
-    await this.performDraftSectionAIRevision(
-      sectionId,
-      instructionText,
+    const workspace = this.data.workspace;
+    const sectionId = datasetString(event, "id");
+    const section = workspace?.draft_sections.find(
+      (item) => item.section_id === sectionId,
     );
+    if (!workspace?.draft_version_id || !section) {
+      return;
+    }
+    if (workspace.draft_needs_rewrite) {
+      wx.showToast({ title: "请先更新有变化的小节正文", icon: "none" });
+      return;
+    }
+    if (this.data.operationKind || this.data.editingSectionId) {
+      return;
+    }
+    trackAuditAction(
+      "chapter_workspace.section_ai_instruction_edit",
+      {},
+      { projectId: this.data.projectId },
+    );
+    wx.navigateTo({
+      url: pageUrl("/pages/revision-workbench/index", {
+        scope: "chapter_section",
+        projectId: this.data.projectId,
+        chapterId: this.data.chapterId,
+        sectionId,
+        sectionTitle: section.title,
+      }),
+    });
   },
 
   async saveDraftSectionEdit() {
@@ -210,68 +198,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       this.setData({ error: error instanceof Error ? error.message : "本章正文确认失败" });
     } finally {
       this.finishOperation("confirm_chapter");
-    }
-  },
-
-  async performDraftSectionAIRevision(
-    sectionId: string,
-    instructionText: string,
-  ) {
-    const workspace = this.data.workspace;
-    const normalizedInstruction = instructionText.trim();
-    if (
-      !workspace?.draft_version_id
-      || !sectionId
-      || !normalizedInstruction
-      || !this.beginOperation("revise_draft_section_with_ai", sectionId)
-    ) {
-      return;
-    }
-    try {
-      const revisedWorkspace = await reviseMemoirChapterDraftSectionWithAI(
-        this.data.projectId,
-        this.data.chapterId,
-        sectionId,
-        workspace.draft_version_id,
-        normalizedInstruction,
-      );
-      if (
-        revisedWorkspace.draft_version_id === workspace.draft_version_id
-      ) {
-        this.setData({
-          error: "AI 没有改动这一小节，请把修改要求说得更具体一些",
-        });
-        return;
-      }
-      const expandedSectionIds = {
-        ...this.data.expandedSectionIds,
-        [sectionId]: true,
-      };
-      this.setData({
-        expandedSectionIds,
-        ...CLOSED_DRAFT_SECTION_EDITOR,
-      });
-      await this.loadPageData(true);
-      wx.showToast({
-        title: "已按要求修改",
-        icon: "success",
-      });
-      trackAuditAction(
-        "chapter_workspace.section_ai_instruction_edit",
-        {},
-        { projectId: this.data.projectId },
-      );
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error
-          ? error.message
-          : "小节 AI 修改失败",
-      });
-    } finally {
-      this.finishOperation("revise_draft_section_with_ai", sectionId);
     }
   },
 

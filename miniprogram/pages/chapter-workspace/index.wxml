@@ -224,30 +224,6 @@
               </view>
             </view>
               </block>
-              <block wx:elif="{{editingSectionId === item.id && editingMode === 'ai'}}">
-            <view class="draft-section-body">
-              <view class="draft-ai-editor">
-                <text class="draft-ai-editor-title">告诉 AI 这节怎么改</text>
-                <text class="draft-ai-editor-hint">可以说或输入修改要求。AI 会参考当前正文和原始讲述，只修改这一小节。</text>
-                <voice-text-editor
-                  value="{{draftSectionAIInstruction}}"
-                  gateway-url="{{draftSectionDictationUrl}}"
-                  voice-session-id="{{item.id}}"
-                  maxlength="800"
-                  placeholder="例如：保留事情经过，把语气写得更平实；删掉重复的回忆，但不要增加新事实。"
-                  submit-text="按要求修改"
-                  busy-text="AI 正在修改正文…"
-                  cancel-text="取消"
-                  disabled="{{operationKind !== ''}}"
-                  busy="{{operationKind === 'revise_draft_section_with_ai' && operationTargetId === item.id}}"
-                  aria-label="输入小节 AI 修改要求"
-                  bindchange="changeDraftSectionAIInstruction"
-                  bindsubmit="submitDraftSectionAIInstruction"
-                  bindcancel="cancelDraftSectionEdit"
-                />
-              </view>
-            </view>
-              </block>
               <block wx:elif="{{item.hasDraft}}">
                 <view class="draft-section-actions">
               <view

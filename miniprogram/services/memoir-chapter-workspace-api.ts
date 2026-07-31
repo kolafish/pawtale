@@ -1,4 +1,5 @@
 import type { MemoirChapterWorkspace } from "../domain/chapter-workspace";
+import type { MemoirBookRevisionProposal } from "./memoir-book-completion-api";
 import {
   memoirNarrativeProjectPath,
   memoirAIRequest,
@@ -126,32 +127,110 @@ export function cancelMemoirChapterSectionRegenerationJob(
   );
 }
 
-export function reviseMemoirChapterDraftSectionWithAI(
+export type MemoirChapterSectionRevisionOperation = "plan" | "feedback" | "draft";
+
+export interface MemoirChapterSectionRevisionJob {
+  job_id: string | null;
+  project_id: string;
+  operation: MemoirChapterSectionRevisionOperation;
+  status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
+  stage: string;
+  proposal_id: string | null;
+  requested_ai_model: string | null;
+  resolved_ai_model: string | null;
+  error_message: string;
+}
+
+function sectionRevisionPath(
   projectId: string,
   chapterId: string,
   sectionId: string,
-  expectedVersionId: string,
-  instructionText: string,
-): Promise<MemoirChapterWorkspace> {
+): string {
+  return memoirNarrativeProjectPath(
+    projectId,
+    `/chapters/${encodeURIComponent(chapterId)}/draft-sections/${encodeURIComponent(sectionId)}/revision`,
+  );
+}
+
+export function enqueueMemoirChapterSectionRevision(
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  operation: MemoirChapterSectionRevisionOperation,
+  proposalId: string | null,
+  feedback: string | null,
+): Promise<MemoirChapterSectionRevisionJob> {
   return memoirAIRequest<
-    MemoirChapterWorkspace,
+    MemoirChapterSectionRevisionJob,
     {
-      expected_version_id: string;
-      instruction_text: string;
+      operation: MemoirChapterSectionRevisionOperation;
+      proposal_id: string | null;
+      feedback: string | null;
       ai_model: null;
     }
   >(
-    memoirNarrativeProjectPath(
-      projectId,
-      `/chapters/${encodeURIComponent(chapterId)}/draft-sections/${encodeURIComponent(sectionId)}/ai-revise`,
-    ),
+    `${sectionRevisionPath(projectId, chapterId, sectionId)}/jobs`,
     {
-      expected_version_id: expectedVersionId,
-      instruction_text: instructionText.trim(),
+      operation,
+      proposal_id: proposalId,
+      feedback: feedback?.trim() || null,
       ai_model: null,
     },
+    { timeoutProfile: "mutation" },
   );
 }
+
+export function getMemoirChapterSectionRevisionJob(
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+): Promise<MemoirChapterSectionRevisionJob> {
+  return memoirRequest<MemoirChapterSectionRevisionJob>(
+    `${sectionRevisionPath(projectId, chapterId, sectionId)}/jobs/current`,
+  );
+}
+
+export function getMemoirChapterSectionRevisionProposal(
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionProposal> {
+  return memoirRequest<MemoirBookRevisionProposal>(
+    `${sectionRevisionPath(projectId, chapterId, sectionId)}/proposals/${encodeURIComponent(proposalId)}`,
+  );
+}
+
+function finalizeMemoirChapterSectionRevision(
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  proposalId: string,
+  action: "apply" | "dismiss",
+): Promise<MemoirBookRevisionProposal> {
+  return memoirRequest<MemoirBookRevisionProposal>(
+    `${sectionRevisionPath(projectId, chapterId, sectionId)}/proposals/${encodeURIComponent(proposalId)}/${action}`,
+    { method: "POST" },
+  );
+}
+
+export const applyMemoirChapterSectionRevision = (
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  proposalId: string,
+) => finalizeMemoirChapterSectionRevision(
+  projectId, chapterId, sectionId, proposalId, "apply",
+);
+
+export const dismissMemoirChapterSectionRevision = (
+  projectId: string,
+  chapterId: string,
+  sectionId: string,
+  proposalId: string,
+) => finalizeMemoirChapterSectionRevision(
+  projectId, chapterId, sectionId, proposalId, "dismiss",
+);
 
 export function moveMemoirChapterMaterial(
   projectId: string,

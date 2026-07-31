@@ -111,7 +111,7 @@ class _GeneratedRevision:
 
 
 @dataclass(frozen=True)
-class _GeneratedPlan:
+class GeneratedRevisionPlan:
     plan: _RevisionPlan
     resolved_ai_model: str | None
     generation: dict[str, object]
@@ -297,7 +297,7 @@ async def _generate_revisions(
         ) from exc
 
 
-async def _generate_revision_plan(
+async def generate_revision_plan(
     *,
     project_id: str,
     prompt: str,
@@ -306,7 +306,7 @@ async def _generate_revision_plan(
     ai_model: str | None,
     ai_client: AITextClient | None,
     reference_maps: tuple[ModelReferenceMap, ...],
-) -> _GeneratedPlan:
+) -> GeneratedRevisionPlan:
     client = ai_client or get_ai_service(ai_model)
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
     timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
@@ -331,7 +331,7 @@ async def _generate_revision_plan(
         plan_value: object = generated.value.model_dump()
         for references in reference_maps:
             plan_value = _render_reference_labels(plan_value, references)
-        return _GeneratedPlan(
+        return GeneratedRevisionPlan(
             plan=_RevisionPlan.model_validate(plan_value),
             resolved_ai_model=generated.response.resolved_model,
             generation=generation,
@@ -606,7 +606,7 @@ async def _refine_book_revision_plan(
     snapshots = _snapshots(baseline.chapter_snapshot_json)
     if progress_callback is not None:
         await progress_callback({"stage": "revising"})
-    generated = await _generate_revision_plan(
+    generated = await generate_revision_plan(
         project_id=project_id,
         prompt=_plan_feedback_prompt(
             plan=plan,
@@ -1001,7 +1001,7 @@ async def generate_book_revision_proposal(
     )
     if progress_callback is not None:
         await progress_callback({"stage": "revising"})
-    generated_plan = await _generate_revision_plan(
+    generated_plan = await generate_revision_plan(
         project_id=project_id,
         prompt=_revision_plan_prompt(
             snapshots=original_snapshots,

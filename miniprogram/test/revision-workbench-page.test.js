@@ -162,6 +162,20 @@ function loadRevisionPage({ api = {} } = {}) {
       can_apply: false,
       can_dismiss: false,
     }),
+    enqueueMemoirChapterSectionRevision: async () => revisionFeedbackJob("pending"),
+    getMemoirChapterSectionRevisionJob: async () => revisionFeedbackJob(),
+    getMemoirChapterSectionRevisionProposal: async () => revisionProposalMetadata(),
+    applyMemoirChapterSectionRevision: async () => revisionProposalMetadata({
+      status: "applied",
+      can_apply: false,
+      can_dismiss: false,
+      result_output_version_id: "version-2",
+    }),
+    dismissMemoirChapterSectionRevision: async () => revisionProposalMetadata({
+      status: "dismissed",
+      can_apply: false,
+      can_dismiss: false,
+    }),
     ...api,
   });
   mockModule("../services/memoir-api-client.ts", {
@@ -460,4 +474,91 @@ test("book revision keeps submit error when polling only finds an older success"
   assert.equal(context.data.feedbackBusy, false);
   assert.equal(context.data.feedbackText, "请统一前后章节的人物称谓。");
   assert.equal(context.data.error, "network unavailable");
+});
+
+test("section revision uses the shared plan, preview, and apply workbench", async () => {
+  const calls = [];
+  let draftReady = false;
+  global.wx = {
+    setNavigationBarTitle() {},
+    showToast() {},
+    showModal(options) {
+      options.success({ confirm: true, cancel: false });
+    },
+    navigateBack() {},
+  };
+  const { page } = loadRevisionPage({
+    api: {
+      getMemoirChapterSectionRevisionJob: async () => ({
+        ...revisionFeedbackJob(),
+        operation: "plan",
+        proposal_id: null,
+      }),
+      enqueueMemoirChapterSectionRevision: async (...args) => {
+        calls.push(args);
+        if (args[3] === "draft") {
+          draftReady = true;
+        }
+        return revisionFeedbackJob("succeeded");
+      },
+      getMemoirChapterSectionRevisionProposal: async () => (
+        draftReady ? revisionProposalMetadata() : revisionPlanProposal()
+      ),
+      applyMemoirChapterSectionRevision: async (...args) => {
+        calls.push(["apply", ...args]);
+        return revisionProposalMetadata({
+          status: "applied",
+          can_apply: false,
+          can_dismiss: false,
+          result_output_version_id: "version-2",
+        });
+      },
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    scope: "chapter_section",
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    sectionId: "section-1",
+    sectionTitle: "旧校舍",
+  });
+
+  await page.submitFeedback.call(context, {
+    detail: { value: "保留事实，把语气写得更平实。" },
+  });
+  assert.equal(context.data.proposal.phase, "plan_ready");
+  await page.generateDraft.call(context);
+  assert.equal(context.data.proposal.phase, "draft_ready");
+  assert.equal(
+    context.data.changedChapters[0].sections[0].display_content,
+    "修改后正文",
+  );
+  await page.applyRevision.call(context);
+
+  assert.deepEqual(calls, [
+    [
+      "project-1",
+      "chapter-1",
+      "section-1",
+      "plan",
+      null,
+      "保留事实，把语气写得更平实。",
+    ],
+    [
+      "project-1",
+      "chapter-1",
+      "section-1",
+      "draft",
+      "proposal-1",
+      null,
+    ],
+    [
+      "apply",
+      "project-1",
+      "chapter-1",
+      "section-1",
+      "proposal-1",
+    ],
+  ]);
 });

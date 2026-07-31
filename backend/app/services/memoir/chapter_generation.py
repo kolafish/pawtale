@@ -46,10 +46,7 @@ from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
 )
-from app.services.memoir.section_digests import (
-    get_current_section_digest,
-    mark_section_digests_stale,
-)
+from app.services.memoir.section_digests import get_current_section_digest
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -434,7 +431,7 @@ async def load_chapter_draft_generation_plan(
     *,
     context: ChapterGenerationContext,
 ) -> ChapterDraftGenerationPlan:
-    latest = await _latest_version(
+    latest = await latest_chapter_draft_version(
         db,
         project_id=context.project_id,
         chapter_id=context.chapter_id,
@@ -1070,6 +1067,7 @@ async def generate_chapter_section(
     preceding_section_context: str = "",
     current_section_content: str = "",
     revision_instruction: str = "",
+    allow_title_revision: bool | None = None,
     ai_model: str | None = None,
     ai_client: AITextClient | None = None,
 ) -> GeneratedChapter:
@@ -1114,7 +1112,11 @@ async def generate_chapter_section(
                 generated_result.value.model_dump(),
                 context=section_context,
                 model=generated_result.response.resolved_model,
-                allow_title_revision=bool(revision_instruction),
+                allow_title_revision=(
+                    bool(revision_instruction)
+                    if allow_title_revision is None
+                    else allow_title_revision
+                ),
             )
             _reject_repeated_section_boundary(
                 previous_section_content,
@@ -1150,7 +1152,7 @@ async def _next_version(db: AsyncSession, *, draft_id: str) -> int:
     return int(latest or 0) + 1
 
 
-async def _latest_version(
+async def latest_chapter_draft_version(
     db: AsyncSession,
     *,
     project_id: str,
@@ -1280,7 +1282,7 @@ async def generate_and_save_chapter_draft(
         project_id=project_id,
         chapter_id=chapter_id,
     )
-    latest_before = await _latest_version(
+    latest_before = await latest_chapter_draft_version(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -1322,7 +1324,7 @@ async def generate_and_save_chapter_draft(
         )
         db.add(draft)
         await db.flush()
-    latest = await _latest_version(
+    latest = await latest_chapter_draft_version(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -1376,19 +1378,20 @@ async def generate_and_save_chapter_draft(
     return draft, version
 
 
-async def revise_and_save_chapter_draft_section_with_ai(
+async def apply_chapter_section_candidate(
     db: AsyncSession,
     *,
     project_id: str,
     chapter_id: str,
     section_id: str,
     expected_version_id: str,
-    instruction_text: str,
-    editorial_guidance: list[str],
-    ai_model: str | None = None,
-    ai_client: AITextClient | None = None,
+    expected_input_signature: str,
+    candidate_content: str,
+    feedback: str,
+    requested_ai_model: str | None,
+    resolved_ai_model: str | None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
-    before = await load_chapter_generation_context(
+    context = await load_chapter_generation_context(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -1396,7 +1399,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
     target_index = next(
         (
             index
-            for index, section in enumerate(before.sections)
+            for index, section in enumerate(context.sections)
             if section.section_id == section_id
         ),
         -1,
@@ -1409,7 +1412,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
             MemoirBookChapterDraft.chapter_id == chapter_id,
         )
     )
-    latest = await _latest_version(
+    latest = await latest_chapter_draft_version(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
@@ -1418,117 +1421,40 @@ async def revise_and_save_chapter_draft_section_with_ai(
         raise HTTPException(status_code=404, detail="章节稿不存在")
     if latest.id != expected_version_id:
         raise HTTPException(status_code=409, detail="正文已更新，请刷新后再修改")
-    if not chapter_draft_is_current(before, latest):
+    if (
+        context.input_signature != expected_input_signature
+        or not chapter_draft_is_current(context, latest)
+    ):
         raise HTTPException(status_code=409, detail="本章素材已变化，请先更新相关小节正文")
     latest_sections = [
         dict(section)
         for section in latest.section_snapshot_json
         if isinstance(section, dict)
     ]
-    expected_section_ids = [section.section_id for section in before.sections]
+    expected_section_ids = [section.section_id for section in context.sections]
     if (
-        len(latest_sections) != len(before.sections)
+        len(latest_sections) != len(context.sections)
         or [
             str(section.get("section_id") or "")
             for section in latest_sections
         ] != expected_section_ids
     ):
         raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后再修改")
-    previous = before.sections[target_index - 1] if target_index > 0 else None
-    previous_section_content = (
-        str(latest_sections[target_index - 1].get("content") or "").strip()
-        if previous is not None
-        else ""
-    )
-    target = before.sections[target_index]
-    revision_instruction = instruction_text.strip()
-    continuity = await load_section_continuity(db, context=before)
-    await db.commit()
-    generated = await generate_chapter_section(
-        before,
-        section=target,
-        editorial_guidance=editorial_guidance,
-        chapter_sections=before.sections,
-        previous_section_content=previous_section_content,
-        preceding_section_context=previous_section_context(
-            section=previous,
-            content=previous_section_content,
-            continuity=(
-                continuity.get(previous.section_id)
-                if previous is not None
-                else None
-            ),
-        ),
-        current_section_content=str(
-            latest_sections[target_index].get("content") or ""
-        ).strip(),
-        revision_instruction=revision_instruction,
-        ai_model=ai_model,
-        ai_client=ai_client,
-    )
-    db.expire_all()
-    after = await load_chapter_generation_context(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if after.input_signature != before.input_signature:
-        raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
-    current_latest = await _latest_version(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    if current_latest is None or current_latest.id != expected_version_id:
-        raise HTTPException(status_code=409, detail="生成期间正文已更新，请刷新后重试")
-    draft = await db.scalar(
-        select(MemoirBookChapterDraft).where(
-            MemoirBookChapterDraft.id == current_latest.draft_id
-        )
-    )
-    if draft is None:
-        raise HTTPException(status_code=404, detail="章节稿不存在")
-    current = generated.sections[0]
-    target_input = after.sections[target_index]
-    if current.title != target_input.title:
-        target_section = await db.get(
-            MemoirSection,
-            section_id,
-            populate_existing=True,
-        )
-        if (
-            target_section is None
-            or target_section.version != target_input.section_version
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="生成期间小节标题已更新，请刷新后重试",
-            )
-        target_section.title = current.title
-        target_section.version += 1
-        target_section.updated_at = datetime.now(UTC).replace(tzinfo=None)
-        db.add(target_section)
-        await mark_section_digests_stale(
-            db,
-            project_id=project_id,
-            section_ids={section_id},
-        )
-        await db.flush()
-        after = await load_chapter_generation_context(
-            db,
-            project_id=project_id,
-            chapter_id=chapter_id,
-        )
-        target_input = after.sections[target_index]
+    content = candidate_content.strip()
+    if not content:
+        raise ValueError("修改稿正文不能为空")
+    target_input = context.sections[target_index]
     replacement = {
         "section_id": target_input.section_id,
-        "title": current.title,
+        "title": target_input.title,
         "section_type": target_input.section_type,
         "section_version": target_input.section_version,
         "sort_order": target_input.sort_order,
-        "input_signature": _section_input_signature(after, target_input),
-        "content": current.content,
-        "used_material_ids": list(current.used_material_ids),
+        "input_signature": _section_input_signature(context, target_input),
+        "content": content,
+        "used_material_ids": list(
+            latest_sections[target_index].get("used_material_ids", [])
+        ),
     }
     revised_sections = [
         replacement if index == target_index else section
@@ -1539,7 +1465,7 @@ async def revise_and_save_chapter_draft_section_with_ai(
         for section in revised_sections
     )
     if revised_sections == latest_sections:
-        return draft, current_latest
+        return draft, latest
     used_material_ids = [
         material_id
         for section in revised_sections
@@ -1557,16 +1483,13 @@ async def revise_and_save_chapter_draft_section_with_ai(
         version=await _next_version(db, draft_id=draft.id),
         content=revised_content,
         created_by=MemoirCreatedBy.AI.value,
-        model=generated.model,
-        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section_ai_revision",
-        feedback=(
-            f"AI 按要求修改小节《{target_input.title}》："
-            f"{revision_instruction}"
-        ),
-        input_signature=after.input_signature,
+        model=resolved_ai_model,
+        prompt_snapshot=f"{CHAPTER_GENERATION_ENGINE}:section_revision_workbench",
+        feedback=feedback.strip() or f"AI 修改小节《{target_input.title}》",
+        input_signature=context.input_signature,
         used_material_ids_json=used_material_ids,
         material_snapshot_json=_snapshot(
-            after,
+            context,
             used_material_ids=set(used_material_ids),
         ),
         section_snapshot_json=revised_sections,
@@ -1578,8 +1501,8 @@ async def revise_and_save_chapter_draft_section_with_ai(
         **(draft.metadata_json or {}),
         "source": CHAPTER_GENERATION_ENGINE,
         "last_ai_revised_section_id": section_id,
-        "last_requested_ai_model": ai_model,
-        "last_resolved_ai_model": generated.model,
+        "last_requested_ai_model": requested_ai_model,
+        "last_resolved_ai_model": resolved_ai_model,
     }
     db.add(draft)
     output = await db.scalar(
@@ -1611,7 +1534,7 @@ async def confirm_chapter_draft(
             MemoirBookChapterDraft.chapter_id == chapter_id,
         )
     )
-    latest = await _latest_version(
+    latest = await latest_chapter_draft_version(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
