@@ -38,6 +38,7 @@ from app.schemas.memoir_narrative import (
     MemoirChapterCompletionSummary,
 )
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
+from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.memoir import (
     book_completion_jobs,
     book_revision_generation,
@@ -346,6 +347,16 @@ def test_section_revision_keeps_whole_chapter_size_limit():
                 }
                 for index in range(3)
             ],
+        )
+
+
+def test_book_revision_plan_rejects_non_object_metadata_patch():
+    with pytest.raises(ValueError):
+        MemoirBookRevisionPlan.model_validate(
+            {
+                "summary": "调整成书信息",
+                "book_metadata_patch": [],
+            }
         )
 
 

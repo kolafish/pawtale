@@ -213,7 +213,7 @@ class MemoirBookRevisionPlan(BaseModel):
     @classmethod
     def _validate_metadata_patch(cls, value: object) -> dict[str, str]:
         return MemoirBookRevisionMetadataPatch.model_validate(
-            value or {}
+            {} if value is None else value
         ).model_dump(exclude_none=True)
 
 
