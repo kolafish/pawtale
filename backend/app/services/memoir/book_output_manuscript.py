@@ -33,6 +33,15 @@ from app.services.memoir.book_manuscript_cleanup import (
 DEFAULT_BOOK_COVER_STYLE = "classic_plain"
 BOOK_PROFILE_TEXT_FIELDS = ("subtitle", "narrator_name", "prepared_by")
 BOOK_SECTION_TEXT_FIELDS = ("preface", "afterword", "back_cover_quote")
+BOOK_INFORMATION_LABELS = {
+    "title": "书名",
+    "subtitle": "副标题",
+    "narrator_name": "口述人",
+    "prepared_by": "整理人",
+    "preface": "前言",
+    "afterword": "后记",
+    "back_cover_quote": "封底文案",
+}
 BOOK_EDITORIAL_COPY_TARGETS = {
     "preface",
     "afterword",
@@ -67,6 +76,13 @@ def positive_int(value: object) -> int:
 
 def safe_str(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
+
+
+def book_information_text(information: dict[str, str]) -> str:
+    return "\n".join(
+        f"{label}：{information.get(field, '') or '（未填写）'}"
+        for field, label in BOOK_INFORMATION_LABELS.items()
+    )
 
 
 def _section_responses(value: object) -> list[MemoirBookOutputSectionResponse]:

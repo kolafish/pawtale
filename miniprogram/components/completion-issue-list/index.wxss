@@ -76,36 +76,6 @@
   line-height: 38rpx;
 }
 
-.required-answer-textarea {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 176rpx;
-  padding: 16rpx 18rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 12rpx;
-  background: var(--ui-surface);
-  color: var(--ui-text-primary);
-  font-size: 27rpx;
-  line-height: 42rpx;
-}
-
-.required-answer-hint {
-  margin-top: 8rpx;
-  color: var(--ui-text-secondary);
-  font-size: 22rpx;
-  line-height: 34rpx;
-}
-
-.required-answer-actions {
-  margin-top: 14rpx;
-  display: flex;
-  gap: 12rpx;
-}
-
-.required-answer-actions .action {
-  margin-top: 0;
-}
-
 .action {
   min-height: 76rpx;
   margin-top: 18rpx;

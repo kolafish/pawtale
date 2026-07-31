@@ -54,6 +54,7 @@ function revisionProposal(overrides = {}) {
           after_char_count: 5,
         }],
       }],
+      metadata_changes: [],
     },
     before: {
       version: 1,
@@ -82,6 +83,7 @@ function revisionPlanProposal(overrides = {}) {
         approach: "保留两段经历，只统一相关人物的称谓。",
         targets: ["上学时光", "旧校舍"],
       }],
+      book_metadata_patch: {},
     },
     summary: "保留两段经历，并统一人物称谓。",
     comparison: {
@@ -94,6 +96,7 @@ function revisionPlanProposal(overrides = {}) {
       before_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
       after_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
       chapters: [],
+      metadata_changes: [],
     },
     can_apply: false,
     ...overrides,
@@ -137,33 +140,7 @@ function revisionFeedbackJob(status = "idle") {
   };
 }
 
-function loadRevisionPage({ api = {}, voice = {} } = {}) {
-  const voiceController = {
-    options: null,
-    closed: [],
-    stopCount: 0,
-    finishCount: 0,
-    async connect(options) {
-      this.options = options;
-      await voice.connect?.(options);
-      return {};
-    },
-    startRecording() {
-      return voice.startRecording?.() ?? true;
-    },
-    stopRecording() {
-      this.stopCount += 1;
-      this.options?.callbacks.onStatus("stopping");
-    },
-    async finishSession() {
-      this.finishCount += 1;
-      await voice.finishSession?.();
-      return true;
-    },
-    close(options) {
-      this.closed.push(options);
-    },
-  };
+function loadRevisionPage({ api = {} } = {}) {
   mockMemoirApiModules({
     getMemoirBookRevisionProposal: async (_projectId, _proposalId, preview = "none") => (
       preview === "none"
@@ -185,31 +162,37 @@ function loadRevisionPage({ api = {}, voice = {} } = {}) {
       can_apply: false,
       can_dismiss: false,
     }),
-    memoirBookRevisionDictationUrl: () =>
-      "ws://backend.local/api/memoir/projects/project-1/book-review/revision-proposals/proposal-1/dictation",
+    memoirBookReviewDictationUrl: () =>
+      "ws://backend.local/api/memoir/projects/project-1/book-review/dictation",
     ...api,
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
-  mockModule("../services/streaming-voice-controller.ts", {
-    StreamingVoiceController: class {
-      constructor() {
-        return voiceController;
-      }
+  return loadPageModule("../pages/book-revision/index.ts");
+}
+
+test("book revision plan presents proposed book information before drafting", () => {
+  const { mod } = loadRevisionPage();
+  const proposal = revisionPlanProposal({
+    revision_plan: {
+      summary: "让书名更贴近故园主线。",
+      items: [],
+      book_metadata_patch: {
+        title: "风从故园来",
+        subtitle: "一部家庭口述回忆录",
+      },
     },
   });
-  mockModule("../services/voice-authorization.ts", {
-    readVoiceAuthorizationConsent: () => voice.hasConsent !== false,
-    syncVoiceAuthorizationConsent: async () => voice.syncConsent?.(),
-    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
-  });
-  mockModule("../services/wechat-privacy.ts", {
-    ensureRecorderPrivacyAuthorization: async () => voice.ensurePrivacy?.(),
-  });
-  return {
-    ...loadPageModule("../pages/book-revision/index.ts"),
-    voiceController,
-  };
-}
+
+  assert.deepEqual(
+    mod.revisionViewPatch(proposal).metadataChanges.map(
+      ({ label, display_value }) => [label, display_value],
+    ),
+    [
+      ["书名", "风从故园来"],
+      ["副标题", "一部家庭口述回忆录"],
+    ],
+  );
+});
 
 test("book revision page loads only the selected whole-book preview on demand", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
@@ -450,52 +433,4 @@ test("book revision keeps submit error when polling only finds an older success"
   assert.equal(context.data.feedbackBusy, false);
   assert.equal(context.data.feedbackText, "请统一前后章节的人物称谓。");
   assert.equal(context.data.error, "network unavailable");
-});
-
-test("book revision voice input shows live transcript and keeps existing feedback", async () => {
-  const toasts = [];
-  global.wx = {
-    showToast(options) {
-      toasts.push(options.title);
-    },
-  };
-  const { page, voiceController } = loadRevisionPage();
-  const context = pageContext(page, {
-    projectId: "project-1",
-    proposalId: "proposal-1",
-    proposal: revisionPlanProposal(),
-    feedbackText: "请保留校舍这一段。",
-  });
-
-  await page.toggleFeedbackVoice.call(context);
-  voiceController.options.callbacks.onStatus("listening");
-  voiceController.options.callbacks.onPartial("人物称谓");
-
-  assert.equal(context.data.feedbackVoicePhase, "listening");
-  assert.equal(
-    context.data.feedbackText,
-    "请保留校舍这一段。\n人物称谓",
-  );
-
-  voiceController.options.callbacks.onPartial("人物称谓要前后一致");
-  assert.equal(
-    context.data.feedbackText,
-    "请保留校舍这一段。\n人物称谓要前后一致",
-  );
-
-  voiceController.options.callbacks.onFinal({
-    type: "asr.final",
-    text: "人物称谓要前后一致。",
-  });
-  voiceController.options.callbacks.onEvent({ type: "audio.ended" });
-  await Promise.resolve();
-  await Promise.resolve();
-
-  assert.equal(voiceController.finishCount, 1);
-  assert.equal(context.data.feedbackVoicePhase, "idle");
-  assert.equal(
-    context.data.feedbackText,
-    "请保留校舍这一段。\n人物称谓要前后一致。",
-  );
-  assert.deepEqual(toasts, ["语音已转成文字"]);
 });

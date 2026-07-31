@@ -19,6 +19,19 @@ type ComponentPropertyValue<T> =
   : T extends { type: ArrayConstructor } ? unknown[]
   : unknown;
 
+type ComponentInstance<
+  TProperties extends object,
+  TData extends object,
+  TMethods extends object,
+> = TMethods & {
+  data: TData;
+  properties: {
+    [TKey in keyof TProperties]: ComponentPropertyValue<TProperties[TKey]>;
+  };
+  setData(data: Partial<TData>): void;
+  triggerEvent(name: string, detail?: unknown): void;
+};
+
 declare function Component<
   TProperties extends object,
   TData extends object = object,
@@ -27,14 +40,16 @@ declare function Component<
   options: {
     properties: TProperties;
     data?: TData;
-    methods: TMethods & ThisType<TMethods & {
-      data: TData;
-      properties: {
-        [TKey in keyof TProperties]: ComponentPropertyValue<TProperties[TKey]>;
-      };
-      setData(data: Partial<TData>): void;
-      triggerEvent(name: string, detail?: unknown): void;
-    }>;
+    methods: TMethods & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
+    observers?: Record<string, (...values: unknown[]) => void>
+      & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
+    lifetimes?: {
+      attached?(): void;
+      detached?(): void;
+    } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
+    pageLifetimes?: {
+      hide?(): void;
+    } & ThisType<ComponentInstance<TProperties, TData, TMethods>>;
   },
 ): void;
 

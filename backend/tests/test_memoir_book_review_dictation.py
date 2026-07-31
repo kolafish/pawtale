@@ -1,11 +1,12 @@
 from types import SimpleNamespace
 from typing import Any
 
-from app.domain.memoir.types import MemoirBookRevisionProposalStatus
+from fastapi import HTTPException
+
 from app.routers.memoir import book_reviews as book_reviews_router
 
 
-async def test_book_revision_dictation_streams_for_available_proposal(
+async def test_book_review_dictation_streams_for_owned_project(
     test_db,
     monkeypatch,
 ):
@@ -42,7 +43,7 @@ async def test_book_revision_dictation_streams_for_available_proposal(
     monkeypatch.setattr(book_reviews_router, "authenticate_websocket", authenticate)
     monkeypatch.setattr(
         book_reviews_router,
-        "_book_revision_dictation_is_available",
+        "_book_review_dictation_is_available",
         available,
     )
     monkeypatch.setattr(
@@ -58,10 +59,9 @@ async def test_book_revision_dictation_streams_for_available_proposal(
     )
 
     websocket = FakeWebSocket()
-    await book_reviews_router.stream_memoir_book_revision_dictation(
+    await book_reviews_router.stream_memoir_book_review_dictation(
         websocket,
         "project-1",
-        "proposal-1",
         test_db,
     )
 
@@ -69,22 +69,20 @@ async def test_book_revision_dictation_streams_for_available_proposal(
     assert calls["ran"] and calls["released"]
     assert calls["availability"] == {
         "project_id": "project-1",
-        "proposal_id": "proposal-1",
         "current_user": user,
     }
     assert calls["capacity"][0] == "user-1"
-    assert calls["capacity"][1].startswith("book-revision-dictation:")
+    assert calls["capacity"][1].startswith("book-review-dictation:")
     assert calls["gateway"]["diagnostics_context"] == {
-        "gateway": "book_revision_dictation",
+        "gateway": "book_review_dictation",
         "project_id": "project-1",
-        "proposal_id": "proposal-1",
     }
     assert calls["gateway"]["text_normalizer"]("把第一张放到第二张后面") == ("把第一章放到第二章后面")
     calls["gateway"]["asr_client_factory"]()
     assert calls["asr"] == calls["capacity"]
 
 
-async def test_book_revision_dictation_rejects_unavailable_proposal(
+async def test_book_review_dictation_rejects_unavailable_project(
     test_db,
     monkeypatch,
 ):
@@ -97,15 +95,14 @@ async def test_book_revision_dictation_rejects_unavailable_proposal(
     monkeypatch.setattr(book_reviews_router, "authenticate_websocket", authenticate)
     monkeypatch.setattr(
         book_reviews_router,
-        "_book_revision_dictation_is_available",
+        "_book_review_dictation_is_available",
         unavailable,
     )
     websocket = FakeWebSocket()
 
-    await book_reviews_router.stream_memoir_book_revision_dictation(
+    await book_reviews_router.stream_memoir_book_review_dictation(
         websocket,
         "project-1",
-        "proposal-1",
         test_db,
     )
 
@@ -113,69 +110,39 @@ async def test_book_revision_dictation_rejects_unavailable_proposal(
         {
             "type": "session.error",
             "state": "failed",
-            "error": "book_revision_dictation_unavailable",
+            "error": "book_review_dictation_unavailable",
         }
     ]
     assert websocket.closed_with == 1008
 
 
-async def test_book_revision_dictation_requires_owned_adjustable_proposal(
+async def test_book_review_dictation_requires_owned_project(
     test_db,
     monkeypatch,
 ):
     user = SimpleNamespace(id="user-1")
-    proposal = object()
     calls: dict[str, Any] = {}
-    response = SimpleNamespace(
-        status=MemoirBookRevisionProposalStatus.READY,
-        can_dismiss=True,
-    )
 
     async def load_project(_db, project_id, user_id, *, allow_admin):
         calls["project"] = (project_id, user_id, allow_admin)
 
-    async def load_proposal(_db, **kwargs):
-        calls["proposal"] = kwargs
-        return proposal
-
-    async def proposal_response(_db, **kwargs):
-        calls["response"] = kwargs
-        return response
-
     monkeypatch.setattr(book_reviews_router, "is_admin_user", lambda _user: False)
     monkeypatch.setattr(book_reviews_router, "load_memoir_project", load_project)
-    monkeypatch.setattr(
-        book_reviews_router.book_revision_proposals,
-        "load_proposal",
-        load_proposal,
-    )
-    monkeypatch.setattr(
-        book_reviews_router.book_revision_proposals,
-        "proposal_response",
-        proposal_response,
-    )
 
-    assert await book_reviews_router._book_revision_dictation_is_available(
+    assert await book_reviews_router._book_review_dictation_is_available(
         test_db,
         project_id="project-1",
-        proposal_id="proposal-1",
         current_user=user,
     )
     assert calls["project"] == ("project-1", "user-1", False)
-    assert calls["proposal"] == {
-        "project_id": "project-1",
-        "proposal_id": "proposal-1",
-    }
-    assert calls["response"] == {
-        "proposal": proposal,
-        "preview": "none",
-    }
 
-    response.status = MemoirBookRevisionProposalStatus.STALE
-    assert not await book_reviews_router._book_revision_dictation_is_available(
+    async def missing_project(*_args, **_kwargs):
+        raise HTTPException(status_code=404)
+
+    monkeypatch.setattr(book_reviews_router, "load_memoir_project", missing_project)
+    assert not await book_reviews_router._book_review_dictation_is_available(
         test_db,
         project_id="project-1",
-        proposal_id="proposal-1",
         current_user=user,
     )
 

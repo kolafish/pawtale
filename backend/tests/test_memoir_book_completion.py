@@ -81,12 +81,14 @@ class LayeredBookAI:
         chapter_manual_issue: bool = False,
         book_issue: bool = False,
         book_actions: bool = False,
+        book_profile_action: bool = False,
     ):
         self.section_issue = section_issue
         self.chapter_interview_issue = chapter_interview_issue
         self.chapter_manual_issue = chapter_manual_issue
         self.book_issue = book_issue
         self.book_actions = book_actions
+        self.book_profile_action = book_profile_action
         self.system_prompts: list[str] = []
         self.prompts: list[str] = []
 
@@ -189,6 +191,16 @@ class LayeredBookAI:
                             "reason": "这样更符合回忆展开的顺序。",
                             "chapter_ids": list(reversed(chapter_ids[:2])),
                         },
+                        *(
+                            [{
+                                "action_type": "revise_book_profile",
+                                "title": "调整书名与成书信息",
+                                "reason": "当前书名没有体现故园主题。",
+                                "chapter_ids": [],
+                            }]
+                            if self.book_profile_action
+                            else []
+                        ),
                     ]
                     if self.book_actions
                     else []
@@ -209,6 +221,14 @@ class LayeredBookAI:
                         "targets": ["学校经历"],
                     }
                 ],
+                "book_metadata_patch": (
+                    {
+                        "title": "风从故园来",
+                        "subtitle": "一部家庭口述回忆录",
+                    }
+                    if "调整书名与成书信息" in user_prompt
+                    else {}
+                ),
             }
         elif "请根据用户反馈更新完整修改思路" in user_prompt:
             payload = {
@@ -255,7 +275,7 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
     context = BookReviewContext(
         project_id="project-1",
         plan_id="plan-1",
-        title="爷爷的故事",
+        book_metadata={"title": "爷爷的故事"},
         chapters=(
             BookReviewChapter(
                 chapter_id="chapter-1",
@@ -2251,7 +2271,10 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     monkeypatch,
 ):
     project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
-    fake = LayeredBookAI(book_actions=True)
+    fake = LayeredBookAI(
+        book_actions=True,
+        book_profile_action=True,
+    )
     _install_ai(monkeypatch, fake)
     bootstrapped = await client.post(f"/api/memoir/projects/{project_id}/sections/bootstrap")
     assert bootstrapped.status_code == 200
@@ -2274,6 +2297,7 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
         "remove_repetition",
         "improve_transition",
         "reorder_chapters",
+        "revise_book_profile",
     }
     assembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
     assert assembled.status_code == 200, assembled.text
@@ -2284,7 +2308,7 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
         json={"action_ids": [action["id"] for action in actions]},
     )
     assert queued.status_code == 202, queued.text
-    assert queued.json()["selected_action_count"] == 3
+    assert queued.json()["selected_action_count"] == 4
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     try:
@@ -2321,6 +2345,10 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     assert proposal.status_code == 200, proposal.text
     assert proposal.json()["can_apply"] is False
     assert proposal.json()["revision_plan"]["items"]
+    assert proposal.json()["revision_plan"]["book_metadata_patch"] == {
+        "title": "风从故园来",
+        "subtitle": "一部家庭口述回忆录",
+    }
     draft = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{completed_body['proposal_id']}/draft/jobs",
         json={},
@@ -2345,6 +2373,13 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     assert comparison["chapter_order_changed"] is True
     assert [item["chapter_id"] for item in comparison["after_chapter_order"]] == [chapters[1].id, chapters[0].id]
     assert comparison["changed_section_count"] == 1
+    assert {
+        item["field"]: item["after_value"]
+        for item in comparison["metadata_changes"]
+    } == {
+        "title": "风从故园来",
+        "subtitle": "一部家庭口述回忆录",
+    }
     assert proposal.json()["before"]["version"] == 1
     assert proposal.json()["after"]["version"] == 2
 
@@ -2368,10 +2403,18 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     ]
     assert [item["chapter_id"] for item in versions[-1].chapter_snapshot_json] == [chapters[1].id, chapters[0].id]
     assert "老同学" in versions[-1].content
-
-    reassembled = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
-    assert reassembled.status_code == 200, reassembled.text
-    assert reassembled.json()["output_version_id"] == applied_version_id
+    assert versions[-1].manuscript_json["profile"]["title"] == "风从故园来"
+    assert (
+        versions[-1].manuscript_json["profile"]["subtitle"]
+        == "一部家庭口述回忆录"
+    )
+    output = await test_db.scalar(
+        select(MemoirBookOutput).where(
+            MemoirBookOutput.project_id == project_id,
+        )
+    )
+    assert output is not None
+    assert output.title == "风从故园来"
 
 
 async def test_book_review_job_preserves_failure_and_can_retry(
@@ -2493,5 +2536,5 @@ async def test_book_review_uses_the_current_output_title(
         project_id=project_id,
     )
 
-    assert context.title == "一个人的故园与远方"
+    assert context.book_metadata["title"] == "一个人的故园与远方"
     assert context.input_signature != reviewed.json()["input_signature"]

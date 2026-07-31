@@ -12,15 +12,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
+from app.domain.memoir.types import (
+    MemoirBookRevisionProposalPhase,
+    MemoirBookRevisionProposalStatus,
+)
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookReview,
 )
-from app.domain.memoir.types import (
-    MemoirBookRevisionProposalPhase,
-    MemoirBookRevisionProposalStatus,
-)
+from app.schemas.memoir_book_review import MemoirBookRevisionPlan
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -39,6 +40,10 @@ from app.services.memoir import (
     book_reviews,
 )
 from app.services.memoir.book_output_snapshots import sectioned_chapter_content
+from app.services.memoir.book_output_manuscript import (
+    book_information_text,
+    stored_manuscript_metadata,
+)
 from app.services.memoir.narrative.book_output_assembly import assemble_book_output
 from app.services.memoir.semantic_state import semantic_json_signature
 
@@ -71,20 +76,7 @@ class _RevisionOutput(BaseModel):
     section_revisions: list[_SectionRevision] = Field(default_factory=list)
 
 
-class _RevisionPlanItem(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str
-    reason: str
-    approach: str
-    targets: list[str] = Field(default_factory=list)
-
-
-class _RevisionPlan(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    summary: str
-    items: list[_RevisionPlanItem] = Field(default_factory=list)
+_RevisionPlan = MemoirBookRevisionPlan
 
 
 @dataclass(frozen=True)
@@ -401,6 +393,19 @@ def _chapter_source_text(
     return "\n\n".join(chapters)
 
 
+def _book_information(
+    output: MemoirBookOutput,
+    version: MemoirBookOutputVersion,
+) -> dict[str, str]:
+    return {
+        "title": book_output_versions.book_output_version_title(
+            version,
+            fallback=output.title,
+        ),
+        **stored_manuscript_metadata(version.manuscript_json),
+    }
+
+
 def _plan_output_instruction() -> str:
     return """请先制定修改思路，不要输出修改后的正文。
 
@@ -414,13 +419,24 @@ def _plan_output_instruction() -> str:
       "approach": "具体准备怎样调整，但不写修改后的正文",
       "targets": ["用户能看懂的章节名或小节名"]
     }
-  ]
+  ],
+  "book_metadata_patch": {
+    "title": "调整后的完整书名；不调整则省略",
+    "subtitle": "调整后的副标题；不调整则省略",
+    "narrator_name": "调整后的口述人；不调整则省略",
+    "prepared_by": "调整后的整理人；不调整则省略",
+    "preface": "调整后的完整前言；不调整则省略",
+    "afterword": "调整后的完整后记；不调整则省略",
+    "back_cover_quote": "调整后的封底文案；不调整则省略"
+  }
 }
 
 要求：
 - 输出的是用户确认前的整体修改思路，不是修改后的书稿。
 - 每一项都要说清楚修改目标、原因和做法。
 - targets 使用章节名或小节名，不显示内部编号。
+- 书名或成书信息需要调整时，在 book_metadata_patch 给出供用户确认的完整新值，并在 items 说明理由和做法。
+- book_metadata_patch 只包含需要修改的字段；没有成书信息调整时返回空对象。
 - 只根据输入原文、检查结论和用户明确表达的决定制定计划。
 - 不新增、推测或改变人生事实。
 - 不需要修改时，items 返回空数组，并在 summary 里说明原因。
@@ -433,6 +449,7 @@ def _answer_plan_prompt(
     context: book_review_answer_state.BookReviewAnswerContext,
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
+    book_information: dict[str, str],
 ) -> str:
     answers = "\n\n".join(
         f"问题 {index}：{answer.question}\n"
@@ -451,6 +468,9 @@ def _answer_plan_prompt(
 
 用户回答：
 {answers}
+
+当前成书信息：
+{book_information_text(book_information)}
 
 关联章节原文：
 {chapters}
@@ -520,6 +540,7 @@ async def apply_book_review_answers(
             context=context,
             chapter_refs=chapter_refs,
             section_refs=section_refs,
+            book_information=_book_information(output, baseline),
         ),
         engine=PLAN_ENGINE,
         error_message="生成修改思路时遇到问题，请稍后重试",
@@ -587,6 +608,7 @@ def _plan_feedback_prompt(
     plan: _RevisionPlan,
     feedback: str,
     snapshots: list[dict[str, object]],
+    book_information: dict[str, str],
 ) -> str:
     return f"""请根据用户反馈更新完整修改思路。
 
@@ -595,6 +617,9 @@ def _plan_feedback_prompt(
 
 用户最新意见：
 {feedback}
+
+当前成书信息：
+{book_information_text(book_information)}
 
 当前书稿目录：
 {_book_outline(snapshots)}
@@ -676,6 +701,9 @@ async def _refine_book_revision_plan(
     )
     if baseline is None:
         raise BookRevisionError("修改前的书稿版本已不可用")
+    output = await db.get(MemoirBookOutput, baseline.output_id)
+    if output is None:
+        raise BookRevisionError("当前书稿已经变化，请重新查看")
     snapshots = _snapshots(baseline.chapter_snapshot_json)
     if progress_callback is not None:
         await progress_callback({"stage": "revising"})
@@ -685,6 +713,7 @@ async def _refine_book_revision_plan(
             plan=plan,
             feedback=feedback,
             snapshots=snapshots,
+            book_information=_book_information(output, baseline),
         ),
         engine=PLAN_FEEDBACK_ENGINE,
         error_message="按反馈更新修改思路时遇到问题，请稍后重试",
@@ -899,11 +928,20 @@ def _editorial_plan_prompt(
     actions: list[dict[str, object]],
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
+    book_information: dict[str, str],
 ) -> str:
     action_text = "\n\n".join(
         f"修改目标：{_text(action.get('title'))}\n"
         f"原因：{_text(action.get('reason'))}\n"
-        "涉及章节：" + "、".join(chapter_refs.encode(str(chapter_id)) for chapter_id in action.get("chapter_ids", []))
+        "涉及范围："
+        + (
+            "书名与成书信息"
+            if action.get("action_type") == "revise_book_profile"
+            else "、".join(
+                chapter_refs.encode(str(chapter_id))
+                for chapter_id in action.get("chapter_ids", [])
+            )
+        )
         for action in actions
     )
     related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
@@ -917,6 +955,9 @@ def _editorial_plan_prompt(
 
 用户选中的建议：
 {action_text}
+
+当前成书信息：
+{book_information_text(book_information)}
 
 相关章节原文：
 {chapters}
@@ -985,6 +1026,7 @@ async def generate_editorial_revision_proposal(
             actions=actions,
             chapter_refs=chapter_refs,
             section_refs=section_refs,
+            book_information=_book_information(output, baseline),
         ),
         engine=PLAN_ENGINE,
         error_message="生成修改思路时遇到问题，请稍后重试",

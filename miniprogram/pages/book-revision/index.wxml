@@ -17,7 +17,7 @@
         共 {{proposal.revision_plan ? proposal.revision_plan.items.length : 0}} 项修改安排
       </text>
       <text wx:else class="revision-meta ui-tabular">
-        {{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节
+        {{proposal.comparison.chapter_order_changed ? "包含章节顺序调整；" : ""}}正文涉及 {{proposal.comparison.changed_chapter_count}} 章、{{proposal.comparison.changed_section_count}} 个小节{{metadataChanges.length ? "；成书信息 " + metadataChanges.length + " 项" : ""}}
       </text>
       <text wx:if="{{proposal.status === 'stale'}}" class="status-notice error">
         当前书稿已经变化，这版预览不能再确认，请返回后重新生成。
@@ -50,8 +50,19 @@
           >{{item}}</text>
         </view>
       </view>
+      <view wx:if="{{metadataChanges.length}}" class="plan-item">
+        <text class="chapter-label">成书信息调整</text>
+        <view
+          wx:for="{{metadataChanges}}"
+          wx:key="field"
+          class="metadata-change"
+        >
+          <text class="plan-field-label">{{item.label}}</text>
+          <text class="revision-summary plan-field" selectable>{{item.after_value || "（留空）"}}</text>
+        </view>
+      </view>
       <view
-        wx:if="{{!proposal.revision_plan || !proposal.revision_plan.items.length}}"
+        wx:if="{{(!proposal.revision_plan || !proposal.revision_plan.items.length) && !metadataChanges.length}}"
         class="state-card"
       >
         当前思路认为不需要改动正文。您仍可在下方补充意见。
@@ -86,6 +97,17 @@
       </view>
 
       <view wx:if="{{mode === 'changes'}}" class="changed-list">
+      <view wx:if="{{metadataChanges.length}}" class="changed-chapter">
+        <text class="chapter-label">成书信息</text>
+        <view
+          wx:for="{{metadataChanges}}"
+          wx:key="field"
+          class="metadata-change"
+        >
+          <text class="section-label">{{item.label}}</text>
+          <text class="section-content" selectable>{{item.display_value}}</text>
+        </view>
+      </view>
       <view
         wx:if="{{proposal.comparison.chapter_order_changed}}"
         class="changed-chapter order-comparison"
@@ -124,7 +146,7 @@
         </view>
       </view>
       <view
-        wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed}}"
+        wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed && !metadataChanges.length}}"
         class="state-card"
       >
         已核对所选修改，正文和章节顺序没有变化。
@@ -171,28 +193,19 @@
             : "输入或说出意见，AI 会返回下一版完整修改思路。")
           : "输入或说出意见，AI 会更新当前预览；确认使用前不会写入正式书稿。"}}
       </text>
-      <textarea
-        class="feedback-input"
+      <voice-text-editor
         value="{{feedbackText}}"
+        gateway-url="{{feedbackDictationUrl}}"
+        voice-session-id="{{proposalId}}"
         maxlength="1000"
-        disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle'}}"
         placeholder="请输入希望保留或继续调整的内容"
-        bindinput="changeFeedbackText"
+        submit-text="{{proposal.revision_plan ? '更新修改思路' : '按意见调整'}}"
+        busy-text="正在调整…"
+        disabled="{{busy || draftBusy}}"
+        busy="{{feedbackBusy}}"
+        bindchange="changeFeedbackText"
+        bindsubmit="submitFeedback"
       />
-      <view class="feedback-actions">
-        <view
-          class="feedback-voice secondary-action ui-block-action ui-pressable {{feedbackVoicePhase === 'listening' ? 'recording' : ''}} {{busy || feedbackBusy || draftBusy || feedbackVoicePhase === 'connecting' || feedbackVoicePhase === 'stopping' ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase === 'connecting' || feedbackVoicePhase === 'stopping'}}"
-          bindtap="toggleFeedbackVoice"
-        >{{feedbackVoicePhase === "listening" ? "结束录音" : (feedbackVoicePhase === "connecting" ? "正在连接…" : (feedbackVoicePhase === "stopping" ? "正在确认文字…" : "语音输入"))}}</view>
-        <view
-          class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle'}}"
-          bindtap="submitFeedback"
-        >{{feedbackBusy ? "正在调整…" : (proposal.revision_plan ? "更新修改思路" : "按意见调整")}}</view>
-      </view>
       <text wx:if="{{feedbackBusy}}" class="revision-meta">
         AI 正在更新{{proposal.revision_plan ? "修改思路" : "修改预览"}}，离开页面后任务也会继续。
       </text>
@@ -211,23 +224,23 @@
     <view class="revision-actions">
       <view
         wx:if="{{proposal.phase === 'plan_ready' && proposal.status === 'ready'}}"
-        class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
+        class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle'}}"
+        aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="generateDraft"
       >{{draftBusy ? "正在生成修改稿…" : "按这个思路生成修改稿"}}</view>
       <view
         wx:elif="{{proposal.can_apply}}"
-        class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
+        class="primary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle'}}"
+        aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="applyRevision"
       >{{feedbackBusy ? "请等待调整完成" : (busy ? "正在确认…" : "确认使用这版修改稿")}}</view>
       <view
         wx:if="{{proposal.can_dismiss}}"
-        class="secondary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle' ? 'is-disabled' : ''}}"
+        class="secondary-action ui-block-action ui-pressable {{busy || feedbackBusy || draftBusy ? 'is-disabled' : ''}}"
         aria-role="button"
-        aria-disabled="{{busy || feedbackBusy || draftBusy || feedbackVoicePhase !== 'idle'}}"
+        aria-disabled="{{busy || feedbackBusy || draftBusy}}"
         bindtap="dismissRevision"
       >放弃这版修改</view>
       <view

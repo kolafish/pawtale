@@ -180,7 +180,8 @@
 }
 
 .changed-section,
-.whole-section {
+.whole-section,
+.metadata-change {
   margin-top: 26rpx;
   padding-top: 24rpx;
   border-top: 1rpx solid var(--ui-divider);
@@ -236,35 +237,9 @@
   margin-top: 30rpx;
 }
 
-.feedback-input {
-  box-sizing: border-box;
-  width: 100%;
-  height: 220rpx;
-  min-height: 220rpx;
-  max-height: 220rpx;
+.feedback-card voice-text-editor {
+  display: block;
   margin-top: 22rpx;
-  padding: 20rpx;
-  border-radius: 12rpx;
-  background: var(--ui-surface-subtle);
-  color: var(--ui-text-primary);
-  font-size: 27rpx;
-  line-height: 42rpx;
-}
-
-.feedback-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
-  gap: 14rpx;
-  margin-top: 18rpx;
-}
-
-.feedback-actions .secondary-action {
-  margin-top: 0;
-}
-
-.feedback-voice.recording {
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
 }
 
 .revision-actions {

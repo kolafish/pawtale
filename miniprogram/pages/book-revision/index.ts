@@ -15,7 +15,7 @@ import {
   getMemoirBookRevisionDraftJob,
   getMemoirBookRevisionFeedbackJob,
   getMemoirBookRevisionProposal,
-  memoirBookRevisionDictationUrl,
+  memoirBookReviewDictationUrl,
   type MemoirBookRevisionProposal,
   type MemoirBookRevisionPreviewVersion,
   type MemoirBookRevisionSectionComparison,
@@ -30,21 +30,11 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { PollingTimer } from "../../services/polling-timer";
-import { StreamingVoiceController } from "../../services/streaming-voice-controller";
-import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
-} from "../../services/voice-authorization";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 
 
 type RevisionMode = "changes" | "whole";
 type PreviewVersion = "before" | "after";
-type FeedbackVoicePhase = "idle" | "connecting" | "listening" | "stopping";
 const FEEDBACK_POLL_INTERVAL_MS = 1500;
-const FEEDBACK_VOICE_MAX_DURATION_MS = 30000;
-const FEEDBACK_TEXT_MAX_LENGTH = 1000;
 const PAGE_CLASS = "revision-page ui-page-shell ui-accessible-page";
 
 interface RevisionSectionView extends MemoirBookRevisionSectionComparison {
@@ -65,6 +55,24 @@ interface WholeChapterView {
   content: string;
 }
 
+interface BookMetadataChangeView {
+  field: string;
+  label: string;
+  before_value: string;
+  after_value: string;
+  display_value: string;
+}
+
+const BOOK_METADATA_LABELS: Record<string, string> = {
+  title: "书名",
+  subtitle: "副标题",
+  narrator_name: "口述人",
+  prepared_by: "整理人",
+  preface: "前言",
+  afterword: "后记",
+  back_cover_quote: "封底文案",
+};
+
 interface RevisionProposalView extends Pick<
   MemoirBookRevisionProposal,
   | "status"
@@ -82,6 +90,7 @@ interface RevisionProposalView extends Pick<
     | "chapter_order_changed"
     | "before_chapter_order"
     | "after_chapter_order"
+    | "metadata_changes"
   >;
 }
 
@@ -96,12 +105,13 @@ interface BookRevisionData {
   mode: RevisionMode;
   previewVersion: PreviewVersion;
   changedChapters: RevisionChapterView[];
+  metadataChanges: BookMetadataChangeView[];
   wholeLoading: boolean;
   wholeChapters: WholeChapterView[];
   feedbackText: string;
+  feedbackDictationUrl: string;
   feedbackBusy: boolean;
   draftBusy: boolean;
-  feedbackVoicePhase: FeedbackVoicePhase;
 }
 
 type RevisionDatasetEvent = PageDatasetEvent<{
@@ -122,12 +132,36 @@ function wholeBookChapters(
   }));
 }
 
+function metadataChangeViews(
+  proposal: MemoirBookRevisionProposal,
+  previewVersion: PreviewVersion,
+): BookMetadataChangeView[] {
+  const changes = proposal.phase === "plan_ready"
+    ? Object.entries(proposal.revision_plan?.book_metadata_patch || {}).map(
+      ([field, afterValue]) => ({
+        field,
+        before_value: "",
+        after_value: afterValue || "",
+      }),
+    )
+    : (proposal.comparison.metadata_changes || []);
+  return changes.map((change) => ({
+    ...change,
+    label: BOOK_METADATA_LABELS[change.field] || "成书信息",
+    display_value: (
+      proposal.phase === "plan_ready" || previewVersion === "after"
+        ? change.after_value
+        : change.before_value
+    ) || "（留空）",
+  }));
+}
+
 export function revisionViewPatch(
   proposal: MemoirBookRevisionProposal,
   previewVersion: PreviewVersion = "after",
 ): Pick<
   BookRevisionData,
-  "proposal" | "previewVersion" | "changedChapters"
+  "proposal" | "previewVersion" | "changedChapters" | "metadataChanges"
 > {
   return {
     proposal: {
@@ -144,9 +178,11 @@ export function revisionViewPatch(
         chapter_order_changed: proposal.comparison.chapter_order_changed,
         before_chapter_order: proposal.comparison.before_chapter_order,
         after_chapter_order: proposal.comparison.after_chapter_order,
+        metadata_changes: proposal.comparison.metadata_changes || [],
       },
     },
     previewVersion,
+    metadataChanges: metadataChangeViews(proposal, previewVersion),
     changedChapters: proposal.comparison.chapters.map((chapter) => ({
       ...chapter,
       sections: chapter.sections.map((section) => ({
@@ -172,26 +208,9 @@ function confirmAction(title: string, content: string): Promise<boolean> {
   });
 }
 
-export function feedbackTextWithTranscript(
-  existing: string,
-  transcript: string,
-): string {
-  const base = existing.trim();
-  const live = transcript.trim();
-  return `${base}${base && live ? "\n" : ""}${live}`.slice(
-    0,
-    FEEDBACK_TEXT_MAX_LENGTH,
-  );
-}
-
 definePage<BookRevisionData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
-  feedbackVoiceStreaming: new StreamingVoiceController(),
-  feedbackVoiceTimer: null as ReturnType<typeof setTimeout> | null,
-  feedbackVoiceToken: 0,
-  feedbackVoiceBaseText: "",
-  feedbackVoiceTranscript: "",
   feedbackBaselineUpdatedAt: "",
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
@@ -209,18 +228,25 @@ definePage<BookRevisionData>()({
     mode: "changes",
     previewVersion: "after",
     changedChapters: [],
+    metadataChanges: [],
     wholeLoading: false,
     wholeChapters: [],
     feedbackText: "",
+    feedbackDictationUrl: "",
     feedbackBusy: false,
     draftBusy: false,
-    feedbackVoicePhase: "idle",
   },
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const proposalId = queryParam(query, "proposalId");
-    this.setData({ projectId, proposalId });
+    this.setData({
+      projectId,
+      proposalId,
+      feedbackDictationUrl: projectId
+        ? memoirBookReviewDictationUrl(projectId)
+        : "",
+    });
     if (!projectId || !proposalId) {
       this.setData({ loading: false, error: "缺少修改预览信息" });
       return;
@@ -251,14 +277,12 @@ definePage<BookRevisionData>()({
     this.pageActive = false;
     this.stopFeedbackPolling();
     this.stopDraftPolling();
-    this.cancelFeedbackVoice();
   },
 
   onUnload() {
     this.pageActive = false;
     this.stopFeedbackPolling();
     this.stopDraftPolling();
-    this.cancelFeedbackVoice();
   },
 
   async loadProposal(silent = false) {
@@ -450,186 +474,22 @@ definePage<BookRevisionData>()({
   },
 
   changeFeedbackText(event: PageTextInputEvent) {
-    if (
-      this.data.feedbackBusy
-      || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
-    ) {
+    if (this.data.feedbackBusy || this.data.draftBusy) {
       return;
     }
     this.setData({ feedbackText: event.detail.value });
   },
 
-  cancelFeedbackVoice() {
-    this.feedbackVoiceToken += 1;
-    this.clearFeedbackVoiceTimer();
-    this.feedbackVoiceStreaming.close({ force: true });
-    this.feedbackVoiceBaseText = "";
-    this.feedbackVoiceTranscript = "";
-    this.setData({ feedbackVoicePhase: "idle" });
-  },
-
-  async toggleFeedbackVoice() {
-    if (this.data.feedbackVoicePhase === "listening") {
-      this.clearFeedbackVoiceTimer();
-      this.feedbackVoiceStreaming.stopRecording();
-      return;
-    }
-    if (
-      this.data.busy
-      || this.data.feedbackBusy
-      || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
-    ) {
-      return;
-    }
-    this.feedbackVoiceToken += 1;
-    const token = this.feedbackVoiceToken;
-    this.setData({ feedbackVoicePhase: "connecting", error: "" });
-    try {
-      if (!readVoiceAuthorizationConsent()) {
-        wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
-        this.setData({ feedbackVoicePhase: "idle" });
-        return;
-      }
-      await syncVoiceAuthorizationConsent();
-      await ensureRecorderPrivacyAuthorization();
-      if (token !== this.feedbackVoiceToken) {
-        return;
-      }
-      this.feedbackVoiceBaseText = this.data.feedbackText;
-      this.feedbackVoiceTranscript = "";
-      await this.feedbackVoiceStreaming.connect({
-        voiceSessionId: this.data.proposalId,
-        gatewayUrl: memoirBookRevisionDictationUrl(
-          this.data.projectId,
-          this.data.proposalId,
-        ),
-        guidanceMode: "free_narration",
-        autoStopSilenceMs: 0,
-        noVoiceActivityTimeoutMs: 0,
-        callbacks: {
-          onStatus: (status) => {
-            if (token !== this.feedbackVoiceToken) {
-              return;
-            }
-            if (status === "listening") {
-              this.setData({ feedbackVoicePhase: "listening" });
-            } else if (status === "stopping") {
-              this.setData({ feedbackVoicePhase: "stopping" });
-            } else if (status === "closed" || status === "error") {
-              this.clearFeedbackVoiceTimer();
-              this.setData({ feedbackVoicePhase: "idle" });
-            }
-          },
-          onEvent: (event) => {
-            if (
-              token === this.feedbackVoiceToken
-              && event.type === "audio.ended"
-            ) {
-              void this.finishFeedbackVoice(token);
-            }
-          },
-          onPartial: (text) => {
-            this.updateFeedbackVoiceTranscript(token, text);
-          },
-          onFinal: (event) => {
-            this.updateFeedbackVoiceTranscript(token, event.text || "");
-          },
-          onError: (message) => {
-            if (token !== this.feedbackVoiceToken) {
-              return;
-            }
-            this.clearFeedbackVoiceTimer();
-            this.setData({
-              feedbackVoicePhase: "idle",
-              error: message || "语音输入失败",
-            });
-          },
-        },
-      });
-      if (token !== this.feedbackVoiceToken) {
-        this.feedbackVoiceStreaming.close({ force: true });
-        return;
-      }
-      if (!this.feedbackVoiceStreaming.startRecording()) {
-        throw new Error("录音启动失败，请重试");
-      }
-      this.feedbackVoiceTimer = setTimeout(() => {
-        if (token === this.feedbackVoiceToken) {
-          this.feedbackVoiceTimer = null;
-          this.feedbackVoiceStreaming.stopRecording();
-        }
-      }, FEEDBACK_VOICE_MAX_DURATION_MS);
-    } catch (error) {
-      if (token !== this.feedbackVoiceToken) {
-        return;
-      }
-      this.feedbackVoiceStreaming.close({ force: true });
-      this.setData({
-        feedbackVoicePhase: "idle",
-        error: error instanceof Error ? error.message : "语音输入失败",
-      });
-    }
-  },
-
-  updateFeedbackVoiceTranscript(token: number, transcript: string) {
-    if (token !== this.feedbackVoiceToken) {
-      return;
-    }
-    this.feedbackVoiceTranscript = transcript.trim();
-    this.setData({
-      feedbackText: feedbackTextWithTranscript(
-        this.feedbackVoiceBaseText,
-        this.feedbackVoiceTranscript,
-      ),
-    });
-  },
-
-  clearFeedbackVoiceTimer() {
-    if (this.feedbackVoiceTimer) {
-      clearTimeout(this.feedbackVoiceTimer);
-      this.feedbackVoiceTimer = null;
-    }
-  },
-
-  async finishFeedbackVoice(token: number) {
-    this.clearFeedbackVoiceTimer();
-    try {
-      await this.feedbackVoiceStreaming.finishSession();
-    } catch (error) {
-      if (token === this.feedbackVoiceToken) {
-        this.setData({
-          error: error instanceof Error ? error.message : "语音输入结束失败",
-        });
-      }
-    }
-    if (token !== this.feedbackVoiceToken) {
-      return;
-    }
-    const transcript = this.feedbackVoiceTranscript.trim();
-    this.feedbackVoiceBaseText = "";
-    this.feedbackVoiceTranscript = "";
-    this.setData({
-      feedbackVoicePhase: "idle",
-      ...(transcript
-        ? {}
-        : { error: "没有识别到调整意见，请再说一次" }),
-    });
-    if (transcript) {
-      wx.showToast({ title: "语音已转成文字", icon: "none" });
-    }
-  },
-
-  async submitFeedback() {
-    const feedback = this.data.feedbackText.trim();
+  async submitFeedback(event?: PageTextInputEvent) {
+    const feedback = String(
+      event?.detail.value ?? this.data.feedbackText,
+    ).trim();
     if (
       this.data.proposal?.status !== "ready"
       || !this.data.proposal.can_dismiss
       || this.data.busy
       || this.data.feedbackBusy
       || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
     }
@@ -672,7 +532,6 @@ definePage<BookRevisionData>()({
       || this.data.busy
       || this.data.feedbackBusy
       || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
     }
@@ -732,7 +591,6 @@ definePage<BookRevisionData>()({
       || this.data.busy
       || this.data.feedbackBusy
       || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
     }
@@ -771,7 +629,6 @@ definePage<BookRevisionData>()({
       || this.data.busy
       || this.data.feedbackBusy
       || this.data.draftBusy
-      || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
     }

@@ -1,6 +1,7 @@
 {
   "navigationBarTitleText": "确认书稿修改",
   "usingComponents": {
-    "ai-task-progress": "/components/ai-task-progress/index"
+    "ai-task-progress": "/components/ai-task-progress/index",
+    "voice-text-editor": "/components/voice-text-editor/index"
   }
 }

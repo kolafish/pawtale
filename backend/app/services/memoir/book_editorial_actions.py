@@ -11,6 +11,7 @@ BOOK_EDITORIAL_ACTION_TYPES = {
     "remove_repetition",
     "improve_transition",
     "reorder_chapters",
+    "revise_book_profile",
 }
 
 
