@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
+from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookRevisionProposal,
@@ -20,9 +19,9 @@ from app.services.memoir import (
     book_revision_proposals,
     book_reviews,
     editing_jobs,
+    revision_job_workflow,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.semantic_state import semantic_json_signature
 
@@ -406,16 +405,13 @@ async def cancel_book_revision_job(
 async def run_book_revision_job(
     db: AsyncSession,
     job: MemoirEditingJob,
-) -> EditingJobResult:
+) -> editing_jobs.EditingJobResult:
     source = _source_for_job(job)
-    payload = dict(job.payload_json or {})
-    progress = dict(job.result_json or {})
-    update_progress = editing_jobs.editing_job_progress_callback(
-        db,
-        job=job,
-        progress=progress,
-    )
-    try:
+
+    async def execute(
+        payload: dict[str, object],
+        update_progress: revision_job_workflow.ProgressCallback,
+    ) -> dict[str, object]:
         await load_memoir_project(
             db,
             job.project_id,
@@ -457,45 +453,16 @@ async def run_book_revision_job(
                 ai_model=ai_model,
                 progress_callback=update_progress,
             )
-    except editing_jobs.EditingJobProgressLost:
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.SKIPPED,
-            result_json={
-                **progress,
-                "stage": "cancelled",
-                "cancelled": True,
-            },
-        )
-    except book_revision_generation.BookRevisionError as exc:
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.FAILED,
-            result_json={
-                **progress,
-                "stage": "failed",
-                "generation": exc.generation,
-            },
-            error_message=str(exc),
-        )
-    except (HTTPException, ValueError) as exc:
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.FAILED,
-            result_json={**progress, "stage": "failed"},
-            error_message=(str(exc.detail) if isinstance(exc, HTTPException) else str(exc)),
-        )
+        return {
+            "proposal_id": generated.proposal_id,
+            "proposal_status": "ready" if generated.proposal_id else None,
+            "proposal_phase": generated.proposal_phase,
+            "requested_ai_model": generated.requested_ai_model,
+            "resolved_ai_model": generated.resolved_ai_model,
+            "generation": generated.generation,
+            "changed_chapter_count": generated.changed_chapter_count,
+            "selected_action_count": generated.selected_action_count,
+            "summary": generated.summary,
+        }
 
-    result = {
-        **progress,
-        "stage": "completed",
-        "proposal_id": generated.proposal_id,
-        "proposal_status": "ready" if generated.proposal_id else None,
-        "proposal_phase": generated.proposal_phase,
-        "requested_ai_model": generated.requested_ai_model,
-        "resolved_ai_model": generated.resolved_ai_model,
-        "generation": generated.generation,
-    }
-    result.update(
-        changed_chapter_count=generated.changed_chapter_count,
-        selected_action_count=generated.selected_action_count,
-        summary=generated.summary,
-    )
-    return EditingJobResult(result_json=result)
+    return await revision_job_workflow.run(db, job, execute)

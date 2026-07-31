@@ -228,6 +228,73 @@ function matchesSectionOperation(
   return !("operation" in job) || job.operation === operation;
 }
 
+function loadTargetProposal(
+  data: RevisionWorkbenchData,
+  preview: "none" | PreviewVersion = "none",
+): Promise<MemoirBookRevisionProposal> {
+  return data.scope === "chapter_section"
+    ? getMemoirChapterSectionRevisionProposal(
+      data.projectId, data.chapterId, data.sectionId, data.proposalId,
+    )
+    : getMemoirBookRevisionProposal(data.projectId, data.proposalId, preview);
+}
+
+function loadTargetJob(
+  data: RevisionWorkbenchData,
+  operation: "feedback" | "draft",
+) {
+  if (data.scope === "chapter_section") {
+    return getMemoirChapterSectionRevisionJob(
+      data.projectId, data.chapterId, data.sectionId,
+    );
+  }
+  return operation === "feedback"
+    ? getMemoirBookRevisionFeedbackJob(data.projectId, data.proposalId)
+    : getMemoirBookRevisionDraftJob(data.projectId, data.proposalId);
+}
+
+function enqueueTargetRevision(
+  data: RevisionWorkbenchData,
+  operation: "plan" | "feedback" | "draft",
+  feedback: string | null = null,
+) {
+  if (operation === "plan" && data.scope !== "chapter_section") {
+    throw new Error("全书修改思路必须从全书检查结果发起");
+  }
+  if (data.scope === "chapter_section") {
+    return enqueueMemoirChapterSectionRevision(
+      data.projectId,
+      data.chapterId,
+      data.sectionId,
+      operation,
+      data.proposalId || null,
+      feedback,
+    );
+  }
+  return operation === "feedback"
+    ? enqueueMemoirBookRevisionFeedback(
+      data.projectId, data.proposalId, feedback || "",
+    )
+    : enqueueMemoirBookRevisionDraft(data.projectId, data.proposalId);
+}
+
+function finalizeTargetRevision(
+  data: RevisionWorkbenchData,
+  action: "apply" | "dismiss",
+) {
+  if (data.scope === "chapter_section") {
+    const args = [
+      data.projectId, data.chapterId, data.sectionId, data.proposalId,
+    ] as const;
+    return action === "apply"
+      ? applyMemoirChapterSectionRevision(...args)
+      : dismissMemoirChapterSectionRevision(...args);
+  }
+  return action === "apply"
+    ? applyMemoirBookRevisionProposal(data.projectId, data.proposalId)
+    : dismissMemoirBookRevisionProposal(data.projectId, data.proposalId);
+}
+
 definePage<RevisionWorkbenchData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
@@ -323,14 +390,14 @@ definePage<RevisionWorkbenchData>()({
 
   onHide() {
     this.pageActive = false;
-    this.stopFeedbackPolling();
-    this.stopDraftPolling();
+    this.stopJobPolling("feedback");
+    this.stopJobPolling("draft");
   },
 
   onUnload() {
     this.pageActive = false;
-    this.stopFeedbackPolling();
-    this.stopDraftPolling();
+    this.stopJobPolling("feedback");
+    this.stopJobPolling("draft");
   },
 
   async loadProposal(silent = false) {
@@ -338,17 +405,7 @@ definePage<RevisionWorkbenchData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
-      const proposal = this.data.scope === "chapter_section"
-        ? await getMemoirChapterSectionRevisionProposal(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          this.data.proposalId,
-        )
-        : await getMemoirBookRevisionProposal(
-          this.data.projectId,
-          this.data.proposalId,
-        );
+      const proposal = await loadTargetProposal(this.data);
       this.revisionProposal = proposal;
       this.wholeChapterCache = {};
       this.wholeLoadSequence += 1;
@@ -386,11 +443,7 @@ definePage<RevisionWorkbenchData>()({
     const sequence = ++this.wholeLoadSequence;
     this.setData({ wholeLoading: true, wholeChapters: [], error: "" });
     try {
-      const proposal = await getMemoirBookRevisionProposal(
-        this.data.projectId,
-        this.data.proposalId,
-        version,
-      );
+      const proposal = await loadTargetProposal(this.data, version);
       if (sequence !== this.wholeLoadSequence) {
         return false;
       }
@@ -422,39 +475,25 @@ definePage<RevisionWorkbenchData>()({
     }
   },
 
-  stopFeedbackPolling() {
-    this.feedbackPoller.cancel();
+  stopJobPolling(operation: "feedback" | "draft") {
+    (operation === "feedback" ? this.feedbackPoller : this.draftPoller).cancel();
   },
 
-  stopDraftPolling() {
-    this.draftPoller.cancel();
-  },
-
-  scheduleFeedbackPoll() {
+  scheduleJobPoll(operation: "feedback" | "draft") {
     if (!this.pageActive) {
       return;
     }
-    this.feedbackPoller.schedule(() => {
-      void this.refreshFeedbackJob();
-    });
-  },
-
-  scheduleDraftPoll() {
-    if (!this.pageActive) {
-      return;
-    }
-    this.draftPoller.schedule(() => {
-      void this.refreshDraftJob();
+    const poller = operation === "feedback"
+      ? this.feedbackPoller
+      : this.draftPoller;
+    poller.schedule(() => {
+      void this.refreshJob(operation);
     });
   },
 
   async refreshInitialJob() {
     try {
-      const job = await getMemoirChapterSectionRevisionJob(
-        this.data.projectId,
-        this.data.chapterId,
-        this.data.sectionId,
-      );
+      const job = await loadTargetJob(this.data, "feedback");
       if (job.proposal_id) {
         this.setData({ proposalId: job.proposal_id, feedbackText: "" });
         if (await this.loadProposal(true)) {
@@ -466,7 +505,7 @@ definePage<RevisionWorkbenchData>()({
         return;
       }
       const active = job.status === "pending" || job.status === "running";
-      this.stopFeedbackPolling();
+      this.stopJobPolling("feedback");
       this.setData({
         feedbackBusy: active,
         ...(job.status === "failed"
@@ -474,7 +513,7 @@ definePage<RevisionWorkbenchData>()({
           : {}),
       });
       if (active) {
-        this.scheduleFeedbackPoll();
+        this.scheduleJobPoll("feedback");
       }
     } catch (error) {
       if (routeAuthError(error)) {
@@ -492,39 +531,47 @@ definePage<RevisionWorkbenchData>()({
       await this.refreshInitialJob();
       return;
     }
-    const wasActive = this.data.feedbackBusy;
+    await this.refreshJob("feedback");
+  },
+
+  async refreshDraftJob() {
+    if (this.data.proposalId) {
+      await this.refreshJob("draft");
+    }
+  },
+
+  async refreshJob(operation: "feedback" | "draft") {
+    const busyKey = operation === "feedback" ? "feedbackBusy" : "draftBusy";
+    const wasActive = this.data[busyKey];
     try {
-      const job = this.data.scope === "chapter_section"
-        ? await getMemoirChapterSectionRevisionJob(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-        )
-        : await getMemoirBookRevisionFeedbackJob(
-          this.data.projectId,
-          this.data.proposalId,
-        );
+      const job = await loadTargetJob(this.data, operation);
       const active = (
         job.status === "pending" || job.status === "running"
-      ) && matchesSectionOperation(job, "feedback");
+      ) && matchesSectionOperation(job, operation);
       const failed = job.status === "failed"
-        && matchesSectionOperation(job, "feedback");
-      this.stopFeedbackPolling();
+        && matchesSectionOperation(job, operation);
+      this.stopJobPolling(operation);
       this.setData({
-        feedbackBusy: active,
+        [busyKey]: active,
         ...(failed
-          ? { error: job.error_message || "按意见调整失败" }
+          ? {
+            error: job.error_message || (
+              operation === "feedback" ? "按意见调整失败" : "生成修改稿失败"
+            ),
+          }
           : {}),
       });
       if (active) {
-        this.scheduleFeedbackPoll();
+        this.scheduleJobPoll(operation);
       } else if (job.status === "succeeded" && wasActive) {
         if (await this.loadProposal(true)) {
-          const updated = (
+          if (operation === "draft") {
+            this.setData({ error: "" });
+            wx.showToast({ title: "修改稿已生成", icon: "success" });
+          } else if (
             !this.feedbackBaselineUpdatedAt
             || this.data.proposal?.updated_at !== this.feedbackBaselineUpdatedAt
-          );
-          if (updated) {
+          ) {
             this.setData({ feedbackText: "", error: "" });
             wx.showToast({
               title: this.data.proposal?.revision_plan
@@ -540,59 +587,14 @@ definePage<RevisionWorkbenchData>()({
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "调整进度加载失败",
+        error: error instanceof Error
+          ? error.message
+          : operation === "feedback"
+            ? "调整进度加载失败"
+            : "修改稿进度加载失败",
       });
       if (wasActive) {
-        this.scheduleFeedbackPoll();
-      }
-    }
-  },
-
-  async refreshDraftJob() {
-    if (!this.data.proposalId) {
-      return;
-    }
-    const wasActive = this.data.draftBusy;
-    try {
-      const job = this.data.scope === "chapter_section"
-        ? await getMemoirChapterSectionRevisionJob(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-        )
-        : await getMemoirBookRevisionDraftJob(
-          this.data.projectId,
-          this.data.proposalId,
-        );
-      const active = (
-        job.status === "pending" || job.status === "running"
-      ) && matchesSectionOperation(job, "draft");
-      const failed = job.status === "failed"
-        && matchesSectionOperation(job, "draft");
-      this.stopDraftPolling();
-      this.setData({
-        draftBusy: active,
-        ...(failed
-          ? { error: job.error_message || "生成修改稿失败" }
-          : {}),
-      });
-      if (active) {
-        this.scheduleDraftPoll();
-      } else if (job.status === "succeeded" && wasActive) {
-        if (await this.loadProposal(true)) {
-          this.setData({ error: "" });
-          wx.showToast({ title: "修改稿已生成", icon: "success" });
-        }
-      }
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "修改稿进度加载失败",
-      });
-      if (wasActive) {
-        this.scheduleDraftPoll();
+        this.scheduleJobPoll(operation);
       }
     }
   },
@@ -621,18 +623,11 @@ definePage<RevisionWorkbenchData>()({
       }
       this.setData({ feedbackBusy: true, error: "" });
       try {
-        const job = await enqueueMemoirChapterSectionRevision(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          "plan",
-          null,
-          feedback,
-        );
+        const job = await enqueueTargetRevision(this.data, "plan", feedback);
         const active = job.status === "pending" || job.status === "running";
         this.setData({ feedbackBusy: active });
         if (active) {
-          this.scheduleFeedbackPoll();
+          this.scheduleJobPoll("feedback");
         } else if (job.status === "succeeded" && job.proposal_id) {
           this.setData({ proposalId: job.proposal_id, feedbackText: "" });
           await this.loadProposal(true);
@@ -657,24 +652,11 @@ definePage<RevisionWorkbenchData>()({
     this.feedbackBaselineUpdatedAt = this.data.proposal.updated_at;
     this.setData({ feedbackBusy: true, error: "" });
     try {
-      const job = this.data.scope === "chapter_section"
-        ? await enqueueMemoirChapterSectionRevision(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          "feedback",
-          this.data.proposalId,
-          feedback,
-        )
-        : await enqueueMemoirBookRevisionFeedback(
-          this.data.projectId,
-          this.data.proposalId,
-          feedback,
-        );
+      const job = await enqueueTargetRevision(this.data, "feedback", feedback);
       const active = job.status === "pending" || job.status === "running";
       this.setData({ feedbackBusy: active });
       if (active) {
-        this.scheduleFeedbackPoll();
+        this.scheduleJobPoll("feedback");
       } else if (job.status === "succeeded") {
         if (await this.loadProposal(true)) {
           this.setData({ feedbackText: "" });
@@ -687,7 +669,7 @@ definePage<RevisionWorkbenchData>()({
       this.setData({
         error: error instanceof Error ? error.message : "提交调整意见失败",
       });
-      this.scheduleFeedbackPoll();
+      this.scheduleJobPoll("feedback");
     }
   },
 
@@ -703,23 +685,11 @@ definePage<RevisionWorkbenchData>()({
     }
     this.setData({ draftBusy: true, error: "" });
     try {
-      const job = this.data.scope === "chapter_section"
-        ? await enqueueMemoirChapterSectionRevision(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          "draft",
-          this.data.proposalId,
-          null,
-        )
-        : await enqueueMemoirBookRevisionDraft(
-          this.data.projectId,
-          this.data.proposalId,
-        );
+      const job = await enqueueTargetRevision(this.data, "draft");
       const active = job.status === "pending" || job.status === "running";
       this.setData({ draftBusy: active });
       if (active) {
-        this.scheduleDraftPoll();
+        this.scheduleJobPoll("draft");
       } else if (job.status === "succeeded") {
         await this.loadProposal(true);
       }
@@ -731,7 +701,7 @@ definePage<RevisionWorkbenchData>()({
         draftBusy: false,
         error: error instanceof Error ? error.message : "生成修改稿失败",
       });
-      this.scheduleDraftPoll();
+      this.scheduleJobPoll("draft");
     }
   },
 
@@ -782,17 +752,7 @@ definePage<RevisionWorkbenchData>()({
     }
     this.setData({ busy: true, error: "" });
     try {
-      const proposal = this.data.scope === "chapter_section"
-        ? await applyMemoirChapterSectionRevision(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          this.data.proposalId,
-        )
-        : await applyMemoirBookRevisionProposal(
-          this.data.projectId,
-          this.data.proposalId,
-        );
+      const proposal = await finalizeTargetRevision(this.data, "apply");
       this.revisionProposal = proposal;
       this.setData({
         busy: false,
@@ -832,19 +792,7 @@ definePage<RevisionWorkbenchData>()({
     }
     this.setData({ busy: true, error: "" });
     try {
-      if (this.data.scope === "chapter_section") {
-        await dismissMemoirChapterSectionRevision(
-          this.data.projectId,
-          this.data.chapterId,
-          this.data.sectionId,
-          this.data.proposalId,
-        );
-      } else {
-        await dismissMemoirBookRevisionProposal(
-          this.data.projectId,
-          this.data.proposalId,
-        );
-      }
+      await finalizeTargetRevision(this.data, "dismiss");
       wx.navigateBack();
     } catch (error) {
       if (routeAuthError(error)) {

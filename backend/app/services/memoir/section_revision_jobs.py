@@ -31,9 +31,9 @@ from app.services.memoir import (
     chapter_digests,
     chapter_generation,
     editing_jobs,
+    revision_job_workflow,
 )
 from app.services.memoir.access import load_memoir_project
-from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 from app.services.memoir.semantic_state import semantic_json_signature
 
@@ -368,14 +368,14 @@ async def get_section_revision_job(
 async def run_section_revision_job(
     db: AsyncSession,
     job: MemoirEditingJob,
-) -> EditingJobResult:
-    payload = dict(job.payload_json or {})
-    operation = str(payload.get("source") or "")
-    project_id, chapter_id = job.project_id, str(job.chapter_id or "")
-    section_id = str(payload.get("section_id") or "")
-    progress = dict(job.result_json or {})
-    update = editing_jobs.editing_job_progress_callback(db, job=job, progress=progress)
-    try:
+) -> editing_jobs.EditingJobResult:
+    async def execute(
+        payload: dict[str, object],
+        update: revision_job_workflow.ProgressCallback,
+    ) -> dict[str, object]:
+        operation = str(payload.get("source") or "")
+        project_id, chapter_id = job.project_id, str(job.chapter_id or "")
+        section_id = str(payload.get("section_id") or "")
         if operation not in {"plan", "feedback", "draft"}:
             raise ValueError("不支持的小节修改任务")
         await load_memoir_project(db, project_id, str(payload.get("user_id") or ""))
@@ -463,29 +463,9 @@ async def run_section_revision_job(
             )
             await update({"stage": "saving"})
             result = {**previous, **patch, "requested_ai_model": ai_model}
-        return EditingJobResult(result_json={**progress, **result, "stage": "completed"})
-    except editing_jobs.EditingJobProgressLost:
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.SKIPPED,
-            result_json={**progress, "stage": "cancelled", "cancelled": True},
-        )
-    except book_revision_generation.BookRevisionError as exc:
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.FAILED,
-            result_json={
-                **progress,
-                "stage": "failed",
-                "generation": exc.generation,
-            },
-            error_message=str(exc),
-        )
-    except (HTTPException, ValueError) as exc:
-        message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
-        return EditingJobResult(
-            status=MemoirEditingJobStatus.FAILED,
-            result_json={**progress, "stage": "failed"},
-            error_message=message,
-        )
+        return result
+
+    return await revision_job_workflow.run(db, job, execute)
 
 
 async def section_revision_proposal_response(
