@@ -2,33 +2,18 @@ import { definePage } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
-  createMemoirMaterialImageGenerationJob,
-  createMemoirTranscriptShareVideoJob,
-  downloadMemoirShareVideoJob,
-  getMemoirMaterialImageGenerationJob,
-  getMemoirShareVideoJob,
   getMemoirVoiceTranscript,
 } from "../../services/memoir-transcript-api";
 import { AudioPlaybackController } from "../../services/audio-playback";
-import {
-  shareLocalFileMessage,
-} from "../../services/share";
 import {
   isAuthError,
   navigateToLogin,
 } from "../../services/navigation";
 import {
+  pageUrl,
   queryParam,
   type PageQuery,
 } from "../../services/page-input";
-import {
-  initialTranscriptShareVideoData,
-  TranscriptShareVideoController,
-} from "../../services/transcript-share-video";
-import {
-  initialTranscriptMaterialImageTaskState,
-  TranscriptMaterialImageController,
-} from "../../services/transcript-material-image";
 import { PollingTimer } from "../../services/polling-timer";
 import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import {
@@ -43,24 +28,10 @@ import {
 import {
   transcriptDetailEditWorkflowMethods,
 } from "./transcript-detail-edit-workflow";
-import {
-  transcriptDetailShareVideoWorkflowMethods,
-} from "./transcript-detail-share-video-workflow";
 
 definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
-  shareVideoController: new TranscriptShareVideoController({
-    createJob: createMemoirTranscriptShareVideoJob,
-    getJob: getMemoirShareVideoJob,
-    downloadJob: downloadMemoirShareVideoJob,
-    shareFile: shareLocalFileMessage,
-  }),
-  materialImageController: new TranscriptMaterialImageController({
-    createJob: createMemoirMaterialImageGenerationJob,
-    getJob: getMemoirMaterialImageGenerationJob,
-  }),
   loadToken: 0,
-  shareVideoBackgroundUploadToken: 0,
   offlineAsrPoller: new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
   offlineAsrPollToken: 0,
   offlineAsrPollAttempts: 0,
@@ -105,14 +76,9 @@ definePage<TranscriptDetailData>()({
     assignmentText: "",
     assignmentCanSave: false,
     assignmentPlacement: null,
-    ...initialTranscriptShareVideoData(),
-    ...initialTranscriptMaterialImageTaskState(),
   },
 
   async onLoad(options?: PageQuery) {
-    this.shareVideoController.setStateListener((patch) => this.setData(patch));
-    this.materialImageController.setStateListener((patch) => this.setData(patch));
-    this.resetShareVideoState();
     const utteranceId = queryParam(options, "id");
     this.setData({
       utteranceId,
@@ -169,10 +135,17 @@ definePage<TranscriptDetailData>()({
 
   ...transcriptDetailEditWorkflowMethods,
 
-  ...transcriptDetailShareVideoWorkflowMethods,
-
   openLogin() {
     navigateToLogin();
+  },
+
+  openMediaTools() {
+    if (!this.data.item || this.data.item.canRecoverTranscription) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/transcript-media/index", { id: this.data.item.id }),
+    });
   },
 
   onShow() {
@@ -188,7 +161,5 @@ definePage<TranscriptDetailData>()({
     syncEditUnloadAlert(null);
     this.stopOfflineAsrPolling();
     this.stopPlayback();
-    this.shareVideoController.dispose();
-    this.materialImageController.dispose();
   },
 });

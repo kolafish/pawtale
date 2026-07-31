@@ -17,12 +17,16 @@ import {
   shareVideoBackgroundPatch,
   shareVideoSelectionPatch,
   TranscriptShareVideoController,
+  type TranscriptShareVideoData,
 } from "../../services/transcript-share-video";
 import {
   shareVideoFileName,
-  type TranscriptDetailData,
+  type TranscriptDetailItemView,
 } from "./transcript-detail-model";
-import { TranscriptMaterialImageController } from "../../services/transcript-material-image";
+import {
+  TranscriptMaterialImageController,
+  type TranscriptMaterialImageTaskState,
+} from "../../services/transcript-material-image";
 
 type ShareVideoSegmentEvent = PageDatasetEvent<{ index?: string | number }>;
 type ShareVideoBackgroundEvent = PageDatasetEvent<{
@@ -31,18 +35,26 @@ type ShareVideoBackgroundEvent = PageDatasetEvent<{
   backgroundStyle?: string;
 }>;
 
-interface TranscriptDetailShareVideoWorkflowHost {
-  data: TranscriptDetailData;
+export interface TranscriptMediaData
+  extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
+  pageClass: string;
+  loading: boolean;
+  needsLogin: boolean;
+  error: string;
+  utteranceId: string;
+  item: TranscriptDetailItemView | null;
+}
+
+interface TranscriptMediaWorkflowHost {
+  data: TranscriptMediaData;
   shareVideoController: TranscriptShareVideoController;
   materialImageController: TranscriptMaterialImageController;
   shareVideoBackgroundUploadToken: number;
-  setData(patch: Partial<TranscriptDetailData>): void;
-  stopPlayback(): void;
+  setData(patch: Partial<TranscriptMediaData>): void;
 }
 
-export interface TranscriptDetailShareVideoWorkflowMethods {
+export interface TranscriptMediaWorkflowMethods {
   resetShareVideoState(): void;
-  toggleShareVideoPanel(): Promise<void>;
   openShareVideoPanel(): Promise<void>;
   selectShareVideoSegment(event: ShareVideoSegmentEvent): void;
   clearShareVideoSelection(): void;
@@ -56,11 +68,11 @@ export interface TranscriptDetailShareVideoWorkflowMethods {
   shareGeneratedVideo(): Promise<void>;
 }
 
-type TranscriptDetailShareVideoWorkflow = TranscriptDetailShareVideoWorkflowHost
-  & TranscriptDetailShareVideoWorkflowMethods;
+type TranscriptMediaWorkflow = TranscriptMediaWorkflowHost
+  & TranscriptMediaWorkflowMethods;
 
-export const transcriptDetailShareVideoWorkflowMethods:
-TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoWorkflow> = {
+export const transcriptMediaWorkflowMethods:
+TranscriptMediaWorkflowMethods & ThisType<TranscriptMediaWorkflow> = {
   resetShareVideoState() {
     this.shareVideoController.reset();
     this.materialImageController.reset();
@@ -68,35 +80,13 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
     this.setData(initialTranscriptShareVideoData());
   },
 
-  async toggleShareVideoPanel() {
-    const item = this.data.item;
-    if (
-      !item ||
-      item.canRecoverTranscription ||
-      item.isEditing ||
-      this.data.saving ||
-      this.data.deleting ||
-      this.data.shareVideoSharing ||
-      this.data.shareVideoCustomBackgroundUploading
-    ) {
-      return;
-    }
-    if (this.data.shareVideoPanelOpen) {
-      this.shareVideoController.cancel();
-      this.resetShareVideoState();
-      return;
-    }
-    await this.openShareVideoPanel();
-  },
-
   async openShareVideoPanel() {
     const item = this.data.item;
-    if (!item || item.canRecoverTranscription || item.isEditing) {
+    if (!item || item.canRecoverTranscription) {
       return;
     }
     if (this.data.shareVideoContext?.utterance_id === item.id) {
       this.setData({
-        shareVideoPanelOpen: true,
         shareVideoError: "",
         ...shareVideoBackgroundPatch(this.data.shareVideoContext),
       });
@@ -114,7 +104,6 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
     this.materialImageController.reset();
     this.setData({
       ...initialTranscriptShareVideoData(),
-      shareVideoPanelOpen: true,
       shareVideoLoadingContext: true,
     });
     try {
@@ -338,7 +327,6 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       if (!filePath) {
         return;
       }
-      this.stopPlayback();
       this.shareVideoController.clearResult();
       this.shareVideoBackgroundUploadToken += 1;
       const token = this.shareVideoBackgroundUploadToken;
@@ -427,7 +415,6 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
     ) {
       return;
     }
-    this.stopPlayback();
     const job = await this.materialImageController.create({
       utteranceId: item.id,
       startChar: this.data.shareVideoSelectedStartChar,
@@ -481,7 +468,6 @@ TranscriptDetailShareVideoWorkflowMethods & ThisType<TranscriptDetailShareVideoW
       });
       return;
     }
-    this.stopPlayback();
     const job = await this.shareVideoController.create({
       utteranceId: item.id,
       startChar: this.data.shareVideoSelectedStartChar,

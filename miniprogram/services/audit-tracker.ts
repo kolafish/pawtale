@@ -51,6 +51,7 @@ const PAGE_FEATURES: Record<string, string> = {
   "/pages/voice-chat/index": "voice_chat.session",
   "/pages/transcripts/index": "transcript.view",
   "/pages/transcript-detail/index": "transcript.view",
+  "/pages/transcript-media/index": "transcript.view",
   "/pages/book/index": "book.view",
   "/pages/book-completion/index": "book.view",
   "/pages/revision-workbench/index": "book.view",
