@@ -6,7 +6,7 @@
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <block wx:if="{{!loggedIn}}">
-    <view class="guest-login-panel">
+    <view class="guest-login-panel ui-card ui-card-borderless">
       <view class="guest-login-mark">余</view>
       <text class="panel-title">登录后管理你的回忆录</text>
       <text class="panel-copy">讲述记录、成书进度和个人设置都会跟随账号保存。</text>
@@ -20,8 +20,8 @@
     </view>
 
     <view class="section">
-      <text class="section-title">显示与辅助</text>
-      <view class="settings-card">
+      <text class="section-title ui-section-heading">显示与辅助</text>
+      <view class="settings-card ui-card ui-card-borderless">
         <view class="switch-row">
           <view class="switch-copy">
             <text class="action-title">大字模式</text>
@@ -39,7 +39,7 @@
   </block>
 
   <block wx:if="{{loggedIn}}">
-    <view class="profile-panel">
+    <view class="profile-panel ui-card ui-card-borderless">
       <button
         class="profile-avatar-picker"
         open-type="chooseAvatar"
@@ -81,10 +81,10 @@
 
     <view class="section">
       <view class="setting-header">
-        <text class="section-title">当前回忆录</text>
+        <text class="section-title ui-section-heading">当前回忆录</text>
         <text class="setting-current stats-refresh">{{voiceStatsLoading ? "更新中" : " "}}</text>
       </view>
-      <view class="project-overview">
+      <view class="project-overview ui-card ui-card-borderless">
         <view class="project-overview-head">
           <view class="project-overview-main">
             <text class="action-title">{{projectTitle || "尚未创建回忆录"}}</text>
@@ -117,8 +117,8 @@
     </view>
 
     <view class="section">
-      <text class="section-title">回忆录管理</text>
-      <view class="settings-list">
+      <text class="section-title ui-section-heading">回忆录管理</text>
+      <view class="settings-list ui-card ui-card-borderless">
         <view
           class="settings-nav-row"
           aria-role="button"
@@ -138,8 +138,8 @@
     </view>
 
     <view class="section">
-      <text class="section-title">语音与工具</text>
-      <view class="settings-list">
+      <text class="section-title ui-section-heading">语音与工具</text>
+      <view class="settings-list ui-card ui-card-borderless">
         <view
           class="settings-nav-row"
           aria-role="button"
@@ -177,8 +177,8 @@
     </view>
 
     <view class="section">
-      <text class="section-title">显示与辅助</text>
-      <view class="settings-card">
+      <text class="section-title ui-section-heading">显示与辅助</text>
+      <view class="settings-card ui-card ui-card-borderless">
         <view class="switch-row">
           <view class="switch-copy">
             <text class="action-title">大字模式</text>
@@ -195,9 +195,9 @@
     </view>
 
     <view wx:if="{{!passwordLoginEnabled}}" class="section">
-      <text class="section-title">账号与安全</text>
+      <text class="section-title ui-section-heading">账号与安全</text>
       <view
-        class="settings-disclosure"
+        class="settings-disclosure ui-card ui-card-borderless"
         aria-role="button"
         aria-expanded="{{showAccountSettings}}"
         bindtap="toggleAccountSettings"
@@ -209,7 +209,7 @@
         </view>
         <text class="settings-disclosure-action">{{showAccountSettings ? "收起" : "设置"}}</text>
       </view>
-      <view wx:if="{{showAccountSettings}}" class="credential-panel disclosure-content">
+      <view wx:if="{{showAccountSettings}}" class="credential-panel disclosure-content ui-card ui-card-borderless">
         <view class="field">
           <text class="field-label">邮箱</text>
           <input

@@ -5,9 +5,9 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <view class="form-panel">
+  <view class="form-panel ui-card">
     <view class="field">
-      <text class="field-label">回忆录名称</text>
+      <text class="field-label ui-section-heading">回忆录名称</text>
       <input
         class="text-input"
         value="{{title}}"
@@ -18,7 +18,7 @@
     </view>
 
     <view class="field">
-      <text class="field-label">性别</text>
+      <text class="field-label ui-section-heading">性别</text>
       <view class="segmented">
         <view
           wx:for="{{genderOptions}}"
@@ -33,7 +33,7 @@
     </view>
 
     <view class="field">
-      <text class="field-label">籍贯</text>
+      <text class="field-label ui-section-heading">籍贯</text>
       <input
         class="text-input"
         value="{{narratorOrigin}}"
@@ -44,7 +44,7 @@
     </view>
 
     <view class="field">
-      <text class="field-label">年龄</text>
+      <text class="field-label ui-section-heading">年龄</text>
       <input
         class="text-input"
         value="{{narratorAgeText}}"
@@ -56,7 +56,7 @@
     </view>
 
     <view class="field">
-      <text class="field-label">讲述方式</text>
+      <text class="field-label ui-section-heading">讲述方式</text>
       <view class="mode-list">
         <view
           wx:for="{{guidanceOptions}}"

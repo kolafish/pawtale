@@ -8,7 +8,7 @@
   <view wx:if="{{loading && !workspace}}" class="loading-state">正在读取本章</view>
 
   <block wx:if="{{workspace}}">
-    <view class="status-card" id="chapter-status">
+    <view class="status-card ui-card ui-card-borderless" id="chapter-status">
       <text class="section-kicker">本章进度</text>
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
@@ -41,7 +41,7 @@
 
     <view
       wx:if="{{requiredIssues.length || optionalIssues.length}}"
-      class="content-card suggestions-card"
+      class="content-card suggestions-card ui-card ui-card-borderless"
       id="chapter-suggestions"
     >
       <view
@@ -73,7 +73,7 @@
       </block>
     </view>
 
-    <view class="content-card draft-card" id="chapter-sections">
+    <view class="content-card draft-card ui-card ui-card-borderless" id="chapter-sections">
       <view class="draft-heading">
         <view>
           <text class="section-kicker">本章小节</text>

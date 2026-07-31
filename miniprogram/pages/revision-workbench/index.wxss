@@ -3,15 +3,6 @@
   color: var(--ui-text-primary);
 }
 
-.revision-intro,
-.changed-chapter,
-.whole-chapter,
-.state-card {
-  border-radius: 20rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-}
-
 .revision-intro {
   padding: 36rpx 30rpx;
 }
@@ -134,12 +125,6 @@
 .plan-item {
   margin-top: 20rpx;
   padding: 30rpx 26rpx;
-}
-
-.plan-item {
-  border-radius: 20rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .plan-field-label {

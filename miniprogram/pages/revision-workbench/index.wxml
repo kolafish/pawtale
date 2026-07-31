@@ -1,7 +1,7 @@
 <view class="{{pageClass}}">
-  <view wx:if="{{loading}}" class="state-card">正在准备修改预览...</view>
+  <view wx:if="{{loading}}" class="state-card ui-card ui-card-borderless">正在准备修改预览...</view>
   <block wx:elif="{{scope === 'chapter_section' && !proposal}}">
-    <view class="revision-intro feedback-card initial-feedback-card">
+    <view class="revision-intro feedback-card initial-feedback-card ui-card ui-card-borderless">
       <text class="revision-kicker">小节修改</text>
       <text class="revision-title">先说怎么改，再看修改思路</text>
       <text wx:if="{{sectionTitle}}" class="chapter-title">{{sectionTitle}}</text>
@@ -33,7 +33,7 @@
   <view wx:elif="{{error && !proposal}}" class="ui-error-banner">{{error}}</view>
 
   <block wx:elif="{{proposal}}">
-    <view class="revision-intro">
+    <view class="revision-intro ui-card ui-card-borderless">
       <text class="revision-kicker">
         {{proposal.phase === "plan_ready"
           ? (scope === "chapter_section" ? "小节修改思路" : "书稿修改思路")
@@ -66,7 +66,7 @@
       <view
         wx:for="{{proposal.revision_plan ? proposal.revision_plan.items : []}}"
         wx:key="title"
-        class="plan-item"
+        class="plan-item ui-card ui-card-borderless"
       >
         <text class="chapter-label">修改安排 {{index + 1}}</text>
         <text class="chapter-title">{{item.title}}</text>
@@ -82,7 +82,7 @@
           >{{item}}</text>
         </view>
       </view>
-      <view wx:if="{{metadataChanges.length}}" class="plan-item">
+      <view wx:if="{{metadataChanges.length}}" class="plan-item ui-card ui-card-borderless">
         <text class="chapter-label">成书信息调整</text>
         <view
           wx:for="{{metadataChanges}}"
@@ -95,7 +95,7 @@
       </view>
       <view
         wx:if="{{(!proposal.revision_plan || !proposal.revision_plan.items.length) && !metadataChanges.length}}"
-        class="state-card"
+        class="state-card ui-card ui-card-borderless"
       >
         当前思路认为不需要改动正文。您仍可在下方补充意见。
       </view>
@@ -129,7 +129,7 @@
       </view>
 
       <view wx:if="{{mode === 'changes'}}" class="changed-list">
-      <view wx:if="{{metadataChanges.length}}" class="changed-chapter">
+      <view wx:if="{{metadataChanges.length}}" class="changed-chapter ui-card ui-card-borderless">
         <text class="chapter-label">成书信息</text>
         <view
           wx:for="{{metadataChanges}}"
@@ -145,7 +145,7 @@
       </view>
       <view
         wx:if="{{proposal.comparison.chapter_order_changed}}"
-        class="changed-chapter order-comparison"
+        class="changed-chapter order-comparison ui-card ui-card-borderless"
       >
         <text class="chapter-label">章节顺序</text>
         <text class="chapter-title">调整前</text>
@@ -165,7 +165,7 @@
         wx:for="{{changedChapters}}"
         wx:key="chapter_id"
         wx:for-item="chapter"
-        class="changed-chapter"
+        class="changed-chapter ui-card ui-card-borderless"
       >
         <text class="chapter-label">修改章节</text>
         <text class="chapter-title">{{chapter.title}}</text>
@@ -182,20 +182,20 @@
       </view>
       <view
         wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed && !metadataChanges.length}}"
-        class="state-card"
+        class="state-card ui-card ui-card-borderless"
       >
         这版没有产生实际修改，不能确认使用。请继续调整修改思路或放弃这版修改。
       </view>
       </view>
 
-      <view wx:elif="{{wholeLoading}}" class="state-card">正在加载整书预览...</view>
+      <view wx:elif="{{wholeLoading}}" class="state-card ui-card ui-card-borderless">正在加载整书预览...</view>
 
       <view wx:else class="whole-book">
       <view
         wx:for="{{wholeChapters}}"
         wx:key="chapter_id"
         wx:for-item="chapter"
-        class="whole-chapter"
+        class="whole-chapter ui-card ui-card-borderless"
       >
         <text class="chapter-label">{{chapter.index_text}}</text>
         <text class="chapter-title">{{chapter.title}}</text>
@@ -215,7 +215,7 @@
 
     <view
       wx:if="{{proposal.status === 'ready' && proposal.can_dismiss}}"
-      class="revision-intro feedback-card"
+      class="revision-intro feedback-card ui-card ui-card-borderless"
     >
       <text class="chapter-label">继续调整</text>
       <text class="chapter-title">

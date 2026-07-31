@@ -1,14 +1,14 @@
 <view class="{{pageClass}}">
-  <view wx:if="{{loading}}" class="state-card">
+  <view wx:if="{{loading}}" class="state-card ui-card">
     <text>正在加载全书...</text>
   </view>
 
-  <view wx:elif="{{error}}" class="state-card error">
+  <view wx:elif="{{error}}" class="state-card error ui-card">
     <text>{{error}}</text>
   </view>
 
   <block wx:else>
-    <view class="export-hero">
+    <view class="export-hero ui-card">
       <view>
         <text class="eyebrow">成书中心</text>
         <text class="hero-title">{{bookManuscriptTitle || bookPreviewTitle || planTitle}}</text>
@@ -23,7 +23,7 @@
     <view wx:elif="{{exportNotice}}" class="notice">{{exportNotice}}</view>
     <view wx:if="{{bookVersionNotice}}" class="notice subtle">{{bookVersionNotice}}</view>
 
-    <view wx:if="{{!bookContent}}" class="state-card">
+    <view wx:if="{{!bookContent}}" class="state-card ui-card">
       <text>回到书稿页生成全书后，可以在这里预览和导出。</text>
       <view
         class="ghost-button state-action ui-block-action ui-pressable"
@@ -33,7 +33,7 @@
     </view>
 
     <block wx:else>
-      <view class="preview-card">
+      <view class="preview-card ui-card">
         <view class="section-head">
           <text class="section-title">全书预览</text>
           <button class="text-button reader-entry-action" bindtap="openBookReader">阅读与朗读</button>
@@ -80,7 +80,7 @@
       </view>
 
       <text class="section-title export-section-title">导出文件</text>
-      <view class="export-settings">
+      <view class="export-settings ui-card">
         <view class="setting-row">
           <view>
             <text class="setting-title">原始讲述索引</text>
@@ -147,7 +147,7 @@
       </view>
 
       <block wx:if="{{showBookSettings}}">
-      <view class="book-design-panel">
+      <view class="book-design-panel ui-card">
         <view class="book-design-head">
           <view>
             <text class="book-design-title">成书信息</text>
@@ -347,7 +347,7 @@
         </view>
       </view>
 
-      <view wx:if="{{bookManuscriptAvailable}}" class="manuscript-card">
+      <view wx:if="{{bookManuscriptAvailable}}" class="manuscript-card ui-card">
         <view class="manuscript-section">
           <view class="section-head">
             <text class="section-title">书稿设置</text>
@@ -429,7 +429,7 @@
         </view>
       </view>
 
-      <view class="advanced-card">
+      <view class="advanced-card ui-card">
         <view class="section-head">
           <text class="section-title">历史版本与重新整理</text>
           <text class="section-count">高级操作</text>

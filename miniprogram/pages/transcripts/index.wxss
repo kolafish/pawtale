@@ -138,10 +138,6 @@
 .empty-panel,
 .transcript-card {
   margin-top: 24rpx;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 24rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .empty-panel {

@@ -61,11 +61,6 @@
 .content-card {
   margin-top: 30rpx;
   padding: 34rpx 30rpx;
-  box-sizing: border-box;
-  border: 0;
-  border-radius: 24rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .status-card {

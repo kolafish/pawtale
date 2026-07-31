@@ -48,7 +48,7 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
+  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <text class="empty-title">浏览讲述记录</text>
     <text class="empty-copy">登录后可以查看语音聊天保存的识别原文、整理文字、音频时长和是否已收录到章节。</text>
     <view
@@ -58,7 +58,7 @@
     >登录后查看</view>
   </view>
 
-  <view wx:elif="{{showNoProjectPanel}}" class="empty-panel">
+  <view wx:elif="{{showNoProjectPanel}}" class="empty-panel ui-card">
     <text class="empty-title">还没有回忆录</text>
     <text class="empty-copy">先创建一本回忆录，完成语音聊天后，讲述记录会显示在这里。</text>
     <view
@@ -68,11 +68,11 @@
     >创建回忆录</view>
   </view>
 
-  <view wx:elif="{{showLoadingEmpty}}" class="empty-panel">
+  <view wx:elif="{{showLoadingEmpty}}" class="empty-panel ui-card">
     <text>{{loadingEmptyText}}</text>
   </view>
 
-  <view wx:elif="{{showSearchEmpty}}" class="empty-panel">
+  <view wx:elif="{{showSearchEmpty}}" class="empty-panel ui-card">
     <text class="empty-title">没有找到相关记录</text>
     <text class="empty-copy">没有匹配“{{searchDisplayText}}”的讲述记录。</text>
     <view
@@ -83,7 +83,7 @@
     >清除搜索，查看全部</view>
   </view>
 
-  <view wx:elif="{{showGenericEmpty}}" class="empty-panel">
+  <view wx:elif="{{showGenericEmpty}}" class="empty-panel ui-card">
     <text class="empty-title">暂无讲述记录</text>
     <text class="empty-copy">完成一次语音聊天后，保存的语音和文字会显示在这里。</text>
   </view>
@@ -92,7 +92,7 @@
     wx:for="{{items}}"
     wx:key="id"
     id="{{item.anchorId}}"
-    class="{{item.cardClass}}"
+    class="{{item.cardClass}} ui-card"
     data-id="{{item.id}}"
     bindtap="openTranscriptDetail"
     hover-class="transcript-card-hover"

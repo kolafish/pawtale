@@ -1,14 +1,14 @@
 <view class="{{pageClass}}">
-  <view wx:if="{{loading}}" class="reader-state">
+  <view wx:if="{{loading}}" class="reader-state ui-card">
     <text>正在打开成书...</text>
   </view>
 
-  <view wx:elif="{{error}}" class="reader-state error">
+  <view wx:elif="{{error}}" class="reader-state error ui-card">
     <text>{{error}}</text>
   </view>
 
   <block wx:else>
-    <view class="reader-cover">
+    <view class="reader-cover ui-card">
       <text class="reader-eyebrow">{{readerMode === "chapter" ? "整章预览" : "成书阅读"}}</text>
       <text class="reader-title">{{readerTitle}}</text>
       <text wx:if="{{readerSubtitle}}" class="reader-subtitle">{{readerSubtitle}}</text>
@@ -43,7 +43,7 @@
       />
     </view>
 
-    <view wx:if="{{readerMode === 'book' && bookPreviewTocItems.length}}" class="reader-section">
+    <view wx:if="{{readerMode === 'book' && bookPreviewTocItems.length}}" class="reader-section ui-card">
       <text class="section-label">目录</text>
       <view class="toc-list">
         <view wx:for="{{bookPreviewTocItems}}" wx:key="id" wx:for-item="chapter" class="toc-group">
@@ -74,7 +74,7 @@
         wx:key="id"
         wx:for-item="chapter"
         id="reader-chapter-{{index}}"
-        class="chapter-block {{readerMode === 'chapter' ? 'chapter-preview-block' : ''}}"
+        class="chapter-block ui-card {{readerMode === 'chapter' ? 'chapter-preview-block' : ''}}"
       >
         <block wx:if="{{readerMode === 'book'}}">
           <text class="chapter-index">{{chapter.indexText}}</text>
@@ -107,7 +107,7 @@
       </view>
     </view>
 
-    <view wx:else class="reader-section">
+    <view wx:else class="reader-section ui-card">
       <text class="section-label">正文</text>
       <text class="book-content" selectable>{{bookContent}}</text>
     </view>
