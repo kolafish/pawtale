@@ -28,6 +28,8 @@ function revisionProposal(overrides = {}) {
     id: "proposal-1",
     project_id: "project-1",
     status: "ready",
+    phase: "draft_ready",
+    revision_plan: null,
     summary: "修改预览已准备。",
     base_output_version_id: "version-1",
     result_output_version_id: null,
@@ -69,6 +71,35 @@ function revisionProposal(overrides = {}) {
   };
 }
 
+function revisionPlanProposal(overrides = {}) {
+  return revisionProposalMetadata({
+    phase: "plan_ready",
+    revision_plan: {
+      summary: "保留两段经历，并统一人物称谓。",
+      items: [{
+        title: "统一人物称谓",
+        reason: "同一人物在不同章节中的称呼不一致。",
+        approach: "保留两段经历，只统一相关人物的称谓。",
+        targets: ["上学时光", "旧校舍"],
+      }],
+    },
+    summary: "保留两段经历，并统一人物称谓。",
+    comparison: {
+      changed_chapter_count: 0,
+      changed_section_count: 0,
+      before_char_count: 5,
+      after_char_count: 5,
+      char_count_delta: 0,
+      chapter_order_changed: false,
+      before_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
+      after_chapter_order: [{ chapter_id: "chapter-1", title: "上学时光" }],
+      chapters: [],
+    },
+    can_apply: false,
+    ...overrides,
+  });
+}
+
 function revisionProposalMetadata(overrides = {}) {
   const proposal = revisionProposal(overrides);
   return {
@@ -97,6 +128,7 @@ function revisionFeedbackJob(status = "idle") {
     ),
     proposal_id: "proposal-1",
     proposal_status: "ready",
+    proposal_phase: "plan_ready",
     requested_ai_model: null,
     resolved_ai_model: null,
     can_cancel: status === "pending" || status === "running",
@@ -114,6 +146,8 @@ function loadRevisionPage({ api = {} } = {}) {
     ),
     enqueueMemoirBookRevisionFeedback: async () => revisionFeedbackJob("pending"),
     getMemoirBookRevisionFeedbackJob: async () => revisionFeedbackJob(),
+    enqueueMemoirBookRevisionDraft: async () => revisionFeedbackJob("pending"),
+    getMemoirBookRevisionDraftJob: async () => revisionFeedbackJob(),
     applyMemoirBookRevisionProposal: async () => revisionProposalMetadata({
       status: "applied",
       can_apply: false,
@@ -226,9 +260,9 @@ test("book revision page confirms or dismisses the candidate without hidden acti
   ]);
 });
 
-test("book revision feedback refreshes the candidate before final confirmation", async () => {
+test("book revision feedback refreshes the whole plan before drafting", async () => {
   const calls = [];
-  const proposal = revisionProposalMetadata();
+  const proposal = revisionPlanProposal();
   global.wx = {
     showToast(options) {
       calls.push(["toast", options.title]);
@@ -248,8 +282,17 @@ test("book revision feedback refreshes the candidate before final confirmation",
         revisionFeedbackJob("succeeded"),
       getMemoirBookRevisionProposal: async () => {
         calls.push(["reload"]);
-        return revisionProposalMetadata({
-          summary: "已经按意见更新。",
+        return revisionPlanProposal({
+          summary: "已更新整体修改思路。",
+          revision_plan: {
+            summary: "已更新整体修改思路。",
+            items: [{
+              title: "统一称谓并精简重复",
+              reason: "保留经历的同时避免重复。",
+              approach: "统一称谓，并压缩重复叙述。",
+              targets: ["上学时光"],
+            }],
+          },
           updated_at: "2026-07-30T00:01:00",
         });
       },
@@ -284,8 +327,54 @@ test("book revision feedback refreshes the candidate before final confirmation",
   ]);
   assert.equal(context.data.feedbackBusy, false);
   assert.equal(context.data.feedbackText, "");
-  assert.equal(context.data.proposal.summary, "已经按意见更新。");
+  assert.equal(context.data.proposal.summary, "已更新整体修改思路。");
+  assert.equal(
+    context.data.proposal.revision_plan.items[0].approach,
+    "统一称谓，并压缩重复叙述。",
+  );
   assert.ok(calls.some(([kind]) => kind === "reload"));
+});
+
+test("book revision generates a draft only after the user confirms the plan", async () => {
+  const calls = [];
+  const { page } = loadRevisionPage({
+    api: {
+      enqueueMemoirBookRevisionDraft: async (projectId, proposalId) => {
+        calls.push(["draft", projectId, proposalId]);
+        return revisionFeedbackJob("pending");
+      },
+      getMemoirBookRevisionDraftJob: async () =>
+        revisionFeedbackJob("succeeded"),
+      getMemoirBookRevisionProposal: async () => revisionProposalMetadata({
+        summary: "修改稿已生成。",
+        updated_at: "2026-07-30T00:02:00",
+      }),
+    },
+  });
+  let pollScheduled = false;
+  const context = pageContext(page, {
+    projectId: "project-1",
+    proposalId: "proposal-1",
+    proposal: revisionPlanProposal(),
+  });
+  context.pageActive = true;
+  context.draftPoller = {
+    cancel() {},
+    schedule() {
+      pollScheduled = true;
+      return true;
+    },
+  };
+
+  await page.generateDraft.call(context);
+  assert.equal(context.data.draftBusy, true);
+  assert.equal(pollScheduled, true);
+  await page.refreshDraftJob.call(context);
+
+  assert.deepEqual(calls[0], ["draft", "project-1", "proposal-1"]);
+  assert.equal(context.data.draftBusy, false);
+  assert.equal(context.data.proposal.phase, "draft_ready");
+  assert.equal(context.data.proposal.summary, "修改稿已生成。");
 });
 
 test("book revision keeps submit error when polling only finds an older success", async () => {

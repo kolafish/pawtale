@@ -26,6 +26,7 @@ from app.database import Base
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirBookRevisionProposalStatus,
+    MemoirBookRevisionProposalPhase,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueOutcome,
@@ -93,8 +94,7 @@ class MemoirVoiceSession(Base):
             name="ck_memoir_voice_sessions_anchor_mode",
         ),
         CheckConstraint(
-            "anchor_framework_item_id IS NULL "
-            "OR current_completion_issue_id IS NULL",
+            "anchor_framework_item_id IS NULL OR current_completion_issue_id IS NULL",
             name="ck_memoir_voice_sessions_single_target",
         ),
     )
@@ -203,7 +203,10 @@ class MemoirChatMessage(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
     voice_session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=False, index=True,
+        String(36),
+        ForeignKey("memoir_voice_sessions.id"),
+        nullable=False,
+        index=True,
     )
     role: Mapped[str] = mapped_column(String(20), nullable=False)
     content_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -214,10 +217,14 @@ class MemoirChatMessage(Base):
     )
     audio_file_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=True)
     transcript_version_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_transcript_versions.id"), nullable=True,
+        String(36),
+        ForeignKey("memoir_transcript_versions.id"),
+        nullable=True,
     )
     parent_message_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_chat_messages.id"), nullable=True,
+        String(36),
+        ForeignKey("memoir_chat_messages.id"),
+        nullable=True,
     )
     guidance_intent: Mapped[str | None] = mapped_column(String(80), nullable=True)
     turn_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -250,10 +257,16 @@ class MemoirVoiceUtterance(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     voice_session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=False, index=True,
+        String(36),
+        ForeignKey("memoir_voice_sessions.id"),
+        nullable=False,
+        index=True,
     )
     chat_message_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_chat_messages.id"), nullable=True, index=True,
+        String(36),
+        ForeignKey("memoir_chat_messages.id"),
+        nullable=True,
+        index=True,
     )
     audio_file_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("audio_files.id"), nullable=True)
     transcript_raw: Mapped[str] = mapped_column(Text, default="", nullable=False)
@@ -297,9 +310,7 @@ class MemoirVoiceUtterance(Base):
 
 class MemoirTranscriptAlignment(Base):
     __tablename__ = "memoir_transcript_alignments"
-    __table_args__ = (
-        UniqueConstraint("utterance_id", name="uq_memoir_transcript_alignments_utterance"),
-    )
+    __table_args__ = (UniqueConstraint("utterance_id", name="uq_memoir_transcript_alignments_utterance"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     utterance_id: Mapped[str] = mapped_column(
@@ -392,9 +403,7 @@ class MemoirShareVideoOutput(Base):
         ),
     )
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
-    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("memoir_material_share_videos.id", ondelete="CASCADE"),
@@ -437,7 +446,10 @@ class MemoirTranscriptVersion(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     voice_session_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("memoir_voice_sessions.id"), nullable=False, index=True,
+        String(36),
+        ForeignKey("memoir_voice_sessions.id"),
+        nullable=False,
+        index=True,
     )
     source_artifact_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     version_type: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -494,13 +506,22 @@ class MemoirImageAsset(Base):
     provider: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     source_utterance_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_voice_utterances.id"), nullable=True, index=True,
+        String(36),
+        ForeignKey("memoir_voice_utterances.id"),
+        nullable=True,
+        index=True,
     )
     source_chapter_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_book_plan_chapters.id"), nullable=True, index=True,
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id"),
+        nullable=True,
+        index=True,
     )
     share_video_job_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_material_share_videos.id"), nullable=True, index=True,
+        String(36),
+        ForeignKey("memoir_material_share_videos.id"),
+        nullable=True,
+        index=True,
     )
     source_quote: Mapped[str] = mapped_column(Text, default="", nullable=False)
     metadata_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
@@ -532,11 +553,17 @@ class MemoirBookImagePlacement(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"), nullable=False, index=True)
     image_asset_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("memoir_image_assets.id"), nullable=False, index=True,
+        String(36),
+        ForeignKey("memoir_image_assets.id"),
+        nullable=False,
+        index=True,
     )
     placement_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
     chapter_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("memoir_book_plan_chapters.id"), nullable=True, index=True,
+        String(36),
+        ForeignKey("memoir_book_plan_chapters.id"),
+        nullable=True,
+        index=True,
     )
     caption_override: Mapped[str] = mapped_column(Text, default="", nullable=False)
     display_size: Mapped[str] = mapped_column(String(40), default="full_width", nullable=False)
@@ -736,8 +763,7 @@ class MemoirSectionMaterial(Base):
             name="ck_memoir_section_materials_assigned_by",
         ),
         CheckConstraint(
-            "assignment_confidence IS NULL "
-            "OR (assignment_confidence >= 0 AND assignment_confidence <= 1)",
+            "assignment_confidence IS NULL OR (assignment_confidence >= 0 AND assignment_confidence <= 1)",
             name="ck_memoir_section_materials_confidence",
         ),
     )
@@ -792,9 +818,7 @@ class MemoirSectionMaterial(Base):
         back_populates="materials",
     )
     utterance: Mapped[MemoirVoiceUtterance] = orm_relationship("MemoirVoiceUtterance")
-    transcript_version: Mapped[MemoirTranscriptVersion | None] = orm_relationship(
-        "MemoirTranscriptVersion"
-    )
+    transcript_version: Mapped[MemoirTranscriptVersion | None] = orm_relationship("MemoirTranscriptVersion")
 
 
 class MemoirSectionDigest(Base):
@@ -898,8 +922,7 @@ class MemoirCompletionIssue(Base):
             name="ck_memoir_completion_issues_status",
         ),
         CheckConstraint(
-            "outcome = '' "
-            f"OR outcome IN ({_enum_values(MemoirCompletionIssueOutcome)})",
+            f"outcome = '' OR outcome IN ({_enum_values(MemoirCompletionIssueOutcome)})",
             name="ck_memoir_completion_issues_outcome",
         ),
         CheckConstraint(
@@ -912,8 +935,7 @@ class MemoirCompletionIssue(Base):
             name="ck_memoir_completion_issues_target",
         ),
         CheckConstraint(
-            "(status = 'closed' AND outcome != '') "
-            "OR (status != 'closed' AND outcome = '')",
+            "(status = 'closed' AND outcome != '') OR (status != 'closed' AND outcome = '')",
             name="ck_memoir_completion_issues_lifecycle",
         ),
         CheckConstraint(
@@ -1073,9 +1095,7 @@ class MemoirChapterDigest(Base):
         onupdate=utcnow_naive,
     )
 
-    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship(
-        "MemoirBookPlanChapter"
-    )
+    chapter: Mapped[MemoirBookPlanChapter] = orm_relationship("MemoirBookPlanChapter")
 
 
 class MemoirBookReview(Base):
@@ -1164,9 +1184,7 @@ class MemoirBookChapterDraft(Base):
 
 class MemoirBookChapterDraftVersion(Base):
     __tablename__ = "memoir_book_chapter_draft_versions"
-    __table_args__ = (
-        UniqueConstraint("draft_id", "version", name="uq_memoir_book_chapter_draft_versions_version"),
-    )
+    __table_args__ = (UniqueConstraint("draft_id", "version", name="uq_memoir_book_chapter_draft_versions_version"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     draft_id: Mapped[str] = mapped_column(
@@ -1250,9 +1268,7 @@ class MemoirBookOutput(Base):
 
 class MemoirBookOutputVersion(Base):
     __tablename__ = "memoir_book_output_versions"
-    __table_args__ = (
-        UniqueConstraint("output_id", "version", name="uq_memoir_book_output_versions_version"),
-    )
+    __table_args__ = (UniqueConstraint("output_id", "version", name="uq_memoir_book_output_versions_version"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     output_id: Mapped[str] = mapped_column(String(36), ForeignKey("memoir_book_outputs.id"), nullable=False, index=True)
@@ -1324,6 +1340,18 @@ class MemoirBookRevisionProposal(Base):
     selected_actions_json: Mapped[dict] = mapped_column(
         JSON,
         default=dict,
+        nullable=False,
+    )
+    phase: Mapped[str] = mapped_column(
+        String(20),
+        default=MemoirBookRevisionProposalPhase.DRAFT_READY.value,
+        server_default=MemoirBookRevisionProposalPhase.DRAFT_READY.value,
+        nullable=False,
+    )
+    revision_plan_json: Mapped[dict] = mapped_column(
+        JSON,
+        default=dict,
+        server_default=sql_text("'{}'"),
         nullable=False,
     )
     candidate_chapter_snapshot_json: Mapped[list] = mapped_column(

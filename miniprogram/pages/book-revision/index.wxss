@@ -124,14 +124,51 @@
 }
 
 .changed-list,
-.whole-book {
+.whole-book,
+.revision-plan {
   margin-top: 24rpx;
 }
 
 .changed-chapter,
-.whole-chapter {
+.whole-chapter,
+.plan-item {
   margin-top: 20rpx;
   padding: 30rpx 26rpx;
+}
+
+.plan-item {
+  border-radius: 20rpx;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow);
+}
+
+.plan-field-label {
+  display: block;
+  margin-top: 24rpx;
+  color: var(--ui-text-primary);
+  font-size: 26rpx;
+  font-weight: 700;
+  line-height: 38rpx;
+}
+
+.plan-field {
+  margin-top: 8rpx;
+}
+
+.plan-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-top: 22rpx;
+}
+
+.plan-target {
+  padding: 8rpx 14rpx;
+  border-radius: 999rpx;
+  background: var(--ui-surface-subtle);
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 34rpx;
 }
 
 .chapter-title {
@@ -188,6 +225,10 @@
 }
 
 .revision-page .ui-error-banner {
+  margin-top: 24rpx;
+}
+
+.revision-progress {
   margin-top: 24rpx;
 }
 

@@ -69,11 +69,12 @@ export interface MemoirBookReviewJob {
 export type MemoirBookRevisionJobSource =
   | "review_answers"
   | "editorial_actions"
-  | "proposal_feedback";
+  | "proposal_feedback"
+  | "proposal_draft";
 
 export type MemoirBookRevisionCommandSource = Exclude<
   MemoirBookRevisionJobSource,
-  "proposal_feedback"
+  "proposal_feedback" | "proposal_draft"
 >;
 
 export interface MemoirBookRevisionJob {
@@ -91,6 +92,7 @@ export interface MemoirBookRevisionJob {
     | "cancelled";
   proposal_id: string | null;
   proposal_status: MemoirBookRevisionProposalStatus | null;
+  proposal_phase: MemoirBookRevisionProposalPhase | null;
   requested_ai_model: string | null;
   resolved_ai_model: string | null;
   can_cancel: boolean;
@@ -116,6 +118,8 @@ export interface MemoirBookRevisionFeedbackJob extends MemoirBookRevisionJob {
   summary: string;
 }
 
+export type MemoirBookRevisionDraftJob = MemoirBookRevisionFeedbackJob;
+
 export type MemoirBookRevisionJobForSource<
   Source extends MemoirBookRevisionCommandSource,
 > = Source extends "review_answers"
@@ -127,6 +131,20 @@ export type MemoirBookRevisionProposalStatus =
   | "applied"
   | "dismissed"
   | "stale";
+
+export type MemoirBookRevisionProposalPhase = "plan_ready" | "draft_ready";
+
+export interface MemoirBookRevisionPlanItem {
+  title: string;
+  reason: string;
+  approach: string;
+  targets: string[];
+}
+
+export interface MemoirBookRevisionPlan {
+  summary: string;
+  items: MemoirBookRevisionPlanItem[];
+}
 
 export interface MemoirBookRevisionSectionComparison {
   section_id: string;
@@ -154,6 +172,8 @@ export interface MemoirBookRevisionProposal {
   id: string;
   project_id: string;
   status: MemoirBookRevisionProposalStatus;
+  phase: MemoirBookRevisionProposalPhase;
+  revision_plan: MemoirBookRevisionPlan | null;
   summary: string;
   base_output_version_id: string;
   result_output_version_id: string | null;
@@ -313,8 +333,12 @@ export function enqueueMemoirBookRevisionJob<
   actionIds: string[] = [],
 ): Promise<MemoirBookRevisionJobForSource<Source>> {
   const payload = source === "review_answers"
-    ? { ai_model: null }
-    : { action_ids: actionIds, ai_model: null };
+    ? { ai_model: null, workflow_mode: "plan_first" as const }
+    : {
+        action_ids: actionIds,
+        ai_model: null,
+        workflow_mode: "plan_first" as const,
+      };
   return memoirAIRequest<MemoirBookRevisionJobForSource<Source>, typeof payload>(
     bookRevisionJobPath(projectId, source),
     payload,
@@ -391,6 +415,29 @@ export function getMemoirBookRevisionFeedbackJob(
 ): Promise<MemoirBookRevisionFeedbackJob> {
   return memoirRequest<MemoirBookRevisionFeedbackJob>(
     bookRevisionProposalPath(projectId, proposalId, "/feedback/jobs/current"),
+  );
+}
+
+export function enqueueMemoirBookRevisionDraft(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionDraftJob> {
+  return memoirAIRequest<
+    MemoirBookRevisionDraftJob,
+    { ai_model: null }
+  >(
+    bookRevisionProposalPath(projectId, proposalId, "/draft/jobs"),
+    { ai_model: null },
+    { timeoutProfile: "mutation" },
+  );
+}
+
+export function getMemoirBookRevisionDraftJob(
+  projectId: string,
+  proposalId: string,
+): Promise<MemoirBookRevisionDraftJob> {
+  return memoirRequest<MemoirBookRevisionDraftJob>(
+    bookRevisionProposalPath(projectId, proposalId, "/draft/jobs/current"),
   );
 }
 

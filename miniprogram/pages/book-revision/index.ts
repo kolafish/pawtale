@@ -10,7 +10,9 @@ import { definePage } from "../../services/page-definition";
 import {
   applyMemoirBookRevisionProposal,
   dismissMemoirBookRevisionProposal,
+  enqueueMemoirBookRevisionDraft,
   enqueueMemoirBookRevisionFeedback,
+  getMemoirBookRevisionDraftJob,
   getMemoirBookRevisionFeedbackJob,
   getMemoirBookRevisionProposal,
   type MemoirBookRevisionProposal,
@@ -60,7 +62,13 @@ interface WholeChapterView {
 
 interface RevisionProposalView extends Pick<
   MemoirBookRevisionProposal,
-  "status" | "summary" | "can_apply" | "can_dismiss" | "updated_at"
+  | "status"
+  | "phase"
+  | "revision_plan"
+  | "summary"
+  | "can_apply"
+  | "can_dismiss"
+  | "updated_at"
 > {
   comparison: Pick<
     MemoirBookRevisionProposal["comparison"],
@@ -87,6 +95,7 @@ interface BookRevisionData {
   wholeChapters: WholeChapterView[];
   feedbackText: string;
   feedbackBusy: boolean;
+  draftBusy: boolean;
   feedbackVoicePhase: FeedbackVoicePhase;
 }
 
@@ -118,6 +127,8 @@ export function revisionViewPatch(
   return {
     proposal: {
       status: proposal.status,
+      phase: proposal.phase,
+      revision_plan: proposal.revision_plan,
       summary: proposal.summary,
       can_apply: proposal.can_apply,
       can_dismiss: proposal.can_dismiss,
@@ -158,6 +169,7 @@ function confirmAction(title: string, content: string): Promise<boolean> {
 
 definePage<BookRevisionData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
+  draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   feedbackVoiceToken: 0,
   feedbackBaselineUpdatedAt: "",
   revisionProposal: null as MemoirBookRevisionProposal | null,
@@ -180,6 +192,7 @@ definePage<BookRevisionData>()({
     wholeChapters: [],
     feedbackText: "",
     feedbackBusy: false,
+    draftBusy: false,
     feedbackVoicePhase: "idle",
   },
 
@@ -192,7 +205,10 @@ definePage<BookRevisionData>()({
       return;
     }
     if (await this.loadProposal()) {
-      await this.refreshFeedbackJob();
+      await Promise.all([
+        this.refreshFeedbackJob(),
+        this.refreshDraftJob(),
+      ]);
     }
   },
 
@@ -206,18 +222,21 @@ definePage<BookRevisionData>()({
       && this.data.proposalId
     ) {
       void this.refreshFeedbackJob();
+      void this.refreshDraftJob();
     }
   },
 
   onHide() {
     this.pageActive = false;
     this.stopFeedbackPolling();
+    this.stopDraftPolling();
     this.cancelFeedbackVoice();
   },
 
   onUnload() {
     this.pageActive = false;
     this.stopFeedbackPolling();
+    this.stopDraftPolling();
     this.cancelFeedbackVoice();
   },
 
@@ -239,7 +258,7 @@ definePage<BookRevisionData>()({
         wholeChapters: [],
         ...revisionViewPatch(proposal, this.data.previewVersion),
       });
-      if (this.data.mode === "whole") {
+      if (proposal.phase === "draft_ready" && this.data.mode === "whole") {
         await this.loadWholePreview(this.data.previewVersion);
       }
       return true;
@@ -304,12 +323,25 @@ definePage<BookRevisionData>()({
     this.feedbackPoller.cancel();
   },
 
+  stopDraftPolling() {
+    this.draftPoller.cancel();
+  },
+
   scheduleFeedbackPoll() {
     if (!this.pageActive) {
       return;
     }
     this.feedbackPoller.schedule(() => {
       void this.refreshFeedbackJob();
+    });
+  },
+
+  scheduleDraftPoll() {
+    if (!this.pageActive) {
+      return;
+    }
+    this.draftPoller.schedule(() => {
+      void this.refreshDraftJob();
     });
   },
 
@@ -338,7 +370,12 @@ definePage<BookRevisionData>()({
           );
           if (updated) {
             this.setData({ feedbackText: "", error: "" });
-            wx.showToast({ title: "修改预览已更新", icon: "success" });
+            wx.showToast({
+              title: this.data.proposal?.revision_plan
+                ? "修改思路已更新"
+                : "修改预览已更新",
+              icon: "success",
+            });
           }
         }
       }
@@ -355,8 +392,48 @@ definePage<BookRevisionData>()({
     }
   },
 
+  async refreshDraftJob() {
+    const wasActive = this.data.draftBusy;
+    try {
+      const job = await getMemoirBookRevisionDraftJob(
+        this.data.projectId,
+        this.data.proposalId,
+      );
+      const active = job.status === "pending" || job.status === "running";
+      this.stopDraftPolling();
+      this.setData({
+        draftBusy: active,
+        ...(job.status === "failed"
+          ? { error: job.error_message || "生成修改稿失败" }
+          : {}),
+      });
+      if (active) {
+        this.scheduleDraftPoll();
+      } else if (job.status === "succeeded" && wasActive) {
+        if (await this.loadProposal(true)) {
+          this.setData({ error: "" });
+          wx.showToast({ title: "修改稿已生成", icon: "success" });
+        }
+      }
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "修改稿进度加载失败",
+      });
+      if (wasActive) {
+        this.scheduleDraftPoll();
+      }
+    }
+  },
+
   changeFeedbackText(event: PageTextInputEvent) {
-    if (this.data.feedbackBusy || this.data.feedbackVoicePhase !== "idle") {
+    if (
+      this.data.feedbackBusy
+      || this.data.draftBusy
+      || this.data.feedbackVoicePhase !== "idle"
+    ) {
       return;
     }
     this.setData({ feedbackText: event.detail.value });
@@ -381,6 +458,7 @@ definePage<BookRevisionData>()({
     if (
       this.data.busy
       || this.data.feedbackBusy
+      || this.data.draftBusy
       || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
@@ -426,9 +504,11 @@ definePage<BookRevisionData>()({
   async submitFeedback() {
     const feedback = this.data.feedbackText.trim();
     if (
-      !this.data.proposal?.can_apply
+      this.data.proposal?.status !== "ready"
+      || !this.data.proposal.can_dismiss
       || this.data.busy
       || this.data.feedbackBusy
+      || this.data.draftBusy
       || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
@@ -465,6 +545,42 @@ definePage<BookRevisionData>()({
     }
   },
 
+  async generateDraft() {
+    if (
+      this.data.proposal?.status !== "ready"
+      || this.data.proposal.phase !== "plan_ready"
+      || this.data.busy
+      || this.data.feedbackBusy
+      || this.data.draftBusy
+      || this.data.feedbackVoicePhase !== "idle"
+    ) {
+      return;
+    }
+    this.setData({ draftBusy: true, error: "" });
+    try {
+      const job = await enqueueMemoirBookRevisionDraft(
+        this.data.projectId,
+        this.data.proposalId,
+      );
+      const active = job.status === "pending" || job.status === "running";
+      this.setData({ draftBusy: active });
+      if (active) {
+        this.scheduleDraftPoll();
+      } else if (job.status === "succeeded") {
+        await this.loadProposal(true);
+      }
+    } catch (error) {
+      if (routeAuthError(error)) {
+        return;
+      }
+      this.setData({
+        draftBusy: false,
+        error: error instanceof Error ? error.message : "生成修改稿失败",
+      });
+      this.scheduleDraftPoll();
+    }
+  },
+
   async switchMode(event: RevisionDatasetEvent) {
     const mode = datasetString(event, "mode");
     if (mode === "changes" || mode === "whole") {
@@ -495,6 +611,7 @@ definePage<BookRevisionData>()({
       !this.data.proposal?.can_apply
       || this.data.busy
       || this.data.feedbackBusy
+      || this.data.draftBusy
       || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;
@@ -533,6 +650,7 @@ definePage<BookRevisionData>()({
       !this.data.proposal?.can_dismiss
       || this.data.busy
       || this.data.feedbackBusy
+      || this.data.draftBusy
       || this.data.feedbackVoicePhase !== "idle"
     ) {
       return;

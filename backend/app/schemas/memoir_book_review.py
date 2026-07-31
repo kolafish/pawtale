@@ -6,6 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.domain.memoir.types import (
+    MemoirBookRevisionProposalPhase,
     MemoirBookRevisionProposalStatus,
     MemoirSemanticCacheStatus,
 )
@@ -19,15 +20,21 @@ class MemoirBookReviewGenerateRequest(BaseModel):
 
 class MemoirBookReviewAnswerApplyRequest(BaseModel):
     ai_model: str | None = None
+    workflow_mode: Literal["direct_draft", "plan_first"] = "direct_draft"
 
 
 class MemoirBookEditorialRevisionRequest(BaseModel):
     action_ids: list[str] = Field(min_length=1)
     ai_model: str | None = None
+    workflow_mode: Literal["direct_draft", "plan_first"] = "direct_draft"
 
 
 class MemoirBookRevisionFeedbackRequest(BaseModel):
     feedback: str = Field(min_length=1, max_length=1000)
+    ai_model: str | None = None
+
+
+class MemoirBookRevisionDraftRequest(BaseModel):
     ai_model: str | None = None
 
 
@@ -98,6 +105,7 @@ class MemoirBookRevisionJobResponse(BaseModel):
     stage: MemoirBookReviewAnswerApplicationStage = ""
     proposal_id: str | None = None
     proposal_status: MemoirBookRevisionProposalStatus | None = None
+    proposal_phase: MemoirBookRevisionProposalPhase | None = None
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     can_cancel: bool = False
@@ -105,9 +113,7 @@ class MemoirBookRevisionJobResponse(BaseModel):
     error_message: str = ""
 
 
-class MemoirBookReviewAnswerApplicationJobResponse(
-    MemoirBookRevisionJobResponse
-):
+class MemoirBookReviewAnswerApplicationJobResponse(MemoirBookRevisionJobResponse):
     answer_count: int = 0
     unresolved_count: int = 0
     changed_chapter_count: int = 0
@@ -123,6 +129,23 @@ class MemoirBookEditorialRevisionJobResponse(MemoirBookRevisionJobResponse):
 class MemoirBookRevisionFeedbackJobResponse(MemoirBookRevisionJobResponse):
     changed_chapter_count: int = 0
     summary: str = ""
+
+
+class MemoirBookRevisionDraftJobResponse(MemoirBookRevisionJobResponse):
+    changed_chapter_count: int = 0
+    summary: str = ""
+
+
+class MemoirBookRevisionPlanItem(BaseModel):
+    title: str
+    reason: str
+    approach: str
+    targets: list[str] = Field(default_factory=list)
+
+
+class MemoirBookRevisionPlan(BaseModel):
+    summary: str
+    items: list[MemoirBookRevisionPlanItem] = Field(default_factory=list)
 
 
 class MemoirBookRevisionPreviewVersion(BaseModel):
@@ -158,18 +181,16 @@ class MemoirBookRevisionComparison(BaseModel):
     char_count_delta: int
     chapters: list[MemoirBookRevisionChapterComparison]
     chapter_order_changed: bool = False
-    before_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(
-        default_factory=list
-    )
-    after_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(
-        default_factory=list
-    )
+    before_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(default_factory=list)
+    after_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(default_factory=list)
 
 
 class MemoirBookRevisionProposalResponse(BaseModel):
     id: str
     project_id: str
     status: MemoirBookRevisionProposalStatus
+    phase: MemoirBookRevisionProposalPhase
+    revision_plan: MemoirBookRevisionPlan | None = None
     summary: str
     base_output_version_id: str
     result_output_version_id: str | None = None

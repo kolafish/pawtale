@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
+    MemoirBookRevisionProposalPhase,
     MemoirBookRevisionProposalStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
@@ -23,6 +24,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book_review import (
     MemoirBookRevisionComparison,
+    MemoirBookRevisionPlan,
     MemoirBookRevisionPreviewVersion,
     MemoirBookRevisionProposalResponse,
 )
@@ -143,6 +145,8 @@ async def create_ready_proposal(
     selected_actions: dict[str, object],
     generation: dict[str, object],
     summary: str,
+    phase: MemoirBookRevisionProposalPhase = (MemoirBookRevisionProposalPhase.DRAFT_READY),
+    revision_plan: dict[str, object] | None = None,
 ) -> MemoirBookRevisionProposal:
     previous = list(
         (
@@ -165,6 +169,8 @@ async def create_ready_proposal(
         base_output_version_id=baseline.id,
         status=MemoirBookRevisionProposalStatus.READY.value,
         selected_actions_json=selected_actions,
+        phase=phase.value,
+        revision_plan_json=revision_plan or {},
         candidate_chapter_snapshot_json=candidate_snapshots,
         comparison_json={},
         generation_json=generation,
@@ -299,20 +305,13 @@ async def _ready_source_state(
     try:
         actions = book_editorial_actions.selected_review_actions(
             review.review_json,
-            (
-                [str(value) for value in raw_action_ids]
-                if isinstance(raw_action_ids, list)
-                else []
-            ),
+            ([str(value) for value in raw_action_ids] if isinstance(raw_action_ids, list) else []),
         )
     except ValueError:
         return None, "所选编辑建议已经变化，请重新生成修改预览"
-    if (
-        book_editorial_actions.actions_signature(actions)
-        != proposal.selected_actions_json.get("actions_signature")
-        or context.answers_signature
-        != proposal.selected_actions_json.get("answers_signature", "")
-    ):
+    if book_editorial_actions.actions_signature(actions) != proposal.selected_actions_json.get(
+        "actions_signature"
+    ) or context.answers_signature != proposal.selected_actions_json.get("answers_signature", ""):
         return None, "所选编辑建议已经变化，请重新生成修改预览"
     return _ProposalSourceState(review, context, actions), ""
 
@@ -325,6 +324,7 @@ async def proposal_response(
 ) -> MemoirBookRevisionProposalResponse:
     output, baseline, project = await _proposal_records(db, proposal=proposal)
     status = MemoirBookRevisionProposalStatus(proposal.status)
+    phase = MemoirBookRevisionProposalPhase(proposal.phase)
     if status == MemoirBookRevisionProposalStatus.READY:
         _, stale_message = await _ready_source_state(
             db,
@@ -335,7 +335,11 @@ async def proposal_response(
         if stale_message:
             status = MemoirBookRevisionProposalStatus.STALE
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
-    after_snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
+    after_snapshots = (
+        _snapshots(proposal.candidate_chapter_snapshot_json)
+        if phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+        else before_snapshots
+    )
     before_manuscript = (
         manuscript_response(
             title=output.title,
@@ -347,7 +351,7 @@ async def proposal_response(
         else None
     )
     after_manuscript = None
-    if preview in {"after", "both"}:
+    if phase == MemoirBookRevisionProposalPhase.DRAFT_READY and preview in {"after", "both"}:
         after_content = book_content_from_chapter_snapshots(
             title=output.title,
             snapshots=after_snapshots,
@@ -371,6 +375,10 @@ async def proposal_response(
         id=proposal.id,
         project_id=proposal.project_id,
         status=status,
+        phase=phase,
+        revision_plan=(
+            MemoirBookRevisionPlan.model_validate(proposal.revision_plan_json) if proposal.revision_plan_json else None
+        ),
         summary=proposal.summary,
         base_output_version_id=baseline.id,
         result_output_version_id=proposal.result_output_version_id,
@@ -383,7 +391,9 @@ async def proposal_response(
             version=baseline.version + int(after_snapshots != before_snapshots),
             manuscript=after_manuscript,
         ),
-        can_apply=status == MemoirBookRevisionProposalStatus.READY,
+        can_apply=(
+            status == MemoirBookRevisionProposalStatus.READY and phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+        ),
         can_dismiss=status
         in {
             MemoirBookRevisionProposalStatus.READY,
@@ -404,6 +414,8 @@ async def apply_proposal(
         return await proposal_response(db, proposal=proposal, preview=preview)
     if proposal.status != MemoirBookRevisionProposalStatus.READY.value:
         raise ValueError("这个修改预览已经不能确认")
+    if proposal.phase != MemoirBookRevisionProposalPhase.DRAFT_READY.value:
+        raise ValueError("请先按修改思路生成修改稿")
     output, baseline, project = await _proposal_records(db, proposal=proposal)
     state, stale_message = await _ready_source_state(
         db,
@@ -442,11 +454,7 @@ async def apply_proposal(
             created_by=MemoirCreatedBy.AI,
         )
 
-    changed_chapter_count = int(
-        build_comparison(before=before_snapshots, after=snapshots)[
-            "changed_chapter_count"
-        ]
-    )
+    changed_chapter_count = int(build_comparison(before=before_snapshots, after=snapshots)["changed_chapter_count"])
     metadata = {
         **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
         "source": str(source),
@@ -466,17 +474,10 @@ async def apply_proposal(
             "proposal_id": proposal.id,
         }
     else:
-        metadata[
-            book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY
-        ] = {
+        metadata[book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY] = {
             "review_input_signature": review.input_signature,
-            "action_ids": [
-                str(action.get("id") or "")
-                for action in selected_editorial_actions
-            ],
-            "actions_signature": book_editorial_actions.actions_signature(
-                selected_editorial_actions
-            ),
+            "action_ids": [str(action.get("id") or "") for action in selected_editorial_actions],
+            "actions_signature": book_editorial_actions.actions_signature(selected_editorial_actions),
             "answers_signature": context.answers_signature,
             "output_version_id": applied_version.id,
             "proposal_id": proposal.id,
