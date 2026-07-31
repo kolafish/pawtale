@@ -5,7 +5,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 import json
 import logging
-import re
 import time
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -44,23 +43,9 @@ from app.services.memoir.narrative.book_output_assembly import assemble_book_out
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-ANSWER_ENGINE = "llm_book_review_answer_application_v3"
-EDITORIAL_ENGINE = "llm_book_editorial_revision_v1"
-FEEDBACK_ENGINE = "llm_book_revision_feedback_v1"
 PLAN_ENGINE = "llm_book_revision_plan_v1"
 PLAN_FEEDBACK_ENGINE = "llm_book_revision_plan_feedback_v1"
 PLAN_DRAFT_ENGINE = "llm_book_revision_plan_draft_v1"
-ANSWER_SYSTEM_PROMPT = (
-    "你是一位克制的中文回忆录编辑。"
-    "你只根据用户明确写下的回答调整已有书稿，不推测、不补造人生事实，"
-    "并保持没有关联的章节原样不动。"
-)
-EDITORIAL_SYSTEM_PROMPT = (
-    "你是一位克制的中文回忆录编辑。你只执行用户选中的去重复或补衔接修改，不新增、推测或改变人生事实。"
-)
-FEEDBACK_SYSTEM_PROMPT = (
-    "你是一位克制的中文回忆录编辑。你根据用户最新反馈调整尚未确认的书稿修改预览，不推测、不补造人生事实。"
-)
 PLAN_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。你先制定清楚、可供用户确认的修改思路，不直接改写正文，不推测、不补造人生事实。"
 )
@@ -391,43 +376,6 @@ async def _reload_baseline(
     return review, baseline
 
 
-_INTERNAL_MODEL_REFERENCE_PATTERN = re.compile(r"[CS]\d+")
-
-
-def user_visible_application_summary(
-    summary: object,
-    *,
-    changed_chapter_count: object,
-) -> str:
-    value = " ".join(summary.split())[:400] if isinstance(summary, str) else ""
-    if not value or not _INTERNAL_MODEL_REFERENCE_PATTERN.search(value):
-        return value
-    return (
-        "修改预览已准备，包含根据回答生成的相关章节调整。"
-        if isinstance(changed_chapter_count, int) and changed_chapter_count > 0
-        else "已核对这些回答，现有正文无需调整。"
-    )
-
-
-def _answer_summary(
-    snapshots: list[dict[str, object]],
-    changed_ids: set[str],
-) -> str:
-    if not changed_ids:
-        return "已核对这些回答，现有正文无需调整。"
-    titles = [
-        title
-        for snapshot in snapshots
-        if _text(snapshot.get("chapter_id")) in changed_ids and (title := _text(snapshot.get("chapter_title")))
-    ]
-    if not titles:
-        return "修改预览已准备，包含相关章节的正文调整。"
-    target = "、".join(f"《{title}》" for title in titles[:3])
-    if len(titles) > 3:
-        target = f"{target}等 {len(titles)} 个章节"
-    return f"修改预览已准备，包含{target}的相关正文调整。"
-
-
 def _chapter_source_text(
     *,
     snapshots: list[dict[str, object]],
@@ -510,55 +458,6 @@ def _answer_plan_prompt(
 {_plan_output_instruction()}"""
 
 
-def _answer_prompt(
-    *,
-    snapshots: list[dict[str, object]],
-    context: book_review_answer_state.BookReviewAnswerContext,
-    chapter_refs: ModelReferenceMap,
-    section_refs: ModelReferenceMap,
-) -> str:
-    chapters = _chapter_source_text(
-        snapshots=snapshots,
-        chapter_refs=chapter_refs,
-        section_refs=section_refs,
-        allowed_chapter_ids=context.related_chapter_ids,
-    )
-    answers = "\n\n".join(
-        f"问题 {index}：{answer.question}\n"
-        f"问题原因：{answer.reason}\n"
-        f"用户回答：{answer.answer}\n"
-        "关联章节：" + "、".join(chapter_refs.encode(value) for value in answer.chapter_ids)
-        for index, answer in enumerate(context.answers, start=1)
-    )
-    return f"""请把用户对全书检查问题的回答应用到现有书稿。
-
-用户回答：
-{answers}
-
-允许修改的关联章节原文：
-{chapters}
-
-请输出严格 JSON：
-{{
-  "section_revisions": [
-    {{
-      "section_id": "需要修改的小节 section_id",
-      "content": "修改后的完整小节正文"
-    }}
-  ]
-}}
-
-要求：
-- chapter_id 和 section_id 只能使用输入中的本次请求短编号。
-- 只修改与回答关联章节中已有小节的正文。
-- 回答是用户明确提供的事实或决定，可以写入相关正文；除此之外不能新增事实。
-- 不得改变章节或小节的顺序、收录状态、标题、数量及归属关系。
-- 若修改小节，必须返回该小节修改后的完整正文，不能只返回差异片段。
-- 保留原文叙述视角、语气和已有事实，避免为了润色大幅重写。
-- 不需要修改的小节不要出现在 section_revisions。
-"""
-
-
 async def apply_book_review_answers(
     db: AsyncSession,
     *,
@@ -566,7 +465,6 @@ async def apply_book_review_answers(
     expected_review_input_signature: str,
     expected_answers_signature: str,
     ai_model: str | None,
-    workflow_mode: str = "direct_draft",
     progress_callback: ProgressCallback | None = None,
     ai_client: AITextClient | None = None,
 ) -> BookRevisionResult:
@@ -599,13 +497,7 @@ async def apply_book_review_answers(
             proposal_id=_text(marker.get("proposal_id")) or None,
             changed_chapter_count=changed_count,
             selected_action_count=0,
-            summary=(
-                user_visible_application_summary(
-                    marker.get("summary"),
-                    changed_chapter_count=changed_count,
-                )
-                or "这些回答已经应用到书稿"
-            ),
+            summary=_text(marker.get("summary")) or "这些回答已经应用到书稿",
             requested_ai_model=ai_model,
             resolved_ai_model=_text(marker.get("resolved_ai_model")) or ai_model,
             generation={},
@@ -621,54 +513,21 @@ async def apply_book_review_answers(
         raise BookRevisionError("问题没有关联到可调整的书稿章节")
     if progress_callback is not None:
         await progress_callback({"stage": "revising"})
-    plan_first = workflow_mode == "plan_first"
-    generated_plan = (
-        await _generate_revision_plan(
-            project_id=project_id,
-            prompt=_answer_plan_prompt(
-                snapshots=snapshots,
-                context=context,
-                chapter_refs=chapter_refs,
-                section_refs=section_refs,
-            ),
-            engine=PLAN_ENGINE,
-            error_message="生成修改思路时遇到问题，请稍后重试",
-            ai_model=ai_model,
-            ai_client=ai_client,
-        )
-        if plan_first
-        else None
-    )
-    generated_revision = (
-        None
-        if plan_first
-        else await _generate_revisions(
-            project_id=project_id,
+    generated_plan = await _generate_revision_plan(
+        project_id=project_id,
+        prompt=_answer_plan_prompt(
             snapshots=snapshots,
-            allowed_chapter_ids=context.related_chapter_ids,
+            context=context,
+            chapter_refs=chapter_refs,
             section_refs=section_refs,
-            system_prompt=ANSWER_SYSTEM_PROMPT,
-            prompt=_answer_prompt(
-                snapshots=snapshots,
-                context=context,
-                chapter_refs=chapter_refs,
-                section_refs=section_refs,
-            ),
-            engine=ANSWER_ENGINE,
-            error_message="根据回答调整书稿时遇到问题，请稍后重试",
-            ai_model=ai_model,
-            ai_client=ai_client,
-        )
+        ),
+        engine=PLAN_ENGINE,
+        error_message="生成修改思路时遇到问题，请稍后重试",
+        ai_model=ai_model,
+        ai_client=ai_client,
     )
-    summary = (
-        generated_plan.plan.summary.strip()
-        if generated_plan is not None
-        else _answer_summary(
-            generated_revision.snapshots,
-            generated_revision.changed_chapter_ids,
-        )
-    )
-    generation = generated_plan.generation if generated_plan is not None else generated_revision.generation
+    summary = generated_plan.plan.summary.strip()
+    generation = generated_plan.generation
 
     if progress_callback is not None:
         await progress_callback({"stage": "saving"})
@@ -691,7 +550,7 @@ async def apply_book_review_answers(
         db,
         review=current_review,
         baseline=baseline,
-        candidate_snapshots=([] if generated_revision is None else generated_revision.snapshots),
+        candidate_snapshots=[],
         selected_actions={
             "source": "book_review_answers",
             "answers_signature": current_context.answers_signature,
@@ -699,22 +558,16 @@ async def apply_book_review_answers(
         },
         generation=generation,
         summary=summary,
-        phase=(
-            MemoirBookRevisionProposalPhase.PLAN_READY
-            if generated_plan is not None
-            else MemoirBookRevisionProposalPhase.DRAFT_READY
-        ),
-        revision_plan=(generated_plan.plan.model_dump(mode="json") if generated_plan is not None else None),
+        phase=MemoirBookRevisionProposalPhase.PLAN_READY,
+        revision_plan=generated_plan.plan.model_dump(mode="json"),
     )
     return BookRevisionResult(
         proposal_id=proposal.id,
-        changed_chapter_count=(0 if generated_revision is None else len(generated_revision.changed_chapter_ids)),
+        changed_chapter_count=0,
         selected_action_count=0,
         summary=summary,
         requested_ai_model=ai_model,
-        resolved_ai_model=(
-            generated_plan.resolved_ai_model if generated_plan is not None else generated_revision.resolved_ai_model
-        ),
+        resolved_ai_model=generated_plan.resolved_ai_model,
         generation=generation,
         proposal_phase=proposal.phase,
     )
@@ -860,7 +713,6 @@ async def _refine_book_revision_plan(
     current.phase = MemoirBookRevisionProposalPhase.PLAN_READY.value
     current.revision_plan_json = generated.plan.model_dump(mode="json")
     current.candidate_chapter_snapshot_json = []
-    current.comparison_json = {}
     current.generation_json = generated.generation
     current.summary = generated.plan.summary.strip()
     current.updated_at = utcnow_naive()
@@ -980,7 +832,6 @@ async def generate_book_revision_draft(
         raise BookRevisionError("生成期间修改思路已经变化，请重新生成修改稿")
     current.phase = MemoirBookRevisionProposalPhase.DRAFT_READY.value
     current.candidate_chapter_snapshot_json = generated.snapshots
-    current.comparison_json = {}
     current.generation_json = generated.generation
     current.summary = summary
     current.updated_at = utcnow_naive()
@@ -998,182 +849,26 @@ async def generate_book_revision_draft(
     )
 
 
-def _feedback_prompt(
-    *,
-    baseline: list[dict[str, object]],
-    candidate: list[dict[str, object]],
-    feedback: str,
-    chapter_refs: ModelReferenceMap,
-    section_refs: ModelReferenceMap,
-) -> str:
-    baseline_sections = {
-        _text(section.get("section_id")): _text(section.get("content"))
-        for chapter in baseline
-        for section in _sections(chapter)
-        if _text(section.get("section_id"))
-    }
-    chapters: list[str] = []
-    for chapter in candidate:
-        chapter_id = _text(chapter.get("chapter_id"))
-        section_texts: list[str] = []
-        for section in _sections(chapter):
-            section_id = _text(section.get("section_id"))
-            if not section_id:
-                continue
-            current_content = _text(section.get("content"))
-            original_content = baseline_sections.get(section_id, "")
-            original = f"\n修改前原文：\n{original_content}" if original_content != current_content else ""
-            section_texts.append(
-                f"section_id: {section_refs.encode(section_id)}\n"
-                f"小节名：{_text(section.get('title'))}"
-                f"{original}\n当前预览正文：\n{current_content}"
-            )
-        chapters.append(
-            f"chapter_id: {chapter_refs.encode(chapter_id)}\n"
-            f"章节名：{_text(chapter.get('chapter_title'))}\n" + "\n\n".join(section_texts)
-        )
-    return f"""请根据用户反馈调整当前尚未确认的书稿修改预览。
-
-用户最新反馈：
-{feedback}
-
-当前修改预览：
-{chr(10).join(chapters)}
-
-请输出严格 JSON：
-{{
-  "section_revisions": [
-    {{
-      "section_id": "需要继续调整的小节短编号",
-      "content": "调整后的完整小节正文"
-    }}
-  ]
-}}
-
-要求：
-- 以用户最新反馈为准，只调整反馈涉及的正文。
-- 保留当前预览中未被反馈否定的修改。
-- 涉及跨章人物、时间或称谓时，在相关章节中保持一致。
-- 只使用修改前原文、当前预览和用户反馈中已有的事实，不得推测或补造。
-- 不得改变章节或小节的顺序、标题、数量、收录状态及归属关系。
-- section_id 只能使用输入中的短编号；返回修改后的完整小节正文。
-- 不需要继续调整的小节不要返回。
-"""
-
-
 async def refine_book_revision_proposal(
     db: AsyncSession,
     *,
     project_id: str,
     proposal_id: str,
     feedback: str,
-    expected_candidate_signature: str,
+    expected_plan_signature: str,
     ai_model: str | None,
     progress_callback: ProgressCallback | None = None,
     ai_client: AITextClient | None = None,
 ) -> BookRevisionResult:
-    proposal = await book_revision_proposals.load_proposal(
+    return await _refine_book_revision_plan(
         db,
         project_id=project_id,
         proposal_id=proposal_id,
-    )
-    if proposal.revision_plan_json:
-        return await _refine_book_revision_plan(
-            db,
-            project_id=project_id,
-            proposal_id=proposal_id,
-            feedback=feedback,
-            expected_plan_signature=expected_candidate_signature,
-            ai_model=ai_model,
-            progress_callback=progress_callback,
-            ai_client=ai_client,
-        )
-    response = await book_revision_proposals.proposal_response(
-        db,
-        proposal=proposal,
-        preview="none",
-    )
-    candidate = _snapshots(proposal.candidate_chapter_snapshot_json)
-    if not response.can_apply or semantic_json_signature(candidate) != expected_candidate_signature:
-        raise BookRevisionError("修改预览已经变化，请重新查看后再提交反馈")
-    baseline = await db.get(
-        MemoirBookOutputVersion,
-        proposal.base_output_version_id,
-    )
-    if baseline is None:
-        raise BookRevisionError("修改前的书稿版本已不可用")
-    baseline_snapshots = _snapshots(baseline.chapter_snapshot_json)
-    allowed_chapter_ids = {chapter_id for snapshot in candidate if (chapter_id := _text(snapshot.get("chapter_id")))}
-    chapter_refs, section_refs = _reference_maps(
-        candidate,
-        allowed_chapter_ids,
-        stale_message="当前修改预览已经变化，请重新打开",
-    )
-    if progress_callback is not None:
-        await progress_callback({"stage": "revising"})
-    generated = await _generate_revisions(
-        project_id=project_id,
-        snapshots=candidate,
-        allowed_chapter_ids=allowed_chapter_ids,
-        section_refs=section_refs,
-        system_prompt=FEEDBACK_SYSTEM_PROMPT,
-        prompt=_feedback_prompt(
-            baseline=baseline_snapshots,
-            candidate=candidate,
-            feedback=feedback,
-            chapter_refs=chapter_refs,
-            section_refs=section_refs,
-        ),
-        engine=FEEDBACK_ENGINE,
-        error_message="按反馈调整修改预览时遇到问题，请稍后重试",
+        feedback=feedback,
+        expected_plan_signature=expected_plan_signature,
         ai_model=ai_model,
+        progress_callback=progress_callback,
         ai_client=ai_client,
-    )
-    comparison = book_revision_proposals.build_comparison(
-        before=baseline_snapshots,
-        after=generated.snapshots,
-    )
-    changed_chapter_count = int(comparison["changed_chapter_count"])
-    changed_section_count = int(comparison["changed_section_count"])
-    summary = (
-        f"已按反馈更新修改预览，当前涉及 {changed_chapter_count} 章、{changed_section_count} 个小节。"
-        if changed_chapter_count
-        else "已核对反馈，当前预览无需修改正文。"
-    )
-
-    if progress_callback is not None:
-        await progress_callback({"stage": "saving"})
-    db.expire_all()
-    current = await book_revision_proposals.load_proposal(
-        db,
-        project_id=project_id,
-        proposal_id=proposal_id,
-    )
-    current_response = await book_revision_proposals.proposal_response(
-        db,
-        proposal=current,
-        preview="none",
-    )
-    if (
-        not current_response.can_apply
-        or semantic_json_signature(_snapshots(current.candidate_chapter_snapshot_json)) != expected_candidate_signature
-    ):
-        raise BookRevisionError("调整期间修改预览已经变化，请重新提交反馈")
-    current.candidate_chapter_snapshot_json = generated.snapshots
-    current.comparison_json = {}
-    current.generation_json = generated.generation
-    current.summary = summary
-    current.updated_at = utcnow_naive()
-    db.add(current)
-    await db.flush()
-    return BookRevisionResult(
-        proposal_id=current.id,
-        changed_chapter_count=changed_chapter_count,
-        selected_action_count=0,
-        summary=summary,
-        requested_ai_model=ai_model,
-        resolved_ai_model=generated.resolved_ai_model,
-        generation=generated.generation,
     )
 
 
@@ -1196,78 +891,6 @@ def _reorder_chapters(
     for index, snapshot in enumerate(result, start=1):
         snapshot["chapter_index"] = index
     return result
-
-
-def _editorial_prompt(
-    *,
-    snapshots: list[dict[str, object]],
-    actions: list[dict[str, object]],
-    chapter_refs: ModelReferenceMap,
-    section_refs: ModelReferenceMap,
-) -> str:
-    action_text = "\n\n".join(
-        f"类型：{action.get('action_type')}\n"
-        f"修改目标：{_text(action.get('title'))}\n"
-        f"原因：{_text(action.get('reason'))}\n"
-        "涉及章节：" + "、".join(chapter_refs.encode(str(chapter_id)) for chapter_id in action.get("chapter_ids", []))
-        for action in actions
-    )
-    allowed_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
-    chapters: list[str] = []
-    for snapshot in snapshots:
-        chapter_id = _text(snapshot.get("chapter_id"))
-        if chapter_id not in allowed_ids:
-            continue
-        sections = "\n\n".join(
-            f"section_id: {section_refs.encode(_text(section.get('section_id')))}\n"
-            f"小节名：{_text(section.get('title'))}\n"
-            f"正文：\n{_text(section.get('content'))}"
-            for section in _sections(snapshot)
-            if _text(section.get("section_id"))
-        )
-        chapters.append(
-            f"chapter_id: {chapter_refs.encode(chapter_id)}\n章节名：{_text(snapshot.get('chapter_title'))}\n{sections}"
-        )
-    return f"""请执行用户选中的全书编辑修改。
-
-选中的修改：
-{action_text}
-
-允许修改的章节正文：
-{chr(10).join(chapters)}
-
-请输出严格 JSON：
-{{
-  "section_revisions": [
-    {{
-      "section_id": "需要修改的小节短编号",
-      "content": "修改后的完整小节正文"
-    }}
-  ]
-}}
-
-要求：
-- remove_repetition 只删除或压缩跨章重复表达，重要事实至少保留一次。
-- improve_transition 只调整承接语句，让已有时间、人物或主题关系更清楚。
-- 不新增事实、人物、时间、地点、评价或因果。
-- 不改变章节和小节的标题、数量、归属及顺序。
-- section_id 只能使用输入中的短编号；返回修改后的完整小节正文。
-- 不需要修改的小节不要返回。
-"""
-
-
-def _editorial_summary(actions: list[dict[str, object]]) -> str:
-    labels = {
-        "remove_repetition": "去除重复内容",
-        "improve_transition": "改善章节衔接",
-        "reorder_chapters": "调整章节顺序",
-    }
-    selected = list(
-        dict.fromkeys(
-            labels[str(action.get("action_type"))] for action in actions if str(action.get("action_type")) in labels
-        )
-    )
-    return f"修改预览已准备，包含{'、'.join(selected)}。"
 
 
 def _editorial_plan_prompt(
@@ -1309,7 +932,6 @@ async def generate_editorial_revision_proposal(
     expected_actions_signature: str,
     action_ids: list[str],
     ai_model: str | None,
-    workflow_mode: str = "direct_draft",
     progress_callback: ProgressCallback | None = None,
     ai_client: AITextClient | None = None,
 ) -> BookRevisionResult:
@@ -1348,67 +970,27 @@ async def generate_editorial_revision_proposal(
         raise BookRevisionError("请先确认根据问题回答生成的修改预览")
 
     original_snapshots = _snapshots(baseline.chapter_snapshot_json)
-    plan_first = workflow_mode == "plan_first"
-    revised_snapshots = original_snapshots if plan_first else _reorder_chapters(original_snapshots, actions)
-    content_actions = [
-        action for action in actions if action.get("action_type") in {"remove_repetition", "improve_transition"}
-    ]
-    generation: dict[str, object] = {"engine": EDITORIAL_ENGINE}
-    resolved_ai_model: str | None = None
-    generated_plan: _GeneratedPlan | None = None
-    if plan_first:
-        related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
-        chapter_refs, section_refs = _reference_maps(
-            original_snapshots,
-            related_ids,
-            stale_message="编辑建议涉及的章节已经变化，请重新检查全书",
-        )
-        if progress_callback is not None:
-            await progress_callback({"stage": "revising"})
-        generated_plan = await _generate_revision_plan(
-            project_id=project_id,
-            prompt=_editorial_plan_prompt(
-                snapshots=original_snapshots,
-                actions=actions,
-                chapter_refs=chapter_refs,
-                section_refs=section_refs,
-            ),
-            engine=PLAN_ENGINE,
-            error_message="生成修改思路时遇到问题，请稍后重试",
-            ai_model=ai_model,
-            ai_client=ai_client,
-        )
-        generation = generated_plan.generation
-        resolved_ai_model = generated_plan.resolved_ai_model
-    elif content_actions:
-        related_ids = {str(chapter_id) for action in content_actions for chapter_id in action.get("chapter_ids", [])}
-        chapter_refs, section_refs = _reference_maps(
-            revised_snapshots,
-            related_ids,
-            stale_message="编辑建议涉及的章节已经变化，请重新检查全书",
-        )
-        if progress_callback is not None:
-            await progress_callback({"stage": "revising"})
-        generated = await _generate_revisions(
-            project_id=project_id,
-            snapshots=revised_snapshots,
-            allowed_chapter_ids=related_ids,
+    related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
+    chapter_refs, section_refs = _reference_maps(
+        original_snapshots,
+        related_ids,
+        stale_message="编辑建议涉及的章节已经变化，请重新检查全书",
+    )
+    if progress_callback is not None:
+        await progress_callback({"stage": "revising"})
+    generated_plan = await _generate_revision_plan(
+        project_id=project_id,
+        prompt=_editorial_plan_prompt(
+            snapshots=original_snapshots,
+            actions=actions,
+            chapter_refs=chapter_refs,
             section_refs=section_refs,
-            system_prompt=EDITORIAL_SYSTEM_PROMPT,
-            prompt=_editorial_prompt(
-                snapshots=revised_snapshots,
-                actions=content_actions,
-                chapter_refs=chapter_refs,
-                section_refs=section_refs,
-            ),
-            engine=EDITORIAL_ENGINE,
-            error_message="生成全书修改预览时遇到问题，请稍后重试",
-            ai_model=ai_model,
-            ai_client=ai_client,
-        )
-        revised_snapshots = generated.snapshots
-        generation = generated.generation
-        resolved_ai_model = generated.resolved_ai_model
+        ),
+        engine=PLAN_ENGINE,
+        error_message="生成修改思路时遇到问题，请稍后重试",
+        ai_model=ai_model,
+        ai_client=ai_client,
+    )
 
     if progress_callback is not None:
         await progress_callback({"stage": "saving"})
@@ -1438,30 +1020,26 @@ async def generate_editorial_revision_proposal(
         db,
         review=current_review,
         baseline=baseline,
-        candidate_snapshots=[] if generated_plan is not None else revised_snapshots,
+        candidate_snapshots=[],
         selected_actions={
             "source": book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE,
             "action_ids": action_ids,
             "actions_signature": expected_actions_signature,
             "answers_signature": current_answers.answers_signature,
         },
-        generation=generation,
-        summary=(generated_plan.plan.summary.strip() if generated_plan is not None else _editorial_summary(actions)),
-        phase=(
-            MemoirBookRevisionProposalPhase.PLAN_READY
-            if generated_plan is not None
-            else MemoirBookRevisionProposalPhase.DRAFT_READY
-        ),
-        revision_plan=(generated_plan.plan.model_dump(mode="json") if generated_plan is not None else None),
+        generation=generated_plan.generation,
+        summary=generated_plan.plan.summary.strip(),
+        phase=MemoirBookRevisionProposalPhase.PLAN_READY,
+        revision_plan=generated_plan.plan.model_dump(mode="json"),
     )
-    summary = generated_plan.plan.summary.strip() if generated_plan is not None else _editorial_summary(actions)
+    summary = generated_plan.plan.summary.strip()
     return BookRevisionResult(
         proposal_id=proposal.id,
         changed_chapter_count=0,
         selected_action_count=len(actions),
         summary=summary,
         requested_ai_model=ai_model,
-        resolved_ai_model=resolved_ai_model,
-        generation=generation,
+        resolved_ai_model=generated_plan.resolved_ai_model,
+        generation=generated_plan.generation,
         proposal_phase=proposal.phase,
     )

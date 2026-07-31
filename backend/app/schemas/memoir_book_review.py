@@ -20,13 +20,11 @@ class MemoirBookReviewGenerateRequest(BaseModel):
 
 class MemoirBookReviewAnswerApplyRequest(BaseModel):
     ai_model: str | None = None
-    workflow_mode: Literal["direct_draft", "plan_first"] = "direct_draft"
 
 
 class MemoirBookEditorialRevisionRequest(BaseModel):
     action_ids: list[str] = Field(min_length=1)
     ai_model: str | None = None
-    workflow_mode: Literal["direct_draft", "plan_first"] = "direct_draft"
 
 
 class MemoirBookRevisionFeedbackRequest(BaseModel):
@@ -38,13 +36,30 @@ class MemoirBookRevisionDraftRequest(BaseModel):
     ai_model: str | None = None
 
 
+class MemoirBookEditorialActionResponse(BaseModel):
+    id: str
+    action_type: Literal["remove_repetition", "improve_transition", "reorder_chapters"]
+    title: str
+    reason: str
+    chapter_ids: list[str] = Field(default_factory=list)
+
+
+class MemoirBookReviewContentResponse(BaseModel):
+    summary: str = ""
+    strengths: list[str] = Field(default_factory=list)
+    structure_guidance: list[str] = Field(default_factory=list)
+    editorial_actions: list[MemoirBookEditorialActionResponse] = Field(
+        default_factory=list
+    )
+
+
 class MemoirBookReviewResponse(BaseModel):
     id: str
     project_id: str
     input_signature: str
     engine: str
     status: MemoirSemanticCacheStatus
-    review: dict
+    review: MemoirBookReviewContentResponse
     error_message: str
     created_at: datetime
     updated_at: datetime

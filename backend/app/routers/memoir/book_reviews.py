@@ -39,7 +39,6 @@ from app.services.memoir import (
     book_reviews,
 )
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
 router = APIRouter(tags=["memoir-book-reviews"])
@@ -79,32 +78,6 @@ async def get_memoir_book_review(
         project_id=project_id,
     )
     return _response(review) if review else None
-
-
-@router.post(
-    "/projects/{project_id}/book-review",
-    response_model=MemoirBookReviewResponse,
-)
-async def generate_memoir_book_review(
-    project_id: str,
-    req: MemoirBookReviewGenerateRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    project = await load_memoir_project(
-        db,
-        project_id,
-        current_user.id,
-        allow_admin=is_admin_user(current_user),
-    )
-    review = await book_reviews.generate_or_reuse_book_review(
-        db,
-        project_id=project_id,
-        ai_model=select_project_ai_model(project, req.ai_model),
-        force_regenerate=req.force_regenerate,
-    )
-    await db.commit()
-    return _response(review)
 
 
 @router.post(
@@ -187,7 +160,6 @@ async def enqueue_memoir_book_review_answer_application_job(
             project_id=project_id,
             source="review_answers",
             ai_model=req.ai_model,
-            workflow_mode=req.workflow_mode,
             allow_admin=is_admin_user(current_user),
         )
     except ValueError as exc:
@@ -254,7 +226,6 @@ async def enqueue_memoir_book_editorial_revision_job(
             source="editorial_actions",
             ai_model=req.ai_model,
             action_ids=req.action_ids,
-            workflow_mode=req.workflow_mode,
             allow_admin=is_admin_user(current_user),
         )
     except ValueError as exc:

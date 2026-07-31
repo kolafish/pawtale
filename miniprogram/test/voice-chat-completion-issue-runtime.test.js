@@ -48,7 +48,7 @@ test("completion issue verification stops when the answer closes the issue", asy
       const current = refreshCalls >= 3
         ? issue("closed", { outcome: "answered" })
         : issue("in_progress");
-      return { project_id: "project-1", current_issue: current, issues: [current] };
+      return { project_id: "project-1", issues: [current] };
     },
   });
   clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");

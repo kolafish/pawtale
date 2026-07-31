@@ -41,19 +41,6 @@ async def _target_section_id(
     *,
     issue: MemoirCompletionIssue,
 ) -> str:
-    if issue.scope == MemoirCompletionIssueScope.SECTION.value:
-        section = await db.scalar(
-            select(MemoirSection).where(
-                MemoirSection.project_id == issue.project_id,
-                MemoirSection.id == issue.section_id,
-                MemoirSection.status == MemoirSectionStatus.ACTIVE.value,
-                MemoirSection.include_in_book.is_(True),
-            )
-        )
-        if section is None:
-            raise HTTPException(status_code=409, detail="补全问题对应的小章节已不可用")
-        return section.id
-
     related_material_ids = [
         str(value).strip()
         for value in issue.related_material_ids_json

@@ -887,12 +887,6 @@ class MemoirCompletionIssue(Base):
             name="uq_memoir_completion_issues_project_fingerprint",
         ),
         ForeignKeyConstraint(
-            ["project_id", "section_id"],
-            ["memoir_sections.project_id", "memoir_sections.id"],
-            name="fk_memoir_completion_issues_project_section",
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
             ["project_id", "chapter_id"],
             [
                 "memoir_book_plan_chapters.project_id",
@@ -926,11 +920,8 @@ class MemoirCompletionIssue(Base):
             name="ck_memoir_completion_issues_outcome",
         ),
         CheckConstraint(
-            "(scope = 'section' AND section_id IS NOT NULL "
-            "AND chapter_id IS NOT NULL) "
-            "OR (scope = 'chapter' AND section_id IS NULL "
-            "AND chapter_id IS NOT NULL) "
-            "OR (scope = 'book' AND section_id IS NULL "
+            "(scope = 'chapter' AND chapter_id IS NOT NULL) "
+            "OR (scope = 'book' "
             "AND chapter_id IS NULL)",
             name="ck_memoir_completion_issues_target",
         ),
@@ -973,11 +964,6 @@ class MemoirCompletionIssue(Base):
         index=True,
     )
     scope: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
-    section_id: Mapped[str | None] = mapped_column(
-        String(36),
-        nullable=True,
-        index=True,
-    )
     chapter_id: Mapped[str | None] = mapped_column(
         String(36),
         nullable=True,
@@ -1027,13 +1013,8 @@ class MemoirCompletionIssue(Base):
         onupdate=utcnow_naive,
     )
 
-    section: Mapped[MemoirSection | None] = orm_relationship(
-        "MemoirSection",
-        overlaps="chapter",
-    )
     chapter: Mapped[MemoirBookPlanChapter | None] = orm_relationship(
         "MemoirBookPlanChapter",
-        overlaps="section",
     )
     answered_material: Mapped[MemoirVoiceUtterance | None] = orm_relationship(
         "MemoirVoiceUtterance",
@@ -1344,8 +1325,8 @@ class MemoirBookRevisionProposal(Base):
     )
     phase: Mapped[str] = mapped_column(
         String(20),
-        default=MemoirBookRevisionProposalPhase.DRAFT_READY.value,
-        server_default=MemoirBookRevisionProposalPhase.DRAFT_READY.value,
+        default=MemoirBookRevisionProposalPhase.PLAN_READY.value,
+        server_default=MemoirBookRevisionProposalPhase.PLAN_READY.value,
         nullable=False,
     )
     revision_plan_json: Mapped[dict] = mapped_column(
@@ -1357,11 +1338,6 @@ class MemoirBookRevisionProposal(Base):
     candidate_chapter_snapshot_json: Mapped[list] = mapped_column(
         JSON,
         default=list,
-        nullable=False,
-    )
-    comparison_json: Mapped[dict] = mapped_column(
-        JSON,
-        default=dict,
         nullable=False,
     )
     generation_json: Mapped[dict] = mapped_column(

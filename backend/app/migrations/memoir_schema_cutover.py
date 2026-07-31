@@ -83,10 +83,13 @@ REBUILD_ORDER = (
     "memoir_book_plan_chapters",
     "memoir_voice_sessions",
     "memoir_voice_utterances",
+    "memoir_completion_issues",
     "memoir_editing_jobs",
+    "memoir_book_completion_jobs",
     "memoir_automation_events",
     "memoir_book_outputs",
     "memoir_book_chapter_draft_versions",
+    "memoir_book_revision_proposals",
 )
 
 OBSOLETE_COLUMNS = {
@@ -103,6 +106,8 @@ OBSOLETE_COLUMNS = {
         "source_route_reason",
         "source_route_updated_at",
     },
+    "memoir_completion_issues": {"section_id"},
+    "memoir_book_completion_jobs": {"scope"},
     "memoir_automation_events": {
         "followup_task_id",
         "review_utterance_id",
@@ -115,6 +120,7 @@ OBSOLETE_COLUMNS = {
         "formalized_at",
     },
     "memoir_book_chapter_draft_versions": {"block_snapshot_json"},
+    "memoir_book_revision_proposals": {"comparison_json"},
 }
 
 LEGACY_SQL_MARKERS = {
@@ -224,6 +230,8 @@ async def _needs_rebuild(
 
 
 def _copy_filter(table_name: str) -> str:
+    if table_name == "memoir_completion_issues":
+        return 'legacy."scope" IN (\'chapter\', \'book\')'
     if table_name == "memoir_editing_jobs":
         return (
             f'legacy."job_type" IN ({CURRENT_JOB_TYPES}) '
@@ -289,6 +297,25 @@ async def _rebuild_table(
             checkfirst=False,
         )
     )
+
+    if table_name == "memoir_completion_issues":
+        for referencing_table, column_name in (
+            ("memoir_voice_sessions", "current_completion_issue_id"),
+            ("memoir_voice_utterances", "completion_issue_id"),
+        ):
+            if column_name not in await table_columns(
+                conn,
+                referencing_table,
+            ):
+                continue
+            await conn.execute(
+                text(
+                    f'UPDATE "{referencing_table}" SET "{column_name}" = NULL '
+                    f'WHERE "{column_name}" IN ('
+                    f'SELECT id FROM "{legacy_table}" WHERE scope = \'section\''
+                    ")"
+                )
+            )
 
     if copied_columns:
         target_sql = ", ".join(

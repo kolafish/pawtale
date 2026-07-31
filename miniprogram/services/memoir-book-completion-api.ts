@@ -232,7 +232,6 @@ export interface MemoirBookCompletionJobChapter {
 export interface MemoirBookCompletionJob {
   job_id: string | null;
   project_id: string;
-  scope: "pending" | "all";
   status: "idle" | "pending" | "running" | "succeeded" | "failed" | "cancelled";
   total_chapter_count: number;
   processed_chapter_count: number;
@@ -269,19 +268,6 @@ export function getMemoirBookReview(
   projectId: string,
 ): Promise<MemoirBookReview | null> {
   return memoirRequest<MemoirBookReview | null>(bookReviewPath(projectId));
-}
-
-export function generateMemoirBookReview(
-  projectId: string,
-  forceRegenerate: boolean,
-): Promise<MemoirBookReview> {
-  return memoirAIRequest<
-    MemoirBookReview,
-    { force_regenerate: boolean; ai_model: null }
-  >(bookReviewPath(projectId), {
-    force_regenerate: forceRegenerate,
-    ai_model: null,
-  });
 }
 
 export function enqueueMemoirBookReviewJob(
@@ -338,12 +324,8 @@ export function enqueueMemoirBookRevisionJob<
   actionIds: string[] = [],
 ): Promise<MemoirBookRevisionJobForSource<Source>> {
   const payload = source === "review_answers"
-    ? { ai_model: null, workflow_mode: "plan_first" as const }
-    : {
-        action_ids: actionIds,
-        ai_model: null,
-        workflow_mode: "plan_first" as const,
-      };
+    ? { ai_model: null }
+    : { action_ids: actionIds, ai_model: null };
   return memoirAIRequest<MemoirBookRevisionJobForSource<Source>, typeof payload>(
     bookRevisionJobPath(projectId, source),
     payload,
@@ -485,10 +467,10 @@ export function enqueueMemoirBookCompletionJob(
 ): Promise<MemoirBookCompletionJob> {
   return memoirAIRequest<
     MemoirBookCompletionJob,
-    { scope: "pending"; retry_job_id: string | null; ai_model: null }
+    { retry_job_id: string | null; ai_model: null }
   >(
     bookCompletionPath(projectId, "/jobs"),
-    { scope: "pending", retry_job_id: retryJobId, ai_model: null },
+    { retry_job_id: retryJobId, ai_model: null },
     { timeoutProfile: "mutation" },
   );
 }

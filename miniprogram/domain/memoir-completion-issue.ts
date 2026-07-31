@@ -10,7 +10,7 @@ export type MemoirCompletionIssueOutcome =
   | "deferred"
   | "declined"
   | "superseded";
-export type MemoirCompletionIssueScope = "section" | "chapter" | "book";
+export type MemoirCompletionIssueScope = "chapter" | "book";
 export type MemoirCompletionIssueChannel = "interview" | "manual_review";
 export type MemoirCompletionIssueType =
   | "context"
@@ -29,7 +29,6 @@ export interface MemoirCompletionIssue {
   id: string;
   project_id: string;
   scope: MemoirCompletionIssueScope;
-  section_id?: string | null;
   chapter_id?: string | null;
   issue_type: MemoirCompletionIssueType;
   channel: MemoirCompletionIssueChannel;
@@ -51,7 +50,6 @@ export interface MemoirCompletionIssue {
 
 export interface MemoirCompletionIssueCollection {
   project_id: string;
-  current_issue?: MemoirCompletionIssue | null;
   issues: MemoirCompletionIssue[];
 }
 

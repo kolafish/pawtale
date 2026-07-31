@@ -282,7 +282,6 @@ async def _job_response(
     return {
         "job_id": job.id,
         "project_id": project_id,
-        "scope": job.scope,
         "status": batch_status,
         "total_chapter_count": total_count,
         "processed_chapter_count": processed_count,
@@ -457,7 +456,6 @@ async def enqueue_book_completion_job(
     job = MemoirBookCompletionJob(
         project_id=project_id,
         active_key=_active_key(project_id),
-        scope=req.scope,
         status=MemoirBookCompletionJobStatus.PENDING.value,
         requested_ai_model=req.ai_model,
         target_chapters_json=targets,

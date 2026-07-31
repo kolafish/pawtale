@@ -35,6 +35,10 @@ from app.services.memoir import (
     section_digests,
     sections,
 )
+from app.services.memoir.editing_job_handlers import (
+    register_memoir_editing_job_handlers,
+)
+from app.services.memoir.editing_jobs import clear_editing_job_handlers
 from app.services.memoir.section_roles import (
     PENDING_ASSIGNMENT_SECTION_ROLE,
     PENDING_ASSIGNMENT_SECTION_TITLE,
@@ -45,6 +49,7 @@ from tests.memoir_helpers import (
     create_test_voice_transcript,
     ensure_mobile_memoir_project,
     memoir_source_ref,
+    run_test_editing_job,
 )
 
 
@@ -907,7 +912,6 @@ async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_d
         select(MemoirCompletionIssue).where(
             MemoirCompletionIssue.project_id == project_id,
             MemoirCompletionIssue.chapter_id == chapter.id,
-            MemoirCompletionIssue.section_id.is_(None),
         )
     )
     assert issue is not None
@@ -967,14 +971,31 @@ async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_tru
     monkeypatch.setattr(section_digests, "get_ai_service", lambda _model: fake)
     monkeypatch.setattr(chapter_digests, "get_ai_service", lambda _model: fake)
 
-    response = await client.post(
+    queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/"
-        f"chapters/{chapter.id}/prepare",
-        json={"ai_model": "claude-opus-4-8"},
+        f"chapters/{chapter.id}/jobs",
+        json={
+            "operation": "prepare",
+            "ai_model": "claude-opus-4-8",
+        },
     )
-
-    assert response.status_code == 409
-    assert response.json()["detail"] == "章节审阅输出被截断，请重新检查本章"
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued.json()["job_id"],
+        ) is False
+    finally:
+        clear_editing_job_handlers()
+    response = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter.id}/jobs/current",
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error_message"] == "章节审阅输出被截断，请重新检查本章"
     assert fake.chapter_max_tokens == [
         chapter_digests.CHAPTER_DIGEST_MAX_TOKENS,
         chapter_digests.CHAPTER_DIGEST_MAX_TOKENS,
