@@ -44,7 +44,6 @@
 - `pages/topic-map`：查看已经讲过的话题，并记录“够了/不适合/不想聊”等用户决定；
 - `pages/transcript-detail`：回听、阅读/编辑切换、人工校正、重新识别、清理、删除和分享视频；
 - `pages/voice-progress`：当前回忆录会话和真实进度快照；
-- `pages/speaker-transcription`：多人实时转写与说话人标记调试。
 
 ### 成书
 

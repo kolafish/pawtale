@@ -151,20 +151,6 @@
         <view
           class="settings-nav-row"
           aria-role="button"
-          aria-label="多人实时转写"
-          bindtap="openSpeakerTranscription"
-          hover-class="settings-nav-row-hover"
-        >
-          <view class="settings-row-copy">
-            <text class="action-title">多人实时转写</text>
-            <text class="action-meta">临时区分多人对话，不保存到素材库。</text>
-          </view>
-          <text class="row-chevron">›</text>
-        </view>
-
-        <view
-          class="settings-nav-row"
-          aria-role="button"
           aria-label="查看声纹授权"
           bindtap="openVoiceAuthorization"
           hover-class="settings-nav-row-hover"

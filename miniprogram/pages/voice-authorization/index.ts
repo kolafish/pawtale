@@ -9,7 +9,7 @@ import {
 } from "../../services/accessibility-settings";
 import { definePage } from "../../services/page-definition";
 
-const PAGE_CLASS = "voice-authorization-page ui-page-shell ui-accessible-page";
+const PAGE_CLASS = "voice-authorization-page ui-page-shell ui-fixed-action-page ui-accessible-page";
 
 interface VoiceAuthorizationData {
   pageClass: string;
