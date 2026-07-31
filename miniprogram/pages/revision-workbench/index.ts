@@ -487,7 +487,11 @@ definePage<RevisionWorkbenchData>()({
       ? this.feedbackPoller
       : this.draftPoller;
     poller.schedule(() => {
-      void this.refreshJob(operation);
+      void (
+        operation === "feedback"
+          ? this.refreshFeedbackJob()
+          : this.refreshDraftJob()
+      );
     });
   },
 
