@@ -161,6 +161,24 @@
       </view>
     </view>
 
+    <view wx:if="{{!item.isEditing}}" class="section-card raw-material-card">
+      <view class="section-head">
+        <view class="section-heading">
+          <text class="section-title">原始讲述</text>
+          <text class="section-hint">根据录音识别，保留口述痕迹</text>
+        </view>
+        <text class="section-count">{{item.rawCountText}}</text>
+      </view>
+      <text class="body-text raw-text">
+        <text
+          wx:for="{{item.rawSegments}}"
+          wx:for-item="segment"
+          wx:for-index="segmentIndex"
+          wx:key="segmentIndex"
+        >{{segment.text}}</text>
+      </text>
+    </view>
+
     <view wx:if="{{!item.isEditing && item.question_text}}" class="section-card question-card">
       <view class="section-head">
         <view class="section-heading">
@@ -193,28 +211,6 @@
           disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayQuestionAudio}}"
         >
           {{playingAudioKind === "question" ? "停止提问" : "听小余提问"}}
-        </button>
-      </view>
-    </view>
-
-    <view wx:if="{{!item.isEditing && item.showOfflineAsr && !item.canRecoverTranscription}}" class="section-card offline-asr-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">离线加强识别</text>
-          <text class="section-hint">{{item.offlineAsrMethodText}}</text>
-        </view>
-        <text class="section-count offline-asr-status {{item.offlineAsrStatusClass}}">{{item.offlineAsrStatusText}}</text>
-      </view>
-      <text class="offline-asr-detail">{{item.offlineAsrDetailText}}</text>
-      <text wx:if="{{item.offlineAsrErrorText}}" class="offline-asr-error">{{item.offlineAsrErrorText}}</text>
-      <view class="actions-row offline-asr-actions">
-        <button
-          class="primary-button"
-          bindtap="startOfflineAsr"
-          loading="{{offlineAsrStarting || item.offlineAsrActive}}"
-          disabled="{{offlineAsrStarting || item.offlineAsrActive || !item.canStartOfflineAsr || item.isEditing || saving || deleting || convertingQuestionToAnswer}}"
-        >
-          {{offlineAsrStarting ? "正在提交" : item.offlineAsrActionText}}
         </button>
       </view>
     </view>
@@ -290,221 +286,18 @@
       </view>
     </view>
 
-    <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card share-video-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">图片与分享视频</text>
-          <text class="section-hint">选择校正文片段，可以直接生成插图，也可以制作带字幕的视频。</text>
-        </view>
-        <text class="section-count share-video-count {{(materialImageCreating || materialImagePolling) ? materialImageStatusClass : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? shareVideoStatusClass : (materialImageStatusClass || shareVideoStatusClass))}}">
-          {{(materialImageCreating || materialImagePolling) ? (materialImageStatusText || "图片生成中") : ((shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview) ? (shareVideoStatusText || "视频生成中") : (materialImageStatusText || shareVideoStatusText || "未生成"))}}
-        </text>
+    <view
+      wx:if="{{!item.isEditing && !item.canRecoverTranscription}}"
+      class="section-card media-tools-card ui-pressable"
+      bindtap="openMediaTools"
+      aria-role="button"
+      aria-label="打开图片与分享视频工具"
+    >
+      <view class="media-tools-copy">
+        <text class="section-title">图片与分享视频</text>
+        <text class="section-hint">从成书文字选择片段，生成插图或带原音字幕的视频</text>
       </view>
-      <view class="actions-row edit-choice-actions">
-        <button
-          class="primary-button"
-          bindtap="toggleShareVideoPanel"
-          loading="{{shareVideoLoadingContext}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
-        >
-          {{shareVideoPanelOpen ? "收起制作工具" : "制作图片或视频"}}
-        </button>
-      </view>
-      <view wx:if="{{shareVideoPanelOpen}}" class="share-video-panel">
-        <view wx:if="{{shareVideoLoadingContext}}" class="share-video-state">
-          <text>正在加载校正文片段</text>
-        </view>
-        <block wx:else>
-          <view wx:if="{{shareVideoError}}" class="share-video-error">
-            <text>{{shareVideoError}}</text>
-          </view>
-          <view wx:if="{{materialImageError}}" class="share-video-error">
-            <text>{{materialImageError}}</text>
-          </view>
-          <view wx:if="{{shareVideoSegments.length}}" class="share-video-segments">
-            <view
-              wx:for="{{shareVideoSegments}}"
-              wx:for-item="segment"
-              wx:for-index="segmentIndex"
-              wx:key="segmentIndex"
-              class="share-video-segment {{segment.className}}"
-              data-index="{{segment.arrayIndex}}"
-              bindtap="selectShareVideoSegment"
-            >
-              <text class="share-video-segment-text">{{segment.text}}</text>
-              <text class="share-video-segment-meta">{{segment.timeRangeText}} · {{segment.durationText}}</text>
-            </view>
-          </view>
-          <view wx:if="{{shareVideoSelectedText}}" class="share-video-selection">
-            <view class="share-video-selection-head">
-              <text class="voice-edit-label">已选片段</text>
-              <button
-                class="text-action-button"
-                bindtap="clearShareVideoSelection"
-                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
-              >
-                重选
-              </button>
-            </view>
-            <text class="share-video-selection-text">{{shareVideoSelectedText}}</text>
-            <text class="share-video-selection-meta">{{shareVideoSelectedMetaText}}</text>
-          </view>
-          <view class="share-video-background">
-            <view class="share-video-background-head">
-              <text class="voice-edit-label">视频背景</text>
-              <text class="share-video-background-current">{{shareVideoBackgroundSourceLabel}}</text>
-            </view>
-            <view class="share-video-background-options">
-              <view
-                wx:for="{{shareVideoBackgroundSourceOptions}}"
-                wx:key="value"
-                class="share-video-background-option {{item.value === shareVideoBackgroundSource ? 'selected' : ''}}"
-                data-background-source="{{item.value}}"
-                bindtap="selectShareVideoBackgroundSource"
-                hover-class="tap-hover"
-              >
-                <text class="share-video-background-label">{{item.label}}</text>
-                <text class="share-video-background-desc">{{item.description}}</text>
-              </view>
-            </view>
-          </view>
-          <view class="share-video-background">
-            <view class="share-video-background-head">
-              <text class="voice-edit-label">插图风格</text>
-              <text class="share-video-background-current">{{shareVideoBackgroundStyleLabel}}</text>
-            </view>
-            <text class="share-video-background-help">
-              直接图片使用完整构图；视频选择 AI 背景时，会另行为字幕保留留白。
-            </text>
-            <view class="share-video-background-options">
-              <view
-                wx:for="{{shareVideoBackgroundStyleOptions}}"
-                wx:key="value"
-                class="share-video-background-option {{item.value === shareVideoBackgroundStyle ? 'selected' : ''}}"
-                data-background-style="{{item.value}}"
-                bindtap="selectShareVideoBackgroundStyle"
-                hover-class="tap-hover"
-              >
-                <text class="share-video-background-label">{{item.label}}</text>
-                <text class="share-video-background-desc">{{item.description}}</text>
-              </view>
-            </view>
-          </view>
-          <view wx:if="{{shareVideoBackgroundUsesAi}}" class="share-video-background">
-            <view class="share-video-background-head">
-              <text class="voice-edit-label">视频画面模式</text>
-              <text class="share-video-background-current">{{shareVideoBackgroundModeLabel}}</text>
-            </view>
-            <view class="share-video-background-options">
-              <view
-                wx:for="{{shareVideoBackgroundModeOptions}}"
-                wx:key="value"
-                class="share-video-background-option {{item.value === shareVideoBackgroundMode ? 'selected' : ''}}"
-                data-background-mode="{{item.value}}"
-                bindtap="selectShareVideoBackgroundMode"
-                hover-class="tap-hover"
-              >
-                <text class="share-video-background-label">{{item.label}}</text>
-                <text class="share-video-background-desc">{{item.description}}</text>
-              </view>
-            </view>
-          </view>
-          <view wx:if="{{shareVideoBackgroundUsesCustom}}" class="share-video-background custom-background-panel">
-            <view class="share-video-background-head">
-              <text class="voice-edit-label">自定义视频背景</text>
-              <button
-                class="text-action-button"
-                bindtap="chooseShareVideoCustomBackground"
-                loading="{{shareVideoCustomBackgroundUploading}}"
-                disabled="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
-              >
-                {{shareVideoCustomBackgroundAssetId ? "更换图片" : "选择图片"}}
-              </button>
-            </view>
-            <view wx:if="{{shareVideoCustomBackgroundPreviewPath}}" class="custom-background-preview-wrap">
-              <image
-                class="custom-background-preview"
-                src="{{shareVideoCustomBackgroundPreviewPath}}"
-                mode="aspectFill"
-              />
-            </view>
-            <text wx:if="{{shareVideoCustomBackgroundStatusText}}" class="custom-background-status">{{shareVideoCustomBackgroundStatusText}}</text>
-            <text wx:else class="custom-background-status muted">选择家庭照片、旧物或地点图片，系统会处理成适合叠加文字的横版背景。</text>
-          </view>
-          <view class="actions-row share-video-actions">
-            <button
-              class="ghost-button material-image-button"
-              bindtap="createMaterialImage"
-              loading="{{materialImageCreating || materialImagePolling}}"
-              disabled="{{!shareVideoSelectedText || convertingQuestionToAnswer || materialImageCreating || materialImagePolling || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading}}"
-            >
-              {{materialImageCreating || materialImagePolling ? "生成中" : "生成图片"}}
-            </button>
-            <button
-              class="primary-button"
-              bindtap="createShareVideo"
-              loading="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-              disabled="{{!shareVideoSelectedCanGenerate || convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing || shareVideoCustomBackgroundUploading || materialImageCreating || materialImagePolling}}"
-            >
-              {{shareVideoDownloadingPreview ? "准备预览" : (shareVideoCreating || shareVideoPolling ? "生成中" : "生成视频")}}
-            </button>
-            <button
-              wx:if="{{shareVideoJob && shareVideoJob.status === 'succeeded'}}"
-              class="ghost-button"
-              bindtap="shareGeneratedVideo"
-              loading="{{shareVideoSharing}}"
-              disabled="{{convertingQuestionToAnswer || shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview || shareVideoSharing}}"
-            >
-              {{shareVideoSharing ? "分享中" : "分享给微信"}}
-            </button>
-          </view>
-          <ai-task-progress
-            wx:if="{{materialImageCreating || materialImagePolling}}"
-            class="share-video-task-progress"
-            title="{{materialImageStatusText || '正在生成图片'}}"
-            detail="完成后会自动放入图片素材，默认不收入书稿"
-            mode="indeterminate"
-          />
-          <view
-            wx:elif="{{materialImageJob}}"
-            class="share-video-job {{materialImageStatusClass}} material-image-job"
-          >
-            <view class="material-image-job-copy">
-              <text class="share-video-job-title">{{materialImageStatusText}}</text>
-              <text wx:if="{{materialImageJob.status === 'succeeded'}}" class="share-video-job-meta">
-                默认不收入书稿，可在图片素材中编辑说明并决定放置位置。
-              </text>
-            </view>
-            <button
-              wx:if="{{materialImageJob.status === 'succeeded'}}"
-              class="text-action-button material-image-toolbox-link"
-              bindtap="openImageAssets"
-            >
-              去图片素材
-            </button>
-          </view>
-          <ai-task-progress
-            wx:if="{{shareVideoCreating || shareVideoPolling || shareVideoDownloadingPreview}}"
-            class="share-video-task-progress"
-            title="{{shareVideoStatusText || '正在生成视频'}}"
-            detail="{{shareVideoSelectedMetaText}}"
-            mode="indeterminate"
-          />
-          <view wx:elif="{{shareVideoJob}}" class="share-video-job {{shareVideoStatusClass}}">
-            <text class="share-video-job-title">{{shareVideoStatusText}}</text>
-            <text wx:if="{{shareVideoSelectedMetaText}}" class="share-video-job-meta">{{shareVideoSelectedMetaText}}</text>
-          </view>
-          <video
-            wx:if="{{shareVideoPreviewPath}}"
-            class="share-video-preview"
-            src="{{shareVideoPreviewPath}}"
-            controls
-            show-center-play-btn
-            enable-progress-gesture
-            object-fit="contain"
-          />
-        </block>
-      </view>
+      <text class="media-tools-action">制作 ›</text>
     </view>
 
     <view wx:if="{{!item.isEditing}}" class="section-card">
@@ -574,31 +367,34 @@
       </view>
     </view>
 
-    <view wx:if="{{!item.isEditing}}" class="section-card raw-material-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">原始讲述</text>
-          <text class="section-hint">根据录音识别，保留口述痕迹</text>
-        </view>
-        <text class="section-count">{{item.rawCountText}}</text>
-      </view>
-      <text class="body-text raw-text">
-        <text
-          wx:for="{{item.rawSegments}}"
-          wx:for-item="segment"
-          wx:for-index="segmentIndex"
-          wx:key="segmentIndex"
-        >{{segment.text}}</text>
-      </text>
-    </view>
-
     <view wx:if="{{!item.isEditing}}" class="section-card more-actions-card">
       <view class="section-head more-actions-head" bindtap="toggleMoreActionsExpanded">
         <view class="section-heading">
           <text class="section-title">更多操作</text>
-          <text class="section-hint">{{item.canConvertQuestionToAnswer ? "误判修正和删除等低频操作收在这里" : "删除等低频操作收在这里"}}</text>
+          <text class="section-hint">{{item.canConvertQuestionToAnswer ? "识别加强、误判修正和删除等低频操作" : "识别加强和删除等低频操作"}}</text>
         </view>
         <text class="more-actions-toggle">{{moreActionsExpanded ? "收起" : "展开"}}</text>
+      </view>
+      <view wx:if="{{moreActionsExpanded && item.showOfflineAsr && !item.canRecoverTranscription}}" class="offline-asr-panel">
+        <view class="section-head">
+          <view class="section-heading">
+            <text class="section-title">离线加强识别</text>
+            <text class="section-hint">{{item.offlineAsrMethodText}}</text>
+          </view>
+          <text class="section-count offline-asr-status {{item.offlineAsrStatusClass}}">{{item.offlineAsrStatusText}}</text>
+        </view>
+        <text class="offline-asr-detail">{{item.offlineAsrDetailText}}</text>
+        <text wx:if="{{item.offlineAsrErrorText}}" class="offline-asr-error">{{item.offlineAsrErrorText}}</text>
+        <view class="actions-row offline-asr-actions">
+          <button
+            class="primary-button"
+            bindtap="startOfflineAsr"
+            loading="{{offlineAsrStarting || item.offlineAsrActive}}"
+            disabled="{{offlineAsrStarting || item.offlineAsrActive || !item.canStartOfflineAsr || saving || deleting || convertingQuestionToAnswer}}"
+          >
+            {{offlineAsrStarting ? "正在提交" : item.offlineAsrActionText}}
+          </button>
+        </view>
       </view>
       <view wx:if="{{moreActionsExpanded && item.canConvertQuestionToAnswer}}" class="repair-panel">
         <text class="repair-panel-title">这段其实是回答</text>

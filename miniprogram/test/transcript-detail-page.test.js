@@ -259,6 +259,12 @@ function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
   return loadPageModule("../pages/transcript-detail/index.ts");
 }
 
+function loadTranscriptMediaPage(options = {}) {
+  loadTranscriptDetailPage(options);
+  clearModule("../pages/transcript-detail/transcript-detail-share-video-workflow.ts");
+  return loadPageModule("../pages/transcript-media/index.ts");
+}
+
 test("transcript detail page loads a single transcript", async () => {
   const calls = [];
   const { page } = loadTranscriptDetailPage({
@@ -283,6 +289,30 @@ test("transcript detail page loads a single transcript", async () => {
   assert.equal(context.data.item.questionCanExpand, false);
   assert.equal(context.data.questionExpanded, false);
   assert.equal(context.data.moreActionsExpanded, false);
+});
+
+test("transcript detail opens the registered media tools page", async () => {
+  const appJson = require("../app.json");
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, { id: "utterance/media" });
+  page.openMediaTools.call(context);
+
+  assert.ok(appJson.pages.includes("pages/transcript-media/index"));
+  assert.deepEqual(navigations, [
+    "/pages/transcript-media/index?id=utterance%2Fmedia",
+  ]);
 });
 
 test("transcript detail page shows saved audio awaiting transcription", async () => {
@@ -787,12 +817,12 @@ test("transcript detail page creates a chapter while assigning material", async 
   }]);
 });
 
-test("transcript detail page creates share video from selected corrected segments", async () => {
+test("transcript media page creates share video from selected corrected segments", async () => {
   const contextCalls = [];
   const createCalls = [];
   const pollCalls = [];
   const downloads = [];
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
         transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
@@ -828,10 +858,8 @@ test("transcript detail page creates share video from selected corrected segment
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
 
   assert.deepEqual(contextCalls, ["utterance-share"]);
-  assert.equal(context.data.shareVideoPanelOpen, true);
   assert.equal(context.data.shareVideoSegments.length, 2);
   assert.equal(context.data.shareVideoSelectedCanGenerate, false);
   assert.equal(context.data.shareVideoBackgroundSource, "ai");
@@ -915,11 +943,11 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoStatusText, "已打开微信分享");
 });
 
-test("transcript detail page creates a standalone image and opens it in the toolbox", async () => {
+test("transcript media page creates a standalone image and opens it in the toolbox", async () => {
   const createCalls = [];
   const pollCalls = [];
   const navigations = [];
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
         transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
@@ -948,7 +976,6 @@ test("transcript detail page creates a standalone image and opens it in the tool
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
   page.selectShareVideoSegment.call(context, {
     currentTarget: { dataset: { index: 0 } },
   });
@@ -991,7 +1018,7 @@ test("transcript detail page creates a standalone image and opens it in the tool
   ]);
 });
 
-test("transcript detail page restores the latest matching share video job after reload", async () => {
+test("transcript media page restores the latest matching share video job after reload", async () => {
   const contextCalls = [];
   const pollCalls = [];
   const restoredJob = sampleShareVideoJob({
@@ -1001,7 +1028,7 @@ test("transcript detail page restores the latest matching share video job after 
     output: null,
     completed_at: null,
   });
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
       getMemoirTranscriptShareVideoContext: async (id) => {
@@ -1017,7 +1044,6 @@ test("transcript detail page restores the latest matching share video job after 
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-resume" });
-  await page.toggleShareVideoPanel.call(context);
 
   assert.deepEqual(contextCalls, ["utterance-resume"]);
   assert.deepEqual(pollCalls, ["job-1"]);
@@ -1033,7 +1059,7 @@ test("transcript detail page restores the latest matching share video job after 
   assert.equal(context.data.shareVideoPolling, false);
 });
 
-test("transcript detail page restores the latest standalone image job and selection", async () => {
+test("transcript media page restores the latest standalone image job and selection", async () => {
   const pollCalls = [];
   const restoredJob = sampleMaterialImageJob({
     utterance_id: "utterance-image-resume",
@@ -1043,7 +1069,7 @@ test("transcript detail page restores the latest standalone image job and select
     start_char: 0,
     end_char: 13,
   });
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
       getMemoirTranscriptShareVideoContext: async (id) => sampleShareVideoContext(id, {
@@ -1059,7 +1085,6 @@ test("transcript detail page restores the latest standalone image job and select
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-image-resume" });
-  await page.toggleShareVideoPanel.call(context);
 
   assert.deepEqual(pollCalls, ["image-job-1"]);
   assert.equal(context.data.materialImageJob.status, "running");
@@ -1072,7 +1097,7 @@ test("transcript detail page restores the latest standalone image job and select
   context.materialImageController.cancel();
 });
 
-test("transcript detail page uses backend background options as the configuration source", async () => {
+test("transcript media page uses backend background options as the configuration source", async () => {
   const baseContext = sampleShareVideoContext("utterance-share");
   const backendContext = {
     ...baseContext,
@@ -1107,7 +1132,7 @@ test("transcript detail page uses backend background options as the configuratio
       storageWrites.push({ key, value });
     },
   };
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
       getMemoirTranscriptShareVideoContext: async () => backendContext,
@@ -1116,7 +1141,6 @@ test("transcript detail page uses backend background options as the configuratio
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
 
   assert.equal(context.data.shareVideoBackgroundStyle, "documentary");
   assert.equal(context.data.shareVideoBackgroundStyleLabel, "纪实影像");
@@ -1141,9 +1165,9 @@ test("transcript detail page uses backend background options as the configuratio
   ]);
 });
 
-test("transcript detail page requires a custom background asset before creating video", async () => {
+test("transcript media page requires a custom background asset before creating video", async () => {
   const createCalls = [];
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
         transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
@@ -1160,7 +1184,6 @@ test("transcript detail page requires a custom background asset before creating 
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   page.selectShareVideoBackgroundSource.call(context, {
     currentTarget: { dataset: { backgroundSource: "custom" } },
@@ -1174,12 +1197,12 @@ test("transcript detail page requires a custom background asset before creating 
   assert.equal(context.data.shareVideoStatusText, "请先选择背景图片");
 });
 
-test("transcript detail page uploads a custom background before creating share video", async () => {
+test("transcript media page uploads a custom background before creating share video", async () => {
   const uploadCalls = [];
   const previewCalls = [];
   const createCalls = [];
   const storageWrites = [];
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
         transcript_edited: "爷爷退休后还在帮公司做事。后来大家都很信任他。",
@@ -1239,7 +1262,6 @@ test("transcript detail page uploads a custom background before creating share v
   };
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
   await page.chooseShareVideoCustomBackground.call(context);
 
   assert.deepEqual(uploadCalls, [{ projectId: "project-1", filePath: "/tmp/family-photo.png" }]);
@@ -1269,9 +1291,9 @@ test("transcript detail page uploads a custom background before creating share v
   });
 });
 
-test("transcript detail page creates classic background share video without image asset", async () => {
+test("transcript media page creates classic background share video without image asset", async () => {
   const createCalls = [];
-  const { page } = loadTranscriptDetailPage({
+  const { page } = loadTranscriptMediaPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id, {
         transcript_edited: "爷爷退休后还在帮公司做事。",
@@ -1299,7 +1321,6 @@ test("transcript detail page creates classic background share video without imag
   const context = pageContext(page);
 
   await page.onLoad.call(context, { id: "utterance-share" });
-  await page.toggleShareVideoPanel.call(context);
   page.selectShareVideoSegment.call(context, { currentTarget: { dataset: { index: 0 } } });
   page.selectShareVideoBackgroundSource.call(context, {
     currentTarget: { dataset: { backgroundSource: "classic" } },

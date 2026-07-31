@@ -34,7 +34,6 @@ interface TranscriptDetailEditWorkflowHost {
   data: TranscriptDetailData;
   setData(patch: Partial<TranscriptDetailData>): void;
   loadTranscript(): Promise<void>;
-  resetShareVideoState(): void;
   stopPlayback(): void;
 }
 
@@ -82,7 +81,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       return;
     }
     this.stopPlayback();
-    this.resetShareVideoState();
     const current = item.transcript_edited || item.transcript_raw;
     const nextItem: TranscriptDetailItemView = {
       ...item,
@@ -333,7 +331,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
         editReferenceExpanded: false,
       });
       syncEditUnloadAlert(nextItem);
-      this.resetShareVideoState();
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存", icon: "success" });
     } catch (error) {
@@ -359,7 +356,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     try {
       const recovered = await recoverMemoirVoiceTranscript(item.id);
       this.setData({ item: toViewItem(recovered) });
-      this.resetShareVideoState();
       trackAuditAction("transcript.detail_recover_transcription", {}, { projectId: recovered.project_id });
       wx.showToast({ title: "已恢复转写", icon: "success" });
     } catch (error) {
@@ -470,7 +466,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
         voiceEditInstructionText: "",
         voiceEditPreview: null,
       });
-      this.resetShareVideoState();
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存修改", icon: "success" });
     } catch (error) {
@@ -520,7 +515,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       return;
     }
     this.stopPlayback();
-    this.resetShareVideoState();
     this.setData({ convertingQuestionToAnswer: true, error: "" });
     try {
       await convertMemoirInterviewQuestionToAnswer(item.project_id, item.chat_message_id);

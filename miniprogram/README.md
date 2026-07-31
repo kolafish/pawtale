@@ -42,7 +42,8 @@
 
 - `pages/voice-chat`：录音、partial/final 转写、动态追问、流式播放、自动续听、用户打断和断线恢复；
 - `pages/voice-progress`：汇总当前回忆录的讲述数据、最近会话和聊过的人生话题，并记录“够了/不适合/不想聊”等用户决定；
-- `pages/transcript-detail`：回听、阅读/编辑切换、人工校正、重新识别、清理、删除和分享视频；
+- `pages/transcript-detail`：回听、阅读/编辑切换、人工校正、重新识别、素材位置和低频修复；
+- `pages/transcript-media`：从成书文字选择片段，生成插图或带原音字幕的分享视频；
 
 ### 成书
 

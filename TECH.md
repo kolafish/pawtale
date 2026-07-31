@@ -231,7 +231,7 @@ miniprogram/
 
 - 入口：home、login、projects、project-edit、me；
 - 语音：voice-authorization、voice-chat；
-- 素材：transcripts、transcript-detail、voice-progress（讲述概览）；
+- 素材：transcripts、transcript-detail、transcript-media、voice-progress（讲述概览）；
 - 成书：book、book-completion、chapter-workspace、book-export、book-reader、image-assets。
 
 页面测试优先调用 page method、view model 和 service mock，断言用户可观察结果；WXML/WXSS 只在路由、绑定或配置本身是失败边界时做轻量检查。

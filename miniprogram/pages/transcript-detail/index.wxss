@@ -209,9 +209,11 @@
   border-color: var(--ui-border);
 }
 
-.offline-asr-card {
-  background: var(--ui-surface);
-  border-color: var(--ui-border);
+.offline-asr-panel {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 16rpx;
+  background: var(--ui-surface-subtle);
 }
 
 .offline-asr-status.pending,
@@ -665,10 +667,6 @@
   background: var(--ui-surface);
 }
 
-.edit-choice-actions {
-  justify-content: flex-start;
-}
-
 .edit-tools-card .primary-button,
 .edit-tools-card .ghost-button {
   height: 80rpx;
@@ -784,6 +782,27 @@
   margin-top: 24rpx;
 }
 
+.media-tools-card {
+  min-height: 116rpx;
+  padding: 24rpx 26rpx;
+  background: var(--ui-accent-surface-subtle);
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.media-tools-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.media-tools-action {
+  flex: 0 0 auto;
+  color: var(--ui-accent-strong);
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
 .share-video-card {
   background: var(--ui-surface);
   border-color: var(--ui-border);
@@ -806,10 +825,6 @@
 
 .share-video-count.failed {
   color: var(--ui-danger-text);
-}
-
-.share-video-panel {
-  margin-top: 20rpx;
 }
 
 .share-video-state {

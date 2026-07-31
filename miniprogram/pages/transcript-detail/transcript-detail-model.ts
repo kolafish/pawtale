@@ -19,8 +19,6 @@ import {
   type TranscriptTextSegment,
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
-import type { TranscriptShareVideoData } from "../../services/transcript-share-video";
-import type { TranscriptMaterialImageTaskState } from "../../services/transcript-material-image";
 
 export interface MaterialAssignmentOption {
   kind: "existing_section" | "create_section" | "create_chapter";
@@ -67,8 +65,7 @@ export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   canStartOfflineAsr: boolean;
 }
 
-export interface TranscriptDetailData
-  extends TranscriptShareVideoData, TranscriptMaterialImageTaskState {
+export interface TranscriptDetailData {
   pageClass: string;
   loading: boolean;
   needsLogin: boolean;

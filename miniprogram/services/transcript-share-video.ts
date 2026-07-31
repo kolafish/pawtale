@@ -37,7 +37,6 @@ export interface TranscriptShareVideoTaskState {
 }
 
 export interface TranscriptShareVideoData extends TranscriptShareVideoTaskState {
-  shareVideoPanelOpen: boolean;
   shareVideoLoadingContext: boolean;
   shareVideoContext: MemoirTranscriptShareVideoContext | null;
   shareVideoSegments: TranscriptShareVideoSegmentView[];
@@ -301,7 +300,6 @@ export function initialTranscriptShareVideoTaskState(): TranscriptShareVideoTask
 
 export function initialTranscriptShareVideoData(): TranscriptShareVideoData {
   return {
-    shareVideoPanelOpen: false,
     shareVideoLoadingContext: false,
     shareVideoContext: null,
     ...shareVideoSelectionPatch(null, -1, -1),

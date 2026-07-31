@@ -23,7 +23,6 @@ interface TranscriptDetailAudioWorkflowHost {
   offlineAsrPollToken: number;
   offlineAsrPollAttempts: number;
   setData(patch: Partial<TranscriptDetailData>): void;
-  resetShareVideoState(): void;
 }
 
 export interface TranscriptDetailAudioWorkflowMethods {
@@ -91,9 +90,6 @@ TranscriptDetailAudioWorkflowMethods & ThisType<TranscriptDetailAudioWorkflow> =
       this.setData({ item: next });
       if (next.offline_asr.status === "succeeded") {
         this.stopOfflineAsrPolling();
-        if (!this.data.shareVideoPanelOpen) {
-          this.resetShareVideoState();
-        }
         wx.showToast({ title: "识别已更新", icon: "success" });
         return;
       }
@@ -128,7 +124,6 @@ TranscriptDetailAudioWorkflowMethods & ThisType<TranscriptDetailAudioWorkflow> =
       return;
     }
     this.stopPlayback();
-    this.resetShareVideoState();
     this.setData({ offlineAsrStarting: true, error: "" });
     try {
       const state = await startMemoirMaterialOfflineASR(item.id);

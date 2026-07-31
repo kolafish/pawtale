@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "图片与分享视频",
+  "usingComponents": {
+    "ai-task-progress": "/components/ai-task-progress/index"
+  }
+}
