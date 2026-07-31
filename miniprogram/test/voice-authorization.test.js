@@ -105,9 +105,10 @@ test("voice authorization consent exposes the active consent record", () => {
   delete global.wx;
 });
 
-test("syncVoiceAuthorizationConsent posts the local consent audit", async () => {
+test("voice recording authorization syncs consent before requesting recorder privacy", async () => {
   const requests = [];
   let ensuredSession = false;
+  let privacyAuthorized = false;
   const storage = {};
   global.wx = {
     getStorageSync(key) {
@@ -115,6 +116,13 @@ test("syncVoiceAuthorizationConsent posts the local consent audit", async () => 
     },
     setStorageSync(key, value) {
       storage[key] = value;
+    },
+    getPrivacySetting({ success }) {
+      success({ needAuthorization: true });
+    },
+    requirePrivacyAuthorize({ success }) {
+      privacyAuthorized = true;
+      success();
     },
   };
   const service = loadVoiceAuthorizationService({
@@ -135,10 +143,11 @@ test("syncVoiceAuthorizationConsent posts the local consent audit", async () => 
   });
   service.saveVoiceAuthorizationConsent(true);
 
-  const response = await service.syncVoiceAuthorizationConsent({ sourceSessionId: "voice-1" });
+  const authorized = await service.ensureVoiceRecordingAuthorization("voice-1");
 
+  assert.equal(authorized, true);
   assert.equal(ensuredSession, true);
-  assert.equal(response.id, "consent-1");
+  assert.equal(privacyAuthorized, true);
   assert.equal(requests[0].path, "/api/mobile/memoir/voice-authorization-consent");
   assert.equal(requests[0].options.method, "POST");
   assert.deepEqual(requests[0].options.data, {
@@ -150,5 +159,20 @@ test("syncVoiceAuthorizationConsent posts the local consent audit", async () => 
       agreed_at: storage[service.VOICE_AUTHORIZATION_STORAGE_KEY].agreedAt,
     },
   });
+  delete global.wx;
+});
+
+test("voice recording authorization opens the consent page before using the recorder", async () => {
+  const navigations = [];
+  global.wx = {
+    getStorageSync() {},
+    navigateTo({ url }) {
+      navigations.push(url);
+    },
+  };
+  const service = loadVoiceAuthorizationService();
+
+  assert.equal(await service.ensureVoiceRecordingAuthorization(), false);
+  assert.deepEqual(navigations, [service.VOICE_AUTHORIZATION_PAGE_URL]);
   delete global.wx;
 });

@@ -145,6 +145,7 @@ function loadVoiceChatPage({
     ...memoirCacheExports,
   });
   mockModule("../services/voice-authorization.ts", {
+    ensureVoiceRecordingAuthorization: async () => true,
     readVoiceAuthorizationConsent: () => false,
     saveVoiceAuthorizationConsent: (agreed = true) => ({ agreed, version: "test", agreedAt: "now" }),
     syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
@@ -1555,6 +1556,7 @@ test("voice chat uses conservative silence thresholds for automatic turn ending"
 
 test("voice chat uses no-answer timeout only for auto-listen recordings", async () => {
   const startOptions = [];
+  const authorizationSessions = [];
   const page = loadVoiceChatPage({
     streamingExports: {
       MemoirStreamingAsrClient: class {
@@ -1570,6 +1572,10 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
       },
     },
     voiceAuthorizationExports: {
+      ensureVoiceRecordingAuthorization: async (voiceSessionId) => {
+        authorizationSessions.push(voiceSessionId);
+        return true;
+      },
       readVoiceAuthorizationConsent: () => true,
       syncVoiceAuthorizationConsent: async () => ({ id: "consent-1" }),
     },
@@ -1599,6 +1605,7 @@ test("voice chat uses no-answer timeout only for auto-listen recordings", async 
   await page.startRecordingAfterPrivacy.call(context, false);
 
   assert.equal(startOptions.length, 2);
+  assert.deepEqual(authorizationSessions, ["voice-1", "voice-1"]);
   assert.deepEqual(startOptions[0], {
     noVoiceActivityTimeoutMs: 15000,
     parentMessageId: "assistant-message-1",

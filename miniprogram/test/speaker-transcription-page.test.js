@@ -27,14 +27,10 @@ function loadSpeakerTranscriptionPage({
     }),
     ...proofreadExports,
   });
-  if (privacyExports) {
-    mockModule("../services/wechat-privacy.ts", {
-      ensureRecorderPrivacyAuthorization: async () => {},
-      ...privacyExports,
-    });
-  } else {
-    clearModule("../services/wechat-privacy.ts");
-  }
+  mockModule("../services/voice-authorization.ts", {
+    ensureVoiceRecordingAuthorization: privacyExports?.ensureRecorderPrivacyAuthorization
+      || (async () => true),
+  });
   if (transcribeExports) {
     mockModule("../services/speaker-transcription.ts", {
       SpeakerTranscriptionClient: class SpeakerTranscriptionClient {

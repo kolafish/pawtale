@@ -55,18 +55,6 @@ export function voiceAssistantInterruptedPatch(): VoiceChatPatch {
   };
 }
 
-export function voiceRecorderPrivacyDeniedPatch(
-  autoTriggered: boolean,
-  currentAutoListenStateText: string,
-): VoiceChatPatch {
-  return {
-    recording: false,
-    recordingStarting: false,
-    primaryActionText: "继续说话",
-    autoListenStateText: autoTriggered ? "自动收音已暂停，等待隐私授权" : currentAutoListenStateText,
-  };
-}
-
 export function voiceRecordingUnavailablePatch(
   autoTriggered: boolean,
   currentAutoListenStateText: string,

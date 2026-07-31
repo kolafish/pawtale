@@ -12,10 +12,12 @@ test("shared voice text editor shows live transcription without replacing existi
   const controller = {
     callbacks: null,
     finishCount: 0,
+    recordingOptions: null,
     async connect(options) {
       this.callbacks = options.callbacks;
     },
-    startRecording() {
+    startRecording(options) {
+      this.recordingOptions = options;
       return true;
     },
     stopRecording() {},
@@ -33,12 +35,7 @@ test("shared voice text editor shows live transcription without replacing existi
     },
   });
   mockModule("../services/voice-authorization.ts", {
-    readVoiceAuthorizationConsent: () => true,
-    syncVoiceAuthorizationConsent: async () => {},
-    VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
-  });
-  mockModule("../services/wechat-privacy.ts", {
-    ensureRecorderPrivacyAuthorization: async () => {},
+    ensureVoiceRecordingAuthorization: async () => true,
   });
   const toasts = [];
   global.wx = {
@@ -68,6 +65,7 @@ test("shared voice text editor shows live transcription without replacing existi
   await Promise.resolve();
 
   assert.equal(controller.finishCount, 1);
+  assert.deepEqual(controller.recordingOptions, { maxDurationMs: 30000 });
   assert.equal(context.data.voicePhase, "idle");
   assert.equal(
     context.events.filter((event) => event.name === "change").at(-1).detail.value,

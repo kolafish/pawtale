@@ -32,6 +32,7 @@ import {
   VoiceAssistantTTSProgressRuntime,
 } from "../../services/voice-assistant-tts-progress";
 import {
+  ensureVoiceRecordingAuthorization,
   readVoiceAuthorizationConsent,
   saveVoiceAuthorizationConsent,
   syncVoiceAuthorizationConsent,
@@ -309,21 +310,28 @@ definePage<VoiceChatData>()({
     return false;
   },
 
-  async syncVoiceAuthorizationForSession() {
+  async syncVoiceAuthorizationForSession(forRecording: boolean = false) {
     if (!readVoiceAuthorizationConsent()) {
       this.ensureVoiceAuthorization(false);
       return false;
     }
     try {
+      if (forRecording) {
+        return await ensureVoiceRecordingAuthorization(this.data.voiceSessionId || undefined);
+      }
       await syncVoiceAuthorizationConsent({
         sourceSessionId: this.data.voiceSessionId || undefined,
       });
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "声纹授权同步失败";
-      applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(message));
+      const fallback = forRecording ? "录音授权失败" : "声纹授权同步失败";
+      const message = error instanceof Error ? error.message : fallback;
+      if (forRecording) {
+        this.handleError(message, { kind: "recorder", code: "voice_recording_authorization_failed", message });
+      }
+      applyVoiceChatDataPatch(this, voiceAuthorizationSyncFailedPatch(message, forRecording));
       if (typeof wx !== "undefined" && typeof wx.showToast === "function") {
-        wx.showToast({ title: "声纹授权同步失败", icon: "none" });
+        wx.showToast({ title: fallback, icon: "none" });
       }
       return false;
     }

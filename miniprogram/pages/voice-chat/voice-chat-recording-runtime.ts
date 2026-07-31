@@ -13,7 +13,6 @@ import {
 } from "../../services/memoir-streaming-asr";
 import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import {
   canRequestFollowUp,
   latestPersistedAssistantMessageId,
@@ -41,7 +40,6 @@ import {
   voiceAssistantInterruptedPatch,
   voiceClientUnavailableForRecording,
   voiceLiveTranscriptPatch,
-  voiceRecorderPrivacyDeniedPatch,
   voiceRecordingReconnectPatch,
   voiceRecordingStartRequestedPatch,
   voiceRecordingStartedPatch,
@@ -91,7 +89,7 @@ export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   noAnswerPromptInFlight: boolean;
   noAnswerPromptRequestSerial: number;
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
-  syncVoiceAuthorizationForSession(): Promise<boolean>;
+  syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
   refreshVoiceSessionSnapshot(): Promise<void>;
   confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
@@ -235,15 +233,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     ) {
       return false;
     }
-    if (!(await this.syncVoiceAuthorizationForSession())) {
-      return false;
-    }
-    try {
-      await ensureRecorderPrivacyAuthorization();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "微信隐私授权失败";
-      this.handleError(message, { kind: "recorder", code: "wechat_privacy_authorization_failed", message });
-      applyVoiceChatDataPatch(this, voiceRecorderPrivacyDeniedPatch(autoTriggered, this.data.autoListenStateText));
+    if (!(await this.syncVoiceAuthorizationForSession(true))) {
       return false;
     }
     if (

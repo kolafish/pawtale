@@ -1,17 +1,13 @@
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
+  ensureVoiceRecordingAuthorization,
 } from "../../services/voice-authorization";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 
 type VoicePhase = "idle" | "connecting" | "listening" | "stopping";
 const VOICE_MAX_DURATION_MS = 30000;
 
 interface VoiceRuntime {
   streaming: StreamingVoiceController;
-  timer: ReturnType<typeof setTimeout> | null;
   token: number;
   text: string;
   baseText: string;
@@ -25,7 +21,6 @@ function voiceRuntime(owner: object): VoiceRuntime {
   if (!runtime) {
     runtime = {
       streaming: new StreamingVoiceController(),
-      timer: null,
       token: 0,
       text: "",
       baseText: "",
@@ -121,7 +116,6 @@ Component({
     cancelVoice() {
       const runtime = voiceRuntime(this);
       runtime.token += 1;
-      this.clearVoiceTimer();
       runtime.streaming.close({ force: true });
       runtime.baseText = "";
       runtime.transcript = "";
@@ -131,7 +125,6 @@ Component({
     async toggleVoice() {
       const runtime = voiceRuntime(this);
       if (this.data.voicePhase === "listening") {
-        this.clearVoiceTimer();
         runtime.streaming.stopRecording();
         return;
       }
@@ -150,13 +143,10 @@ Component({
       const token = runtime.token;
       this.setData({ voicePhase: "connecting", error: "" });
       try {
-        if (!readVoiceAuthorizationConsent()) {
-          wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+        if (!(await ensureVoiceRecordingAuthorization())) {
           this.setData({ voicePhase: "idle" });
           return;
         }
-        await syncVoiceAuthorizationConsent();
-        await ensureRecorderPrivacyAuthorization();
         if (token !== runtime.token) {
           return;
         }
@@ -173,13 +163,10 @@ Component({
               if (token !== runtime.token) {
                 return;
               }
-              if (status === "listening") {
-                this.setData({ voicePhase: "listening" });
-              } else if (status === "stopping") {
-                this.setData({ voicePhase: "stopping" });
-              } else if (status === "closed" || status === "error") {
-                this.clearVoiceTimer();
+              if (status === "closed" || status === "error") {
                 this.setData({ voicePhase: "idle" });
+              } else if (status === "listening" || status === "stopping") {
+                this.setData({ voicePhase: status });
               }
             },
             onEvent: (event) => {
@@ -193,7 +180,6 @@ Component({
             ),
             onError: (message) => {
               if (token === runtime.token) {
-                this.clearVoiceTimer();
                 this.setData({
                   voicePhase: "idle",
                   error: message || "语音输入失败",
@@ -206,15 +192,9 @@ Component({
           runtime.streaming.close({ force: true });
           return;
         }
-        if (!runtime.streaming.startRecording()) {
+        if (!runtime.streaming.startRecording({ maxDurationMs: VOICE_MAX_DURATION_MS })) {
           throw new Error("录音启动失败，请重试");
         }
-        runtime.timer = setTimeout(() => {
-          if (token === runtime.token) {
-            runtime.timer = null;
-            runtime.streaming.stopRecording();
-          }
-        }, VOICE_MAX_DURATION_MS);
       } catch (error) {
         if (token !== runtime.token) {
           return;
@@ -240,17 +220,8 @@ Component({
       ));
     },
 
-    clearVoiceTimer() {
-      const runtime = voiceRuntime(this);
-      if (runtime.timer) {
-        clearTimeout(runtime.timer);
-        runtime.timer = null;
-      }
-    },
-
     async finishVoice(token: number) {
       const runtime = voiceRuntime(this);
-      this.clearVoiceTimer();
       try {
         await runtime.streaming.finishSession();
       } catch (error) {

@@ -40,9 +40,7 @@ function loadVoiceSearchService({ voiceApiExports = {}, privacyExports = {}, aut
     filename: authorizationPath,
     loaded: true,
     exports: {
-      readVoiceAuthorizationConsent: () => true,
-      syncVoiceAuthorizationConsent: async () => ({}),
-      VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
+      ensureVoiceRecordingAuthorization: async () => true,
       ...authorizationExports,
     },
   };
@@ -72,7 +70,7 @@ test("voice search service records PCM audio and returns transcribed text", asyn
   const starts = [];
   const readFiles = [];
   const transcriptions = [];
-  const syncedAuthorizations = [];
+  const authorizationChecks = [];
   global.wx = {
     getRecorderManager() {
       return {
@@ -105,9 +103,9 @@ test("voice search service records PCM audio and returns transcribed text", asyn
       },
     },
     authorizationExports: {
-      syncVoiceAuthorizationConsent: async (options) => {
-        syncedAuthorizations.push(options);
-        return {};
+      ensureVoiceRecordingAuthorization: async (sourceSessionId) => {
+        authorizationChecks.push(sourceSessionId);
+        return true;
       },
     },
   });
@@ -125,7 +123,7 @@ test("voice search service records PCM audio and returns transcribed text", asyn
   assert.equal(readFiles[0].filePath, "/tmp/search.pcm");
   assert.equal(readFiles[0].encoding, "base64");
   assert.deepEqual(transcriptions, [{ audioBase64: "cGNt", mimeType: "audio/pcm" }]);
-  assert.deepEqual(syncedAuthorizations, [undefined]);
+  assert.deepEqual(authorizationChecks, [undefined]);
   delete global.wx;
 });
 
@@ -317,22 +315,15 @@ test("voice input manual mode waits for the user to stop despite initial silence
   delete global.wx;
 });
 
-test("voice search service navigates to authorization before recording", async () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
+test("voice search service stops before recording when authorization is missing", async () => {
+  global.wx = {};
   const { recordMemoirVoiceSearchQuery } = loadVoiceSearchService({
     authorizationExports: {
-      readVoiceAuthorizationConsent: () => false,
+      ensureVoiceRecordingAuthorization: async () => false,
     },
   });
 
   await assert.rejects(recordMemoirVoiceSearchQuery(), /请先同意声纹授权协议/);
-
-  assert.deepEqual(navigations, ["/pages/voice-authorization/index"]);
   delete global.wx;
 });
 
