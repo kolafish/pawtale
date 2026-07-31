@@ -23,11 +23,8 @@ import {
   enqueueMemoirChapterPreparationJob,
   getMemoirBookCompletionOverview,
   type MemoirBookReview,
-  type MemoirBookAnswerApplicationJob,
   type MemoirBookEditorialAction,
-  type MemoirBookEditorialRevisionJob,
   type MemoirBookRevisionJob,
-  type MemoirBookRevisionCommandSource,
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-book-completion-api";
@@ -110,16 +107,13 @@ interface BookCompletionData {
   bookReviewProgress: TaskProgressView;
   bookReviewCancelling: boolean;
   checkingBook: boolean;
-  answerApplicationJob: MemoirBookAnswerApplicationJob | null;
-  answerApplicationProgress: TaskProgressView;
-  applyingAnswers: boolean;
-  answerApplicationCancelling: boolean;
-  editorialRevisionJob: MemoirBookEditorialRevisionJob | null;
+  revisionJob: MemoirBookRevisionJob | null;
+  includeBookReviewAnswers: boolean;
   selectedEditorialActionIds: string[];
   editorialActionViews: EditorialActionView[];
-  editorialRevisionProgress: TaskProgressView;
-  generatingEditorialRevision: boolean;
-  editorialRevisionCancelling: boolean;
+  revisionProgress: TaskProgressView;
+  generatingRevision: boolean;
+  revisionCancelling: boolean;
 }
 
 interface ChapterDataset {
@@ -194,31 +188,23 @@ function revisionJobActive(job: MemoirBookRevisionJob): boolean {
 
 export function revisionJobView(
   job: MemoirBookRevisionJob | null,
-  source: MemoirBookRevisionCommandSource,
 ): TaskProgressView {
   if (!job || job.status === "idle" || job.status === "succeeded") {
     return HIDDEN_TASK_PROGRESS;
   }
-  const applyingAnswers = source === "review_answers";
   if (revisionJobActive(job)) {
     const titles: Partial<
       Record<MemoirBookRevisionJob["stage"], string>
     > = {
-      queued: applyingAnswers ? "修改思路任务已提交" : "修改思路已提交",
+      queued: "修改思路任务已提交",
       assembling: "正在准备当前书稿",
-      revising: applyingAnswers
-        ? "正在根据回答制定修改思路"
-        : "正在整理所选编辑建议",
+      revising: "正在根据所选内容制定修改思路",
       saving: "正在保存修改思路",
     };
     return {
       visible: true,
-      title: titles[job.stage] || (
-        applyingAnswers ? "正在根据回答制定修改思路" : "正在生成修改思路"
-      ),
-      detail: applyingAnswers
-        ? "任务在后台执行，完成后先确认整体思路"
-        : "完成后仍需查看并确认整体思路",
+      title: titles[job.stage] || "正在生成修改思路",
+      detail: "任务在后台执行，完成后仍需查看并确认整体思路",
       progressMode: "indeterminate",
       progress: 0,
       className: "active",
@@ -228,13 +214,9 @@ export function revisionJobView(
   const failed = job.status === "failed";
   return {
     visible: true,
-    title: applyingAnswers
-      ? (failed ? "书稿调整未完成" : "书稿调整已停止")
-      : (failed ? "修改思路未完成" : "已停止生成修改思路"),
+    title: failed ? "修改思路未完成" : "已停止生成修改思路",
     detail: job.error_message || (
-      applyingAnswers
-        ? "回答仍然保留，可以重新调整。"
-        : "所选建议仍然保留，可以重新生成。"
+      "选择仍然保留，可以重新生成。"
     ),
     progressMode: "hidden",
     progress: 0,
@@ -481,16 +463,13 @@ definePage<BookCompletionData>()({
     bookReviewProgress: HIDDEN_TASK_PROGRESS,
     bookReviewCancelling: false,
     checkingBook: false,
-    answerApplicationJob: null,
-    answerApplicationProgress: HIDDEN_TASK_PROGRESS,
-    applyingAnswers: false,
-    answerApplicationCancelling: false,
-    editorialRevisionJob: null,
+    revisionJob: null,
+    includeBookReviewAnswers: false,
     selectedEditorialActionIds: [],
     editorialActionViews: [],
-    editorialRevisionProgress: HIDDEN_TASK_PROGRESS,
-    generatingEditorialRevision: false,
-    editorialRevisionCancelling: false,
+    revisionProgress: HIDDEN_TASK_PROGRESS,
+    generatingRevision: false,
+    revisionCancelling: false,
   },
 
   onLoad(options: PageQuery) {
@@ -525,33 +504,8 @@ definePage<BookCompletionData>()({
     wx.switchTab({ url: "/pages/book/index" });
   },
 
-  openAdjustedBook() {
-    if (!this.data.projectId) {
-      return;
-    }
-    wx.navigateTo({
-      url: pageUrl("/pages/book-export/index", {
-        projectId: this.data.projectId,
-        action: "preview",
-      }),
-    });
-  },
-
   openBookRevision() {
-    const proposalId = this.data.answerApplicationJob?.proposal_id;
-    if (!this.data.projectId || !proposalId) {
-      return;
-    }
-    wx.navigateTo({
-      url: pageUrl("/pages/book-revision/index", {
-        projectId: this.data.projectId,
-        proposalId,
-      }),
-    });
-  },
-
-  openEditorialRevision() {
-    const proposalId = this.data.editorialRevisionJob?.proposal_id;
+    const proposalId = this.data.revisionJob?.proposal_id;
     if (!this.data.projectId || !proposalId) {
       return;
     }
@@ -599,22 +553,18 @@ definePage<BookCompletionData>()({
       const bookIssues = view.allChaptersConfirmed
         ? overview.book_issues
         : [];
-      const answerApplicationJob = view.allChaptersConfirmed
-        ? overview.answer_application_job
-        : null;
-      const editorialRevisionJob = view.allChaptersConfirmed
-        ? overview.editorial_revision_job
+      const revisionJob = view.allChaptersConfirmed
+        ? overview.revision_job
         : null;
       const reviewJobActive = Boolean(
         bookReviewJob && bookReviewJobActive(bookReviewJob),
       );
-      const applicationActive = Boolean(
-        answerApplicationJob
-        && revisionJobActive(answerApplicationJob),
+      const revisionActive = Boolean(
+        revisionJob
+        && revisionJobActive(revisionJob),
       );
-      const editorialRevisionActive = Boolean(
-        editorialRevisionJob
-        && revisionJobActive(editorialRevisionJob),
+      const restoreRevisionSelection = Boolean(
+        revisionActive || revisionJob?.proposal_status === "ready",
       );
       const finishedBookReview = (
         this.data.checkingBook
@@ -622,15 +572,10 @@ definePage<BookCompletionData>()({
         && bookReviewJob?.status !== "idle"
       );
       const finishedChapterId = this.data.preparingChapterId;
-      const finishedAnswerApplication = (
-        this.data.applyingAnswers
-        && !applicationActive
-        && answerApplicationJob?.status !== "idle"
-      );
-      const finishedEditorialRevision = (
-        this.data.generatingEditorialRevision
-        && !editorialRevisionActive
-        && editorialRevisionJob?.status !== "idle"
+      const finishedRevision = (
+        this.data.generatingRevision
+        && !revisionActive
+        && revisionJob?.status !== "idle"
       );
       const finishedWholeBook = (
         this.data.recheckingAll
@@ -638,7 +583,11 @@ definePage<BookCompletionData>()({
         && bulkCheckJob.status !== "idle"
       );
       const selectedEditorialActionIds = (
-        this.data.selectedEditorialActionIds.filter(
+        (
+          restoreRevisionSelection
+            ? revisionJob?.action_ids || []
+            : this.data.selectedEditorialActionIds
+        ).filter(
           (actionId) => (
             bookReview?.review.editorial_actions?.some(
               (action) => action.id === actionId,
@@ -646,14 +595,7 @@ definePage<BookCompletionData>()({
           ),
         )
       );
-      const answerProgress = revisionJobView(
-        answerApplicationJob,
-        "review_answers",
-      );
-      const editorialProgress = revisionJobView(
-        editorialRevisionJob,
-        "editorial_actions",
-      );
+      const revisionProgress = revisionJobView(revisionJob);
       this.setData({
         ...view,
         ...bookReviewViewPatch(bookReview, bookIssues),
@@ -665,12 +607,14 @@ definePage<BookCompletionData>()({
         bookReviewProgress: bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,
-        answerApplicationProgress: answerProgress,
-        answerApplicationJob,
-        applyingAnswers: applicationActive,
-        editorialRevisionProgress: editorialProgress,
-        editorialRevisionJob,
-        generatingEditorialRevision: editorialRevisionActive,
+        includeBookReviewAnswers: (
+          restoreRevisionSelection && revisionJob
+            ? revisionJob.include_answers
+            : this.data.includeBookReviewAnswers
+        ),
+        revisionProgress,
+        revisionJob,
+        generatingRevision: revisionActive,
         bulkCheckProgress: bookCompletionJobView(
           view.allChaptersConfirmed ? null : bulkCheckJob,
         ),
@@ -686,8 +630,7 @@ definePage<BookCompletionData>()({
       if (
         batchActive
         || reviewJobActive
-        || applicationActive
-        || editorialRevisionActive
+        || revisionActive
         || overview.chapters.some((item) => item.state === "preparing")
       ) {
         this.schedulePolling();
@@ -726,21 +669,8 @@ definePage<BookCompletionData>()({
             icon: bookReviewJob?.status === "succeeded" ? "success" : "none",
           });
         }
-        if (finishedAnswerApplication) {
-          const toastTitle = answerApplicationJob?.status === "succeeded"
-            ? "修改思路已生成"
-            : (answerApplicationJob?.status === "cancelled"
-              ? "已停止调整书稿"
-              : "书稿调整未完成");
-          wx.showToast({
-            title: toastTitle,
-            icon: answerApplicationJob?.status === "succeeded"
-              ? "success"
-              : "none",
-          });
-        }
-        if (finishedEditorialRevision) {
-          const succeeded = editorialRevisionJob?.status === "succeeded";
+        if (finishedRevision) {
+          const succeeded = revisionJob?.status === "succeeded";
           wx.showToast({
             title: succeeded ? "修改思路已生成" : "修改思路未完成",
             icon: succeeded ? "success" : "none",
@@ -759,8 +689,7 @@ definePage<BookCompletionData>()({
         this.data.preparingChapterId
         || this.data.recheckingAll
         || this.data.checkingBook
-        || this.data.applyingAnswers
-        || this.data.generatingEditorialRevision
+        || this.data.generatingRevision
       ) {
         this.schedulePolling();
       }
@@ -937,89 +866,29 @@ definePage<BookCompletionData>()({
     }
   },
 
-  async applyBookReviewAnswers() {
-    const state = this.data.answerApplicationJob;
+  toggleBookReviewAnswers() {
+    const job = this.data.revisionJob;
     if (
-      !state?.can_apply
-      || this.data.applyingAnswers
-      || this.data.answerApplicationCancelling
+      !job?.answer_count
+      || job.already_applied
+      || job.proposal_status === "ready"
+      || this.data.generatingRevision
+      || this.data.revisionCancelling
     ) {
       return;
     }
     this.setData({
-      applyingAnswers: true,
-      error: "",
-      answerApplicationProgress: activeTaskProgress(
-        "正在提交书稿调整",
-        "提交后可以离开页面，完成后仍需预览并确认",
-      ),
+      includeBookReviewAnswers: !this.data.includeBookReviewAnswers,
     });
-    try {
-      await enqueueMemoirBookRevisionJob(
-        this.data.projectId,
-        "review_answers",
-      );
-      await this.loadOverview(true);
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      const message = error instanceof Error
-        ? error.message
-        : "根据回答生成修改思路失败";
-      this.setData({ applyingAnswers: false });
-      await this.loadOverview(true);
-      if (
-        !this.data.answerApplicationJob
-        || !revisionJobActive(this.data.answerApplicationJob)
-      ) {
-        this.setData({ error: message });
-      }
-    }
-  },
-
-  async cancelAnswerApplication() {
-    const job = this.data.answerApplicationJob;
-    if (
-      !job?.job_id
-      || !revisionJobActive(job)
-      || this.data.answerApplicationCancelling
-    ) {
-      return;
-    }
-    this.setData({
-      answerApplicationCancelling: true,
-      answerApplicationProgress: {
-        ...this.data.answerApplicationProgress,
-        canCancel: false,
-      },
-      error: "",
-    });
-    try {
-      await cancelMemoirBookRevisionJob(
-        this.data.projectId,
-        job.job_id,
-        "review_answers",
-      );
-      await this.loadOverview(true);
-    } catch (error) {
-      if (routeAuthError(error)) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "停止书稿调整失败",
-      });
-    } finally {
-      this.setData({ answerApplicationCancelling: false });
-    }
   },
 
   toggleEditorialAction(event: ChapterTapEvent) {
     const actionId = datasetString(event, "actionId");
     if (
       !actionId
-      || this.data.generatingEditorialRevision
-      || this.data.editorialRevisionCancelling
+      || this.data.revisionJob?.proposal_status === "ready"
+      || this.data.generatingRevision
+      || this.data.revisionCancelling
     ) {
       return;
     }
@@ -1036,24 +905,20 @@ definePage<BookCompletionData>()({
     });
   },
 
-  async generateEditorialRevision() {
+  async generateBookRevision() {
     const actionIds = this.data.selectedEditorialActionIds;
     if (
-      !actionIds.length
-      || this.data.generatingEditorialRevision
-      || this.data.editorialRevisionCancelling
+      (!this.data.includeBookReviewAnswers && !actionIds.length)
+      || this.data.generatingRevision
+      || this.data.revisionCancelling
       || this.data.requiredBookIssues.length > 0
-      || (
-        Boolean(this.data.answerApplicationJob?.answer_count)
-        && !this.data.answerApplicationJob?.already_applied
-      )
     ) {
       return;
     }
     this.setData({
-      generatingEditorialRevision: true,
+      generatingRevision: true,
       error: "",
-      editorialRevisionProgress: activeTaskProgress(
+      revisionProgress: activeTaskProgress(
         "正在提交修改思路",
         "完成后仍需查看并确认整体思路",
       ),
@@ -1061,7 +926,7 @@ definePage<BookCompletionData>()({
     try {
       await enqueueMemoirBookRevisionJob(
         this.data.projectId,
-        "editorial_actions",
+        this.data.includeBookReviewAnswers,
         actionIds,
       );
       await this.loadOverview(true);
@@ -1072,30 +937,30 @@ definePage<BookCompletionData>()({
       const message = error instanceof Error
         ? error.message
         : "生成修改思路失败";
-      this.setData({ generatingEditorialRevision: false });
+      this.setData({ generatingRevision: false });
       await this.loadOverview(true);
       if (
-        !this.data.editorialRevisionJob
-        || !revisionJobActive(this.data.editorialRevisionJob)
+        !this.data.revisionJob
+        || !revisionJobActive(this.data.revisionJob)
       ) {
         this.setData({ error: message });
       }
     }
   },
 
-  async cancelEditorialRevision() {
-    const job = this.data.editorialRevisionJob;
+  async cancelBookRevision() {
+    const job = this.data.revisionJob;
     if (
       !job?.job_id
       || !revisionJobActive(job)
-      || this.data.editorialRevisionCancelling
+      || this.data.revisionCancelling
     ) {
       return;
     }
     this.setData({
-      editorialRevisionCancelling: true,
-      editorialRevisionProgress: {
-        ...this.data.editorialRevisionProgress,
+      revisionCancelling: true,
+      revisionProgress: {
+        ...this.data.revisionProgress,
         canCancel: false,
       },
       error: "",
@@ -1104,7 +969,6 @@ definePage<BookCompletionData>()({
       await cancelMemoirBookRevisionJob(
         this.data.projectId,
         job.job_id,
-        "editorial_actions",
       );
       await this.loadOverview(true);
     } catch (error) {
@@ -1115,7 +979,7 @@ definePage<BookCompletionData>()({
         error: error instanceof Error ? error.message : "停止生成修改思路失败",
       });
     } finally {
-      this.setData({ editorialRevisionCancelling: false });
+      this.setData({ revisionCancelling: false });
     }
   },
 

@@ -10,12 +10,10 @@ from app.database import get_db
 from app.models.users import User
 from app.routers.websocket_auth import authenticate_websocket, reject_websocket
 from app.schemas.memoir_book_review import (
-    MemoirBookEditorialRevisionJobResponse,
-    MemoirBookEditorialRevisionRequest,
-    MemoirBookReviewAnswerApplicationJobResponse,
-    MemoirBookReviewAnswerApplyRequest,
     MemoirBookReviewGenerateRequest,
     MemoirBookReviewJobResponse,
+    MemoirBookRevisionJobResponse,
+    MemoirBookRevisionRequest,
     MemoirBookRevisionFeedbackJobResponse,
     MemoirBookRevisionDraftJobResponse,
     MemoirBookRevisionDraftRequest,
@@ -86,13 +84,13 @@ async def cancel_memoir_book_review_job(
 
 
 @router.post(
-    "/projects/{project_id}/book-review/answer-application/jobs",
-    response_model=MemoirBookReviewAnswerApplicationJobResponse,
+    "/projects/{project_id}/book-review/revision/jobs",
+    response_model=MemoirBookRevisionJobResponse,
     status_code=202,
 )
-async def enqueue_memoir_book_review_answer_application_job(
+async def enqueue_memoir_book_revision_job(
     project_id: str,
-    req: MemoirBookReviewAnswerApplyRequest,
+    req: MemoirBookRevisionRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -101,55 +99,9 @@ async def enqueue_memoir_book_review_answer_application_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
-            source="review_answers",
+            source="review_selection",
             ai_model=req.ai_model,
-            allow_admin=is_admin_user(current_user),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@router.delete(
-    "/projects/{project_id}/book-review/answer-application/jobs/{job_id}",
-    response_model=MemoirBookReviewAnswerApplicationJobResponse,
-)
-async def cancel_memoir_book_review_answer_application_job(
-    project_id: str,
-    job_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        return await book_revision_jobs.cancel_book_revision_job(
-            db,
-            user_id=current_user.id,
-            project_id=project_id,
-            source="review_answers",
-            job_id=job_id,
-            allow_admin=is_admin_user(current_user),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post(
-    "/projects/{project_id}/book-review/editorial-revision/jobs",
-    response_model=MemoirBookEditorialRevisionJobResponse,
-    status_code=202,
-)
-async def enqueue_memoir_book_editorial_revision_job(
-    project_id: str,
-    req: MemoirBookEditorialRevisionRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    try:
-        return await book_revision_jobs.enqueue_book_revision_job(
-            db,
-            user_id=current_user.id,
-            project_id=project_id,
-            source="editorial_actions",
-            ai_model=req.ai_model,
+            include_answers=req.include_answers,
             action_ids=req.action_ids,
             allow_admin=is_admin_user(current_user),
         )
@@ -158,10 +110,10 @@ async def enqueue_memoir_book_editorial_revision_job(
 
 
 @router.delete(
-    "/projects/{project_id}/book-review/editorial-revision/jobs/{job_id}",
-    response_model=MemoirBookEditorialRevisionJobResponse,
+    "/projects/{project_id}/book-review/revision/jobs/{job_id}",
+    response_model=MemoirBookRevisionJobResponse,
 )
-async def cancel_memoir_book_editorial_revision_job(
+async def cancel_memoir_book_revision_job(
     project_id: str,
     job_id: str,
     db: AsyncSession = Depends(get_db),
@@ -172,7 +124,7 @@ async def cancel_memoir_book_editorial_revision_job(
             db,
             user_id=current_user.id,
             project_id=project_id,
-            source="editorial_actions",
+            source="review_selection",
             job_id=job_id,
             allow_admin=is_admin_user(current_user),
         )

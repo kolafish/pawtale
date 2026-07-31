@@ -58,10 +58,6 @@ def register_memoir_editing_job_handlers() -> None:
         book_review_jobs.run_book_review_job,
     )
     register_editing_job_handler(
-        MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS,
-        book_revision_jobs.run_book_revision_job,
-    )
-    register_editing_job_handler(
         MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
         book_revision_jobs.run_book_revision_job,
     )

@@ -18,12 +18,9 @@ class MemoirBookReviewGenerateRequest(BaseModel):
     force_regenerate: bool = False
 
 
-class MemoirBookReviewAnswerApplyRequest(BaseModel):
-    ai_model: str | None = None
-
-
-class MemoirBookEditorialRevisionRequest(BaseModel):
-    action_ids: list[str] = Field(min_length=1)
+class MemoirBookRevisionRequest(BaseModel):
+    include_answers: bool = False
+    action_ids: list[str] = Field(default_factory=list)
     ai_model: str | None = None
 
 
@@ -120,7 +117,7 @@ class MemoirBookReviewJobResponse(BaseModel):
     error_message: str = ""
 
 
-MemoirBookReviewAnswerApplicationStage = Literal[
+MemoirBookRevisionJobStage = Literal[
     "",
     "queued",
     "assembling",
@@ -136,7 +133,7 @@ class MemoirBookRevisionJobResponse(BaseModel):
     job_id: str | None = None
     project_id: str
     status: MemoirBookReviewJobStatus
-    stage: MemoirBookReviewAnswerApplicationStage = ""
+    stage: MemoirBookRevisionJobStage = ""
     proposal_id: str | None = None
     proposal_status: MemoirBookRevisionProposalStatus | None = None
     proposal_phase: MemoirBookRevisionProposalPhase | None = None
@@ -145,19 +142,14 @@ class MemoirBookRevisionJobResponse(BaseModel):
     can_cancel: bool = False
     can_retry: bool = False
     error_message: str = ""
-
-
-class MemoirBookReviewAnswerApplicationJobResponse(MemoirBookRevisionJobResponse):
+    include_answers: bool = False
     answer_count: int = 0
     unresolved_count: int = 0
+    action_ids: list[str] = Field(default_factory=list)
+    selected_action_count: int = 0
     changed_chapter_count: int = 0
     summary: str = ""
     already_applied: bool = False
-    can_apply: bool = False
-
-
-class MemoirBookEditorialRevisionJobResponse(MemoirBookRevisionJobResponse):
-    selected_action_count: int = 0
 
 
 class MemoirBookRevisionFeedbackJobResponse(MemoirBookRevisionJobResponse):

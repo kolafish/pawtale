@@ -219,6 +219,7 @@ class LayeredBookAI:
         elif (
             "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in user_prompt
             or "请根据用户选中的全书编辑建议，制定书稿修改思路" in user_prompt
+            or "请根据用户选中的问题回答和编辑建议，制定一份统一的书稿修改思路" in user_prompt
         ):
             profile_only = (
                 "调整前言、后记与封底文案" in user_prompt
@@ -385,7 +386,7 @@ def test_editorial_profile_plan_requires_selected_metadata_fields():
         book_revision_generation.BookRevisionError,
         match=r"(?=.*前言)(?=.*后记)(?=.*封底文案)",
     ):
-        book_revision_generation._validate_editorial_metadata_plan(
+        book_revision_generation._validate_metadata_plan(
             plan=MemoirBookRevisionPlan(
                 summary="调整成书信息",
                 book_metadata_patch={},
@@ -1907,8 +1908,8 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert snapshot_body["book_review_job"]["review_id"] == completed_body["review_id"]
     assert len(snapshot_body["book_issues"]) == 1
     assert snapshot_body["book_output_available"] is False
-    assert snapshot_body["answer_application_job"]["unresolved_count"] == 1
-    assert snapshot_body["editorial_revision_job"]["status"] == "idle"
+    assert snapshot_body["revision_job"]["unresolved_count"] == 1
+    assert snapshot_body["revision_job"]["status"] == "idle"
 
     requeued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
@@ -1923,7 +1924,7 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert cancelled.json()["can_retry"] is True
 
 
-async def test_book_review_answers_plan_feedback_draft_and_apply(
+async def test_book_review_selection_plan_feedback_draft_and_apply(
     client,
     test_db,
     monkeypatch,
@@ -1958,20 +1959,25 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
         )
     )
     assert issue is not None
-    blocked_editorial = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
-        json={"action_ids": [action["id"] for action in generated.json()["review"]["editorial_actions"]]},
+    blocked_revision = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={
+            "include_answers": False,
+            "action_ids": [
+                action["id"]
+                for action in generated.json()["review"]["editorial_actions"]
+            ],
+        },
     )
-    assert blocked_editorial.status_code == 409
-    assert "先处理完所有需要确认的问题" in blocked_editorial.json()["detail"]
+    assert blocked_revision.status_code == 409
+    assert "先处理完所有需要确认的问题" in blocked_revision.json()["detail"]
     blocked_state = await _completion_field(
         client,
         project_id,
-        "answer_application_job",
+        "revision_job",
     )
     assert blocked_state["answer_count"] == 0
     assert blocked_state["unresolved_count"] == 1
-    assert blocked_state["can_apply"] is False
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
         json={
@@ -1984,33 +1990,45 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     unapplied = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
     assert unapplied.status_code == 200, unapplied.text
 
-    idle = await _completion_field(client, project_id, "answer_application_job")
+    idle = await _completion_field(client, project_id, "revision_job")
     assert idle["status"] == "idle"
     assert idle["answer_count"] == 1
-    assert idle["can_apply"] is True
+    action_id = generated.json()["review"]["editorial_actions"][0]["id"]
 
     queued = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
-        json={"ai_model": "claude-opus-4-8"},
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={
+            "include_answers": True,
+            "action_ids": [],
+            "ai_model": "claude-opus-4-8",
+        },
     )
     assert queued.status_code == 202, queued.text
     queued_body = queued.json()
     assert queued_body["status"] == "pending"
     assert queued_body["stage"] == "queued"
+    assert queued_body["include_answers"] is True
     assert queued_body["answer_count"] == 1
-    assert queued_body["can_apply"] is False
+    assert queued_body["action_ids"] == []
+    assert queued_body["selected_action_count"] == 0
 
     cancelled = await client.delete(
-        f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/{queued_body['job_id']}"
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs/{queued_body['job_id']}"
     )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
     retried = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
-        json={"ai_model": "claude-opus-4-8"},
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={
+            "include_answers": True,
+            "action_ids": [action_id],
+            "ai_model": "claude-opus-4-8",
+        },
     )
     assert retried.status_code == 202, retried.text
     assert retried.json()["job_id"] == queued_body["job_id"]
+    assert retried.json()["action_ids"] == [action_id]
+    assert retried.json()["selected_action_count"] == 1
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -2028,11 +2046,13 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     completed_body = await _completion_field(
         client,
         project_id,
-        "answer_application_job",
+        "revision_job",
     )
     assert completed_body["status"] == "succeeded"
     assert completed_body["stage"] == "completed"
     assert completed_body["answer_count"] == 1
+    assert completed_body["action_ids"] == [action_id]
+    assert completed_body["selected_action_count"] == 1
     assert completed_body["changed_chapter_count"] == 0
     assert completed_body["proposal_id"]
     assert completed_body["proposal_status"] == "ready"
@@ -2246,6 +2266,8 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert applied_body["status"] == "applied"
     assert applied_body["can_apply"] is False
     assert applied_body["result_output_version_id"]
+    applied_state = await _completion_field(client, project_id, "revision_job")
+    assert applied_state["already_applied"] is True
 
     versions = list(
         (
@@ -2261,68 +2283,17 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert versions[1].created_by == "ai"
     assert [item["chapter_id"] for item in versions[1].chapter_snapshot_json] == [chapter.id for chapter in chapters]
     assert versions[1].chapter_snapshot_json[1:] == versions[0].chapter_snapshot_json[1:]
-    plan_prompt = next(prompt for prompt in fake.prompts if "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in prompt)
+    plan_prompt = next(
+        prompt
+        for prompt in fake.prompts
+        if "请根据用户选中的问题回答和编辑建议" in prompt
+    )
     assert "两段经历发生在不同阶段，我希望都保留" in plan_prompt
     assert all(chapter.id not in plan_prompt for chapter in chapters)
     draft_prompt = next(prompt for prompt in fake.prompts if "请按照已确认的修改思路生成书稿修改稿" in prompt)
     assert "统一称谓并精简重复" in draft_prompt
     assert all(chapter.id not in draft_prompt for chapter in chapters)
     assert "不改变章节和小节的标题、数量" in draft_prompt
-
-    editorial_job = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
-        json={"action_ids": [action["id"] for action in generated.json()["review"]["editorial_actions"]]},
-    )
-    assert editorial_job.status_code == 202, editorial_job.text
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert (
-            await run_test_editing_job(
-                test_db,
-                editorial_job.json()["job_id"],
-            )
-            is True
-        )
-    finally:
-        clear_editing_job_handlers()
-    editorial_state = await _completion_field(
-        client,
-        project_id,
-        "editorial_revision_job",
-    )
-    editorial_draft = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{editorial_state['proposal_id']}/draft/jobs",
-        json={},
-    )
-    assert editorial_draft.status_code == 202, editorial_draft.text
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert (
-            await run_test_editing_job(
-                test_db,
-                editorial_draft.json()["job_id"],
-            )
-            is True
-        )
-    finally:
-        clear_editing_job_handlers()
-    editorial_applied = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{editorial_state['proposal_id']}/apply"
-    )
-    assert editorial_applied.status_code == 200, editorial_applied.text
-
-    preserved_answer_state = await _completion_field(
-        client,
-        project_id,
-        "answer_application_job",
-    )
-    assert preserved_answer_state["already_applied"] is True
-    assert preserved_answer_state["can_apply"] is False
-
 
 async def test_selected_editorial_actions_create_a_preview_before_applying(
     client,
@@ -2363,8 +2334,11 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     baseline_version_id = assembled.json()["output_version_id"]
 
     queued = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
-        json={"action_ids": [action["id"] for action in actions]},
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={
+            "include_answers": False,
+            "action_ids": [action["id"] for action in actions],
+        },
     )
     assert queued.status_code == 202, queued.text
     assert queued.json()["selected_action_count"] == 4
@@ -2384,7 +2358,7 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     completed_body = await _completion_field(
         client,
         project_id,
-        "editorial_revision_job",
+        "revision_job",
     )
     assert completed_body["status"] == "succeeded"
     assert completed_body["proposal_status"] == "ready"
@@ -2476,6 +2450,8 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     assert versions[-1].manuscript_json["render_settings"]["back_cover_quote"] == (
         "把故园与家人的声音，留在这本书里。"
     )
+    state = await _completion_field(client, project_id, "revision_job")
+    assert state["already_applied"] is False
 
 
 async def test_profile_only_revision_previews_metadata_and_rejects_noop(
@@ -2507,8 +2483,11 @@ async def test_profile_only_revision_previews_metadata_and_rejects_noop(
     )
     assert assembled.status_code == 200
     queued = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
-        json={"action_ids": [profile_action["id"]]},
+        f"/api/memoir/projects/{project_id}/book-review/revision/jobs",
+        json={
+            "include_answers": False,
+            "action_ids": [profile_action["id"]],
+        },
     )
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -2517,7 +2496,7 @@ async def test_profile_only_revision_previews_metadata_and_rejects_noop(
     finally:
         clear_editing_job_handlers()
     proposal_id = (
-        await _completion_field(client, project_id, "editorial_revision_job")
+        await _completion_field(client, project_id, "revision_job")
     )["proposal_id"]
     draft = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}/draft/jobs",

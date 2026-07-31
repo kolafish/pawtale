@@ -5,7 +5,6 @@ from typing import Any
 from app.services.memoir.semantic_state import semantic_json_signature
 
 
-BOOK_EDITORIAL_ACTION_SOURCE = "book_editorial_actions"
 BOOK_EDITORIAL_REVISION_APPLICATION_KEY = "book_editorial_revision_application"
 BOOK_EDITORIAL_ACTION_TYPES = {
     "remove_repetition",

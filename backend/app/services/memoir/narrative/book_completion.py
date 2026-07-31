@@ -315,15 +315,10 @@ async def get_book_completion_overview(
                 )
                 is not None
             ),
-            "answer_application_job": await book_revision_jobs.book_revision_job_state(
+            "revision_job": await book_revision_jobs.book_revision_job_state(
                 db,
                 project_id=project_id,
-                source="review_answers",
-            ),
-            "editorial_revision_job": await book_revision_jobs.book_revision_job_state(
-                db,
-                project_id=project_id,
-                source="editorial_actions",
+                source="review_selection",
             ),
         }
     )
