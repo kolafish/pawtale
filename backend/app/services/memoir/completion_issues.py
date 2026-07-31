@@ -37,7 +37,6 @@ _PRIORITY_ORDER = {
 def _issue_fingerprint(
     *,
     scope: MemoirCompletionIssueScope,
-    section_id: str | None,
     chapter_id: str | None,
     issue_type: MemoirCompletionIssueType,
     related_material_ids: list[str],
@@ -45,7 +44,6 @@ def _issue_fingerprint(
 ) -> str:
     payload = {
         "scope": scope.value,
-        "section_id": section_id,
         "chapter_id": chapter_id,
         "issue_type": issue_type.value,
         "material_ids": sorted(set(related_material_ids)),
@@ -119,7 +117,6 @@ def book_review_candidate_fingerprints(
                 {
                     "fingerprint": _issue_fingerprint(
                         scope=MemoirCompletionIssueScope.BOOK,
-                        section_id=None,
                         chapter_id=None,
                         issue_type=issue_type,
                         related_material_ids=material_ids,
@@ -163,7 +160,6 @@ def _response(
         id=issue.id,
         project_id=issue.project_id,
         scope=issue.scope,
-        section_id=issue.section_id,
         chapter_id=issue.chapter_id,
         issue_type=issue.issue_type,
         channel=issue.channel,
@@ -228,7 +224,6 @@ async def sync_chapter_digest_issues(
             {
                 "project_id": project_id,
                 "scope": MemoirCompletionIssueScope.CHAPTER.value,
-                "section_id": None,
                 "chapter_id": chapter_id,
                 "issue_type": issue_type.value,
                 "channel": channel.value,
@@ -237,7 +232,6 @@ async def sync_chapter_digest_issues(
                 "priority": priority.value,
                 "fingerprint": _issue_fingerprint(
                     scope=MemoirCompletionIssueScope.CHAPTER,
-                    section_id=None,
                     chapter_id=chapter_id,
                     issue_type=issue_type,
                     related_material_ids=material_ids,
@@ -254,7 +248,6 @@ async def sync_chapter_digest_issues(
                 select(MemoirCompletionIssue).where(
                     MemoirCompletionIssue.project_id == project_id,
                     MemoirCompletionIssue.chapter_id == chapter_id,
-                    MemoirCompletionIssue.section_id.is_(None),
                     MemoirCompletionIssue.scope
                     == MemoirCompletionIssueScope.CHAPTER.value,
                 )
@@ -313,7 +306,6 @@ async def sync_book_review_issues(
             {
                 "project_id": project_id,
                 "scope": MemoirCompletionIssueScope.BOOK.value,
-                "section_id": None,
                 "chapter_id": None,
                 "issue_type": issue_type.value,
                 "channel": channel.value,
@@ -403,14 +395,6 @@ async def collection_response(
         chapter_id=chapter_id,
         include_closed=include_closed,
     )
-    current = next(
-        (
-            issue
-            for issue in issues
-            if issue.status != MemoirCompletionIssueStatus.CLOSED.value
-        ),
-        None,
-    )
     active_sessions: dict[str, str] = {}
     if issues:
         rows = await db.execute(
@@ -439,14 +423,6 @@ async def collection_response(
             active_sessions.setdefault(issue_id, session_id)
     return MemoirCompletionIssueCollectionResponse(
         project_id=project_id,
-        current_issue=(
-            _response(
-                current,
-                active_session_id=active_sessions.get(current.id),
-            )
-            if current is not None
-            else None
-        ),
         issues=[
             _response(
                 issue,

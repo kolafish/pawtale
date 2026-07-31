@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
@@ -9,7 +8,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobType,
     MemoirSemanticCacheStatus,
 )
-from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
+from app.models.memoir import MemoirEditingJob
 from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
 from app.services.memoir import book_reviews, editing_jobs
 from app.services.memoir.access import load_memoir_project
@@ -69,19 +68,10 @@ async def enqueue_book_review_job(
     ):
         return _job_state(project_id=project_id, job=existing)
 
-    total_chapter_count = int(
-        await db.scalar(
-            select(func.count())
-            .select_from(MemoirBookPlanChapter)
-            .where(
-                MemoirBookPlanChapter.project_id == project_id,
-                MemoirBookPlanChapter.include_in_book.is_(True),
-            )
-        )
-        or 0
+    total_chapter_count = await book_reviews.require_confirmed_chapter_drafts(
+        db,
+        project_id=project_id,
     )
-    if total_chapter_count == 0:
-        raise ValueError("全书没有收录章节")
 
     job = await editing_jobs.enqueue_editing_job(
         db,

@@ -32,7 +32,6 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     getMemoirBookOutput: async () => null,
     listMemoirCompletionIssues: async () => ({
       project_id: "project-1",
-      current_issue: null,
       issues: [],
     }),
     enqueueMemoirChapterPreparationJob: unmockedAsync("enqueueMemoirChapterPreparationJob"),
@@ -124,7 +123,6 @@ function bulkJob(overrides = {}) {
   return {
     job_id: null,
     project_id: "project-1",
-    scope: "pending",
     status: "idle",
     total_chapter_count: 0,
     processed_chapter_count: 0,

@@ -23,7 +23,6 @@ from app.database import Base
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
-    MemoirBookCompletionJobScope,
     MemoirBookCompletionJobStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -101,10 +100,6 @@ class MemoirBookCompletionJob(Base):
     __tablename__ = "memoir_book_completion_jobs"
     __table_args__ = (
         CheckConstraint(
-            f"scope IN ({_enum_values(MemoirBookCompletionJobScope)})",
-            name="ck_memoir_book_completion_jobs_scope",
-        ),
-        CheckConstraint(
             f"status IN ({_enum_values(MemoirBookCompletionJobStatus)})",
             name="ck_memoir_book_completion_jobs_status",
         ),
@@ -127,7 +122,6 @@ class MemoirBookCompletionJob(Base):
         index=True,
     )
     active_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    scope: Mapped[str] = mapped_column(String(20), nullable=False)
     status: Mapped[str] = mapped_column(
         String(20),
         default=MemoirBookCompletionJobStatus.PENDING.value,

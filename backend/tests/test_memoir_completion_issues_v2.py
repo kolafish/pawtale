@@ -101,7 +101,7 @@ async def _completion_issue(
     return issue
 
 
-async def test_completion_issue_migration_has_only_layered_targets():
+async def test_completion_issue_migration_has_only_chapter_and_book_targets():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     try:
@@ -110,28 +110,9 @@ async def test_completion_issue_migration_has_only_layered_targets():
             await conn.execute(text("DROP TABLE memoir_completion_issues"))
 
         first = await migrate_memoir_completion_schema(engine)
-        async with engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO memoir_completion_issues ("
-                    "id, project_id, scope, section_id, chapter_id, issue_type, "
-                    "channel, question, reason, priority, fingerprint, "
-                    "related_material_ids_json, input_signature, status, "
-                    "outcome, outcome_note, created_at, updated_at"
-                    ") VALUES ("
-                    "'issue-1', 'project-1', 'section', 'section-1', "
-                    "'chapter-1', 'clarity', 'interview', '旧问题', '', "
-                    "'medium', :fingerprint, '[]', 'old-input', 'open', '', '', "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                ),
-                {"fingerprint": "a" * 64},
-            )
         second = await migrate_memoir_completion_schema(engine)
-        third = await migrate_memoir_completion_schema(engine)
         assert first["changed_tables"] == ["memoir_completion_issues"]
         assert second["changed_tables"] == []
-        assert second["superseded_section_issues"] == 1
-        assert third["superseded_section_issues"] == 0
         await assert_memoir_completion_schema(engine)
 
         async with engine.begin() as conn:
@@ -152,20 +133,14 @@ async def test_completion_issue_migration_has_only_layered_targets():
                     )
                 )
             ).scalar_one()
-            migrated_issue = (
-                await conn.execute(
-                    text(
-                        "SELECT status, outcome FROM memoir_completion_issues "
-                        "WHERE id = 'issue-1'"
-                    )
-                )
-            ).one()
-        assert {"section_id", "chapter_id", "related_material_ids_json"} <= columns
+        assert {"chapter_id", "related_material_ids_json"} <= columns
+        assert "section_id" not in columns
         assert "story_id" not in columns
         assert "claim_id" not in columns
         assert "evidence_id" not in columns
         assert "ck_memoir_completion_issues_lifecycle" in table_sql
-        assert migrated_issue == ("closed", "superseded")
+        assert "'chapter', 'book'" in table_sql
+        assert "'section'" not in table_sql
     finally:
         await engine.dispose()
 

@@ -133,11 +133,6 @@ class MemoirEditingJobStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class MemoirBookCompletionJobScope(str, Enum):
-    PENDING = "pending"
-    ALL = "all"
-
-
 class MemoirBookCompletionJobStatus(str, Enum):
     PENDING = "pending"
     RUNNING = "running"
@@ -197,7 +192,6 @@ class MemoirSemanticCacheStatus(str, Enum):
 
 
 class MemoirCompletionIssueScope(str, Enum):
-    SECTION = "section"
     CHAPTER = "chapter"
     BOOK = "book"
 

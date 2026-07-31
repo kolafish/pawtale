@@ -18,7 +18,6 @@ class MemoirCompletionIssueResponse(BaseModel):
     id: str
     project_id: str
     scope: MemoirCompletionIssueScope
-    section_id: str | None = None
     chapter_id: str | None = None
     issue_type: MemoirCompletionIssueType
     channel: MemoirCompletionIssueChannel
@@ -40,7 +39,6 @@ class MemoirCompletionIssueResponse(BaseModel):
 
 class MemoirCompletionIssueCollectionResponse(BaseModel):
     project_id: str
-    current_issue: MemoirCompletionIssueResponse | None = None
     issues: list[MemoirCompletionIssueResponse] = Field(default_factory=list)
 
 

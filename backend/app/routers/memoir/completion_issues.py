@@ -52,26 +52,6 @@ async def list_memoir_completion_issues(
 
 
 @router.post(
-    "/projects/{project_id}/completion-issues/{issue_id}/start",
-    response_model=MemoirCompletionIssueResponse,
-)
-async def start_memoir_completion_issue(
-    project_id: str,
-    issue_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await _authorize(db, project_id=project_id, current_user=current_user)
-    issue = await completion_issues.start_issue(
-        db,
-        project_id=project_id,
-        issue_id=issue_id,
-    )
-    await db.commit()
-    return completion_issues.issue_response(issue)
-
-
-@router.post(
     "/projects/{project_id}/completion-issues/{issue_id}/close",
     response_model=MemoirCompletionIssueResponse,
 )

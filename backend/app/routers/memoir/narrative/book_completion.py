@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
@@ -8,7 +8,6 @@ from app.schemas.memoir_narrative import (
     MemoirBookCompletionJobRequest,
     MemoirBookCompletionJobResponse,
     MemoirBookCompletionOverviewResponse,
-    MemoirChapterAIRequest,
     MemoirChapterDraftSectionAIRevisionRequest,
     MemoirChapterPreparationJobRequest,
     MemoirChapterPreparationJobResponse,
@@ -188,73 +187,6 @@ async def cancel_memoir_chapter_preparation_job(
             chapter_id=chapter_id,
             job_id=job_id,
         )
-    except ValueError as exc:
-        raise decision_error(exc) from exc
-
-
-@router.post(
-    "/projects/{project_id}/book-completion/chapters/{chapter_id}/prepare",
-    response_model=MemoirChapterWorkspaceResponse,
-)
-async def prepare_memoir_book_completion_chapter(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirChapterAIRequest = Body(
-        default=MemoirChapterAIRequest(),
-    ),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    project = await authorize_project(
-        db,
-        project_id=project_id,
-        current_user=current_user,
-    )
-    selected_ai_model = select_project_ai_model(project, req.ai_model)
-    # Persist the model preference before provider calls so this request does
-    # not hold SQLite's write lock throughout multi-step chapter preparation.
-    await db.commit()
-    try:
-        async with commit_or_rollback(db):
-            return await book_completion.prepare_chapter(
-                db,
-                project_id=project_id,
-                chapter_id=chapter_id,
-                user_id=current_user.id,
-                ai_model=selected_ai_model,
-            )
-    except ValueError as exc:
-        raise decision_error(exc) from exc
-
-
-@router.post(
-    "/projects/{project_id}/book-completion/chapters/{chapter_id}/rewrite",
-    response_model=MemoirChapterWorkspaceResponse,
-)
-async def rewrite_memoir_book_completion_chapter(
-    project_id: str,
-    chapter_id: str,
-    req: MemoirChapterAIRequest = Body(
-        default=MemoirChapterAIRequest(),
-    ),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    project = await authorize_project(
-        db,
-        project_id=project_id,
-        current_user=current_user,
-    )
-    selected_ai_model = select_project_ai_model(project, req.ai_model)
-    try:
-        async with commit_or_rollback(db):
-            return await book_completion.rewrite_chapter(
-                db,
-                project_id=project_id,
-                chapter_id=chapter_id,
-                user_id=current_user.id,
-                ai_model=selected_ai_model,
-            )
     except ValueError as exc:
         raise decision_error(exc) from exc
 

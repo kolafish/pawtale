@@ -185,6 +185,91 @@ async def test_runtime_schema_includes_book_review_answer_application_job_type()
         await engine.dispose()
 
 
+async def test_cutover_removes_unused_book_completion_and_review_columns():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    try:
+        await migrate_runtime_schema(engine)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_completion_issues "
+                    "ADD COLUMN section_id VARCHAR(36)"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_book_completion_jobs "
+                    "ADD COLUMN scope VARCHAR(20) NOT NULL DEFAULT 'pending'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "ALTER TABLE memoir_book_revision_proposals "
+                    "ADD COLUMN comparison_json JSON NOT NULL DEFAULT '{}'"
+                )
+            )
+            await conn.execute(
+                text(
+                    "INSERT INTO projects ("
+                    "id, type, title, metadata_json, created_at, updated_at"
+                    ") VALUES ("
+                    "'project-legacy-review', 'memoir', '旧项目', '{}', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                )
+            )
+            await conn.execute(text("PRAGMA ignore_check_constraints = ON"))
+            await conn.execute(
+                text(
+                    "INSERT INTO memoir_completion_issues ("
+                    "id, project_id, scope, section_id, chapter_id, issue_type, "
+                    "channel, question, reason, priority, fingerprint, "
+                    "related_material_ids_json, input_signature, status, "
+                    "outcome, outcome_note, created_at, updated_at"
+                    ") VALUES ("
+                    "'legacy-section-issue', 'project-legacy-review', "
+                    "'section', 'section-1', NULL, 'clarity', 'interview', "
+                    "'旧问题', '', 'medium', :fingerprint, '[]', "
+                    "'old-input', 'open', '', '', "
+                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"fingerprint": "a" * 64},
+            )
+            await conn.execute(text("PRAGMA ignore_check_constraints = OFF"))
+
+        migration = await migrate_runtime_schema(engine)
+        rebuilt = set(
+            migration["memoir_schema_cutover"]["rebuilt_tables"]
+        )
+        assert {
+            "memoir_completion_issues",
+            "memoir_book_completion_jobs",
+            "memoir_book_revision_proposals",
+        } <= rebuilt
+        assert migration["memoir_schema_cutover"]["discarded_rows"][
+            "memoir_completion_issues"
+        ] == 1
+        async with engine.begin() as conn:
+            assert "section_id" not in await _table_columns(
+                conn,
+                "memoir_completion_issues",
+            )
+            assert "scope" not in await _table_columns(
+                conn,
+                "memoir_book_completion_jobs",
+            )
+            assert "comparison_json" not in await _table_columns(
+                conn,
+                "memoir_book_revision_proposals",
+            )
+        await assert_runtime_schema(
+            engine,
+            require_sqlite_foreign_keys=False,
+        )
+    finally:
+        await engine.dispose()
+
+
 async def test_cutover_drops_all_known_legacy_tables():
     register_models()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)

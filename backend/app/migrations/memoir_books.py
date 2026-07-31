@@ -29,7 +29,6 @@ REQUIRED_TABLE_COLUMNS = {
         "phase",
         "revision_plan_json",
         "candidate_chapter_snapshot_json",
-        "comparison_json",
         "generation_json",
         "summary",
         "result_output_version_id",
@@ -62,7 +61,7 @@ async def migrate_memoir_book_schema(
                 lambda sync_conn: {column["name"] for column in inspect(sync_conn).get_columns(proposal_table)}
             )
             additions = {
-                "phase": "VARCHAR(20) NOT NULL DEFAULT 'draft_ready'",
+                "phase": "VARCHAR(20) NOT NULL DEFAULT 'plan_ready'",
                 "revision_plan_json": "JSON NOT NULL DEFAULT '{}'",
             }
             for column_name, definition in additions.items():

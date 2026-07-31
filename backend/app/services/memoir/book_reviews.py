@@ -66,7 +66,7 @@ class BookReviewChapter:
     digest_id: str
     digest_signature: str
     digest: dict
-    confirmed_draft_version_id: str | None
+    confirmed_draft_version_id: str
     confirmed_draft_hash: str
     material_ids: frozenset[str]
 
@@ -231,6 +231,46 @@ async def _confirmed_version(
     )
 
 
+async def require_confirmed_chapter_drafts(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> int:
+    _, chapters = await _plan(db, project_id=project_id)
+    confirmed_chapter_ids = set(
+        (
+            await db.scalars(
+                select(MemoirBookChapterDraftVersion.chapter_id)
+                .join(
+                    MemoirBookChapterDraft,
+                    MemoirBookChapterDraft.id
+                    == MemoirBookChapterDraftVersion.draft_id,
+                )
+                .where(
+                    MemoirBookChapterDraftVersion.project_id == project_id,
+                    MemoirBookChapterDraftVersion.chapter_id.in_(
+                        [chapter.id for chapter in chapters]
+                    ),
+                    MemoirBookChapterDraft.status
+                    == MemoirBookChapterDraftStatus.CONFIRMED.value,
+                )
+                .distinct()
+            )
+        ).all()
+    )
+    unconfirmed = [
+        chapter.title
+        for chapter in chapters
+        if chapter.id not in confirmed_chapter_ids
+    ]
+    if unconfirmed:
+        raise HTTPException(
+            status_code=409,
+            detail=f"请先确认章节“{unconfirmed[0]}”的正文，再检查全书",
+        )
+    return len(chapters)
+
+
 async def ensure_chapter_digests(
     db: AsyncSession,
     *,
@@ -311,6 +351,11 @@ async def load_book_review_context(
             project_id=project_id,
             chapter_id=chapter.id,
         )
+        if confirmed is None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"请先确认章节“{chapter.title}”的正文，再检查全书",
+            )
         chapters.append(
             BookReviewChapter(
                 chapter_id=chapter.id,
@@ -319,10 +364,8 @@ async def load_book_review_context(
                 digest_id=digest.id,
                 digest_signature=digest.input_signature,
                 digest=digest.digest_json,
-                confirmed_draft_version_id=confirmed.id if confirmed else None,
-                confirmed_draft_hash=(
-                    semantic_text_hash(confirmed.content) if confirmed else ""
-                ),
+                confirmed_draft_version_id=confirmed.id,
+                confirmed_draft_hash=semantic_text_hash(confirmed.content),
                 material_ids=digest_context.allowed_material_ids,
             )
         )

@@ -199,7 +199,6 @@ function loadWorkspacePage({
     closeMemoirCompletionIssue: async () => {},
     listMemoirCompletionIssues: async () => ({
       project_id: "project-1",
-      current_issue: null,
       issues: [],
     }),
     createMemoirVoiceSession: async () => ({ session: { id: "session-1" } }),
@@ -874,7 +873,6 @@ test("chapter workspace separates optional suggestions from required decisions",
     voiceApiExports: {
       listMemoirCompletionIssues: async () => ({
         project_id: "project-1",
-        current_issue: optionalIssue,
         issues: [optionalIssue],
       }),
     },

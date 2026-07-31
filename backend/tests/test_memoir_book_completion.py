@@ -230,33 +230,6 @@ class LayeredBookAI:
                     }
                 ],
             }
-        elif "请执行用户选中的全书编辑修改" in user_prompt:
-            payload = {
-                "section_revisions": [
-                    {
-                        "section_id": section_ids[0],
-                        "content": "那年参加学校比赛的经历留在这里，不再重复讲述。",
-                    }
-                ],
-            }
-        elif "请把用户对全书检查问题的回答应用到现有书稿" in user_prompt:
-            payload = {
-                "section_revisions": [
-                    {
-                        "section_id": section_ids[0],
-                        "content": ("这两段学校经历发生在不同阶段，我决定都保留在书里。"),
-                    }
-                ],
-            }
-        elif "请根据用户反馈调整当前尚未确认的书稿修改预览" in user_prompt:
-            payload = {
-                "section_revisions": [
-                    {
-                        "section_id": section_ids[0],
-                        "content": "两段经历都保留，相关人物统一称为老同学。",
-                    }
-                ],
-            }
         else:
             section_materials = _prompt_section_materials(user_prompt)
             is_revision = "用户修改要求：" in user_prompt
@@ -462,6 +435,64 @@ def _install_ai(
     monkeypatch.setattr(book_revision_generation, "get_ai_service", factory)
 
 
+async def _run_chapter_preparation(
+    client,
+    test_db,
+    *,
+    project_id: str,
+    chapter_id: str,
+    operation: str = "prepare",
+    ai_model: str | None = None,
+):
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs",
+        json={"operation": operation, "ai_model": ai_model},
+    )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued.json()["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+    return await client.get(
+        f"/api/memoir/projects/{project_id}/chapters/{chapter_id}/workspace",
+    )
+
+
+async def _run_book_review(
+    client,
+    test_db,
+    *,
+    project_id: str,
+    force_regenerate: bool = False,
+    ai_model: str | None = None,
+):
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={
+            "force_regenerate": force_regenerate,
+            "ai_model": ai_model,
+        },
+    )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            queued.json()["job_id"],
+        ) is True
+    finally:
+        clear_editing_job_handlers()
+    return await client.get(
+        f"/api/memoir/projects/{project_id}/book-review",
+    )
+
+
 def test_book_review_answer_output_rejects_structure_changes():
     valid = {
         "section_revisions": [
@@ -499,18 +530,6 @@ def test_book_review_answer_output_rejects_structure_changes():
                 ],
             }
         )
-
-
-def test_book_review_answer_summary_hides_legacy_model_references():
-    summary = book_revision_generation.user_visible_application_summary(
-        "补充C3章节的关联说明，明确C4章节为同一人；调整C4小节S19。",
-        changed_chapter_count=2,
-    )
-
-    assert summary == "修改预览已准备，包含根据回答生成的相关章节调整。"
-    assert "C3" not in summary
-    assert "C4" not in summary
-    assert "S19" not in summary
 
 
 async def _book(client, test_db, *, chapter_count: int = 1):
@@ -623,9 +642,11 @@ async def test_prepare_keeps_a_current_existing_draft_unchanged(
     fake = LayeredBookAI(chapter_interview_issue=True)
     _install_ai(monkeypatch, fake)
 
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
     )
 
     assert prepared.status_code == 200, prepared.text
@@ -653,9 +674,12 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
-    first = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={"ai_model": "claude-opus-4-8"},
+    first = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+        ai_model="claude-opus-4-8",
     )
 
     assert first.status_code == 200, first.text
@@ -666,7 +690,12 @@ async def test_prepare_uses_and_remembers_the_selected_ai_model(
     assert project.metadata_json["ai_model"] == "claude-opus-4-8"
 
     requested_models.clear()
-    second = await client.post(f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare")
+    second = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
+    )
 
     assert second.status_code == 200, second.text
     assert requested_models
@@ -965,9 +994,11 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     fake = LayeredBookAI(chapter_manual_issue=True)
     _install_ai(monkeypatch, fake)
 
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
     )
 
     assert prepared.status_code == 200, prepared.text
@@ -976,11 +1007,24 @@ async def test_current_completion_issue_overrides_confirmed_draft(
     assert summary["next_action"]["kind"] == "confirm"
     assert summary["active_issue"]["question"] == "这一章是否愿意保留真实学校名称？"
     rewritten = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/rewrite",
-        json={},
+        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/jobs",
+        json={"operation": "rewrite"},
     )
-    assert rewritten.status_code == 409
-    assert rewritten.json()["detail"] == "本章还有一项需要您先确认"
+    assert rewritten.status_code == 202
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(
+            test_db,
+            rewritten.json()["job_id"],
+        ) is False
+    finally:
+        clear_editing_job_handlers()
+    failed = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/"
+        f"chapters/{chapter_id}/jobs/current",
+    )
+    assert failed.json()["error_message"] == "本章还有一项需要您先确认"
 
 
 async def test_chapter_review_filters_section_findings_before_rewrite(
@@ -1016,9 +1060,11 @@ async def test_chapter_review_filters_section_findings_before_rewrite(
     fake = LayeredBookAI(section_issue=True)
     _install_ai(monkeypatch, fake)
 
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
     )
 
     assert prepared.status_code == 200, prepared.text
@@ -1085,9 +1131,13 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
-    rewritten = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter_id}/rewrite",
-        json={"ai_model": "claude-opus-4-8"},
+    rewritten = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        operation="rewrite",
+        ai_model="claude-opus-4-8",
     )
 
     assert rewritten.status_code == 200, rewritten.text
@@ -1242,7 +1292,7 @@ async def test_book_overview_counts_all_unfinished_chapter_states(
     assert overview.detail == ("1 章待检查，1 章待确认，1 章待通读。每章只显示当前最重要的一步。")
 
 
-async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
+async def test_book_completion_uses_background_chapter_preparation(
     client,
     test_db,
     monkeypatch,
@@ -1256,9 +1306,11 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     assert initial.status_code == 200
     assert initial.json()["chapters"][0]["state"] == "not_started"
 
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
     )
     assert prepared.status_code == 200, prepared.text
     body = prepared.json()
@@ -1268,14 +1320,15 @@ async def test_book_completion_uses_layered_pipeline_without_editing_jobs(
     assert body["draft_sections"][0]["content"] == body["draft_content"]
     assert body["draft_sections"][0]["used_material_ids"]
     original_version_id = body["draft_version_id"]
-    assert (
-        await test_db.scalar(
-            select(MemoirEditingJob.id).where(
-                MemoirEditingJob.project_id == project_id,
-            )
+    preparation_job = await test_db.scalar(
+        select(MemoirEditingJob).where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.PREPARE_CHAPTER.value,
         )
-        is None
     )
+    assert preparation_job is not None
+    assert preparation_job.status == MemoirEditingJobStatus.SUCCEEDED.value
 
     revised = await client.post(
         f"/api/mobile/memoir/projects/{project_id}/book-plan/chapters/{chapter.id}/draft/revise",
@@ -1333,9 +1386,11 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
     _install_ai(monkeypatch, fake)
 
     for chapter in chapters:
-        prepared = await client.post(
-            f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-            json={},
+        prepared = await _run_chapter_preparation(
+            client,
+            test_db,
+            project_id=project_id,
+            chapter_id=chapter.id,
         )
         assert prepared.status_code == 200, prepared.text
         confirmed = await client.post(
@@ -1355,9 +1410,10 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         version.input_signature = f"legacy-order-{chapter.sort_order}"
         test_db.add(version)
     await test_db.commit()
-    reviewed = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review",
-        json={"force_regenerate": False},
+    reviewed = await _run_book_review(
+        client,
+        test_db,
+        project_id=project_id,
     )
     assert reviewed.status_code == 200, reviewed.text
     prompt_count = len(fake.prompts)
@@ -1394,9 +1450,11 @@ async def test_section_revision_rejects_changed_section_boundary(
     project_id, chapters, _ = await _book(client, test_db)
     chapter = chapters[0]
     _install_ai(monkeypatch, LayeredBookAI())
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
     )
     assert prepared.status_code == 200, prepared.text
     body = prepared.json()
@@ -1458,9 +1516,11 @@ async def test_chapter_manual_issue_is_one_explicit_next_action(
     fake = LayeredBookAI(chapter_manual_issue=True)
     _install_ai(monkeypatch, fake)
 
-    prepared = await client.post(
-        f"/api/memoir/projects/{project_id}/book-completion/chapters/{chapter.id}/prepare",
-        json={},
+    prepared = await _run_chapter_preparation(
+        client,
+        test_db,
+        project_id=project_id,
+        chapter_id=chapter.id,
     )
     assert prepared.status_code == 200
     summary = prepared.json()["completion_summary"]
@@ -1493,12 +1553,11 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert unreviewed.status_code == 409
     assert "完成当前版本的全书检查" in unreviewed.json()["detail"]
 
-    generated = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review",
-        json={
-            "force_regenerate": False,
-            "ai_model": "claude-opus-4-8",
-        },
+    generated = await _run_book_review(
+        client,
+        test_db,
+        project_id=project_id,
+        ai_model="claude-opus-4-8",
     )
     assert generated.status_code == 200
     review = generated.json()
@@ -1509,6 +1568,8 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
     assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
+    assert "candidate_issues" not in review["review"]
+    assert "generation" not in review["review"]
     issue = await test_db.scalar(
         select(MemoirCompletionIssue).where(
             MemoirCompletionIssue.project_id == project_id,
@@ -1675,9 +1736,10 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
 
-    generated = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review",
-        json={"force_regenerate": False},
+    generated = await _run_book_review(
+        client,
+        test_db,
+        project_id=project_id,
     )
     assert generated.status_code == 200, generated.text
     issue = await test_db.scalar(
@@ -1717,63 +1779,9 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert idle.json()["answer_count"] == 1
     assert idle.json()["can_apply"] is True
 
-    legacy = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
-        json={"ai_model": "claude-opus-4-8"},
-    )
-    assert legacy.status_code == 202, legacy.text
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert (
-            await run_test_editing_job(
-                test_db,
-                legacy.json()["job_id"],
-            )
-            is True
-        )
-    finally:
-        clear_editing_job_handlers()
-    legacy_state = await client.get(f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/current")
-    assert legacy_state.json()["proposal_phase"] == "draft_ready"
-    legacy_proposal_id = legacy_state.json()["proposal_id"]
-    legacy_proposal = await client.get(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{legacy_proposal_id}?preview=after"
-    )
-    assert legacy_proposal.json()["can_apply"] is True
-    assert "我决定都保留在书里" in (legacy_proposal.json()["after"]["manuscript"]["chapters"][0]["content"])
-    legacy_feedback = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{legacy_proposal_id}/feedback/jobs",
-        json={"feedback": "统一相关人物称谓。"},
-    )
-    assert legacy_feedback.status_code == 202, legacy_feedback.text
-    clear_editing_job_handlers()
-    register_memoir_editing_job_handlers()
-    try:
-        assert (
-            await run_test_editing_job(
-                test_db,
-                legacy_feedback.json()["job_id"],
-            )
-            is True
-        )
-    finally:
-        clear_editing_job_handlers()
-    refined_legacy = await client.get(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{legacy_proposal_id}?preview=after"
-    )
-    assert "老同学" in (refined_legacy.json()["after"]["manuscript"]["chapters"][0]["content"])
-    dismissed_legacy = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{legacy_proposal_id}/dismiss?preview=none"
-    )
-    assert dismissed_legacy.status_code == 200, dismissed_legacy.text
-
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
-        json={
-            "ai_model": "claude-opus-4-8",
-            "workflow_mode": "plan_first",
-        },
+        json={"ai_model": "claude-opus-4-8"},
     )
     assert queued.status_code == 202, queued.text
     queued_body = queued.json()
@@ -1789,10 +1797,7 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert cancelled.json()["status"] == "cancelled"
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
-        json={
-            "ai_model": "claude-opus-4-8",
-            "workflow_mode": "plan_first",
-        },
+        json={"ai_model": "claude-opus-4-8"},
     )
     assert retried.status_code == 202, retried.text
     assert retried.json()["job_id"] == queued_body["job_id"]
@@ -2065,6 +2070,24 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     finally:
         clear_editing_job_handlers()
     editorial_state = await client.get(f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs/current")
+    editorial_draft = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/"
+        f"revision-proposals/{editorial_state.json()['proposal_id']}/draft/jobs",
+        json={},
+    )
+    assert editorial_draft.status_code == 202, editorial_draft.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert (
+            await run_test_editing_job(
+                test_db,
+                editorial_draft.json()["job_id"],
+            )
+            is True
+        )
+    finally:
+        clear_editing_job_handlers()
     editorial_applied = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/"
         f"revision-proposals/{editorial_state.json()['proposal_id']}/apply"
@@ -2097,9 +2120,10 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
 
-    generated = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review",
-        json={"force_regenerate": False},
+    generated = await _run_book_review(
+        client,
+        test_db,
+        project_id=project_id,
     )
     assert generated.status_code == 200, generated.text
     actions = generated.json()["review"]["editorial_actions"]
@@ -2114,10 +2138,7 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
-        json={
-            "action_ids": [action["id"] for action in actions],
-            "workflow_mode": "plan_first",
-        },
+        json={"action_ids": [action["id"] for action in actions]},
     )
     assert queued.status_code == 202, queued.text
     assert queued.json()["selected_action_count"] == 3
@@ -2213,7 +2234,13 @@ async def test_book_review_job_preserves_failure_and_can_retry(
     test_db,
     monkeypatch,
 ):
-    project_id, _, _ = await _book(client, test_db)
+    project_id, chapters, _ = await _book(client, test_db)
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
 
     async def fail_review(*args, progress_callback=None, **kwargs):
         assert progress_callback is not None
@@ -2264,6 +2291,23 @@ async def test_book_review_job_preserves_failure_and_can_retry(
     assert retried.json()["error_message"] == ""
 
 
+async def test_book_review_job_requires_every_chapter_draft_to_be_confirmed(
+    client,
+    test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/jobs",
+        json={},
+    )
+
+    assert queued.status_code == 409
+    assert queued.json()["detail"] == (
+        f"请先确认章节“{chapters[0].title}”的正文，再检查全书"
+    )
+
+
 async def test_book_review_uses_the_current_output_title(
     client,
     test_db,
@@ -2280,9 +2324,10 @@ async def test_book_review_uses_the_current_output_title(
         chapter_id=chapters[0].id,
         status=MemoirBookChapterDraftStatus.CONFIRMED,
     )
-    reviewed = await client.post(
-        f"/api/memoir/projects/{project_id}/book-review",
-        json={"force_regenerate": False},
+    reviewed = await _run_book_review(
+        client,
+        test_db,
+        project_id=project_id,
     )
     assert reviewed.status_code == 200, reviewed.text
     assembled = await client.post(

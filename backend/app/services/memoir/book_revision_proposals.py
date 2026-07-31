@@ -172,7 +172,6 @@ async def create_ready_proposal(
         phase=phase.value,
         revision_plan_json=revision_plan or {},
         candidate_chapter_snapshot_json=candidate_snapshots,
-        comparison_json={},
         generation_json=generation,
         summary=summary,
     )

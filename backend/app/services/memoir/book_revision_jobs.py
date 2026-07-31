@@ -154,10 +154,6 @@ async def _job_state(
         db,
         project_id=project_id,
     )
-    result["summary"] = book_revision_generation.user_visible_application_summary(
-        state.get("summary"),
-        changed_chapter_count=state.get("changed_chapter_count"),
-    )
     active = state.get("can_cancel") is True
     return {
         **result,
@@ -218,7 +214,6 @@ async def enqueue_book_revision_job(
     action_ids: list[str] | None = None,
     proposal_id: str | None = None,
     feedback: str | None = None,
-    workflow_mode: str = "direct_draft",
     allow_admin: bool = False,
 ) -> dict[str, object]:
     project = await load_memoir_project(
@@ -253,7 +248,6 @@ async def enqueue_book_revision_job(
         "allow_admin": allow_admin,
         "review_input_signature": review.input_signature,
         "requested_ai_model": selected_ai_model,
-        "workflow_mode": workflow_mode,
     }
     result: dict[str, object] = {
         "stage": "queued",
@@ -315,16 +309,19 @@ async def enqueue_book_revision_job(
             proposal=proposal,
             preview="none",
         )
-        if proposal_response.status != "ready" or not proposal_response.can_dismiss:
-            raise ValueError("这个修改预览已经不能继续调整")
-        revision_state = (
-            proposal.revision_plan_json if proposal.revision_plan_json else proposal.candidate_chapter_snapshot_json
-        )
+        if (
+            proposal_response.status != "ready"
+            or not proposal_response.can_dismiss
+            or not proposal.revision_plan_json
+        ):
+            raise ValueError("这个修改思路已经不能继续调整")
         payload.update(
             source="proposal_feedback",
             proposal_id=proposal.id,
             feedback=feedback_text,
-            candidate_signature=semantic_json_signature(revision_state),
+            plan_signature=semantic_json_signature(
+                proposal.revision_plan_json
+            ),
         )
         result.update(
             proposal_id=proposal.id,
@@ -470,7 +467,6 @@ async def run_book_revision_job(
                 expected_review_input_signature=str(payload.get("review_input_signature") or ""),
                 expected_answers_signature=str(payload.get("answers_signature") or ""),
                 ai_model=ai_model,
-                workflow_mode=str(payload.get("workflow_mode") or "direct_draft"),
                 progress_callback=update_progress,
             )
         elif source == "editorial_actions":
@@ -482,7 +478,6 @@ async def run_book_revision_job(
                 expected_actions_signature=str(payload.get("actions_signature") or ""),
                 action_ids=([str(value) for value in raw_action_ids] if isinstance(raw_action_ids, list) else []),
                 ai_model=ai_model,
-                workflow_mode=str(payload.get("workflow_mode") or "direct_draft"),
                 progress_callback=update_progress,
             )
         elif source == "proposal_feedback":
@@ -491,7 +486,9 @@ async def run_book_revision_job(
                 project_id=job.project_id,
                 proposal_id=str(payload.get("proposal_id") or ""),
                 feedback=str(payload.get("feedback") or ""),
-                expected_candidate_signature=str(payload.get("candidate_signature") or ""),
+                expected_plan_signature=str(
+                    payload.get("plan_signature") or ""
+                ),
                 ai_model=ai_model,
                 progress_callback=update_progress,
             )
