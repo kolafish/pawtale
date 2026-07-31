@@ -113,14 +113,6 @@
           </view>
         </view>
 
-        <view
-          class="overview-button primary ui-block-action ui-pressable {{!projectCount ? 'is-disabled' : ''}}"
-          aria-role="button"
-          aria-disabled="{{!projectCount}}"
-          bindtap="openVoiceProgress"
-        >
-          查看讲述进度
-        </view>
       </view>
     </view>
 

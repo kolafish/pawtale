@@ -745,7 +745,7 @@ test("home opens the whole-book completion overview without waiting for backgrou
   assert.equal(context.data.error, "");
 });
 
-test("home opens the topic map without requiring microphone consent", () => {
+test("home opens narration overview without requiring microphone consent", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -766,12 +766,9 @@ test("home opens the topic map without requiring microphone consent", () => {
     },
   };
 
-  page.openTopicMap.call(context);
+  page.openNarrationOverview.call(context);
 
-  assert.equal(
-    navigations[0],
-    "/pages/topic-map/index?projectId=project%2F1",
-  );
+  assert.equal(navigations[0], "/pages/voice-progress/index");
   assert.equal(context.data.error, "");
 });
 

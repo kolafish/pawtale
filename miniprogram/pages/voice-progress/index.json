@@ -1,3 +1,4 @@
 {
-  "navigationBarTitleText": "讲述进度"
+  "navigationBarTitleText": "讲述概览",
+  "enablePullDownRefresh": true
 }

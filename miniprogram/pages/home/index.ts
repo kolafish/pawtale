@@ -571,15 +571,11 @@ definePage<HomeData>()({
     });
   },
 
-  openTopicMap() {
+  openNarrationOverview() {
     if (!this.canStartVoiceChat(false)) {
       return;
     }
-    wx.navigateTo({
-      url: pageUrl("/pages/topic-map/index", {
-        projectId: this.data.projectId,
-      }),
-    });
+    wx.navigateTo({ url: "/pages/voice-progress/index" });
   },
 
   async startHumanInterview() {
