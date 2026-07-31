@@ -90,14 +90,12 @@ definePage<ChapterWorkspacePageData>()({
     rewriteDraftActionText: "更新有变化的小节正文",
     rewriteDraftBusyText: "正在更新小节正文…",
     rewriteDraftScopeDetail: "",
-    structureExpanded: false,
     suggestionsExpanded: false,
     requiredIssues: [],
     optionalIssues: [],
     sectionViews: [],
-    draftSectionViews: [],
+    retainedDraftSectionCount: 0,
     expandedSectionIds: {},
-    expandedDraftSectionIds: {},
     canConfirmChapter: false,
     operationKind: "",
     operationTargetId: "",
@@ -366,11 +364,7 @@ definePage<ChapterWorkspacePageData>()({
       ...chapterWorkspaceViewPatch(
         viewWorkspace,
         this.data.expandedSectionIds,
-        this.data.expandedDraftSectionIds,
       ),
-      structureExpanded:
-        !viewWorkspace.draft_sections.length
-        || this.data.structureExpanded,
       loading: false,
       error: "",
     });

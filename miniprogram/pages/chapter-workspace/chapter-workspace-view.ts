@@ -1,6 +1,5 @@
 import type { MemoirChapterWorkspace } from "../../domain/chapter-workspace";
 import type {
-  MemoirChapterDraftSection,
   MemoirChapterSectionMaterialSummary,
   MemoirChapterSectionSummary,
   MemoirSectionType,
@@ -23,14 +22,11 @@ export interface ChapterSectionView extends MemoirChapterSectionSummary {
   assignmentHint: string;
   mergeTargetId: string;
   mergeTargetTitle: string;
+  hasDraft: boolean;
+  draftContent: string;
+  draftNeedsUpdate: boolean;
   expanded: boolean;
   visibleMaterials: ChapterSectionMaterialView[];
-}
-
-export interface ChapterDraftSectionView extends MemoirChapterDraftSection {
-  indexText: string;
-  metaText: string;
-  expanded: boolean;
 }
 
 export interface ChapterWorkspaceViewPatch {
@@ -50,7 +46,7 @@ export interface ChapterWorkspaceViewPatch {
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
   sectionViews: ChapterSectionView[];
-  draftSectionViews: ChapterDraftSectionView[];
+  retainedDraftSectionCount: number;
   canConfirmChapter: boolean;
 }
 
@@ -66,6 +62,9 @@ function visibleSectionViews(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean>,
 ): ChapterSectionView[] {
+  const draftsBySectionId = new Map(
+    workspace.draft_sections.map((section) => [section.section_id, section]),
+  );
   const assignmentOptions: ChapterSectionMaterialView["assignmentOptions"] = [
     ...(workspace.sections || []),
   ]
@@ -103,6 +102,17 @@ function visibleSectionViews(
   let previousNarrativeSection: MemoirChapterSectionSummary | undefined;
   return visibleSections
     .map((section, sectionIndex) => {
+      const draft = section.requires_user_assignment
+        ? undefined
+        : draftsBySectionId.get(section.id);
+      const draftNeedsUpdate = draft
+        ? (
+          draft.title !== section.title
+          || draft.section_type !== section.section_type
+          || draft.section_version !== section.version
+          || draft.sort_order !== section.sort_order
+        )
+        : false;
       const mergeTarget = section.requires_user_assignment
         ? undefined
         : previousNarrativeSection;
@@ -130,12 +140,24 @@ function visibleSectionViews(
         typeText: section.requires_user_assignment
           ? "暂不纳入正文"
           : SECTION_TYPE_TEXT[section.section_type] || "内容小节",
-        metaText: `${visibleMaterials.length} 条讲述`,
+        metaText: [
+          `${visibleMaterials.length} 条讲述`,
+          ...(section.requires_user_assignment
+            ? []
+            : [
+              draft
+                ? `${draft.content.replace(/\s/g, "").length} 字正文${draftNeedsUpdate ? " · 待更新" : ""}`
+                : "正文待生成",
+            ]),
+        ].join(" · "),
         assignmentHint: section.requires_user_assignment
           ? "这些讲述暂未归入小节，因此不会纳入本章正文。您可以稍后归类，也可以点击讲述进入编辑或删除。"
           : "",
         mergeTargetId: mergeTarget?.id || "",
         mergeTargetTitle: mergeTarget?.title || "",
+        hasDraft: Boolean(draft),
+        draftContent: draft?.content || "",
+        draftNeedsUpdate,
         expanded: section.requires_user_assignment
           ? expandedSectionIds[section.id] !== false
           : Boolean(expandedSectionIds[section.id]),
@@ -144,35 +166,30 @@ function visibleSectionViews(
     });
 }
 
-function visibleDraftSectionViews(
+function currentNarrativeSectionIds(
   workspace: MemoirChapterWorkspace,
-  expandedDraftSectionIds: Record<string, boolean>,
-): ChapterDraftSectionView[] {
-  return [...(workspace.draft_sections || [])]
-    .sort((left, right) => left.sort_order - right.sort_order)
-    .map((section, index) => ({
-      ...section,
-      indexText: `${index + 1}`,
-      metaText: [
-        `${section.used_material_ids.length} 条讲述整理`,
-        `${section.content.replace(/\s/g, "").length} 字`,
-      ].join(" · "),
-      expanded: Boolean(expandedDraftSectionIds[section.section_id]),
-    }));
+): string[] {
+  return workspace.sections
+    .filter((section) => (
+      section.status === "active"
+      && section.include_in_book !== false
+      && !section.requires_user_assignment
+    ))
+    .map((section) => section.id);
+}
+
+function retainedDraftSectionCount(workspace: MemoirChapterWorkspace): number {
+  const currentSectionIds = new Set(currentNarrativeSectionIds(workspace));
+  return workspace.draft_sections.filter(
+    (section) => !currentSectionIds.has(section.section_id),
+  ).length;
 }
 
 function draftStructureChanged(workspace: MemoirChapterWorkspace): boolean {
   if (!workspace.draft_sections.length) {
     return false;
   }
-  const currentSectionIds = workspace.sections
-    .filter((section) => (
-      section.status === "active"
-      && section.include_in_book !== false
-      && !section.requires_user_assignment
-    ))
-    .map((section) => section.id)
-    .sort();
+  const currentSectionIds = currentNarrativeSectionIds(workspace).sort();
   const draftSectionIds = workspace.draft_sections
     .map((section) => section.section_id)
     .sort();
@@ -278,7 +295,6 @@ function draftRecoveryPatch(
 export function chapterWorkspaceViewPatch(
   workspace: MemoirChapterWorkspace,
   expandedSectionIds: Record<string, boolean> = {},
-  expandedDraftSectionIds: Record<string, boolean> = {},
 ): ChapterWorkspaceViewPatch {
   const summary = workspace.completion_summary;
   const nextAction = chapterNextAction(summary);
@@ -341,10 +357,7 @@ export function chapterWorkspaceViewPatch(
     rewriteDraftBusyText,
     rewriteDraftScopeDetail,
     sectionViews,
-    draftSectionViews: visibleDraftSectionViews(
-      workspace,
-      expandedDraftSectionIds,
-    ),
+    retainedDraftSectionCount: retainedDraftSectionCount(workspace),
     canConfirmChapter:
       summary.state === "draft_ready"
       && !workspace.draft_needs_rewrite
