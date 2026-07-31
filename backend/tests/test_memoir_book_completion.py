@@ -367,10 +367,12 @@ async def test_book_review_migration_creates_review_and_revision_proposal_tables
                 "memoir_book_revision_proposals",
             ],
             "changed_columns": [],
+            "removed_legacy_revision_proposals": 0,
         }
         assert second == {
             "changed_tables": [],
             "changed_columns": [],
+            "removed_legacy_revision_proposals": 0,
         }
         await assert_memoir_book_schema(engine)
     finally:
@@ -395,9 +397,75 @@ async def test_book_review_migration_adds_revision_plan_columns():
                 "memoir_book_revision_proposals.phase",
                 "memoir_book_revision_proposals.revision_plan_json",
             ],
+            "removed_legacy_revision_proposals": 0,
         }
-        assert second == {"changed_tables": [], "changed_columns": []}
+        assert second == {
+            "changed_tables": [],
+            "changed_columns": [],
+            "removed_legacy_revision_proposals": 0,
+        }
         await assert_memoir_book_schema(engine)
+    finally:
+        await engine.dispose()
+
+
+async def test_book_review_migration_removes_only_unreviewable_ready_proposals():
+    register_models()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    table = Base.metadata.tables["memoir_book_revision_proposals"]
+    shared_values = {
+        "project_id": "project-1",
+        "review_id": "review-1",
+        "review_input_signature": "review-signature",
+        "base_output_version_id": "version-1",
+        "selected_actions_json": {"source": "book_review_answers"},
+        "generation_json": {},
+        "summary": "",
+    }
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                table.insert(),
+                [
+                    {
+                        **shared_values,
+                        "id": "legacy-ready",
+                        "status": "ready",
+                        "phase": "draft_ready",
+                        "revision_plan_json": {},
+                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
+                    },
+                    {
+                        **shared_values,
+                        "id": "current-draft",
+                        "status": "ready",
+                        "phase": "draft_ready",
+                        "revision_plan_json": {
+                            "summary": "统一人物称谓",
+                            "items": [],
+                        },
+                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
+                    },
+                    {
+                        **shared_values,
+                        "id": "dismissed-legacy",
+                        "status": "dismissed",
+                        "phase": "draft_ready",
+                        "revision_plan_json": {},
+                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
+                    },
+                ],
+            )
+
+        first = await migrate_memoir_book_schema(engine)
+        second = await migrate_memoir_book_schema(engine)
+
+        assert first["removed_legacy_revision_proposals"] == 1
+        assert second["removed_legacy_revision_proposals"] == 0
+        async with engine.connect() as conn:
+            proposal_ids = set((await conn.scalars(select(table.c.id))).all())
+        assert proposal_ids == {"current-draft", "dismissed-legacy"}
     finally:
         await engine.dispose()
 
