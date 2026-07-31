@@ -11,7 +11,6 @@ import {
 } from "../../services/ai-task-progress";
 import type { ChapterNextAction } from "./chapter-next-action";
 import type {
-  ChapterDraftSectionView,
   ChapterSectionView,
 } from "./chapter-workspace-view";
 
@@ -252,14 +251,12 @@ export interface ChapterWorkspacePageData {
   rewriteDraftActionText: string;
   rewriteDraftBusyText: string;
   rewriteDraftScopeDetail: string;
-  structureExpanded: boolean;
   suggestionsExpanded: boolean;
   requiredIssues: MemoirCompletionIssue[];
   optionalIssues: MemoirCompletionIssue[];
   sectionViews: ChapterSectionView[];
-  draftSectionViews: ChapterDraftSectionView[];
+  retainedDraftSectionCount: number;
   expandedSectionIds: Record<string, boolean>;
-  expandedDraftSectionIds: Record<string, boolean>;
   canConfirmChapter: boolean;
   operationKind: ChapterWorkspaceOperationKind;
   operationTargetId: string;

@@ -68,16 +68,15 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       return;
     }
     this.stopDraftSectionPlayback();
-    const expandedDraftSectionIds = {
-      ...this.data.expandedDraftSectionIds,
+    const expandedSectionIds = {
+      ...this.data.expandedSectionIds,
       [section.section_id]: true,
     };
     this.setData({
-      expandedDraftSectionIds,
+      expandedSectionIds,
       ...chapterWorkspaceViewPatch(
         workspace,
-        this.data.expandedSectionIds,
-        expandedDraftSectionIds,
+        expandedSectionIds,
       ),
       editingMode,
       editingSectionId: section.section_id,
@@ -244,12 +243,12 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
         });
         return;
       }
-      const expandedDraftSectionIds = {
-        ...this.data.expandedDraftSectionIds,
+      const expandedSectionIds = {
+        ...this.data.expandedSectionIds,
         [sectionId]: true,
       };
       this.setData({
-        expandedDraftSectionIds,
+        expandedSectionIds,
         ...CLOSED_DRAFT_SECTION_EDITOR,
       });
       await this.loadPageData(true);

@@ -56,12 +56,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     });
   },
 
-  toggleStructure() {
-    this.setData({
-      structureExpanded: !this.data.structureExpanded,
-    });
-  },
-
   openSectionStructure() {
     if (this.data.operationKind) {
       return;
@@ -69,9 +63,8 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
     this.leaveAfterEditConfirmation(() => {
       this.setData({
         ...CLOSED_DRAFT_SECTION_EDITOR,
-        structureExpanded: true,
       });
-      scrollToSection("#chapter-structure");
+      scrollToSection("#chapter-sections");
     });
   },
 
@@ -93,30 +86,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       ...chapterWorkspaceViewPatch(
         workspace,
         expandedSectionIds,
-        this.data.expandedDraftSectionIds,
-      ),
-    });
-  },
-
-  toggleDraftSection(event: PageDatasetEvent<{ id?: string }>) {
-    const sectionId = datasetString(event, "id");
-    const workspace = this.data.workspace;
-    if (!sectionId || !workspace || this.data.editingSectionId === sectionId) {
-      return;
-    }
-    const expanded = this.data.draftSectionViews.find(
-      (section) => section.section_id === sectionId,
-    )?.expanded || false;
-    const expandedDraftSectionIds = {
-      ...this.data.expandedDraftSectionIds,
-      [sectionId]: !expanded,
-    };
-    this.setData({
-      expandedDraftSectionIds,
-      ...chapterWorkspaceViewPatch(
-        workspace,
-        this.data.expandedSectionIds,
-        expandedDraftSectionIds,
       ),
     });
   },
@@ -187,7 +156,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         sourceId,
       );
       this.setData({
-        structureExpanded: true,
         expandedSectionIds: {
           ...this.data.expandedSectionIds,
           [targetId]: true,
@@ -419,7 +387,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         sectionRegenerationDetail: view.detail,
         sectionRegenerationProgress: view.progress,
         sectionRegenerationProgressMode: view.progressMode,
-        structureExpanded: true,
         error: "",
       });
       this.scheduleSectionRegenerationPolling();
@@ -471,7 +438,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         sectionRegenerationDetail: view.detail,
         sectionRegenerationProgress: view.progress,
         sectionRegenerationProgressMode: view.progressMode,
-        structureExpanded: true,
       });
       return;
     }
@@ -520,18 +486,16 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         [pendingSection.id]: true,
       };
       this.setData({
-        structureExpanded: true,
         expandedSectionIds,
         ...(this.data.workspace
           ? chapterWorkspaceViewPatch(
             this.data.workspace,
             expandedSectionIds,
-            this.data.expandedDraftSectionIds,
           )
           : {}),
       });
     }
-    scrollToSection("#chapter-structure");
+    scrollToSection("#chapter-sections");
   },
 
   rewriteChapter() {

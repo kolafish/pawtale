@@ -40,8 +40,7 @@
 .section-meta,
 .section-material-index,
 .section-material-text,
-.draft-section-title,
-.draft-section-meta,
+.section-content-label,
 .draft-content,
 .empty-title,
 .empty-detail,
@@ -361,6 +360,14 @@
     0 2rpx 6rpx rgba(0, 0, 0, 0.04);
 }
 
+.section-content-label {
+  padding-top: 14rpx;
+  color: var(--ui-section-title);
+  font-size: 23rpx;
+  font-weight: 700;
+  line-height: 34rpx;
+}
+
 .section-merge-action {
   min-height: 88rpx;
   margin: 14rpx 0 8rpx;
@@ -669,75 +676,6 @@ button[disabled] {
   line-height: 30rpx;
 }
 
-.draft-section-list {
-  margin-top: 26rpx;
-  padding-top: 28rpx;
-  border-top: 1rpx solid var(--ui-divider);
-}
-
-.draft-section-card {
-  padding: 28rpx 26rpx;
-  border-radius: 16rpx;
-  background: var(--ui-surface-subtle);
-  box-shadow:
-    0 0 0 1rpx rgba(0, 0, 0, 0.06),
-    0 2rpx 5rpx -2rpx rgba(0, 0, 0, 0.08),
-    0 8rpx 20rpx rgba(0, 0, 0, 0.04);
-}
-
-.draft-section-card + .draft-section-card {
-  margin-top: 22rpx;
-}
-
-.draft-section-heading {
-  min-width: 0;
-}
-
-.draft-section-heading-copy {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 40px;
-  gap: 20rpx;
-}
-
-.draft-section-heading-copy > view {
-  min-width: 0;
-}
-
-.draft-section-expand-mark {
-  flex: 0 0 auto;
-  color: var(--ui-section-title);
-  font-size: 23rpx;
-  font-weight: 700;
-  line-height: 36rpx;
-}
-
-.draft-section-number {
-  color: var(--ui-section-title);
-  font-size: 22rpx;
-  font-weight: 700;
-  line-height: 32rpx;
-  font-variant-numeric: tabular-nums;
-}
-
-.draft-section-title {
-  margin-top: 6rpx;
-  color: var(--ui-text-primary);
-  font-size: 32rpx;
-  font-weight: 700;
-  line-height: 46rpx;
-  text-wrap: balance;
-}
-
-.draft-section-meta {
-  margin-top: 6rpx;
-  color: var(--ui-text-secondary);
-  font-size: 23rpx;
-  line-height: 34rpx;
-  font-variant-numeric: tabular-nums;
-}
-
 .draft-section-actions {
   display: flex;
   align-items: center;
@@ -820,11 +758,17 @@ button[disabled] {
 }
 
 .draft-content {
+  margin-top: 10rpx;
   color: var(--ui-text-primary);
   font-size: 29rpx;
   line-height: 52rpx;
   white-space: pre-wrap;
   text-wrap: pretty;
+}
+
+.draft-section-missing .empty-detail {
+  margin-top: 8rpx;
+  text-align: left;
 }
 
 .edit-actions {
