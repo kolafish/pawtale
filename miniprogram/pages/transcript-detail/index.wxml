@@ -52,7 +52,7 @@
           wx:if="{{!item.canRecoverTranscription}}"
           class="ghost-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditRecording || voiceEditLoading || voiceEditSaving}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditLoading || voiceEditSaving}}"
         >
           编辑成书文字
         </button>
@@ -225,31 +225,23 @@
           <text class="section-title">用语音说修改</text>
           <text class="section-hint">说出要替换的词、句子或片段，小余先给出预览，确认后才保存。</text>
         </view>
-        <text class="section-count voice-edit-count {{voiceEditStatusClass}}">{{voiceEditStatusText}}</text>
+        <text class="section-count">可修改</text>
       </view>
-      <view wx:if="{{voiceEditStatusVisible}}" class="voice-edit-status {{voiceEditStatusClass}}">
-        <view class="voice-edit-status-mark">
-          <view class="voice-edit-status-dot"></view>
-        </view>
-        <view class="voice-edit-status-copy">
-          <text class="voice-edit-status-title">{{voiceEditStatusText}}</text>
-          <text class="voice-edit-status-detail">{{voiceEditStatusDetail}}</text>
-        </view>
-      </view>
-      <view class="actions-row edit-choice-actions">
-        <button
-          class="primary-button"
-          bindtap="startVoiceEdit"
-          loading="{{voiceEditLoading}}"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditLoading}}"
-        >
-          {{voiceEditActionText}}
-        </button>
-      </view>
-      <view wx:if="{{voiceEditInstructionText}}" class="voice-edit-block">
-        <text class="voice-edit-label">你说</text>
-        <text class="voice-edit-text">{{voiceEditInstructionText}}</text>
-      </view>
+      <voice-text-editor
+        value="{{voiceEditInstructionText}}"
+        gateway-url="{{voiceEditGatewayUrl}}"
+        voice-session-id="{{item.id}}"
+        maxlength="1000"
+        placeholder="请输入或说出要修改的词、句子或片段"
+        submit-text="生成修改预览"
+        busy-text="正在生成预览…"
+        hint="识别文字会实时显示；提交后先看预览，确认后才保存。"
+        disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditPreview !== null}}"
+        busy="{{voiceEditLoading}}"
+        aria-label="输入或说出素材修改意见"
+        bindchange="changeVoiceEditInstruction"
+        bindsubmit="previewVoiceEdit"
+      />
       <view wx:if="{{voiceEditPreview}}" class="voice-edit-block">
         <text class="voice-edit-label">小余建议</text>
         <text class="voice-edit-text">{{voiceEditPreview.replyText}}</text>

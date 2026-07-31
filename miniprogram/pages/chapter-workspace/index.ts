@@ -51,6 +51,7 @@ import {
   chapterWorkspaceJobMethods,
 } from "./chapter-workspace-job-workflow";
 import { PollingTimer } from "../../services/polling-timer";
+import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 
 export { chapterWorkspaceViewPatch };
 
@@ -66,7 +67,6 @@ definePage<ChapterWorkspacePageData>()({
   workspaceLoadSequence: 0,
   chapterPreparationLoadSequence: 0,
   sectionRegenerationLoadSequence: 0,
-  draftSectionVoiceInstructionToken: 0,
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -113,13 +113,20 @@ definePage<ChapterWorkspacePageData>()({
     sectionRegenerationProgressMode: "hidden",
     audioPhase: "idle",
     audioTarget: "",
+    draftSectionDictationUrl: "",
     ...CLOSED_DRAFT_SECTION_EDITOR,
   },
 
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
-    this.setData({ projectId, chapterId });
+    this.setData({
+      projectId,
+      chapterId,
+      draftSectionDictationUrl: projectId
+        ? memoirProjectDictationUrl(projectId)
+        : "",
+    });
     if (!projectId || !chapterId) {
       this.setData({ loading: false, error: "缺少章节信息" });
       return;
@@ -150,7 +157,6 @@ definePage<ChapterWorkspacePageData>()({
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
-    this.cancelDraftSectionVoiceInstruction();
   },
 
   onUnload() {
@@ -158,7 +164,6 @@ definePage<ChapterWorkspacePageData>()({
     this.stopPreparationPolling();
     this.stopSectionRegenerationPolling();
     this.stopDraftSectionPlayback();
-    this.cancelDraftSectionVoiceInstruction();
   },
 
   async onPullDownRefresh() {
@@ -221,10 +226,7 @@ definePage<ChapterWorkspacePageData>()({
       return false;
     }
     if (this.data.editingMode === "ai") {
-      return Boolean(
-        this.data.draftSectionAIInstruction.trim()
-        || this.data.draftSectionVoicePhase !== "idle"
-      );
+      return Boolean(this.data.draftSectionAIInstruction.trim());
     }
     const section = this.data.workspace.draft_sections.find(
       (item) => item.section_id === this.data.editingSectionId,

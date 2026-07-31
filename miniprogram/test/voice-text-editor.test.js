@@ -48,7 +48,7 @@ test("shared voice text editor shows live transcription without replacing existi
   ).component;
   const context = componentContext(component, {
     value: "请保留校舍这一段。",
-    gatewayUrl: "ws://backend.local/book-review/dictation",
+    gatewayUrl: "ws://backend.local/projects/project-1/dictation",
   });
   component.lifetimes.attached.call(context);
 

@@ -5,9 +5,7 @@ import type {
 import {
   closeMemoirCompletionIssue,
 } from "../../services/memoir-completion-issue-api";
-import {
-  memoirBookReviewDictationUrl,
-} from "../../services/memoir-book-completion-api";
+import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import {
   openMemoirCompletionInterview,
 } from "../../services/memoir-completion-interview";
@@ -102,7 +100,7 @@ Component({
         answeringIssueId: issue.id,
         requiredAnswer: "",
         requiredAnswerReady: false,
-        requiredAnswerGatewayUrl: memoirBookReviewDictationUrl(
+        requiredAnswerGatewayUrl: memoirProjectDictationUrl(
           this.properties.projectId,
         ),
       });

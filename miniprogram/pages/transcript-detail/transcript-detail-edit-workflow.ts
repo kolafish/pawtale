@@ -9,10 +9,6 @@ import {
 } from "../../services/memoir-transcript-api";
 import { getMemoirBookPlan } from "../../services/memoir-book-api";
 import { placeMemoirChapterMaterial } from "../../services/memoir-chapter-workspace-api";
-import {
-  recordMemoirVoiceSearchQuery,
-  stopMemoirVoiceSearchRecording,
-} from "../../services/memoir-voice-search";
 import { routeAuthError } from "../../services/navigation";
 import {
   pickerIndex,
@@ -30,15 +26,12 @@ import {
   materialAssignmentPatch,
   syncEditUnloadAlert,
   toViewItem,
-  voiceEditStateData,
-  VOICE_EDIT_MAX_RECORDING_MS,
   type TranscriptDetailData,
   type TranscriptDetailItemView,
 } from "./transcript-detail-model";
 
 interface TranscriptDetailEditWorkflowHost {
   data: TranscriptDetailData;
-  voiceEditToken: number;
   setData(patch: Partial<TranscriptDetailData>): void;
   loadTranscript(): Promise<void>;
   resetShareVideoState(): void;
@@ -59,7 +52,8 @@ export interface TranscriptDetailEditWorkflowMethods {
   saveTranscript(): Promise<void>;
   recoverTranscript(): Promise<void>;
   resetToRaw(): void;
-  startVoiceEdit(): Promise<void>;
+  changeVoiceEditInstruction(event: PageTextInputEvent): void;
+  previewVoiceEdit(event: PageTextInputEvent): Promise<void>;
   cancelVoiceEdit(): void;
   confirmVoiceEdit(): Promise<void>;
   deleteTranscript(): Promise<void>;
@@ -81,7 +75,6 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
-      || this.data.voiceEditRecording
       || this.data.voiceEditLoading
       || this.data.voiceEditSaving
       || this.data.assignmentEditorOpen
@@ -386,8 +379,17 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     syncEditUnloadAlert(nextItem);
   },
 
-  async startVoiceEdit() {
+  changeVoiceEditInstruction(event: PageTextInputEvent) {
+    this.setData({
+      voiceEditInstructionText: event.detail.value,
+      voiceEditPreview: null,
+      error: "",
+    });
+  },
+
+  async previewVoiceEdit(event: PageTextInputEvent) {
     const item = this.data.item;
+    const instructionText = event.detail.value.trim();
     if (
       !item
       || item.canRecoverTranscription
@@ -399,87 +401,40 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     ) {
       return;
     }
-    if (this.data.voiceEditRecording) {
-      stopMemoirVoiceSearchRecording();
+    if (!instructionText) {
+      wx.showToast({ title: "请先输入或说出修改意见", icon: "none" });
       return;
     }
     this.stopPlayback();
-    this.voiceEditToken += 1;
-    const requestToken = this.voiceEditToken;
     this.setData({
-      voiceEditRecording: true,
-      voiceEditLoading: false,
+      voiceEditLoading: true,
       voiceEditSaving: false,
-      voiceEditInstructionText: "",
+      voiceEditInstructionText: instructionText,
       voiceEditPreview: null,
       error: "",
-      ...voiceEditStateData("listening"),
     });
     try {
-      const instructionText = await recordMemoirVoiceSearchQuery({
-        stopMode: "manual",
-        maxDurationMs: VOICE_EDIT_MAX_RECORDING_MS,
-        onRecordingEnd: () => {
-          if (requestToken !== this.voiceEditToken) {
-            return;
-          }
-          this.setData({
-            voiceEditRecording: false,
-            voiceEditLoading: true,
-            ...voiceEditStateData("transcribing"),
-          });
-        },
-        emptyTranscriptMessage: "没有识别到修改意见，请再说一次",
-        noVoiceTranscriptMessage: "没有听到修改意见，请再说一次",
-      });
-      if (requestToken !== this.voiceEditToken) {
-        return;
-      }
-      this.setData({
-        voiceEditInstructionText: instructionText,
-        ...voiceEditStateData("generating"),
-      });
       const preview = await previewMemoirVoiceTranscriptVoiceEdit(item.id, instructionText);
-      if (requestToken !== this.voiceEditToken) {
-        return;
-      }
       this.setData({
         voiceEditPreview: transcriptVoiceEditPreviewView(preview),
-        ...voiceEditStateData(
-          preview.action === "revise_transcript" ? "review" : "clarify",
-          preview.action === "revise_transcript" ? "" : preview.reply_text,
-        ),
+        error: preview.action === "revise_transcript" ? "" : preview.reply_text,
       });
       trackAuditAction("transcript.detail_voice_edit_preview", { action: preview.action }, { projectId: item.project_id });
     } catch (error) {
-      if (requestToken !== this.voiceEditToken) {
-        return;
-      }
       const message = error instanceof Error ? error.message : "语音修改失败";
-      this.setData({ error: message, ...voiceEditStateData("error", message) });
+      this.setData({ error: message });
     } finally {
-      if (requestToken === this.voiceEditToken) {
-        this.setData({
-          voiceEditRecording: false,
-          voiceEditLoading: false,
-        });
-      }
+      this.setData({ voiceEditLoading: false });
     }
   },
 
   cancelVoiceEdit() {
-    this.voiceEditToken += 1;
-    if (this.data.voiceEditRecording) {
-      stopMemoirVoiceSearchRecording();
-    }
     this.setData({
-      voiceEditRecording: false,
       voiceEditLoading: false,
       voiceEditSaving: false,
       voiceEditInstructionText: "",
       voiceEditPreview: null,
       error: "",
-      ...voiceEditStateData("idle"),
     });
   },
 
@@ -500,14 +455,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     const content = preview.editedText.trim();
     if (!content) {
       const message = "修改后的成书文字不能为空";
-      this.setData({ error: message, ...voiceEditStateData("error", message) });
+      this.setData({ error: message });
       return;
     }
     this.setData({
       voiceEditSaving: true,
       saving: true,
       error: "",
-      ...voiceEditStateData("saving"),
     });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
@@ -515,14 +469,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
         item: toViewItem(updated),
         voiceEditInstructionText: "",
         voiceEditPreview: null,
-        ...voiceEditStateData("idle"),
       });
       this.resetShareVideoState();
       trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
       wx.showToast({ title: "已保存修改", icon: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "保存修改失败";
-      this.setData({ error: message, ...voiceEditStateData("error", message) });
+      this.setData({ error: message });
     } finally {
       this.setData({ voiceEditSaving: false, saving: false });
     }

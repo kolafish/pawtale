@@ -41,7 +41,6 @@ interface ChapterWorkspaceJobHost {
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
   loadPageData(silent?: boolean): Promise<void>;
   leaveAfterEditConfirmation(navigate: () => void): void;
-  cancelDraftSectionVoiceInstruction(): void;
 }
 
 function defineChapterWorkspaceJobMethods<TMethods extends object>(
@@ -68,7 +67,6 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       return;
     }
     this.leaveAfterEditConfirmation(() => {
-      this.cancelDraftSectionVoiceInstruction();
       this.setData({
         ...CLOSED_DRAFT_SECTION_EDITOR,
         structureExpanded: true,

@@ -676,102 +676,9 @@
   text-align: center;
 }
 
-.voice-edit-count.listening,
-.voice-edit-count.working,
-.voice-edit-count.warning {
-  color: var(--ui-warning-text);
-}
-
-.voice-edit-count.ready {
-  color: var(--ui-success-text);
-}
-
-.voice-edit-count.error {
-  color: var(--ui-danger-text);
-}
-
-.voice-edit-status {
-  display: flex;
-  align-items: flex-start;
-  gap: 16rpx;
-  padding: 18rpx 20rpx;
-  border-radius: 14rpx;
-  background: var(--ui-surface-subtle);
-}
-
-.voice-edit-status.listening {
-  background: var(--ui-accent-surface);
-}
-
-.voice-edit-status.working,
-.voice-edit-status.warning {
-  background: var(--ui-warning-surface);
-}
-
-.voice-edit-status.ready {
-  background: var(--ui-success-surface);
-}
-
-.voice-edit-status.error {
-  background: var(--ui-danger-surface);
-}
-
-.voice-edit-status-mark {
-  flex: 0 0 40rpx;
-  width: 40rpx;
-  height: 40rpx;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.voice-edit-status-dot {
-  width: 12rpx;
-  height: 12rpx;
-  border-radius: 999rpx;
-  background: var(--ui-accent);
-  box-shadow: 0 0 0 8rpx rgba(168, 79, 67, 0.12);
-}
-
-.voice-edit-status.working .voice-edit-status-dot,
-.voice-edit-status.warning .voice-edit-status-dot {
-  background: #a66a2e;
-  box-shadow: 0 0 0 8rpx rgba(166, 106, 46, 0.12);
-}
-
-.voice-edit-status.ready .voice-edit-status-dot {
-  background: var(--ui-success-text);
-  box-shadow: 0 0 0 8rpx rgba(94, 119, 88, 0.12);
-}
-
-.voice-edit-status.error .voice-edit-status-dot {
-  background: var(--ui-danger-text);
-  box-shadow: 0 0 0 8rpx rgba(182, 69, 69, 0.12);
-}
-
-.voice-edit-status-copy {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.voice-edit-status-title,
-.voice-edit-status-detail {
+.edit-tools-card voice-text-editor {
   display: block;
-  word-break: break-word;
-}
-
-.voice-edit-status-title {
-  color: var(--ui-text-primary);
-  font-size: 27rpx;
-  font-weight: 850;
-  line-height: 1.35;
-}
-
-.voice-edit-status-detail {
-  margin-top: 4rpx;
-  color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  line-height: 1.45;
+  margin-top: 18rpx;
 }
 
 .voice-edit-change-scope {
@@ -1302,8 +1209,7 @@
 .detail-page.large-text .section-title,
 .detail-page.large-text .edit-mode-title,
 .detail-page.large-text .danger-panel-title,
-.detail-page.large-text .repair-panel-title,
-.detail-page.large-text .voice-edit-status-title {
+.detail-page.large-text .repair-panel-title {
   font-size: 34rpx;
   line-height: 1.4;
 }
@@ -1366,7 +1272,6 @@
 .detail-page.large-text .share-video-background-current,
 .detail-page.large-text .share-video-background-desc,
 .detail-page.large-text .share-video-job-meta,
-.detail-page.large-text .voice-edit-status-detail,
 .detail-page.large-text .voice-edit-change-scope,
 .detail-page.large-text .voice-edit-label,
 .detail-page.large-text .voice-edit-confidence {

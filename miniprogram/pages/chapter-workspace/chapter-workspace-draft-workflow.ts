@@ -10,10 +10,6 @@ import {
   reviseMemoirBookChapterDraft,
 } from "../../services/memoir-book-api";
 import { reviseMemoirChapterDraftSectionWithAI } from "../../services/memoir-chapter-workspace-api";
-import {
-  recordMemoirVoiceSearchQuery,
-  stopMemoirVoiceSearchRecording,
-} from "../../services/memoir-voice-search";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
@@ -24,7 +20,6 @@ import { readBookTTSRequest } from "../../services/tts-settings";
 import { chapterWorkspaceViewPatch } from "./chapter-workspace-view";
 import {
   CLOSED_DRAFT_SECTION_EDITOR,
-  DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
   type ChapterWorkspaceOperationKind,
   type ChapterWorkspacePageData,
   type DraftSectionEditingMode,
@@ -34,7 +29,6 @@ interface ChapterWorkspaceDraftHost {
   data: ChapterWorkspacePageData;
   audioPlayback: AudioPlaybackController;
   playToken: number;
-  draftSectionVoiceInstructionToken: number;
   setData(patch: Partial<ChapterWorkspacePageData>): void;
   beginOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): boolean;
   finishOperation(kind: ChapterWorkspaceOperationKind, targetId?: string): void;
@@ -88,7 +82,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
       editingMode,
       editingSectionId: section.section_id,
       editingSectionContent: section.content,
-      draftSectionVoicePhase: "idle",
       draftSectionAIInstruction: "",
       error: "",
     });
@@ -109,7 +102,6 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
     if (this.data.operationKind) {
       return;
     }
-    this.cancelDraftSectionVoiceInstruction();
     this.setData(CLOSED_DRAFT_SECTION_EDITOR);
   },
 
@@ -118,89 +110,19 @@ export const chapterWorkspaceDraftMethods = defineChapterWorkspaceDraftMethods({
   },
 
   changeDraftSectionAIInstruction(event: PageTextInputEvent) {
-    if (
-      this.data.editingMode !== "ai"
-      || this.data.draftSectionVoicePhase !== "idle"
-    ) {
+    if (this.data.editingMode !== "ai") {
       return;
     }
     this.setData({ draftSectionAIInstruction: event.detail.value });
   },
 
-  cancelDraftSectionVoiceInstruction() {
-    if (
-      this.data.draftSectionVoicePhase !== "listening"
-      && this.data.draftSectionVoicePhase !== "transcribing"
-    ) {
-      return;
-    }
-    this.draftSectionVoiceInstructionToken += 1;
-    if (this.data.draftSectionVoicePhase === "listening") {
-      stopMemoirVoiceSearchRecording();
-    }
-    this.setData({ draftSectionVoicePhase: "idle" });
-  },
-
-  async toggleDraftSectionVoiceInstruction() {
-    if (this.data.draftSectionVoicePhase === "listening") {
-      stopMemoirVoiceSearchRecording();
-      return;
-    }
+  async submitDraftSectionAIInstruction(event: PageTextInputEvent) {
     const sectionId = this.data.editingSectionId;
+    const instructionText = event.detail.value.trim();
     if (
       this.data.editingMode !== "ai"
       || !sectionId
       || this.data.operationKind
-      || this.data.draftSectionVoicePhase !== "idle"
-    ) {
-      return;
-    }
-    this.stopDraftSectionPlayback();
-    this.draftSectionVoiceInstructionToken += 1;
-    const requestToken = this.draftSectionVoiceInstructionToken;
-    this.setData({
-      draftSectionVoicePhase: "listening",
-      error: "",
-    });
-    try {
-      const instructionText = await recordMemoirVoiceSearchQuery({
-        stopMode: "manual",
-        maxDurationMs: DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS,
-        onRecordingEnd: () => {
-          if (requestToken === this.draftSectionVoiceInstructionToken) {
-            this.setData({ draftSectionVoicePhase: "transcribing" });
-          }
-        },
-        emptyTranscriptMessage: "没有识别到修改要求，请再说一次",
-        noVoiceTranscriptMessage: "没有听到修改要求，请再说一次",
-      });
-      if (requestToken !== this.draftSectionVoiceInstructionToken) {
-        return;
-      }
-      this.setData({
-        draftSectionAIInstruction: instructionText,
-        draftSectionVoicePhase: "idle",
-      });
-      wx.showToast({ title: "已识别修改要求", icon: "none" });
-    } catch (error) {
-      if (requestToken !== this.draftSectionVoiceInstructionToken) {
-        return;
-      }
-      this.setData({
-        error: error instanceof Error ? error.message : "语音修改失败",
-        draftSectionVoicePhase: "idle",
-      });
-    }
-  },
-
-  async submitDraftSectionAIInstruction() {
-    const sectionId = this.data.editingSectionId;
-    const instructionText = this.data.draftSectionAIInstruction.trim();
-    if (
-      this.data.editingMode !== "ai"
-      || !sectionId
-      || this.data.operationKind
-      || this.data.draftSectionVoicePhase !== "idle"
     ) {
       return;
     }

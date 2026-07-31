@@ -162,9 +162,11 @@ function loadRevisionPage({ api = {} } = {}) {
       can_apply: false,
       can_dismiss: false,
     }),
-    memoirBookReviewDictationUrl: () =>
-      "ws://backend.local/api/memoir/projects/project-1/book-review/dictation",
     ...api,
+  });
+  mockModule("../services/memoir-api-client.ts", {
+    memoirProjectDictationUrl: () =>
+      "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
   return loadPageModule("../pages/book-revision/index.ts");

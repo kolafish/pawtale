@@ -17,6 +17,7 @@ function resetMemoirApiModules() {
   [
     "memoir-book-api",
     "memoir-book-completion-api",
+    "memoir-api-client",
     "memoir-transcript-api",
     "memoir-voice-session-api",
   ].forEach((name) => {
@@ -682,12 +683,13 @@ test("book service APIs encode backend routes and selected AI model", async () =
     ...require("../services/memoir-book-api.ts"),
     ...require("../services/memoir-book-completion-api.ts"),
   };
+  const apiClient = require("../services/memoir-api-client.ts");
   const base = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1";
   const narrativeBase = "http://backend.local:8000/api/memoir/projects/project%2F1";
   const selectedModel = "doubao-seed-2-0-pro-260215";
   assert.equal(
-    api.memoirBookReviewDictationUrl("project/1"),
-    "ws://backend.local:8000/api/memoir/projects/project%2F1/book-review/dictation",
+    apiClient.memoirProjectDictationUrl("project/1"),
+    "ws://backend.local:8000/api/memoir/projects/project%2F1/dictation",
   );
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },

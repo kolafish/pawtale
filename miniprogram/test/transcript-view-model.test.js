@@ -10,7 +10,6 @@ const {
   transcriptMaterialChapterText,
   transcriptMaterialSectionText,
   transcriptVoiceEditPreviewView,
-  transcriptVoiceEditStateView,
 } = require("../services/transcript-view-model.ts");
 
 test("transcript view model formats duration and audio text consistently", () => {
@@ -101,15 +100,4 @@ test("transcript view model builds voice edit preview diff", () => {
     { text: "李阅", kind: "insert" },
     { text: "，我们是高中同学。", kind: "equal" },
   ]);
-});
-
-test("transcript view model exposes actionable voice edit phases", () => {
-  const listening = transcriptVoiceEditStateView("listening");
-  assert.equal(listening.phase, "listening");
-  assert.equal(listening.statusVisible, true);
-  assert.equal(listening.actionText, "结束并生成预览");
-
-  const clarify = transcriptVoiceEditStateView("clarify", "没有定位到你说的片段");
-  assert.equal(clarify.statusClass, "warning");
-  assert.equal(clarify.statusDetail, "没有定位到你说的片段");
 });

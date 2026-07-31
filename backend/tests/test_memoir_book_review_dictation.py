@@ -3,10 +3,10 @@ from typing import Any
 
 from fastapi import HTTPException
 
-from app.routers.memoir import book_reviews as book_reviews_router
+from app.routers.memoir import dictation as dictation_router
 
 
-async def test_book_review_dictation_streams_for_owned_project(
+async def test_memoir_project_dictation_streams_for_owned_project(
     test_db,
     monkeypatch,
 ):
@@ -40,26 +40,26 @@ async def test_book_review_dictation_streams_for_owned_project(
         calls["asr"] = (user_id, session_id)
         return object()
 
-    monkeypatch.setattr(book_reviews_router, "authenticate_websocket", authenticate)
+    monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
     monkeypatch.setattr(
-        book_reviews_router,
-        "_book_review_dictation_is_available",
+        dictation_router,
+        "_memoir_project_dictation_is_available",
         available,
     )
     monkeypatch.setattr(
-        book_reviews_router,
+        dictation_router,
         "voice_gateway_capacity_manager",
         CapacityManager(),
     )
-    monkeypatch.setattr(book_reviews_router, "VoiceGatewaySession", GatewaySession)
+    monkeypatch.setattr(dictation_router, "VoiceGatewaySession", GatewaySession)
     monkeypatch.setattr(
-        book_reviews_router,
+        dictation_router,
         "create_realtime_volc_streaming_asr_client",
         create_asr,
     )
 
     websocket = FakeWebSocket()
-    await book_reviews_router.stream_memoir_book_review_dictation(
+    await dictation_router.stream_memoir_project_dictation(
         websocket,
         "project-1",
         test_db,
@@ -72,9 +72,9 @@ async def test_book_review_dictation_streams_for_owned_project(
         "current_user": user,
     }
     assert calls["capacity"][0] == "user-1"
-    assert calls["capacity"][1].startswith("book-review-dictation:")
+    assert calls["capacity"][1].startswith("memoir-project-dictation:")
     assert calls["gateway"]["diagnostics_context"] == {
-        "gateway": "book_review_dictation",
+        "gateway": "memoir_project_dictation",
         "project_id": "project-1",
     }
     assert calls["gateway"]["text_normalizer"]("把第一张放到第二张后面") == ("把第一章放到第二章后面")
@@ -82,7 +82,7 @@ async def test_book_review_dictation_streams_for_owned_project(
     assert calls["asr"] == calls["capacity"]
 
 
-async def test_book_review_dictation_rejects_unavailable_project(
+async def test_memoir_project_dictation_rejects_unavailable_project(
     test_db,
     monkeypatch,
 ):
@@ -92,15 +92,15 @@ async def test_book_review_dictation_rejects_unavailable_project(
     async def unavailable(_db, **_kwargs):
         return False
 
-    monkeypatch.setattr(book_reviews_router, "authenticate_websocket", authenticate)
+    monkeypatch.setattr(dictation_router, "authenticate_websocket", authenticate)
     monkeypatch.setattr(
-        book_reviews_router,
-        "_book_review_dictation_is_available",
+        dictation_router,
+        "_memoir_project_dictation_is_available",
         unavailable,
     )
     websocket = FakeWebSocket()
 
-    await book_reviews_router.stream_memoir_book_review_dictation(
+    await dictation_router.stream_memoir_project_dictation(
         websocket,
         "project-1",
         test_db,
@@ -110,13 +110,13 @@ async def test_book_review_dictation_rejects_unavailable_project(
         {
             "type": "session.error",
             "state": "failed",
-            "error": "book_review_dictation_unavailable",
+            "error": "memoir_project_dictation_unavailable",
         }
     ]
     assert websocket.closed_with == 1008
 
 
-async def test_book_review_dictation_requires_owned_project(
+async def test_memoir_project_dictation_requires_owned_project(
     test_db,
     monkeypatch,
 ):
@@ -126,10 +126,10 @@ async def test_book_review_dictation_requires_owned_project(
     async def load_project(_db, project_id, user_id, *, allow_admin):
         calls["project"] = (project_id, user_id, allow_admin)
 
-    monkeypatch.setattr(book_reviews_router, "is_admin_user", lambda _user: False)
-    monkeypatch.setattr(book_reviews_router, "load_memoir_project", load_project)
+    monkeypatch.setattr(dictation_router, "is_admin_user", lambda _user: False)
+    monkeypatch.setattr(dictation_router, "load_memoir_project", load_project)
 
-    assert await book_reviews_router._book_review_dictation_is_available(
+    assert await dictation_router._memoir_project_dictation_is_available(
         test_db,
         project_id="project-1",
         current_user=user,
@@ -139,8 +139,8 @@ async def test_book_review_dictation_requires_owned_project(
     async def missing_project(*_args, **_kwargs):
         raise HTTPException(status_code=404)
 
-    monkeypatch.setattr(book_reviews_router, "load_memoir_project", missing_project)
-    assert not await book_reviews_router._book_review_dictation_is_available(
+    monkeypatch.setattr(dictation_router, "load_memoir_project", missing_project)
+    assert not await dictation_router._memoir_project_dictation_is_available(
         test_db,
         project_id="project-1",
         current_user=user,
