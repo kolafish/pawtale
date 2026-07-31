@@ -2,19 +2,6 @@
   padding: 24rpx 36rpx 120rpx;
 }
 
-.profile-panel,
-.guest-login-panel,
-.credential-panel,
-.project-overview,
-.settings-card,
-.settings-list,
-.settings-disclosure {
-  border: 0;
-  border-radius: 26rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-}
-
 .guest-login-panel {
   padding: 52rpx 36rpx 38rpx;
   text-align: center;
@@ -276,13 +263,7 @@
 }
 
 .section-title {
-  display: block;
   margin-bottom: 14rpx;
-  color: var(--ui-section-title);
-  font-size: 27rpx;
-  font-weight: 800;
-  line-height: 1.35;
-  text-wrap: balance;
 }
 
 .setting-header {
@@ -543,7 +524,6 @@
   line-height: 1.5;
 }
 
-.me-page.large-text .section-title,
 .me-page.large-text .field-label,
 .me-page.large-text .overview-stat-label {
   font-size: 30rpx;

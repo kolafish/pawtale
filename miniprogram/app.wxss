@@ -52,6 +52,31 @@ image {
   background: var(--ui-page-background);
 }
 
+.ui-card {
+  box-sizing: border-box;
+  border: 1rpx solid var(--ui-border);
+  border-radius: 24rpx;
+  background: var(--ui-surface);
+  box-shadow: var(--ui-card-shadow);
+}
+
+.ui-card.ui-card-borderless {
+  border: 0;
+}
+
+.ui-card.ui-card-raised {
+  box-shadow: var(--ui-card-shadow-raised);
+}
+
+.ui-section-heading {
+  display: block;
+  color: var(--ui-section-title);
+  font-size: 28rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
 .ui-page-shell.ui-fixed-action-page {
   padding-bottom: calc(var(--ui-fixed-action-space, 168rpx) + env(safe-area-inset-bottom));
 }
@@ -180,6 +205,7 @@ image {
 .ui-accessible-page.large-text .section-name,
 .ui-accessible-page.large-text .section-header,
 .ui-accessible-page.large-text .section-title,
+.ui-accessible-page.large-text .ui-section-heading,
 .ui-accessible-page.large-text .session-title,
 .ui-accessible-page.large-text .settings-toggle-title {
   font-size: 44rpx;

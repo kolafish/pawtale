@@ -40,10 +40,6 @@
 .empty-panel {
   margin-top: 24rpx;
   padding: 30rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 28rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .project-card.active {

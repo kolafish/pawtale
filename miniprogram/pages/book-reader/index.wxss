@@ -3,17 +3,6 @@
   color: var(--ui-text-primary);
 }
 
-.reader-cover,
-.reader-state,
-.reader-section,
-.chapter-block {
-  box-sizing: border-box;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 12rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-}
-
 .reader-cover {
   padding: 44rpx 34rpx 40rpx;
 }

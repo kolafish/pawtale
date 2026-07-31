@@ -9,19 +9,6 @@
   gap: 24rpx;
 }
 
-.export-hero,
-.state-card,
-.export-settings,
-.manuscript-card,
-.advanced-card,
-.preview-card {
-  box-sizing: border-box;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 12rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-}
-
 .export-hero {
   display: flex;
   align-items: flex-start;
@@ -274,11 +261,6 @@
 
 .book-design-panel {
   padding: 26rpx;
-  border: 1rpx solid var(--ui-border);
-  border-radius: 12rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
-  box-sizing: border-box;
 }
 
 .book-design-head {

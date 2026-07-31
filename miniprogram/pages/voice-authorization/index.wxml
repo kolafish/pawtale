@@ -3,29 +3,29 @@
     <text class="ui-page-context ui-tabular">协议版本 {{version}}</text>
   </view>
 
-  <view class="agreement-panel">
+  <view class="agreement-panel ui-card">
     <view class="section">
-      <text class="section-title">一、我们会收集什么</text>
+      <text class="section-title ui-section-heading">一、我们会收集什么</text>
       <text class="paragraph">当你主动进入语音聊天并点击开始说话、继续说话或开启自动收音时，小程序会调用麦克风，采集你的语音音频、实时识别成文字的内容、整理文字和与音频片段相关的时间信息。语音音频中可能包含能够识别个人声音特征的信息。</text>
     </view>
 
     <view class="section">
-      <text class="section-title">二、收集目的</text>
+      <text class="section-title ui-section-heading">二、收集目的</text>
       <text class="paragraph">这些信息仅用于回忆录功能，包括语音访谈、实时识别文字、生成小余追问、保存原始音频证据、整理讲述记录、生成章节和全书内容，以及在你需要时回放或核对访谈材料。</text>
     </view>
 
     <view class="section">
-      <text class="section-title">三、收集方式</text>
+      <text class="section-title ui-section-heading">三、收集方式</text>
       <text class="paragraph">你同意本协议后，小程序才会在语音聊天中打开麦克风。录音数据会通过小程序传输到 Pawtale 后端，并在必要时交由已配置的语音识别、语音合成和 AI 服务处理，用于完成上述功能。</text>
     </view>
 
     <view class="section">
-      <text class="section-title">四、使用和存储范围</text>
+      <text class="section-title ui-section-heading">四、使用和存储范围</text>
       <text class="paragraph">语音和识别文字会保存在你的回忆录项目下，用于生成和管理你的个人回忆录。我们不会把这些声音信息用于身份识别、声纹比对、广告画像或对外出售；如未来启用独立的声纹识别能力，会另行取得你的单独同意。</text>
     </view>
 
     <view class="section">
-      <text class="section-title">五、你的选择</text>
+      <text class="section-title ui-section-heading">五、你的选择</text>
       <text class="paragraph">你可以不同意本协议。不同意时，语音聊天、录音和实时识别文字功能将不可用，但你仍可浏览小程序中不依赖麦克风的功能。你也可以停止录音，并按页面提供的删除或管理能力处理已生成的讲述记录和音频资料。</text>
     </view>
   </view>

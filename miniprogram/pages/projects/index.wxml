@@ -12,18 +12,18 @@
     </view>
   </view>
 
-  <view wx:if="{{loading && !projects.length}}" class="empty-panel">
+  <view wx:if="{{loading && !projects.length}}" class="empty-panel ui-card">
     <text>正在加载</text>
   </view>
 
-  <view wx:elif="{{!projects.length}}" class="empty-panel">
+  <view wx:elif="{{!projects.length}}" class="empty-panel ui-card">
     <text>暂无回忆录</text>
   </view>
 
   <view
     wx:for="{{projects}}"
     wx:key="id"
-    class="project-card {{item.active ? 'active' : ''}}"
+    class="project-card ui-card {{item.active ? 'active' : ''}}"
     data-id="{{item.id}}"
     bindtap="activateProject"
     hover-class="{{item.active ? 'none' : 'project-card-hover'}}"

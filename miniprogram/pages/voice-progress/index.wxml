@@ -7,31 +7,31 @@
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="summary-grid">
-    <view class="summary-item">
+    <view class="summary-item ui-card ui-card-raised">
       <text class="summary-value ui-tabular">{{progress.session_count || 0}}</text>
       <text class="summary-label">讲述次数</text>
     </view>
-    <view class="summary-item">
+    <view class="summary-item ui-card ui-card-raised">
       <text class="summary-value ui-tabular">{{progress.utterance_count || 0}}</text>
       <text class="summary-label">讲述记录</text>
     </view>
-    <view class="summary-item">
+    <view class="summary-item ui-card ui-card-raised">
       <text class="summary-value ui-tabular">{{progress.total_user_char_count || 0}}</text>
       <text class="summary-label">文字</text>
     </view>
-    <view class="summary-item">
+    <view class="summary-item ui-card ui-card-raised">
       <text class="summary-value ui-tabular">{{progress.assistant_message_count || 0}}</text>
       <text class="summary-label">小余追问</text>
     </view>
   </view>
 
-  <view class="section">
+  <view class="section ui-card ui-card-raised">
     <view class="section-header">
       <text class="section-title">最近讲述</text>
       <text class="section-meta ui-tabular">{{sessions.length}} 次</text>
     </view>
     <view wx:if="{{!sessions.length}}" class="empty-state">还没有语音访谈记录。</view>
-    <view wx:for="{{sessions}}" wx:key="id" class="session-card">
+    <view wx:for="{{sessions}}" wx:key="id" class="session-card ui-card">
       <view class="session-head">
         <view class="session-copy">
           <text class="session-title">{{item.modeText}} · {{item.moduleText}}</text>
@@ -56,7 +56,7 @@
     </view>
   </view>
 
-  <view class="section topic-section">
+  <view class="section topic-section ui-card ui-card-raised">
     <text class="section-kicker">人生话题</text>
     <text class="section-title topic-headline">{{topicHeadline}}</text>
     <text class="topic-detail">{{topicDetail}}</text>

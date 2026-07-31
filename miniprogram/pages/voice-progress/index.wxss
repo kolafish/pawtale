@@ -22,18 +22,9 @@
   gap: 18rpx;
 }
 
-.summary-item,
-.section,
-.session-card {
-  border: 2rpx solid var(--ui-border);
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow-raised);
-}
-
 .summary-item {
   min-height: 152rpx;
   padding: 28rpx;
-  border-radius: 24rpx;
 }
 
 .summary-value {
@@ -54,7 +45,6 @@
 .section {
   margin-top: 28rpx;
   padding: 28rpx;
-  border-radius: 28rpx;
 }
 
 .section-header,
@@ -266,7 +256,6 @@
 .session-card {
   margin-top: 22rpx;
   padding: 24rpx;
-  border-radius: 22rpx;
   box-shadow: none;
 }
 

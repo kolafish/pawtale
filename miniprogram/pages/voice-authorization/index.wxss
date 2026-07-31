@@ -7,22 +7,10 @@
 
 .agreement-panel {
   padding: 32rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 24rpx;
-  background: var(--ui-surface);
-  box-shadow: var(--ui-card-shadow);
 }
 
 .section + .section {
   margin-top: 30rpx;
-}
-
-.section-title {
-  display: block;
-  color: var(--ui-section-title);
-  font-size: 30rpx;
-  font-weight: 800;
-  line-height: 1.35;
 }
 
 .paragraph {

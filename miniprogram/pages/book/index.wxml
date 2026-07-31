@@ -14,7 +14,7 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
-  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel">
+  <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">浏览书稿</text>
     <text class="empty-copy">登录后可以把讲述记录归入章节，确认章节正文，再生成全书和章节朗读。</text>
@@ -30,7 +30,7 @@
   </view>
 
   <block wx:else>
-  <view wx:if="{{!projectId}}" class="empty-panel">
+  <view wx:if="{{!projectId}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">还没有回忆录</text>
     <text class="empty-copy">先创建一本回忆录并设置讲述资料，完成语音聊天后再整理书稿。</text>
@@ -41,7 +41,7 @@
   </view>
 
   <block wx:else>
-  <view class="status-panel progress-panel">
+  <view class="status-panel progress-panel ui-card">
     <view class="progress-main">
       <view class="progress-title-row">
         <text class="status-title">{{bookPreviewTitle || planTitle || "书稿"}}</text>
@@ -143,7 +143,7 @@
     <text class="image-assets-entry-action">管理</text>
   </view>
 
-  <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel">
+  <view wx:if="{{automationEventLoading || automationEventError || automationEventItems.length}}" class="automation-panel ui-card">
     <view class="automation-head">
       <view>
         <text class="automation-title">整理进度</text>
@@ -218,11 +218,11 @@
   </block>
 
   <block wx:else>
-  <view wx:if="{{loading && stage === 'empty'}}" class="empty-panel">
+  <view wx:if="{{loading && stage === 'empty'}}" class="empty-panel ui-card">
     <text>正在加载</text>
   </view>
 
-  <view wx:elif="{{stage === 'empty'}}" class="empty-panel">
+  <view wx:elif="{{stage === 'empty'}}" class="empty-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">从讲述记录生成章节</text>
     <text class="empty-copy">系统会先把当前回忆录里的讲述内容划分为若干章节。你确认章节后，再逐章生成正文。</text>
@@ -267,7 +267,7 @@
       </view>
     </view>
 
-    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card">
+    <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card ui-card">
       <view class="chapter-head">
         <text class="chapter-index">第 {{index + 1}} 章</text>
         <text class="source-count">{{item.sourceCount}} 条原始讲述</text>
@@ -472,7 +472,7 @@
     </view>
 
     <block wx:else>
-      <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card summary">
+      <view wx:for="{{chapters}}" wx:key="id" id="chapter-editor-{{item.id}}" class="chapter-card summary ui-card">
         <view class="chapter-summary-card">
           <view class="chapter-summary-head">
             <view class="chapter-summary-title-block">
