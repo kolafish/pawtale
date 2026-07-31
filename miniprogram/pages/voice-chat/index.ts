@@ -873,7 +873,7 @@ definePage<VoiceChatData>()({
         ttsProgressPercent: 0,
       } : {}),
     });
-    this.startAssistantBargeInMonitor(requestSerial);
+    void this.startAssistantBargeInMonitor(requestSerial);
   },
 
   markStreamingPlaybackError(error: Error, requestSerial: number) {

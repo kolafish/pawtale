@@ -31,16 +31,6 @@ function voiceRuntime(owner: object): VoiceRuntime {
   return runtime;
 }
 
-export function voiceTextWithTranscript(
-  existing: string,
-  transcript: string,
-  maxLength: number,
-): string {
-  const base = existing.trim();
-  const live = transcript.trim();
-  return `${base}${base && live ? "\n" : ""}${live}`.slice(0, maxLength);
-}
-
 Component({
   properties: {
     value: { type: String, value: "" },
@@ -65,20 +55,13 @@ Component({
 
   observers: {
     value(value: unknown) {
-      if (this.data.voicePhase !== "idle") {
-        return;
-      }
-      const text = String(value || "");
-      voiceRuntime(this).text = text;
-      this.setData({ textReady: Boolean(text.trim()) });
+      this.syncText(value);
     },
   },
 
   lifetimes: {
     attached() {
-      const text = String(this.properties.value || "");
-      voiceRuntime(this).text = text;
-      this.setData({ textReady: Boolean(text.trim()) });
+      this.syncText(this.properties.value);
     },
     detached() {
       this.cancelVoice();
@@ -93,15 +76,24 @@ Component({
   },
 
   methods: {
-    changeText(event: { detail: { value?: string } }) {
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
-        return;
+    syncText(value: unknown) {
+      if (this.data.voicePhase === "idle") {
+        const text = String(value || "");
+        voiceRuntime(this).text = text;
+        this.setData({ textReady: Boolean(text.trim()) });
       }
-      this.updateText(String(event.detail.value || ""));
+    },
+
+    canEdit() {
+      return !this.properties.disabled
+        && !this.properties.busy
+        && this.data.voicePhase === "idle";
+    },
+
+    changeText(event: { detail: { value?: string } }) {
+      if (this.canEdit()) {
+        this.updateText(String(event.detail.value || ""));
+      }
     },
 
     updateText(text: string) {
@@ -128,11 +120,7 @@ Component({
         runtime.streaming.stopRecording();
         return;
       }
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
+      if (!this.canEdit()) {
         return;
       }
       if (!this.properties.gatewayUrl) {
@@ -175,9 +163,7 @@ Component({
               }
             },
             onPartial: (text) => this.updateVoiceTranscript(token, text),
-            onFinal: (event) => (
-              this.updateVoiceTranscript(token, event.text || "")
-            ),
+            onFinal: (event) => this.updateVoiceTranscript(token, event.text || ""),
             onError: (message) => {
               if (token === runtime.token) {
                 this.setData({
@@ -213,11 +199,10 @@ Component({
         return;
       }
       runtime.transcript = transcript.trim();
-      this.updateText(voiceTextWithTranscript(
-        runtime.baseText,
-        runtime.transcript,
-        this.properties.maxlength,
-      ));
+      const separator = runtime.baseText.trim() && runtime.transcript ? "\n" : "";
+      this.updateText(
+        `${runtime.baseText.trim()}${separator}${runtime.transcript}`.slice(0, this.properties.maxlength),
+      );
     },
 
     async finishVoice(token: number) {
@@ -250,12 +235,7 @@ Component({
 
     submit() {
       const value = voiceRuntime(this).text.trim();
-      if (
-        !value
-        || this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
+      if (!value || !this.canEdit()) {
         if (!value) {
           wx.showToast({ title: "请先输入或说出内容", icon: "none" });
         }
@@ -265,14 +245,9 @@ Component({
     },
 
     cancel() {
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
-        return;
+      if (this.canEdit()) {
+        this.triggerEvent("cancel");
       }
-      this.triggerEvent("cancel");
     },
   },
 });

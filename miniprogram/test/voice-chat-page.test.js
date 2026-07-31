@@ -2211,6 +2211,7 @@ test("voice chat automatically interrupts assistant playback when local voice mo
   };
 
   page.prepareStreamingAudioPlayback.call(context, 0);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(monitor.running, true);
   assert.ok(monitorOptions);
 
@@ -2273,31 +2274,12 @@ test("voice chat does not start local barge-in monitor when the setting is off",
   assert.equal(context.data.autoListenStateText, "可以点按钮回答");
 });
 
-test("voice chat surfaces local barge-in monitor recorder failures", () => {
-  let monitorOptions = null;
-  const monitor = {
-    running: false,
-    start(options) {
-      monitorOptions = options;
-      this.running = true;
-      return true;
-    },
-    stop() {
-      this.running = false;
-    },
-    async stopAndWait() {
-      this.stop();
-    },
-    isRunning() {
-      return this.running;
-    },
-  };
+test("voice chat checks recorder privacy before passive barge-in monitoring", async () => {
+  let startCount = 0;
   const page = loadVoiceChatPage({
-    voiceBargeInMonitorExports: {
-      VoiceBargeInMonitor: class {
-        constructor() {
-          return monitor;
-        }
+    wechatPrivacyExports: {
+      ensureRecorderPrivacyAuthorization: async () => {
+        throw new Error("privacy denied");
       },
     },
   });
@@ -2305,23 +2287,24 @@ test("voice chat surfaces local barge-in monitor recorder failures", () => {
     ...page,
     data: {
       ...page.data,
-      status: "ready",
-      followUpLoading: true,
-      followUpTTSLoading: false,
-      followUpTTSPlaying: false,
-      autoListenStateText: "小余说完自动听",
+      voiceAuthorizationAgreed: true,
+      followUpTTSPlaying: true,
+    },
+    assistantBargeInMonitor: {
+      isRunning: () => false,
+      start() {
+        startCount += 1;
+        return true;
+      },
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
     },
   };
 
-  page.startAssistantBargeInMonitor.call(context, 0);
+  await page.startAssistantBargeInMonitor.call(context, 0);
 
-  assert.equal(context.data.autoListenStateText, "想说时可以直接开口");
-
-  monitorOptions.onError("operateRecorder:fail auth deny");
-
+  assert.equal(startCount, 0);
   assert.equal(context.data.autoListenStateText, "可以点按钮回答");
 });
 
@@ -2414,6 +2397,7 @@ test("voice chat auto barge-in stops assistant before reconnecting a missing gat
   };
 
   page.prepareStreamingAudioPlayback.call(context, 0);
+  await new Promise((resolve) => setImmediate(resolve));
   monitorOptions.onBargeIn();
   await new Promise((resolve) => setImmediate(resolve));
 

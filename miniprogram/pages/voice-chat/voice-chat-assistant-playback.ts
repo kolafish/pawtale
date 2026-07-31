@@ -13,6 +13,7 @@ import {
   type VoiceAssistantTTSProgressPatch,
 } from "../../services/voice-assistant-tts-progress";
 import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
+import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 import { createMemoirAssistantTTS } from "../../services/memoir-voice-session-api";
 import { readChatTTSSettings } from "../../services/tts-settings";
 import type { StreamingSpeechPlaybackFrameEvent } from "../../services/streaming-speech-playback";
@@ -49,7 +50,7 @@ export interface VoiceChatAssistantPlaybackMethods {
   stopFollowUpAudio(): void;
   cancelFollowUpTTS(reason?: string): void;
   assistantTurnActiveForBargeIn(): boolean;
-  startAssistantBargeInMonitor(requestSerial: number): void;
+  startAssistantBargeInMonitor(requestSerial: number): Promise<void>;
   stopAssistantBargeInMonitor(): Promise<void>;
   handleAssistantBargeIn(requestSerial: number): Promise<void>;
   markStreamingAudioFrameScheduled(event: StreamingSpeechPlaybackFrameEvent): void;
@@ -292,7 +293,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
           if (playToken === this.ttsPlayToken) {
             this.ttsProgress.markPlaybackStarted();
             this.startFollowUpProgressTimer(playToken, audio, fallbackDuration);
-            this.startAssistantBargeInMonitor(this.followUpRequestSerial);
+            void this.startAssistantBargeInMonitor(this.followUpRequestSerial);
           }
         },
         onTimeUpdate: (audio) => {
@@ -416,7 +417,7 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       || this.data.followUpTTSPlaying;
   },
 
-  startAssistantBargeInMonitor(requestSerial: number) {
+  async startAssistantBargeInMonitor(requestSerial: number) {
     if (
       this.data.recording
       || bookCompletionRoundFinished(this.data)
@@ -427,6 +428,23 @@ export const voiceChatAssistantPlaybackMethods: VoiceChatAssistantPlaybackMethod
       if (!this.data.autoBargeInEnabled && this.assistantTurnActiveForBargeIn()) {
         applyVoiceChatDataPatch(this, { autoListenStateText: "可以点按钮回答" });
       }
+      return;
+    }
+    if (!this.data.voiceAuthorizationAgreed) {
+      return;
+    }
+    try {
+      await ensureRecorderPrivacyAuthorization();
+    } catch {
+      applyVoiceChatDataPatch(this, { autoListenStateText: "可以点按钮回答" });
+      return;
+    }
+    if (
+      this.data.recording
+      || bookCompletionRoundFinished(this.data)
+      || !this.assistantTurnActiveForBargeIn()
+      || this.assistantBargeInMonitor.isRunning()
+    ) {
       return;
     }
     const started = this.assistantBargeInMonitor.start({
