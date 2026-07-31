@@ -80,11 +80,13 @@ def _scene_metadata(scene: ShareVideoScene) -> dict[str, object]:
         "start_ms": scene.start_ms,
         "end_ms": scene.end_ms,
         "title": scene.title,
-        "visual_summary": scene.visual_summary,
-        "image_prompt_content": scene.image_prompt_content,
         "sentence_ids": list(scene.sentence_ids),
         "evidence_quote": scene.evidence_quote,
     }
+
+
+def _scene_source_text(selected_text: str, scene: ShareVideoScene) -> str:
+    return selected_text[scene.start_char:scene.end_char].strip()
 
 
 def _render_background_segments(
@@ -206,9 +208,10 @@ async def prepare_share_video_background(
         errors: list[str] = []
         for scene in plan.scenes:
             scene_info = ShareVideoSceneAssetMetadata.model_validate(_scene_metadata(scene))
+            scene_source_text = _scene_source_text(job.selected_text, scene)
             try:
                 asset = await get_or_generate_share_video_background(
-                    scene.image_prompt_content,
+                    scene_source_text,
                     background_style,
                 )
             except ShareVideoBackgroundGenerationError as exc:
@@ -232,10 +235,9 @@ async def prepare_share_video_background(
                         job=job,
                         background=asset,
                         context=RegisteredShareVideoBackground(
-                            source_quote=scene.evidence_quote or job.selected_text,
+                            source_quote=scene_source_text,
                             scene_index=scene.index,
                             scene_title=scene.title,
-                            scene_visual_summary=scene.visual_summary,
                             evidence_quote=scene.evidence_quote,
                         ),
                     )

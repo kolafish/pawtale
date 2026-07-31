@@ -54,19 +54,23 @@ def _png_bytes(size: tuple[int, int] = (1280, 720)) -> bytes:
 def test_material_image_prompt_is_not_a_subtitle_background_prompt():
     selected_text = "小时候院子里有一棵葡萄树，夏天一家人都坐在下面乘凉。"
 
-    _, illustration_prompt, _ = material_image_generation.build_material_image_prompt(
+    style_id, illustration_prompt, _ = material_image_generation.build_material_image_prompt(
         selected_text,
-        "old_album",
+        None,
     )
-    video_prompt = build_share_video_background_prompt(selected_text, "old_album").prompt
+    video_prompt = build_share_video_background_prompt(selected_text, None).prompt
 
+    assert style_id == "watercolor"
+    assert selected_text in illustration_prompt
+    assert selected_text in video_prompt
     assert "适合放进家庭回忆录" in illustration_prompt
     assert "构图完整，主体明确" in illustration_prompt
     assert "不冒充真实历史照片" in illustration_prompt
-    assert "保留大面积干净留白" not in illustration_prompt
-    assert "方便后期叠加" not in illustration_prompt
-    assert "保留大面积干净留白" in video_prompt
-    assert "方便后期叠加" in video_prompt
+    assert "画面中部和右侧" not in illustration_prompt
+    assert "不需要为字幕预留中部或右侧空白" not in illustration_prompt
+    assert "画面中部和右侧保留大面积" in video_prompt
+    assert "不要因为这是回忆录内容" not in illustration_prompt
+    assert "不要因为这是回忆录内容" not in video_prompt
 
 
 async def test_material_image_generation_creates_unplaced_toolbox_asset(

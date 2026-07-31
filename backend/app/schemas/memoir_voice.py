@@ -422,7 +422,7 @@ class MemoirTranscriptShareVideoContextResponse(BaseModel):
     max_select_ms: int = 90000
     ai_background_enabled: bool = False
     default_background_source: str = "ai"
-    default_background_style: str = "old_album"
+    default_background_style: str = "watercolor"
     default_background_mode: str = "auto"
     background_sources: list[MemoirShareVideoBackgroundSourceResponse] = Field(default_factory=list)
     background_styles: list[MemoirShareVideoBackgroundStyleResponse] = Field(default_factory=list)
@@ -483,7 +483,7 @@ class MemoirShareVideoJobResponse(BaseModel):
     end_ms: int
     duration_ms: int
     background_source: str = "ai"
-    background_style: str = "old_album"
+    background_style: str = "watercolor"
     background_mode: str = "auto"
     background_effective_mode: str = "single"
     custom_background_asset_id: str | None = None

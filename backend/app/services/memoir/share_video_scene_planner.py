@@ -13,7 +13,7 @@ from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
 
-SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v2"
+SHARE_VIDEO_SCENE_PLAN_VERSION = "memoir-share-video-scene-plan-v3"
 SHARE_VIDEO_SCENE_MIN_DURATION_MS = 6000
 SHARE_VIDEO_SCENE_MAX_COUNT = 5
 SHARE_VIDEO_SCENE_TEXT_MAX_CHARS = 220
@@ -32,8 +32,6 @@ class ShareVideoScene:
     start_ms: int
     end_ms: int
     title: str
-    visual_summary: str
-    image_prompt_content: str
     sentence_ids: tuple[int, ...] = ()
     evidence_quote: str = ""
 
@@ -66,10 +64,6 @@ class _ShareVideoSceneOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sentence_ids: list[int] = Field(default_factory=list)
-    title: str = ""
-    evidence_quote: str = ""
-    visual_summary: str = ""
-    image_prompt_content: str = ""
 
 
 class _ShareVideoScenePlanOutput(BaseModel):
@@ -333,8 +327,6 @@ def fallback_share_video_scene_plan(
                 start_ms=start_ms,
                 end_ms=max(start_ms + 1, end_ms),
                 title=_fallback_title(scene_text, index),
-                visual_summary=f"围绕“{_compact_text(scene_text, limit=80)}”的回忆氛围",
-                image_prompt_content=_compact_text(scene_text),
                 sentence_ids=tuple(sentence.index for sentence in group),
                 evidence_quote=_compact_text(scene_text, limit=90),
             )
@@ -348,9 +340,6 @@ def fallback_share_video_scene_plan(
                 start_ms=0,
                 end_ms=max(1, duration_ms),
                 title="回忆片段",
-                visual_summary="温暖、克制、留白充足的家庭回忆录氛围",
-                image_prompt_content=_compact_text(text)
-                or "温暖、克制、留白充足的家庭回忆录背景",
                 sentence_ids=(),
                 evidence_quote=_compact_text(text, limit=90),
             )
@@ -366,11 +355,9 @@ def fallback_share_video_scene_plan(
 
 def _system_prompt() -> str:
     return (
-        "你是回忆录访谈视频的纪录片分镜策划。"
+        "你是回忆录访谈视频的分镜切分助手。"
         "你只输出严格 JSON，不要 Markdown，不要解释。"
-        "你的任务是把一段口述文字拆成适合生成背景图的少量画面。"
-        "不要凭空编造具体正脸、姓名、地标或没有依据的细节；"
-        "要提炼年代感、家庭关系、生活场景和情绪。"
+        "你的任务只是在不改写原文的前提下，把连续句子分成少量画面组。"
     )
 
 
@@ -391,14 +378,10 @@ def _user_prompt(
 要求：
 1. 输出 JSON 对象，格式为 {{"scenes":[...]}}。
 2. scenes 长度必须在 {min_scene_count} 到 {max_scene_count} 之间；不要为了平均切分而机械用满上限。
-3. 每个 scene 包含 sentence_ids、title、evidence_quote、visual_summary、image_prompt_content。
+3. 每个 scene 只包含 sentence_ids。
 4. sentence_ids 只能引用下面的“句子/短句单元”编号，必须连续、递增、不重叠，并且所有编号从 0 到 {len(sentences) - 1} 必须刚好覆盖一次。
 5. 不要拆开任何一个句子/短句单元；不要输出 start_char/end_char。
-6. evidence_quote 应来自本 scene 覆盖的句子/短句，可以适度压缩但不要改写事实。
-7. image_prompt_content 要适合交给文生图模型生成背景图，不要包含“生成一张图”这类指令。
-8. image_prompt_content 只能提炼原文支持的可视化场景、年代感、家庭关系、生活物件和情绪；不要凭空编造具体年份、地点、人物身份或清晰正脸。
-9. 不要要求出现文字、字幕、logo、招牌、题字、清晰正脸。
-10. 每个画面应保留留白，适合叠加口述文字。
+6. 根据原文中场景、人物、时间或叙述重点的自然变化决定分组边界。
 
 音频时长：{round(duration_ms / 1000, 1)} 秒
 原文字符数：{len(selected_text)}
@@ -429,10 +412,6 @@ def _scene_from_sentence_payload(
     if start_char >= len(text):
         return None
     scene_text = text[start_char:end_char]
-    title = str(item.get("title") or _fallback_title(scene_text, index)).strip()[:30]
-    visual_summary = str(item.get("visual_summary") or "").strip()
-    evidence_quote = str(item.get("evidence_quote") or "").strip()
-    prompt_content = str(item.get("image_prompt_content") or "").strip()
     start_ms, end_ms = _scene_time_range(char_timings, start_char, end_char, duration_ms)
     return ShareVideoScene(
         index=index,
@@ -440,11 +419,9 @@ def _scene_from_sentence_payload(
         end_char=end_char,
         start_ms=start_ms,
         end_ms=max(start_ms + 1, end_ms),
-        title=title or _fallback_title(scene_text, index),
-        visual_summary=_compact_text(visual_summary or scene_text),
-        image_prompt_content=_compact_text(prompt_content or scene_text),
+        title=_fallback_title(scene_text, index),
         sentence_ids=tuple(sentence_ids),
-        evidence_quote=_compact_text(evidence_quote or scene_text, limit=90),
+        evidence_quote=_compact_text(scene_text, limit=90),
     )
 
 
@@ -583,8 +560,6 @@ def scene_plan_to_metadata(plan: ShareVideoScenePlan) -> dict[str, object]:
                 "start_ms": scene.start_ms,
                 "end_ms": scene.end_ms,
                 "title": scene.title,
-                "visual_summary": scene.visual_summary,
-                "image_prompt_content": scene.image_prompt_content,
                 "sentence_ids": list(scene.sentence_ids),
                 "evidence_quote": scene.evidence_quote,
             }

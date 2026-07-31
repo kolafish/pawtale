@@ -64,7 +64,6 @@ class RegisteredShareVideoBackground:
     source_quote: str
     scene_index: int | None = None
     scene_title: str = ""
-    scene_visual_summary: str = ""
     evidence_quote: str = ""
 
 
@@ -845,7 +844,6 @@ async def register_share_video_background_asset(
         "share_video_end_ms": job.end_ms,
         "share_video_text_hash": job.text_hash,
         "scene_index": context.scene_index,
-        "scene_visual_summary": context.scene_visual_summary,
     }
     if existing:
         existing.status = MemoirImageAssetStatus.READY.value

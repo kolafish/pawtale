@@ -545,7 +545,7 @@ test("share video APIs encode routes and download preview with session cookie", 
 
   const context = await getMemoirTranscriptShareVideoContext("utterance/1");
   const created = await createMemoirTranscriptShareVideoJob("utterance/1", 0, 13, {
-    backgroundStyle: "storybook",
+    backgroundStyle: "gouache",
     backgroundMode: "smart_multi",
   });
   const detail = await getMemoirShareVideoJob("job/1");
@@ -567,7 +567,7 @@ test("share video APIs encode routes and download preview with session cookie", 
     start_char: 0,
     end_char: 13,
     ai_model: "deepseek-v4-pro",
-    background_style: "storybook",
+    background_style: "gouache",
     background_mode: "smart_multi",
   });
   assert.equal(

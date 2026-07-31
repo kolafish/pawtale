@@ -83,7 +83,7 @@ function sampleShareVideoContext(utteranceId = "utterance-share", overrides = {}
     max_select_ms: 90000,
     ai_background_enabled: true,
     default_background_source: "ai",
-    default_background_style: "old_album",
+    default_background_style: "watercolor",
     default_background_mode: "auto",
     background_sources: [
       {
@@ -104,19 +104,29 @@ function sampleShareVideoContext(utteranceId = "utterance-share", overrides = {}
     ],
     background_styles: [
       {
-        value: "old_album",
-        label: "旧相册",
-        description: "旧照片手工上色质感",
+        value: "watercolor",
+        label: "清透水彩",
+        description: "透明水色和柔和叠染",
+      },
+      {
+        value: "pencil",
+        label: "柔和铅笔",
+        description: "细腻铅笔线条和轻柔明暗",
       },
       {
         value: "ink_paper",
-        label: "淡水墨",
-        description: "淡水墨旧纸质感",
+        label: "水墨淡彩",
+        description: "现代水墨与透明淡彩",
       },
       {
-        value: "storybook",
-        label: "老故事书",
-        description: "中国老连环画和旧书插图质感",
+        value: "gouache",
+        label: "叙事水粉",
+        description: "明确色块和柔和笔触",
+      },
+      {
+        value: "old_album",
+        label: "怀旧影像",
+        description: "旧相册手工上色质感",
       },
     ],
     background_modes: [
@@ -856,8 +866,8 @@ test("transcript detail page creates share video from selected corrected segment
   assert.equal(context.data.shareVideoBackgroundSource, "ai");
   assert.equal(context.data.shareVideoBackgroundSourceOptions.length, 3);
   assert.equal(context.data.shareVideoBackgroundUsesAi, true);
-  assert.equal(context.data.shareVideoBackgroundStyle, "old_album");
-  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 3);
+  assert.equal(context.data.shareVideoBackgroundStyle, "watercolor");
+  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 5);
   assert.equal(context.data.shareVideoBackgroundMode, "auto");
   assert.equal(context.data.shareVideoBackgroundModeOptions.length, 3);
 
@@ -878,14 +888,14 @@ test("transcript detail page creates share video from selected corrected segment
     },
   };
   page.selectShareVideoBackgroundStyle.call(context, {
-    currentTarget: { dataset: { backgroundStyle: "storybook" } },
+    currentTarget: { dataset: { backgroundStyle: "gouache" } },
   });
-  assert.equal(context.data.shareVideoBackgroundStyle, "storybook");
-  assert.equal(context.data.shareVideoBackgroundStyleLabel, "老故事书");
+  assert.equal(context.data.shareVideoBackgroundStyle, "gouache");
+  assert.equal(context.data.shareVideoBackgroundStyleLabel, "叙事水粉");
   assert.deepEqual(storageWrites, [
     {
       key: "pawtale_share_video_background_settings",
-      value: { backgroundSource: "ai", backgroundStyle: "storybook", backgroundMode: "auto" },
+      value: { backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "auto" },
     },
   ]);
   page.selectShareVideoBackgroundMode.call(context, {
@@ -901,7 +911,7 @@ test("transcript detail page creates share video from selected corrected segment
       id: "utterance-share",
       startChar: 0,
       endChar: 23,
-      options: { backgroundSource: "ai", backgroundStyle: "storybook", backgroundMode: "smart_multi" },
+      options: { backgroundSource: "ai", backgroundStyle: "gouache", backgroundMode: "smart_multi" },
     },
   ]);
   assert.equal(context.data.shareVideoJob.status, "pending");
@@ -975,7 +985,7 @@ test("transcript detail page creates a standalone image and opens it in the tool
     setStorageSync() {},
   };
   page.selectShareVideoBackgroundStyle.call(context, {
-    currentTarget: { dataset: { backgroundStyle: "storybook" } },
+    currentTarget: { dataset: { backgroundStyle: "gouache" } },
   });
 
   await page.createMaterialImage.call(context);
@@ -984,7 +994,7 @@ test("transcript detail page creates a standalone image and opens it in the tool
     id: "utterance-share",
     startChar: 0,
     endChar: 13,
-    styleId: "storybook",
+    styleId: "gouache",
   }]);
   assert.equal(context.data.materialImageJob.status, "pending");
   assert.equal(context.data.materialImagePolling, true);
@@ -1141,7 +1151,7 @@ test("transcript detail page uses backend background options as the configuratio
   assert.equal(context.data.shareVideoBackgroundStyleLabel, "纪实影像");
   assert.equal(context.data.shareVideoBackgroundMode, "story_beats");
   assert.equal(context.data.shareVideoBackgroundModeLabel, "故事节拍");
-  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 4);
+  assert.equal(context.data.shareVideoBackgroundStyleOptions.length, 6);
   assert.equal(context.data.shareVideoBackgroundModeOptions.length, 4);
 
   page.selectShareVideoBackgroundStyle.call(context, {
@@ -1284,7 +1294,7 @@ test("transcript detail page uploads a custom background before creating share v
   ]);
   assert.deepEqual(storageWrites[storageWrites.length - 1], {
     key: "pawtale_share_video_background_settings",
-    value: { backgroundSource: "custom", backgroundStyle: "old_album", backgroundMode: "auto" },
+    value: { backgroundSource: "custom", backgroundStyle: "watercolor", backgroundMode: "auto" },
   });
 });
 

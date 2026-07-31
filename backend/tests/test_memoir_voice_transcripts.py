@@ -643,38 +643,67 @@ def test_share_video_multi_background_filter_falls_back_without_xfade(tmp_path):
 
 def test_share_video_background_prompts_cover_default_styles():
     options = share_video_backgrounds.share_video_background_style_options()
-    assert [option["value"] for option in options] == ["old_album", "ink_paper", "storybook"]
-    assert [option["label"] for option in options] == ["旧相册", "淡水墨", "老故事书"]
+    assert [option["value"] for option in options] == [
+        "watercolor",
+        "pencil",
+        "ink_paper",
+        "gouache",
+        "old_album",
+    ]
+    assert [option["label"] for option in options] == [
+        "清透水彩",
+        "柔和铅笔",
+        "水墨淡彩",
+        "叙事水粉",
+        "怀旧影像",
+    ]
     mode_options = share_video_backgrounds.share_video_background_mode_options()
     assert [option["value"] for option in mode_options] == ["auto", "single", "smart_multi"]
     assert [option["label"] for option in mode_options] == ["自动", "单张背景", "智能多图"]
 
+    watercolor = share_video_backgrounds.build_share_video_background_prompt(
+        "周末一家人一起在院子里吃饭。",
+        None,
+    )
+    pencil = share_video_backgrounds.build_share_video_background_prompt(
+        "母亲常在窗边缝补衣服。",
+        "pencil",
+    )
+    ink_paper = share_video_backgrounds.build_share_video_background_prompt(
+        "雨后沿着河边慢慢走回家。",
+        "ink_paper",
+    )
+    gouache = share_video_backgrounds.build_share_video_background_prompt(
+        "第一次到县城上学，街上很热闹。",
+        "gouache",
+    )
     old_album = share_video_backgrounds.build_share_video_background_prompt(
         "爷爷说偏爱孙女，但做事情心里要讲公道。",
         "old_album",
-    )
-    ink_paper = share_video_backgrounds.build_share_video_background_prompt(
-        "晚年回看故乡，很多事情都慢慢淡了。",
-        "ink_paper",
     )
     storybook = share_video_backgrounds.build_share_video_background_prompt(
         "小时候一家人在老房子里吃饭，后来去县城读书。",
         "storybook",
     )
 
-    assert "旧家庭照片" in old_album.prompt
-    assert "手工上色" in old_album.prompt
-    assert "淡水墨旧纸" in ink_paper.prompt
-    assert "中国文人水墨画" in ink_paper.prompt
+    assert watercolor.style.value == "watercolor"
+    assert "透明水色" in watercolor.prompt
+    assert "石墨铅笔" in pencil.prompt
+    assert "现代水墨淡彩" in ink_paper.prompt
+    assert "叙事水粉画" in gouache.prompt
+    assert "银盐胶片颗粒" in old_album.prompt
     assert "二十世纪中国老连环画" in storybook.prompt
-    assert "旧书插图" in storybook.prompt
-    for prompt in (old_album, ink_paper, storybook):
-        assert "不要出现文字" in prompt.prompt
+    assert "storybook" not in [option["value"] for option in options]
+    for prompt in (watercolor, pencil, ink_paper, gouache, old_album, storybook):
+        assert "画面主体主要安排在左侧" in prompt.prompt
+        assert "画面中部和右侧保留大面积" in prompt.prompt
+        assert "不出现文字" in prompt.prompt
         assert "横版 16:9" in prompt.prompt
+        assert "不要因为这是回忆录内容" not in prompt.prompt
 
     long_prompt = share_video_backgrounds.build_share_video_background_prompt(
         "乡" * 420,
-        "old_album",
+        "watercolor",
     )
     assert len(long_prompt.content) == share_video_backgrounds.SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS + 3
     assert long_prompt.content.endswith("...")
@@ -720,9 +749,13 @@ def test_share_video_scene_planner_prompt_uses_sentence_ids_not_char_offsets():
 
     assert "sentence_ids" in prompt
     assert "不要输出 start_char/end_char" in prompt
+    assert "每个 scene 只包含 sentence_ids" in prompt
     assert "0. [0.0s-" in prompt
     assert "小时候一家人住在老房子里。" in prompt
     assert "每个 scene 包含 start_char、end_char" not in prompt
+    assert "image_prompt_content" not in prompt
+    assert "visual_summary" not in prompt
+    assert "evidence_quote" not in prompt
 
 
 def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
@@ -736,20 +769,8 @@ def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
     scenes = share_video_scene_planner._normalize_llm_sentence_scenes(
         {
             "scenes": [
-                {
-                    "sentence_ids": [0, 1],
-                    "title": "老房子和县城",
-                    "evidence_quote": "小时候一家人住在老房子里。后来去县城读书。",
-                    "visual_summary": "老房子生活与去县城读书的回忆",
-                    "image_prompt_content": "旧房子与去县城读书路上的安静回忆",
-                },
-                {
-                    "sentence_ids": [2],
-                    "title": "各自成家",
-                    "evidence_quote": "再后来大家各自成家。",
-                    "visual_summary": "家人各自成家后的回望",
-                    "image_prompt_content": "家庭成员各自成家后的克制回望",
-                },
+                {"sentence_ids": [0, 1]},
+                {"sentence_ids": [2]},
             ]
         },
         text,
@@ -782,8 +803,10 @@ def test_share_video_scene_planner_normalizes_continuous_sentence_groups():
     assert scenes[0].sentence_ids == (0, 1)
     assert scenes[0].start_char == 0
     assert scenes[0].end_char == sentences[1].end_char
+    assert scenes[0].evidence_quote.startswith("小时候一家人住在老房子里")
     assert scenes[1].start_char == sentences[2].start_char
     assert scenes[1].end_char == len(text)
+    assert scenes[1].evidence_quote == "再后来大家各自成家。"
     assert invalid_gap == []
     assert invalid_offsets == []
 
@@ -1536,8 +1559,6 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
                     start_ms=0,
                     end_ms=12_000,
                     title="老房子",
-                    visual_summary="一家人在老房子里的生活气息",
-                    image_prompt_content="老房子里一家人的温暖生活气息",
                 ),
                 share_video_scene_planner.ShareVideoScene(
                     index=1,
@@ -1546,8 +1567,6 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
                     start_ms=12_000,
                     end_ms=24_000,
                     title="县城读书",
-                    visual_summary="去县城读书的记忆",
-                    image_prompt_content="去县城读书路上的旧时记忆",
                 ),
                 share_video_scene_planner.ShareVideoScene(
                     index=2,
@@ -1556,8 +1575,6 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
                     start_ms=24_000,
                     end_ms=36_000,
                     title="各自成家",
-                    visual_summary="家人各自成家后的回望",
-                    image_prompt_content="家人各自成家后的安静回望",
                 ),
             ],
         )
@@ -1630,9 +1647,9 @@ async def test_mobile_memoir_share_video_job_uses_smart_multi_background_segment
     assert detail["background_model"] == "doubao-seedream-5-0-lite-260128"
     assert [style for _prompt, style in image_calls] == ["old_album", "old_album", "old_album"]
     assert [prompt for prompt, _style in image_calls] == [
-        "老房子里一家人的温暖生活气息",
-        "去县城读书路上的旧时记忆",
-        "家人各自成家后的安静回望",
+        "小时候一家人住在老房子里。",
+        "后来去县城读书。",
+        "再后来大家各自成家。",
     ]
     assert len(render_requests) == 1
     render_request = render_requests[0]
