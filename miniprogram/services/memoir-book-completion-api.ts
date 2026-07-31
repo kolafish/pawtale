@@ -73,17 +73,6 @@ export interface MemoirBookReviewJob {
   error_message: string;
 }
 
-export type MemoirBookRevisionJobSource =
-  | "review_answers"
-  | "editorial_actions"
-  | "proposal_feedback"
-  | "proposal_draft";
-
-export type MemoirBookRevisionCommandSource = Exclude<
-  MemoirBookRevisionJobSource,
-  "proposal_feedback" | "proposal_draft"
->;
-
 export interface MemoirBookRevisionJob {
   job_id: string | null;
   project_id: string;
@@ -105,19 +94,13 @@ export interface MemoirBookRevisionJob {
   can_cancel: boolean;
   can_retry: boolean;
   error_message: string;
-}
-
-export interface MemoirBookAnswerApplicationJob extends MemoirBookRevisionJob {
+  include_answers: boolean;
   answer_count: number;
   unresolved_count: number;
+  selected_action_count: number;
   changed_chapter_count: number;
   summary: string;
   already_applied: boolean;
-  can_apply: boolean;
-}
-
-export interface MemoirBookEditorialRevisionJob extends MemoirBookRevisionJob {
-  selected_action_count: number;
 }
 
 export interface MemoirBookRevisionFeedbackJob extends MemoirBookRevisionJob {
@@ -126,12 +109,6 @@ export interface MemoirBookRevisionFeedbackJob extends MemoirBookRevisionJob {
 }
 
 export type MemoirBookRevisionDraftJob = MemoirBookRevisionFeedbackJob;
-
-export type MemoirBookRevisionJobForSource<
-  Source extends MemoirBookRevisionCommandSource,
-> = Source extends "review_answers"
-  ? MemoirBookAnswerApplicationJob
-  : MemoirBookEditorialRevisionJob;
 
 export type MemoirBookRevisionProposalStatus =
   | "ready"
@@ -276,8 +253,7 @@ export interface MemoirBookCompletionSnapshot
   book_review_job: MemoirBookReviewJob | null;
   book_issues: MemoirCompletionIssue[];
   book_output_available: boolean;
-  answer_application_job: MemoirBookAnswerApplicationJob | null;
-  editorial_revision_job: MemoirBookEditorialRevisionJob | null;
+  revision_job: MemoirBookRevisionJob | null;
 }
 
 function chapterPreparationJobPath(
@@ -326,45 +302,34 @@ export function cancelMemoirBookReviewJob(
   );
 }
 
-function bookRevisionJobPath(
-  projectId: string,
-  source: MemoirBookRevisionCommandSource,
-  suffix = "",
-): string {
-  const segment = source === "review_answers"
-    ? "answer-application"
-    : "editorial-revision";
-  return `${bookReviewPath(projectId)}/${segment}/jobs${suffix}`;
+function bookRevisionJobPath(projectId: string, suffix = ""): string {
+  return `${bookReviewPath(projectId)}/revision/jobs${suffix}`;
 }
 
-export function enqueueMemoirBookRevisionJob<
-  Source extends MemoirBookRevisionCommandSource,
->(
+export function enqueueMemoirBookRevisionJob(
   projectId: string,
-  source: Source,
+  includeAnswers: boolean,
   actionIds: string[] = [],
-): Promise<MemoirBookRevisionJobForSource<Source>> {
-  const payload = source === "review_answers"
-    ? { ai_model: null }
-    : { action_ids: actionIds, ai_model: null };
-  return memoirAIRequest<MemoirBookRevisionJobForSource<Source>, typeof payload>(
-    bookRevisionJobPath(projectId, source),
+): Promise<MemoirBookRevisionJob> {
+  const payload = {
+    include_answers: includeAnswers,
+    action_ids: actionIds,
+    ai_model: null,
+  };
+  return memoirAIRequest<MemoirBookRevisionJob, typeof payload>(
+    bookRevisionJobPath(projectId),
     payload,
     { timeoutProfile: "mutation" },
   );
 }
 
-export function cancelMemoirBookRevisionJob<
-  Source extends MemoirBookRevisionCommandSource,
->(
+export function cancelMemoirBookRevisionJob(
   projectId: string,
   jobId: string,
-  source: Source,
-): Promise<MemoirBookRevisionJobForSource<Source>> {
-  return memoirRequest<MemoirBookRevisionJobForSource<Source>>(
+): Promise<MemoirBookRevisionJob> {
+  return memoirRequest<MemoirBookRevisionJob>(
     bookRevisionJobPath(
       projectId,
-      source,
       `/${encodeURIComponent(jobId)}`,
     ),
     { method: "DELETE" },

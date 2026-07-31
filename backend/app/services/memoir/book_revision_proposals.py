@@ -45,6 +45,9 @@ from app.services.memoir.book_output_snapshots import (
 )
 
 
+BOOK_REVIEW_SELECTION_SOURCE = "book_review_selection"
+
+
 def _text(value: object) -> str:
     return value.strip() if isinstance(value, str) else ""
 
@@ -373,25 +376,36 @@ async def _ready_source_state(
         db,
         review=review,
     )
-    source = proposal.selected_actions_json.get("source")
-    if source == "book_review_answers":
+    if (
+        proposal.selected_actions_json.get("source")
+        != BOOK_REVIEW_SELECTION_SOURCE
+    ):
+        return None, "修改预览来源无效"
+    include_answers = proposal.selected_actions_json.get("include_answers") is True
+    if include_answers:
         expected = _text(proposal.selected_actions_json.get("answers_signature"))
         if not expected or context.answers_signature != expected:
             return None, "问题回答已经变化，请重新生成修改预览"
-        return _ProposalSourceState(review, context, []), ""
-    if source != book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE:
-        return None, "修改预览来源无效"
     raw_action_ids = proposal.selected_actions_json.get("action_ids")
     try:
-        actions = book_editorial_actions.selected_review_actions(
-            review.review_json,
-            ([str(value) for value in raw_action_ids] if isinstance(raw_action_ids, list) else []),
+        action_ids = (
+            [str(value) for value in raw_action_ids]
+            if isinstance(raw_action_ids, list)
+            else []
+        )
+        actions = (
+            book_editorial_actions.selected_review_actions(
+                review.review_json,
+                action_ids,
+            )
+            if action_ids
+            else []
         )
     except ValueError:
         return None, "所选编辑建议已经变化，请重新生成修改预览"
     if book_editorial_actions.actions_signature(actions) != proposal.selected_actions_json.get(
         "actions_signature"
-    ) or context.answers_signature != proposal.selected_actions_json.get("answers_signature", ""):
+    ):
         return None, "所选编辑建议已经变化，请重新生成修改预览"
     return _ProposalSourceState(review, context, actions), ""
 
@@ -532,10 +546,10 @@ async def apply_proposal(
     )
     if state is None:
         raise ValueError(stale_message)
-    source = proposal.selected_actions_json.get("source")
     review = state.review
     context = state.answer_context
     selected_editorial_actions = state.editorial_actions
+    include_answers = proposal.selected_actions_json.get("include_answers") is True
 
     snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
@@ -580,10 +594,10 @@ async def apply_proposal(
     changed_chapter_count = int(build_comparison(before=before_snapshots, after=snapshots)["changed_chapter_count"])
     metadata = {
         **(output.metadata_json if isinstance(output.metadata_json, dict) else {}),
-        "source": str(source),
+        "source": BOOK_REVIEW_SELECTION_SOURCE,
         "book_tts": None,
     }
-    if source == "book_review_answers":
+    if include_answers:
         metadata[book_review_answer_state.BOOK_REVIEW_ANSWER_APPLICATION_KEY] = {
             "review_input_signature": review.input_signature,
             "answers_signature": context.answers_signature,
@@ -596,7 +610,7 @@ async def apply_proposal(
             "engine": _text(proposal.generation_json.get("engine")),
             "proposal_id": proposal.id,
         }
-    else:
+    if selected_editorial_actions:
         metadata[book_editorial_actions.BOOK_EDITORIAL_REVISION_APPLICATION_KEY] = {
             "review_input_signature": review.input_signature,
             "action_ids": [str(action.get("id") or "") for action in selected_editorial_actions],

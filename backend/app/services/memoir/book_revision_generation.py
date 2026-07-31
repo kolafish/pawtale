@@ -493,158 +493,6 @@ def _plan_output_instruction() -> str:
 """
 
 
-def _answer_plan_prompt(
-    *,
-    snapshots: list[dict[str, object]],
-    context: book_review_answer_state.BookReviewAnswerContext,
-    chapter_refs: ModelReferenceMap,
-    section_refs: ModelReferenceMap,
-    book_information: dict[str, str],
-) -> str:
-    answers = "\n\n".join(
-        f"问题 {index}：{answer.question}\n"
-        f"问题原因：{answer.reason}\n"
-        f"用户回答：{answer.answer}\n"
-        "关联章节：" + "、".join(chapter_refs.encode(value) for value in answer.chapter_ids)
-        for index, answer in enumerate(context.answers, start=1)
-    )
-    chapters = _chapter_source_text(
-        snapshots=snapshots,
-        chapter_refs=chapter_refs,
-        section_refs=section_refs,
-        allowed_chapter_ids=context.related_chapter_ids,
-    )
-    return f"""请根据全书检查问题和用户回答，判断当前书稿是否需要修改；确有必要时再制定修改思路。
-
-用户回答：
-{answers}
-
-当前成书信息：
-{book_information_text(book_information)}
-
-关联章节原文：
-{chapters}
-
-{_plan_output_instruction()}"""
-
-
-async def apply_book_review_answers(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    expected_review_input_signature: str,
-    expected_answers_signature: str,
-    ai_model: str | None,
-    progress_callback: ProgressCallback | None = None,
-    ai_client: AITextClient | None = None,
-) -> BookRevisionResult:
-    review = await book_reviews.get_current_book_review(db, project_id=project_id)
-    if review is None or review.input_signature != expected_review_input_signature:
-        raise BookRevisionError("全书内容已经变化，请重新检查后再应用回答")
-    context = await book_review_answer_state.load_answer_context(db, review=review)
-    if context.unresolved_count:
-        raise BookRevisionError("请先处理完所有需要确认的问题")
-    if not context.answers:
-        raise BookRevisionError("当前没有可以应用到书稿的回答")
-    if context.answers_signature != expected_answers_signature:
-        raise BookRevisionError("问题回答已经变化，请重新提交")
-
-    if progress_callback is not None:
-        await progress_callback({"stage": "assembling"})
-    output, baseline = await _load_baseline(
-        db,
-        project_id=project_id,
-        missing_message="书稿还没有生成",
-    )
-    if book_review_answer_state.marker_matches_context(
-        output=output,
-        version=baseline,
-        context=context,
-    ):
-        marker = book_review_answer_state.application_marker(output)
-        changed_count = int(marker.get("changed_chapter_count") or 0)
-        return BookRevisionResult(
-            proposal_id=_text(marker.get("proposal_id")) or None,
-            changed_chapter_count=changed_count,
-            selected_action_count=0,
-            summary=_text(marker.get("summary")) or "这些回答已经应用到书稿",
-            requested_ai_model=ai_model,
-            resolved_ai_model=_text(marker.get("resolved_ai_model")) or ai_model,
-            generation={},
-        )
-
-    snapshots = _snapshots(baseline.chapter_snapshot_json)
-    chapter_refs, section_refs = _reference_maps(
-        snapshots,
-        context.related_chapter_ids,
-        stale_message="问题关联的章节已经变化，请重新检查全书",
-    )
-    if not context.related_chapter_ids:
-        raise BookRevisionError("问题没有关联到可调整的书稿章节")
-    if progress_callback is not None:
-        await progress_callback({"stage": "revising"})
-    generated_plan = await _generate_revision_plan(
-        project_id=project_id,
-        prompt=_answer_plan_prompt(
-            snapshots=snapshots,
-            context=context,
-            chapter_refs=chapter_refs,
-            section_refs=section_refs,
-            book_information=_book_information(output, baseline),
-        ),
-        engine=PLAN_ENGINE,
-        error_message="生成修改思路时遇到问题，请稍后重试",
-        ai_model=ai_model,
-        ai_client=ai_client,
-        reference_maps=(chapter_refs, section_refs),
-    )
-    summary = generated_plan.plan.summary.strip()
-    generation = generated_plan.generation
-
-    if progress_callback is not None:
-        await progress_callback({"stage": "saving"})
-    current_review, baseline = await _reload_baseline(
-        db,
-        project_id=project_id,
-        output_id=output.id,
-        baseline_id=baseline.id,
-        expected_review_input_signature=expected_review_input_signature,
-        require_ready_review=False,
-        stale_message="调整期间全书或回答已变化，请重试",
-    )
-    current_context = await book_review_answer_state.load_answer_context(
-        db,
-        review=current_review,
-    )
-    if current_context.answers_signature != expected_answers_signature:
-        raise BookRevisionError("调整期间全书或回答已变化，请重试")
-    proposal = await book_revision_proposals.create_ready_proposal(
-        db,
-        review=current_review,
-        baseline=baseline,
-        candidate_snapshots=[],
-        selected_actions={
-            "source": "book_review_answers",
-            "answers_signature": current_context.answers_signature,
-            "issue_ids": [answer.issue_id for answer in current_context.answers],
-        },
-        generation=generation,
-        summary=summary,
-        phase=MemoirBookRevisionProposalPhase.PLAN_READY,
-        revision_plan=generated_plan.plan.model_dump(mode="json"),
-    )
-    return BookRevisionResult(
-        proposal_id=proposal.id,
-        changed_chapter_count=0,
-        selected_action_count=0,
-        summary=summary,
-        requested_ai_model=ai_model,
-        resolved_ai_model=generated_plan.resolved_ai_model,
-        generation=generation,
-        proposal_phase=proposal.phase,
-    )
-
-
 def _book_outline(snapshots: list[dict[str, object]]) -> str:
     return "\n".join(
         f"- {_text(chapter.get('chapter_title'))}："
@@ -853,15 +701,14 @@ async def generate_book_revision_draft(
     if baseline is None:
         raise BookRevisionError("修改前的书稿版本已不可用")
     snapshots = _snapshots(baseline.chapter_snapshot_json)
-    source = proposal.selected_actions_json.get("source")
-    if source == book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE:
+    raw_action_ids = proposal.selected_actions_json.get("action_ids")
+    if isinstance(raw_action_ids, list) and raw_action_ids:
         review = await db.get(MemoirBookReview, proposal.review_id)
         if review is None:
             raise BookRevisionError("全书检查结果已经变化，请重新检查")
-        raw_action_ids = proposal.selected_actions_json.get("action_ids")
         actions = book_editorial_actions.selected_review_actions(
             review.review_json,
-            ([str(value) for value in raw_action_ids] if isinstance(raw_action_ids, list) else []),
+            [str(value) for value in raw_action_ids],
         )
         snapshots = _reorder_chapters(snapshots, actions)
 
@@ -982,15 +829,24 @@ def _reorder_chapters(
     return result
 
 
-def _editorial_plan_prompt(
+def _revision_plan_prompt(
     *,
     snapshots: list[dict[str, object]],
+    answer_context: book_review_answer_state.BookReviewAnswerContext,
+    include_answers: bool,
     actions: list[dict[str, object]],
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
     book_information: dict[str, str],
     book_overview: str,
 ) -> str:
+    answers = "\n\n".join(
+        f"问题 {index}：{answer.question}\n"
+        f"问题原因：{answer.reason}\n"
+        f"用户回答：{answer.answer}\n"
+        "关联章节：" + "、".join(chapter_refs.encode(value) for value in answer.chapter_ids)
+        for index, answer in enumerate(answer_context.answers, start=1)
+    ) if include_answers else "未选择问题回答"
     action_text = "\n\n".join(
         f"修改目标：{_text(action.get('title'))}\n"
         f"原因：{_text(action.get('reason'))}\n"
@@ -1007,8 +863,15 @@ def _editorial_plan_prompt(
             )
         )
         for action in actions
+    ) or "未选择编辑建议"
+    related_ids = (
+        (answer_context.related_chapter_ids if include_answers else set())
+        | {
+            str(chapter_id)
+            for action in actions
+            for chapter_id in action.get("chapter_ids", [])
+        }
     )
-    related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
     chapters = _chapter_source_text(
         snapshots=snapshots,
         chapter_refs=chapter_refs,
@@ -1025,7 +888,10 @@ def _editorial_plan_prompt(
         if required_metadata_fields
         else "本次没有成书信息修改。"
     )
-    return f"""请根据用户选中的全书编辑建议，制定书稿修改思路。
+    return f"""请根据用户选中的问题回答和编辑建议，制定一份统一的书稿修改思路。
+
+用户选择采用的问题回答：
+{answers}
 
 用户选中的建议：
 {action_text}
@@ -1044,7 +910,7 @@ def _editorial_plan_prompt(
 {_plan_output_instruction()}"""
 
 
-def _validate_editorial_metadata_plan(
+def _validate_metadata_plan(
     *,
     plan: _RevisionPlan,
     actions: list[dict[str, object]],
@@ -1066,12 +932,14 @@ def _validate_editorial_metadata_plan(
         raise BookRevisionError(f"修改思路没有生成有效的{labels}，请重新生成")
 
 
-async def generate_editorial_revision_proposal(
+async def generate_book_revision_proposal(
     db: AsyncSession,
     *,
     project_id: str,
     expected_review_input_signature: str,
+    expected_answers_signature: str,
     expected_actions_signature: str,
+    include_answers: bool,
     action_ids: list[str],
     ai_model: str | None,
     progress_callback: ProgressCallback | None = None,
@@ -1080,10 +948,26 @@ async def generate_editorial_revision_proposal(
     review = await book_reviews.get_current_book_review(db, project_id=project_id)
     if review is None or review.status != "ready" or review.input_signature != expected_review_input_signature:
         raise BookRevisionError("全书检查结果已经变化，请重新检查")
-    actions = book_editorial_actions.selected_review_actions(
-        review.review_json,
-        action_ids,
+    answer_context = await book_review_answer_state.load_answer_context(
+        db,
+        review=review,
     )
+    actions = (
+        book_editorial_actions.selected_review_actions(
+            review.review_json,
+            action_ids,
+        )
+        if action_ids
+        else []
+    )
+    if answer_context.unresolved_count:
+        raise BookRevisionError("请先处理完所有需要确认的问题")
+    if include_answers and not answer_context.answers:
+        raise BookRevisionError("当前没有可以应用到书稿的回答")
+    if include_answers and answer_context.answers_signature != expected_answers_signature:
+        raise BookRevisionError("问题回答已经变化，请重新提交")
+    if not include_answers and not actions:
+        raise BookRevisionError("请至少选择回答或一条编辑建议")
     if any(
         action.get("action_type") == "revise_book_profile"
         and not action.get("metadata_fields")
@@ -1100,15 +984,16 @@ async def generate_editorial_revision_proposal(
         project_id=project_id,
         missing_message="当前书稿还没有准备好",
     )
-    answer_context = await book_review_answer_state.load_answer_context(
-        db,
-        review=review,
-    )
-    if answer_context.unresolved_count:
-        raise BookRevisionError("请先处理完所有需要确认的问题")
     original_snapshots = _snapshots(baseline.chapter_snapshot_json)
     book_information = _book_information(output, baseline)
-    related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
+    related_ids = (
+        (answer_context.related_chapter_ids if include_answers else set())
+        | {
+            str(chapter_id)
+            for action in actions
+            for chapter_id in action.get("chapter_ids", [])
+        }
+    )
     chapter_refs, section_refs = _reference_maps(
         original_snapshots,
         related_ids,
@@ -1118,8 +1003,10 @@ async def generate_editorial_revision_proposal(
         await progress_callback({"stage": "revising"})
     generated_plan = await _generate_revision_plan(
         project_id=project_id,
-        prompt=_editorial_plan_prompt(
+        prompt=_revision_plan_prompt(
             snapshots=original_snapshots,
+            answer_context=answer_context,
+            include_answers=include_answers,
             actions=actions,
             chapter_refs=chapter_refs,
             section_refs=section_refs,
@@ -1132,7 +1019,7 @@ async def generate_editorial_revision_proposal(
         ai_client=ai_client,
         reference_maps=(chapter_refs, section_refs),
     )
-    _validate_editorial_metadata_plan(
+    _validate_metadata_plan(
         plan=generated_plan.plan,
         actions=actions,
         book_information=book_information,
@@ -1149,9 +1036,13 @@ async def generate_editorial_revision_proposal(
         require_ready_review=True,
         stale_message="生成期间全书内容已经变化，请重试",
     )
-    current_actions = book_editorial_actions.selected_review_actions(
-        current_review.review_json,
-        action_ids,
+    current_actions = (
+        book_editorial_actions.selected_review_actions(
+            current_review.review_json,
+            action_ids,
+        )
+        if action_ids
+        else []
     )
     current_answers = await book_review_answer_state.load_answer_context(
         db,
@@ -1159,7 +1050,10 @@ async def generate_editorial_revision_proposal(
     )
     if (
         book_editorial_actions.actions_signature(current_actions) != expected_actions_signature
-        or current_answers.answers_signature != answer_context.answers_signature
+        or (
+            include_answers
+            and current_answers.answers_signature != expected_answers_signature
+        )
     ):
         raise BookRevisionError("生成期间编辑建议或问题回答已经变化，请重试")
     proposal = await book_revision_proposals.create_ready_proposal(
@@ -1168,10 +1062,18 @@ async def generate_editorial_revision_proposal(
         baseline=baseline,
         candidate_snapshots=[],
         selected_actions={
-            "source": book_editorial_actions.BOOK_EDITORIAL_ACTION_SOURCE,
+            "source": book_revision_proposals.BOOK_REVIEW_SELECTION_SOURCE,
+            "include_answers": include_answers,
+            "answers_signature": (
+                current_answers.answers_signature if include_answers else ""
+            ),
+            "issue_ids": (
+                [answer.issue_id for answer in current_answers.answers]
+                if include_answers
+                else []
+            ),
             "action_ids": action_ids,
             "actions_signature": expected_actions_signature,
-            "answers_signature": current_answers.answers_signature,
         },
         generation=generated_plan.generation,
         summary=generated_plan.plan.summary.strip(),

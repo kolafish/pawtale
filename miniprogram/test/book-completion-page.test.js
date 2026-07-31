@@ -163,14 +163,16 @@ function reviewJob(overrides = {}) {
   };
 }
 
-function answerApplicationJob(overrides = {}) {
+function revisionJob(overrides = {}) {
   return {
     job_id: null,
     project_id: "project-1",
     status: "idle",
     stage: "",
+    include_answers: false,
     answer_count: 0,
     unresolved_count: 0,
+    selected_action_count: 0,
     changed_chapter_count: 0,
     summary: "",
     proposal_id: null,
@@ -178,25 +180,6 @@ function answerApplicationJob(overrides = {}) {
     requested_ai_model: null,
     resolved_ai_model: null,
     already_applied: false,
-    can_apply: false,
-    can_cancel: false,
-    can_retry: false,
-    error_message: "",
-    ...overrides,
-  };
-}
-
-function editorialRevisionJob(overrides = {}) {
-  return {
-    job_id: null,
-    project_id: "project-1",
-    status: "idle",
-    stage: "",
-    selected_action_count: 0,
-    proposal_id: null,
-    proposal_status: null,
-    requested_ai_model: null,
-    resolved_ai_model: null,
     can_cancel: false,
     can_retry: false,
     error_message: "",
@@ -212,8 +195,7 @@ function completionSnapshot(overview, overrides = {}) {
     book_review_job: reviewJob(),
     book_issues: [],
     book_output_available: false,
-    answer_application_job: answerApplicationJob(),
-    editorial_revision_job: editorialRevisionJob(),
+    revision_job: revisionJob(),
     ...overrides,
   };
 }
@@ -316,29 +298,28 @@ test("book review progress uses persisted stages without inventing model percent
   })).visible, false);
 });
 
-test("book answer application reports its real background stage", () => {
+test("book revision reports its real background stage", () => {
   const { revisionJobView } = loadBookCompletionPage().mod;
-  const revising = revisionJobView(answerApplicationJob({
-    job_id: "apply-job-1",
+  const revising = revisionJobView(revisionJob({
+    job_id: "revision-job-1",
     status: "running",
     stage: "revising",
     answer_count: 2,
     can_cancel: true,
-  }), "review_answers");
-  const failed = revisionJobView(answerApplicationJob({
-    job_id: "apply-job-1",
+  }));
+  const failed = revisionJobView(revisionJob({
+    job_id: "revision-job-1",
     status: "failed",
     stage: "failed",
     answer_count: 2,
-    can_apply: true,
     can_retry: true,
     error_message: "模型暂时不可用",
-  }), "review_answers");
+  }));
 
-  assert.equal(revising.title, "正在根据回答制定修改思路");
+  assert.equal(revising.title, "正在根据所选内容制定修改思路");
   assert.equal(revising.progressMode, "indeterminate");
   assert.equal(revising.canCancel, true);
-  assert.equal(failed.title, "书稿调整未完成");
+  assert.equal(failed.title, "修改思路未完成");
   assert.equal(failed.detail, "模型暂时不可用");
 });
 
@@ -357,73 +338,7 @@ test("book completion returns to the book hub for generation and chapter managem
   assert.deepEqual(tabNavigations, ["/pages/book/index"]);
 });
 
-test("book completion submits saved answers and opens the generated revision preview", async () => {
-  const requests = [];
-  const navigations = [];
-  const overview = confirmedOverview();
-  let currentJob = answerApplicationJob({
-    answer_count: 2,
-    can_apply: true,
-  });
-  global.wx = {
-    showToast() {},
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadBookCompletionPage({
-    voiceApiExports: {
-      getMemoirBookCompletionOverview: async () => completionSnapshot(
-        overview,
-        {
-          book_review: bookReview(),
-          book_output_available: true,
-          answer_application_job: currentJob,
-        },
-      ),
-      enqueueMemoirBookRevisionJob: async (projectId, source) => {
-        requests.push([projectId, source]);
-        currentJob = answerApplicationJob({
-          job_id: "apply-job-1",
-          status: "pending",
-          stage: "queued",
-          answer_count: 2,
-          can_cancel: true,
-        });
-        return currentJob;
-      },
-    },
-  });
-  const context = pageContext(page, {
-    projectId: "project/1",
-    projectTitle: "我的故事",
-  });
-
-  await page.onShow.call(context);
-  assert.equal(context.data.answerApplicationJob.can_apply, true);
-  await page.applyBookReviewAnswers.call(context);
-
-  assert.deepEqual(requests, [["project/1", "review_answers"]]);
-  assert.equal(context.data.applyingAnswers, true);
-  assert.equal(
-    context.data.answerApplicationProgress.title,
-    "修改思路任务已提交",
-  );
-  context.data.answerApplicationJob = answerApplicationJob({
-    status: "succeeded",
-    answer_count: 2,
-    proposal_id: "proposal/1",
-    proposal_status: "ready",
-  });
-  page.openBookRevision.call(context);
-  assert.deepEqual(navigations, [
-    "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
-  ]);
-  page.onHide.call(context);
-  delete global.wx;
-});
-
-test("book completion generates a preview only for selected editorial actions", async () => {
+test("book completion submits answers and editorial actions as one revision", async () => {
   const requests = [];
   const navigations = [];
   const review = bookReview({
@@ -440,7 +355,9 @@ test("book completion generates a preview only for selected editorial actions", 
       }],
     },
   });
-  let currentJob = editorialRevisionJob();
+  let currentJob = revisionJob({
+    answer_count: 2,
+  });
   global.wx = {
     showToast() {},
     navigateTo(options) {
@@ -454,15 +371,21 @@ test("book completion generates a preview only for selected editorial actions", 
         {
           book_review: review,
           book_output_available: true,
-          editorial_revision_job: currentJob,
+          revision_job: currentJob,
         },
       ),
-      enqueueMemoirBookRevisionJob: async (projectId, source, actionIds) => {
-        requests.push([projectId, source, actionIds]);
-        currentJob = editorialRevisionJob({
-          job_id: "editorial-job-1",
+      enqueueMemoirBookRevisionJob: async (
+        projectId,
+        includeAnswers,
+        actionIds,
+      ) => {
+        requests.push([projectId, includeAnswers, actionIds]);
+        currentJob = revisionJob({
+          job_id: "revision-job-1",
           status: "succeeded",
           stage: "completed",
+          include_answers: true,
+          answer_count: 2,
           selected_action_count: 1,
           proposal_id: "proposal/1",
           proposal_status: "ready",
@@ -471,25 +394,25 @@ test("book completion generates a preview only for selected editorial actions", 
       },
     },
   });
-  const context = pageContext(page, { projectId: "project/1" });
+  const context = pageContext(page, {
+    projectId: "project/1",
+    projectTitle: "我的故事",
+  });
 
   await page.onShow.call(context);
+  page.toggleBookReviewAnswers.call(context);
   page.toggleEditorialAction.call(context, {
     currentTarget: { dataset: { actionId: "action/1" } },
   });
   context.data.requiredBookIssues = [{ id: "issue-1" }];
-  await page.generateEditorialRevision.call(context);
+  await page.generateBookRevision.call(context);
   assert.deepEqual(requests, []);
   context.data.requiredBookIssues = [];
-  await page.generateEditorialRevision.call(context);
-  page.openEditorialRevision.call(context);
+  await page.generateBookRevision.call(context);
+  page.openBookRevision.call(context);
 
-  assert.deepEqual(requests, [[
-    "project/1",
-    "editorial_actions",
-    ["action/1"],
-  ]]);
-  assert.equal(context.data.editorialRevisionJob.proposal_status, "ready");
+  assert.deepEqual(requests, [["project/1", true, ["action/1"]]]);
+  assert.equal(context.data.revisionJob.proposal_status, "ready");
   assert.deepEqual(navigations, [
     "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
   ]);

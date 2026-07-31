@@ -4,10 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.memoir_book_review import (
-    MemoirBookEditorialRevisionJobResponse,
-    MemoirBookReviewAnswerApplicationJobResponse,
     MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
+    MemoirBookRevisionJobResponse,
 )
 from app.schemas.memoir_completion_issues import MemoirCompletionIssueResponse
 from app.schemas.memoir_sections import (
@@ -175,8 +174,7 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
     book_review_job: MemoirBookReviewJobResponse | None = None
     book_issues: list[MemoirCompletionIssueResponse] = Field(default_factory=list)
     book_output_available: bool = False
-    answer_application_job: MemoirBookReviewAnswerApplicationJobResponse | None = None
-    editorial_revision_job: MemoirBookEditorialRevisionJobResponse | None = None
+    revision_job: MemoirBookRevisionJobResponse | None = None
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):
