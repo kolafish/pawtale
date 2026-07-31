@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
-import re
 import time
 from typing import Any, Awaitable, Callable, Literal
 
@@ -56,7 +55,7 @@ from app.services.memoir.semantic_state import (
 BOOK_REVIEW_ENGINE = "llm_book_review_v4"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
-    "你根据章节摘要审阅全书层面的结构，不创造人生经历。"
+    "你根据章节摘要通读全书并判断阅读体验，不创造人生经历。"
 )
 logger = logging.getLogger(__name__)
 BookReviewProgressCallback = Callable[
@@ -152,23 +151,7 @@ def _user_visible_text(
     context: BookReviewContext,
     limit: int,
 ) -> str:
-    text = value if isinstance(value, str) else ""
-    references = _chapter_references(context)
-    labels: dict[str, str] = {}
-    for index, chapter in enumerate(context.chapters, start=1):
-        reference = references.encode(chapter.chapter_id)
-        labels[reference] = f"第{index}章《{chapter.title}》"
-    if labels:
-        reference_pattern = "|".join(
-            re.escape(reference)
-            for reference in sorted(labels, key=len, reverse=True)
-        )
-        text = re.sub(
-            rf"(?<![A-Za-z0-9])(?:{reference_pattern})(?![A-Za-z0-9])",
-            lambda match: labels[match.group(0)],
-            text,
-        )
-    return _compact(text, limit=limit)
+    return _compact(_chapter_references(context).render_text(value), limit=limit)
 
 
 def _user_visible_string_list(
@@ -440,6 +423,11 @@ def _chapter_references(context: BookReviewContext) -> ModelReferenceMap:
     return ModelReferenceMap(
         "C",
         (chapter.chapter_id for chapter in context.chapters),
+        labels={
+            chapter.chapter_id: f"第{index}章《{chapter.title}》"
+            for index, chapter in enumerate(context.chapters, start=1)
+        },
+        fallback_label="相关章节",
     )
 
 
@@ -454,7 +442,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
         )
         for chapter in context.chapters
     )
-    return f"""请审阅下面这本回忆录的全书结构。
+    return f"""请通读下面这本回忆录。
 
 当前成书信息：
 {book_information_text(context.book_metadata)}
@@ -466,7 +454,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 {{
   "summary": "全书目前的整体面貌",
   "strengths": ["已经成立的主线或结构优点"],
-  "structure_guidance": ["只供用户参考、不能直接执行的结构建议"],
+  "structure_guidance": ["确有必要时给出的可选编辑建议"],
   "editorial_actions": [
     {{
       "action_type": "remove_repetition|improve_transition|reorder_chapters|revise_book_profile",
@@ -489,19 +477,18 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 
 要求：
 - 不用固定人生目录检查每个阶段是否都讲过。
-- 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
-- 去除跨章重复、改善相邻章节衔接、调整现有章节顺序，或调整书名与成书信息的问题，写入 editorial_actions。
+- 从整体阅读感受出发，没有明显影响时可以不提修改。
+- editorial_actions 只放基于现有内容、能够直接执行的可选建议。
 - revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组。
-- 不能在现有书稿和成书信息中直接执行的建议写入 structure_guidance，不要求用户补讲。
+- 不能直接执行的编辑建议写入 structure_guidance，不要求用户补讲。
 - 不得建议新建、删除、合并章节，不得改变小节数量或归属。
-- reorder_chapters 的 chapter_ids 至少包含两个章节，并按建议的新顺序排列；正文修改类建议按涉及范围排列。
 - 书名、全书定位或出版陈述不合适时使用 revise_book_profile，不要把它拆成需要用户补讲的问题。
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
 - 不能创建摘要中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
-- summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；其中必须使用章节标题或“第几章＋标题”，不得出现 C1、C2 等内部短编号。
+- summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
 
 

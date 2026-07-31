@@ -177,6 +177,13 @@
             aria-disabled="{{applyingAnswers || answerApplicationCancelling}}"
             bindtap="applyBookReviewAnswers"
           >{{answerApplicationJob.can_retry ? "重新生成修改思路" : "生成修改思路"}}</view>
+          <view
+            wx:if="{{!answerApplicationJob.already_applied}}"
+            class="skip-answers-action ui-block-action ui-pressable {{applyingAnswers || answerApplicationCancelling ? 'is-disabled' : ''}}"
+            aria-role="button"
+            aria-disabled="{{applyingAnswers || answerApplicationCancelling}}"
+            bindtap="openBookHome"
+          >忽略这些修改，继续成书</view>
         </view>
 
         <text

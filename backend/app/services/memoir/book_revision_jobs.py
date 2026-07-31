@@ -10,7 +10,6 @@ from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookRevisionProposal,
-    MemoirBookReview,
     MemoirEditingJob,
 )
 from app.services.memoir import (
@@ -170,40 +169,6 @@ async def _job_state(
     }
 
 
-async def _require_applied_answers(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    review: MemoirBookReview,
-) -> None:
-    context = await book_review_answer_state.load_answer_context(db, review=review)
-    if context.unresolved_count:
-        raise ValueError("请先处理完所有需要确认的问题")
-    if not context.answers:
-        return
-    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
-    latest = (
-        await book_output_versions.load_latest_book_output_version(
-            db,
-            output_id=output.id,
-        )
-        if output is not None
-        else None
-    )
-    if book_review_answer_state.marker_matches_context(
-        output=output,
-        version=latest,
-        context=context,
-    ) or book_editorial_actions.marker_matches_review(
-        output=output,
-        version=latest,
-        review=review,
-        answers_signature=context.answers_signature,
-    ):
-        return
-    raise ValueError("请先确认根据问题回答生成的修改预览")
-
-
 async def enqueue_book_revision_job(
     db: AsyncSession,
     *,
@@ -285,11 +250,12 @@ async def enqueue_book_revision_job(
             review.review_json,
             selected_ids,
         )
-        await _require_applied_answers(
+        context = await book_review_answer_state.load_answer_context(
             db,
-            project_id=project_id,
             review=review,
         )
+        if context.unresolved_count:
+            raise ValueError("请先处理完所有需要确认的问题")
         payload.update(
             action_ids=selected_ids,
             actions_signature=book_editorial_actions.actions_signature(actions),

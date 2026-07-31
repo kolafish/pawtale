@@ -52,7 +52,9 @@ PLAN_ENGINE = "llm_book_revision_plan_v1"
 PLAN_FEEDBACK_ENGINE = "llm_book_revision_plan_feedback_v1"
 PLAN_DRAFT_ENGINE = "llm_book_revision_plan_draft_v1"
 PLAN_SYSTEM_PROMPT = (
-    "你是一位克制的中文回忆录编辑。你先制定清楚、可供用户确认的修改思路，不直接改写正文，不推测、不补造人生事实。"
+    "你是一位克制的中文回忆录编辑。"
+    "你先判断是否需要修改，确有必要时再给出可供用户确认的修改思路；"
+    "不直接改写正文，不推测、不补造人生事实。"
 )
 PLAN_DRAFT_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录编辑。"
@@ -136,21 +138,41 @@ def _reference_maps(
     *,
     stale_message: str,
 ) -> tuple[ModelReferenceMap, ModelReferenceMap]:
-    ordered_chapter_ids = [
-        chapter_id for snapshot in snapshots if (chapter_id := _text(snapshot.get("chapter_id"))) in allowed_chapter_ids
-    ]
+    ordered_chapter_ids: list[str] = []
+    section_ids: list[str] = []
+    chapter_labels: dict[str, str] = {}
+    section_labels: dict[str, str] = {}
+    for chapter_index, snapshot in enumerate(snapshots, start=1):
+        chapter_id = _text(snapshot.get("chapter_id"))
+        if chapter_id not in allowed_chapter_ids:
+            continue
+        chapter_title = _text(snapshot.get("chapter_title"))
+        ordered_chapter_ids.append(chapter_id)
+        chapter_labels[chapter_id] = f"第{chapter_index}章《{chapter_title}》"
+        for section_index, section in enumerate(_sections(snapshot), start=1):
+            section_id = _text(section.get("section_id"))
+            if not section_id:
+                continue
+            section_ids.append(section_id)
+            section_labels[section_id] = (
+                f"第{chapter_index}章《{chapter_title}》的"
+                f"第{section_index}小节《{_text(section.get('title'))}》"
+            )
     if set(ordered_chapter_ids) != allowed_chapter_ids:
         raise BookRevisionError(stale_message)
-    section_ids = [
-        section_id
-        for snapshot in snapshots
-        if _text(snapshot.get("chapter_id")) in allowed_chapter_ids
-        for section in _sections(snapshot)
-        if (section_id := _text(section.get("section_id")))
-    ]
     return (
-        ModelReferenceMap("C", ordered_chapter_ids),
-        ModelReferenceMap("S", section_ids),
+        ModelReferenceMap(
+            "C",
+            ordered_chapter_ids,
+            labels=chapter_labels,
+            fallback_label="相关章节",
+        ),
+        ModelReferenceMap(
+            "S",
+            section_ids,
+            labels=section_labels,
+            fallback_label="相关小节",
+        ),
     )
 
 
@@ -274,6 +296,7 @@ async def _generate_revision_plan(
     error_message: str,
     ai_model: str | None,
     ai_client: AITextClient | None,
+    reference_maps: tuple[ModelReferenceMap, ...],
 ) -> _GeneratedPlan:
     client = ai_client or get_ai_service(ai_model)
     policy = ai_text_workload_policy(AITextWorkload.INTERACTIVE_STRUCTURED)
@@ -296,8 +319,11 @@ async def _generate_revision_plan(
             "engine": engine,
             "timeout_seconds": timeout_seconds,
         }
+        plan_value: object = generated.value.model_dump()
+        for references in reference_maps:
+            plan_value = _render_reference_labels(plan_value, references)
         return _GeneratedPlan(
-            plan=generated.value,
+            plan=_RevisionPlan.model_validate(plan_value),
             resolved_ai_model=generated.response.resolved_model,
             generation=generation,
         )
@@ -320,6 +346,22 @@ async def _generate_revision_plan(
         ) from exc
 
 
+def _render_reference_labels(
+    value: object,
+    references: ModelReferenceMap,
+) -> object:
+    if isinstance(value, str):
+        return references.render_text(value)
+    if isinstance(value, list):
+        return [_render_reference_labels(item, references) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _render_reference_labels(item, references)
+            for key, item in value.items()
+        }
+    return value
+
+
 async def _load_baseline(
     db: AsyncSession,
     *,
@@ -329,7 +371,6 @@ async def _load_baseline(
     assembled = await assemble_book_output(
         db,
         project_id=project_id,
-        allow_unapplied_review_answers=True,
     )
     output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     baseline = await db.get(MemoirBookOutputVersion, assembled.output_version_id)
@@ -407,7 +448,7 @@ def _book_information(
 
 
 def _plan_output_instruction() -> str:
-    return """请先制定修改思路，不要输出修改后的正文。
+    return """请先判断是否需要修改，不要输出修改后的正文。
 
 请输出严格 JSON：
 {
@@ -433,8 +474,8 @@ def _plan_output_instruction() -> str:
 
 要求：
 - 输出的是用户确认前的整体修改思路，不是修改后的书稿。
-- 每一项都要说清楚修改目标、原因和做法。
-- targets 使用章节名或小节名，不显示内部编号。
+- items 有内容时，每一项都要说清楚修改目标、原因和做法。
+- targets 使用章节名或小节名。
 - 书名或成书信息需要调整时，在 book_metadata_patch 给出供用户确认的完整新值，并在 items 说明理由和做法。
 - book_metadata_patch 只包含需要修改的字段；没有成书信息调整时返回空对象。
 - 只根据输入原文、检查结论和用户明确表达的决定制定计划。
@@ -464,7 +505,7 @@ def _answer_plan_prompt(
         section_refs=section_refs,
         allowed_chapter_ids=context.related_chapter_ids,
     )
-    return f"""请根据全书检查问题和用户回答，制定书稿修改思路。
+    return f"""请根据全书检查问题和用户回答，判断当前书稿是否需要修改；确有必要时再制定修改思路。
 
 用户回答：
 {answers}
@@ -546,6 +587,7 @@ async def apply_book_review_answers(
         error_message="生成修改思路时遇到问题，请稍后重试",
         ai_model=ai_model,
         ai_client=ai_client,
+        reference_maps=(chapter_refs, section_refs),
     )
     summary = generated_plan.plan.summary.strip()
     generation = generated_plan.generation
@@ -719,6 +761,15 @@ async def _refine_book_revision_plan(
         error_message="按反馈更新修改思路时遇到问题，请稍后重试",
         ai_model=ai_model,
         ai_client=ai_client,
+        reference_maps=_reference_maps(
+            snapshots,
+            {
+                chapter_id
+                for snapshot in snapshots
+                if (chapter_id := _text(snapshot.get("chapter_id")))
+            },
+            stale_message="书稿章节已经变化，请重新生成修改思路",
+        ),
     )
 
     if progress_callback is not None:
@@ -997,19 +1048,8 @@ async def generate_editorial_revision_proposal(
         db,
         review=review,
     )
-    answers_applied = book_review_answer_state.marker_matches_context(
-        output=output,
-        version=baseline,
-        context=answer_context,
-    ) or book_editorial_actions.marker_matches_review(
-        output=output,
-        version=baseline,
-        review=review,
-        answers_signature=answer_context.answers_signature,
-    )
-    if answer_context.answers and not answers_applied:
-        raise BookRevisionError("请先确认根据问题回答生成的修改预览")
-
+    if answer_context.unresolved_count:
+        raise BookRevisionError("请先处理完所有需要确认的问题")
     original_snapshots = _snapshots(baseline.chapter_snapshot_json)
     related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
     chapter_refs, section_refs = _reference_maps(
@@ -1032,6 +1072,7 @@ async def generate_editorial_revision_proposal(
         error_message="生成修改思路时遇到问题，请稍后重试",
         ai_model=ai_model,
         ai_client=ai_client,
+        reference_maps=(chapter_refs, section_refs),
     )
 
     if progress_callback is not None:

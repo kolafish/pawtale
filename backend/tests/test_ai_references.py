@@ -7,6 +7,11 @@ def test_model_references_are_short_stable_and_strict():
     references = ModelReferenceMap(
         "M",
         ["uuid-first", "uuid-second", "uuid-first"],
+        labels={
+            "uuid-first": "第一章",
+            "uuid-second": "第二章",
+        },
+        fallback_label="相关内容",
     )
 
     assert references.encode("uuid-first") == "M1"
@@ -15,5 +20,8 @@ def test_model_references_are_short_stable_and_strict():
         "uuid-second",
         "uuid-first",
     ]
+    assert references.render_text("M1 与 M2、M9；AM1 和 M2x 不变") == (
+        "第一章 与 第二章、相关内容；AM1 和 M2x 不变"
+    )
     with pytest.raises(ValueError, match="unknown reference"):
         references.decode("uuid-first")

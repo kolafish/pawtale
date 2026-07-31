@@ -64,7 +64,6 @@ async def assemble_book_output(
     db: AsyncSession,
     *,
     project_id: str,
-    allow_unapplied_review_answers: bool = False,
 ) -> MemoirBookAssemblyResponse:
     plan = await db.scalar(
         select(MemoirBookPlan)
@@ -167,10 +166,6 @@ async def assemble_book_output(
     )
     previous_version: MemoirBookOutputVersion | None = None
     if output is None:
-        if answer_context.answers and not allow_unapplied_review_answers:
-            raise ValueError(
-                "book output requires applying the saved book review answers"
-            )
         output = MemoirBookOutput(
             project_id=project_id,
             plan_id=plan.id,
@@ -205,10 +200,6 @@ async def assemble_book_output(
                     previous_version.chapter_snapshot_json or []
                 ),
                 created_at=previous_version.created_at,
-            )
-        if answer_context.answers and not allow_unapplied_review_answers:
-            raise ValueError(
-                "book output requires applying the saved book review answers"
             )
         if (
             previous_version is not None

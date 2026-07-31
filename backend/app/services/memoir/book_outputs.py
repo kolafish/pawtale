@@ -420,7 +420,6 @@ async def book_output_response_or_none(
         current_review = None
     answer_application_current = False
     editorial_revision_current = False
-    pending_answer_application = False
     if current_review is not None:
         answer_context = await book_review_answer_state.load_answer_context(
             db,
@@ -441,24 +440,15 @@ async def book_output_response_or_none(
                 answers_signature=answer_context.answers_signature,
             )
         )
-        pending_answer_application = bool(
-            answer_context.answers
-            and not answer_application_current
-            and not editorial_revision_current
-        )
     return _output_response(
         output,
         stale_chapter_titles=(
-            ["全书检查回答"]
-            if pending_answer_application
-            else (
-                []
-                if answer_application_current or editorial_revision_current
-                else _output_stale_chapter_titles(
-                    output,
-                    plan,
-                    source_refs_by_chapter=refs_by_chapter,
-                )
+            []
+            if answer_application_current or editorial_revision_current
+            else _output_stale_chapter_titles(
+                output,
+                plan,
+                source_refs_by_chapter=refs_by_chapter,
             )
         ),
     )
