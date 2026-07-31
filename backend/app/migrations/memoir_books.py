@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import inspect, text
+from sqlalchemy import delete, inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
@@ -40,9 +40,10 @@ REQUIRED_TABLE_COLUMNS = {
 
 async def migrate_memoir_book_schema(
     engine: AsyncEngine,
-) -> dict[str, list[str]]:
+) -> dict[str, list[str] | int]:
     changed_tables: list[str] = []
     changed_columns: list[str] = []
+    removed_legacy_revision_proposals = 0
     async with engine.begin() as conn:
         register_models()
         tables = await conn.run_sync(lambda sync_conn: set(inspect(sync_conn).get_table_names()))
@@ -69,9 +70,29 @@ async def migrate_memoir_book_schema(
                     continue
                 await conn.execute(text(f'ALTER TABLE "{proposal_table}" ADD COLUMN "{column_name}" {definition}'))
                 changed_columns.append(f"{proposal_table}.{column_name}")
+        if proposal_table in tables or proposal_table in changed_tables:
+            table = Base.metadata.tables[proposal_table]
+            rows = (
+                await conn.execute(
+                    select(
+                        table.c.id,
+                        table.c.revision_plan_json,
+                        table.c.candidate_chapter_snapshot_json,
+                    ).where(table.c.status == "ready")
+                )
+            ).mappings()
+            legacy_ids = [
+                row["id"]
+                for row in rows
+                if not row["revision_plan_json"] and row["candidate_chapter_snapshot_json"]
+            ]
+            if legacy_ids:
+                await conn.execute(delete(table).where(table.c.id.in_(legacy_ids)))
+                removed_legacy_revision_proposals = len(legacy_ids)
     return {
         "changed_tables": changed_tables,
         "changed_columns": changed_columns,
+        "removed_legacy_revision_proposals": removed_legacy_revision_proposals,
     }
 
 
