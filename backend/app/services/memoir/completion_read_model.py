@@ -446,6 +446,7 @@ async def _chapter_summary_snapshots(
     *,
     project_id: str,
     chapters: list[MemoirBookPlanChapter],
+    issues: list[MemoirCompletionIssue] | None = None,
 ) -> dict[str, _ChapterSummarySnapshot]:
     chapter_ids = [chapter.id for chapter in chapters]
     active_chapter_ids = set(
@@ -477,7 +478,11 @@ async def _chapter_summary_snapshots(
         ).all()
     )
     issues_by_chapter: dict[str, list[MemoirCompletionIssue]] = {}
-    for issue in await completion_issues.list_issues(db, project_id=project_id):
+    for issue in (
+        issues
+        if issues is not None
+        else await completion_issues.list_issues(db, project_id=project_id)
+    ):
         if issue.chapter_id in chapter_ids:
             issues_by_chapter.setdefault(issue.chapter_id, []).append(issue)
     drafts = {
@@ -507,7 +512,8 @@ async def _chapter_summary_snapshots(
         version.chapter_id: version
         for version in (
             await db.scalars(
-                select(MemoirBookChapterDraftVersion).join(
+                select(MemoirBookChapterDraftVersion)
+                .join(
                     latest_version_numbers,
                     and_(
                         latest_version_numbers.c.chapter_id
@@ -516,6 +522,7 @@ async def _chapter_summary_snapshots(
                         == MemoirBookChapterDraftVersion.version,
                     ),
                 )
+                .where(MemoirBookChapterDraftVersion.project_id == project_id)
             )
         ).all()
     }
@@ -553,6 +560,7 @@ async def book_overview(
     db: AsyncSession,
     *,
     project_id: str,
+    issues: list[MemoirCompletionIssue] | None = None,
 ) -> MemoirBookCompletionOverviewResponse:
     chapters = await _plan_chapters(db, project_id=project_id)
     if not chapters:
@@ -568,6 +576,7 @@ async def book_overview(
         db,
         project_id=project_id,
         chapters=chapters,
+        issues=issues,
     )
     items = [
         await chapter_summary(

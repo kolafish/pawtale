@@ -276,9 +276,14 @@ async def get_book_completion_overview(
     project_id: str,
     allow_admin: bool = False,
 ) -> MemoirBookCompletionOverviewResponse:
+    issue_models = await completion_issues.list_issues(
+        db,
+        project_id=project_id,
+    )
     overview = await completion_read_model.book_overview(
         db,
         project_id=project_id,
+        issues=issue_models,
     )
     completion_job = await book_completion_jobs.get_current_book_completion_job(
         db,
@@ -287,7 +292,11 @@ async def get_book_completion_overview(
         allow_admin=allow_admin,
     )
     review = await book_reviews.get_current_book_review(db, project_id=project_id)
-    issues = await completion_issues.collection_response(db, project_id=project_id)
+    issues = await completion_issues.collection_response(
+        db,
+        project_id=project_id,
+        issues=issue_models,
+    )
     return MemoirBookCompletionOverviewResponse.model_validate(
         {
             **overview.model_dump(),
