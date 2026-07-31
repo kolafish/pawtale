@@ -858,6 +858,17 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert failed_batch.active_key is not None
     assert failed_batch.completed_at is None
 
+    settled = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/{queued_body['job_id']}"
+    )
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "failed"
+    await test_db.refresh(failed_batch)
+    assert failed_batch.status == MemoirBookCompletionJobStatus.FAILED.value
+    assert failed_batch.active_key is None
+    assert failed_batch.error_message == "provider unavailable"
+    assert failed_batch.completed_at is not None
+
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
         json={
@@ -872,11 +883,6 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert retried_body["total_chapter_count"] == 1
     assert retried_body["chapters"][0]["chapter_id"] == chapters[1].id
     assert retried_body["chapters"][0]["job_id"] != child_job_ids[1]
-    await test_db.refresh(failed_batch)
-    assert failed_batch.status == MemoirBookCompletionJobStatus.FAILED.value
-    assert failed_batch.active_key is None
-    assert failed_batch.error_message == "provider unavailable"
-    assert failed_batch.completed_at is not None
 
     stale_cancel = await client.delete(
         f"/api/memoir/projects/{project_id}/book-completion/jobs/{queued_body['job_id']}"

@@ -455,8 +455,14 @@ async def cancel_book_completion_job(
     )
     if job is None:
         raise ValueError("全书检查任务不存在")
-    if job.status not in _ACTIVE_BATCH_STATUSES:
-        return await _job_response(db, project_id=project_id, job=job)
+    current = await _job_response(
+        db,
+        project_id=project_id,
+        job=job,
+        persist_status=True,
+    )
+    if current["status"] not in _ACTIVE_BATCH_STATUSES:
+        return current
 
     for chapter_id, child_job_id in dict(job.chapter_job_ids_json or {}).items():
         child_job = await db.get(MemoirEditingJob, str(child_job_id))
