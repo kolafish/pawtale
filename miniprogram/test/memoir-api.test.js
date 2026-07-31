@@ -685,6 +685,10 @@ test("book service APIs encode backend routes and selected AI model", async () =
   const base = "http://backend.local:8000/api/mobile/memoir/projects/project%2F1";
   const narrativeBase = "http://backend.local:8000/api/memoir/projects/project%2F1";
   const selectedModel = "doubao-seed-2-0-pro-260215";
+  assert.equal(
+    api.memoirBookRevisionDictationUrl("project/1", "proposal/1"),
+    "ws://backend.local:8000/api/memoir/projects/project%2F1/book-review/revision-proposals/proposal%2F1/dictation",
+  );
   const cases = [
     { call: () => api.getMemoirBookPlan("project/1"), method: "GET", url: `${base}/book-plan` },
     { call: () => api.generateMemoirBookPlan("project/1", { max_chapters: 6 }), method: "POST", url: `${base}/book-plan/generate`, data: { max_chapters: 6, ai_model: selectedModel } },

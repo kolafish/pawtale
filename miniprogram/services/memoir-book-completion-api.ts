@@ -5,6 +5,11 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
+import {
+  ApiError,
+  cleanBaseUrl,
+  readBackendConfig,
+} from "./request";
 
 
 function bookCompletionPath(projectId: string, suffix = ""): string {
@@ -382,6 +387,19 @@ function bookRevisionProposalPath(
   return `${bookReviewPath(projectId)}/revision-proposals/${
     encodeURIComponent(proposalId)
   }${suffix}`;
+}
+
+export function memoirBookRevisionDictationUrl(
+  projectId: string,
+  proposalId: string,
+): string {
+  const config = readBackendConfig();
+  if (!config.wsBaseUrl) {
+    throw new ApiError(0, "未配置后端 WebSocket 地址", {});
+  }
+  return `${cleanBaseUrl(config.wsBaseUrl)}${
+    bookRevisionProposalPath(projectId, proposalId, "/dictation")
+  }`;
 }
 
 export function getMemoirBookRevisionProposal(

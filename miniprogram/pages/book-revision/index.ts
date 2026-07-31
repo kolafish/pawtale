@@ -15,14 +15,11 @@ import {
   getMemoirBookRevisionDraftJob,
   getMemoirBookRevisionFeedbackJob,
   getMemoirBookRevisionProposal,
+  memoirBookRevisionDictationUrl,
   type MemoirBookRevisionProposal,
   type MemoirBookRevisionPreviewVersion,
   type MemoirBookRevisionSectionComparison,
 } from "../../services/memoir-book-completion-api";
-import {
-  recordMemoirVoiceSearchQuery,
-  stopMemoirVoiceSearchRecording,
-} from "../../services/memoir-voice-search";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
@@ -33,13 +30,21 @@ import {
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { PollingTimer } from "../../services/polling-timer";
+import { StreamingVoiceController } from "../../services/streaming-voice-controller";
+import {
+  readVoiceAuthorizationConsent,
+  syncVoiceAuthorizationConsent,
+  VOICE_AUTHORIZATION_PAGE_URL,
+} from "../../services/voice-authorization";
+import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 
 
 type RevisionMode = "changes" | "whole";
 type PreviewVersion = "before" | "after";
-type FeedbackVoicePhase = "idle" | "listening" | "transcribing";
+type FeedbackVoicePhase = "idle" | "connecting" | "listening" | "stopping";
 const FEEDBACK_POLL_INTERVAL_MS = 1500;
 const FEEDBACK_VOICE_MAX_DURATION_MS = 30000;
+const FEEDBACK_TEXT_MAX_LENGTH = 1000;
 const PAGE_CLASS = "revision-page ui-page-shell ui-accessible-page";
 
 interface RevisionSectionView extends MemoirBookRevisionSectionComparison {
@@ -167,10 +172,26 @@ function confirmAction(title: string, content: string): Promise<boolean> {
   });
 }
 
+export function feedbackTextWithTranscript(
+  existing: string,
+  transcript: string,
+): string {
+  const base = existing.trim();
+  const live = transcript.trim();
+  return `${base}${base && live ? "\n" : ""}${live}`.slice(
+    0,
+    FEEDBACK_TEXT_MAX_LENGTH,
+  );
+}
+
 definePage<BookRevisionData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
+  feedbackVoiceStreaming: new StreamingVoiceController(),
+  feedbackVoiceTimer: null as ReturnType<typeof setTimeout> | null,
   feedbackVoiceToken: 0,
+  feedbackVoiceBaseText: "",
+  feedbackVoiceTranscript: "",
   feedbackBaselineUpdatedAt: "",
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,
@@ -440,19 +461,18 @@ definePage<BookRevisionData>()({
   },
 
   cancelFeedbackVoice() {
-    if (this.data.feedbackVoicePhase === "idle") {
-      return;
-    }
     this.feedbackVoiceToken += 1;
-    if (this.data.feedbackVoicePhase === "listening") {
-      stopMemoirVoiceSearchRecording();
-    }
+    this.clearFeedbackVoiceTimer();
+    this.feedbackVoiceStreaming.close({ force: true });
+    this.feedbackVoiceBaseText = "";
+    this.feedbackVoiceTranscript = "";
     this.setData({ feedbackVoicePhase: "idle" });
   },
 
   async toggleFeedbackVoice() {
     if (this.data.feedbackVoicePhase === "listening") {
-      stopMemoirVoiceSearchRecording();
+      this.clearFeedbackVoiceTimer();
+      this.feedbackVoiceStreaming.stopRecording();
       return;
     }
     if (
@@ -465,39 +485,139 @@ definePage<BookRevisionData>()({
     }
     this.feedbackVoiceToken += 1;
     const token = this.feedbackVoiceToken;
-    this.setData({ feedbackVoicePhase: "listening", error: "" });
+    this.setData({ feedbackVoicePhase: "connecting", error: "" });
     try {
-      const transcript = await recordMemoirVoiceSearchQuery({
-        stopMode: "manual",
-        maxDurationMs: FEEDBACK_VOICE_MAX_DURATION_MS,
-        onRecordingEnd: () => {
-          if (token === this.feedbackVoiceToken) {
-            this.setData({ feedbackVoicePhase: "transcribing" });
-          }
-        },
-        emptyTranscriptMessage: "没有识别到调整意见，请再说一次",
-        noVoiceTranscriptMessage: "没有听到调整意见，请再说一次",
-      });
+      if (!readVoiceAuthorizationConsent()) {
+        wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+        this.setData({ feedbackVoicePhase: "idle" });
+        return;
+      }
+      await syncVoiceAuthorizationConsent();
+      await ensureRecorderPrivacyAuthorization();
       if (token !== this.feedbackVoiceToken) {
         return;
       }
-      const existing = this.data.feedbackText.trim();
-      this.setData({
-        feedbackText: `${existing ? `${existing}\n` : ""}${transcript}`.slice(
-          0,
-          1000,
+      this.feedbackVoiceBaseText = this.data.feedbackText;
+      this.feedbackVoiceTranscript = "";
+      await this.feedbackVoiceStreaming.connect({
+        voiceSessionId: this.data.proposalId,
+        gatewayUrl: memoirBookRevisionDictationUrl(
+          this.data.projectId,
+          this.data.proposalId,
         ),
-        feedbackVoicePhase: "idle",
+        guidanceMode: "free_narration",
+        autoStopSilenceMs: 0,
+        noVoiceActivityTimeoutMs: 0,
+        callbacks: {
+          onStatus: (status) => {
+            if (token !== this.feedbackVoiceToken) {
+              return;
+            }
+            if (status === "listening") {
+              this.setData({ feedbackVoicePhase: "listening" });
+            } else if (status === "stopping") {
+              this.setData({ feedbackVoicePhase: "stopping" });
+            } else if (status === "closed" || status === "error") {
+              this.clearFeedbackVoiceTimer();
+              this.setData({ feedbackVoicePhase: "idle" });
+            }
+          },
+          onEvent: (event) => {
+            if (
+              token === this.feedbackVoiceToken
+              && event.type === "audio.ended"
+            ) {
+              void this.finishFeedbackVoice(token);
+            }
+          },
+          onPartial: (text) => {
+            this.updateFeedbackVoiceTranscript(token, text);
+          },
+          onFinal: (event) => {
+            this.updateFeedbackVoiceTranscript(token, event.text || "");
+          },
+          onError: (message) => {
+            if (token !== this.feedbackVoiceToken) {
+              return;
+            }
+            this.clearFeedbackVoiceTimer();
+            this.setData({
+              feedbackVoicePhase: "idle",
+              error: message || "语音输入失败",
+            });
+          },
+        },
       });
-      wx.showToast({ title: "已识别调整意见", icon: "none" });
+      if (token !== this.feedbackVoiceToken) {
+        this.feedbackVoiceStreaming.close({ force: true });
+        return;
+      }
+      if (!this.feedbackVoiceStreaming.startRecording()) {
+        throw new Error("录音启动失败，请重试");
+      }
+      this.feedbackVoiceTimer = setTimeout(() => {
+        if (token === this.feedbackVoiceToken) {
+          this.feedbackVoiceTimer = null;
+          this.feedbackVoiceStreaming.stopRecording();
+        }
+      }, FEEDBACK_VOICE_MAX_DURATION_MS);
     } catch (error) {
       if (token !== this.feedbackVoiceToken) {
         return;
       }
+      this.feedbackVoiceStreaming.close({ force: true });
       this.setData({
         feedbackVoicePhase: "idle",
         error: error instanceof Error ? error.message : "语音输入失败",
       });
+    }
+  },
+
+  updateFeedbackVoiceTranscript(token: number, transcript: string) {
+    if (token !== this.feedbackVoiceToken) {
+      return;
+    }
+    this.feedbackVoiceTranscript = transcript.trim();
+    this.setData({
+      feedbackText: feedbackTextWithTranscript(
+        this.feedbackVoiceBaseText,
+        this.feedbackVoiceTranscript,
+      ),
+    });
+  },
+
+  clearFeedbackVoiceTimer() {
+    if (this.feedbackVoiceTimer) {
+      clearTimeout(this.feedbackVoiceTimer);
+      this.feedbackVoiceTimer = null;
+    }
+  },
+
+  async finishFeedbackVoice(token: number) {
+    this.clearFeedbackVoiceTimer();
+    try {
+      await this.feedbackVoiceStreaming.finishSession();
+    } catch (error) {
+      if (token === this.feedbackVoiceToken) {
+        this.setData({
+          error: error instanceof Error ? error.message : "语音输入结束失败",
+        });
+      }
+    }
+    if (token !== this.feedbackVoiceToken) {
+      return;
+    }
+    const transcript = this.feedbackVoiceTranscript.trim();
+    this.feedbackVoiceBaseText = "";
+    this.feedbackVoiceTranscript = "";
+    this.setData({
+      feedbackVoicePhase: "idle",
+      ...(transcript
+        ? {}
+        : { error: "没有识别到调整意见，请再说一次" }),
+    });
+    if (transcript) {
+      wx.showToast({ title: "语音已转成文字", icon: "none" });
     }
   },
 
