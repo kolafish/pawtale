@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.application_errors import ApplicationError
 from app.auth import get_current_user, is_admin_user
 from app.database import get_db
-from app.domain.memoir.types import MemoirBookRevisionProposalStatus
 from app.models.users import User
 from app.routers.websocket_auth import authenticate_websocket, reject_websocket
 from app.schemas.memoir_book_review import (
@@ -371,28 +370,26 @@ async def dismiss_memoir_book_revision_proposal(
     return response
 
 
-@router.websocket("/projects/{project_id}/book-review/revision-proposals/{proposal_id}/dictation")
-async def stream_memoir_book_revision_dictation(
+@router.websocket("/projects/{project_id}/book-review/dictation")
+async def stream_memoir_book_review_dictation(
     websocket: WebSocket,
     project_id: str,
-    proposal_id: str,
     db: AsyncSession = Depends(get_db),
 ):
     current_user = await authenticate_websocket(websocket, db)
     if current_user is None:
         await reject_websocket(websocket, "voice_gateway_auth_failed")
         return
-    if not await _book_revision_dictation_is_available(
+    if not await _book_review_dictation_is_available(
         db,
         project_id=project_id,
-        proposal_id=proposal_id,
         current_user=current_user,
     ):
-        await reject_websocket(websocket, "book_revision_dictation_unavailable")
+        await reject_websocket(websocket, "book_review_dictation_unavailable")
         return
 
     connection_id = str(uuid.uuid4())
-    capacity_session_id = f"book-revision-dictation:{connection_id}"
+    capacity_session_id = f"book-review-dictation:{connection_id}"
     try:
         capacity_lease = await voice_gateway_capacity_manager.acquire(
             current_user.id,
@@ -413,9 +410,8 @@ async def stream_memoir_book_revision_dictation(
             text_normalizer=normalize_memoir_asr_text,
             connection_id=connection_id,
             diagnostics_context={
-                "gateway": "book_revision_dictation",
+                "gateway": "book_review_dictation",
                 "project_id": project_id,
-                "proposal_id": proposal_id,
             },
         )
         await session.run()
@@ -423,11 +419,10 @@ async def stream_memoir_book_revision_dictation(
         await capacity_lease.release()
 
 
-async def _book_revision_dictation_is_available(
+async def _book_review_dictation_is_available(
     db: AsyncSession,
     *,
     project_id: str,
-    proposal_id: str,
     current_user: User,
 ) -> bool:
     try:
@@ -437,16 +432,6 @@ async def _book_revision_dictation_is_available(
             current_user.id,
             allow_admin=is_admin_user(current_user),
         )
-        proposal = await book_revision_proposals.load_proposal(
-            db,
-            project_id=project_id,
-            proposal_id=proposal_id,
-        )
-        response = await book_revision_proposals.proposal_response(
-            db,
-            proposal=proposal,
-            preview="none",
-        )
     except (ApplicationError, HTTPException):
         return False
-    return response.status == MemoirBookRevisionProposalStatus.READY and response.can_dismiss
+    return True

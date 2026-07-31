@@ -6,6 +6,9 @@ import {
   closeMemoirCompletionIssue,
 } from "../../services/memoir-completion-issue-api";
 import {
+  memoirBookReviewDictationUrl,
+} from "../../services/memoir-book-completion-api";
+import {
   openMemoirCompletionInterview,
 } from "../../services/memoir-completion-interview";
 import { routeAuthError } from "../../services/navigation";
@@ -39,6 +42,7 @@ Component({
     answeringIssueId: "",
     requiredAnswer: "",
     requiredAnswerReady: false,
+    requiredAnswerGatewayUrl: "",
   },
 
   methods: {
@@ -98,6 +102,9 @@ Component({
         answeringIssueId: issue.id,
         requiredAnswer: "",
         requiredAnswerReady: false,
+        requiredAnswerGatewayUrl: memoirBookReviewDictationUrl(
+          this.properties.projectId,
+        ),
       });
     },
 
@@ -120,9 +127,11 @@ Component({
       });
     },
 
-    async submitRequiredAnswer() {
+    async submitRequiredAnswer(event?: IssueInputEvent) {
       const issueId = this.data.answeringIssueId;
-      const note = this.data.requiredAnswer.trim();
+      const note = String(
+        event?.detail.value ?? this.data.requiredAnswer,
+      ).trim();
       if (
         !issueId
         || this.data.busyIssueId
@@ -195,6 +204,7 @@ Component({
             answeringIssueId: "",
             requiredAnswer: "",
             requiredAnswerReady: false,
+            requiredAnswerGatewayUrl: "",
           });
         }
         this.triggerEvent("refresh");

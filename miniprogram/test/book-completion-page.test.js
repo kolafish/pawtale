@@ -357,23 +357,6 @@ test("book completion returns to the book hub for generation and chapter managem
   assert.deepEqual(tabNavigations, ["/pages/book/index"]);
 });
 
-test("book completion opens book title settings directly", () => {
-  const navigations = [];
-  global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
-    },
-  };
-  const { page } = loadBookCompletionPage();
-  const context = pageContext(page, { projectId: "project/1" });
-
-  page.openBookSettings.call(context);
-
-  assert.deepEqual(navigations, [
-    "/pages/book-export/index?projectId=project%2F1&action=preview&settings=book",
-  ]);
-});
-
 test("book completion submits saved answers and opens the generated revision preview", async () => {
   const requests = [];
   const navigations = [];
@@ -570,7 +553,6 @@ test("book completion submits the cross-chapter review to the background", async
 
   assert.equal(context.data.checkingBook, false);
   assert.equal(context.data.bookReview.review.summary, "全书围绕家庭与成长展开。");
-  assert.equal(context.data.bookOutputAvailable, true);
 });
 
 test("book completion refreshes all visible state with one snapshot request", async () => {
@@ -594,7 +576,6 @@ test("book completion refreshes all visible state with one snapshot request", as
 
   assert.equal(requestCount, 1);
   assert.equal(context.data.bookReview.id, "review-1");
-  assert.equal(context.data.bookOutputAvailable, true);
 });
 
 test("book completion can check only chapters that have not been checked", async () => {

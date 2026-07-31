@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from app.domain.memoir.types import (
     MemoirBookRevisionProposalPhase,
@@ -38,7 +38,12 @@ class MemoirBookRevisionDraftRequest(BaseModel):
 
 class MemoirBookEditorialActionResponse(BaseModel):
     id: str
-    action_type: Literal["remove_repetition", "improve_transition", "reorder_chapters"]
+    action_type: Literal[
+        "remove_repetition",
+        "improve_transition",
+        "reorder_chapters",
+        "revise_book_profile",
+    ]
     title: str
     reason: str
     chapter_ids: list[str] = Field(default_factory=list)
@@ -152,15 +157,64 @@ class MemoirBookRevisionDraftJobResponse(MemoirBookRevisionJobResponse):
 
 
 class MemoirBookRevisionPlanItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str
     reason: str
     approach: str
     targets: list[str] = Field(default_factory=list)
 
 
+MemoirBookRevisionMetadataField = Literal[
+    "title",
+    "subtitle",
+    "narrator_name",
+    "prepared_by",
+    "preface",
+    "afterword",
+    "back_cover_quote",
+]
+
+
+class MemoirBookRevisionMetadataPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str | None = Field(default=None, max_length=200)
+    subtitle: str | None = Field(default=None, max_length=180)
+    narrator_name: str | None = Field(default=None, max_length=180)
+    prepared_by: str | None = Field(default=None, max_length=180)
+    preface: str | None = Field(default=None, max_length=1200)
+    afterword: str | None = Field(default=None, max_length=1200)
+    back_cover_quote: str | None = Field(default=None, max_length=160)
+
+    @field_validator("*")
+    @classmethod
+    def _strip_text(
+        cls,
+        value: str | None,
+        info: ValidationInfo,
+    ) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        return (text or None) if info.field_name == "title" else text
+
+
 class MemoirBookRevisionPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     summary: str
     items: list[MemoirBookRevisionPlanItem] = Field(default_factory=list)
+    book_metadata_patch: dict[MemoirBookRevisionMetadataField, str] = Field(
+        default_factory=dict
+    )
+
+    @field_validator("book_metadata_patch", mode="before")
+    @classmethod
+    def _validate_metadata_patch(cls, value: object) -> dict[str, str]:
+        return MemoirBookRevisionMetadataPatch.model_validate(
+            {} if value is None else value
+        ).model_dump(exclude_none=True)
 
 
 class MemoirBookRevisionPreviewVersion(BaseModel):
@@ -188,6 +242,12 @@ class MemoirBookRevisionChapterOrderItem(BaseModel):
     title: str
 
 
+class MemoirBookRevisionMetadataChange(BaseModel):
+    field: MemoirBookRevisionMetadataField
+    before_value: str
+    after_value: str
+
+
 class MemoirBookRevisionComparison(BaseModel):
     changed_chapter_count: int
     changed_section_count: int
@@ -198,6 +258,9 @@ class MemoirBookRevisionComparison(BaseModel):
     chapter_order_changed: bool = False
     before_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(default_factory=list)
     after_chapter_order: list[MemoirBookRevisionChapterOrderItem] = Field(default_factory=list)
+    metadata_changes: list[MemoirBookRevisionMetadataChange] = Field(
+        default_factory=list
+    )
 
 
 class MemoirBookRevisionProposalResponse(BaseModel):

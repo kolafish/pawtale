@@ -1,0 +1,36 @@
+<view class="voice-text-editor">
+  <textarea
+    class="voice-text-input"
+    value="{{value}}"
+    maxlength="{{maxlength}}"
+    auto-height
+    cursor-spacing="24"
+    disabled="{{disabled || busy || voicePhase !== 'idle'}}"
+    placeholder="{{placeholder}}"
+    aria-label="{{ariaLabel}}"
+    bindinput="changeText"
+  />
+  <text wx:if="{{hint}}" class="voice-text-hint">{{hint}}</text>
+  <text wx:if="{{error}}" class="voice-text-error">{{error}}</text>
+  <view class="voice-text-actions">
+    <view
+      class="voice-action ui-block-action ui-pressable {{voicePhase === 'listening' ? 'recording' : ''}} {{disabled || busy || voicePhase === 'connecting' || voicePhase === 'stopping' ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{disabled || busy || voicePhase === 'connecting' || voicePhase === 'stopping'}}"
+      bindtap="toggleVoice"
+    >{{voicePhase === "listening" ? "结束录音" : (voicePhase === "connecting" ? "正在连接…" : (voicePhase === "stopping" ? "正在确认文字…" : "语音输入"))}}</view>
+    <view
+      class="submit-action ui-block-action ui-pressable {{!textReady || disabled || busy || voicePhase !== 'idle' ? 'is-disabled' : ''}}"
+      aria-role="button"
+      aria-disabled="{{!textReady || disabled || busy || voicePhase !== 'idle'}}"
+      bindtap="submit"
+    >{{busy ? busyText : submitText}}</view>
+  </view>
+  <view
+    wx:if="{{cancelText}}"
+    class="cancel-action ui-block-action ui-pressable {{disabled || busy || voicePhase !== 'idle' ? 'is-disabled' : ''}}"
+    aria-role="button"
+    aria-disabled="{{disabled || busy || voicePhase !== 'idle'}}"
+    bindtap="cancel"
+  >{{cancelText}}</view>
+</view>

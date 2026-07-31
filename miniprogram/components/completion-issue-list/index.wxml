@@ -17,32 +17,23 @@
       >填写回答或说明</view>
       <view wx:else class="required-answer-editor">
         <text class="required-answer-label">我的回答或处理说明</text>
-        <textarea
-          class="required-answer-textarea"
+        <voice-text-editor
           value="{{requiredAnswer}}"
+          gateway-url="{{requiredAnswerGatewayUrl}}"
+          voice-session-id="{{answeringIssueId}}"
           maxlength="1000"
-          auto-height
-          cursor-spacing="24"
-          disabled="{{busyIssueId !== '' || disabled}}"
           placeholder="请写下您的回答、选择，或希望怎样处理这件事。"
-          aria-label="填写问题的回答或处理说明"
-          bindinput="changeRequiredAnswer"
+          submit-text="保存回答并处理"
+          busy-text="正在保存…"
+          cancel-text="稍后再填"
+          hint="您的原话会作为这项问题的处理说明保存。"
+          aria-label="填写或说出问题的回答或处理说明"
+          disabled="{{disabled}}"
+          busy="{{busyIssueId !== ''}}"
+          bindchange="changeRequiredAnswer"
+          bindsubmit="submitRequiredAnswer"
+          bindcancel="cancelRequiredAnswer"
         />
-        <text class="required-answer-hint">您的原话会作为这项问题的处理说明保存。</text>
-        <view class="required-answer-actions">
-          <view
-            class="action compact subtle ui-pressable {{busyIssueId || disabled ? 'is-disabled' : ''}}"
-            aria-role="button"
-            aria-disabled="{{busyIssueId !== '' || disabled}}"
-            bindtap="cancelRequiredAnswer"
-          >稍后再填</view>
-          <view
-            class="action compact ui-pressable {{!requiredAnswerReady || busyIssueId || disabled ? 'is-disabled' : ''}}"
-            aria-role="button"
-            aria-disabled="{{!requiredAnswerReady || busyIssueId !== '' || disabled}}"
-            bindtap="submitRequiredAnswer"
-          >{{busyIssueId === item.id ? "正在保存…" : "保存回答并处理"}}</view>
-        </view>
       </view>
     </block>
     <text wx:else class="state">

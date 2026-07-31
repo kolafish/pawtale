@@ -7,7 +7,6 @@ import {
   memoirRequest,
 } from "./memoir-api-client";
 import {
-  ApiError,
   cleanBaseUrl,
   readBackendConfig,
 } from "./request";
@@ -38,7 +37,8 @@ export interface MemoirBookReview {
 export type MemoirBookEditorialActionType =
   | "remove_repetition"
   | "improve_transition"
-  | "reorder_chapters";
+  | "reorder_chapters"
+  | "revise_book_profile";
 
 export interface MemoirBookEditorialAction {
   id: string;
@@ -150,6 +150,25 @@ export interface MemoirBookRevisionPlanItem {
 export interface MemoirBookRevisionPlan {
   summary: string;
   items: MemoirBookRevisionPlanItem[];
+  book_metadata_patch: Partial<Record<
+    MemoirBookRevisionMetadataField,
+    string
+  >>;
+}
+
+export type MemoirBookRevisionMetadataField =
+  | "title"
+  | "subtitle"
+  | "narrator_name"
+  | "prepared_by"
+  | "preface"
+  | "afterword"
+  | "back_cover_quote";
+
+export interface MemoirBookRevisionMetadataChange {
+  field: MemoirBookRevisionMetadataField;
+  before_value: string;
+  after_value: string;
 }
 
 export interface MemoirBookRevisionSectionComparison {
@@ -193,6 +212,7 @@ export interface MemoirBookRevisionProposal {
     chapter_order_changed: boolean;
     before_chapter_order: Array<{ chapter_id: string; title: string }>;
     after_chapter_order: Array<{ chapter_id: string; title: string }>;
+    metadata_changes: MemoirBookRevisionMetadataChange[];
   };
   before: MemoirBookRevisionPreviewVersion;
   after: MemoirBookRevisionPreviewVersion;
@@ -360,17 +380,11 @@ function bookRevisionProposalPath(
   }${suffix}`;
 }
 
-export function memoirBookRevisionDictationUrl(
-  projectId: string,
-  proposalId: string,
-): string {
+export function memoirBookReviewDictationUrl(projectId: string): string {
   const config = readBackendConfig();
-  if (!config.wsBaseUrl) {
-    throw new ApiError(0, "未配置后端 WebSocket 地址", {});
-  }
-  return `${cleanBaseUrl(config.wsBaseUrl)}${
-    bookRevisionProposalPath(projectId, proposalId, "/dictation")
-  }`;
+  return config.wsBaseUrl
+    ? `${cleanBaseUrl(config.wsBaseUrl)}${bookReviewPath(projectId)}/dictation`
+    : "";
 }
 
 export function getMemoirBookRevisionProposal(

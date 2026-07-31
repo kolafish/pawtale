@@ -120,7 +120,6 @@ interface BookCompletionData {
   editorialRevisionProgress: TaskProgressView;
   generatingEditorialRevision: boolean;
   editorialRevisionCancelling: boolean;
-  bookOutputAvailable: boolean;
 }
 
 interface ChapterDataset {
@@ -138,6 +137,7 @@ function editorialActionViews(
     remove_repetition: "去重复",
     improve_transition: "补衔接",
     reorder_chapters: "调顺序",
+    revise_book_profile: "成书信息",
   };
   return (review?.review.editorial_actions || []).map((action) => ({
     ...action,
@@ -491,7 +491,6 @@ definePage<BookCompletionData>()({
     editorialRevisionProgress: HIDDEN_TASK_PROGRESS,
     generatingEditorialRevision: false,
     editorialRevisionCancelling: false,
-    bookOutputAvailable: false,
   },
 
   onLoad(options: PageQuery) {
@@ -524,19 +523,6 @@ definePage<BookCompletionData>()({
 
   openBookHome() {
     wx.switchTab({ url: "/pages/book/index" });
-  },
-
-  openBookSettings() {
-    if (!this.data.projectId) {
-      return;
-    }
-    wx.navigateTo({
-      url: pageUrl("/pages/book-export/index", {
-        projectId: this.data.projectId,
-        action: "preview",
-        settings: "book",
-      }),
-    });
   },
 
   openAdjustedBook() {
@@ -676,7 +662,6 @@ definePage<BookCompletionData>()({
           bookReview,
           selectedEditorialActionIds,
         ),
-        bookOutputAvailable: overview.book_output_available,
         bookReviewProgress: bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,

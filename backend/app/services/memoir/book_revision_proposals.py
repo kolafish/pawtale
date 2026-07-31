@@ -58,6 +58,81 @@ def _sections(snapshot: dict[str, object]) -> list[dict[str, object]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
+_BOOK_METADATA_FIELDS = (
+    "title",
+    "subtitle",
+    "narrator_name",
+    "prepared_by",
+    "preface",
+    "afterword",
+    "back_cover_quote",
+)
+
+
+def _revision_metadata_patch(proposal: MemoirBookRevisionProposal) -> dict[str, str]:
+    plan = proposal.revision_plan_json
+    value = plan.get("book_metadata_patch") if isinstance(plan, dict) else None
+    return {
+        field: text
+        for field in _BOOK_METADATA_FIELDS
+        if isinstance(value, dict)
+        and field in value
+        and isinstance((text := value[field]), str)
+    }
+
+
+def _book_information(
+    *,
+    project: Project,
+    output: MemoirBookOutput,
+    baseline: MemoirBookOutputVersion,
+) -> dict[str, str]:
+    return {
+        "title": book_output_versions.book_output_version_title(
+            baseline,
+            fallback=output.title,
+        ),
+        **effective_book_metadata(
+            project=project,
+            stored=baseline.manuscript_json,
+            include_empty=True,
+        ),
+    }
+
+
+def _metadata_changes(
+    before: dict[str, str],
+    after: dict[str, str],
+) -> list[dict[str, str]]:
+    return [
+        {
+            "field": field,
+            "before_value": before.get(field, ""),
+            "after_value": after.get(field, ""),
+        }
+        for field in _BOOK_METADATA_FIELDS
+        if before.get(field, "") != after.get(field, "")
+    ]
+
+
+def _patched_book_information(
+    *,
+    project: Project,
+    baseline: MemoirBookOutputVersion,
+    before: dict[str, str],
+    patch: dict[str, str],
+) -> dict[str, str]:
+    return {
+        "title": patch.get("title", before["title"]),
+        **effective_book_metadata(
+            project=project,
+            stored=baseline.manuscript_json,
+            patch={key: value for key, value in patch.items() if key != "title"},
+            include_empty=True,
+        ),
+    }
+
+
 def build_comparison(
     *,
     before: list[dict[str, object]],
@@ -237,20 +312,26 @@ def _stored_illustrations(
 def _candidate_manuscript(
     *,
     project: Project,
-    output: MemoirBookOutput,
     baseline: MemoirBookOutputVersion,
     snapshots: list[dict[str, object]],
     content: str,
+    title: str,
+    metadata_patch: dict[str, str],
 ) -> dict[str, Any]:
     illustrations, image_appendix = _stored_illustrations(baseline.manuscript_json)
     manuscript = manuscript_from_snapshot(
-        title=output.title,
+        title=title,
         content=content,
         snapshot=snapshots,
         cover_style_value=stored_cover_style(baseline),
         metadata=effective_book_metadata(
             project=project,
             stored=baseline.manuscript_json,
+            patch={
+                key: value
+                for key, value in metadata_patch.items()
+                if key != "title"
+            },
         ),
         chapter_illustrations_by_chapter=illustrations,
         image_appendix=image_appendix,
@@ -339,9 +420,29 @@ async def proposal_response(
         if phase == MemoirBookRevisionProposalPhase.DRAFT_READY
         else before_snapshots
     )
+    before_information = _book_information(
+        project=project,
+        output=output,
+        baseline=baseline,
+    )
+    metadata_patch = _revision_metadata_patch(proposal)
+    after_information = (
+        _patched_book_information(
+            project=project,
+            baseline=baseline,
+            before=before_information,
+            patch=metadata_patch,
+        )
+        if phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+        else before_information
+    )
+    metadata_changes = _metadata_changes(
+        before_information,
+        after_information,
+    )
     before_manuscript = (
         manuscript_response(
-            title=output.title,
+            title=before_information["title"],
             content=baseline.content,
             snapshot=before_snapshots,
             stored=baseline.manuscript_json,
@@ -352,24 +453,28 @@ async def proposal_response(
     after_manuscript = None
     if phase == MemoirBookRevisionProposalPhase.DRAFT_READY and preview in {"after", "both"}:
         after_content = book_content_from_chapter_snapshots(
-            title=output.title,
+            title=after_information["title"],
             snapshots=after_snapshots,
         )
         after_manuscript = manuscript_response(
-            title=output.title,
+            title=after_information["title"],
             content=after_content,
             snapshot=after_snapshots,
             stored=_candidate_manuscript(
                 project=project,
-                output=output,
                 baseline=baseline,
                 snapshots=after_snapshots,
                 content=after_content,
+                title=after_information["title"],
+                metadata_patch=metadata_patch,
             ),
         )
-    comparison = MemoirBookRevisionComparison.model_validate(
-        build_comparison(before=before_snapshots, after=after_snapshots)
+    comparison_data = build_comparison(
+        before=before_snapshots,
+        after=after_snapshots,
     )
+    comparison_data["metadata_changes"] = metadata_changes
+    comparison = MemoirBookRevisionComparison.model_validate(comparison_data)
     return MemoirBookRevisionProposalResponse(
         id=proposal.id,
         project_id=proposal.project_id,
@@ -387,7 +492,8 @@ async def proposal_response(
             manuscript=before_manuscript,
         ),
         after=MemoirBookRevisionPreviewVersion(
-            version=baseline.version + int(after_snapshots != before_snapshots),
+            version=baseline.version
+            + int(after_snapshots != before_snapshots or bool(metadata_changes)),
             manuscript=after_manuscript,
         ),
         can_apply=(
@@ -431,19 +537,36 @@ async def apply_proposal(
 
     snapshots = _snapshots(proposal.candidate_chapter_snapshot_json)
     before_snapshots = _snapshots(baseline.chapter_snapshot_json)
+    before_information = _book_information(
+        project=project,
+        output=output,
+        baseline=baseline,
+    )
+    metadata_patch = _revision_metadata_patch(proposal)
+    after_information = _patched_book_information(
+        project=project,
+        baseline=baseline,
+        before=before_information,
+        patch=metadata_patch,
+    )
     content = book_content_from_chapter_snapshots(
-        title=output.title,
+        title=after_information["title"],
         snapshots=snapshots,
     )
+    manuscript_json = _candidate_manuscript(
+        project=project,
+        baseline=baseline,
+        snapshots=snapshots,
+        content=content,
+        title=after_information["title"],
+        metadata_patch=metadata_patch,
+    )
     applied_version = baseline
-    if content != baseline.content or snapshots != before_snapshots:
-        manuscript_json = _candidate_manuscript(
-            project=project,
-            output=output,
-            baseline=baseline,
-            snapshots=snapshots,
-            content=content,
-        )
+    if (
+        content != baseline.content
+        or snapshots != before_snapshots
+        or manuscript_json != baseline.manuscript_json
+    ):
         applied_version = await book_output_versions.append_book_output_version(
             db,
             output=output,
@@ -482,6 +605,7 @@ async def apply_proposal(
             "proposal_id": proposal.id,
         }
     output.status = MemoirOutputStatus.DRAFT.value
+    output.title = after_information["title"]
     output.metadata_json = metadata
     output.updated_at = utcnow_naive()
     proposal.status = MemoirBookRevisionProposalStatus.APPLIED.value

@@ -114,17 +114,6 @@
           >{{selectedEditorialActionIds.length ? "生成所选修改思路" : "请先选择建议"}}</view>
         </view>
 
-        <view wx:if="{{bookOutputAvailable}}" class="review-book-settings">
-          <text class="review-book-settings-copy">
-            如果问题只是书名、全书定位或出版信息不合适，可以直接修改，不需要录音补讲。
-          </text>
-          <view
-            class="review-book-settings-action ui-block-action ui-pressable"
-            aria-role="button"
-            bindtap="openBookSettings"
-          >调整书名与成书信息</view>
-        </view>
-
         <completion-issue-list
           project-id="{{projectId}}"
           project-title="{{projectTitle}}"

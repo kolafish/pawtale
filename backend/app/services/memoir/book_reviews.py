@@ -20,6 +20,7 @@ from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
+    MemoirBookOutputVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
     MemoirBookReview,
@@ -37,10 +38,15 @@ from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir import (
     book_editorial_actions,
+    book_output_versions,
     chapter_digests,
     completion_issues,
 )
-from app.services.memoir.book_output_manuscript import formal_book_title
+from app.services.memoir.book_output_manuscript import (
+    book_information_text,
+    formal_book_title,
+    stored_manuscript_metadata,
+)
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
@@ -90,7 +96,7 @@ class BookReviewChapter:
 class BookReviewContext:
     project_id: str
     plan_id: str
-    title: str
+    book_metadata: dict[str, str]
     chapters: tuple[BookReviewChapter, ...]
     input_signature: str
 
@@ -117,6 +123,7 @@ class _BookReviewEditorialActionOutput(BaseModel):
         "remove_repetition",
         "improve_transition",
         "reorder_chapters",
+        "revise_book_profile",
     ]
     title: str
     reason: str
@@ -335,11 +342,25 @@ async def load_book_review_context(
             MemoirBookOutput.project_id == project_id,
         )
     )
+    latest: MemoirBookOutputVersion | None = (
+        await book_output_versions.load_latest_book_output_version(
+            db,
+            output_id=output.id,
+        )
+        if output is not None
+        else None
+    )
     book_title = (
         (output.title or "").strip()
         if output is not None
         else formal_book_title((plan.title or "").strip())
     ) or "我的回忆录"
+    book_metadata = {
+        "title": book_title,
+        **stored_manuscript_metadata(
+            latest.manuscript_json if latest is not None else None
+        ),
+    }
     chapters: list[BookReviewChapter] = []
     for chapter in plan_chapters:
         digest_context = await chapter_digests.load_chapter_digest_context(
@@ -409,7 +430,7 @@ async def load_book_review_context(
     return BookReviewContext(
         project_id=project_id,
         plan_id=plan.id,
-        title=book_title,
+        book_metadata=book_metadata,
         chapters=tuple(chapters),
         input_signature=signature,
     )
@@ -435,7 +456,8 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
     )
     return f"""请审阅下面这本回忆录的全书结构。
 
-当前书名：{context.title}
+当前成书信息：
+{book_information_text(context.book_metadata)}
 
 有序章节：
 {chapters}
@@ -447,7 +469,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
   "structure_guidance": ["只供用户参考、不能直接执行的结构建议"],
   "editorial_actions": [
     {{
-      "action_type": "remove_repetition|improve_transition|reorder_chapters",
+      "action_type": "remove_repetition|improve_transition|reorder_chapters|revise_book_profile",
       "title": "用户能直接理解的一句话修改标题",
       "reason": "为什么需要这项修改，以及预期改善",
       "chapter_ids": ["涉及章节；调整顺序时按建议顺序排列"]
@@ -468,11 +490,12 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 要求：
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 只判断明显的跨章断裂、重复、人物突现、主题失衡和用户决定。
-- 只有明确属于去除跨章重复、改善相邻章节衔接、调整现有章节顺序的问题，才写入 editorial_actions。
-- 不能直接执行或不属于上述三类的编辑建议写入 structure_guidance，不要求用户补讲。
+- 去除跨章重复、改善相邻章节衔接、调整现有章节顺序，或调整书名与成书信息的问题，写入 editorial_actions。
+- revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组。
+- 不能在现有书稿和成书信息中直接执行的建议写入 structure_guidance，不要求用户补讲。
 - 不得建议新建、删除、合并章节，不得改变小节数量或归属。
-- reorder_chapters 的 chapter_ids 至少包含两个章节，并按建议的新顺序排列；另外两类按涉及范围排列。
-- 书名、全书定位、主题取舍等属于 editorial_change，但本次不能自动执行，应写入 structure_guidance。
+- reorder_chapters 的 chapter_ids 至少包含两个章节，并按建议的新顺序排列；正文修改类建议按涉及范围排列。
+- 书名、全书定位或出版陈述不合适时使用 revise_book_profile，不要把它拆成需要用户补讲的问题。
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
@@ -606,7 +629,11 @@ def normalize_book_review(
             raw_action.get("chapter_ids"),
             limit=len(context.chapters),
         )
-        if not title or not reason or not chapter_ids:
+        if (
+            not title
+            or not reason
+            or (action_type != "revise_book_profile" and not chapter_ids)
+        ):
             continue
         if action_type == "reorder_chapters":
             if len(chapter_ids) < 2:
