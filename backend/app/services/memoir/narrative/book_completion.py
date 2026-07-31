@@ -272,9 +272,7 @@ async def revise_chapter_section_with_ai(
 async def get_book_completion_overview(
     db: AsyncSession,
     *,
-    user_id: str,
     project_id: str,
-    allow_admin: bool = False,
 ) -> MemoirBookCompletionOverviewResponse:
     issue_models = await completion_issues.list_issues(
         db,
@@ -285,11 +283,9 @@ async def get_book_completion_overview(
         project_id=project_id,
         issues=issue_models,
     )
-    completion_job = await book_completion_jobs.get_current_book_completion_job(
+    completion_job = await book_completion_jobs.read_current_book_completion_job(
         db,
-        user_id=user_id,
         project_id=project_id,
-        allow_admin=allow_admin,
     )
     review = await book_reviews.get_current_book_review(db, project_id=project_id)
     issues = await completion_issues.collection_response(

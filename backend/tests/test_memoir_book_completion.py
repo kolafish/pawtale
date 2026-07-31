@@ -854,10 +854,20 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
         queued_body["job_id"],
     )
     assert failed_batch is not None
-    assert [item["status"] for item in failed_batch.chapter_results_json] == [
-        "succeeded",
-        "failed",
-    ]
+    assert failed_batch.status == MemoirBookCompletionJobStatus.RUNNING.value
+    assert failed_batch.active_key is not None
+    assert failed_batch.completed_at is None
+
+    settled = await client.delete(
+        f"/api/memoir/projects/{project_id}/book-completion/jobs/{queued_body['job_id']}"
+    )
+    assert settled.status_code == 200, settled.text
+    assert settled.json()["status"] == "failed"
+    await test_db.refresh(failed_batch)
+    assert failed_batch.status == MemoirBookCompletionJobStatus.FAILED.value
+    assert failed_batch.active_key is None
+    assert failed_batch.error_message == "provider unavailable"
+    assert failed_batch.completed_at is not None
 
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
@@ -872,6 +882,7 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     assert retried_body["status"] == "running"
     assert retried_body["total_chapter_count"] == 1
     assert retried_body["chapters"][0]["chapter_id"] == chapters[1].id
+    assert retried_body["chapters"][0]["job_id"] != child_job_ids[1]
 
     stale_cancel = await client.delete(
         f"/api/memoir/projects/{project_id}/book-completion/jobs/{queued_body['job_id']}"
@@ -901,6 +912,47 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     )
     assert stored_batch is not None
     assert stored_batch.active_key is None
+
+
+async def test_book_completion_overview_does_not_resume_or_update_job(
+    client,
+    test_db,
+):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    batch = MemoirBookCompletionJob(
+        project_id=project_id,
+        active_key=f"book-completion:{project_id}",
+        status=MemoirBookCompletionJobStatus.PENDING.value,
+        target_chapters_json=[
+            {"chapter_id": chapter.id, "title": chapter.title}
+            for chapter in chapters
+        ],
+        chapter_job_ids_json={},
+        enqueue_errors_json={},
+    )
+    test_db.add(batch)
+    await test_db.commit()
+
+    snapshot = await _completion_field(client, project_id, "completion_job")
+
+    assert snapshot["job_id"] == batch.id
+    assert snapshot["status"] == "pending"
+    assert snapshot["processed_chapter_count"] == 0
+    assert all(item["job_id"] is None for item in snapshot["chapters"])
+    await test_db.refresh(batch)
+    assert batch.status == MemoirBookCompletionJobStatus.PENDING.value
+    assert batch.chapter_job_ids_json == {}
+    assert batch.active_key == f"book-completion:{project_id}"
+    child_count = await test_db.scalar(
+        select(func.count())
+        .select_from(MemoirEditingJob)
+        .where(
+            MemoirEditingJob.project_id == project_id,
+            MemoirEditingJob.job_type
+            == MemoirEditingJobType.PREPARE_CHAPTER.value,
+        )
+    )
+    assert child_count == 0
 
 
 async def test_book_completion_job_does_not_enqueue_after_concurrent_cancel(

@@ -137,8 +137,8 @@ async def test_runtime_schema_migration_creates_book_completion_jobs():
             "target_chapters_json",
             "chapter_job_ids_json",
             "enqueue_errors_json",
-            "chapter_results_json",
         } <= columns
+        assert "chapter_results_json" not in columns
         await assert_runtime_schema(
             engine,
             require_sqlite_foreign_keys=False,
@@ -205,6 +205,13 @@ async def test_cutover_removes_unused_book_completion_and_review_columns():
             )
             await conn.execute(
                 text(
+                    "ALTER TABLE memoir_book_completion_jobs "
+                    "ADD COLUMN chapter_results_json "
+                    "JSON NOT NULL DEFAULT '[]'"
+                )
+            )
+            await conn.execute(
+                text(
                     "ALTER TABLE memoir_book_revision_proposals "
                     "ADD COLUMN comparison_json JSON NOT NULL DEFAULT '{}'"
                 )
@@ -254,10 +261,12 @@ async def test_cutover_removes_unused_book_completion_and_review_columns():
                 conn,
                 "memoir_completion_issues",
             )
-            assert "scope" not in await _table_columns(
+            book_completion_columns = await _table_columns(
                 conn,
                 "memoir_book_completion_jobs",
             )
+            assert "scope" not in book_completion_columns
+            assert "chapter_results_json" not in book_completion_columns
             assert "comparison_json" not in await _table_columns(
                 conn,
                 "memoir_book_revision_proposals",
