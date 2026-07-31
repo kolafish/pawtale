@@ -479,6 +479,8 @@ test("book revision keeps submit error when polling only finds an older success"
 test("section revision uses the shared plan, preview, and apply workbench", async () => {
   const calls = [];
   let draftReady = false;
+  let initialPlanReady = false;
+  let scheduledFeedbackPoll = null;
   global.wx = {
     setNavigationBarTitle() {},
     showToast() {},
@@ -490,12 +492,16 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
   const { page } = loadRevisionPage({
     api: {
       getMemoirChapterSectionRevisionJob: async () => ({
-        ...revisionFeedbackJob(),
+        ...revisionFeedbackJob(initialPlanReady ? "succeeded" : "idle"),
         operation: "plan",
-        proposal_id: null,
+        proposal_id: initialPlanReady ? "proposal-1" : null,
       }),
       enqueueMemoirChapterSectionRevision: async (...args) => {
         calls.push(args);
+        if (args[3] === "plan") {
+          initialPlanReady = true;
+          return revisionFeedbackJob("pending");
+        }
         if (args[3] === "draft") {
           draftReady = true;
         }
@@ -516,6 +522,14 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
     },
   });
   const context = pageContext(page);
+  context.pageActive = true;
+  context.feedbackPoller = {
+    cancel() {},
+    schedule(callback) {
+      scheduledFeedbackPoll = callback;
+      return true;
+    },
+  };
   await page.onLoad.call(context, {
     scope: "chapter_section",
     projectId: "project-1",
@@ -527,6 +541,10 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
   await page.submitFeedback.call(context, {
     detail: { value: "保留事实，把语气写得更平实。" },
   });
+  assert.equal(context.data.feedbackBusy, true);
+  assert.ok(scheduledFeedbackPoll);
+  scheduledFeedbackPoll();
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(context.data.proposal.phase, "plan_ready");
   await page.generateDraft.call(context);
   assert.equal(context.data.proposal.phase, "draft_ready");
