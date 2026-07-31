@@ -97,6 +97,7 @@ export interface MemoirBookRevisionJob {
   include_answers: boolean;
   answer_count: number;
   unresolved_count: number;
+  action_ids: string[];
   selected_action_count: number;
   changed_chapter_count: number;
   summary: string;

@@ -172,6 +172,7 @@ function revisionJob(overrides = {}) {
     include_answers: false,
     answer_count: 0,
     unresolved_count: 0,
+    action_ids: [],
     selected_action_count: 0,
     changed_chapter_count: 0,
     summary: "",
@@ -386,6 +387,7 @@ test("book completion submits answers and editorial actions as one revision", as
           stage: "completed",
           include_answers: true,
           answer_count: 2,
+          action_ids: ["action/1"],
           selected_action_count: 1,
           proposal_id: "proposal/1",
           proposal_status: "ready",
@@ -416,6 +418,52 @@ test("book completion submits answers and editorial actions as one revision", as
   assert.deepEqual(navigations, [
     "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
   ]);
+  page.onHide.call(context);
+  delete global.wx;
+});
+
+test("book completion restores the selection of an active revision", async () => {
+  const review = bookReview({
+    review: {
+      summary: "全书围绕家庭与成长展开。",
+      strengths: [],
+      structure_guidance: [],
+      editorial_actions: [{
+        id: "action/1",
+        action_type: "improve_transition",
+        title: "补充章节衔接",
+        reason: "相邻章节切换较突然。",
+        chapter_ids: ["chapter-1"],
+      }],
+    },
+  });
+  global.wx = { showToast() {} };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        confirmedOverview(),
+        {
+          book_review: review,
+          revision_job: revisionJob({
+            job_id: "revision-job-1",
+            status: "running",
+            stage: "revising",
+            include_answers: true,
+            answer_count: 2,
+            action_ids: ["action/1"],
+            selected_action_count: 1,
+          }),
+        },
+      ),
+    },
+  });
+  const context = pageContext(page, { projectId: "project/1" });
+
+  await page.onShow.call(context);
+
+  assert.equal(context.data.includeBookReviewAnswers, true);
+  assert.deepEqual(context.data.selectedEditorialActionIds, ["action/1"]);
+  assert.equal(context.data.editorialActionViews[0].selected, true);
   page.onHide.call(context);
   delete global.wx;
 });

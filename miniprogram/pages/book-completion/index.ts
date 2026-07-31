@@ -563,6 +563,9 @@ definePage<BookCompletionData>()({
         revisionJob
         && revisionJobActive(revisionJob),
       );
+      const restoreRevisionSelection = Boolean(
+        revisionActive || revisionJob?.proposal_status === "ready",
+      );
       const finishedBookReview = (
         this.data.checkingBook
         && !reviewJobActive
@@ -580,7 +583,11 @@ definePage<BookCompletionData>()({
         && bulkCheckJob.status !== "idle"
       );
       const selectedEditorialActionIds = (
-        this.data.selectedEditorialActionIds.filter(
+        (
+          restoreRevisionSelection
+            ? revisionJob?.action_ids || []
+            : this.data.selectedEditorialActionIds
+        ).filter(
           (actionId) => (
             bookReview?.review.editorial_actions?.some(
               (action) => action.id === actionId,
@@ -601,7 +608,7 @@ definePage<BookCompletionData>()({
         bookReviewJob,
         checkingBook: reviewJobActive,
         includeBookReviewAnswers: (
-          revisionJob && revisionJob.status !== "idle"
+          restoreRevisionSelection && revisionJob
             ? revisionJob.include_answers
             : this.data.includeBookReviewAnswers
         ),
@@ -864,6 +871,7 @@ definePage<BookCompletionData>()({
     if (
       !job?.answer_count
       || job.already_applied
+      || job.proposal_status === "ready"
       || this.data.generatingRevision
       || this.data.revisionCancelling
     ) {
@@ -878,6 +886,7 @@ definePage<BookCompletionData>()({
     const actionId = datasetString(event, "actionId");
     if (
       !actionId
+      || this.data.revisionJob?.proposal_status === "ready"
       || this.data.generatingRevision
       || this.data.revisionCancelling
     ) {

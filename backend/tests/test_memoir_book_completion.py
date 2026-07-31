@@ -2009,6 +2009,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert queued_body["stage"] == "queued"
     assert queued_body["include_answers"] is True
     assert queued_body["answer_count"] == 1
+    assert queued_body["action_ids"] == []
     assert queued_body["selected_action_count"] == 0
 
     cancelled = await client.delete(
@@ -2026,6 +2027,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     )
     assert retried.status_code == 202, retried.text
     assert retried.json()["job_id"] == queued_body["job_id"]
+    assert retried.json()["action_ids"] == [action_id]
     assert retried.json()["selected_action_count"] == 1
 
     clear_editing_job_handlers()
@@ -2049,6 +2051,7 @@ async def test_book_review_selection_plan_feedback_draft_and_apply(
     assert completed_body["status"] == "succeeded"
     assert completed_body["stage"] == "completed"
     assert completed_body["answer_count"] == 1
+    assert completed_body["action_ids"] == [action_id]
     assert completed_body["selected_action_count"] == 1
     assert completed_body["changed_chapter_count"] == 0
     assert completed_body["proposal_id"]

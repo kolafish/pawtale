@@ -141,6 +141,11 @@ async def _job_state(
         "include_answers": state.get("include_answers") is True,
         "answer_count": answer_count,
         "unresolved_count": unresolved_count,
+        "action_ids": (
+            [str(value) for value in state.get("action_ids", [])]
+            if isinstance(state.get("action_ids"), list)
+            else []
+        ),
         "selected_action_count": int(state.get("selected_action_count") or 0),
         "changed_chapter_count": int(state.get("changed_chapter_count") or 0),
         "summary": str(state.get("summary") or ""),
@@ -234,6 +239,7 @@ async def enqueue_book_revision_job(
         result.update(
             include_answers=include_answers,
             answer_count=len(context.answers),
+            action_ids=selected_ids,
             selected_action_count=len(actions),
             changed_chapter_count=0,
             summary="",

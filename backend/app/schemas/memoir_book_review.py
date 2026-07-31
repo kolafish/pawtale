@@ -145,6 +145,7 @@ class MemoirBookRevisionJobResponse(BaseModel):
     include_answers: bool = False
     answer_count: int = 0
     unresolved_count: int = 0
+    action_ids: list[str] = Field(default_factory=list)
     selected_action_count: int = 0
     changed_chapter_count: int = 0
     summary: str = ""
