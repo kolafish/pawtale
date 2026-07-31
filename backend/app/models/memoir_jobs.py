@@ -132,7 +132,6 @@ class MemoirBookCompletionJob(Base):
     target_chapters_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     chapter_job_ids_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     enqueue_errors_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
-    chapter_results_json: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
     error_message: Mapped[str] = mapped_column(Text, default="", nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive)

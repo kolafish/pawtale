@@ -107,7 +107,7 @@ OBSOLETE_COLUMNS = {
         "source_route_updated_at",
     },
     "memoir_completion_issues": {"section_id"},
-    "memoir_book_completion_jobs": {"scope"},
+    "memoir_book_completion_jobs": {"scope", "chapter_results_json"},
     "memoir_automation_events": {
         "followup_task_id",
         "review_utterance_id",

@@ -178,13 +178,16 @@ async def enqueue_chapter_preparation_job(
         if req.operation == "rewrite"
         else len(context.sections)
     )
+    if existing is not None:
+        existing.dedupe_key = None
+        db.add(existing)
+        await db.flush()
     job = await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
         chapter_id=chapter_id,
         job_type=MemoirEditingJobType.PREPARE_CHAPTER,
         dedupe_key=_job_dedupe_key(chapter_id),
-        replace_completed=True,
         payload_json={
             "user_id": user_id,
             "allow_admin": allow_admin,

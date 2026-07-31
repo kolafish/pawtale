@@ -60,9 +60,7 @@ async def get_memoir_book_completion_overview(
     await authorize_project(db, project_id=project_id, current_user=current_user)
     return await book_completion.get_book_completion_overview(
         db,
-        user_id=current_user.id,
         project_id=project_id,
-        allow_admin=is_admin_user(current_user),
     )
 
 
