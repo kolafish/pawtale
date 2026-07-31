@@ -388,15 +388,20 @@ async def collection_response(
     project_id: str,
     chapter_id: str | None = None,
     include_closed: bool = False,
+    issues: list[MemoirCompletionIssue] | None = None,
 ) -> MemoirCompletionIssueCollectionResponse:
-    issues = await list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-        include_closed=include_closed,
+    issue_rows = (
+        issues
+        if issues is not None
+        else await list_issues(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            include_closed=include_closed,
+        )
     )
     active_sessions: dict[str, str] = {}
-    if issues:
+    if issue_rows:
         rows = await db.execute(
             select(
                 MemoirVoiceSession.current_completion_issue_id,
@@ -405,7 +410,7 @@ async def collection_response(
             .where(
                 MemoirVoiceSession.project_id == project_id,
                 MemoirVoiceSession.current_completion_issue_id.in_(
-                    [issue.id for issue in issues]
+                    [issue.id for issue in issue_rows]
                 ),
                 MemoirVoiceSession.status.not_in(
                     {
@@ -428,7 +433,7 @@ async def collection_response(
                 issue,
                 active_session_id=active_sessions.get(issue.id),
             )
-            for issue in issues
+            for issue in issue_rows
         ],
     )
 

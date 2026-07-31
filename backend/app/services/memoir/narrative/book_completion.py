@@ -11,6 +11,7 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
+    MemoirBookOutput,
     MemoirBookPlanChapter,
     MemoirSection,
 )
@@ -19,6 +20,10 @@ from app.schemas.memoir_narrative import (
     MemoirChapterWorkspaceResponse,
 )
 from app.services.memoir import (
+    book_completion_jobs,
+    book_review_jobs,
+    book_reviews,
+    book_revision_jobs,
     chapter_digests,
     chapter_generation,
     completion_issues,
@@ -267,9 +272,62 @@ async def revise_chapter_section_with_ai(
 async def get_book_completion_overview(
     db: AsyncSession,
     *,
+    user_id: str,
     project_id: str,
+    allow_admin: bool = False,
 ) -> MemoirBookCompletionOverviewResponse:
-    return await completion_read_model.book_overview(
+    issue_models = await completion_issues.list_issues(
         db,
         project_id=project_id,
+    )
+    overview = await completion_read_model.book_overview(
+        db,
+        project_id=project_id,
+        issues=issue_models,
+    )
+    completion_job = await book_completion_jobs.get_current_book_completion_job(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        allow_admin=allow_admin,
+    )
+    review = await book_reviews.get_current_book_review(db, project_id=project_id)
+    issues = await completion_issues.collection_response(
+        db,
+        project_id=project_id,
+        issues=issue_models,
+    )
+    return MemoirBookCompletionOverviewResponse.model_validate(
+        {
+            **overview.model_dump(),
+            "completion_job": completion_job,
+            "book_review": (
+                book_reviews.book_review_response(review) if review else None
+            ),
+            "book_review_job": await book_review_jobs.book_review_job_state(
+                db,
+                project_id=project_id,
+            ),
+            "book_issues": [
+                issue for issue in issues.issues if issue.scope == "book"
+            ],
+            "book_output_available": (
+                await db.scalar(
+                    select(MemoirBookOutput.id)
+                    .where(MemoirBookOutput.project_id == project_id)
+                    .limit(1)
+                )
+                is not None
+            ),
+            "answer_application_job": await book_revision_jobs.book_revision_job_state(
+                db,
+                project_id=project_id,
+                source="review_answers",
+            ),
+            "editorial_revision_job": await book_revision_jobs.book_revision_job_state(
+                db,
+                project_id=project_id,
+                source="editorial_actions",
+            ),
+        }
     )

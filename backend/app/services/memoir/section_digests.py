@@ -128,29 +128,7 @@ def _string_list(
     return result
 
 
-async def load_section_digest_context(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    section_id: str,
-) -> SectionDigestContext:
-    section = await db.scalar(
-        select(MemoirSection)
-        .where(
-            MemoirSection.project_id == project_id,
-            MemoirSection.id == section_id,
-        )
-        .options(
-            selectinload(MemoirSection.materials).selectinload(
-                MemoirSectionMaterial.utterance
-            ),
-            selectinload(MemoirSection.materials).selectinload(
-                MemoirSectionMaterial.transcript_version
-            ),
-        )
-    )
-    if section is None:
-        raise HTTPException(status_code=404, detail="小章节不存在")
+def section_digest_context(section: MemoirSection) -> SectionDigestContext:
     ordered = sorted(
         section.materials,
         key=lambda item: (item.sort_order, item.id),
@@ -193,7 +171,7 @@ async def load_section_digest_context(
         "engine": SECTION_DIGEST_ENGINE,
     }
     return SectionDigestContext(
-        project_id=project_id,
+        project_id=section.project_id,
         section_id=section.id,
         title=section.title,
         section_type=section.section_type,
@@ -202,6 +180,32 @@ async def load_section_digest_context(
         materials=materials,
         input_signature=semantic_json_signature(signature_payload),
     )
+
+
+async def load_section_digest_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    section_id: str,
+) -> SectionDigestContext:
+    section = await db.scalar(
+        select(MemoirSection)
+        .where(
+            MemoirSection.project_id == project_id,
+            MemoirSection.id == section_id,
+        )
+        .options(
+            selectinload(MemoirSection.materials).selectinload(
+                MemoirSectionMaterial.utterance
+            ),
+            selectinload(MemoirSection.materials).selectinload(
+                MemoirSectionMaterial.transcript_version
+            ),
+        )
+    )
+    if section is None:
+        raise HTTPException(status_code=404, detail="小章节不存在")
+    return section_digest_context(section)
 
 
 _TYPE_GUIDANCE = {

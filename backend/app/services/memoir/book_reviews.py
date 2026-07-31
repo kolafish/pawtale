@@ -24,6 +24,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookReview,
 )
+from app.schemas.memoir_book_review import MemoirBookReviewResponse
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -56,6 +57,20 @@ BookReviewProgressCallback = Callable[
     [dict[str, object]],
     Awaitable[None],
 ]
+
+
+def book_review_response(review: MemoirBookReview) -> MemoirBookReviewResponse:
+    return MemoirBookReviewResponse(
+        id=review.id,
+        project_id=review.project_id,
+        input_signature=review.input_signature,
+        engine=review.engine,
+        status=review.status,
+        review=review.review_json,
+        error_message=review.error_message,
+        created_at=review.created_at,
+        updated_at=review.updated_at,
+    )
 
 
 @dataclass(frozen=True)

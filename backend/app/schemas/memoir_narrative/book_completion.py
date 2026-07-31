@@ -3,6 +3,13 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
+from app.schemas.memoir_book_review import (
+    MemoirBookEditorialRevisionJobResponse,
+    MemoirBookReviewAnswerApplicationJobResponse,
+    MemoirBookReviewJobResponse,
+    MemoirBookReviewResponse,
+)
+from app.schemas.memoir_completion_issues import MemoirCompletionIssueResponse
 from app.schemas.memoir_sections import (
     MemoirChapterDraftSectionResponse,
     MemoirChapterSectionSummary,
@@ -163,6 +170,13 @@ class MemoirBookCompletionOverviewResponse(BaseModel):
     total_chapters: int
     completed_chapters: int
     chapters: list[MemoirChapterCompletionSummary]
+    completion_job: MemoirBookCompletionJobResponse | None = None
+    book_review: MemoirBookReviewResponse | None = None
+    book_review_job: MemoirBookReviewJobResponse | None = None
+    book_issues: list[MemoirCompletionIssueResponse] = Field(default_factory=list)
+    book_output_available: bool = False
+    answer_application_job: MemoirBookReviewAnswerApplicationJobResponse | None = None
+    editorial_revision_job: MemoirBookEditorialRevisionJobResponse | None = None
 
 
 class MemoirChapterWorkspaceResponse(BaseModel):

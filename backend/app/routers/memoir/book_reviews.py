@@ -8,7 +8,6 @@ from app.application_errors import ApplicationError
 from app.auth import get_current_user, is_admin_user
 from app.database import get_db
 from app.domain.memoir.types import MemoirBookRevisionProposalStatus
-from app.models.memoir import MemoirBookReview
 from app.models.users import User
 from app.routers.websocket_auth import authenticate_websocket, reject_websocket
 from app.schemas.memoir_book_review import (
@@ -18,7 +17,6 @@ from app.schemas.memoir_book_review import (
     MemoirBookReviewAnswerApplyRequest,
     MemoirBookReviewGenerateRequest,
     MemoirBookReviewJobResponse,
-    MemoirBookReviewResponse,
     MemoirBookRevisionFeedbackJobResponse,
     MemoirBookRevisionDraftJobResponse,
     MemoirBookRevisionDraftRequest,
@@ -36,48 +34,11 @@ from app.services.memoir import (
     book_review_jobs,
     book_revision_jobs,
     book_revision_proposals,
-    book_reviews,
 )
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 
 
 router = APIRouter(tags=["memoir-book-reviews"])
-
-
-def _response(review: MemoirBookReview) -> MemoirBookReviewResponse:
-    return MemoirBookReviewResponse(
-        id=review.id,
-        project_id=review.project_id,
-        input_signature=review.input_signature,
-        engine=review.engine,
-        status=review.status,
-        review=review.review_json,
-        error_message=review.error_message,
-        created_at=review.created_at,
-        updated_at=review.updated_at,
-    )
-
-
-@router.get(
-    "/projects/{project_id}/book-review",
-    response_model=MemoirBookReviewResponse | None,
-)
-async def get_memoir_book_review(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await load_memoir_project(
-        db,
-        project_id,
-        current_user.id,
-        allow_admin=is_admin_user(current_user),
-    )
-    review = await book_reviews.get_current_book_review(
-        db,
-        project_id=project_id,
-    )
-    return _response(review) if review else None
 
 
 @router.post(
@@ -101,23 +62,6 @@ async def enqueue_memoir_book_review_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@router.get(
-    "/projects/{project_id}/book-review/jobs/current",
-    response_model=MemoirBookReviewJobResponse,
-)
-async def get_current_memoir_book_review_job(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await book_review_jobs.get_book_review_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        allow_admin=is_admin_user(current_user),
-    )
 
 
 @router.delete(
@@ -166,24 +110,6 @@ async def enqueue_memoir_book_review_answer_application_job(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-@router.get(
-    "/projects/{project_id}/book-review/answer-application/jobs/current",
-    response_model=MemoirBookReviewAnswerApplicationJobResponse,
-)
-async def get_current_memoir_book_review_answer_application_job(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await book_revision_jobs.get_book_revision_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        source="review_answers",
-        allow_admin=is_admin_user(current_user),
-    )
-
-
 @router.delete(
     "/projects/{project_id}/book-review/answer-application/jobs/{job_id}",
     response_model=MemoirBookReviewAnswerApplicationJobResponse,
@@ -230,24 +156,6 @@ async def enqueue_memoir_book_editorial_revision_job(
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@router.get(
-    "/projects/{project_id}/book-review/editorial-revision/jobs/current",
-    response_model=MemoirBookEditorialRevisionJobResponse,
-)
-async def get_current_memoir_book_editorial_revision_job(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await book_revision_jobs.get_book_revision_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        source="editorial_actions",
-        allow_admin=is_admin_user(current_user),
-    )
 
 
 @router.delete(

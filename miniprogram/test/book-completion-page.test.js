@@ -14,26 +14,13 @@ const {
 
 function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
   mockMemoirApiModules({
-    getMemoirBookCompletionJob: async () => bulkJob(),
     getMemoirBookCompletionOverview: unmockedAsync("getMemoirBookCompletionOverview"),
     enqueueMemoirBookCompletionJob: unmockedAsync("enqueueMemoirBookCompletionJob"),
     cancelMemoirBookCompletionJob: unmockedAsync("cancelMemoirBookCompletionJob"),
     enqueueMemoirBookReviewJob: unmockedAsync("enqueueMemoirBookReviewJob"),
-    getMemoirBookReviewJob: async () => reviewJob(),
     cancelMemoirBookReviewJob: unmockedAsync("cancelMemoirBookReviewJob"),
     enqueueMemoirBookRevisionJob: unmockedAsync("enqueueMemoirBookRevisionJob"),
-    getMemoirBookRevisionJob: async (_projectId, source) => (
-      source === "review_answers"
-        ? answerApplicationJob()
-        : editorialRevisionJob()
-    ),
     cancelMemoirBookRevisionJob: unmockedAsync("cancelMemoirBookRevisionJob"),
-    getMemoirBookReview: async () => null,
-    getMemoirBookOutput: async () => null,
-    listMemoirCompletionIssues: async () => ({
-      project_id: "project-1",
-      issues: [],
-    }),
     enqueueMemoirChapterPreparationJob: unmockedAsync("enqueueMemoirChapterPreparationJob"),
     ...voiceApiExports,
   });
@@ -217,6 +204,20 @@ function editorialRevisionJob(overrides = {}) {
   };
 }
 
+function completionSnapshot(overview, overrides = {}) {
+  return {
+    ...overview,
+    completion_job: bulkJob(),
+    book_review: null,
+    book_review_job: reviewJob(),
+    book_issues: [],
+    book_output_available: false,
+    answer_application_job: answerApplicationJob(),
+    editorial_revision_job: editorialRevisionJob(),
+    ...overrides,
+  };
+}
+
 test("book completion overview page is registered", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-completion/index"));
@@ -389,11 +390,13 @@ test("book completion submits saved answers and opens the generated revision pre
   };
   const { page } = loadBookCompletionPage({
     voiceApiExports: {
-      getMemoirBookCompletionOverview: async () => overview,
-      getMemoirBookReview: async () => bookReview(),
-      getMemoirBookOutput: async () => ({ id: "output-1" }),
-      getMemoirBookRevisionJob: async (_projectId, source) => (
-        source === "review_answers" ? currentJob : editorialRevisionJob()
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        overview,
+        {
+          book_review: bookReview(),
+          book_output_available: true,
+          answer_application_job: currentJob,
+        },
       ),
       enqueueMemoirBookRevisionJob: async (projectId, source) => {
         requests.push([projectId, source]);
@@ -463,11 +466,13 @@ test("book completion generates a preview only for selected editorial actions", 
   };
   const { page } = loadBookCompletionPage({
     voiceApiExports: {
-      getMemoirBookCompletionOverview: async () => confirmedOverview(),
-      getMemoirBookReview: async () => review,
-      getMemoirBookOutput: async () => ({ id: "output-1" }),
-      getMemoirBookRevisionJob: async (_projectId, source) => (
-        source === "editorial_actions" ? currentJob : answerApplicationJob()
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        confirmedOverview(),
+        {
+          book_review: review,
+          book_output_available: true,
+          editorial_revision_job: currentJob,
+        },
       ),
       enqueueMemoirBookRevisionJob: async (projectId, source, actionIds) => {
         requests.push([projectId, source, actionIds]);
@@ -517,7 +522,14 @@ test("book completion submits the cross-chapter review to the background", async
   global.wx = { showToast() {} };
   const { page } = loadBookCompletionPage({
     voiceApiExports: {
-      getMemoirBookCompletionOverview: async () => overview,
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        overview,
+        {
+          book_review: currentReview,
+          book_review_job: currentReviewJob,
+          book_output_available: true,
+        },
+      ),
       enqueueMemoirBookReviewJob: async (projectId, force) => {
         reviewRequests.push([projectId, force]);
         currentReviewJob = reviewJob({
@@ -529,9 +541,6 @@ test("book completion submits the cross-chapter review to the background", async
         });
         return currentReviewJob;
       },
-      getMemoirBookReview: async () => currentReview,
-      getMemoirBookReviewJob: async () => currentReviewJob,
-      getMemoirBookOutput: async () => ({ id: "book-output-1" }),
     },
   });
   const context = pageContext(page, {
@@ -561,6 +570,30 @@ test("book completion submits the cross-chapter review to the background", async
 
   assert.equal(context.data.checkingBook, false);
   assert.equal(context.data.bookReview.review.summary, "全书围绕家庭与成长展开。");
+  assert.equal(context.data.bookOutputAvailable, true);
+});
+
+test("book completion refreshes all visible state with one snapshot request", async () => {
+  let requestCount = 0;
+  const overview = confirmedOverview();
+  global.wx = { showToast() {} };
+  const { page } = loadBookCompletionPage({
+    voiceApiExports: {
+      getMemoirBookCompletionOverview: async () => {
+        requestCount += 1;
+        return completionSnapshot(overview, {
+          book_review: bookReview(),
+          book_output_available: true,
+        });
+      },
+    },
+  });
+  const context = pageContext(page, { projectId: "project-1" });
+
+  await page.loadOverview.call(context);
+
+  assert.equal(requestCount, 1);
+  assert.equal(context.data.bookReview.id, "review-1");
   assert.equal(context.data.bookOutputAvailable, true);
 });
 
@@ -595,15 +628,19 @@ test("book completion can check only chapters that have not been checked", async
           can_cancel: true,
         });
       },
-      getMemoirBookCompletionJob: async () => bulkJob({
-        job_id: "book-job-1",
-        status: "running",
-        total_chapter_count: 1,
-        current_chapter_id: "chapter-1",
-        current_chapter_title: "学校里的比赛",
-        can_cancel: true,
-      }),
-      getMemoirBookCompletionOverview: async () => overview,
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        overview,
+        {
+          completion_job: bulkJob({
+            job_id: "book-job-1",
+            status: "running",
+            total_chapter_count: 1,
+            current_chapter_id: "chapter-1",
+            current_chapter_title: "学校里的比赛",
+            can_cancel: true,
+          }),
+        },
+      ),
     },
   });
   const patch = mod.bookCompletionViewPatch(overview);
@@ -636,14 +673,18 @@ test("book completion keeps a submit error when only an older finished job exist
       enqueueMemoirBookCompletionJob: async () => {
         throw new Error("network unavailable");
       },
-      getMemoirBookCompletionJob: async () => bulkJob({
-        job_id: "old-book-job",
-        status: "succeeded",
-        total_chapter_count: 2,
-        processed_chapter_count: 2,
-        succeeded_chapter_count: 2,
-      }),
-      getMemoirBookCompletionOverview: async () => readyOverview(),
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        readyOverview(),
+        {
+          completion_job: bulkJob({
+            job_id: "old-book-job",
+            status: "succeeded",
+            total_chapter_count: 2,
+            processed_chapter_count: 2,
+            succeeded_chapter_count: 2,
+          }),
+        },
+      ),
     },
   });
   const patch = mod.bookCompletionViewPatch(readyOverview());
@@ -685,17 +726,21 @@ test("book completion restores and polls an active chapter batch after reopening
   try {
     const { page } = loadBookCompletionPage({
       voiceApiExports: {
-        getMemoirBookCompletionJob: async () => bulkJob({
-          job_id: "book-job-1",
-          status: "running",
-          total_chapter_count: 2,
-          processed_chapter_count: 1,
-          succeeded_chapter_count: 1,
-          current_chapter_id: "chapter-1",
-          current_chapter_title: "学校里的比赛",
-          can_cancel: true,
-        }),
-        getMemoirBookCompletionOverview: async () => overview,
+        getMemoirBookCompletionOverview: async () => completionSnapshot(
+          overview,
+          {
+            completion_job: bulkJob({
+              job_id: "book-job-1",
+              status: "running",
+              total_chapter_count: 2,
+              processed_chapter_count: 1,
+              succeeded_chapter_count: 1,
+              current_chapter_id: "chapter-1",
+              current_chapter_title: "学校里的比赛",
+              can_cancel: true,
+            }),
+          },
+        ),
       },
     });
     const context = pageContext(page, { projectId: "project-1" });
@@ -739,8 +784,10 @@ test("book completion restores and can cancel an active full-book review after r
   try {
     const { page } = loadBookCompletionPage({
       voiceApiExports: {
-        getMemoirBookCompletionOverview: async () => overview,
-        getMemoirBookReviewJob: async () => currentReviewJob,
+        getMemoirBookCompletionOverview: async () => completionSnapshot(
+          overview,
+          { book_review_job: currentReviewJob },
+        ),
         cancelMemoirBookReviewJob: async (projectId, jobId) => {
           cancellations.push([projectId, jobId]);
           currentReviewJob = reviewJob({
@@ -803,8 +850,10 @@ test("book completion preserves partial results and can cancel remaining checks"
   global.wx = { showToast() {} };
   const { page } = loadBookCompletionPage({
     voiceApiExports: {
-      getMemoirBookCompletionJob: async () => currentJob,
-      getMemoirBookCompletionOverview: async () => readyOverview(),
+      getMemoirBookCompletionOverview: async () => completionSnapshot(
+        readyOverview(),
+        { completion_job: currentJob },
+      ),
       cancelMemoirBookCompletionJob: async (projectId, jobId) => {
         cancellations.push([projectId, jobId]);
         currentJob = cancelledJob;
@@ -893,7 +942,7 @@ test("book completion prepares an untouched chapter in place", async () => {
       enqueueMemoirChapterPreparationJob: async (projectId, chapterId, operation) => {
         prepared.push([projectId, chapterId, operation]);
       },
-      getMemoirBookCompletionOverview: async () => overview,
+      getMemoirBookCompletionOverview: async () => completionSnapshot(overview),
     },
   });
   const context = pageContext(page, {

@@ -58,7 +58,12 @@ async def get_memoir_book_completion_overview(
     current_user: User = Depends(get_current_user),
 ):
     await authorize_project(db, project_id=project_id, current_user=current_user)
-    return await book_completion.get_book_completion_overview(db, project_id=project_id)
+    return await book_completion.get_book_completion_overview(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        allow_admin=is_admin_user(current_user),
+    )
 
 
 @router.post(
@@ -83,24 +88,6 @@ async def enqueue_memoir_book_completion_job(
         )
     except ValueError as exc:
         raise decision_error(exc) from exc
-
-
-@router.get(
-    "/projects/{project_id}/book-completion/jobs/current",
-    response_model=MemoirBookCompletionJobResponse,
-)
-async def get_current_memoir_book_completion_job(
-    project_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    await authorize_project(db, project_id=project_id, current_user=current_user)
-    return await book_completion_jobs.get_current_book_completion_job(
-        db,
-        user_id=current_user.id,
-        project_id=project_id,
-        allow_admin=is_admin_user(current_user),
-    )
 
 
 @router.delete(

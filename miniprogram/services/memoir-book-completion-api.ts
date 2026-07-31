@@ -1,5 +1,6 @@
 import type { MemoirBookCompletionOverview } from "../domain/chapter-completion";
 import type { MemoirBookManuscript } from "../domain/memoir-book";
+import type { MemoirCompletionIssue } from "../domain/memoir-completion-issue";
 import {
   memoirNarrativeProjectPath,
   memoirAIRequest,
@@ -247,6 +248,17 @@ export interface MemoirBookCompletionJob {
   error_message: string;
 }
 
+export interface MemoirBookCompletionSnapshot
+  extends MemoirBookCompletionOverview {
+  completion_job: MemoirBookCompletionJob;
+  book_review: MemoirBookReview | null;
+  book_review_job: MemoirBookReviewJob | null;
+  book_issues: MemoirCompletionIssue[];
+  book_output_available: boolean;
+  answer_application_job: MemoirBookAnswerApplicationJob | null;
+  editorial_revision_job: MemoirBookEditorialRevisionJob | null;
+}
+
 function chapterPreparationJobPath(
   projectId: string,
   chapterId: string,
@@ -260,14 +272,10 @@ function chapterPreparationJobPath(
 
 export function getMemoirBookCompletionOverview(
   projectId: string,
-): Promise<MemoirBookCompletionOverview> {
-  return memoirRequest<MemoirBookCompletionOverview>(bookCompletionPath(projectId, "/overview"));
-}
-
-export function getMemoirBookReview(
-  projectId: string,
-): Promise<MemoirBookReview | null> {
-  return memoirRequest<MemoirBookReview | null>(bookReviewPath(projectId));
+): Promise<MemoirBookCompletionSnapshot> {
+  return memoirRequest<MemoirBookCompletionSnapshot>(
+    bookCompletionPath(projectId, "/overview"),
+  );
 }
 
 export function enqueueMemoirBookReviewJob(
@@ -284,14 +292,6 @@ export function enqueueMemoirBookReviewJob(
       ai_model: null,
     },
     { timeoutProfile: "mutation" },
-  );
-}
-
-export function getMemoirBookReviewJob(
-  projectId: string,
-): Promise<MemoirBookReviewJob> {
-  return memoirRequest<MemoirBookReviewJob>(
-    `${bookReviewPath(projectId)}/jobs/current`,
   );
 }
 
@@ -330,17 +330,6 @@ export function enqueueMemoirBookRevisionJob<
     bookRevisionJobPath(projectId, source),
     payload,
     { timeoutProfile: "mutation" },
-  );
-}
-
-export function getMemoirBookRevisionJob<
-  Source extends MemoirBookRevisionCommandSource,
->(
-  projectId: string,
-  source: Source,
-): Promise<MemoirBookRevisionJobForSource<Source>> {
-  return memoirRequest<MemoirBookRevisionJobForSource<Source>>(
-    bookRevisionJobPath(projectId, source, "/current"),
   );
 }
 
@@ -472,14 +461,6 @@ export function enqueueMemoirBookCompletionJob(
     bookCompletionPath(projectId, "/jobs"),
     { retry_job_id: retryJobId, ai_model: null },
     { timeoutProfile: "mutation" },
-  );
-}
-
-export function getMemoirBookCompletionJob(
-  projectId: string,
-): Promise<MemoirBookCompletionJob> {
-  return memoirRequest<MemoirBookCompletionJob>(
-    bookCompletionPath(projectId, "/jobs/current"),
   );
 }
 

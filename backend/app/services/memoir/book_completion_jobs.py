@@ -17,8 +17,7 @@ from app.schemas.memoir_narrative import (
     MemoirBookCompletionJobRequest,
     MemoirChapterPreparationJobRequest,
 )
-from app.services.memoir import chapter_preparation_jobs
-from app.services.memoir.narrative import book_completion
+from app.services.memoir import chapter_preparation_jobs, completion_read_model
 
 
 _ACTIVE_BATCH_STATUSES = {
@@ -404,7 +403,7 @@ async def enqueue_book_completion_job(
         )
         return await _job_response(db, project_id=project_id, job=active)
 
-    overview = await book_completion.get_book_completion_overview(
+    overview = await completion_read_model.book_overview(
         db,
         project_id=project_id,
     )
