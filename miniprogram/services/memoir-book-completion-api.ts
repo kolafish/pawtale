@@ -6,10 +6,6 @@ import {
   memoirAIRequest,
   memoirRequest,
 } from "./memoir-api-client";
-import {
-  cleanBaseUrl,
-  readBackendConfig,
-} from "./request";
 
 
 function bookCompletionPath(projectId: string, suffix = ""): string {
@@ -345,13 +341,6 @@ function bookRevisionProposalPath(
   return `${bookReviewPath(projectId)}/revision-proposals/${
     encodeURIComponent(proposalId)
   }${suffix}`;
-}
-
-export function memoirBookReviewDictationUrl(projectId: string): string {
-  const config = readBackendConfig();
-  return config.wsBaseUrl
-    ? `${cleanBaseUrl(config.wsBaseUrl)}${bookReviewPath(projectId)}/dictation`
-    : "";
 }
 
 export function getMemoirBookRevisionProposal(

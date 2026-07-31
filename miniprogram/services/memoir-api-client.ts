@@ -4,6 +4,8 @@ import {
 } from "./auth";
 import { readSelectedAIModel } from "./ai-model-settings";
 import {
+  cleanBaseUrl,
+  readBackendConfig,
   type HttpMethod,
   type RequestTimeoutProfile,
 } from "./request";
@@ -77,6 +79,13 @@ export function memoirProjectPath(projectId: string, suffix = ""): string {
 
 export function memoirNarrativeProjectPath(projectId: string, suffix = ""): string {
   return `/api/memoir/projects/${encodeURIComponent(projectId)}${suffix}`;
+}
+
+export function memoirProjectDictationUrl(projectId: string): string {
+  const config = readBackendConfig();
+  return config.wsBaseUrl
+    ? `${cleanBaseUrl(config.wsBaseUrl)}${memoirNarrativeProjectPath(projectId, "/dictation")}`
+    : "";
 }
 
 export function memoirVoiceSessionPath(voiceSessionId: string, suffix = ""): string {

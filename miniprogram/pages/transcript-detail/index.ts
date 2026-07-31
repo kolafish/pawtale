@@ -30,11 +30,11 @@ import {
   TranscriptMaterialImageController,
 } from "../../services/transcript-material-image";
 import { PollingTimer } from "../../services/polling-timer";
+import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import {
   OFFLINE_ASR_POLL_INTERVAL_MS,
   syncEditUnloadAlert,
   toViewItem,
-  voiceEditStateData,
   type TranscriptDetailData,
 } from "./transcript-detail-model";
 import {
@@ -60,7 +60,6 @@ definePage<TranscriptDetailData>()({
     getJob: getMemoirMaterialImageGenerationJob,
   }),
   loadToken: 0,
-  voiceEditToken: 0,
   shareVideoBackgroundUploadToken: 0,
   offlineAsrPoller: new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
   offlineAsrPollToken: 0,
@@ -92,7 +91,7 @@ definePage<TranscriptDetailData>()({
     questionExpanded: false,
     moreActionsExpanded: false,
     editReferenceExpanded: false,
-    voiceEditRecording: false,
+    voiceEditGatewayUrl: "",
     voiceEditLoading: false,
     voiceEditSaving: false,
     voiceEditInstructionText: "",
@@ -106,7 +105,6 @@ definePage<TranscriptDetailData>()({
     assignmentText: "",
     assignmentCanSave: false,
     assignmentPlacement: null,
-    ...voiceEditStateData("idle"),
     ...initialTranscriptShareVideoData(),
     ...initialTranscriptMaterialImageTaskState(),
   },
@@ -147,6 +145,7 @@ definePage<TranscriptDetailData>()({
       this.setData({
         needsLogin: false,
         item: toViewItem(transcript, this.data.item),
+        voiceEditGatewayUrl: memoirProjectDictationUrl(transcript.project_id),
       });
       this.startOfflineAsrPollingIfNeeded();
       trackAuditAction("transcript.detail_view", {}, { projectId: transcript.project_id });
@@ -189,7 +188,6 @@ definePage<TranscriptDetailData>()({
     syncEditUnloadAlert(null);
     this.stopOfflineAsrPolling();
     this.stopPlayback();
-    this.cancelVoiceEdit();
     this.shareVideoController.dispose();
     this.materialImageController.dispose();
   },

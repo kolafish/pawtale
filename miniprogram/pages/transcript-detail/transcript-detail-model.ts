@@ -16,9 +16,7 @@ import {
   transcriptMaterialChapterText,
   transcriptMaterialSectionText,
   transcriptTitleText,
-  transcriptVoiceEditStateView,
   type TranscriptTextSegment,
-  type TranscriptVoiceEditPhase,
   type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
 import type { TranscriptShareVideoData } from "../../services/transcript-share-video";
@@ -96,16 +94,10 @@ export interface TranscriptDetailData
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
   editReferenceExpanded: boolean;
-  voiceEditRecording: boolean;
+  voiceEditGatewayUrl: string;
   voiceEditLoading: boolean;
   voiceEditSaving: boolean;
   voiceEditInstructionText: string;
-  voiceEditPhase: TranscriptVoiceEditPhase;
-  voiceEditStatusText: string;
-  voiceEditStatusDetail: string;
-  voiceEditStatusClass: string;
-  voiceEditStatusVisible: boolean;
-  voiceEditActionText: string;
   voiceEditPreview: TranscriptVoiceEditPreviewView | null;
   assignmentEditorOpen: boolean;
   assignmentLoading: boolean;
@@ -118,33 +110,7 @@ export interface TranscriptDetailData
   assignmentPlacement: MemoirSectionMaterialPlacementRequest | null;
 }
 
-type VoiceEditStateData = Pick<
-  TranscriptDetailData,
-  | "voiceEditPhase"
-  | "voiceEditStatusText"
-  | "voiceEditStatusDetail"
-  | "voiceEditStatusClass"
-  | "voiceEditStatusVisible"
-  | "voiceEditActionText"
->;
-
-export function voiceEditStateData(
-  phase: TranscriptVoiceEditPhase,
-  statusDetail = "",
-): VoiceEditStateData {
-  const state = transcriptVoiceEditStateView(phase, statusDetail);
-  return {
-    voiceEditPhase: state.phase,
-    voiceEditStatusText: state.statusText,
-    voiceEditStatusDetail: state.statusDetail,
-    voiceEditStatusClass: state.statusClass,
-    voiceEditStatusVisible: state.statusVisible,
-    voiceEditActionText: state.actionText,
-  };
-}
-
 const COLLAPSIBLE_QUESTION_CHAR_COUNT = 72;
-export const VOICE_EDIT_MAX_RECORDING_MS = 30000;
 export const OFFLINE_ASR_POLL_INTERVAL_MS = 2000;
 export const OFFLINE_ASR_MAX_POLL_ATTEMPTS = 150;
 export type TranscriptDetailAudioKind = "question" | "answer";

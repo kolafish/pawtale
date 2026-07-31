@@ -285,45 +285,22 @@
               <view class="draft-ai-editor">
                 <text class="draft-ai-editor-title">告诉 AI 这节怎么改</text>
                 <text class="draft-ai-editor-hint">可以说或输入修改要求。AI 会参考当前正文和原始讲述，只修改这一小节。</text>
-                <textarea
-                  class="draft-editor draft-ai-instruction"
+                <voice-text-editor
                   value="{{draftSectionAIInstruction}}"
+                  gateway-url="{{draftSectionDictationUrl}}"
+                  voice-session-id="{{item.section_id}}"
                   maxlength="800"
-                  auto-height
-                  cursor-spacing="24"
-                  disabled="{{draftSectionVoicePhase !== 'idle' || operationKind !== ''}}"
                   placeholder="例如：保留事情经过，把语气写得更平实；删掉重复的回忆，但不要增加新事实。"
+                  submit-text="按要求修改"
+                  busy-text="AI 正在修改正文…"
+                  cancel-text="取消"
+                  disabled="{{operationKind !== ''}}"
+                  busy="{{operationKind === 'revise_draft_section_with_ai' && operationTargetId === item.section_id}}"
                   aria-label="输入小节 AI 修改要求"
-                  bindinput="changeDraftSectionAIInstruction"
+                  bindchange="changeDraftSectionAIInstruction"
+                  bindsubmit="submitDraftSectionAIInstruction"
+                  bindcancel="cancelDraftSectionEdit"
                 />
-                <view
-                  wx:if="{{draftSectionVoicePhase !== 'idle' || (operationKind === 'revise_draft_section_with_ai' && operationTargetId === item.section_id)}}"
-                  class="draft-ai-status"
-                >
-                  <view class="draft-ai-status-dot"></view>
-                  <text>{{draftSectionVoicePhase === "listening" ? "正在听你说修改要求…" : (draftSectionVoicePhase === "transcribing" ? "正在识别语音…" : "AI 正在按要求修改这一小节…")}}</text>
-                </view>
-                <view class="edit-actions draft-ai-actions">
-                  <button
-                    class="secondary-action voice-instruction-action {{draftSectionVoicePhase === 'listening' ? 'is-listening' : ''}}"
-                    loading="{{draftSectionVoicePhase === 'transcribing'}}"
-                    disabled="{{draftSectionVoicePhase === 'transcribing' || operationKind !== ''}}"
-                    bindtap="toggleDraftSectionVoiceInstruction"
-                  >{{draftSectionVoicePhase === "listening" ? "结束录音" : "语音说要求"}}</button>
-                  <button
-                    class="secondary-action strong"
-                    loading="{{operationKind === 'revise_draft_section_with_ai' && operationTargetId === item.section_id}}"
-                    disabled="{{draftSectionAIInstruction === '' || draftSectionVoicePhase !== 'idle' || operationKind !== ''}}"
-                    bindtap="submitDraftSectionAIInstruction"
-                  >按要求修改</button>
-                </view>
-                <view class="edit-actions draft-ai-secondary-actions">
-                  <button
-                    class="secondary-action draft-ai-text-action"
-                    disabled="{{draftSectionVoicePhase !== 'idle' || operationKind !== ''}}"
-                    bindtap="cancelDraftSectionEdit"
-                  >取消</button>
-                </view>
               </view>
             </view>
           </block>

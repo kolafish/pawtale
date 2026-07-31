@@ -15,11 +15,11 @@ import {
   getMemoirBookRevisionDraftJob,
   getMemoirBookRevisionFeedbackJob,
   getMemoirBookRevisionProposal,
-  memoirBookReviewDictationUrl,
   type MemoirBookRevisionProposal,
   type MemoirBookRevisionPreviewVersion,
   type MemoirBookRevisionSectionComparison,
 } from "../../services/memoir-book-completion-api";
+import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
@@ -244,7 +244,7 @@ definePage<BookRevisionData>()({
       projectId,
       proposalId,
       feedbackDictationUrl: projectId
-        ? memoirBookReviewDictationUrl(projectId)
+        ? memoirProjectDictationUrl(projectId)
         : "",
     });
     if (!projectId || !proposalId) {

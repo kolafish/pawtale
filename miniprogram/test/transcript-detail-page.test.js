@@ -225,7 +225,7 @@ function sampleMaterialImageJob(overrides = {}) {
   };
 }
 
-function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {} } = {}) {
+function loadTranscriptDetailPage({ voiceApiExports = {} } = {}) {
   mockMemoirApiModules({
     convertMemoirInterviewQuestionToAnswer: unmockedAsync("convertMemoirInterviewQuestionToAnswer"),
     createMemoirMaterialImageGenerationJob: unmockedAsync("createMemoirMaterialImageGenerationJob"),
@@ -248,10 +248,9 @@ function loadTranscriptDetailPage({ voiceApiExports = {}, voiceSearchExports = {
     uploadMemoirShareVideoCustomBackground: unmockedAsync("uploadMemoirShareVideoCustomBackground"),
     ...voiceApiExports,
   });
-  mockModule("../services/memoir-voice-search.ts", {
-    recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
-    stopMemoirVoiceSearchRecording: () => {},
-    ...voiceSearchExports,
+  mockModule("../services/memoir-api-client.ts", {
+    memoirProjectDictationUrl: () =>
+      "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
   clearModule("../pages/transcript-detail/transcript-detail-audio-workflow.ts");
   clearModule("../pages/transcript-detail/transcript-detail-edit-workflow.ts");
@@ -372,73 +371,45 @@ test("transcript detail page labels human interviewer questions", async () => {
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
 });
 
-test("transcript detail page shows every voice edit processing phase", async () => {
-  let recordingOptions;
-  let resolveRecording;
-  let resolvePreview;
-  const recording = new Promise((resolve) => {
-    resolveRecording = resolve;
-  });
-  const preview = new Promise((resolve) => {
-    resolvePreview = resolve;
-  });
+test("transcript detail page builds a preview from shared editor text", async () => {
+  const previewCalls = [];
   const { page } = loadTranscriptDetailPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
-      previewMemoirVoiceTranscriptVoiceEdit: async () => preview,
-    },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        recordingOptions = options;
-        return recording;
+      previewMemoirVoiceTranscriptVoiceEdit: async (...args) => {
+        previewCalls.push(args);
+        return {
+          action: "revise_transcript",
+          current_text: "爷爷退休后还在帮公司做事。",
+          edited_text: "爷爷退休后经常去社区帮忙。",
+          reply_text: "已改写指定片段，请确认后保存。",
+          confidence: 0.92,
+          changes: [{
+            scope: "passage",
+            before: "爷爷退休后还在帮公司做事。",
+            after: "爷爷退休后经常去社区帮忙。",
+          }],
+        };
       },
     },
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { id: "utterance-voice-edit" });
 
-  const operation = page.startVoiceEdit.call(context);
-  assert.equal(context.data.voiceEditPhase, "listening");
-  assert.equal(context.data.voiceEditStatusVisible, true);
-  assert.equal(context.data.voiceEditActionText, "结束并生成预览");
-  assert.equal(recordingOptions.stopMode, "manual");
-  assert.equal(recordingOptions.maxDurationMs, 30000);
-
-  recordingOptions.onRecordingEnd();
-  assert.equal(context.data.voiceEditPhase, "transcribing");
-  assert.equal(context.data.voiceEditLoading, true);
-
-  resolveRecording("把爷爷退休后的那段改成爷爷退休后经常去社区帮忙");
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(context.data.voiceEditPhase, "generating");
-  assert.match(context.data.voiceEditStatusDetail, /定位原文/);
-
-  resolvePreview({
-    action: "revise_transcript",
-    current_text: "爷爷退休后还在帮公司做事。",
-    edited_text: "爷爷退休后经常去社区帮忙。",
-    reply_text: "已改写指定片段，请确认后保存。",
-    confidence: 0.92,
-    changes: [{
-      scope: "passage",
-      before: "爷爷退休后还在帮公司做事。",
-      after: "爷爷退休后经常去社区帮忙。",
-    }],
+  page.changeVoiceEditInstruction.call(context, {
+    detail: { value: "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙" },
   });
-  await operation;
+  await page.previewVoiceEdit.call(context, {
+    detail: { value: "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙" },
+  });
 
-  assert.equal(context.data.voiceEditPhase, "review");
-  assert.equal(context.data.voiceEditStatusText, "等待确认");
+  assert.deepEqual(previewCalls, [[
+    "utterance-voice-edit",
+    "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙",
+  ]]);
+  assert.equal(context.data.voiceEditLoading, false);
   assert.equal(context.data.voiceEditPreview.changes[0].scopeLabel, "片段改写");
   assert.equal(context.data.voiceEditPreview.canConfirm, true);
-
-  const repeatOperation = page.startVoiceEdit.call(context);
-  assert.equal(context.data.voiceEditPhase, "listening");
-  assert.equal(context.data.voiceEditPreview, null);
-  assert.equal(recordingOptions.stopMode, "manual");
-  recordingOptions.onRecordingEnd();
-  await repeatOperation;
-  assert.equal(context.data.voiceEditPhase, "review");
   assert.equal(context.data.error, "");
 });
 

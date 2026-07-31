@@ -17,7 +17,6 @@ import type {
 
 export const PREPARATION_POLL_INTERVAL_MS = 1500;
 export const SECTION_REGENERATION_POLL_INTERVAL_MS = 1500;
-export const DRAFT_SECTION_VOICE_INSTRUCTION_MAX_MS = 30000;
 
 export function readableReviewText(
   text: string,
@@ -66,10 +65,6 @@ export type ChapterWorkspaceOperationKind =
 
 export type ChapterWorkspaceAudioPhase = "idle" | "preparing" | "playing";
 export type DraftSectionEditingMode = "" | "manual" | "ai";
-export type DraftSectionVoicePhase =
-  | "idle"
-  | "listening"
-  | "transcribing";
 
 export function isActiveSectionRegeneration(
   job: MemoirChapterSectionRegenerationJob | null,
@@ -221,7 +216,6 @@ export const CLOSED_DRAFT_SECTION_EDITOR = {
   editingMode: "" as DraftSectionEditingMode,
   editingSectionId: "",
   editingSectionContent: "",
-  draftSectionVoicePhase: "idle" as DraftSectionVoicePhase,
   draftSectionAIInstruction: "",
 };
 
@@ -284,6 +278,6 @@ export interface ChapterWorkspacePageData {
   editingMode: DraftSectionEditingMode;
   editingSectionId: string;
   editingSectionContent: string;
-  draftSectionVoicePhase: DraftSectionVoicePhase;
+  draftSectionDictationUrl: string;
   draftSectionAIInstruction: string;
 }

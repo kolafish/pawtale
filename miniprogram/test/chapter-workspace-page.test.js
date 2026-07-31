@@ -168,7 +168,6 @@ function chapterPreparationJob(overrides = {}) {
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
-  voiceSearchExports = {},
   consent = true,
   cacheExports = {},
 } = {}) {
@@ -224,10 +223,9 @@ function loadWorkspacePage({
     syncVoiceAuthorizationConsent: async () => {},
     VOICE_AUTHORIZATION_PAGE_URL: "/pages/voice-authorization/index",
   });
-  mockModule("../services/memoir-voice-search.ts", {
-    recordMemoirVoiceSearchQuery: unmockedAsync("recordMemoirVoiceSearchQuery"),
-    stopMemoirVoiceSearchRecording: () => {},
-    ...voiceSearchExports,
+  mockModule("../services/memoir-api-client.ts", {
+    memoirProjectDictationUrl: () =>
+      "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
   clearModule("../pages/chapter-workspace/chapter-workspace-draft-workflow.ts");
   clearModule("../pages/chapter-workspace/chapter-workspace-job-workflow.ts");
@@ -988,7 +986,9 @@ test("chapter workspace sends a typed instruction to edit one draft section", as
   page.changeDraftSectionAIInstruction.call(context, {
     detail: { value: "保留离家的事实，把语气写得更平实。" },
   });
-  await page.submitDraftSectionAIInstruction.call(context);
+  await page.submitDraftSectionAIInstruction.call(context, {
+    detail: { value: "保留离家的事实，把语气写得更平实。" },
+  });
 
   assert.deepEqual(calls, [[
     "project-1",
@@ -1001,7 +1001,6 @@ test("chapter workspace sends a typed instruction to edit one draft section", as
   assert.equal(context.data.editingMode, "");
   assert.equal(context.data.editingSectionId, "");
   assert.equal(context.data.draftSectionAIInstruction, "");
-  assert.equal(context.data.draftSectionVoicePhase, "idle");
 });
 
 test("chapter workspace keeps the instruction when AI makes no change", async () => {
@@ -1023,76 +1022,18 @@ test("chapter workspace keeps the instruction when AI makes no change", async ()
     detail: { value: "再多写一些没有提供的细节" },
   });
 
-  await page.submitDraftSectionAIInstruction.call(context);
+  await page.submitDraftSectionAIInstruction.call(context, {
+    detail: { value: "再多写一些没有提供的细节" },
+  });
 
   assert.equal(context.data.editingMode, "ai");
   assert.equal(
     context.data.draftSectionAIInstruction,
     "再多写一些没有提供的细节",
   );
-  assert.equal(context.data.draftSectionVoicePhase, "idle");
   assert.match(context.data.error, /没有改动/);
   assert.deepEqual(toasts, []);
   assert.equal(context.data.operationKind, "");
-});
-
-test("chapter workspace transcribes a voice instruction before editing one section", async () => {
-  installWx();
-  const calls = [];
-  const phases = [];
-  let recordOptions;
-  let context;
-  const { page } = loadWorkspacePage({
-    voiceApiExports: {
-      reviseMemoirChapterDraftSectionWithAI: async (...args) => {
-        calls.push(args);
-        return workspace({
-          draft_version_id: "version-2",
-          draft_version: 2,
-        });
-      },
-    },
-    voiceSearchExports: {
-      recordMemoirVoiceSearchQuery: async (options) => {
-        recordOptions = options;
-        phases.push(context.data.draftSectionVoicePhase);
-        options.onRecordingEnd();
-        phases.push(context.data.draftSectionVoicePhase);
-        return "删掉重复的句子，结尾写得克制一点。";
-      },
-    },
-  });
-  context = pageContext(page);
-  await page.onLoad.call(context, {
-    projectId: "project-1",
-    chapterId: "chapter-1",
-  });
-  page.startDraftSectionAIEdit.call(context, {
-    currentTarget: { dataset: { id: "section-1" } },
-  });
-
-  await page.toggleDraftSectionVoiceInstruction.call(context);
-
-  assert.equal(recordOptions.stopMode, "manual");
-  assert.equal(recordOptions.maxDurationMs, 30000);
-  assert.deepEqual(phases, ["listening", "transcribing"]);
-  assert.equal(
-    context.data.draftSectionAIInstruction,
-    "删掉重复的句子，结尾写得克制一点。",
-  );
-  assert.deepEqual(calls, []);
-
-  await page.submitDraftSectionAIInstruction.call(context);
-
-  assert.deepEqual(calls, [[
-    "project-1",
-    "chapter-1",
-    "section-1",
-    "version-1",
-    "删掉重复的句子，结尾写得克制一点。",
-  ]]);
-  assert.equal(context.data.editingMode, "");
-  assert.equal(context.data.draftSectionVoicePhase, "idle");
 });
 
 test("chapter workspace reads one draft section with saved book voice settings", async () => {

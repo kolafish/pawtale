@@ -35,9 +35,9 @@ function loadIssueList({ closeIssue } = {}) {
   mockModule("../services/memoir-completion-interview.ts", {
     openMemoirCompletionInterview: async () => {},
   });
-  mockModule("../services/memoir-book-completion-api.ts", {
-    memoirBookReviewDictationUrl: () =>
-      "ws://backend.local/api/memoir/projects/project-1/book-review/dictation",
+  mockModule("../services/memoir-api-client.ts", {
+    memoirProjectDictationUrl: () =>
+      "ws://backend.local/api/memoir/projects/project-1/dictation",
   });
   mockModule("../services/navigation.ts", { routeAuthError: () => false });
   return loadComponentModule("../components/completion-issue-list/index.ts")
@@ -69,7 +69,7 @@ test("required book issue opens a real answer editor instead of a confirm modal"
   assert.equal(context.data.requiredAnswerReady, false);
   assert.equal(
     context.data.requiredAnswerGatewayUrl,
-    "ws://backend.local/api/memoir/projects/project-1/book-review/dictation",
+    "ws://backend.local/api/memoir/projects/project-1/dictation",
   );
   assert.equal(modalOpened, false);
 });

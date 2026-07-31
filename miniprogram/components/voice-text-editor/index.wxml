@@ -12,6 +12,14 @@
   />
   <text wx:if="{{hint}}" class="voice-text-hint">{{hint}}</text>
   <text wx:if="{{error}}" class="voice-text-error">{{error}}</text>
+  <view
+    wx:if="{{voicePhase !== 'idle'}}"
+    class="voice-text-status {{voicePhase}}"
+    aria-live="polite"
+  >
+    <view class="voice-text-status-dot"></view>
+    <text>{{voicePhase === "connecting" ? "正在连接实时语音识别…" : (voicePhase === "listening" ? "正在听，识别文字会实时显示在上方…" : "正在确认识别文字…")}}</text>
+  </view>
   <view class="voice-text-actions">
     <view
       class="voice-action ui-block-action ui-pressable {{voicePhase === 'listening' ? 'recording' : ''}} {{disabled || busy || voicePhase === 'connecting' || voicePhase === 'stopping' ? 'is-disabled' : ''}}"
