@@ -51,7 +51,6 @@ import {
   chapterWorkspaceJobMethods,
 } from "./chapter-workspace-job-workflow";
 import { PollingTimer } from "../../services/polling-timer";
-import { memoirProjectDictationUrl } from "../../services/memoir-api-client";
 
 export { chapterWorkspaceViewPatch };
 
@@ -111,7 +110,6 @@ definePage<ChapterWorkspacePageData>()({
     sectionRegenerationProgressMode: "hidden",
     audioPhase: "idle",
     audioTarget: "",
-    draftSectionDictationUrl: "",
     ...CLOSED_DRAFT_SECTION_EDITOR,
   },
 
@@ -121,9 +119,6 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       projectId,
       chapterId,
-      draftSectionDictationUrl: projectId
-        ? memoirProjectDictationUrl(projectId)
-        : "",
     });
     if (!projectId || !chapterId) {
       this.setData({ loading: false, error: "缺少章节信息" });
@@ -180,9 +175,6 @@ definePage<ChapterWorkspacePageData>()({
     const editingAllowsOperation = (
       kind === "save_draft_section"
       && this.data.editingMode === "manual"
-    ) || (
-      kind === "revise_draft_section_with_ai"
-      && this.data.editingMode === "ai"
     );
     if (
       !kind
@@ -222,9 +214,6 @@ definePage<ChapterWorkspacePageData>()({
   hasUnsavedSectionChanges() {
     if (!this.data.editingSectionId || !this.data.workspace) {
       return false;
-    }
-    if (this.data.editingMode === "ai") {
-      return Boolean(this.data.draftSectionAIInstruction.trim());
     }
     const section = this.data.workspace.draft_sections.find(
       (item) => item.section_id === this.data.editingSectionId,

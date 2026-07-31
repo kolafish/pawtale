@@ -731,32 +731,6 @@ button[disabled] {
   margin-top: 0;
 }
 
-.draft-ai-editor-title,
-.draft-ai-editor-hint {
-  display: block;
-}
-
-.draft-ai-editor-title {
-  color: var(--ui-text-primary);
-  font-size: 29rpx;
-  font-weight: 700;
-  line-height: 42rpx;
-  text-wrap: balance;
-}
-
-.draft-ai-editor-hint {
-  margin-top: 8rpx;
-  color: var(--ui-text-secondary);
-  font-size: 24rpx;
-  line-height: 38rpx;
-  text-wrap: pretty;
-}
-
-.draft-ai-editor voice-text-editor {
-  display: block;
-  margin-top: 20rpx;
-}
-
 .draft-content {
   margin-top: 10rpx;
   color: var(--ui-text-primary);

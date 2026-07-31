@@ -165,6 +165,7 @@ REQUIRED_SQL_MARKERS = {
         MemoirEditingJobType.GENERATE_BOOK_REVIEW.value,
         MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS.value,
         MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL.value,
+        MemoirEditingJobType.GENERATE_CHAPTER_SECTION_REVISION.value,
         MemoirEditingJobType.PREPARE_CHAPTER.value,
     ),
 }

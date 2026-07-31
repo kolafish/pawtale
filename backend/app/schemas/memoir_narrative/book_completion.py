@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 from app.schemas.memoir_book_review import (
     MemoirBookReviewJobResponse,
     MemoirBookReviewResponse,
@@ -38,28 +38,39 @@ class MemoirChapterAIRequest(BaseModel):
     ai_model: str | None = Field(default=None, max_length=120)
 
 
-class MemoirChapterDraftSectionAIRevisionRequest(MemoirChapterAIRequest):
-    expected_version_id: str = Field(min_length=1, max_length=36)
-    instruction_text: str = Field(min_length=1, max_length=800)
+class MemoirChapterSectionRevisionJobRequest(MemoirChapterAIRequest):
+    operation: Literal["plan", "feedback", "draft"] = "plan"
+    proposal_id: str | None = Field(default=None, max_length=36)
+    feedback: str | None = Field(default=None, max_length=1000)
 
-    @field_validator("expected_version_id")
-    @classmethod
-    def _strip_expected_version_id(cls, value: str) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("expected_version_id 不能为空")
-        return normalized
+    @model_validator(mode="after")
+    def _validate_operation_input(self):
+        self.proposal_id = (self.proposal_id or "").strip() or None
+        self.feedback = (self.feedback or "").strip() or None
+        if self.operation in {"plan", "feedback"} and not self.feedback:
+            raise ValueError("请先输入或说出修改意见")
+        if self.operation in {"feedback", "draft"} and not self.proposal_id:
+            raise ValueError("缺少要继续处理的修改方案")
+        return self
 
-    @field_validator("instruction_text")
-    @classmethod
-    def _strip_instruction_text(
-        cls,
-        value: str,
-    ) -> str:
-        normalized = value.strip()
-        if not normalized:
-            raise ValueError("instruction_text 不能为空")
-        return normalized
+
+class MemoirChapterSectionRevisionJobResponse(BaseModel):
+    job_id: str | None = None
+    project_id: str
+    operation: Literal["plan", "feedback", "draft"] = "plan"
+    status: Literal[
+        "idle",
+        "pending",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+    ] = "idle"
+    stage: str = ""
+    proposal_id: str | None = None
+    requested_ai_model: str | None = None
+    resolved_ai_model: str | None = None
+    error_message: str = ""
 
 
 class MemoirChapterPreparationJobRequest(MemoirChapterAIRequest):

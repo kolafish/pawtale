@@ -59,11 +59,10 @@ export type ChapterWorkspaceOperationKind =
   | "confirm_issue"
   | "save_draft_section"
   | "confirm_chapter"
-  | "revise_draft_section_with_ai"
   | "rewrite_chapter";
 
 export type ChapterWorkspaceAudioPhase = "idle" | "preparing" | "playing";
-export type DraftSectionEditingMode = "" | "manual" | "ai";
+export type DraftSectionEditingMode = "" | "manual";
 
 export function isActiveSectionRegeneration(
   job: MemoirChapterSectionRegenerationJob | null,
@@ -215,7 +214,6 @@ export const CLOSED_DRAFT_SECTION_EDITOR = {
   editingMode: "" as DraftSectionEditingMode,
   editingSectionId: "",
   editingSectionContent: "",
-  draftSectionAIInstruction: "",
 };
 
 type WxWithPageScrollTo = typeof wx & {
@@ -275,6 +273,4 @@ export interface ChapterWorkspacePageData {
   editingMode: DraftSectionEditingMode;
   editingSectionId: string;
   editingSectionContent: string;
-  draftSectionDictationUrl: string;
-  draftSectionAIInstruction: string;
 }

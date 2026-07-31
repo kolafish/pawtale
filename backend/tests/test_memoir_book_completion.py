@@ -34,9 +34,9 @@ from app.models.memoir import (
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
-    MemoirChapterDraftSectionAIRevisionRequest,
     MemoirChapterCompletionNextAction,
     MemoirChapterCompletionSummary,
+    MemoirChapterSectionRevisionJobRequest,
 )
 from app.schemas.memoir_book import MemoirBookChapterDraftRevisionRequest
 from app.schemas.memoir_book_review import MemoirBookRevisionPlan
@@ -215,6 +215,17 @@ class LayeredBookAI:
                     else []
                 ),
                 "candidate_issues": candidates,
+            }
+        elif "请为一个回忆录小节制定可供用户确认的修改思路" in user_prompt:
+            payload = {
+                "summary": "保留事实，只把这一小节写得更平实。",
+                "items": [{
+                    "title": "调整叙述语气",
+                    "reason": "当前表达可以更克制。",
+                    "approach": "保留事情经过，压缩重复表达并改成平实语气。",
+                    "targets": ["比赛后的回想峰"],
+                }],
+                "book_metadata_patch": {"title": "不应修改书名"},
             }
         elif (
             "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in user_prompt
@@ -405,23 +416,25 @@ def test_editorial_profile_plan_requires_selected_metadata_fields():
         )
 
 
-def test_section_ai_revision_normalizes_required_instruction():
-    assert MemoirChapterDraftSectionAIRevisionRequest(
-        expected_version_id=" version-1 ",
-        instruction_text=" 写得更平实一些 ",
+def test_section_revision_job_validates_each_operation_input():
+    assert MemoirChapterSectionRevisionJobRequest(
+        operation="feedback",
+        proposal_id=" proposal-1 ",
+        feedback=" 写得更平实一些 ",
     ).model_dump() == {
         "ai_model": None,
-        "expected_version_id": "version-1",
-        "instruction_text": "写得更平实一些",
+        "operation": "feedback",
+        "proposal_id": "proposal-1",
+        "feedback": "写得更平实一些",
     }
-    with pytest.raises(ValueError, match="instruction_text 不能为空"):
-        MemoirChapterDraftSectionAIRevisionRequest(
-            expected_version_id="version-1",
-            instruction_text="   ",
+    with pytest.raises(ValueError, match="修改意见"):
+        MemoirChapterSectionRevisionJobRequest(
+            operation="plan",
+            feedback="   ",
         )
-    with pytest.raises(ValueError):
-        MemoirChapterDraftSectionAIRevisionRequest(
-            expected_version_id="version-1",
+    with pytest.raises(ValueError, match="修改方案"):
+        MemoirChapterSectionRevisionJobRequest(
+            operation="draft",
         )
 
 
@@ -1352,7 +1365,7 @@ async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
     assert requested_models == ["claude-opus-4-8"]
 
 
-async def test_ai_revision_of_one_draft_section_preserves_other_content(
+async def test_section_revision_waits_for_apply_and_preserves_other_content(
     client,
     test_db,
     monkeypatch,
@@ -1395,61 +1408,112 @@ async def test_ai_revision_of_one_draft_section_preserves_other_content(
     requested_models: list[str | None] = []
     _install_ai(monkeypatch, fake, requested_models)
 
-    revised = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/draft-sections/{target_section.id}/ai-revise",
+    base_path = (
+        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}"
+        f"/draft-sections/{target_section.id}/revision"
+    )
+    queued = await client.post(
+        f"{base_path}/jobs",
         json={
-            "expected_version_id": version.id,
+            "operation": "plan",
             "ai_model": "claude-opus-4-8",
-            "instruction_text": "把山峰的峰改成刮风的风。",
+            "feedback": "把这一小节写得更平实，但不要改变标题。",
         },
     )
+    assert queued.status_code == 202, queued.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    proposal_id = queued.json()["job_id"]
+    current = await client.get(f"{base_path}/jobs/current")
+    assert current.json()["proposal_id"] == proposal_id
+    plan = await client.get(f"{base_path}/proposals/{proposal_id}")
+    assert plan.status_code == 200, plan.text
+    assert plan.json()["phase"] == "plan_ready"
+    assert plan.json()["can_apply"] is False
+    assert plan.json()["revision_plan"]["book_metadata_patch"] == {}
+    assert await test_db.scalar(
+        select(func.count(MemoirBookChapterDraftVersion.id)).where(
+            MemoirBookChapterDraftVersion.draft_id == version.draft_id
+        )
+    ) == 1
 
-    assert revised.status_code == 200, revised.text
-    body = revised.json()
-    assert body["draft_version"] == 2
-    assert body["draft_status"] == MemoirBookChapterDraftStatus.DRAFT.value
-    assert body["draft_sections"][0]["content"] == ("这是已经存在的完整章节正文。")
-    assert body["draft_sections"][1]["section_id"] == target_section.id
-    assert body["draft_sections"][1]["title"] == "比赛后的回想风"
-    assert body["draft_sections"][1]["content"].startswith("那天刮着风")
-    assert len(fake.prompts) == 1
-    assert sources[0]["utterance_id"] not in fake.prompts[0]
-    assert added_source["utterance_id"] not in fake.prompts[0]
-    assert "material_id: M1" in fake.prompts[0]
-    assert "学校里的比赛1" in fake.prompts[0]
-    assert "当前小节标题：\n比赛后的回想峰" in fake.prompts[0]
-    assert "当前小节正文：" in fake.prompts[0]
-    assert "这是已经存在的完整章节正文。" in fake.prompts[0]
-    assert "把山峰的峰改成刮风的风。" in fake.prompts[0]
-    assert "同时出现在标题和正文时，两处必须同步修正" in fake.prompts[0]
-    assert "用户明确给出的事实更正" in fake.system_prompts[0]
-    assert requested_models == ["claude-opus-4-8"]
+    feedback = await client.post(
+        f"{base_path}/jobs",
+        json={
+            "operation": "feedback",
+            "proposal_id": proposal_id,
+            "feedback": "还要压缩重复表达。",
+        },
+    )
+    assert feedback.status_code == 202, feedback.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, feedback.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    refined = await client.get(f"{base_path}/proposals/{proposal_id}")
+    assert refined.json()["phase"] == "plan_ready"
+    assert refined.json()["summary"] == "保留两段经历，统一称谓并适当精简。"
+
+    draft = await client.post(
+        f"{base_path}/jobs",
+        json={"operation": "draft", "proposal_id": proposal_id},
+    )
+    assert draft.status_code == 202, draft.text
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, draft.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    preview = await client.get(f"{base_path}/proposals/{proposal_id}")
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["phase"] == "draft_ready"
+    assert body["can_apply"] is True
+    comparison = body["comparison"]["chapters"][0]["sections"][0]
+    assert comparison["before_content"] != comparison["after_content"]
+    assert comparison["after_content"].startswith("那天刮着风")
+    assert await test_db.scalar(
+        select(func.count(MemoirBookChapterDraftVersion.id)).where(
+            MemoirBookChapterDraftVersion.draft_id == version.draft_id
+        )
+    ) == 1
+
+    applied = await client.post(f"{base_path}/proposals/{proposal_id}/apply")
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["status"] == "applied"
+    assert (await client.get(f"{base_path}/jobs/current")).json()["status"] == "idle"
     latest = await test_db.scalar(
         select(MemoirBookChapterDraftVersion)
         .where(MemoirBookChapterDraftVersion.draft_id == version.draft_id)
         .order_by(MemoirBookChapterDraftVersion.version.desc())
     )
     assert latest is not None
-    assert latest.prompt_snapshot.endswith(":section_ai_revision")
-    assert latest.feedback == ("AI 按要求修改小节《比赛后的回想风》：把山峰的峰改成刮风的风。")
+    assert latest.version == 2
+    assert latest.section_snapshot_json[0]["content"] == "这是已经存在的完整章节正文。"
+    assert latest.section_snapshot_json[1]["title"] == "比赛后的回想峰"
+    assert latest.section_snapshot_json[1]["content"].startswith("那天刮着风")
+    assert latest.prompt_snapshot.endswith(":section_revision_workbench")
     await test_db.refresh(target_section)
-    assert target_section.title == "比赛后的回想风"
-    assert target_section.version == 2
+    assert target_section.title == "比赛后的回想峰"
+    assert target_section.version == 1
     draft = await test_db.get(MemoirBookChapterDraft, version.draft_id)
     assert draft is not None
     assert draft.metadata_json["last_requested_ai_model"] == "claude-opus-4-8"
     assert draft.metadata_json["last_resolved_ai_model"] == "test-layered-book"
-
-    stale = await client.post(
-        f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/draft-sections/{target_section.id}/ai-revise",
-        json={
-            "expected_version_id": version.id,
-            "instruction_text": "把结尾改得更简洁。",
-        },
-    )
-    assert stale.status_code == 409
-    assert stale.json()["detail"] == "正文已更新，请刷新后再修改"
-    assert len(fake.prompts) == 1
+    assert sources[0]["utterance_id"] not in fake.prompts[-1]
+    assert added_source["utterance_id"] not in fake.prompts[-1]
+    assert requested_models == [
+        "claude-opus-4-8",
+        "claude-opus-4-8",
+        "claude-opus-4-8",
+    ]
 
 
 async def test_book_overview_counts_all_unfinished_chapter_states(

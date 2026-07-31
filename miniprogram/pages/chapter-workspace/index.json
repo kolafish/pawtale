@@ -3,7 +3,6 @@
   "enablePullDownRefresh": true,
   "usingComponents": {
     "ai-task-progress": "/components/ai-task-progress/index",
-    "completion-issue-list": "/components/completion-issue-list/index",
-    "voice-text-editor": "/components/voice-text-editor/index"
+    "completion-issue-list": "/components/completion-issue-list/index"
   }
 }

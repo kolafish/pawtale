@@ -1,25 +1,29 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, is_admin_user
-from app.database import commit_or_rollback, get_db
+from app.database import get_db
 from app.models.users import User
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionJobRequest,
     MemoirBookCompletionJobResponse,
     MemoirBookCompletionOverviewResponse,
-    MemoirChapterDraftSectionAIRevisionRequest,
     MemoirChapterPreparationJobRequest,
     MemoirChapterPreparationJobResponse,
+    MemoirChapterSectionRevisionJobRequest,
+    MemoirChapterSectionRevisionJobResponse,
     MemoirChapterWorkspaceResponse,
 )
+from app.schemas.memoir_book_review import MemoirBookRevisionProposalResponse
 from app.services.memoir.narrative import book_completion
 from app.services.memoir import (
     book_completion_jobs,
     chapter_preparation_jobs,
     completion_read_model,
+    section_revision_jobs,
 )
-from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 from .common import authorize_project, decision_error
 
@@ -177,34 +181,101 @@ async def cancel_memoir_chapter_preparation_job(
 
 
 @router.post(
-    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/ai-revise",
-    response_model=MemoirChapterWorkspaceResponse,
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/revision/jobs",
+    response_model=MemoirChapterSectionRevisionJobResponse,
+    status_code=202,
 )
-async def revise_memoir_chapter_draft_section_with_ai(
+async def enqueue_memoir_chapter_section_revision_job(
     project_id: str,
     chapter_id: str,
     section_id: str,
-    req: MemoirChapterDraftSectionAIRevisionRequest,
+    req: MemoirChapterSectionRevisionJobRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = await authorize_project(
-        db,
-        project_id=project_id,
-        current_user=current_user,
-    )
-    selected_ai_model = select_project_ai_model(project, req.ai_model)
     try:
-        async with commit_or_rollback(db):
-            return await book_completion.revise_chapter_section_with_ai(
-                db,
-                project_id=project_id,
-                chapter_id=chapter_id,
-                section_id=section_id,
-                expected_version_id=req.expected_version_id,
-                instruction_text=req.instruction_text,
-                user_id=current_user.id,
-                ai_model=selected_ai_model,
-            )
+        return await section_revision_jobs.enqueue_section_revision_job(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            section_id=section_id,
+            operation=req.operation,
+            proposal_id=req.proposal_id,
+            feedback=req.feedback,
+            ai_model=req.ai_model,
+        )
+    except ValueError as exc:
+        raise decision_error(exc) from exc
+
+
+@router.get(
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/revision/jobs/current",
+    response_model=MemoirChapterSectionRevisionJobResponse,
+)
+async def get_memoir_chapter_section_revision_job(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await section_revision_jobs.get_section_revision_job(
+        db,
+        user_id=current_user.id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+        section_id=section_id,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/revision/proposals/{proposal_id}",
+    response_model=MemoirBookRevisionProposalResponse,
+)
+async def get_memoir_chapter_section_revision_proposal(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    proposal_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await authorize_project(db, project_id=project_id, current_user=current_user)
+    try:
+        return await section_revision_jobs.section_revision_proposal_response(
+            db,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            section_id=section_id,
+            proposal_id=proposal_id,
+        )
+    except ValueError as exc:
+        raise decision_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/chapters/{chapter_id}/draft-sections/{section_id}/revision/proposals/{proposal_id}/{action}",
+    response_model=MemoirBookRevisionProposalResponse,
+)
+async def finalize_memoir_chapter_section_revision(
+    project_id: str,
+    chapter_id: str,
+    section_id: str,
+    proposal_id: str,
+    action: Literal["apply", "dismiss"],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return await section_revision_jobs.finalize_section_revision(
+            db,
+            user_id=current_user.id,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            section_id=section_id,
+            proposal_id=proposal_id,
+            action=action,
+        )
     except ValueError as exc:
         raise decision_error(exc) from exc

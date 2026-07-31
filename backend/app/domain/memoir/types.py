@@ -122,6 +122,7 @@ class MemoirEditingJobType(str, Enum):
     GENERATE_BOOK_REVIEW = "generate_book_review"
     APPLY_BOOK_REVIEW_ANSWERS = "apply_book_review_answers"
     GENERATE_BOOK_REVISION_PROPOSAL = "generate_book_revision_proposal"
+    GENERATE_CHAPTER_SECTION_REVISION = "generate_chapter_section_revision"
     PREPARE_CHAPTER = "prepare_chapter"
 
 
