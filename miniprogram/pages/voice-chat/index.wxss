@@ -1,21 +1,13 @@
 .voice-chat-page {
-  padding: 34rpx 30rpx 350rpx;
+  --ui-fixed-action-space: 252rpx;
+  --voice-overlay-bottom: 228rpx;
+  padding-top: 34rpx;
+  padding-right: 30rpx;
+  padding-left: 30rpx;
 }
 
 .voice-chat-page.no-control-bar {
-  padding-bottom: 60rpx;
-}
-
-.voice-chat-page.ai-recording-focus {
-  padding-bottom: 360rpx;
-}
-
-.voice-chat-page.human-recording-focus {
-  padding-bottom: 330rpx;
-}
-
-.voice-chat-page.large-text.human-recording-focus {
-  padding-bottom: 380rpx;
+  --ui-fixed-action-space: 60rpx;
 }
 
 .top-bar {
@@ -75,23 +67,14 @@
 .finish-button {
   width: 156rpx;
   height: 80rpx;
-  margin: 0;
-  border: 0;
   border-radius: 24rpx;
   background: var(--ui-surface);
   color: var(--ui-section-title);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 30rpx;
   font-weight: 600;
   box-shadow:
     0 0 0 1rpx rgba(0, 0, 0, 0.08),
     0 6rpx 18rpx rgba(0, 0, 0, 0.05);
-}
-
-.finish-button::after {
-  border: 0;
 }
 
 .transcript-stage {
@@ -540,7 +523,7 @@
   left: 0;
   right: 0;
   top: 0;
-  bottom: 220rpx;
+  bottom: calc(var(--voice-overlay-bottom) + env(safe-area-inset-bottom));
   box-sizing: border-box;
   padding: 28rpx 30rpx 24rpx;
   background: rgba(247, 243, 236, 0.96);
@@ -827,14 +810,8 @@
 }
 
 .control-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-  padding: 26rpx 32rpx 42rpx;
-  background: rgba(247, 243, 236, 0.96);
-  box-shadow: 0 -1rpx 0 rgba(0, 0, 0, 0.06);
+  --ui-fixed-action-top: 26rpx;
+  --ui-fixed-action-bottom: 26rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1070,14 +1047,9 @@
 .recovery-button {
   min-width: 160rpx;
   height: 80rpx;
-  margin: 0;
-  border: 0;
   border-radius: 16rpx;
   background: var(--ui-accent);
   color: var(--ui-on-accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
   font-size: 28rpx;
   font-weight: 800;
 }
@@ -1085,10 +1057,6 @@
 .recovery-button.ghost {
   background: var(--ui-surface);
   color: var(--ui-accent);
-}
-
-.recovery-button::after {
-  border: 0;
 }
 
 .voice-auth-panel {
@@ -1139,7 +1107,11 @@
 }
 
 .voice-chat-page.large-text {
-  padding: 28rpx 24rpx 410rpx;
+  --ui-fixed-action-space: 308rpx;
+  --voice-overlay-bottom: 284rpx;
+  padding-top: 28rpx;
+  padding-right: 24rpx;
+  padding-left: 24rpx;
 }
 
 .voice-chat-page.large-text .top-bar {
@@ -1330,7 +1302,13 @@
 }
 
 .voice-chat-page.large-text .control-bar {
-  padding: 30rpx 24rpx 50rpx;
+  --ui-fixed-action-top: 30rpx;
+  --ui-fixed-action-inline: 24rpx;
+  --ui-fixed-action-bottom: 30rpx;
+}
+
+.voice-chat-page.large-text.no-control-bar {
+  --ui-fixed-action-space: 60rpx;
 }
 
 .voice-chat-page.large-text .human-record-panel {

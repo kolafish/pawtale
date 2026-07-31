@@ -1,11 +1,11 @@
-<view class="ui-page-shell {{voiceChatPageClass}}">
+<view class="ui-page-shell ui-fixed-action-page {{voiceChatPageClass}}">
   <view class="top-bar">
     <view class="top-copy">
       <text class="mode-label">{{topModeLabel}}</text>
       <text class="top-subtitle">{{topSubtitle}}</text>
     </view>
     <button
-      class="finish-button"
+      class="finish-button ui-button"
       loading="{{finishingSession}}"
       disabled="{{finishingSession}}"
       bindtap="finishSession"
@@ -53,8 +53,8 @@
   <view wx:if="{{showRecoveryPanel}}" class="recovery-panel">
     <text wx:if="{{recoveryNotice}}" class="recovery-text">{{recoveryNotice}}</text>
     <view wx:if="{{showRecoveryActions}}" class="recovery-actions">
-      <button wx:if="{{canReconnect}}" class="recovery-button" bindtap="reconnectGateway">重新连接</button>
-      <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ghost" bindtap="finishAfterDisconnect">查看讲述记录</button>
+      <button wx:if="{{canReconnect}}" class="recovery-button ui-button" bindtap="reconnectGateway">重新连接</button>
+      <button wx:if="{{canFinishAfterDisconnect}}" class="recovery-button ui-button ghost" bindtap="finishAfterDisconnect">查看讲述记录</button>
     </view>
   </view>
 
@@ -239,7 +239,7 @@
     </view>
   </view>
 
-  <view wx:if="{{showControlBar}}" class="control-bar">
+  <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
     <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
     <view
       class="{{micButtonClass}}"
