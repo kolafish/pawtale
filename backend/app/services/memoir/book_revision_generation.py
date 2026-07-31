@@ -63,6 +63,15 @@ PLAN_DRAFT_SYSTEM_PROMPT = (
 )
 ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
 logger = logging.getLogger(__name__)
+_BOOK_METADATA_LABELS = {
+    "title": "书名",
+    "subtitle": "副标题",
+    "narrator_name": "口述人",
+    "prepared_by": "整理人",
+    "preface": "前言",
+    "afterword": "后记",
+    "back_cover_quote": "封底文案",
+}
 
 
 class _SectionRevision(BaseModel):
@@ -980,13 +989,17 @@ def _editorial_plan_prompt(
     chapter_refs: ModelReferenceMap,
     section_refs: ModelReferenceMap,
     book_information: dict[str, str],
+    book_overview: str,
 ) -> str:
     action_text = "\n\n".join(
         f"修改目标：{_text(action.get('title'))}\n"
         f"原因：{_text(action.get('reason'))}\n"
         "涉及范围："
         + (
-            "书名与成书信息"
+            "、".join(
+                _BOOK_METADATA_LABELS.get(str(field), str(field))
+                for field in action.get("metadata_fields", [])
+            )
             if action.get("action_type") == "revise_book_profile"
             else "、".join(
                 chapter_refs.encode(str(chapter_id))
@@ -1002,6 +1015,16 @@ def _editorial_plan_prompt(
         section_refs=section_refs,
         allowed_chapter_ids=related_ids,
     )
+    required_metadata_fields = book_editorial_actions.metadata_fields(actions)
+    metadata_requirement = (
+        "本次必须在 book_metadata_patch 中返回以下字段的完整新值："
+        + "、".join(
+            f"{field}（{_BOOK_METADATA_LABELS[field]}）"
+            for field in sorted(required_metadata_fields)
+        )
+        if required_metadata_fields
+        else "本次没有成书信息修改。"
+    )
     return f"""请根据用户选中的全书编辑建议，制定书稿修改思路。
 
 用户选中的建议：
@@ -1010,10 +1033,37 @@ def _editorial_plan_prompt(
 当前成书信息：
 {book_information_text(book_information)}
 
+全书概况：
+{book_overview}
+
 相关章节原文：
 {chapters}
 
+{metadata_requirement}
+
 {_plan_output_instruction()}"""
+
+
+def _validate_editorial_metadata_plan(
+    *,
+    plan: _RevisionPlan,
+    actions: list[dict[str, object]],
+    book_information: dict[str, str],
+) -> None:
+    required = book_editorial_actions.metadata_fields(actions)
+    missing = required.difference(plan.book_metadata_patch)
+    unchanged = {
+        field
+        for field in required.difference(missing)
+        if plan.book_metadata_patch[field] == book_information.get(field, "")
+    }
+    invalid = missing | unchanged
+    if invalid:
+        labels = "、".join(
+            _BOOK_METADATA_LABELS[field]
+            for field in sorted(invalid)
+        )
+        raise BookRevisionError(f"修改思路没有生成有效的{labels}，请重新生成")
 
 
 async def generate_editorial_revision_proposal(
@@ -1034,6 +1084,12 @@ async def generate_editorial_revision_proposal(
         review.review_json,
         action_ids,
     )
+    if any(
+        action.get("action_type") == "revise_book_profile"
+        and not action.get("metadata_fields")
+        for action in actions
+    ):
+        raise BookRevisionError("成书信息建议已经过期，请重新检查全书")
     if book_editorial_actions.actions_signature(actions) != expected_actions_signature:
         raise BookRevisionError("所选编辑建议已经变化，请重新选择")
 
@@ -1051,6 +1107,7 @@ async def generate_editorial_revision_proposal(
     if answer_context.unresolved_count:
         raise BookRevisionError("请先处理完所有需要确认的问题")
     original_snapshots = _snapshots(baseline.chapter_snapshot_json)
+    book_information = _book_information(output, baseline)
     related_ids = {str(chapter_id) for action in actions for chapter_id in action.get("chapter_ids", [])}
     chapter_refs, section_refs = _reference_maps(
         original_snapshots,
@@ -1066,13 +1123,19 @@ async def generate_editorial_revision_proposal(
             actions=actions,
             chapter_refs=chapter_refs,
             section_refs=section_refs,
-            book_information=_book_information(output, baseline),
+            book_information=book_information,
+            book_overview=_text(review.review_json.get("summary")),
         ),
         engine=PLAN_ENGINE,
         error_message="生成修改思路时遇到问题，请稍后重试",
         ai_model=ai_model,
         ai_client=ai_client,
         reference_maps=(chapter_refs, section_refs),
+    )
+    _validate_editorial_metadata_plan(
+        plan=generated_plan.plan,
+        actions=actions,
+        book_information=book_information,
     )
 
     if progress_callback is not None:
