@@ -392,6 +392,21 @@ async def get_book_revision_job(
         user_id,
         allow_admin=allow_admin,
     )
+    return await book_revision_job_state(
+        db,
+        project_id=project_id,
+        source=source,
+        proposal_id=proposal_id,
+    )
+
+
+async def book_revision_job_state(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    source: BookRevisionJobSource,
+    proposal_id: str | None = None,
+) -> dict[str, object]:
     return await _job_state(
         db,
         project_id=project_id,

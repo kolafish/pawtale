@@ -442,32 +442,11 @@ async def load_chapter_draft_generation_plan(
     return chapter_draft_generation_plan(context, latest)
 
 
-async def load_chapter_generation_context(
-    db: AsyncSession,
+def chapter_generation_context(
+    chapter: MemoirBookPlanChapter,
     *,
-    project_id: str,
-    chapter_id: str,
+    polish_level: MemoirTranscriptPolishLevel,
 ) -> ChapterGenerationContext:
-    chapter = await db.scalar(
-        select(MemoirBookPlanChapter)
-        .join(MemoirBookPlan, MemoirBookPlanChapter.plan_id == MemoirBookPlan.id)
-        .where(
-            MemoirBookPlanChapter.project_id == project_id,
-            MemoirBookPlanChapter.id == chapter_id,
-        )
-        .execution_options(populate_existing=True)
-        .options(
-            selectinload(MemoirBookPlanChapter.plan),
-            selectinload(MemoirBookPlanChapter.sections)
-            .selectinload(MemoirSection.materials)
-            .selectinload(MemoirSectionMaterial.utterance),
-            selectinload(MemoirBookPlanChapter.sections)
-            .selectinload(MemoirSection.materials)
-            .selectinload(MemoirSectionMaterial.transcript_version),
-        )
-    )
-    if chapter is None:
-        raise HTTPException(status_code=404, detail="章节不存在")
     if chapter.plan.status != MemoirBookPlanStatus.CONFIRMED.value:
         raise HTTPException(status_code=409, detail="请先确认章节规划")
     sections: list[ChapterSectionInput] = []
@@ -517,7 +496,6 @@ async def load_chapter_generation_context(
             )
     if not materials:
         raise HTTPException(status_code=422, detail="章节没有可用于生成正文的素材")
-    polish_level = await load_project_transcript_polish_level(db, project_id)
     signature = semantic_json_signature(
         {
             "chapter": {
@@ -544,13 +522,45 @@ async def load_chapter_generation_context(
         }
     )
     return ChapterGenerationContext(
-        project_id=project_id,
+        project_id=chapter.project_id,
         chapter_id=chapter.id,
         chapter_title=chapter.title,
         sections=tuple(sections),
         materials=tuple(materials),
         input_signature=signature,
         polish_level=polish_level,
+    )
+
+
+async def load_chapter_generation_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> ChapterGenerationContext:
+    chapter = await db.scalar(
+        select(MemoirBookPlanChapter)
+        .join(MemoirBookPlan, MemoirBookPlanChapter.plan_id == MemoirBookPlan.id)
+        .where(
+            MemoirBookPlanChapter.project_id == project_id,
+            MemoirBookPlanChapter.id == chapter_id,
+        )
+        .execution_options(populate_existing=True)
+        .options(
+            selectinload(MemoirBookPlanChapter.plan),
+            selectinload(MemoirBookPlanChapter.sections)
+            .selectinload(MemoirSection.materials)
+            .selectinload(MemoirSectionMaterial.utterance),
+            selectinload(MemoirBookPlanChapter.sections)
+            .selectinload(MemoirSection.materials)
+            .selectinload(MemoirSectionMaterial.transcript_version),
+        )
+    )
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return chapter_generation_context(
+        chapter,
+        polish_level=await load_project_transcript_polish_level(db, project_id),
     )
 
 

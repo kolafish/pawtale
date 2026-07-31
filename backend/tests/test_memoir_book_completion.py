@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from httpx import Response
 import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -488,9 +489,22 @@ async def _run_book_review(
         ) is True
     finally:
         clear_editing_job_handlers()
-    return await client.get(
-        f"/api/memoir/projects/{project_id}/book-review",
+    snapshot = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview",
     )
+    return Response(
+        snapshot.status_code,
+        json=snapshot.json()["book_review"],
+        request=snapshot.request,
+    )
+
+
+async def _completion_field(client, project_id: str, field: str):
+    response = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert response.status_code == 200, response.text
+    return response.json()[field]
 
 
 def test_book_review_answer_output_rejects_structure_changes():
@@ -769,15 +783,13 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     fake = LayeredBookAI()
     _install_ai(monkeypatch, fake)
 
-    idle = await client.get(f"/api/memoir/projects/{project_id}/book-completion/jobs/current")
-    assert idle.status_code == 200, idle.text
-    assert idle.json()["status"] == "idle"
-    assert idle.json()["job_id"] is None
+    idle = await _completion_field(client, project_id, "completion_job")
+    assert idle["status"] == "idle"
+    assert idle["job_id"] is None
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
         json={
-            "scope": "pending",
             "ai_model": "claude-opus-4-8",
         },
     )
@@ -795,7 +807,7 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
 
     duplicate = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
-        json={"scope": "pending"},
+        json={},
     )
 
     assert duplicate.status_code == 202, duplicate.text
@@ -804,11 +816,9 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     batch_count = await test_db.scalar(select(func.count()).select_from(MemoirBookCompletionJob))
     assert batch_count == 1
 
-    resumed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/jobs/current")
-
-    assert resumed.status_code == 200, resumed.text
-    assert resumed.json()["job_id"] == queued_body["job_id"]
-    assert [item["job_id"] for item in resumed.json()["chapters"]] == child_job_ids
+    resumed = await _completion_field(client, project_id, "completion_job")
+    assert resumed["job_id"] == queued_body["job_id"]
+    assert [item["job_id"] for item in resumed["chapters"]] == child_job_ids
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -817,13 +827,11 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     finally:
         clear_editing_job_handlers()
 
-    partial = await client.get(f"/api/memoir/projects/{project_id}/book-completion/jobs/current")
-
-    assert partial.status_code == 200, partial.text
-    assert partial.json()["status"] == "running"
-    assert partial.json()["processed_chapter_count"] == 1
-    assert partial.json()["succeeded_chapter_count"] == 1
-    assert partial.json()["current_chapter_id"] == chapters[1].id
+    partial = await _completion_field(client, project_id, "completion_job")
+    assert partial["status"] == "running"
+    assert partial["processed_chapter_count"] == 1
+    assert partial["succeeded_chapter_count"] == 1
+    assert partial["current_chapter_id"] == chapters[1].id
 
     failed_child = await test_db.get(MemoirEditingJob, child_job_ids[1])
     assert failed_child is not None
@@ -832,10 +840,7 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     test_db.add(failed_child)
     await test_db.commit()
 
-    failed = await client.get(f"/api/memoir/projects/{project_id}/book-completion/jobs/current")
-
-    assert failed.status_code == 200, failed.text
-    failed_body = failed.json()
+    failed_body = await _completion_field(client, project_id, "completion_job")
     assert failed_body["status"] == "failed"
     assert failed_body["processed_chapter_count"] == 2
     assert failed_body["succeeded_chapter_count"] == 1
@@ -857,7 +862,6 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
         json={
-            "scope": "pending",
             "retry_job_id": queued_body["job_id"],
         },
     )
@@ -879,10 +883,9 @@ async def test_book_completion_job_persists_progress_failure_retry_and_cancel(
         "succeeded",
         "failed",
     ]
-    current_retry = await client.get(f"/api/memoir/projects/{project_id}/book-completion/jobs/current")
-    assert current_retry.status_code == 200, current_retry.text
-    assert current_retry.json()["job_id"] == retried_body["job_id"]
-    assert current_retry.json()["status"] == "running"
+    current_retry = await _completion_field(client, project_id, "completion_job")
+    assert current_retry["job_id"] == retried_body["job_id"]
+    assert current_retry["status"] == "running"
 
     cancelled = await client.delete(f"/api/memoir/projects/{project_id}/book-completion/jobs/{retried_body['job_id']}")
 
@@ -934,7 +937,7 @@ async def test_book_completion_job_does_not_enqueue_after_concurrent_cancel(
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-completion/jobs",
-        json={"scope": "pending"},
+        json={},
     )
 
     assert queued.status_code == 202, queued.text
@@ -1261,7 +1264,7 @@ async def test_book_overview_counts_all_unfinished_chapter_states(
     project_id, _, _ = await _book(client, test_db, chapter_count=3)
     states = iter(("not_started", "needs_input", "draft_ready"))
 
-    async def fake_chapter_summary(db, *, project_id, chapter):
+    async def fake_chapter_summary(db, *, project_id, chapter, snapshot):
         state = next(states)
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
@@ -1436,9 +1439,12 @@ async def test_chapter_reorder_preserves_checks_and_confirmed_drafts(
         workspace = await client.get(f"/api/memoir/projects/{project_id}/chapters/{chapter.id}/workspace")
         assert workspace.status_code == 200, workspace.text
         assert workspace.json()["draft_needs_rewrite"] is False
-    current_review = await client.get(f"/api/memoir/projects/{project_id}/book-review")
-    assert current_review.status_code == 200, current_review.text
-    assert current_review.json() is None
+    current_review = await _completion_field(
+        client,
+        project_id,
+        "book_review",
+    )
+    assert current_review is None
     assert len(fake.prompts) == prompt_count
 
 
@@ -1580,9 +1586,8 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     issue_id = issue.id
     assert issue.channel == "manual_review"
     assert issue.related_material_ids_json
-    current = await client.get(f"/api/memoir/projects/{project_id}/book-review")
-    assert current.status_code == 200
-    assert current.json()["id"] == review["id"]
+    current = await _completion_field(client, project_id, "book_review")
+    assert current["id"] == review["id"]
     blocked = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble",
     )
@@ -1622,9 +1627,8 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
             status=MemoirBookChapterDraftStatus.CONFIRMED,
         )
 
-    idle = await client.get(f"/api/memoir/projects/{project_id}/book-review/jobs/current")
-    assert idle.status_code == 200
-    assert idle.json()["status"] == "idle"
+    idle = await _completion_field(client, project_id, "book_review_job")
+    assert idle["status"] == "idle"
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
@@ -1666,10 +1670,9 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
         == 1
     )
 
-    resumed = await client.get(f"/api/memoir/projects/{project_id}/book-review/jobs/current")
-    assert resumed.status_code == 200
-    assert resumed.json()["job_id"] == queued_body["job_id"]
-    assert resumed.json()["stage"] == "queued"
+    resumed = await _completion_field(client, project_id, "book_review_job")
+    assert resumed["job_id"] == queued_body["job_id"]
+    assert resumed["stage"] == "queued"
 
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
@@ -1684,9 +1687,11 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     finally:
         clear_editing_job_handlers()
 
-    completed = await client.get(f"/api/memoir/projects/{project_id}/book-review/jobs/current")
-    assert completed.status_code == 200, completed.text
-    completed_body = completed.json()
+    completed_body = await _completion_field(
+        client,
+        project_id,
+        "book_review_job",
+    )
     assert completed_body["status"] == "succeeded"
     assert completed_body["stage"] == "completed"
     assert completed_body["processed_chapter_count"] == 2
@@ -1696,10 +1701,19 @@ async def test_book_review_job_persists_across_requests_and_runs_in_worker(
     assert completed_body["resolved_ai_model"] == fake.model_name
     assert set(requested_models) == {"claude-opus-4-8"}
 
-    current_review = await client.get(f"/api/memoir/projects/{project_id}/book-review")
-    assert current_review.status_code == 200
-    assert current_review.json()["id"] == completed_body["review_id"]
-    assert current_review.json()["status"] == "ready"
+    snapshot = await client.get(
+        f"/api/memoir/projects/{project_id}/book-completion/overview"
+    )
+    assert snapshot.status_code == 200
+    snapshot_body = snapshot.json()
+    assert snapshot_body["book_review"]["id"] == completed_body["review_id"]
+    assert snapshot_body["book_review"]["status"] == "ready"
+    assert snapshot_body["book_review_job"]["status"] == "succeeded"
+    assert snapshot_body["book_review_job"]["review_id"] == completed_body["review_id"]
+    assert len(snapshot_body["book_issues"]) == 1
+    assert snapshot_body["book_output_available"] is False
+    assert snapshot_body["answer_application_job"]["unresolved_count"] == 1
+    assert snapshot_body["editorial_revision_job"]["status"] == "idle"
 
     requeued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
@@ -1755,11 +1769,14 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     )
     assert blocked_editorial.status_code == 409
     assert "先处理完所有需要确认的问题" in blocked_editorial.json()["detail"]
-    blocked_state = await client.get(f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/current")
-    assert blocked_state.status_code == 200
-    assert blocked_state.json()["answer_count"] == 0
-    assert blocked_state.json()["unresolved_count"] == 1
-    assert blocked_state.json()["can_apply"] is False
+    blocked_state = await _completion_field(
+        client,
+        project_id,
+        "answer_application_job",
+    )
+    assert blocked_state["answer_count"] == 0
+    assert blocked_state["unresolved_count"] == 1
+    assert blocked_state["can_apply"] is False
     closed = await client.post(
         f"/api/memoir/projects/{project_id}/completion-issues/{issue.id}/close",
         json={
@@ -1773,11 +1790,10 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert unapplied.status_code == 409
     assert "根据全书检查里的回答调整书稿" in unapplied.json()["detail"]
 
-    idle = await client.get(f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/current")
-    assert idle.status_code == 200, idle.text
-    assert idle.json()["status"] == "idle"
-    assert idle.json()["answer_count"] == 1
-    assert idle.json()["can_apply"] is True
+    idle = await _completion_field(client, project_id, "answer_application_job")
+    assert idle["status"] == "idle"
+    assert idle["answer_count"] == 1
+    assert idle["can_apply"] is True
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs",
@@ -1815,9 +1831,11 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     finally:
         clear_editing_job_handlers()
 
-    completed = await client.get(f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/current")
-    assert completed.status_code == 200, completed.text
-    completed_body = completed.json()
+    completed_body = await _completion_field(
+        client,
+        project_id,
+        "answer_application_job",
+    )
     assert completed_body["status"] == "succeeded"
     assert completed_body["stage"] == "completed"
     assert completed_body["answer_count"] == 1
@@ -2069,10 +2087,14 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
         )
     finally:
         clear_editing_job_handlers()
-    editorial_state = await client.get(f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs/current")
+    editorial_state = await _completion_field(
+        client,
+        project_id,
+        "editorial_revision_job",
+    )
     editorial_draft = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{editorial_state.json()['proposal_id']}/draft/jobs",
+        f"revision-proposals/{editorial_state['proposal_id']}/draft/jobs",
         json={},
     )
     assert editorial_draft.status_code == 202, editorial_draft.text
@@ -2090,16 +2112,17 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
         clear_editing_job_handlers()
     editorial_applied = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/"
-        f"revision-proposals/{editorial_state.json()['proposal_id']}/apply"
+        f"revision-proposals/{editorial_state['proposal_id']}/apply"
     )
     assert editorial_applied.status_code == 200, editorial_applied.text
 
-    preserved_answer_state = await client.get(
-        f"/api/memoir/projects/{project_id}/book-review/answer-application/jobs/current"
+    preserved_answer_state = await _completion_field(
+        client,
+        project_id,
+        "answer_application_job",
     )
-    assert preserved_answer_state.status_code == 200
-    assert preserved_answer_state.json()["already_applied"] is True
-    assert preserved_answer_state.json()["can_apply"] is False
+    assert preserved_answer_state["already_applied"] is True
+    assert preserved_answer_state["can_apply"] is False
 
 
 async def test_selected_editorial_actions_create_a_preview_before_applying(
@@ -2155,9 +2178,11 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     finally:
         clear_editing_job_handlers()
 
-    completed = await client.get(f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs/current")
-    assert completed.status_code == 200, completed.text
-    completed_body = completed.json()
+    completed_body = await _completion_field(
+        client,
+        project_id,
+        "editorial_revision_job",
+    )
     assert completed_body["status"] == "succeeded"
     assert completed_body["proposal_status"] == "ready"
     assert completed_body["proposal_phase"] == "plan_ready"
@@ -2273,12 +2298,11 @@ async def test_book_review_job_preserves_failure_and_can_retry(
     finally:
         clear_editing_job_handlers()
 
-    failed = await client.get(f"/api/memoir/projects/{project_id}/book-review/jobs/current")
-    assert failed.status_code == 200
-    assert failed.json()["status"] == "failed"
-    assert failed.json()["stage"] == "reviewing"
-    assert failed.json()["error_message"] == "provider unavailable"
-    assert failed.json()["can_retry"] is True
+    failed = await _completion_field(client, project_id, "book_review_job")
+    assert failed["status"] == "failed"
+    assert failed["stage"] == "reviewing"
+    assert failed["error_message"] == "provider unavailable"
+    assert failed["can_retry"] is True
 
     retried = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/jobs",

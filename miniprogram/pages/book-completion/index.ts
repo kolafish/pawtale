@@ -21,11 +21,7 @@ import {
   enqueueMemoirBookCompletionJob,
   enqueueMemoirBookReviewJob,
   enqueueMemoirChapterPreparationJob,
-  getMemoirBookCompletionJob,
   getMemoirBookCompletionOverview,
-  getMemoirBookReview,
-  getMemoirBookRevisionJob,
-  getMemoirBookReviewJob,
   type MemoirBookReview,
   type MemoirBookAnswerApplicationJob,
   type MemoirBookEditorialAction,
@@ -35,10 +31,7 @@ import {
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-book-completion-api";
-import { getMemoirBookOutput } from "../../services/memoir-book-api";
-import { listMemoirCompletionIssues } from "../../services/memoir-completion-issue-api";
 import { routeAuthError } from "../../services/navigation";
-import { optionalApiResource } from "../../services/request";
 import {
   datasetString,
   pageUrl,
@@ -593,10 +586,10 @@ definePage<BookCompletionData>()({
       this.setData({ loading: true, error: "" });
     }
     try {
-      const [bulkCheckJob, overview] = await Promise.all([
-        getMemoirBookCompletionJob(this.data.projectId),
-        getMemoirBookCompletionOverview(this.data.projectId),
-      ]);
+      const overview = await getMemoirBookCompletionOverview(
+        this.data.projectId,
+      );
+      const bulkCheckJob = overview.completion_job;
       const initialView = bookCompletionViewPatch(
         overview,
         this.data.preparingChapterId,
@@ -611,23 +604,21 @@ definePage<BookCompletionData>()({
         this.data.preparingChapterId,
         batchActive,
       );
-      const [
-        bookReview,
-        bookReviewJob,
-        issueCollection,
-        bookOutput,
-        answerApplicationJob,
-        editorialRevisionJob,
-      ] = view.allChaptersConfirmed
-        ? await Promise.all([
-          getMemoirBookReview(this.data.projectId),
-          getMemoirBookReviewJob(this.data.projectId),
-          listMemoirCompletionIssues(this.data.projectId),
-          optionalApiResource(getMemoirBookOutput(this.data.projectId)),
-          getMemoirBookRevisionJob(this.data.projectId, "review_answers"),
-          getMemoirBookRevisionJob(this.data.projectId, "editorial_actions"),
-        ])
-        : [null, null, { issues: [] }, null, null, null];
+      const bookReview = view.allChaptersConfirmed
+        ? overview.book_review
+        : null;
+      const bookReviewJob = view.allChaptersConfirmed
+        ? overview.book_review_job
+        : null;
+      const bookIssues = view.allChaptersConfirmed
+        ? overview.book_issues
+        : [];
+      const answerApplicationJob = view.allChaptersConfirmed
+        ? overview.answer_application_job
+        : null;
+      const editorialRevisionJob = view.allChaptersConfirmed
+        ? overview.editorial_revision_job
+        : null;
       const reviewJobActive = Boolean(
         bookReviewJob && bookReviewJobActive(bookReviewJob),
       );
@@ -679,13 +670,13 @@ definePage<BookCompletionData>()({
       );
       this.setData({
         ...view,
-        ...bookReviewViewPatch(bookReview, issueCollection.issues),
+        ...bookReviewViewPatch(bookReview, bookIssues),
         selectedEditorialActionIds,
         editorialActionViews: editorialActionViews(
           bookReview,
           selectedEditorialActionIds,
         ),
-        bookOutputAvailable: Boolean(bookOutput),
+        bookOutputAvailable: overview.book_output_available,
         bookReviewProgress: bookReviewJobView(bookReviewJob),
         bookReviewJob,
         checkingBook: reviewJobActive,

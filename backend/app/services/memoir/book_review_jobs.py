@@ -101,19 +101,11 @@ async def enqueue_book_review_job(
     return _job_state(project_id=project_id, job=job)
 
 
-async def get_book_review_job(
+async def book_review_job_state(
     db: AsyncSession,
     *,
-    user_id: str,
     project_id: str,
-    allow_admin: bool = False,
 ) -> dict[str, object]:
-    await load_memoir_project(
-        db,
-        project_id,
-        user_id,
-        allow_admin=allow_admin,
-    )
     return _job_state(
         project_id=project_id,
         job=await _load_job(db, project_id=project_id),

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import logging
@@ -21,6 +21,7 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirChapterDigest,
     MemoirSection,
+    MemoirSectionDigest,
 )
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -250,17 +251,11 @@ async def ensure_section_digests(
             )
 
 
-async def load_chapter_digest_context(
-    db: AsyncSession,
+def chapter_digest_context(
+    chapter: MemoirBookPlanChapter,
     *,
-    project_id: str,
-    chapter_id: str,
+    section_digests_by_id: Mapping[str, MemoirSectionDigest],
 ) -> ChapterDigestContext:
-    chapter = await _load_chapter(
-        db,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
     sections: list[ChapterDigestSection] = []
     material_ids: set[str] = set()
     for section in sorted(
@@ -272,11 +267,7 @@ async def load_chapter_digest_context(
             or not section.include_in_book
         ):
             continue
-        digest = await section_digests.get_current_section_digest(
-            db,
-            project_id=project_id,
-            section_id=section.id,
-        )
+        digest = section_digests_by_id.get(section.id)
         if digest is None:
             raise HTTPException(
                 status_code=409,
@@ -300,7 +291,7 @@ async def load_chapter_digest_context(
         )
     section_tuple = tuple(sections)
     return ChapterDigestContext(
-        project_id=project_id,
+        project_id=chapter.project_id,
         chapter_id=chapter.id,
         chapter_title=chapter.title,
         chapter_sort_order=chapter.sort_order,
@@ -313,6 +304,37 @@ async def load_chapter_digest_context(
             include_in_book=chapter.include_in_book,
             sections=section_tuple,
         ),
+    )
+
+
+async def load_chapter_digest_context(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapter_id: str,
+) -> ChapterDigestContext:
+    chapter = await _load_chapter(
+        db,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    digests = {}
+    for section in chapter.sections:
+        if (
+            section.status != MemoirSectionStatus.ACTIVE.value
+            or not section.include_in_book
+        ):
+            continue
+        digest = await section_digests.get_current_section_digest(
+            db,
+            project_id=project_id,
+            section_id=section.id,
+        )
+        if digest is not None:
+            digests[section.id] = digest
+    return chapter_digest_context(
+        chapter,
+        section_digests_by_id=digests,
     )
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -10,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirCompletionIssueStatus,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
+    MemoirSectionStatus,
     MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
@@ -17,8 +21,12 @@ from app.models.memoir import (
     MemoirBookChapterDraftVersion,
     MemoirBookPlan,
     MemoirBookPlanChapter,
+    MemoirChapterDigest,
+    MemoirCompletionIssue,
     MemoirEditingJob,
     MemoirSection,
+    MemoirSectionDigest,
+    MemoirSectionMaterial,
 )
 from app.models.projects import Project
 from app.schemas.memoir_narrative import (
@@ -33,8 +41,23 @@ from app.services.memoir import (
     chapter_digests,
     chapter_generation,
     completion_issues,
+    section_digests,
     sections,
 )
+from app.services.memoir.project_ai_preferences import (
+    load_project_transcript_polish_level,
+)
+
+
+@dataclass(frozen=True)
+class _ChapterSummarySnapshot:
+    active_job: bool
+    section_exists: bool
+    issues: list[MemoirCompletionIssue]
+    draft: MemoirBookChapterDraft | None
+    version: MemoirBookChapterDraftVersion | None
+    context: chapter_generation.ChapterGenerationContext | None
+    digest: MemoirChapterDigest | None
 
 
 async def _plan_chapters(
@@ -56,6 +79,16 @@ async def _plan_chapters(
                     MemoirBookPlanChapter.plan_id == plan.id,
                     MemoirBookPlanChapter.include_in_book.is_(True),
                 )
+                .options(
+                    selectinload(MemoirBookPlanChapter.plan),
+                    selectinload(MemoirBookPlanChapter.sections)
+                    .selectinload(MemoirSection.materials)
+                    .selectinload(MemoirSectionMaterial.utterance),
+                    selectinload(MemoirBookPlanChapter.sections)
+                    .selectinload(MemoirSection.materials)
+                    .selectinload(MemoirSectionMaterial.transcript_version),
+                )
+                .execution_options(populate_existing=True)
                 .order_by(
                     MemoirBookPlanChapter.sort_order,
                     MemoirBookPlanChapter.id,
@@ -98,24 +131,29 @@ async def chapter_summary(
     *,
     project_id: str,
     chapter: MemoirBookPlanChapter,
+    snapshot: _ChapterSummarySnapshot | None = None,
 ) -> MemoirChapterCompletionSummary:
-    active_job = await db.scalar(
-        select(MemoirEditingJob.id)
-        .where(
-            MemoirEditingJob.project_id == project_id,
-            MemoirEditingJob.chapter_id == chapter.id,
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.PREPARE_CHAPTER.value,
-            MemoirEditingJob.status.in_(
-                {
-                    MemoirEditingJobStatus.PENDING.value,
-                    MemoirEditingJobStatus.RUNNING.value,
-                }
-            ),
+    active_job = (
+        snapshot.active_job
+        if snapshot is not None
+        else await db.scalar(
+            select(MemoirEditingJob.id)
+            .where(
+                MemoirEditingJob.project_id == project_id,
+                MemoirEditingJob.chapter_id == chapter.id,
+                MemoirEditingJob.job_type
+                == MemoirEditingJobType.PREPARE_CHAPTER.value,
+                MemoirEditingJob.status.in_(
+                    {
+                        MemoirEditingJobStatus.PENDING.value,
+                        MemoirEditingJobStatus.RUNNING.value,
+                    }
+                ),
+            )
+            .limit(1)
         )
-        .limit(1)
     )
-    if active_job is not None:
+    if active_job:
         return MemoirChapterCompletionSummary(
             chapter_id=chapter.id,
             title=chapter.title,
@@ -132,20 +170,28 @@ async def chapter_summary(
             detail="每个小节完成后都会保存进度。",
         )
     section_exists = (
-        await db.scalar(
-            select(MemoirSection.id)
-            .where(
-                MemoirSection.project_id == project_id,
-                MemoirSection.chapter_id == chapter.id,
+        snapshot.section_exists
+        if snapshot is not None
+        else (
+            await db.scalar(
+                select(MemoirSection.id)
+                .where(
+                    MemoirSection.project_id == project_id,
+                    MemoirSection.chapter_id == chapter.id,
+                )
+                .limit(1)
             )
-            .limit(1)
+            is not None
         )
-        is not None
     )
-    issues = await completion_issues.list_issues(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    issues = (
+        snapshot.issues
+        if snapshot is not None
+        else await completion_issues.list_issues(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
     )
     issue = next(
         (
@@ -165,29 +211,42 @@ async def chapter_summary(
         if optional_count
         else ""
     )
-    draft, version = await _latest_version(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    draft, version = (
+        (snapshot.draft, snapshot.version)
+        if snapshot is not None
+        else await _latest_version(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
     )
     draft_current = False
     if section_exists:
         try:
-            context = await chapter_generation.load_chapter_generation_context(
-                db,
-                project_id=project_id,
-                chapter_id=chapter.id,
+            context = (
+                snapshot.context
+                if snapshot is not None
+                else await chapter_generation.load_chapter_generation_context(
+                    db,
+                    project_id=project_id,
+                    chapter_id=chapter.id,
+                )
             )
-            draft_current = chapter_generation.chapter_draft_is_current(
-                context,
-                version,
-            )
+            if context is not None:
+                draft_current = chapter_generation.chapter_draft_is_current(
+                    context,
+                    version,
+                )
         except HTTPException:
             draft_current = False
-    digest = await chapter_digests.get_current_chapter_digest(
-        db,
-        project_id=project_id,
-        chapter_id=chapter.id,
+    digest = (
+        snapshot.digest
+        if snapshot is not None
+        else await chapter_digests.get_current_chapter_digest(
+            db,
+            project_id=project_id,
+            chapter_id=chapter.id,
+        )
     )
     digest_ready = bool(
         digest
@@ -312,6 +371,184 @@ async def chapter_summary(
     )
 
 
+async def _current_chapter_digests(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapters: list[MemoirBookPlanChapter],
+) -> dict[str, MemoirChapterDigest]:
+    section_contexts = {
+        section.id: section_digests.section_digest_context(section)
+        for chapter in chapters
+        for section in chapter.sections
+        if (
+            section.status == MemoirSectionStatus.ACTIVE.value
+            and section.include_in_book
+        )
+    }
+    if not section_contexts:
+        return {}
+    current_section_digests = {
+        digest.section_id: digest
+        for digest in (
+            await db.scalars(
+                select(MemoirSectionDigest).where(
+                    MemoirSectionDigest.project_id == project_id,
+                    MemoirSectionDigest.section_id.in_(section_contexts),
+                    MemoirSectionDigest.engine
+                    == section_digests.SECTION_DIGEST_ENGINE,
+                    MemoirSectionDigest.status
+                    == MemoirSemanticCacheStatus.READY.value,
+                    MemoirSectionDigest.input_signature.in_(
+                        context.input_signature
+                        for context in section_contexts.values()
+                    ),
+                )
+            )
+        ).all()
+        if digest.input_signature
+        == section_contexts[digest.section_id].input_signature
+    }
+    chapter_contexts = {}
+    for chapter in chapters:
+        try:
+            chapter_contexts[chapter.id] = chapter_digests.chapter_digest_context(
+                chapter,
+                section_digests_by_id=current_section_digests,
+            )
+        except HTTPException:
+            continue
+    if not chapter_contexts:
+        return {}
+    return {
+        digest.chapter_id: digest
+        for digest in (
+            await db.scalars(
+                select(MemoirChapterDigest).where(
+                    MemoirChapterDigest.project_id == project_id,
+                    MemoirChapterDigest.chapter_id.in_(chapter_contexts),
+                    MemoirChapterDigest.engine
+                    == chapter_digests.CHAPTER_DIGEST_ENGINE,
+                    MemoirChapterDigest.input_signature.in_(
+                        context.input_signature
+                        for context in chapter_contexts.values()
+                    ),
+                )
+            )
+        ).all()
+        if digest.input_signature
+        == chapter_contexts[digest.chapter_id].input_signature
+    }
+
+
+async def _chapter_summary_snapshots(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    chapters: list[MemoirBookPlanChapter],
+) -> dict[str, _ChapterSummarySnapshot]:
+    chapter_ids = [chapter.id for chapter in chapters]
+    active_chapter_ids = set(
+        (
+            await db.scalars(
+                select(MemoirEditingJob.chapter_id).where(
+                    MemoirEditingJob.project_id == project_id,
+                    MemoirEditingJob.chapter_id.in_(chapter_ids),
+                    MemoirEditingJob.job_type
+                    == MemoirEditingJobType.PREPARE_CHAPTER.value,
+                    MemoirEditingJob.status.in_(
+                        {
+                            MemoirEditingJobStatus.PENDING.value,
+                            MemoirEditingJobStatus.RUNNING.value,
+                        }
+                    ),
+                )
+            )
+        ).all()
+    )
+    section_chapter_ids = set(
+        (
+            await db.scalars(
+                select(MemoirSection.chapter_id).where(
+                    MemoirSection.project_id == project_id,
+                    MemoirSection.chapter_id.in_(chapter_ids),
+                )
+            )
+        ).all()
+    )
+    issues_by_chapter: dict[str, list[MemoirCompletionIssue]] = {}
+    for issue in await completion_issues.list_issues(db, project_id=project_id):
+        if issue.chapter_id in chapter_ids:
+            issues_by_chapter.setdefault(issue.chapter_id, []).append(issue)
+    drafts = {
+        draft.chapter_id: draft
+        for draft in (
+            await db.scalars(
+                select(MemoirBookChapterDraft).where(
+                    MemoirBookChapterDraft.project_id == project_id,
+                    MemoirBookChapterDraft.chapter_id.in_(chapter_ids),
+                )
+            )
+        ).all()
+    }
+    latest_version_numbers = (
+        select(
+            MemoirBookChapterDraftVersion.chapter_id.label("chapter_id"),
+            func.max(MemoirBookChapterDraftVersion.version).label("version"),
+        )
+        .where(
+            MemoirBookChapterDraftVersion.project_id == project_id,
+            MemoirBookChapterDraftVersion.chapter_id.in_(chapter_ids),
+        )
+        .group_by(MemoirBookChapterDraftVersion.chapter_id)
+        .subquery()
+    )
+    versions = {
+        version.chapter_id: version
+        for version in (
+            await db.scalars(
+                select(MemoirBookChapterDraftVersion).join(
+                    latest_version_numbers,
+                    and_(
+                        latest_version_numbers.c.chapter_id
+                        == MemoirBookChapterDraftVersion.chapter_id,
+                        latest_version_numbers.c.version
+                        == MemoirBookChapterDraftVersion.version,
+                    ),
+                )
+            )
+        ).all()
+    }
+    current_digests = await _current_chapter_digests(
+        db,
+        project_id=project_id,
+        chapters=chapters,
+    )
+    polish_level = await load_project_transcript_polish_level(db, project_id)
+    snapshots: dict[str, _ChapterSummarySnapshot] = {}
+    for chapter in chapters:
+        issues = issues_by_chapter.get(chapter.id, [])
+        context = None
+        if chapter.id not in active_chapter_ids:
+            try:
+                context = chapter_generation.chapter_generation_context(
+                    chapter,
+                    polish_level=polish_level,
+                )
+            except HTTPException:
+                pass
+        snapshots[chapter.id] = _ChapterSummarySnapshot(
+            active_job=chapter.id in active_chapter_ids,
+            section_exists=chapter.id in section_chapter_ids,
+            issues=issues,
+            draft=drafts.get(chapter.id),
+            version=versions.get(chapter.id),
+            context=context,
+            digest=current_digests.get(chapter.id),
+        )
+    return snapshots
+
+
 async def book_overview(
     db: AsyncSession,
     *,
@@ -327,11 +564,17 @@ async def book_overview(
             completed_chapters=0,
             chapters=[],
         )
+    snapshots = await _chapter_summary_snapshots(
+        db,
+        project_id=project_id,
+        chapters=chapters,
+    )
     items = [
         await chapter_summary(
             db,
             project_id=project_id,
             chapter=chapter,
+            snapshot=snapshots[chapter.id],
         )
         for chapter in chapters
     ]
