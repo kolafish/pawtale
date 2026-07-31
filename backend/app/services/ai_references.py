@@ -1,8 +1,15 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+import re
 
 
 class ModelReferenceMap:
-    def __init__(self, prefix: str, identifiers: Iterable[str]) -> None:
+    def __init__(
+        self,
+        prefix: str,
+        identifiers: Iterable[str],
+        *,
+        labels: Mapping[str, str] | None = None,
+    ) -> None:
         values = tuple(dict.fromkeys(identifiers))
         self._references = {
             identifier: f"{prefix}{index}"
@@ -11,6 +18,11 @@ class ModelReferenceMap:
         self._identifiers = {
             reference: identifier
             for identifier, reference in self._references.items()
+        }
+        self._labels = {
+            self._references[identifier]: label
+            for identifier, label in (labels or {}).items()
+            if identifier in self._references
         }
 
     def encode(self, identifier: str) -> str:
@@ -37,3 +49,17 @@ class ModelReferenceMap:
             if len(result) >= limit:
                 break
         return result
+
+    def render_text(self, value: object) -> str:
+        text = value if isinstance(value, str) else ""
+        if not self._labels:
+            return text
+        pattern = "|".join(
+            re.escape(reference)
+            for reference in sorted(self._labels, key=len, reverse=True)
+        )
+        return re.sub(
+            rf"(?<![A-Za-z0-9])(?:{pattern})(?![A-Za-z0-9])",
+            lambda match: self._labels[match.group(0)],
+            text,
+        )

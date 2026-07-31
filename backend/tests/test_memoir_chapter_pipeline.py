@@ -107,7 +107,7 @@ class FakeChapterAI:
                     }
                 ],
             }
-        elif "请审阅回忆录章节" in user_prompt:
+        elif "请通读回忆录章节" in user_prompt:
             payload = {
                 "summary": "这一章讲重新联系和共同爬山。",
                 "focus": "重新建立联系。",
@@ -161,7 +161,7 @@ class TruncatedChapterDigestAI(FakeChapterAI):
         timeout=60.0,
         return_raw=False,
     ):
-        if "请审阅回忆录章节" not in user_prompt:
+        if "请通读回忆录章节" not in user_prompt:
             return await super()._call_llm(
                 system_prompt,
                 user_prompt,
@@ -945,15 +945,20 @@ def test_chapter_digest_keeps_all_independent_user_questions():
 
     normalized = chapter_digests.normalize_chapter_digest(
         {
-            "summary": "章节摘要",
+            "summary": "S1 的章节摘要",
             "focus": "章节重点",
             "structure_guidance": [],
             "candidate_issues": candidates,
         },
-        section_references=ModelReferenceMap("S", ["section-1"]),
+        section_references=ModelReferenceMap(
+            "S",
+            ["section-1"],
+            labels={"section-1": "第1小节《比赛》"},
+        ),
     )
 
     assert len(normalized["candidate_issues"]) == 5
+    assert normalized["summary"] == "第1小节《比赛》 的章节摘要"
 
 
 async def test_prepare_chapter_preserves_section_digest_when_chapter_json_is_truncated(

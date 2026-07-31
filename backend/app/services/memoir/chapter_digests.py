@@ -51,7 +51,7 @@ CHAPTER_DIGEST_POLICY = ai_text_workload_policy(
 CHAPTER_DIGEST_MAX_TOKENS = CHAPTER_DIGEST_POLICY.max_tokens
 CHAPTER_DIGEST_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录主编。"
-    "你根据小章节摘要判断整章的结构和阅读体验，不创造新事实。"
+    "你根据小章节摘要判断整章的阅读体验，不创造新事实。"
 )
 logger = logging.getLogger(__name__)
 ChapterDigestProgressCallback = Callable[
@@ -371,6 +371,10 @@ def _section_references(context: ChapterDigestContext) -> ModelReferenceMap:
     return ModelReferenceMap(
         "S",
         (section.section_id for section in context.sections),
+        labels={
+            section.section_id: f"第{index}小节《{section.title}》"
+            for index, section in enumerate(context.sections, start=1)
+        },
     )
 
 
@@ -389,7 +393,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
         )
         for item in context.sections
     )
-    return f"""请审阅回忆录章节“{context.chapter_title}”的整体结构。
+    return f"""请通读回忆录章节“{context.chapter_title}”。
 
 有序小章节：
 {sections}
@@ -398,7 +402,7 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 {{
   "summary": "整章内容的一到三句概括",
   "focus": "整章最主要的叙事重点",
-  "structure_guidance": ["只需编辑处理的顺序、去重、过渡、开头或结尾建议"],
+  "structure_guidance": ["确有必要时给出的可选编辑建议"],
   "candidate_issues": [
     {{
       "issue_type": "context|sequence|relationship|motivation|impact|meaning|clarity|structure|privacy|conflict",
@@ -414,11 +418,11 @@ def build_chapter_digest_prompt(context: ChapterDigestContext) -> str:
 要求：
 - 先判断整章是否自然成立，不按固定模板逐项找缺口。
 - 汇总并筛选各小章节的候选补充；不要让小章节发现绕过整章判断直接要求用户处理。
-- 已有素材足够、只需重排或改写的问题写入 structure_guidance，不要求用户补讲。
+- 已有素材足够、只需编辑处理的问题写入 structure_guidance，不要求用户补讲。
 - candidate_issues 数量不设配额，只保留彼此独立且用户回答或确认后会明显改善结果的问题，并合并相似问题。
 - interview 只用于可选补充：不补也不影响正文生成、通读和确认。
 - manual_review 只用于必须由用户决定的隐私、事实冲突或取舍，未处理时会阻止章节确认。
-- question 和 reason 会直接展示给用户；引用小章节时使用标题或“第几小节＋标题”，不得出现 S1、S2 等内部短编号。
+- question 和 reason 会直接展示给用户；引用小章节时使用标题。
 - section_ids 只能使用输入中出现的本次请求短编号 section_id。
 - 不能创建输入摘要之外的新事实。
 - 直接输出 JSON 对象，不要输出分析过程、解释或 JSON 之外的文字。
@@ -432,10 +436,11 @@ def normalize_chapter_digest(
 ) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("chapter digest AI did not return a JSON object")
-    summary = _compact(payload.get("summary"), limit=800)
+    visible = section_references.render_text
+    summary = _compact(visible(payload.get("summary")), limit=800)
     if not summary:
         raise ValueError("chapter digest summary is empty")
-    focus = _compact(payload.get("focus"), limit=400)
+    focus = _compact(visible(payload.get("focus")), limit=400)
     issues: list[dict] = []
     allowed_types = {
         "context",
@@ -455,8 +460,8 @@ def normalize_chapter_digest(
     for candidate in candidate_values:
         if not isinstance(candidate, dict):
             continue
-        question = _compact(candidate.get("question"), limit=180)
-        reason = _compact(candidate.get("reason"), limit=300)
+        question = _compact(visible(candidate.get("question")), limit=180)
+        reason = _compact(visible(candidate.get("reason")), limit=300)
         if not question or not reason:
             continue
         section_ids = section_references.decode_many(
@@ -491,7 +496,12 @@ def normalize_chapter_digest(
         "summary": summary,
         "focus": focus,
         "structure_guidance": _string_list(
-            payload.get("structure_guidance"),
+            [
+                visible(item)
+                for item in payload.get("structure_guidance", [])
+            ]
+            if isinstance(payload.get("structure_guidance"), list)
+            else [],
             limit=8,
             item_limit=240,
         ),

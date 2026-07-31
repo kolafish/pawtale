@@ -125,7 +125,7 @@ class LayeredBookAI:
                 "covered_points": ["事情经过"],
                 "candidate_issues": candidates,
             }
-        elif "请审阅回忆录章节" in user_prompt:
+        elif "请通读回忆录章节" in user_prompt:
             candidates = []
             if self.chapter_interview_issue:
                 candidates = [
@@ -155,7 +155,7 @@ class LayeredBookAI:
                 "structure_guidance": ["从比赛现场开始。"],
                 "candidate_issues": candidates,
             }
-        elif "请审阅下面这本回忆录的全书结构" in user_prompt:
+        elif "请通读下面这本回忆录" in user_prompt:
             candidates = []
             if self.book_issue:
                 candidates = [
@@ -209,17 +209,17 @@ class LayeredBookAI:
                 "candidate_issues": candidates,
             }
         elif (
-            "请根据全书检查问题和用户回答，制定书稿修改思路" in user_prompt
+            "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in user_prompt
             or "请根据用户选中的全书编辑建议，制定书稿修改思路" in user_prompt
         ):
             payload = {
-                "summary": "先保留两段经历，再统一相关人物称谓。",
+                "summary": "先保留 C1 的两段经历，再统一 S1 的相关人物称谓。",
                 "items": [
                     {
-                        "title": "保留经历并统一称谓",
-                        "reason": "两段经历发生在不同阶段，人物称谓需要一致。",
-                        "approach": "保留两段经历，只统一相关人物的称谓。",
-                        "targets": ["学校经历"],
+                        "title": "保留 C1 经历并统一 S1 称谓",
+                        "reason": "C1 的两段经历发生在不同阶段，S1 的人物称谓需要一致。",
+                        "approach": "保留 C1 的两段经历，只统一 S1 的相关人物称谓。",
+                        "targets": ["C1", "S1"],
                     }
                 ],
                 "book_metadata_patch": (
@@ -1233,7 +1233,7 @@ async def test_chapter_review_filters_section_findings_before_rewrite(
         )
     )
     assert issue is None
-    assert any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请审阅回忆录章节" in prompt)
+    assert any("这件事后来对你有什么影响" in prompt for prompt in fake.prompts if "请通读回忆录章节" in prompt)
 
 
 async def test_rewrite_reuses_current_sections_and_generates_only_new_sections(
@@ -1721,7 +1721,7 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
 
     assert review["status"] == "ready"
     assert set(requested_models) == {"claude-opus-4-8"}
-    book_prompt = next(prompt for prompt in fake.prompts if "请审阅下面这本回忆录的全书结构" in prompt)
+    book_prompt = next(prompt for prompt in fake.prompts if "请通读下面这本回忆录" in prompt)
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
     assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
@@ -1938,8 +1938,7 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert closed.status_code == 200
 
     unapplied = await client.post(f"/api/memoir/projects/{project_id}/book-output/assemble")
-    assert unapplied.status_code == 409
-    assert "根据全书检查里的回答调整书稿" in unapplied.json()["detail"]
+    assert unapplied.status_code == 200, unapplied.text
 
     idle = await _completion_field(client, project_id, "answer_application_job")
     assert idle["status"] == "idle"
@@ -1995,7 +1994,8 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert completed_body["proposal_status"] == "ready"
     assert completed_body["proposal_phase"] == "plan_ready"
     assert completed_body["resolved_ai_model"] == fake.model_name
-    assert completed_body["summary"] == "先保留两段经历，再统一相关人物称谓。"
+    assert "第1章" in completed_body["summary"]
+    assert "第1小节" in completed_body["summary"]
     assert "C1" not in completed_body["summary"]
     assert "S1" not in completed_body["summary"]
     assert set(requested_models) == {None, "claude-opus-4-8"}
@@ -2023,7 +2023,11 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert proposal_body["can_dismiss"] is True
     assert proposal_body["comparison"]["changed_chapter_count"] == 0
     assert proposal_body["comparison"]["changed_section_count"] == 0
-    assert proposal_body["revision_plan"]["items"][0]["title"] == ("保留经历并统一称谓")
+    visible_plan = json.dumps(proposal_body["revision_plan"], ensure_ascii=False)
+    assert "第1章" in visible_plan
+    assert "第1小节" in visible_plan
+    assert "C1" not in visible_plan
+    assert "S1" not in visible_plan
     assert proposal_body["before"]["manuscript"] is None
     assert proposal_body["after"]["manuscript"] is None
     before_preview = await client.get(
@@ -2213,7 +2217,7 @@ async def test_book_review_answers_plan_feedback_draft_and_apply(
     assert versions[1].created_by == "ai"
     assert [item["chapter_id"] for item in versions[1].chapter_snapshot_json] == [chapter.id for chapter in chapters]
     assert versions[1].chapter_snapshot_json[1:] == versions[0].chapter_snapshot_json[1:]
-    plan_prompt = next(prompt for prompt in fake.prompts if "请根据全书检查问题和用户回答，制定书稿修改思路" in prompt)
+    plan_prompt = next(prompt for prompt in fake.prompts if "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in prompt)
     assert "两段经历发生在不同阶段，我希望都保留" in plan_prompt
     assert all(chapter.id not in plan_prompt for chapter in chapters)
     draft_prompt = next(prompt for prompt in fake.prompts if "请按照已确认的修改思路生成书稿修改稿" in prompt)
