@@ -1,5 +1,6 @@
 import { ensureBackendSession } from "./auth";
 import { request } from "./request";
+import { ensureRecorderPrivacyAuthorization } from "./wechat-privacy";
 
 export const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
 export const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
@@ -90,4 +91,16 @@ export async function syncVoiceAuthorizationConsent(
       },
     },
   });
+}
+
+export async function ensureVoiceRecordingAuthorization(
+  sourceSessionId?: string,
+): Promise<boolean> {
+  if (!readVoiceAuthorizationConsent()) {
+    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+    return false;
+  }
+  await syncVoiceAuthorizationConsent({ sourceSessionId });
+  await ensureRecorderPrivacyAuthorization();
+  return true;
 }

@@ -1,12 +1,10 @@
 import { transcribeMemoirVoiceSearchAudio } from "./memoir-transcript-api";
 import { sharedRecorderResource } from "./recorder-resource";
 import { VoiceActivityDetector } from "./voice-activity-detector";
-import { ensureRecorderPrivacyAuthorization, wechatPrivacyErrorMessage } from "./wechat-privacy";
 import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
+  ensureVoiceRecordingAuthorization,
 } from "./voice-authorization";
+import { wechatPrivacyErrorMessage } from "./wechat-privacy";
 
 const VOICE_SEARCH_MAX_DURATION_MS = 10000;
 const VOICE_SEARCH_FRAME_SIZE_KB = 4;
@@ -173,12 +171,9 @@ export function stopMemoirVoiceSearchRecording(): void {
 export async function recordMemoirVoiceSearchQuery(
   options: RecordMemoirVoiceSearchQueryOptions = {},
 ): Promise<string> {
-  if (!readVoiceAuthorizationConsent()) {
-    wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+  if (!(await ensureVoiceRecordingAuthorization())) {
     throw new Error("请先同意声纹授权协议");
   }
-  await syncVoiceAuthorizationConsent();
-  await ensureRecorderPrivacyAuthorization();
   let noVoiceAutoStopped = false;
   const audio = await recordVoiceSearchAudio({
     stopMode: options.stopMode,

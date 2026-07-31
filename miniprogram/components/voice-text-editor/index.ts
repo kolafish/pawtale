@@ -1,17 +1,13 @@
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
-  readVoiceAuthorizationConsent,
-  syncVoiceAuthorizationConsent,
-  VOICE_AUTHORIZATION_PAGE_URL,
+  ensureVoiceRecordingAuthorization,
 } from "../../services/voice-authorization";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
 
 type VoicePhase = "idle" | "connecting" | "listening" | "stopping";
 const VOICE_MAX_DURATION_MS = 30000;
 
 interface VoiceRuntime {
   streaming: StreamingVoiceController;
-  timer: ReturnType<typeof setTimeout> | null;
   token: number;
   text: string;
   baseText: string;
@@ -25,7 +21,6 @@ function voiceRuntime(owner: object): VoiceRuntime {
   if (!runtime) {
     runtime = {
       streaming: new StreamingVoiceController(),
-      timer: null,
       token: 0,
       text: "",
       baseText: "",
@@ -34,16 +29,6 @@ function voiceRuntime(owner: object): VoiceRuntime {
     voiceRuntimes.set(owner, runtime);
   }
   return runtime;
-}
-
-export function voiceTextWithTranscript(
-  existing: string,
-  transcript: string,
-  maxLength: number,
-): string {
-  const base = existing.trim();
-  const live = transcript.trim();
-  return `${base}${base && live ? "\n" : ""}${live}`.slice(0, maxLength);
 }
 
 Component({
@@ -70,20 +55,13 @@ Component({
 
   observers: {
     value(value: unknown) {
-      if (this.data.voicePhase !== "idle") {
-        return;
-      }
-      const text = String(value || "");
-      voiceRuntime(this).text = text;
-      this.setData({ textReady: Boolean(text.trim()) });
+      this.syncText(value);
     },
   },
 
   lifetimes: {
     attached() {
-      const text = String(this.properties.value || "");
-      voiceRuntime(this).text = text;
-      this.setData({ textReady: Boolean(text.trim()) });
+      this.syncText(this.properties.value);
     },
     detached() {
       this.cancelVoice();
@@ -98,15 +76,24 @@ Component({
   },
 
   methods: {
-    changeText(event: { detail: { value?: string } }) {
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
-        return;
+    syncText(value: unknown) {
+      if (this.data.voicePhase === "idle") {
+        const text = String(value || "");
+        voiceRuntime(this).text = text;
+        this.setData({ textReady: Boolean(text.trim()) });
       }
-      this.updateText(String(event.detail.value || ""));
+    },
+
+    canEdit() {
+      return !this.properties.disabled
+        && !this.properties.busy
+        && this.data.voicePhase === "idle";
+    },
+
+    changeText(event: { detail: { value?: string } }) {
+      if (this.canEdit()) {
+        this.updateText(String(event.detail.value || ""));
+      }
     },
 
     updateText(text: string) {
@@ -121,7 +108,6 @@ Component({
     cancelVoice() {
       const runtime = voiceRuntime(this);
       runtime.token += 1;
-      this.clearVoiceTimer();
       runtime.streaming.close({ force: true });
       runtime.baseText = "";
       runtime.transcript = "";
@@ -131,15 +117,10 @@ Component({
     async toggleVoice() {
       const runtime = voiceRuntime(this);
       if (this.data.voicePhase === "listening") {
-        this.clearVoiceTimer();
         runtime.streaming.stopRecording();
         return;
       }
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
+      if (!this.canEdit()) {
         return;
       }
       if (!this.properties.gatewayUrl) {
@@ -150,13 +131,10 @@ Component({
       const token = runtime.token;
       this.setData({ voicePhase: "connecting", error: "" });
       try {
-        if (!readVoiceAuthorizationConsent()) {
-          wx.navigateTo({ url: VOICE_AUTHORIZATION_PAGE_URL });
+        if (!(await ensureVoiceRecordingAuthorization())) {
           this.setData({ voicePhase: "idle" });
           return;
         }
-        await syncVoiceAuthorizationConsent();
-        await ensureRecorderPrivacyAuthorization();
         if (token !== runtime.token) {
           return;
         }
@@ -173,13 +151,10 @@ Component({
               if (token !== runtime.token) {
                 return;
               }
-              if (status === "listening") {
-                this.setData({ voicePhase: "listening" });
-              } else if (status === "stopping") {
-                this.setData({ voicePhase: "stopping" });
-              } else if (status === "closed" || status === "error") {
-                this.clearVoiceTimer();
+              if (status === "closed" || status === "error") {
                 this.setData({ voicePhase: "idle" });
+              } else if (status === "listening" || status === "stopping") {
+                this.setData({ voicePhase: status });
               }
             },
             onEvent: (event) => {
@@ -188,12 +163,9 @@ Component({
               }
             },
             onPartial: (text) => this.updateVoiceTranscript(token, text),
-            onFinal: (event) => (
-              this.updateVoiceTranscript(token, event.text || "")
-            ),
+            onFinal: (event) => this.updateVoiceTranscript(token, event.text || ""),
             onError: (message) => {
               if (token === runtime.token) {
-                this.clearVoiceTimer();
                 this.setData({
                   voicePhase: "idle",
                   error: message || "语音输入失败",
@@ -206,15 +178,9 @@ Component({
           runtime.streaming.close({ force: true });
           return;
         }
-        if (!runtime.streaming.startRecording()) {
+        if (!runtime.streaming.startRecording({ maxDurationMs: VOICE_MAX_DURATION_MS })) {
           throw new Error("录音启动失败，请重试");
         }
-        runtime.timer = setTimeout(() => {
-          if (token === runtime.token) {
-            runtime.timer = null;
-            runtime.streaming.stopRecording();
-          }
-        }, VOICE_MAX_DURATION_MS);
       } catch (error) {
         if (token !== runtime.token) {
           return;
@@ -233,24 +199,14 @@ Component({
         return;
       }
       runtime.transcript = transcript.trim();
-      this.updateText(voiceTextWithTranscript(
-        runtime.baseText,
-        runtime.transcript,
-        this.properties.maxlength,
-      ));
-    },
-
-    clearVoiceTimer() {
-      const runtime = voiceRuntime(this);
-      if (runtime.timer) {
-        clearTimeout(runtime.timer);
-        runtime.timer = null;
-      }
+      const separator = runtime.baseText.trim() && runtime.transcript ? "\n" : "";
+      this.updateText(
+        `${runtime.baseText.trim()}${separator}${runtime.transcript}`.slice(0, this.properties.maxlength),
+      );
     },
 
     async finishVoice(token: number) {
       const runtime = voiceRuntime(this);
-      this.clearVoiceTimer();
       try {
         await runtime.streaming.finishSession();
       } catch (error) {
@@ -279,12 +235,7 @@ Component({
 
     submit() {
       const value = voiceRuntime(this).text.trim();
-      if (
-        !value
-        || this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
+      if (!value || !this.canEdit()) {
         if (!value) {
           wx.showToast({ title: "请先输入或说出内容", icon: "none" });
         }
@@ -294,14 +245,9 @@ Component({
     },
 
     cancel() {
-      if (
-        this.properties.disabled
-        || this.properties.busy
-        || this.data.voicePhase !== "idle"
-      ) {
-        return;
+      if (this.canEdit()) {
+        this.triggerEvent("cancel");
       }
-      this.triggerEvent("cancel");
     },
   },
 });

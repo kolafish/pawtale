@@ -1026,10 +1026,11 @@ test("streaming ASR starts provider only after recording starts", async () => {
   assert.deepEqual(statuses, ["connecting", "ready"]);
   assert.deepEqual(sent, []);
   assert.equal(captureStats.at(-1).state, "idle");
-  assert.equal(client.startRecording({ speakerRole: "interviewer" }), true);
+  assert.equal(client.startRecording({ speakerRole: "interviewer", maxDurationMs: 30000 }), true);
   assert.deepEqual(sent, []);
   assert.equal(recorder.starts.length, 1);
   assert.equal(recorder.starts[0].sampleRate, 16000);
+  assert.equal(recorder.starts[0].duration, 30000);
   assert.equal(recorder.starts[0].encodeBitRate, 96000);
   assert.equal(captureStats.at(-1).state, "opening");
 

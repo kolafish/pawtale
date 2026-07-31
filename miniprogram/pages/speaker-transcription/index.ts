@@ -8,7 +8,7 @@ import {
   proofreadSpeakerTranscriptLine,
   type SpeakerProofreadContextLine,
 } from "../../services/speaker-transcript-proofreading";
-import { ensureRecorderPrivacyAuthorization } from "../../services/wechat-privacy";
+import { ensureVoiceRecordingAuthorization } from "../../services/voice-authorization";
 import {
   applySpeakerTranscriptionProofread,
   initialSpeakerTranscriptionReducerState,
@@ -144,7 +144,10 @@ Page<SpeakerTranscriptionPageData, {
       diarizationNoticeClass: "diarization-notice",
     });
     try {
-      await ensureRecorderPrivacyAuthorization();
+      if (!(await ensureVoiceRecordingAuthorization())) {
+        this.starting = false;
+        return;
+      }
     } catch (error) {
       this.starting = false;
       if (!this.pageActive) {

@@ -778,11 +778,14 @@ export function voiceAuthorizationRequiredPatch(autoTriggered: boolean): VoiceCh
   };
 }
 
-export function voiceAuthorizationSyncFailedPatch(message: string): VoiceChatPatch {
+export function voiceAuthorizationSyncFailedPatch(
+  message: string,
+  forRecording: boolean = false,
+): VoiceChatPatch {
   return {
     error: message,
     primaryActionText: "继续说话",
-    autoListenStateText: "声纹授权同步失败",
+    autoListenStateText: forRecording ? "录音授权失败" : "声纹授权同步失败",
   };
 }
 

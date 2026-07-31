@@ -121,6 +121,7 @@ export interface MemoirStartRecordingOptions {
   noVoiceActivityTimeoutMs?: number;
   speakerRole?: MemoirSpeakerRole;
   parentMessageId?: string;
+  maxDurationMs?: number;
 }
 
 export class MemoirStreamingAsrClient {
@@ -314,7 +315,10 @@ export class MemoirStreamingAsrClient {
     this.emitCaptureStats("opening");
     try {
       const started = this.recorderResource.start(this.recorderOwnerId, {
-        duration: STREAMING_RECORDING_DURATION_MS,
+        duration: Math.min(
+          STREAMING_RECORDING_DURATION_MS,
+          Math.max(1000, recordingOptions.maxDurationMs ?? STREAMING_RECORDING_DURATION_MS),
+        ),
         sampleRate: 16000,
         numberOfChannels: 1,
         encodeBitRate: STREAMING_ENCODE_BIT_RATE,
