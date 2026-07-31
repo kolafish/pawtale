@@ -45,7 +45,6 @@ type PageFactory = (definition: PageDefinition) => void;
 
 const PAGE_FEATURES: Record<string, string> = {
   "/pages/home/index": "home.view",
-  "/pages/index/index": "home.view",
   "/pages/login/index": "account.login",
   "/pages/voice-authorization/index": "voice_authorization.view",
   "/pages/voice-chat/index": "voice_chat.session",

@@ -2,6 +2,8 @@
 
 小程序是 Pawtale 的回忆录讲述与移动端成书界面。
 
+当前共注册 19 个页面：4 个一级导航页、4 个账号与项目页、4 个语音与素材页、6 个成书页和 1 个偏好设置页。
+
 当前语音和成书架构分别见：
 
 - [实时语音架构](../docs/MEMOIR_VOICE_CHAT_ARCHITECTURE.md)
@@ -48,12 +50,15 @@
 ### 成书
 
 - `pages/book-completion`：整本书和每章的下一步；
+- `pages/revision-workbench`：确认整书或小节修改方案，并跟踪后台修改结果；
 - `pages/chapter-workspace`：Section、素材、补讲问题、章节正文、版本和确认；
 - `pages/image-assets`：生成图片、章节插图/图录归属和素材状态；
 - `pages/book-export`：阅读预览、文件导出，以及折叠后的成书信息、封面和版本设置；
 - `pages/book-reader`：沉浸式阅读、整书朗读、目录跳转、返回顶部和历史版本。
 
-`pages/index` 是启动路由，进入首页。
+### 偏好设置
+
+- `pages/voice-settings`：自动打断、文字整理、AI 模型，以及聊天/书稿朗读偏好。
 
 ## 本地运行
 
