@@ -375,6 +375,7 @@ def _section_references(context: ChapterDigestContext) -> ModelReferenceMap:
             section.section_id: f"第{index}小节《{section.title}》"
             for index, section in enumerate(context.sections, start=1)
         },
+        fallback_label="相关小节",
     )
 
 

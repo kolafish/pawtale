@@ -9,6 +9,7 @@ class ModelReferenceMap:
         identifiers: Iterable[str],
         *,
         labels: Mapping[str, str] | None = None,
+        fallback_label: str = "",
     ) -> None:
         values = tuple(dict.fromkeys(identifiers))
         self._references = {
@@ -24,6 +25,10 @@ class ModelReferenceMap:
             for identifier, label in (labels or {}).items()
             if identifier in self._references
         }
+        self._fallback_label = fallback_label
+        self._display_pattern = re.compile(
+            rf"(?<![A-Za-z0-9]){re.escape(prefix)}[1-9][0-9]*(?![A-Za-z0-9])"
+        )
 
     def encode(self, identifier: str) -> str:
         try:
@@ -52,14 +57,12 @@ class ModelReferenceMap:
 
     def render_text(self, value: object) -> str:
         text = value if isinstance(value, str) else ""
-        if not self._labels:
+        if not self._labels and not self._fallback_label:
             return text
-        pattern = "|".join(
-            re.escape(reference)
-            for reference in sorted(self._labels, key=len, reverse=True)
-        )
-        return re.sub(
-            rf"(?<![A-Za-z0-9])(?:{pattern})(?![A-Za-z0-9])",
-            lambda match: self._labels[match.group(0)],
+        return self._display_pattern.sub(
+            lambda match: self._labels.get(
+                match.group(0),
+                self._fallback_label or match.group(0),
+            ),
             text,
         )

@@ -161,8 +161,18 @@ def _reference_maps(
     if set(ordered_chapter_ids) != allowed_chapter_ids:
         raise BookRevisionError(stale_message)
     return (
-        ModelReferenceMap("C", ordered_chapter_ids, labels=chapter_labels),
-        ModelReferenceMap("S", section_ids, labels=section_labels),
+        ModelReferenceMap(
+            "C",
+            ordered_chapter_ids,
+            labels=chapter_labels,
+            fallback_label="相关章节",
+        ),
+        ModelReferenceMap(
+            "S",
+            section_ids,
+            labels=section_labels,
+            fallback_label="相关小节",
+        ),
     )
 
 

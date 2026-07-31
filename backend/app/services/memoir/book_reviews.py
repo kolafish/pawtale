@@ -427,6 +427,7 @@ def _chapter_references(context: BookReviewContext) -> ModelReferenceMap:
             chapter.chapter_id: f"第{index}章《{chapter.title}》"
             for index, chapter in enumerate(context.chapters, start=1)
         },
+        fallback_label="相关章节",
     )
 
 

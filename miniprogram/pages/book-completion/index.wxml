@@ -200,7 +200,7 @@
       </text>
 
       <view
-        wx:if="{{bookReview && bookReview.status === 'ready' && !requiredBookIssues.length}}"
+        wx:if="{{bookReview && bookReview.status === 'ready' && !requiredBookIssues.length && (!answerApplicationJob || !answerApplicationJob.answer_count || answerApplicationJob.already_applied)}}"
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
