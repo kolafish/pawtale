@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "确认书稿修改"
+  "navigationBarTitleText": "确认书稿修改",
+  "usingComponents": {
+    "ai-task-progress": "/components/ai-task-progress/index"
+  }
 }

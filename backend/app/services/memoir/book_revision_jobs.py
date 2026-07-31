@@ -32,16 +32,19 @@ BookRevisionJobSource = Literal[
     "review_answers",
     "editorial_actions",
     "proposal_feedback",
+    "proposal_draft",
 ]
 _JOB_TYPES = {
     "review_answers": MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS,
     "editorial_actions": MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
     "proposal_feedback": MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
+    "proposal_draft": MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL,
 }
 _DEDUPE_PREFIXES = {
     "review_answers": "apply-book-review-answers",
     "editorial_actions": "generate-book-revision-proposal",
     "proposal_feedback": "refine-book-revision-proposal",
+    "proposal_draft": "generate-book-revision-draft",
 }
 
 
@@ -49,8 +52,9 @@ def _source_for_job(job: MemoirEditingJob) -> BookRevisionJobSource:
     if job.job_type == MemoirEditingJobType.APPLY_BOOK_REVIEW_ANSWERS.value:
         return "review_answers"
     if job.job_type == MemoirEditingJobType.GENERATE_BOOK_REVISION_PROPOSAL.value:
-        if (job.payload_json or {}).get("source") == "proposal_feedback":
-            return "proposal_feedback"
+        payload_source = (job.payload_json or {}).get("source")
+        if payload_source in {"proposal_feedback", "proposal_draft"}:
+            return payload_source
         return "editorial_actions"
     raise ValueError("不支持的全书修改任务")
 
@@ -60,7 +64,7 @@ def _dedupe_key(
     project_id: str,
     proposal_id: str | None,
 ) -> str:
-    suffix = f":{proposal_id}" if source == "proposal_feedback" else ""
+    suffix = f":{proposal_id}" if source in {"proposal_feedback", "proposal_draft"} else ""
     return f"{_DEDUPE_PREFIXES[source]}:{project_id}{suffix}"
 
 
@@ -90,9 +94,7 @@ async def _answer_state(
     if review is None or review.status != "ready":
         return 0, 0, False
     context = await book_review_answer_state.load_answer_context(db, review=review)
-    output = await db.scalar(
-        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
-    )
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     latest = (
         await book_output_versions.load_latest_book_output_version(
             db,
@@ -134,18 +136,17 @@ async def _job_state(
         **state,
         "proposal_id": proposal.id if proposal is not None else None,
         "proposal_status": proposal.status if proposal is not None else None,
+        "proposal_phase": proposal.phase if proposal is not None else None,
     }
     if source == "editorial_actions":
         return {
             **result,
             "selected_action_count": int(state.get("selected_action_count") or 0),
         }
-    if source == "proposal_feedback":
+    if source in {"proposal_feedback", "proposal_draft"}:
         return {
             **result,
-            "changed_chapter_count": int(
-                state.get("changed_chapter_count") or 0
-            ),
+            "changed_chapter_count": int(state.get("changed_chapter_count") or 0),
             "summary": str(state.get("summary") or ""),
         }
 
@@ -184,9 +185,7 @@ async def _require_applied_answers(
         raise ValueError("请先处理完所有需要确认的问题")
     if not context.answers:
         return
-    output = await db.scalar(
-        select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
-    )
+    output = await db.scalar(select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id))
     latest = (
         await book_output_versions.load_latest_book_output_version(
             db,
@@ -195,18 +194,15 @@ async def _require_applied_answers(
         if output is not None
         else None
     )
-    if (
-        book_review_answer_state.marker_matches_context(
-            output=output,
-            version=latest,
-            context=context,
-        )
-        or book_editorial_actions.marker_matches_review(
-            output=output,
-            version=latest,
-            review=review,
-            answers_signature=context.answers_signature,
-        )
+    if book_review_answer_state.marker_matches_context(
+        output=output,
+        version=latest,
+        context=context,
+    ) or book_editorial_actions.marker_matches_review(
+        output=output,
+        version=latest,
+        review=review,
+        answers_signature=context.answers_signature,
     ):
         return
     raise ValueError("请先确认根据问题回答生成的修改预览")
@@ -222,6 +218,7 @@ async def enqueue_book_revision_job(
     action_ids: list[str] | None = None,
     proposal_id: str | None = None,
     feedback: str | None = None,
+    workflow_mode: str = "direct_draft",
     allow_admin: bool = False,
 ) -> dict[str, object]:
     project = await load_memoir_project(
@@ -236,10 +233,7 @@ async def enqueue_book_revision_job(
         source=source,
         proposal_id=proposal_id,
     )
-    if (
-        existing is not None
-        and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
-    ):
+    if existing is not None and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
         return await _job_state(
             db,
             project_id=project_id,
@@ -259,6 +253,7 @@ async def enqueue_book_revision_job(
         "allow_admin": allow_admin,
         "review_input_signature": review.input_signature,
         "requested_ai_model": selected_ai_model,
+        "workflow_mode": workflow_mode,
     }
     result: dict[str, object] = {
         "stage": "queued",
@@ -291,11 +286,7 @@ async def enqueue_book_revision_job(
             summary="",
         )
     elif source == "editorial_actions":
-        selected_ids = [
-            value.strip()
-            for value in dict.fromkeys(action_ids or [])
-            if value.strip()
-        ]
+        selected_ids = [value.strip() for value in dict.fromkeys(action_ids or []) if value.strip()]
         actions = book_editorial_actions.selected_review_actions(
             review.review_json,
             selected_ids,
@@ -310,7 +301,7 @@ async def enqueue_book_revision_job(
             actions_signature=book_editorial_actions.actions_signature(actions),
         )
         result["selected_action_count"] = len(actions)
-    else:
+    elif source == "proposal_feedback":
         feedback_text = (feedback or "").strip()
         if not proposal_id or not feedback_text:
             raise ValueError("请先输入对这版修改的调整意见")
@@ -324,19 +315,47 @@ async def enqueue_book_revision_job(
             proposal=proposal,
             preview="none",
         )
-        if not proposal_response.can_apply:
+        if proposal_response.status != "ready" or not proposal_response.can_dismiss:
             raise ValueError("这个修改预览已经不能继续调整")
+        revision_state = (
+            proposal.revision_plan_json if proposal.revision_plan_json else proposal.candidate_chapter_snapshot_json
+        )
         payload.update(
             source="proposal_feedback",
             proposal_id=proposal.id,
             feedback=feedback_text,
-            candidate_signature=semantic_json_signature(
-                proposal.candidate_chapter_snapshot_json
-            ),
+            candidate_signature=semantic_json_signature(revision_state),
         )
         result.update(
             proposal_id=proposal.id,
             proposal_status=proposal.status,
+            changed_chapter_count=0,
+            summary="",
+        )
+    else:
+        if not proposal_id:
+            raise ValueError("缺少要生成修改稿的修改思路")
+        proposal = await book_revision_proposals.load_proposal(
+            db,
+            project_id=project_id,
+            proposal_id=proposal_id,
+        )
+        proposal_response = await book_revision_proposals.proposal_response(
+            db,
+            proposal=proposal,
+            preview="none",
+        )
+        if proposal_response.status != "ready" or proposal.phase != "plan_ready" or not proposal.revision_plan_json:
+            raise ValueError("当前修改思路不能生成修改稿")
+        payload.update(
+            source="proposal_draft",
+            proposal_id=proposal.id,
+            plan_signature=semantic_json_signature(proposal.revision_plan_json),
+        )
+        result.update(
+            proposal_id=proposal.id,
+            proposal_status=proposal.status,
+            proposal_phase=proposal.phase,
             changed_chapter_count=0,
             summary="",
         )
@@ -413,11 +432,7 @@ async def cancel_book_revision_job(
         job_id=job_id,
     )
     if job is None:
-        message = (
-            "书稿调整任务不存在"
-            if source == "review_answers"
-            else "全书修改预览任务不存在"
-        )
+        message = "书稿调整任务不存在" if source == "review_answers" else "全书修改预览任务不存在"
         raise ValueError(message)
     await editing_jobs.cancel_project_editing_job(db, job=job)
     return await _job_state(
@@ -447,58 +462,47 @@ async def run_book_revision_job(
             str(payload.get("user_id") or ""),
             allow_admin=payload.get("allow_admin") is True,
         )
-        ai_model = (
-            payload["requested_ai_model"]
-            if isinstance(payload.get("requested_ai_model"), str)
-            else None
-        )
+        ai_model = payload["requested_ai_model"] if isinstance(payload.get("requested_ai_model"), str) else None
         if source == "review_answers":
             generated = await book_revision_generation.apply_book_review_answers(
                 db,
                 project_id=job.project_id,
-                expected_review_input_signature=str(
-                    payload.get("review_input_signature") or ""
-                ),
-                expected_answers_signature=str(
-                    payload.get("answers_signature") or ""
-                ),
+                expected_review_input_signature=str(payload.get("review_input_signature") or ""),
+                expected_answers_signature=str(payload.get("answers_signature") or ""),
                 ai_model=ai_model,
+                workflow_mode=str(payload.get("workflow_mode") or "direct_draft"),
                 progress_callback=update_progress,
             )
         elif source == "editorial_actions":
             raw_action_ids = payload.get("action_ids")
-            generated = await (
-                book_revision_generation.generate_editorial_revision_proposal(
-                    db,
-                    project_id=job.project_id,
-                    expected_review_input_signature=str(
-                        payload.get("review_input_signature") or ""
-                    ),
-                    expected_actions_signature=str(
-                        payload.get("actions_signature") or ""
-                    ),
-                    action_ids=(
-                        [str(value) for value in raw_action_ids]
-                        if isinstance(raw_action_ids, list)
-                        else []
-                    ),
-                    ai_model=ai_model,
-                    progress_callback=update_progress,
-                )
+            generated = await book_revision_generation.generate_editorial_revision_proposal(
+                db,
+                project_id=job.project_id,
+                expected_review_input_signature=str(payload.get("review_input_signature") or ""),
+                expected_actions_signature=str(payload.get("actions_signature") or ""),
+                action_ids=([str(value) for value in raw_action_ids] if isinstance(raw_action_ids, list) else []),
+                ai_model=ai_model,
+                workflow_mode=str(payload.get("workflow_mode") or "direct_draft"),
+                progress_callback=update_progress,
+            )
+        elif source == "proposal_feedback":
+            generated = await book_revision_generation.refine_book_revision_proposal(
+                db,
+                project_id=job.project_id,
+                proposal_id=str(payload.get("proposal_id") or ""),
+                feedback=str(payload.get("feedback") or ""),
+                expected_candidate_signature=str(payload.get("candidate_signature") or ""),
+                ai_model=ai_model,
+                progress_callback=update_progress,
             )
         else:
-            generated = (
-                await book_revision_generation.refine_book_revision_proposal(
-                    db,
-                    project_id=job.project_id,
-                    proposal_id=str(payload.get("proposal_id") or ""),
-                    feedback=str(payload.get("feedback") or ""),
-                    expected_candidate_signature=str(
-                        payload.get("candidate_signature") or ""
-                    ),
-                    ai_model=ai_model,
-                    progress_callback=update_progress,
-                )
+            generated = await book_revision_generation.generate_book_revision_draft(
+                db,
+                project_id=job.project_id,
+                proposal_id=str(payload.get("proposal_id") or ""),
+                expected_plan_signature=str(payload.get("plan_signature") or ""),
+                ai_model=ai_model,
+                progress_callback=update_progress,
             )
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
@@ -523,9 +527,7 @@ async def run_book_revision_job(
         return EditingJobResult(
             status=MemoirEditingJobStatus.FAILED,
             result_json={**progress, "stage": "failed"},
-            error_message=(
-                str(exc.detail) if isinstance(exc, HTTPException) else str(exc)
-            ),
+            error_message=(str(exc.detail) if isinstance(exc, HTTPException) else str(exc)),
         )
 
     result = {
@@ -533,11 +535,12 @@ async def run_book_revision_job(
         "stage": "completed",
         "proposal_id": generated.proposal_id,
         "proposal_status": "ready" if generated.proposal_id else None,
+        "proposal_phase": generated.proposal_phase,
         "requested_ai_model": generated.requested_ai_model,
         "resolved_ai_model": generated.resolved_ai_model,
         "generation": generated.generation,
     }
-    if source in {"review_answers", "proposal_feedback"}:
+    if source in {"review_answers", "proposal_feedback", "proposal_draft"}:
         result.update(
             changed_chapter_count=generated.changed_chapter_count,
             summary=generated.summary,

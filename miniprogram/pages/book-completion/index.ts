@@ -211,21 +211,21 @@ export function revisionJobView(
     const titles: Partial<
       Record<MemoirBookRevisionJob["stage"], string>
     > = {
-      queued: applyingAnswers ? "书稿调整已提交" : "修改预览已提交",
+      queued: applyingAnswers ? "修改思路任务已提交" : "修改思路已提交",
       assembling: "正在准备当前书稿",
       revising: applyingAnswers
-        ? "正在把回答写入相关章节"
-        : "正在执行所选编辑建议",
-      saving: applyingAnswers ? "正在生成修改预览" : "正在保存修改预览",
+        ? "正在根据回答制定修改思路"
+        : "正在整理所选编辑建议",
+      saving: "正在保存修改思路",
     };
     return {
       visible: true,
       title: titles[job.stage] || (
-        applyingAnswers ? "正在根据回答调整书稿" : "正在生成修改预览"
+        applyingAnswers ? "正在根据回答制定修改思路" : "正在生成修改思路"
       ),
       detail: applyingAnswers
-        ? "任务在后台执行，完成后先预览，确认后才会修改书稿"
-        : "完成后仍需查看前后内容并确认",
+        ? "任务在后台执行，完成后先确认整体思路"
+        : "完成后仍需查看并确认整体思路",
       progressMode: "indeterminate",
       progress: 0,
       className: "active",
@@ -237,7 +237,7 @@ export function revisionJobView(
     visible: true,
     title: applyingAnswers
       ? (failed ? "书稿调整未完成" : "书稿调整已停止")
-      : (failed ? "修改预览未完成" : "已停止生成修改预览"),
+      : (failed ? "修改思路未完成" : "已停止生成修改思路"),
     detail: job.error_message || (
       applyingAnswers
         ? "回答仍然保留，可以重新调整。"
@@ -752,7 +752,7 @@ definePage<BookCompletionData>()({
         }
         if (finishedAnswerApplication) {
           const toastTitle = answerApplicationJob?.status === "succeeded"
-            ? "修改预览已生成"
+            ? "修改思路已生成"
             : (answerApplicationJob?.status === "cancelled"
               ? "已停止调整书稿"
               : "书稿调整未完成");
@@ -766,7 +766,7 @@ definePage<BookCompletionData>()({
         if (finishedEditorialRevision) {
           const succeeded = editorialRevisionJob?.status === "succeeded";
           wx.showToast({
-            title: succeeded ? "修改预览已生成" : "修改预览未完成",
+            title: succeeded ? "修改思路已生成" : "修改思路未完成",
             icon: succeeded ? "success" : "none",
           });
         }
@@ -990,7 +990,7 @@ definePage<BookCompletionData>()({
       }
       const message = error instanceof Error
         ? error.message
-        : "根据回答调整书稿失败";
+        : "根据回答生成修改思路失败";
       this.setData({ applyingAnswers: false });
       await this.loadOverview(true);
       if (
@@ -1078,8 +1078,8 @@ definePage<BookCompletionData>()({
       generatingEditorialRevision: true,
       error: "",
       editorialRevisionProgress: activeTaskProgress(
-        "正在提交修改预览",
-        "完成后仍需查看前后内容并确认",
+        "正在提交修改思路",
+        "完成后仍需查看并确认整体思路",
       ),
     });
     try {
@@ -1095,7 +1095,7 @@ definePage<BookCompletionData>()({
       }
       const message = error instanceof Error
         ? error.message
-        : "生成修改预览失败";
+        : "生成修改思路失败";
       this.setData({ generatingEditorialRevision: false });
       await this.loadOverview(true);
       if (
@@ -1136,7 +1136,7 @@ definePage<BookCompletionData>()({
         return;
       }
       this.setData({
-        error: error instanceof Error ? error.message : "停止生成修改预览失败",
+        error: error instanceof Error ? error.message : "停止生成修改思路失败",
       });
     } finally {
       this.setData({ editorialRevisionCancelling: false });

@@ -58,9 +58,9 @@
         </view>
 
         <view wx:if="{{editorialActionViews.length}}" class="editorial-actions">
-          <text class="review-group-title">可生成修改预览</text>
+          <text class="review-group-title">可生成修改思路</text>
           <text class="editorial-actions-detail">
-            只执行您选中的建议。确认预览前，当前书稿不会改变。
+            只执行您选中的建议。确认思路并生成修改稿前，当前书稿不会改变。
           </text>
           <view
             wx:for="{{editorialActionViews}}"
@@ -98,20 +98,20 @@
           <text
             wx:elif="{{answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied}}"
             class="editorial-actions-warning"
-          >请先处理根据问题回答生成的修改预览，再执行全书编辑建议。</text>
+          >请先处理根据问题回答生成的修改任务，再执行全书编辑建议。</text>
           <view
             wx:if="{{editorialRevisionJob && editorialRevisionJob.proposal_status === 'ready' && editorialRevisionJob.proposal_id}}"
             class="apply-answers-action ui-block-action ui-pressable"
             aria-role="button"
             bindtap="openEditorialRevision"
-          >查看全书修改预览</view>
+          >{{editorialRevisionJob.proposal_phase === "plan_ready" ? "查看全书修改思路" : "查看全书修改预览"}}</view>
           <view
             wx:else
             class="apply-answers-action ui-block-action ui-pressable {{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || requiredBookIssues.length || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied) ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{!selectedEditorialActionIds.length || generatingEditorialRevision || editorialRevisionCancelling || requiredBookIssues.length || (answerApplicationJob && answerApplicationJob.answer_count && !answerApplicationJob.already_applied)}}"
             bindtap="generateEditorialRevision"
-          >{{selectedEditorialActionIds.length ? "生成所选修改预览" : "请先选择建议"}}</view>
+          >{{selectedEditorialActionIds.length ? "生成所选修改思路" : "请先选择建议"}}</view>
         </view>
 
         <view wx:if="{{bookOutputAvailable}}" class="review-book-settings">
@@ -142,15 +142,19 @@
             {{answerApplicationJob.already_applied
               ? "回答已经写入书稿"
               : (answerApplicationJob.proposal_status === "ready"
-                ? "修改预览已经生成"
+                ? (answerApplicationJob.proposal_phase === "plan_ready"
+                  ? "修改思路已经生成"
+                  : "修改预览已经生成")
                 : answerApplicationJob.answer_count + " 条回答已经保存")}}
           </text>
           <text class="answer-application-detail">
             {{answerApplicationJob.already_applied
               ? (answerApplicationJob.summary || "相关章节已经根据您的回答完成调整，并保留了原来的书稿版本。")
               : (answerApplicationJob.proposal_status === "ready"
-                ? (answerApplicationJob.summary || "请先查看修改前后内容，确认后才会写入书稿。")
-                : "可以根据这些回答生成修改预览，确认前不会改变当前书稿。")}}
+                ? (answerApplicationJob.summary || (answerApplicationJob.proposal_phase === "plan_ready"
+                  ? "请先确认整体修改思路，再生成修改稿。"
+                  : "请先查看修改前后内容，确认后才会写入书稿。"))
+                : "可以根据这些回答先生成修改思路，确认前不会改变当前书稿。")}}
           </text>
           <view
             wx:if="{{answerApplicationProgress.visible}}"
@@ -176,14 +180,14 @@
             class="apply-answers-action ui-block-action ui-pressable"
             aria-role="button"
             bindtap="openBookRevision"
-          >查看修改预览</view>
+          >{{answerApplicationJob.proposal_phase === "plan_ready" ? "查看修改思路" : "查看修改预览"}}</view>
           <view
             wx:elif="{{answerApplicationJob.can_apply}}"
             class="apply-answers-action ui-block-action ui-pressable {{applyingAnswers || answerApplicationCancelling ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{applyingAnswers || answerApplicationCancelling}}"
             bindtap="applyBookReviewAnswers"
-          >{{answerApplicationJob.can_retry ? "重新生成修改预览" : "生成修改预览"}}</view>
+          >{{answerApplicationJob.can_retry ? "重新生成修改思路" : "生成修改思路"}}</view>
         </view>
 
         <text

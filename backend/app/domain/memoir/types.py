@@ -85,6 +85,11 @@ class MemoirBookRevisionProposalStatus(str, Enum):
     STALE = "stale"
 
 
+class MemoirBookRevisionProposalPhase(str, Enum):
+    PLAN_READY = "plan_ready"
+    DRAFT_READY = "draft_ready"
+
+
 class MemoirSectionType(str, Enum):
     EVENT = "event"
     LIFE_FRAGMENT = "life_fragment"

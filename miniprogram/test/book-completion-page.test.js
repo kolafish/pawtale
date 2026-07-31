@@ -336,7 +336,7 @@ test("book answer application reports its real background stage", () => {
     error_message: "模型暂时不可用",
   }), "review_answers");
 
-  assert.equal(revising.title, "正在把回答写入相关章节");
+  assert.equal(revising.title, "正在根据回答制定修改思路");
   assert.equal(revising.progressMode, "indeterminate");
   assert.equal(revising.canCancel, true);
   assert.equal(failed.title, "书稿调整未完成");
@@ -423,7 +423,7 @@ test("book completion submits saved answers and opens the generated revision pre
   assert.equal(context.data.applyingAnswers, true);
   assert.equal(
     context.data.answerApplicationProgress.title,
-    "书稿调整已提交",
+    "修改思路任务已提交",
   );
   context.data.answerApplicationJob = answerApplicationJob({
     status: "succeeded",
