@@ -1152,8 +1152,9 @@ Job 保存状态、执行时间、租约、重试次数、去重 key、输入和
 | --- | --- | --- | --- |
 | 首页 | Project、进度快照、AutomationEvent | 最近进展、继续讲述/成书入口 | 项目入口与事件确认 |
 | 讲述记录 | VoiceUtterance、ChatMessage、Audio、章节读模型 | 素材摘要、时间、收录状态 | 搜索、恢复转写 |
-| 讲述详情 | Material + TranscriptVersion + Audio + SectionAssignment | 原音、原文、成书文字、问题、章节/小节 | 改文字、离线 ASR、移动、删除、生成图片、分享视频 |
-| 话题地图 | FrameworkItem + Material match | 已聊/可聊/不想聊 | 用户决定、从话题开始访谈 |
+| 讲述详情 | Material + TranscriptVersion + Audio + SectionAssignment | 原音、原文、成书文字、问题、章节/小节 | 改文字、离线 ASR、移动、删除，并进入媒体制作 |
+| 图片与分享视频 | Material + TranscriptVersion + Audio + ImageAsset + ShareVideoJob | 可用于成书的文字、图片和分享视频任务 | 选择文字、生成图片、生成带原音字幕的视频 |
+| 讲述概览 | FrameworkItem + Material match + VoiceSession | 讲述数据、最近会话、已聊/可聊/不想聊 | 用户决定、继续会话、从话题开始访谈 |
 | 书稿首页 | BookPlan、Chapter、Draft、Output、AutomationEvent | 目录、每章进度、全书状态 | 章节结构、书名和输出操作 |
 | 全书补全 | Completion read model | 每章唯一下一步 | 进入准备、补讲、确认 |
 | 章节工作台 | Chapter + Section + SectionMaterial + Draft + Issue | 素材分组、待归类、正文 | 重分组、移动素材、改小节正文、确认章节 |

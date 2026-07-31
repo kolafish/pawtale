@@ -1,8 +1,0 @@
-.launch-page {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--ui-accent);
-  font-size: 30rpx;
-  font-weight: 800;
-}
