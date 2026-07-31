@@ -416,7 +416,7 @@ test("book completion submits answers and editorial actions as one revision", as
   assert.deepEqual(requests, [["project/1", true, ["action/1"]]]);
   assert.equal(context.data.revisionJob.proposal_status, "ready");
   assert.deepEqual(navigations, [
-    "/pages/book-revision/index?projectId=project%2F1&proposalId=proposal%2F1",
+    "/pages/revision-workbench/index?scope=book&projectId=project%2F1&proposalId=proposal%2F1",
   ]);
   page.onHide.call(context);
   delete global.wx;

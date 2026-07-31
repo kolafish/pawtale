@@ -7,7 +7,7 @@
     "pages/voice-chat/index",
     "pages/topic-map/index",
     "pages/book-completion/index",
-    "pages/book-revision/index",
+    "pages/revision-workbench/index",
     "pages/transcripts/index",
     "pages/transcript-detail/index",
     "pages/book/index",

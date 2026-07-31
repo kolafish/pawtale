@@ -34,6 +34,7 @@ import { PollingTimer } from "../../services/polling-timer";
 
 type RevisionMode = "changes" | "whole";
 type PreviewVersion = "before" | "after";
+type RevisionScope = "book" | "chapter_section";
 const FEEDBACK_POLL_INTERVAL_MS = 1500;
 const PAGE_CLASS = "revision-page ui-page-shell ui-accessible-page";
 
@@ -94,8 +95,9 @@ interface RevisionProposalView extends Pick<
   >;
 }
 
-interface BookRevisionData {
+interface RevisionWorkbenchData {
   pageClass: string;
+  scope: RevisionScope;
   projectId: string;
   proposalId: string;
   loading: boolean;
@@ -160,7 +162,7 @@ export function revisionViewPatch(
   proposal: MemoirBookRevisionProposal,
   previewVersion: PreviewVersion = "after",
 ): Pick<
-  BookRevisionData,
+  RevisionWorkbenchData,
   "proposal" | "previewVersion" | "changedChapters" | "metadataChanges"
 > {
   return {
@@ -208,7 +210,7 @@ function confirmAction(title: string, content: string): Promise<boolean> {
   });
 }
 
-definePage<BookRevisionData>()({
+definePage<RevisionWorkbenchData>()({
   feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
   feedbackBaselineUpdatedAt: "",
@@ -219,6 +221,7 @@ definePage<BookRevisionData>()({
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
+    scope: "book",
     projectId: "",
     proposalId: "",
     loading: true,
@@ -238,16 +241,18 @@ definePage<BookRevisionData>()({
   },
 
   async onLoad(query: PageQuery = {}) {
+    const scope = queryParam(query, "scope");
     const projectId = queryParam(query, "projectId");
     const proposalId = queryParam(query, "proposalId");
     this.setData({
+      scope: scope === "chapter_section" ? scope : "book",
       projectId,
       proposalId,
       feedbackDictationUrl: projectId
         ? memoirProjectDictationUrl(projectId)
         : "",
     });
-    if (!projectId || !proposalId) {
+    if (scope !== "book" || !projectId || !proposalId) {
       this.setData({ loading: false, error: "缺少修改预览信息" });
       return;
     }

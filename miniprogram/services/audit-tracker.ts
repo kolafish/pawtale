@@ -55,7 +55,7 @@ const PAGE_FEATURES: Record<string, string> = {
   "/pages/transcript-detail/index": "transcript.view",
   "/pages/book/index": "book.view",
   "/pages/book-completion/index": "book.view",
-  "/pages/book-revision/index": "book.view",
+  "/pages/revision-workbench/index": "book.view",
   "/pages/image-assets/index": "book.view",
   "/pages/chapter-workspace/index": "book.view",
   "/pages/book-export/index": "book.view",

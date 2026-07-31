@@ -510,7 +510,8 @@ definePage<BookCompletionData>()({
       return;
     }
     wx.navigateTo({
-      url: pageUrl("/pages/book-revision/index", {
+      url: pageUrl("/pages/revision-workbench/index", {
+        scope: "book",
         projectId: this.data.projectId,
         proposalId,
       }),
