@@ -72,19 +72,17 @@
       <button
         wx:else
         class="primary-button small"
-        data-action="preview"
-        bindtap="openBookExportPage"
+        bindtap="openBookReader"
       >
-        查看与导出
+        阅读全书
       </button>
       <button
         wx:if="{{bookContentAvailable}}"
         class="ghost-button small"
-        loading="{{ttsBusyTarget === 'book'}}"
-        disabled="{{generatingBook || (ttsBusyTarget && ttsBusyTarget !== 'book') || (playingTarget && playingTarget !== 'book')}}"
-        bindtap="playBookOutputAudio"
+        data-action="preview"
+        bindtap="openBookExportPage"
       >
-        {{ttsBusyTarget === "book" ? "准备全书朗读…" : (playingTarget === "book" ? "停止朗读" : "朗读全书")}}
+        导出与成书设置
       </button>
       <button
         wx:if="{{allChaptersConfirmed}}"

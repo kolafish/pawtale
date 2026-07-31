@@ -714,11 +714,11 @@ test("home daily actions create free narration and human interview sessions", as
   assert.equal(navigations.length, 2);
 });
 
-test("home opens the whole-book completion overview without waiting for background work", () => {
-  const navigations = [];
+test("home routes book organization through the book workspace without requiring microphone consent", () => {
+  const tabNavigations = [];
   global.wx = {
-    navigateTo(options) {
-      navigations.push(options.url);
+    switchTab(options) {
+      tabNavigations.push(options.url);
     },
   };
   const { page } = loadHomePage();
@@ -737,11 +737,11 @@ test("home opens the whole-book completion overview without waiting for backgrou
     },
   };
 
-  page.startBookCompletion.call(context);
+  page.openBookWorkspace.call(context);
 
-  assert.match(navigations[0], /pages\/book-completion\/index/);
-  assert.match(navigations[0], /projectId=project%2F1/);
-  assert.match(navigations[0], /projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B/);
+  const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
+  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
   assert.equal(context.data.error, "");
 });
 

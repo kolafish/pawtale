@@ -84,7 +84,7 @@ test("book export page is registered", () => {
   const pageJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../pages/book-export/index.json"), "utf8"));
 
   assert.ok(appJson.pages.includes("pages/book-export/index"));
-  assert.equal(pageJson.navigationBarTitleText, "预览与导出");
+  assert.equal(pageJson.navigationBarTitleText, "阅读与导出");
 });
 
 test("book export page loads plan and output from query project", async () => {

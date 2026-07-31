@@ -13,7 +13,7 @@
 微信登录 / Pawtale 账号登录
   → 创建或选择回忆录
   → 同意语音授权
-  → 自由讲述、AI 引导、人工访谈或成书补讲
+  → 自由讲述、AI 引导或人工访谈
   → 实时录音、Streaming ASR、AI 回应和 Streaming TTS
   → 保存讲述记录、原始音频和转写版本
   → 搜索、回听、校正和分享
@@ -26,7 +26,7 @@
 
 - `pages/home`：当前回忆录、继续讲述和折叠后的其他讲述方式；
 - `pages/transcripts`：讲述记录、文字/语音搜索和转写恢复；
-- `pages/book`：章节、成书进度、图片素材和后台整理事件；
+- `pages/book`：章节、成书进度、补全入口、阅读和导出入口；
 - `pages/me`：账号、回忆录管理、AI/TTS 设置和大字模式。
 
 ## 功能页面
@@ -50,8 +50,8 @@
 - `pages/book-completion`：整本书和每章的下一步；
 - `pages/chapter-workspace`：Section、素材、补讲问题、章节正文、版本和确认；
 - `pages/image-assets`：生成图片、章节插图/图录归属和素材状态；
-- `pages/book-export`：全书元数据、封面、版式、图片、来源附录和版本选择；
-- `pages/book-reader`：沉浸式阅读、目录跳转、返回顶部和历史版本。
+- `pages/book-export`：阅读预览、文件导出，以及折叠后的成书信息、封面和版本设置；
+- `pages/book-reader`：沉浸式阅读、整书朗读、目录跳转、返回顶部和历史版本。
 
 `pages/index` 是启动路由，进入首页。
 
