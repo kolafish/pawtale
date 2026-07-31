@@ -536,7 +536,7 @@ test("me saves Web login credentials without overriding wechat nickname", async 
   assert.equal(context.data.passwordLoginEnabled, true);
 });
 
-test("me keeps memoir management, voice progress, speaker transcription, and voice settings as separate entries", () => {
+test("me keeps memoir management, voice progress, and voice settings as separate entries", () => {
   const navigations = [];
   global.wx = {
     navigateTo(options) {
@@ -548,13 +548,11 @@ test("me keeps memoir management, voice progress, speaker transcription, and voi
 
   page.openVoiceProgress.call(context);
   page.openProjects.call(context);
-  page.openSpeakerTranscription.call(context);
   page.openVoiceSettings.call(context);
 
   assert.deepEqual(navigations, [
     "/pages/voice-progress/index",
     "/pages/projects/index",
-    "/pages/speaker-transcription/index",
     "/pages/voice-settings/index",
   ]);
 });

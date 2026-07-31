@@ -39,22 +39,12 @@ def create_realtime_volc_streaming_asr_client(user_id: str, voice_session_id: st
     )
 
 
-def create_speaker_transcription_asr_client(user_id: str, transcription_session_id: str) -> StreamingASRClient:
-    return VolcStreamingASRClient(
-        config=volc_config_from_settings(),
-        user_id=user_id,
-        voice_session_id=transcription_session_id,
-        request_options={"enable_speaker_info": True},
-    )
-
-
 __all__ = [
     "StreamingASRClient",
     "StreamingASREvent",
     "VolcStreamingASRClient",
     "VolcStreamingASRConfig",
     "create_realtime_volc_streaming_asr_client",
-    "create_speaker_transcription_asr_client",
     "create_volc_streaming_asr_client",
     "volc_config_from_settings",
 ]

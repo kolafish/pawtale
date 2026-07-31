@@ -230,7 +230,7 @@ miniprogram/
 小程序页面按职责分组：
 
 - 入口：home、login、projects、project-edit、me；
-- 语音：voice-authorization、voice-chat、speaker-transcription；
+- 语音：voice-authorization、voice-chat；
 - 素材：transcripts、transcript-detail、topic-map、voice-progress；
 - 成书：book、book-completion、chapter-workspace、book-export、book-reader、image-assets。
 

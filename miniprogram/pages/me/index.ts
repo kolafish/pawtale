@@ -440,10 +440,6 @@ definePage<MeData>()({
     wx.navigateTo({ url: "/pages/voice-progress/index" });
   },
 
-  openSpeakerTranscription() {
-    wx.navigateTo({ url: "/pages/speaker-transcription/index" });
-  },
-
   openVoiceSettings() {
     wx.navigateTo({ url: "/pages/voice-settings/index" });
   },
