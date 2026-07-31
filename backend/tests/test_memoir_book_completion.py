@@ -25,6 +25,7 @@ from app.models.memoir import (
     MemoirBookCompletionJob,
     MemoirBookOutput,
     MemoirBookOutputVersion,
+    MemoirBookRevisionProposal,
     MemoirBookReview,
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -193,12 +194,19 @@ class LayeredBookAI:
                             "chapter_ids": list(reversed(chapter_ids[:2])),
                         },
                         *(
-                            [{
-                                "action_type": "revise_book_profile",
-                                "title": "调整书名与成书信息",
-                                "reason": "当前书名没有体现故园主题。",
-                                "chapter_ids": [],
-                            }]
+                            [
+                                {
+                                    "action_type": "revise_book_profile",
+                                    "title": "调整前言、后记与封底文案",
+                                    "reason": "当前成书信息没有体现故园主题。",
+                                    "chapter_ids": [],
+                                    "metadata_fields": [
+                                        "preface",
+                                        "afterword",
+                                        "back_cover_quote",
+                                    ],
+                                }
+                            ]
                             if self.book_profile_action
                             else []
                         ),
@@ -212,22 +220,34 @@ class LayeredBookAI:
             "请根据全书检查问题和用户回答，判断当前书稿是否需要修改" in user_prompt
             or "请根据用户选中的全书编辑建议，制定书稿修改思路" in user_prompt
         ):
+            profile_only = (
+                "调整前言、后记与封底文案" in user_prompt
+                and "精简两章重复的学校经历" not in user_prompt
+            )
             payload = {
                 "summary": "先保留 C1 的两段经历，再统一 S1 的相关人物称谓。",
-                "items": [
-                    {
+                "items": (
+                    [{
+                        "title": "调整前言、后记与封底文案",
+                        "reason": "当前成书信息没有体现故园主题。",
+                        "approach": "保持正文不变，只调整三项成书信息。",
+                        "targets": ["前言", "后记", "封底文案"],
+                    }]
+                    if profile_only
+                    else [{
                         "title": "保留 C1 经历并统一 S1 称谓",
                         "reason": "C1 的两段经历发生在不同阶段，S1 的人物称谓需要一致。",
                         "approach": "保留 C1 的两段经历，只统一 S1 的相关人物称谓。",
                         "targets": ["C1", "S1"],
-                    }
-                ],
+                    }]
+                ),
                 "book_metadata_patch": (
                     {
-                        "title": "风从故园来",
-                        "subtitle": "一部家庭口述回忆录",
+                        "preface": "写下这些故园往事，是为了留住家人的声音。",
+                        "afterword": "故事写到这里，故园的风仍在记忆里。",
+                        "back_cover_quote": "把故园与家人的声音，留在这本书里。",
                     }
-                    if "调整书名与成书信息" in user_prompt
+                    if "调整前言、后记与封底文案" in user_prompt
                     else {}
                 ),
             }
@@ -245,7 +265,7 @@ class LayeredBookAI:
             }
         elif "请按照已确认的修改思路生成书稿修改稿" in user_prompt:
             payload = {
-                "section_revisions": [
+                "section_revisions": [] if "保持正文不变" in user_prompt else [
                     {
                         "section_id": section_ids[0],
                         "content": "两段经历都保留，相关人物统一称为老同学。",
@@ -357,6 +377,30 @@ def test_book_revision_plan_rejects_non_object_metadata_patch():
                 "summary": "调整成书信息",
                 "book_metadata_patch": [],
             }
+        )
+
+
+def test_editorial_profile_plan_requires_selected_metadata_fields():
+    with pytest.raises(
+        book_revision_generation.BookRevisionError,
+        match=r"(?=.*前言)(?=.*后记)(?=.*封底文案)",
+    ):
+        book_revision_generation._validate_editorial_metadata_plan(
+            plan=MemoirBookRevisionPlan(
+                summary="调整成书信息",
+                book_metadata_patch={},
+            ),
+            actions=[
+                {
+                    "action_type": "revise_book_profile",
+                    "metadata_fields": [
+                        "preface",
+                        "afterword",
+                        "back_cover_quote",
+                    ],
+                }
+            ],
+            book_information={},
         )
 
 
@@ -2361,8 +2405,9 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     assert proposal.json()["can_apply"] is False
     assert proposal.json()["revision_plan"]["items"]
     assert proposal.json()["revision_plan"]["book_metadata_patch"] == {
-        "title": "风从故园来",
-        "subtitle": "一部家庭口述回忆录",
+        "preface": "写下这些故园往事，是为了留住家人的声音。",
+        "afterword": "故事写到这里，故园的风仍在记忆里。",
+        "back_cover_quote": "把故园与家人的声音，留在这本书里。",
     }
     draft = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{completed_body['proposal_id']}/draft/jobs",
@@ -2392,8 +2437,9 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
         item["field"]: item["after_value"]
         for item in comparison["metadata_changes"]
     } == {
-        "title": "风从故园来",
-        "subtitle": "一部家庭口述回忆录",
+        "preface": "写下这些故园往事，是为了留住家人的声音。",
+        "afterword": "故事写到这里，故园的风仍在记忆里。",
+        "back_cover_quote": "把故园与家人的声音，留在这本书里。",
     }
     assert proposal.json()["before"]["version"] == 1
     assert proposal.json()["after"]["version"] == 2
@@ -2418,18 +2464,104 @@ async def test_selected_editorial_actions_create_a_preview_before_applying(
     ]
     assert [item["chapter_id"] for item in versions[-1].chapter_snapshot_json] == [chapters[1].id, chapters[0].id]
     assert "老同学" in versions[-1].content
-    assert versions[-1].manuscript_json["profile"]["title"] == "风从故园来"
-    assert (
-        versions[-1].manuscript_json["profile"]["subtitle"]
-        == "一部家庭口述回忆录"
+    preface = next(
+        section
+        for section in versions[-1].manuscript_json["front_matter"]
+        if section["kind"] == "preface"
     )
-    output = await test_db.scalar(
-        select(MemoirBookOutput).where(
-            MemoirBookOutput.project_id == project_id,
-        )
+    assert preface["content"] == "写下这些故园往事，是为了留住家人的声音。"
+    assert versions[-1].manuscript_json["back_matter"]["afterword"]["content"] == (
+        "故事写到这里，故园的风仍在记忆里。"
     )
-    assert output is not None
-    assert output.title == "风从故园来"
+    assert versions[-1].manuscript_json["render_settings"]["back_cover_quote"] == (
+        "把故园与家人的声音，留在这本书里。"
+    )
+
+
+async def test_profile_only_revision_previews_metadata_and_rejects_noop(
+    client,
+    test_db,
+    monkeypatch,
+):
+    project_id, chapters, _ = await _book(client, test_db)
+    fake = LayeredBookAI(book_actions=True, book_profile_action=True)
+    _install_ai(monkeypatch, fake)
+    bootstrapped = await client.post(
+        f"/api/memoir/projects/{project_id}/sections/bootstrap"
+    )
+    assert bootstrapped.status_code == 200
+    await _create_current_draft(
+        test_db,
+        project_id=project_id,
+        chapter_id=chapters[0].id,
+        status=MemoirBookChapterDraftStatus.CONFIRMED,
+    )
+    review = await _run_book_review(client, test_db, project_id=project_id)
+    profile_action = next(
+        action
+        for action in review.json()["review"]["editorial_actions"]
+        if action["action_type"] == "revise_book_profile"
+    )
+    assembled = await client.post(
+        f"/api/memoir/projects/{project_id}/book-output/assemble"
+    )
+    assert assembled.status_code == 200
+    queued = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/editorial-revision/jobs",
+        json={"action_ids": [profile_action["id"]]},
+    )
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, queued.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+    proposal_id = (
+        await _completion_field(client, project_id, "editorial_revision_job")
+    )["proposal_id"]
+    draft = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}/draft/jobs",
+        json={},
+    )
+    clear_editing_job_handlers()
+    register_memoir_editing_job_handlers()
+    try:
+        assert await run_test_editing_job(test_db, draft.json()["job_id"])
+    finally:
+        clear_editing_job_handlers()
+
+    assert any(
+        "请按照已确认的修改思路生成书稿修改稿" in prompt
+        for prompt in fake.prompts
+    )
+    preview = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}"
+    )
+    assert preview.json()["can_apply"] is True
+    assert preview.json()["comparison"]["changed_section_count"] == 0
+    assert {item["field"] for item in preview.json()["comparison"]["metadata_changes"]} == {
+        "preface",
+        "afterword",
+        "back_cover_quote",
+    }
+
+    proposal = await test_db.get(MemoirBookRevisionProposal, proposal_id)
+    assert proposal is not None
+    proposal.revision_plan_json = {
+        **proposal.revision_plan_json,
+        "book_metadata_patch": {},
+    }
+    test_db.add(proposal)
+    await test_db.commit()
+    noop = await client.get(
+        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}"
+    )
+    assert noop.json()["can_apply"] is False
+    rejected = await client.post(
+        f"/api/memoir/projects/{project_id}/book-review/revision-proposals/{proposal_id}/apply"
+    )
+    assert rejected.status_code == 409
+    assert "没有产生实际修改" in rejected.json()["detail"]
 
 
 async def test_book_review_job_preserves_failure_and_can_retry(

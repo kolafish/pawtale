@@ -194,6 +194,31 @@ test("book revision plan presents proposed book information before drafting", ()
   );
 });
 
+test("book revision preview exposes before and after book information", () => {
+  const { mod } = loadRevisionPage();
+  const proposal = revisionProposalMetadata({
+    comparison: {
+      ...revisionProposal().comparison,
+      changed_chapter_count: 0,
+      changed_section_count: 0,
+      chapters: [],
+      metadata_changes: [{
+        field: "back_cover_quote",
+        before_value: "旧封底文案",
+        after_value: "新封底文案",
+      }],
+    },
+  });
+
+  assert.deepEqual(mod.revisionViewPatch(proposal).metadataChanges, [{
+    field: "back_cover_quote",
+    label: "封底文案",
+    before_value: "旧封底文案",
+    after_value: "新封底文案",
+    display_value: "新封底文案",
+  }]);
+});
+
 test("book revision page loads only the selected whole-book preview on demand", async () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
   assert.ok(appJson.pages.includes("pages/book-revision/index"));

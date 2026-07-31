@@ -46,6 +46,7 @@ export interface MemoirBookEditorialAction {
   title: string;
   reason: string;
   chapter_ids: string[];
+  metadata_fields: MemoirBookRevisionMetadataField[];
 }
 
 export interface MemoirBookReviewJob {

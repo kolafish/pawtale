@@ -440,6 +440,7 @@ async def proposal_response(
         before_information,
         after_information,
     )
+    has_changes = after_snapshots != before_snapshots or bool(metadata_changes)
     before_manuscript = (
         manuscript_response(
             title=before_information["title"],
@@ -492,12 +493,13 @@ async def proposal_response(
             manuscript=before_manuscript,
         ),
         after=MemoirBookRevisionPreviewVersion(
-            version=baseline.version
-            + int(after_snapshots != before_snapshots or bool(metadata_changes)),
+            version=baseline.version + int(has_changes),
             manuscript=after_manuscript,
         ),
         can_apply=(
-            status == MemoirBookRevisionProposalStatus.READY and phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+            status == MemoirBookRevisionProposalStatus.READY
+            and phase == MemoirBookRevisionProposalPhase.DRAFT_READY
+            and has_changes
         ),
         can_dismiss=status
         in {
@@ -561,20 +563,19 @@ async def apply_proposal(
         title=after_information["title"],
         metadata_patch=metadata_patch,
     )
-    applied_version = baseline
     if (
-        content != baseline.content
-        or snapshots != before_snapshots
-        or manuscript_json != baseline.manuscript_json
+        snapshots == before_snapshots
+        and not _metadata_changes(before_information, after_information)
     ):
-        applied_version = await book_output_versions.append_book_output_version(
-            db,
-            output=output,
-            content=content,
-            chapter_snapshot_json=snapshots,
-            manuscript_json=manuscript_json,
-            created_by=MemoirCreatedBy.AI,
-        )
+        raise ValueError("这版没有产生实际修改，不能确认使用")
+    applied_version = await book_output_versions.append_book_output_version(
+        db,
+        output=output,
+        content=content,
+        chapter_snapshot_json=snapshots,
+        manuscript_json=manuscript_json,
+        created_by=MemoirCreatedBy.AI,
+    )
 
     changed_chapter_count = int(build_comparison(before=before_snapshots, after=snapshots)["changed_chapter_count"])
     metadata = {

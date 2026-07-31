@@ -13,6 +13,15 @@ BOOK_EDITORIAL_ACTION_TYPES = {
     "reorder_chapters",
     "revise_book_profile",
 }
+BOOK_METADATA_FIELDS = {
+    "title",
+    "subtitle",
+    "narrator_name",
+    "prepared_by",
+    "preface",
+    "afterword",
+    "back_cover_quote",
+}
 
 
 def action_id(action: dict[str, object]) -> str:
@@ -48,6 +57,16 @@ def selected_review_actions(
 
 def actions_signature(actions: list[dict[str, Any]]) -> str:
     return semantic_json_signature(actions)
+
+
+def metadata_fields(actions: list[dict[str, Any]]) -> set[str]:
+    return {
+        str(field)
+        for action in actions
+        if action.get("action_type") == "revise_book_profile"
+        for field in action.get("metadata_fields", [])
+        if str(field) in BOOK_METADATA_FIELDS
+    }
 
 
 def application_marker(output: object) -> dict[str, Any]:

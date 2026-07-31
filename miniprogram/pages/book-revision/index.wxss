@@ -195,6 +195,10 @@
   text-wrap: balance;
 }
 
+.metadata-after-title {
+  margin-top: 22rpx;
+}
+
 .section-content {
   margin-top: 10rpx;
   color: var(--ui-text-secondary);

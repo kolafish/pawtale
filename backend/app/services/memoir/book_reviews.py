@@ -24,7 +24,10 @@ from app.models.memoir import (
     MemoirBookPlanChapter,
     MemoirBookReview,
 )
-from app.schemas.memoir_book_review import MemoirBookReviewResponse
+from app.schemas.memoir_book_review import (
+    MemoirBookRevisionMetadataField,
+    MemoirBookReviewResponse,
+)
 from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_references import ModelReferenceMap
@@ -127,6 +130,9 @@ class _BookReviewEditorialActionOutput(BaseModel):
     title: str
     reason: str
     chapter_ids: list[str] = Field(default_factory=list)
+    metadata_fields: list[MemoirBookRevisionMetadataField] = Field(
+        default_factory=list
+    )
 
 
 class _BookReviewOutput(BaseModel):
@@ -460,7 +466,8 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
       "action_type": "remove_repetition|improve_transition|reorder_chapters|revise_book_profile",
       "title": "用户能直接理解的一句话修改标题",
       "reason": "为什么需要这项修改，以及预期改善",
-      "chapter_ids": ["涉及章节；调整顺序时按建议顺序排列"]
+      "chapter_ids": ["涉及章节；调整顺序时按建议顺序排列"],
+      "metadata_fields": ["仅 revise_book_profile 填写：title|subtitle|narrator_name|prepared_by|preface|afterword|back_cover_quote"]
     }}
   ],
   "candidate_issues": [
@@ -479,7 +486,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 不用固定人生目录检查每个阶段是否都讲过。
 - 从整体阅读感受出发，没有明显影响时可以不提修改。
 - editorial_actions 只放基于现有内容、能够直接执行的可选建议。
-- revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组。
+- revise_book_profile 用于书名、副标题、口述人、整理人、前言、后记或封底文案，chapter_ids 返回空数组，并在 metadata_fields 精确列出需要修改的字段；其他类型的 metadata_fields 返回空数组。
 - 不能直接执行的编辑建议写入 structure_guidance，不要求用户补讲。
 - 不得建议新建、删除、合并章节，不得改变小节数量或归属。
 - 书名、全书定位或出版陈述不合适时使用 revise_book_profile，不要把它拆成需要用户补讲的问题。
@@ -616,10 +623,22 @@ def normalize_book_review(
             raw_action.get("chapter_ids"),
             limit=len(context.chapters),
         )
+        metadata_fields = (
+            list(
+                dict.fromkeys(
+                    str(field)
+                    for field in raw_action.get("metadata_fields", [])
+                    if str(field) in book_editorial_actions.BOOK_METADATA_FIELDS
+                )
+            )
+            if isinstance(raw_action.get("metadata_fields"), list)
+            else []
+        )
         if (
             not title
             or not reason
             or (action_type != "revise_book_profile" and not chapter_ids)
+            or (action_type == "revise_book_profile" and not metadata_fields)
         ):
             continue
         if action_type == "reorder_chapters":
@@ -637,6 +656,11 @@ def normalize_book_review(
             "title": title,
             "reason": reason,
             "chapter_ids": chapter_ids,
+            "metadata_fields": (
+                metadata_fields
+                if action_type == "revise_book_profile"
+                else []
+            ),
         }
         normalized["id"] = book_editorial_actions.action_id(normalized)
         if normalized not in editorial_actions:

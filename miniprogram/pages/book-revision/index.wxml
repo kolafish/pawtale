@@ -105,7 +105,10 @@
           class="metadata-change"
         >
           <text class="section-label">{{item.label}}</text>
-          <text class="section-content" selectable>{{item.display_value}}</text>
+          <text class="section-title">修改前</text>
+          <text class="section-content" selectable>{{item.before_value || "（留空）"}}</text>
+          <text class="section-title metadata-after-title">修改后</text>
+          <text class="section-content" selectable>{{item.after_value || "（留空）"}}</text>
         </view>
       </view>
       <view
@@ -149,7 +152,7 @@
         wx:if="{{!changedChapters.length && !proposal.comparison.chapter_order_changed && !metadataChanges.length}}"
         class="state-card"
       >
-        已核对所选修改，正文和章节顺序没有变化。
+        这版没有产生实际修改，不能确认使用。请继续调整修改思路或放弃这版修改。
       </view>
       </view>
 

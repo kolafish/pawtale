@@ -36,6 +36,17 @@ class MemoirBookRevisionDraftRequest(BaseModel):
     ai_model: str | None = None
 
 
+MemoirBookRevisionMetadataField = Literal[
+    "title",
+    "subtitle",
+    "narrator_name",
+    "prepared_by",
+    "preface",
+    "afterword",
+    "back_cover_quote",
+]
+
+
 class MemoirBookEditorialActionResponse(BaseModel):
     id: str
     action_type: Literal[
@@ -47,6 +58,9 @@ class MemoirBookEditorialActionResponse(BaseModel):
     title: str
     reason: str
     chapter_ids: list[str] = Field(default_factory=list)
+    metadata_fields: list[MemoirBookRevisionMetadataField] = Field(
+        default_factory=list
+    )
 
 
 class MemoirBookReviewContentResponse(BaseModel):
@@ -163,17 +177,6 @@ class MemoirBookRevisionPlanItem(BaseModel):
     reason: str
     approach: str
     targets: list[str] = Field(default_factory=list)
-
-
-MemoirBookRevisionMetadataField = Literal[
-    "title",
-    "subtitle",
-    "narrator_name",
-    "prepared_by",
-    "preface",
-    "afterword",
-    "back_cover_quote",
-]
 
 
 class MemoirBookRevisionMetadataPatch(BaseModel):
