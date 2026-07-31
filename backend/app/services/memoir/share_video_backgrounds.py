@@ -13,11 +13,11 @@ from app.config import DATA_DIR, get_settings
 from app.services.provider_limits import provider_concurrency_limiter
 
 
-DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "old_album"
+DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE = "watercolor"
 DEFAULT_SHARE_VIDEO_BACKGROUND_MODE = "auto"
 SHARE_VIDEO_BACKGROUND_MODE_SINGLE = "single"
 SHARE_VIDEO_BACKGROUND_MODE_SMART_MULTI = "smart_multi"
-SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v1"
+SHARE_VIDEO_BACKGROUND_PROMPT_VERSION = "memoir-share-video-background-v2"
 SHARE_VIDEO_BACKGROUND_CONTENT_MAX_CHARS = 300
 MEMOIR_SHARE_VIDEO_BACKGROUND_DIR = DATA_DIR / "memoir" / "share-video-backgrounds"
 
@@ -27,7 +27,7 @@ class ShareVideoBackgroundStyle:
     value: str
     label: str
     description: str
-    prompt_template: str
+    drawing_instruction: str
 
 
 @dataclass(frozen=True)
@@ -63,60 +63,93 @@ class ShareVideoBackgroundGenerationError(RuntimeError):
     pass
 
 
-_OLD_ALBUM_PROMPT = """根据以下口述内容生成一张横版 16:9 视频背景图：
+_VIDEO_BACKGROUND_PROMPT = """根据以下口述内容，创作一张横版 16:9 的视频背景图：
 
 {content}
 
-请不要直接复刻文字内容，而是提炼其中的年代感、家庭关系、地点氛围和情绪。画面要像一张旧家庭照片，带有手工上色的质感。整体为银盐胶片颗粒、轻微褪色、柔和低对比，颜色像后来用水彩淡淡补上的旧照片。使用米黄、灰褐、淡青、浅赭色调。画面真实、安静、克制，有家族相册和私人记忆的感觉。
+请理解原文所表达的场景、人物关系和整体氛围，并让画面的光线、色彩与情绪自然贴合原文。
 
-构图上，主体不要占满画面，中央或右侧保留大面积干净留白，方便后期叠加口述文字。画面可以有生活痕迹，但不要喧宾夺主。
+绘画风格：
+{drawing_instruction}
 
-不要出现文字、字幕、水印、logo、现代 UI 元素。不要泛泛的 AI 插画感，不要塑料质感，不要过度光滑，不要高清数码照片感，不要强烈电影光效，不要过度锐化，不要夸张表情，不要畸形人物，不要清晰正脸特写，不要梦幻发光，不要过度饱和。"""
+视频背景构图：
+- 画面主体主要安排在左侧。
+- 画面中部和右侧保留大面积自然、干净、低细节的区域，供后期叠加口述文字。
+- 留白自然融入房间、天空、墙面、道路或环境空间，不生成生硬的纯色空块。
+- 中部和右侧不放人物面部、复杂物件或视觉焦点。
+- 背景衬托口述文字，不喧宾夺主。
 
+生成边界：
+- 只呈现原文支持的场景、人物关系和生活细节，不添加无依据的重要人物、事件、地点或时代符号。
+- 不出现文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
+- 人物避免清晰正脸特写和可识别肖像。
+- 避免畸形人物、塑料质感、过度锐化、过度饱和和夸张电影光效。"""
 
-_INK_PAPER_PROMPT = """根据以下口述内容生成一张横版 16:9 视频背景图：
-
-{content}
-
-请从口述内容中提炼出场景、情绪和记忆感，生成一幅淡水墨旧纸风格的背景图。画面使用浅墨晕染、枯笔线条和少量淡彩，具有中国文人水墨画的疏淡感。整体安静、克制、含蓄，像一段记忆慢慢浮现在纸上。使用米白、淡墨、灰蓝、浅赭、灰绿色等低饱和色彩。画面要有旧纸纤维、轻微斑驳和纸本质感。
-
-构图上强调留白，不要把场景画满。主体可以意象化、模糊化，不需要完全写实。画面中央或偏右保留干净区域，用于放置口述文字。整体像一本家庭回忆录里的章节背景，而不是旅游风景图。
-
-不要出现文字、题字、印章、水印、logo。不要商业国风插画感，不要景区宣传图感，不要鲜艳青绿色，不要过度精致，不要强烈光影，不要照片真实感，不要动漫感，不要奇幻仙侠感，不要泛泛 AI 生成感。"""
-
-
-_STORYBOOK_PROMPT = """根据以下口述内容生成一张横版 16:9 视频背景图：
-
-{content}
-
-请把口述内容转化为一幅二十世纪中国老连环画或旧书插图风格的画面。画面以黑白或低饱和色为主，使用细密钢笔线描、朴素写实的叙事构图，带有旧纸泛黄质感。人物和场景要有真实生活气息，不要夸张，不要戏剧化。整体像一本旧连环画、家族故事书或口述史插图中的一页。
-
-画面应根据口述内容提炼一个关键场景，但不要堆太多元素。主体适度简化，保留大面积留白，方便叠加字幕。线条自然，有手工绘制感，低对比，安静克制。
-
-不要出现文字、对白框、水印、logo。不要现代漫画感，不要日漫风，不要儿童绘本感，不要夸张表情，不要电影海报构图，不要过度精致，不要 3D 渲染感，不要塑料质感，不要明亮商业插画色彩，不要泛泛 AI 插画感。"""
-
-
-_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
+_SELECTABLE_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
     ShareVideoBackgroundStyle(
-        value="old_album",
-        label="旧相册",
-        description="旧照片手工上色质感，适合家庭、亲人、童年和生活片段",
-        prompt_template=_OLD_ALBUM_PROMPT,
+        value="watercolor",
+        label="清透水彩",
+        description="透明水色和柔和叠染，适合大多数家庭生活与人物故事",
+        drawing_instruction=(
+            "使用清透自然的水彩绘画风格，通过透明水色、柔和叠染和可见的手绘边缘"
+            "表现真实生活场景。画面保持干净、通透、有生活气息，光线和色彩跟随原文氛围。"
+        ),
+    ),
+    ShareVideoBackgroundStyle(
+        value="pencil",
+        label="柔和铅笔",
+        description="细腻铅笔线条和轻柔明暗，适合人物关系与安静日常",
+        drawing_instruction=(
+            "使用柔和的石墨铅笔绘画风格，以细腻线条、轻柔排线和适度明暗塑造场景。"
+            "可以根据原文氛围加入少量低浓度彩铅，纸面干净自然，保留明确的手绘笔触。"
+        ),
     ),
     ShareVideoBackgroundStyle(
         value="ink_paper",
-        label="淡水墨",
-        description="淡水墨旧纸质感，适合故乡、晚年回看和人生总结",
-        prompt_template=_INK_PAPER_PROMPT,
+        label="水墨淡彩",
+        description="现代水墨与透明淡彩，适合含蓄、平静和富有东方气韵的内容",
+        drawing_instruction=(
+            "使用现代水墨淡彩绘画风格，以自然墨色层次、简洁线条和少量透明淡彩"
+            "表现人物与生活场景。画面含蓄而清晰，纸面干净自然，色彩跟随原文氛围。"
+        ),
     ),
+    ShareVideoBackgroundStyle(
+        value="gouache",
+        label="叙事水粉",
+        description="明确色块和柔和笔触，适合具体事件与富有生活气息的场景",
+        drawing_instruction=(
+            "使用叙事水粉画风格，以明确而协调的色块、柔和笔触和概括但可信的造型"
+            "表现人物、房间、街道与生活物件。画面自然、有层次，色彩和明度跟随原文氛围。"
+        ),
+    ),
+    ShareVideoBackgroundStyle(
+        value="old_album",
+        label="怀旧影像",
+        description="旧相册手工上色质感，适合原文本身具有明确年代感的内容",
+        drawing_instruction=(
+            "使用旧家庭相册启发的手工上色绘画风格，带有银盐胶片颗粒、轻微褪色"
+            "和水彩补色质感。保留明显的绘画笔触，画面真实、安静、低对比。"
+        ),
+    ),
+)
+
+# Historical jobs and image assets persist style IDs. Keep the removed option
+# readable for retries without presenting it for new generation.
+_LEGACY_BACKGROUND_STYLES: tuple[ShareVideoBackgroundStyle, ...] = (
     ShareVideoBackgroundStyle(
         value="storybook",
         label="老故事书",
-        description="中国老连环画和旧书插图质感，适合具体故事和家庭事件",
-        prompt_template=_STORYBOOK_PROMPT,
+        description="历史任务使用的老连环画和旧书插图风格",
+        drawing_instruction=(
+            "使用二十世纪中国老连环画与旧书插图绘画风格，以细密钢笔线描、"
+            "朴素写实的叙事造型和少量做旧套色表现生活场景。"
+        ),
     ),
 )
-_BACKGROUND_STYLE_BY_VALUE = {style.value: style for style in _BACKGROUND_STYLES}
+_BACKGROUND_STYLE_BY_VALUE = {
+    style.value: style
+    for style in (*_SELECTABLE_BACKGROUND_STYLES, *_LEGACY_BACKGROUND_STYLES)
+}
 
 _BACKGROUND_MODES: tuple[dict[str, str], ...] = (
     {
@@ -145,7 +178,7 @@ def share_video_background_style_options() -> list[dict[str, str]]:
             "label": style.label,
             "description": style.description,
         }
-        for style in _BACKGROUND_STYLES
+        for style in _SELECTABLE_BACKGROUND_STYLES
     ]
 
 
@@ -156,7 +189,7 @@ def share_video_background_mode_options() -> list[dict[str, str]]:
 def normalize_share_video_background_style(value: str | None) -> str:
     normalized = (value or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE).strip()
     if normalized not in _BACKGROUND_STYLE_BY_VALUE:
-        valid = "、".join(style.label for style in _BACKGROUND_STYLES)
+        valid = "、".join(style.label for style in _SELECTABLE_BACKGROUND_STYLES)
         raise ValueError(f"未知的分享视频背景风格，可选：{valid}")
     return normalized
 
@@ -187,12 +220,15 @@ def _prompt_content(text: str) -> str:
 def build_share_video_background_prompt(selected_text: str, style_id: str | None) -> ShareVideoBackgroundPrompt:
     style = share_video_background_style(style_id)
     content = _prompt_content(selected_text)
-    prompt = style.prompt_template.format(content=content).strip()
+    prompt = _VIDEO_BACKGROUND_PROMPT.format(
+        content=content,
+        drawing_instruction=style.drawing_instruction,
+    ).strip()
     prompt_hash = hashlib.sha256(
         "\n".join((
             SHARE_VIDEO_BACKGROUND_PROMPT_VERSION,
             style.value,
-            content,
+            prompt,
         )).encode("utf-8")
     ).hexdigest()
     return ShareVideoBackgroundPrompt(

@@ -35,6 +35,7 @@ from app.services.memoir.share_video_backgrounds import (
     ShareVideoBackgroundGenerationError,
     VolcArkImageGenerationService,
     normalize_share_video_background_style,
+    share_video_background_style,
 )
 from app.services.memoir.share_video_alignment import build_share_video_alignment
 from app.services.memoir.voice_transcripts import _load_owned_utterance
@@ -42,24 +43,9 @@ from app.services.memoir.voice_transcripts import _load_owned_utterance
 
 logger = logging.getLogger(__name__)
 
-MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v1"
+MATERIAL_IMAGE_PROMPT_VERSION = "memoir-material-illustration-v2"
 MATERIAL_IMAGE_CONTENT_MAX_CHARS = 500
 MATERIAL_IMAGE_DIR = Path("memoir") / "material-images"
-
-_STYLE_INSTRUCTIONS = {
-    "old_album": (
-        "旧家庭相册风格，银盐胶片颗粒和轻微褪色，像经过克制手工上色的旧照片。"
-        "使用米黄、灰褐、淡青和浅赭色，真实、安静、低对比。"
-    ),
-    "ink_paper": (
-        "淡水墨旧纸风格，使用浅墨晕染、枯笔线条和少量低饱和淡彩。"
-        "保留纸张纤维和轻微斑驳，画面疏淡、含蓄。"
-    ),
-    "storybook": (
-        "二十世纪中国老连环画与旧书插图风格，使用克制的钢笔线描、木刻感排线"
-        "和少量做旧套色，朴素、清晰、有叙事感。"
-    ),
-}
 
 
 def _normalized_text(value: str) -> str:
@@ -79,21 +65,29 @@ def build_material_image_prompt(selected_text: str, style_id: str | None) -> tup
         style_id or DEFAULT_SHARE_VIDEO_BACKGROUND_STYLE
     )
     content = _prompt_content(selected_text)
-    style_instruction = _STYLE_INSTRUCTIONS[normalized_style]
-    prompt = f"""根据以下老人口述内容，创作一张适合放进家庭回忆录的横版意象插图：
+    style = share_video_background_style(normalized_style)
+    prompt = f"""根据以下老人口述内容，创作一张适合放进家庭回忆录正文的横版绘画插图：
 
 {content}
 
-画面要求：
-- 从口述中提炼最重要的地点、物件、人物关系和情绪，不要把每个细节机械堆在一起。
-- {style_instruction}
-- 构图完整，主体明确但不过度拥挤，适合印刷在回忆录正文中。
+请理解原文所表达的场景、人物关系和整体氛围，并让画面的光线、色彩与情绪自然贴合原文。
+
+绘画风格：
+{style.drawing_instruction}
+
+成书插图构图：
+- 从原文中选择一个最有代表性、最适合视觉表达的场景。
+- 构图完整，主体明确，人物关系和重要物件自然可信，适合在回忆录正文中独立阅读和印刷。
+- 不把多个时间、多个地点或多个事件拼贴在同一张图中。
+- 不制作多格漫画、时间轴或蒙太奇。
+
+生成边界：
 - 这是基于记忆的意象创作，不冒充真实历史照片；人物避免清晰正脸特写和可识别肖像。
 - 不要添加口述中没有依据的重大人物、事件或时代符号。
 - 不要出现任何文字、字幕、题字、印章、水印、logo 或现代 UI 元素。
 - 避免畸形人物、塑料质感、过度锐化、过度饱和、夸张电影光效和泛泛的 AI 插画感。""".strip()
     prompt_hash = sha256(
-        "\n".join((MATERIAL_IMAGE_PROMPT_VERSION, normalized_style, content)).encode("utf-8")
+        "\n".join((MATERIAL_IMAGE_PROMPT_VERSION, normalized_style, prompt)).encode("utf-8")
     ).hexdigest()
     return normalized_style, prompt, prompt_hash
 

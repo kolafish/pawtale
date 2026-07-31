@@ -41,8 +41,6 @@ class ShareVideoPlannedSceneMetadata(_ShareVideoMetadataModel):
     start_ms: int = Field(default=0, ge=0)
     end_ms: int = Field(default=0, ge=0)
     title: str = ""
-    visual_summary: str = ""
-    image_prompt_content: str = ""
     sentence_ids: list[int] = Field(default_factory=list)
     evidence_quote: str = ""
 
