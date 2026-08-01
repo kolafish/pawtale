@@ -401,8 +401,14 @@ test("transcript detail page labels human interviewer questions", async () => {
   assert.equal(context.data.item.questionTitleText, "采访者刚才问了");
 });
 
-test("transcript detail page builds a preview from shared editor text", async () => {
+test("transcript detail page applies voice changes to the current draft before one save", async () => {
   const previewCalls = [];
+  const updates = [];
+  global.wx = {
+    enableAlertBeforeUnload() {},
+    disableAlertBeforeUnload() {},
+    showToast() {},
+  };
   const { page } = loadTranscriptDetailPage({
     voiceApiExports: {
       getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
@@ -410,37 +416,105 @@ test("transcript detail page builds a preview from shared editor text", async ()
         previewCalls.push(args);
         return {
           action: "revise_transcript",
-          current_text: "爷爷退休后还在帮公司做事。",
-          edited_text: "爷爷退休后经常去社区帮忙。",
-          reply_text: "已改写指定片段，请确认后保存。",
+          current_text: args[2],
+          edited_text: "爷爷退休后经常去社区帮忙，也照顾花园。",
+          reply_text: "已完成修改。",
           confidence: 0.92,
           changes: [{
             scope: "passage",
-            before: "爷爷退休后还在帮公司做事。",
-            after: "爷爷退休后经常去社区帮忙。",
+            before: "爷爷退休后还在帮公司做事",
+            after: "爷爷退休后经常去社区帮忙",
           }],
         };
+      },
+      updateMemoirVoiceTranscript: async (id, content) => {
+        updates.push({ id, content });
+        return sampleTranscript(id, {
+          transcript_edited: content,
+          display_text: content,
+          display_char_count: content.length,
+        });
       },
     },
   });
   const context = pageContext(page);
   await page.onLoad.call(context, { id: "utterance-voice-edit" });
+  page.beginEdit.call(context);
+  page.changeText.call(context, {
+    detail: { value: "爷爷退休后还在帮公司做事，也照顾花园。" },
+  });
 
   page.changeVoiceEditInstruction.call(context, {
-    detail: { value: "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙" },
+    detail: { value: "把退休后帮公司做事改成经常去社区帮忙" },
   });
   await page.previewVoiceEdit.call(context, {
-    detail: { value: "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙" },
+    detail: { value: "把退休后帮公司做事改成经常去社区帮忙" },
   });
 
   assert.deepEqual(previewCalls, [[
     "utterance-voice-edit",
-    "把爷爷退休后的那段改成爷爷退休后经常去社区帮忙",
+    "把退休后帮公司做事改成经常去社区帮忙",
+    "爷爷退休后还在帮公司做事，也照顾花园。",
   ]]);
+  assert.deepEqual(updates, []);
   assert.equal(context.data.voiceEditLoading, false);
-  assert.equal(context.data.voiceEditPreview.changes[0].scopeLabel, "片段改写");
-  assert.equal(context.data.voiceEditPreview.canConfirm, true);
+  assert.equal(context.data.item.editingText, "爷爷退休后经常去社区帮忙，也照顾花园。");
+  assert.equal(context.data.item.changed, true);
+  assert.equal(context.data.item.isEditing, true);
+  assert.equal(context.data.voiceEditInstructionText, "");
+  assert.equal(context.data.voiceEditMessage, "已生成修改后文字，可与修改前对比后统一保存。");
+
+  page.switchEditPreviewVersion.call(context, {
+    currentTarget: { dataset: { version: "before" } },
+  });
+  assert.equal(context.data.editPreviewVersion, "before");
+
+  await page.saveTranscript.call(context);
+  assert.deepEqual(updates, [{
+    id: "utterance-voice-edit",
+    content: "爷爷退休后经常去社区帮忙，也照顾花园。",
+  }]);
+  assert.equal(context.data.item.isEditing, false);
   assert.equal(context.data.error, "");
+});
+
+test("transcript detail page never overwrites typing that continues during voice generation", async () => {
+  let resolvePreview;
+  global.wx = {
+    enableAlertBeforeUnload() {},
+    disableAlertBeforeUnload() {},
+  };
+  const { page } = loadTranscriptDetailPage({
+    voiceApiExports: {
+      getMemoirVoiceTranscript: async (id) => sampleTranscript(id),
+      previewMemoirVoiceTranscriptVoiceEdit: () => new Promise((resolve) => {
+        resolvePreview = resolve;
+      }),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, { id: "utterance-concurrent-edit" });
+  page.beginEdit.call(context);
+
+  const previewPromise = page.previewVoiceEdit.call(context, {
+    detail: { value: "把公司改成社区" },
+  });
+  page.changeText.call(context, {
+    detail: { value: "我继续手动补充了这一句。" },
+  });
+  resolvePreview({
+    action: "revise_transcript",
+    current_text: "爷爷退休后还在帮公司做事。",
+    edited_text: "爷爷退休后还在社区做事。",
+    reply_text: "已完成修改。",
+    confidence: 0.9,
+    changes: [],
+  });
+  await previewPromise;
+
+  assert.equal(context.data.item.editingText, "我继续手动补充了这一句。");
+  assert.equal(context.data.voiceEditLoading, false);
+  assert.equal(context.data.voiceEditMessage, "");
 });
 
 test("transcript detail page keeps editing non-blocking while offline ASR runs", async () => {

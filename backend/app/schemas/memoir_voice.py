@@ -570,11 +570,22 @@ class MemoirVoiceTranscriptRecoveryRequest(BaseModel):
 
 class MemoirVoiceTranscriptVoiceEditPreviewRequest(BaseModel):
     instruction_text: str = Field(min_length=1, max_length=800)
+    draft_text: str | None = None
     ai_model: str | None = None
 
     @field_validator("instruction_text")
     @classmethod
     def _non_empty_instruction(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("不能为空")
+        return normalized
+
+    @field_validator("draft_text")
+    @classmethod
+    def _non_empty_draft(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         normalized = value.strip()
         if not normalized:
             raise ValueError("不能为空")

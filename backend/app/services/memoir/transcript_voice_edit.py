@@ -73,6 +73,7 @@ async def _load_owned_context(
     *,
     utterance_id: str,
     user_id: str,
+    draft_text: str | None = None,
 ) -> TranscriptVoiceEditContext:
     utterance = await db.scalar(
         select(MemoirVoiceUtterance)
@@ -88,7 +89,7 @@ async def _load_owned_context(
     )
     if utterance is None:
         raise HTTPException(status_code=404, detail="讲述记录不存在")
-    current_text = current_utterance_text(utterance)
+    current_text = draft_text or current_utterance_text(utterance)
     if not current_text:
         raise HTTPException(status_code=400, detail="讲述记录内容为空，无法语音修正")
     included_chapter_titles = await _included_chapter_titles(
@@ -319,7 +320,12 @@ async def preview_voice_transcript_edit(
     req: MemoirVoiceTranscriptVoiceEditPreviewRequest,
     ai_client: AITextClient | None = None,
 ) -> MemoirVoiceTranscriptVoiceEditPreviewResponse:
-    context = await _load_owned_context(db, utterance_id=utterance_id, user_id=user_id)
+    context = await _load_owned_context(
+        db,
+        utterance_id=utterance_id,
+        user_id=user_id,
+        draft_text=req.draft_text,
+    )
     selected_ai_model = select_project_ai_model(context.project, req.ai_model)
     client = ai_client
     try:

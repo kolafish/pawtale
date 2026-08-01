@@ -504,6 +504,79 @@
   line-height: 1.55;
 }
 
+.edit-version-switch {
+  margin-top: 0;
+  margin-bottom: 18rpx;
+}
+
+.edit-before-panel {
+  min-height: 260rpx;
+  padding: 22rpx 24rpx;
+  border-radius: 18rpx;
+  background: var(--ui-surface-subtle);
+  box-shadow: inset 0 0 0 1rpx var(--ui-border);
+  box-sizing: border-box;
+}
+
+.edit-before-label,
+.edit-before-text,
+.edit-assistant-title,
+.edit-assistant-hint,
+.voice-edit-message {
+  display: block;
+}
+
+.edit-before-label,
+.edit-assistant-hint {
+  color: var(--ui-text-secondary);
+  font-size: 23rpx;
+  line-height: 1.4;
+}
+
+.edit-before-text {
+  margin-top: 12rpx;
+  color: var(--ui-text-primary);
+  font-size: 30rpx;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.edit-assistant {
+  margin-top: 20rpx;
+  padding: 20rpx;
+  border-radius: 32rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.edit-assistant-title {
+  color: var(--ui-section-title);
+  font-size: 27rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+
+.edit-assistant-hint {
+  margin-top: 4rpx;
+  text-wrap: pretty;
+}
+
+.edit-assistant voice-text-editor {
+  display: block;
+  margin-top: 16rpx;
+}
+
+.voice-edit-message {
+  margin-top: 14rpx;
+  padding: 16rpx 18rpx;
+  border-radius: 14rpx;
+  background: var(--ui-accent-surface);
+  color: var(--ui-accent-strong);
+  font-size: 24rpx;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
 .edit-reference-toggle {
   width: 100%;
   min-height: 88rpx;
@@ -661,120 +734,6 @@
 
 .text-action-button:active {
   transform: scale(0.96);
-}
-
-.edit-tools-card {
-  background: var(--ui-surface);
-}
-
-.edit-tools-card .primary-button,
-.edit-tools-card .ghost-button {
-  height: 80rpx;
-  padding: 0 20rpx;
-  text-align: center;
-}
-
-.edit-tools-card voice-text-editor {
-  display: block;
-  margin-top: 18rpx;
-}
-
-.voice-edit-change-scope {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  margin-right: 12rpx;
-  padding: 5rpx 10rpx;
-  border-radius: 8rpx;
-  background: var(--ui-surface-subtle);
-  color: var(--ui-accent-strong);
-  font-size: 21rpx;
-  font-weight: 800;
-  line-height: 1.2;
-}
-
-.voice-edit-block {
-  margin-top: 16rpx;
-}
-
-.voice-edit-label,
-.voice-edit-confidence {
-  display: block;
-  color: var(--ui-section-title);
-  font-size: 24rpx;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.voice-edit-text {
-  display: block;
-  margin-top: 8rpx;
-  color: var(--ui-text-primary);
-  font-size: 27rpx;
-  line-height: 1.55;
-  word-break: break-word;
-}
-
-.voice-edit-confidence {
-  margin-top: 8rpx;
-  color: var(--ui-accent);
-}
-
-.voice-edit-changes,
-.voice-edit-inline-diff {
-  margin-top: 18rpx;
-}
-
-.voice-edit-change {
-  padding: 16rpx 18rpx;
-  border-radius: 16rpx;
-  background: var(--ui-page-background);
-}
-
-.voice-edit-change + .voice-edit-change {
-  margin-top: 12rpx;
-}
-
-.voice-edit-change-text {
-  display: block;
-  margin-top: 10rpx;
-  color: var(--ui-section-title);
-  font-size: 26rpx;
-  font-weight: 800;
-  line-height: 1.45;
-  word-break: break-word;
-}
-
-.voice-edit-inline-diff {
-  padding: 18rpx;
-  border: 2rpx solid var(--ui-border);
-  border-radius: 16rpx;
-  background: var(--ui-surface);
-}
-
-.voice-edit-diff-text {
-  display: block;
-  margin-top: 10rpx;
-  color: var(--ui-text-primary);
-  font-size: 28rpx;
-  line-height: 1.65;
-  word-break: break-word;
-}
-
-.voice-edit-diff-segment.delete {
-  padding: 0 4rpx;
-  border-radius: 6rpx;
-  background: var(--ui-danger-surface);
-  color: var(--ui-danger-text);
-  text-decoration: line-through;
-}
-
-.voice-edit-diff-segment.insert {
-  padding: 0 4rpx;
-  border-radius: 6rpx;
-  background: var(--ui-success-surface);
-  color: var(--ui-success-text);
-  font-weight: 800;
 }
 
 .login-entry-action {
@@ -1223,6 +1182,7 @@
 
 .detail-page.large-text .section-title,
 .detail-page.large-text .edit-mode-title,
+.detail-page.large-text .edit-assistant-title,
 .detail-page.large-text .danger-panel-title,
 .detail-page.large-text .repair-panel-title {
   font-size: 34rpx;
@@ -1239,9 +1199,8 @@
 }
 
 .detail-page.large-text .body-text,
+.detail-page.large-text .edit-before-text,
 .detail-page.large-text .edit-reference-text,
-.detail-page.large-text .voice-edit-text,
-.detail-page.large-text .voice-edit-diff-text,
 .detail-page.large-text .share-video-segment-text,
 .detail-page.large-text .share-video-selection-text,
 .detail-page.large-text .material-location-value,
@@ -1261,6 +1220,7 @@
 .detail-page.large-text .repair-button,
 .detail-page.large-text .danger-button,
 .detail-page.large-text .edit-exit-button,
+.detail-page.large-text .edit-version-option,
 .detail-page.large-text .edit-reference-toggle,
 .detail-page.large-text .text-action-button,
 .detail-page.large-text .material-location-action,
@@ -1275,7 +1235,8 @@
 .detail-page.large-text .share-video-background-label,
 .detail-page.large-text .custom-background-status,
 .detail-page.large-text .share-video-job-title,
-.detail-page.large-text .voice-edit-change-text,
+.detail-page.large-text .edit-assistant-hint,
+.detail-page.large-text .voice-edit-message,
 .detail-page.large-text .material-assignment-state,
 .detail-page.large-text .material-assignment-error {
   font-size: 30rpx;
@@ -1287,9 +1248,7 @@
 .detail-page.large-text .share-video-background-current,
 .detail-page.large-text .share-video-background-desc,
 .detail-page.large-text .share-video-job-meta,
-.detail-page.large-text .voice-edit-change-scope,
-.detail-page.large-text .voice-edit-label,
-.detail-page.large-text .voice-edit-confidence {
+.detail-page.large-text .edit-before-label {
   font-size: 28rpx;
   line-height: 1.5;
 }

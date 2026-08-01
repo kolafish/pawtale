@@ -52,7 +52,7 @@
           wx:if="{{!item.canRecoverTranscription}}"
           class="ghost-button"
           bindtap="beginEdit"
-          disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditLoading || voiceEditSaving}}"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
         >
           编辑成书文字
         </button>
@@ -123,11 +123,32 @@
       <view class="section-head">
         <view class="section-heading">
           <text class="section-title">编辑成书文字</text>
-          <text class="section-hint">修改后会更新这段章节素材</text>
+          <text class="section-hint">可直接修改，也可以让小余按要求调整</text>
         </view>
-        <text class="section-count">{{item.editingCharCount}} 字</text>
+        <text class="section-count">{{editPreviewVersion === 'before' ? item.displayCountText : item.editingCharCount + ' 字'}}</text>
+      </view>
+      <view class="edit-version-switch ui-version-switch" aria-label="对比修改前后文字">
+        <view
+          class="edit-version-option ui-version-option ui-pressable {{editPreviewVersion === 'before' ? 'active' : ''}}"
+          data-version="before"
+          bindtap="switchEditPreviewVersion"
+          aria-role="button"
+          aria-pressed="{{editPreviewVersion === 'before'}}"
+        >修改前</view>
+        <view
+          class="edit-version-option ui-version-option ui-pressable {{editPreviewVersion === 'after' ? 'active' : ''}}"
+          data-version="after"
+          bindtap="switchEditPreviewVersion"
+          aria-role="button"
+          aria-pressed="{{editPreviewVersion === 'after'}}"
+        >修改后</view>
+      </view>
+      <view wx:if="{{editPreviewVersion === 'before'}}" class="edit-before-panel">
+        <text class="edit-before-label">上次保存的成书文字</text>
+        <text class="edit-before-text" selectable>{{item.savedText}}</text>
       </view>
       <textarea
+        wx:else
         class="transcript-textarea"
         value="{{item.editingText}}"
         bindinput="changeText"
@@ -135,6 +156,28 @@
         auto-height
         cursor-spacing="24"
       />
+      <view class="edit-assistant">
+        <view>
+          <text class="edit-assistant-title">让小余帮我改</text>
+          <text class="edit-assistant-hint">输入或说出要替换的词、句子或片段</text>
+        </view>
+        <voice-text-editor
+          value="{{voiceEditInstructionText}}"
+          gateway-url="{{voiceEditGatewayUrl}}"
+          voice-session-id="{{item.id}}"
+          maxlength="1000"
+          placeholder="例如：把‘清流二村’改成‘清流一村’"
+          submit-text="生成修改后文字"
+          busy-text="正在修改…"
+          hint="结果会放到上方“修改后”草稿，保存前可与修改前对比。"
+          disabled="{{saving || deleting || convertingQuestionToAnswer}}"
+          busy="{{voiceEditLoading}}"
+          aria-label="输入或说出素材修改意见"
+          bindchange="changeVoiceEditInstruction"
+          bindsubmit="previewVoiceEdit"
+        />
+        <text wx:if="{{voiceEditMessage}}" class="voice-edit-message">{{voiceEditMessage}}</text>
+      </view>
       <view
         class="edit-reference-toggle ui-block-action ui-pressable"
         aria-role="button"
@@ -211,77 +254,6 @@
           disabled="{{saving || deleting || convertingQuestionToAnswer || !item.canPlayQuestionAudio}}"
         >
           {{playingAudioKind === "question" ? "停止提问" : "听小余提问"}}
-        </button>
-      </view>
-    </view>
-
-    <view wx:if="{{!item.isEditing && !item.canRecoverTranscription}}" class="section-card edit-tools-card">
-      <view class="section-head">
-        <view class="section-heading">
-          <text class="section-title">用语音说修改</text>
-          <text class="section-hint">说出要替换的词、句子或片段，小余先给出预览，确认后才保存。</text>
-        </view>
-        <text class="section-count">可修改</text>
-      </view>
-      <voice-text-editor
-        value="{{voiceEditInstructionText}}"
-        gateway-url="{{voiceEditGatewayUrl}}"
-        voice-session-id="{{item.id}}"
-        maxlength="1000"
-        placeholder="请输入或说出要修改的词、句子或片段"
-        submit-text="生成修改预览"
-        busy-text="正在生成预览…"
-        hint="识别文字会实时显示；提交后先看预览，确认后才保存。"
-        disabled="{{saving || deleting || convertingQuestionToAnswer || voiceEditSaving || voiceEditPreview !== null}}"
-        busy="{{voiceEditLoading}}"
-        aria-label="输入或说出素材修改意见"
-        bindchange="changeVoiceEditInstruction"
-        bindsubmit="previewVoiceEdit"
-      />
-      <view wx:if="{{voiceEditPreview}}" class="voice-edit-block">
-        <text class="voice-edit-label">小余建议</text>
-        <text class="voice-edit-text">{{voiceEditPreview.replyText}}</text>
-        <text class="voice-edit-confidence">可信度 {{voiceEditPreview.confidenceText}}</text>
-      </view>
-      <view wx:if="{{voiceEditPreview && voiceEditPreview.changes.length}}" class="voice-edit-changes">
-        <view
-          wx:for="{{voiceEditPreview.changes}}"
-          wx:for-item="change"
-          wx:for-index="changeIndex"
-          wx:key="changeIndex"
-          class="voice-edit-change"
-        >
-          <text class="voice-edit-change-scope">{{change.scopeLabel}}</text>
-          <text class="voice-edit-change-text">“{{change.before}}” → “{{change.after}}”</text>
-        </view>
-      </view>
-      <view wx:if="{{voiceEditPreview && voiceEditPreview.canConfirm}}" class="voice-edit-inline-diff">
-        <text class="voice-edit-label">文稿变化</text>
-        <text class="voice-edit-diff-text">
-          <text
-            wx:for="{{voiceEditPreview.diffSegments}}"
-            wx:for-item="segment"
-            wx:for-index="segmentIndex"
-            wx:key="segmentIndex"
-            class="voice-edit-diff-segment {{segment.kind}}"
-          >{{segment.text}}</text>
-        </text>
-      </view>
-      <view wx:if="{{voiceEditPreview}}" class="actions-row">
-        <button
-          class="ghost-button"
-          bindtap="cancelVoiceEdit"
-          disabled="{{voiceEditSaving}}"
-        >
-          取消修改
-        </button>
-        <button
-          class="primary-button"
-          bindtap="confirmVoiceEdit"
-          loading="{{voiceEditSaving}}"
-          disabled="{{voiceEditSaving || !voiceEditPreview.canConfirm}}"
-        >
-          确认保存
         </button>
       </view>
     </view>

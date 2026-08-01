@@ -115,14 +115,14 @@
       >查看全书</view>
       </view>
 
-      <view class="version-switch" aria-label="预览版本">
+      <view class="version-switch ui-version-switch" aria-label="预览版本">
       <view
-        class="version-option ui-pressable {{previewVersion === 'before' ? 'active' : ''}}"
+        class="ui-version-option ui-pressable {{previewVersion === 'before' ? 'active' : ''}}"
         data-version="before"
         bindtap="switchPreviewVersion"
       >修改前</view>
       <view
-        class="version-option ui-pressable {{previewVersion === 'after' ? 'active' : ''}}"
+        class="ui-version-option ui-pressable {{previewVersion === 'after' ? 'active' : ''}}"
         data-version="after"
         bindtap="switchPreviewVersion"
       >修改后</view>

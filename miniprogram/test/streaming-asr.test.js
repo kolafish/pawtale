@@ -696,7 +696,12 @@ test("updates and deletes voice transcripts through backend API", async () => {
     updateMemoirVoiceTranscript,
   } = require("../services/memoir-transcript-api.ts");
 
-  const preview = await previewMemoirVoiceTranscriptVoiceEdit("utterance/1", "这里不是外婆，是奶奶", "deepseek");
+  const preview = await previewMemoirVoiceTranscriptVoiceEdit(
+    "utterance/1",
+    "这里不是外婆，是奶奶",
+    "他是我的外婆。",
+    "deepseek",
+  );
   const result = await updateMemoirVoiceTranscript("utterance/1", "校正文");
   await deleteMemoirVoiceTranscript("utterance/1");
 
@@ -709,6 +714,7 @@ test("updates and deletes voice transcripts through backend API", async () => {
   assert.equal(apiRequests[0].method, "POST");
   assert.deepEqual(apiRequests[0].data, {
     instruction_text: "这里不是外婆，是奶奶",
+    draft_text: "他是我的外婆。",
     ai_model: "deepseek",
   });
   assert.deepEqual(result, updated);

@@ -9,7 +9,6 @@ const {
   transcriptDurationText,
   transcriptMaterialChapterText,
   transcriptMaterialSectionText,
-  transcriptVoiceEditPreviewView,
 } = require("../services/transcript-view-model.ts");
 
 test("transcript view model formats duration and audio text consistently", () => {
@@ -79,25 +78,4 @@ test("transcript view model derives book inclusion text", () => {
     }),
     "待归类素材（请选择小节）",
   );
-});
-
-test("transcript view model builds voice edit preview diff", () => {
-  const preview = transcriptVoiceEditPreviewView({
-    action: "revise_transcript",
-    current_text: "他叫李月，我们是高中同学。",
-    edited_text: "他叫李阅，我们是高中同学。",
-    reply_text: "",
-    confidence: 0.93,
-    changes: [{ scope: "term", before: "李月", after: "李阅" }],
-  });
-
-  assert.equal(preview.confidenceText, "93%");
-  assert.equal(preview.canConfirm, true);
-  assert.equal(preview.changes[0].scopeLabel, "名词替换");
-  assert.deepEqual(preview.diffSegments, [
-    { text: "他叫", kind: "equal" },
-    { text: "李月", kind: "delete" },
-    { text: "李阅", kind: "insert" },
-    { text: "，我们是高中同学。", kind: "equal" },
-  ]);
 });

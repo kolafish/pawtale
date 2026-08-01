@@ -17,7 +17,6 @@ import {
   transcriptMaterialSectionText,
   transcriptTitleText,
   type TranscriptTextSegment,
-  type TranscriptVoiceEditPreviewView,
 } from "../../services/transcript-view-model";
 
 export interface MaterialAssignmentOption {
@@ -29,6 +28,7 @@ export interface MaterialAssignmentOption {
 
 export interface TranscriptDetailItemView extends MemoirVoiceTranscriptItem {
   titleText: string;
+  savedText: string;
   editingText: string;
   editingCharCount: number;
   createdAtText: string;
@@ -91,11 +91,11 @@ export interface TranscriptDetailData {
   questionExpanded: boolean;
   moreActionsExpanded: boolean;
   editReferenceExpanded: boolean;
+  editPreviewVersion: "before" | "after";
   voiceEditGatewayUrl: string;
   voiceEditLoading: boolean;
-  voiceEditSaving: boolean;
   voiceEditInstructionText: string;
-  voiceEditPreview: TranscriptVoiceEditPreviewView | null;
+  voiceEditMessage: string;
   assignmentEditorOpen: boolean;
   assignmentLoading: boolean;
   assignmentSaving: boolean;
@@ -270,7 +270,7 @@ export function toViewItem(
   const canRecoverTranscription = Boolean(
     item.can_recover_transcription || item.transcription_status === "pending_transcription",
   );
-  const editingText = item.transcript_edited || item.transcript_raw;
+  const savedText = item.transcript_edited || item.transcript_raw;
   const isIncludedInBook = !canRecoverTranscription && Boolean(item.is_included_in_book || item.included_chapters?.length);
   const createdAtText = transcriptCreatedAtText(item);
   const audioText = transcriptAudioText(item);
@@ -282,8 +282,9 @@ export function toViewItem(
     ...item,
     offline_asr: offlineAsrState,
     titleText: transcriptTitleText(item),
-    editingText: previous?.isEditing ? previous.editingText : editingText,
-    editingCharCount: (previous?.isEditing ? previous.editingText : editingText).trim().length,
+    savedText,
+    editingText: previous?.isEditing ? previous.editingText : savedText,
+    editingCharCount: (previous?.isEditing ? previous.editingText : savedText).trim().length,
     createdAtText,
     audioText,
     recordMetaText: [createdAtText, audioText].filter(Boolean).join(" · "),
@@ -319,7 +320,7 @@ export function toViewItem(
     rawSegments: plainTranscriptSegments(canRecoverTranscription ? "等待恢复转写后显示原始识别文字。" : item.transcript_raw),
     displaySegments: plainTranscriptSegments(canRecoverTranscription ? recoveryText : item.display_text),
     changed: previous?.isEditing
-      ? previous.editingText.trim() !== editingText.trim()
+      ? previous.editingText.trim() !== savedText.trim()
       : false,
     isEditing: Boolean(previous?.isEditing),
     showOfflineAsr: Boolean(item.audio_file_id && item.chat_message_role !== "interviewer"),
@@ -339,7 +340,7 @@ export function changedItem(item: TranscriptDetailItemView, editingText: string)
     ...item,
     editingText,
     editingCharCount: editingText.trim().length,
-    changed: editingText.trim() !== (item.transcript_edited || item.transcript_raw).trim(),
+    changed: editingText.trim() !== item.savedText.trim(),
     isEditing: true,
   };
 }
