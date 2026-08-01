@@ -2505,7 +2505,10 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
 
     response = await client.post(
         f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/voice-edit/preview",
-        json={"instruction_text": "这里边的风是那个刮风的风，不是山峰的峰。"},
+        json={
+            "instruction_text": "这里边的风是那个刮风的风，不是山峰的峰。",
+            "draft_text": "他是我的儿子，名字叫刘凯峰，今年已经10岁了。",
+        },
     )
 
     assert response.status_code == 200
@@ -2513,8 +2516,8 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     assert data["utterance_id"] == created["utterance_id"]
     assert data["action"] == "revise_transcript"
     assert data["original_text"] == "他是我的儿子，名字叫刘凯峰，今年10岁。"
-    assert data["current_text"] == "他是我的儿子，名字叫刘凯峰，今年10岁。"
-    assert data["edited_text"] == "他是我的儿子，名字叫刘凯风，今年10岁。"
+    assert data["current_text"] == "他是我的儿子，名字叫刘凯峰，今年已经10岁了。"
+    assert data["edited_text"] == "他是我的儿子，名字叫刘凯风，今年已经10岁了。"
     assert data["changes"] == [
         {
             "scope": "term",
@@ -2533,7 +2536,7 @@ async def test_mobile_memoir_voice_edit_preview_uses_ai_without_saving(client, t
     assert "changes 之外的文字和标点必须逐字保持不变" in ai_client.prompt
     assert '"edited_text":' not in ai_client.prompt
     assert '"reason":' not in ai_client.prompt
-    assert "当前整理文字：他是我的儿子，名字叫刘凯峰，今年10岁。" in ai_client.prompt
+    assert "当前整理文字：他是我的儿子，名字叫刘凯峰，今年已经10岁了。" in ai_client.prompt
     assert "用户语音修正指令：\n这里边的风是那个刮风的风，不是山峰的峰。" in ai_client.prompt
 
     utterance = await test_db.scalar(

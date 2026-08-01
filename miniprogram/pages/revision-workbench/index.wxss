@@ -77,8 +77,7 @@
   color: var(--ui-danger-text);
 }
 
-.mode-switch,
-.version-switch {
+.mode-switch {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8rpx;
@@ -95,8 +94,7 @@
   box-shadow: var(--ui-card-shadow-raised);
 }
 
-.mode-option,
-.version-option {
+.mode-option {
   display: flex;
   min-height: 88rpx;
   align-items: center;
@@ -107,8 +105,7 @@
   font-weight: 700;
 }
 
-.mode-option.active,
-.version-option.active {
+.mode-option.active {
   background: var(--ui-surface);
   color: var(--ui-accent-strong);
   box-shadow: var(--ui-control-shadow);

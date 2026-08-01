@@ -32,6 +32,7 @@ import {
 definePage<TranscriptDetailData>()({
   audioPlayback: new AudioPlaybackController(),
   loadToken: 0,
+  voiceEditRequestToken: 0,
   offlineAsrPoller: new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
   offlineAsrPollToken: 0,
   offlineAsrPollAttempts: 0,
@@ -62,11 +63,11 @@ definePage<TranscriptDetailData>()({
     questionExpanded: false,
     moreActionsExpanded: false,
     editReferenceExpanded: false,
+    editPreviewVersion: "after",
     voiceEditGatewayUrl: "",
     voiceEditLoading: false,
-    voiceEditSaving: false,
     voiceEditInstructionText: "",
-    voiceEditPreview: null,
+    voiceEditMessage: "",
     assignmentEditorOpen: false,
     assignmentLoading: false,
     assignmentSaving: false,
@@ -85,6 +86,7 @@ definePage<TranscriptDetailData>()({
       questionExpanded: false,
       moreActionsExpanded: false,
       editReferenceExpanded: false,
+      editPreviewVersion: "after",
       assignmentEditorOpen: false,
       assignmentError: "",
     });
@@ -154,10 +156,12 @@ definePage<TranscriptDetailData>()({
   },
 
   onHide() {
+    this.invalidateVoiceEditRequest();
     this.stopOfflineAsrPolling();
   },
 
   onUnload() {
+    this.voiceEditRequestToken += 1;
     syncEditUnloadAlert(null);
     this.stopOfflineAsrPolling();
     this.stopPlayback();

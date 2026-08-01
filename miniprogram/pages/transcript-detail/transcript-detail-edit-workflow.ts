@@ -11,12 +11,13 @@ import { getMemoirBookPlan } from "../../services/memoir-book-api";
 import { placeMemoirChapterMaterial } from "../../services/memoir-chapter-workspace-api";
 import { routeAuthError } from "../../services/navigation";
 import {
+  datasetString,
   pickerIndex,
+  type PageDatasetEvent,
   type PagePickerEvent,
   type PageTextInputEvent,
 } from "../../services/page-input";
 import { promptRequiredText } from "../../services/text-prompt";
-import { transcriptVoiceEditPreviewView } from "../../services/transcript-view-model";
 import {
   changedItem,
   confirmConvertQuestionToAnswer,
@@ -32,13 +33,16 @@ import {
 
 interface TranscriptDetailEditWorkflowHost {
   data: TranscriptDetailData;
+  voiceEditRequestToken: number;
   setData(patch: Partial<TranscriptDetailData>): void;
   loadTranscript(): Promise<void>;
   stopPlayback(): void;
 }
 
 export interface TranscriptDetailEditWorkflowMethods {
+  invalidateVoiceEditRequest(): void;
   beginEdit(): void;
+  switchEditPreviewVersion(event: PageDatasetEvent<{ version?: string }>): void;
   toggleEditReference(): void;
   toggleQuestionExpanded(): void;
   toggleMoreActionsExpanded(): void;
@@ -53,8 +57,6 @@ export interface TranscriptDetailEditWorkflowMethods {
   resetToRaw(): void;
   changeVoiceEditInstruction(event: PageTextInputEvent): void;
   previewVoiceEdit(event: PageTextInputEvent): Promise<void>;
-  cancelVoiceEdit(): void;
-  confirmVoiceEdit(): Promise<void>;
   deleteTranscript(): Promise<void>;
   convertCurrentQuestionToAnswer(): Promise<void>;
 }
@@ -66,6 +68,14 @@ type TranscriptDetailEditWorkflow = TranscriptDetailEditWorkflowHost
 
 export const transcriptDetailEditWorkflowMethods:
 TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
+  invalidateVoiceEditRequest() {
+    if (!this.data.voiceEditLoading) {
+      return;
+    }
+    this.voiceEditRequestToken += 1;
+    this.setData({ voiceEditLoading: false });
+  },
+
   beginEdit() {
     const item = this.data.item;
     if (
@@ -74,14 +84,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
-      || this.data.voiceEditLoading
-      || this.data.voiceEditSaving
       || this.data.assignmentEditorOpen
     ) {
       return;
     }
+    this.invalidateVoiceEditRequest();
     this.stopPlayback();
-    const current = item.transcript_edited || item.transcript_raw;
+    const current = item.savedText;
     const nextItem: TranscriptDetailItemView = {
       ...item,
       editingText: current,
@@ -92,9 +101,22 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     this.setData({
       item: nextItem,
       editReferenceExpanded: false,
+      editPreviewVersion: "after",
+      voiceEditInstructionText: "",
+      voiceEditMessage: "",
       error: "",
     });
     syncEditUnloadAlert(nextItem);
+  },
+
+  switchEditPreviewVersion(event) {
+    if (!this.data.item?.isEditing) {
+      return;
+    }
+    const version = datasetString(event, "version");
+    if (version === "before" || version === "after") {
+      this.setData({ editPreviewVersion: version });
+    }
   },
 
   toggleEditReference() {
@@ -290,8 +312,13 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || item.canRecoverTranscription) {
       return;
     }
+    this.invalidateVoiceEditRequest();
     const nextItem = changedItem(item, event.detail.value);
-    this.setData({ item: nextItem });
+    this.setData({
+      item: nextItem,
+      editPreviewVersion: "after",
+      voiceEditMessage: "",
+    });
     syncEditUnloadAlert(nextItem);
   },
 
@@ -300,6 +327,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || this.data.saving || this.data.deleting) {
       return;
     }
+    this.invalidateVoiceEditRequest();
     if (item.changed && !await confirmDiscardEdit()) {
       return;
     }
@@ -307,6 +335,9 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     this.setData({
       item: nextItem,
       editReferenceExpanded: false,
+      editPreviewVersion: "after",
+      voiceEditInstructionText: "",
+      voiceEditMessage: "",
       error: "",
     });
     syncEditUnloadAlert(nextItem);
@@ -322,6 +353,7 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({ error: "成书文字不能为空" });
       return;
     }
+    this.invalidateVoiceEditRequest();
     this.setData({ saving: true, error: "" });
     try {
       const updated = await updateMemoirVoiceTranscript(item.id, content);
@@ -329,6 +361,9 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       this.setData({
         item: nextItem,
         editReferenceExpanded: false,
+        editPreviewVersion: "after",
+        voiceEditInstructionText: "",
+        voiceEditMessage: "",
       });
       syncEditUnloadAlert(nextItem);
       trackAuditAction("transcript.detail_edit_save", {}, { projectId: updated.project_id });
@@ -370,15 +405,20 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (!item || item.canRecoverTranscription) {
       return;
     }
+    this.invalidateVoiceEditRequest();
     const nextItem = changedItem(item, item.transcript_raw);
-    this.setData({ item: nextItem });
+    this.setData({
+      item: nextItem,
+      editPreviewVersion: "after",
+      voiceEditMessage: "",
+    });
     syncEditUnloadAlert(nextItem);
   },
 
   changeVoiceEditInstruction(event: PageTextInputEvent) {
     this.setData({
       voiceEditInstructionText: event.detail.value,
-      voiceEditPreview: null,
+      voiceEditMessage: "",
       error: "",
     });
   },
@@ -389,11 +429,11 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
     if (
       !item
       || item.canRecoverTranscription
+      || !item.isEditing
       || this.data.saving
       || this.data.deleting
       || this.data.convertingQuestionToAnswer
       || this.data.voiceEditLoading
-      || this.data.voiceEditSaving
     ) {
       return;
     }
@@ -401,78 +441,69 @@ TranscriptDetailEditWorkflowMethods & ThisType<TranscriptDetailEditWorkflow> = {
       wx.showToast({ title: "请先输入或说出修改意见", icon: "none" });
       return;
     }
+    const draftText = item.editingText.trim();
+    if (!draftText) {
+      this.setData({ error: "成书文字不能为空" });
+      return;
+    }
     this.stopPlayback();
+    this.voiceEditRequestToken += 1;
+    const requestToken = this.voiceEditRequestToken;
     this.setData({
       voiceEditLoading: true,
-      voiceEditSaving: false,
       voiceEditInstructionText: instructionText,
-      voiceEditPreview: null,
+      voiceEditMessage: "",
       error: "",
     });
     try {
-      const preview = await previewMemoirVoiceTranscriptVoiceEdit(item.id, instructionText);
-      this.setData({
-        voiceEditPreview: transcriptVoiceEditPreviewView(preview),
-        error: preview.action === "revise_transcript" ? "" : preview.reply_text,
-      });
+      const preview = await previewMemoirVoiceTranscriptVoiceEdit(
+        item.id,
+        instructionText,
+        draftText,
+      );
+      if (requestToken !== this.voiceEditRequestToken) {
+        return;
+      }
+      const currentItem = this.data.item;
+      if (!currentItem?.isEditing || currentItem.id !== item.id) {
+        return;
+      }
+      if (currentItem.editingText.trim() !== draftText) {
+        this.setData({
+          voiceEditMessage: "编辑内容已经变化，刚才生成的结果没有覆盖当前文字。请重新生成。",
+        });
+        return;
+      }
       trackAuditAction("transcript.detail_voice_edit_preview", { action: preview.action }, { projectId: item.project_id });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "语音修改失败";
-      this.setData({ error: message });
-    } finally {
-      this.setData({ voiceEditLoading: false });
-    }
-  },
-
-  cancelVoiceEdit() {
-    this.setData({
-      voiceEditLoading: false,
-      voiceEditSaving: false,
-      voiceEditInstructionText: "",
-      voiceEditPreview: null,
-      error: "",
-    });
-  },
-
-  async confirmVoiceEdit() {
-    const item = this.data.item;
-    const preview = this.data.voiceEditPreview;
-    if (
-      !item
-      || !preview
-      || !preview.canConfirm
-      || this.data.voiceEditSaving
-      || this.data.saving
-      || this.data.deleting
-      || this.data.convertingQuestionToAnswer
-    ) {
-      return;
-    }
-    const content = preview.editedText.trim();
-    if (!content) {
-      const message = "修改后的成书文字不能为空";
-      this.setData({ error: message });
-      return;
-    }
-    this.setData({
-      voiceEditSaving: true,
-      saving: true,
-      error: "",
-    });
-    try {
-      const updated = await updateMemoirVoiceTranscript(item.id, content);
+      if (
+        preview.action !== "revise_transcript"
+        || !preview.edited_text.trim()
+        || preview.edited_text.trim() === draftText
+      ) {
+        this.setData({ voiceEditMessage: preview.reply_text });
+        return;
+      }
+      const nextItem = changedItem(currentItem, preview.edited_text);
       this.setData({
-        item: toViewItem(updated),
+        item: nextItem,
+        editPreviewVersion: "after",
         voiceEditInstructionText: "",
-        voiceEditPreview: null,
+        voiceEditMessage: "已生成修改后文字，可与修改前对比后统一保存。",
       });
-      trackAuditAction("transcript.detail_voice_edit_save", {}, { projectId: updated.project_id });
-      wx.showToast({ title: "已保存修改", icon: "success" });
+      syncEditUnloadAlert(nextItem);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "保存修改失败";
-      this.setData({ error: message });
+      if (
+        requestToken === this.voiceEditRequestToken
+        && this.data.item?.isEditing
+        && this.data.item.id === item.id
+      ) {
+        const message = error instanceof Error ? error.message : "语音修改失败";
+        this.setData({ error: message });
+      }
     } finally {
-      this.setData({ voiceEditSaving: false, saving: false });
+      if (requestToken === this.voiceEditRequestToken) {
+        this.setData({ voiceEditLoading: false });
+      }
     }
   },
 

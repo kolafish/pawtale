@@ -263,6 +263,7 @@ image {
 .ui-accessible-page.large-text .secondary-action,
 .ui-accessible-page.large-text .settings-toggle,
 .ui-accessible-page.large-text .structure-regenerate-action,
+.ui-accessible-page.large-text .ui-version-option,
 .ui-accessible-page.large-text .ui-block-action {
   min-height: 48px;
   font-size: 32rpx;
@@ -277,6 +278,33 @@ image {
 
 .ui-pressable:active {
   transform: scale(0.96);
+}
+
+.ui-version-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+  margin-top: 24rpx;
+  padding: 8rpx;
+  border-radius: 16rpx;
+  background: var(--ui-surface-subtle);
+}
+
+.ui-version-option {
+  display: flex;
+  min-height: 88rpx;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8rpx;
+  color: var(--ui-text-secondary);
+  font-size: 27rpx;
+  font-weight: 700;
+}
+
+.ui-version-option.active {
+  background: var(--ui-surface);
+  color: var(--ui-accent-strong);
+  box-shadow: var(--ui-control-shadow);
 }
 
 .ui-block-action {

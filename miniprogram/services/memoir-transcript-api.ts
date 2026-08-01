@@ -292,15 +292,17 @@ export function recoverMemoirVoiceTranscript(
 export function previewMemoirVoiceTranscriptVoiceEdit(
   utteranceId: string,
   instructionText: string,
+  draftText: string,
   aiModel?: string,
 ): Promise<MemoirVoiceTranscriptVoiceEditPreviewResponse> {
   return memoirAIRequest<
     MemoirVoiceTranscriptVoiceEditPreviewResponse,
-    { instruction_text: string; ai_model: string | null }
+    { instruction_text: string; draft_text: string; ai_model: string | null }
   >(
     `/api/mobile/memoir/voice-transcripts/${encodeURIComponent(utteranceId)}/voice-edit/preview`,
     {
       instruction_text: instructionText,
+      draft_text: draftText,
       ai_model: aiModel?.trim() || null,
     },
     { invalidatesSnapshots: false },
