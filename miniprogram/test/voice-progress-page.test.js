@@ -53,7 +53,7 @@ function topicMapFixture() {
   };
 }
 
-function sampleSession(id, status) {
+function sampleSession(id, status, overrides = {}) {
   return {
     id,
     project_id: "project-1",
@@ -72,6 +72,7 @@ function sampleSession(id, status) {
     last_message_text: "我小时候住在老家。",
     last_message_role: "user",
     last_message_at: "2026-06-18T00:00:00.000Z",
+    ...overrides,
   };
 }
 
@@ -187,6 +188,21 @@ test("narration overview maps session status by backend status", async () => {
   assert.equal(context.data.sessions[2].canContinue, false);
   assert.equal("canViewTranscripts" in context.data.sessions[1], false);
   assert.equal("actionText" in context.data.sessions[1], false);
+});
+
+test("narration overview gives each session one clear title", () => {
+  const { sessionTitle } = loadOverviewPage().mod;
+  assert.equal(sessionTitle(sampleSession("free", "stopped", {
+    guidance_mode: "free_narration",
+    current_guidance_module: "free_narration",
+  })), "自由讲述");
+  assert.equal(sessionTitle(sampleSession("guided", "stopped")), "小余访谈 · 人物");
+  assert.equal(sessionTitle(sampleSession("human", "stopped", {
+    interview_type: "human_interview",
+  })), "面对面采访");
+  assert.equal(sessionTitle(sampleSession("completion", "stopped", {
+    session_goal: "book_completion",
+  })), "补充成书内容");
 });
 
 test("narration overview scopes all data to the active project", async () => {

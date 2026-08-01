@@ -34,7 +34,7 @@
     <view wx:for="{{sessions}}" wx:key="id" class="session-card ui-card">
       <view class="session-head">
         <view class="session-copy">
-          <text class="session-title">{{item.modeText}} · {{item.moduleText}}</text>
+          <text class="session-title">{{item.titleText}}</text>
           <text class="session-meta">{{item.updatedText}} · {{item.statusText}}</text>
         </view>
         <button

@@ -5,7 +5,6 @@ import type {
   MemoirTopicMapUserResolution,
 } from "../../domain/topic-map";
 import type {
-  MemoirGuidanceMode,
   MemoirVoiceProgressResponse,
   MemoirVoiceSessionSummary,
 } from "../../domain/memoir-voice-session";
@@ -37,9 +36,8 @@ import {
 } from "../../services/voice-authorization";
 
 interface VoiceSessionSummaryView extends MemoirVoiceSessionSummary {
-  modeText: string;
+  titleText: string;
   statusText: string;
-  moduleText: string;
   updatedText: string;
   durationText: string;
   canContinue: boolean;
@@ -91,8 +89,6 @@ const MODULE_LABELS: Record<string, string> = {
   place: "地点",
   period: "时间段",
   theme: "主题",
-  free_narration: "慢慢讲",
-  unassigned: "未分配",
 };
 const RESOLUTION_CHOICES: readonly ResolutionChoice[] = [
   { label: "目前讲这些就够了", value: "enough_for_now" },
@@ -112,10 +108,6 @@ const EMPTY_PROGRESS: MemoirVoiceProgressResponse = {
   modules: [],
 };
 
-function modeText(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
-}
-
 function statusText(status: string): string {
   const labels: Record<string, string> = {
     created: "可继续",
@@ -127,8 +119,20 @@ function statusText(status: string): string {
   return labels[status] || status;
 }
 
-function moduleText(value?: string | null): string {
-  return value ? (MODULE_LABELS[value] || value) : "未分配";
+export function sessionTitle(item: MemoirVoiceSessionSummary): string {
+  if (item.interview_type === "human_interview") {
+    return "面对面采访";
+  }
+  if (item.session_goal === "book_completion") {
+    return "补充成书内容";
+  }
+  if (item.guidance_mode === "guided_interview") {
+    const topic = item.current_guidance_module
+      ? MODULE_LABELS[item.current_guidance_module]
+      : "";
+    return topic ? `小余访谈 · ${topic}` : "小余访谈";
+  }
+  return "自由讲述";
 }
 
 function formatDate(value?: string | null): string {
@@ -165,11 +169,8 @@ export function canContinueVoiceSession(status: string): boolean {
 function toSessionView(item: MemoirVoiceSessionSummary): VoiceSessionSummaryView {
   return {
     ...item,
-    modeText: modeText(item.guidance_mode),
+    titleText: sessionTitle(item),
     statusText: statusText(item.status),
-    moduleText: item.guidance_mode === "free_narration"
-      ? "慢慢讲"
-      : moduleText(item.current_guidance_module),
     updatedText: formatDate(item.updated_at || item.created_at),
     durationText: formatDuration(item.total_audio_seconds),
     canContinue: canContinueVoiceSession(item.status),
