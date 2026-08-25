@@ -18,8 +18,12 @@ case "$target" in
     install_dependencies
     npm --prefix "$repository_root/e2e/miniprogram" run test:voice
     ;;
+  ios)
+    install_dependencies
+    npm --prefix "$repository_root/e2e/miniprogram" run test:ios
+    ;;
   *)
-    echo "暂不支持的目标：$target（当前支持：devtools、voice）" >&2
+    echo "暂不支持的目标：$target（当前支持：devtools、voice、ios）" >&2
     exit 2
     ;;
 esac

@@ -21,6 +21,32 @@ function integerEnvironmentValue(name, fallback) {
   return value;
 }
 
+function durationEnvironmentValue(name, fallback) {
+  const raw = String(process.env[name] || "").trim();
+  if (!raw) {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1000 || value > 10 * 60 * 1000) {
+    throw new Error(`${name} 必须是 1000 到 600000 之间的整数毫秒数`);
+  }
+  return value;
+}
+
+function booleanEnvironmentValue(name, fallback = false) {
+  const raw = String(process.env[name] || "").trim().toLowerCase();
+  if (!raw) {
+    return fallback;
+  }
+  if (["1", "true", "yes"].includes(raw)) {
+    return true;
+  }
+  if (["0", "false", "no"].includes(raw)) {
+    return false;
+  }
+  throw new Error(`${name} 必须是 1/0、true/false 或 yes/no`);
+}
+
 function requiredAccountConfig() {
   const email = String(process.env.PAWTALE_E2E_EMAIL || "").trim();
   const password = String(process.env.PAWTALE_E2E_PASSWORD || "");
@@ -56,6 +82,11 @@ function readE2EConfig() {
       process.env.PAWTALE_E2E_HTTP_BASE_URL || "https://pawtale-api.spaceflows.cn",
     ).replace(/\/$/, ""),
     projectPath,
+    iosAutoConnect: booleanEnvironmentValue("PAWTALE_E2E_IOS_AUTO_CONNECT"),
+    iosConnectTimeoutMs: durationEnvironmentValue(
+      "PAWTALE_E2E_IOS_CONNECT_TIMEOUT_MS",
+      3 * 60 * 1000,
+    ),
     wsBaseUrl: String(
       process.env.PAWTALE_E2E_WS_BASE_URL || "wss://pawtale-api.spaceflows.cn",
     ).replace(/\/$/, ""),
@@ -66,5 +97,7 @@ module.exports = {
   E2E_ROOT,
   LOCAL_ENV_PATH,
   REPOSITORY_ROOT,
+  booleanEnvironmentValue,
+  durationEnvironmentValue,
   readE2EConfig,
 };
