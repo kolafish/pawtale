@@ -11,19 +11,19 @@ source venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
 
-PYTHONPATH=. python scripts/migrate_runtime_schema.py
+createdb pawtale
+PYTHONPATH=. alembic upgrade head
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
-- 数据库默认位于仓库根目录 `data/pawtale.db`；
-- 迁移脚本对已有数据库默认先创建备份；
-- 全新数据库可显式使用 `--skip-backup`；
+- `DATABASE_URL` 必须使用 `postgresql+asyncpg`；
+- 生产环境必须显式设置 `DATABASE_URL`；
+- schema 迁移统一由 Alembic 管理；
 - API 启动只执行运行时配置和 schema 校验，不自动建表或迁移。
 
-## PostgreSQL 迁移开发
+## 数据库迁移
 
-PostgreSQL 迁移使用 Alembic 和 asyncpg 连接。Alembic 必须连接独立的开发数据库，
-不能使用生产数据库生成 schema 或执行测试。
+Alembic 必须连接独立的开发数据库，不能使用生产数据库生成 migration 或执行测试。
 
 ```bash
 export DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_dev'
@@ -32,27 +32,8 @@ PYTHONPATH=. alembic check
 ```
 
 后端 CI 通过 `TEST_POSTGRES_DATABASE_URL` 验证 baseline 能完整升级、与 SQLAlchemy
-metadata 一致、降级并再次升级。分阶段迁移期间仍保留 SQLite 默认值；生产切换后将
-删除 SQLite 运行时支持。
-
-生产数据只允许从 `backup_runtime_data.py` 生成并校验过的 manifest 导入空 PG 库。
-先停止全部数据库 writer 并创建最终备份，再 dry-run，最后显式执行：
-
-```bash
-PYTHONPATH=. python scripts/migrate_sqlite_to_postgres.py \
-  --manifest /path/to/backup/manifest.json \
-  --target-database-url "$POSTGRES_DATABASE_URL" \
-  --report /path/to/postgres-migration-report.json
-
-PYTHONPATH=. python scripts/migrate_sqlite_to_postgres.py \
-  --manifest /path/to/backup/manifest.json \
-  --target-database-url "$POSTGRES_DATABASE_URL" \
-  --report /path/to/postgres-migration-report.json \
-  --execute --writers-stopped
-```
-
-目标库只要有任一业务表非空就会拒绝导入。导入在单个 PG 事务内完成，并逐表校验
-行数、规范化内容 SHA-256 和全部外键；任一校验失败都会整批回滚。
+metadata 一致、降级并再次升级。生产变更先备份，再显式运行 `alembic upgrade head`，
+最后重启 API 并执行 schema、数据行数和外键验证。
 
 本地入口：
 
@@ -65,7 +46,8 @@ PYTHONPATH=. python scripts/migrate_sqlite_to_postgres.py \
 ```bash
 cd backend
 venv/bin/ruff check app tests scripts
-venv/bin/python -m pytest -q
+TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
+  venv/bin/python -m pytest -q
 ```
 
 常用范围：
@@ -148,7 +130,7 @@ app/
 
 完整变量和安全注释以 [.env.example](./.env.example) 与 `app/config.py` 为准。主要分组包括：
 
-- 应用与 SQLite；
+- 应用与 PostgreSQL；
 - 微信小程序登录；
 - Claude、DeepSeek、Doubao 文本模型；
 - 火山流式 ASR 和 TTS；

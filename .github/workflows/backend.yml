@@ -31,6 +31,8 @@ jobs:
           --health-retries 10
     env:
       TEST_POSTGRES_DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test
+      APP_ENV: test
     defaults:
       run:
         working-directory: backend

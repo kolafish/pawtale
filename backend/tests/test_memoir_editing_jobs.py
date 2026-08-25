@@ -3,9 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
     MemoirAutomationEventType,
@@ -22,6 +21,7 @@ from app.services.memoir.editing_jobs import (
     enqueue_editing_job,
     register_editing_job_handler,
     run_available_editing_jobs,
+    run_due_editing_jobs,
     run_editing_job,
 )
 from app.services.memoir.job_leases import JobLeaseLostError, run_with_lease_heartbeat
@@ -67,38 +67,35 @@ async def test_enqueue_editing_job_deduplicates_pending_job(test_db):
     assert second.payload_json == {"utterance_ids": ["u1"], "source": "updated"}
 
 
-async def test_enqueue_editing_job_deduplicates_concurrent_insert(tmp_path):
-    register_models()
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-enqueue.db'}", echo=False)
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+async def test_enqueue_editing_job_deduplicates_concurrent_insert(test_db):
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    async with session_maker() as db:
+        project = Project(title="并发排队", type=ProjectType.MEMOIR.value)
+        db.add(project)
+        await db.commit()
+        project_id = project.id
+
+    async def enqueue_once() -> str:
         async with session_maker() as db:
-            project = Project(title="并发排队", type=ProjectType.MEMOIR.value)
-            db.add(project)
+            job = await enqueue_editing_job(
+                db,
+                project_id=project_id,
+                job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
+                dedupe_key="ingest:concurrent",
+            )
             await db.commit()
-            project_id = project.id
+            return job.id
 
-        async def enqueue_once() -> str:
-            async with session_maker() as db:
-                job = await enqueue_editing_job(
-                    db,
-                    project_id=project_id,
-                    job_type=MemoirEditingJobType.UPDATE_TOPIC_MAP,
-                    dedupe_key="ingest:concurrent",
-                )
-                await db.commit()
-                return job.id
+    job_ids = await asyncio.gather(enqueue_once(), enqueue_once())
 
-        job_ids = await asyncio.gather(enqueue_once(), enqueue_once())
-
-        assert job_ids[0] == job_ids[1]
-        async with session_maker() as db:
-            jobs = (await db.scalars(select(MemoirEditingJob))).all()
-            assert len(jobs) == 1
-    finally:
-        await engine.dispose()
+    assert job_ids[0] == job_ids[1]
+    async with session_maker() as db:
+        jobs = (await db.scalars(select(MemoirEditingJob))).all()
+        assert len(jobs) == 1
 
 
 async def test_enqueue_editing_job_does_not_reset_running_job(test_db):
@@ -390,50 +387,47 @@ async def test_expired_editing_job_lease_is_reclaimed_and_fences_old_worker(test
     assert job.attempts == 2
 
 
-async def test_editing_job_claim_is_atomic_across_workers(tmp_path):
-    register_models()
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-claims.db'}", echo=False)
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        due_at = _utcnow()
+async def test_editing_job_claim_is_atomic_across_workers(test_db):
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    due_at = _utcnow()
+    async with session_maker() as db:
+        project = Project(title="并发领取", type=ProjectType.MEMOIR.value)
+        db.add(project)
+        await db.flush()
+        job = await enqueue_editing_job(
+            db,
+            project_id=project.id,
+            job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+            payload_json={"utterance_ids": ["u1"]},
+            run_after=due_at - timedelta(seconds=1),
+        )
+        job_id = job.id
+        await db.commit()
+
+    async def claim_once():
         async with session_maker() as db:
-            project = Project(title="并发领取", type=ProjectType.MEMOIR.value)
-            db.add(project)
-            await db.flush()
-            job = await enqueue_editing_job(
+            return await claim_due_editing_jobs(
                 db,
-                project_id=project.id,
-                job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-                payload_json={"utterance_ids": ["u1"]},
-                run_after=due_at - timedelta(seconds=1),
+                now=due_at,
+                limit=1,
+                lease_seconds=30,
             )
-            job_id = job.id
-            await db.commit()
 
-        async def claim_once():
-            async with session_maker() as db:
-                return await claim_due_editing_jobs(
-                    db,
-                    now=due_at,
-                    limit=1,
-                    lease_seconds=30,
-                )
+    claims = await asyncio.gather(claim_once(), claim_once())
+    leases = [lease for worker_claims in claims for lease in worker_claims]
 
-        claims = await asyncio.gather(claim_once(), claim_once())
-        leases = [lease for worker_claims in claims for lease in worker_claims]
-
-        assert len(leases) == 1
-        assert leases[0].job_id == job_id
-        async with session_maker() as db:
-            stored_job = await db.get(MemoirEditingJob, job_id)
-            assert stored_job is not None
-            assert stored_job.status == MemoirEditingJobStatus.RUNNING.value
-            assert stored_job.lease_token == leases[0].token
-            assert stored_job.attempts == 1
-    finally:
-        await engine.dispose()
+    assert len(leases) == 1
+    assert leases[0].job_id == job_id
+    async with session_maker() as db:
+        stored_job = await db.get(MemoirEditingJob, job_id)
+        assert stored_job is not None
+        assert stored_job.status == MemoirEditingJobStatus.RUNNING.value
+        assert stored_job.lease_token == leases[0].token
+        assert stored_job.attempts == 1
 
 
 async def test_postgres_editing_claim_skips_locked_queue_head(test_db):
@@ -483,10 +477,12 @@ async def test_postgres_editing_claim_skips_locked_queue_head(test_db):
     assert [lease.job_id for lease in leases] == [second.id]
 
 
-async def test_sqlite_editing_worker_serializes_claimed_job_writes(tmp_path):
-    register_models()
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-serial.db'}", echo=False)
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def test_editing_worker_runs_claimed_jobs_concurrently(test_db):
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
     active_handlers = 0
     peak_handlers = 0
 
@@ -494,38 +490,38 @@ async def test_sqlite_editing_worker_serializes_claimed_job_writes(tmp_path):
         nonlocal active_handlers, peak_handlers
         active_handlers += 1
         peak_handlers = max(peak_handlers, active_handlers)
-        await asyncio.sleep(0.01)
+        await asyncio.sleep(0.2)
         active_handlers -= 1
         return EditingJobResult(result_json={"job_id": current_job.id})
 
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        async with session_maker() as db:
-            project = Project(title="串行任务", type=ProjectType.MEMOIR.value)
+    async with session_maker() as db:
+        for index in range(2):
+            project = Project(
+                title=f"并发任务 {index}",
+                type=ProjectType.MEMOIR.value,
+            )
             db.add(project)
             await db.flush()
-            for index in range(2):
-                await enqueue_editing_job(
-                    db,
-                    project_id=project.id,
-                    job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-                    run_after=_utcnow() - timedelta(seconds=1),
-                    dedupe_key=f"route:serial:{index}",
-                )
-            await db.commit()
+            await enqueue_editing_job(
+                db,
+                project_id=project.id,
+                job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+                run_after=_utcnow() - timedelta(seconds=1),
+                dedupe_key=f"route:concurrent:{index}",
+            )
+        await db.commit()
 
-        register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
-        assert await run_available_editing_jobs(session_maker) == 2
-        assert peak_handlers == 1
-    finally:
-        await engine.dispose()
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
+    assert await run_due_editing_jobs(session_maker, limit=2) == 2
+    assert peak_handlers == 2
 
 
-async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(tmp_path):
-    register_models()
-    engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-drain.db'}", echo=False)
-    session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(test_db):
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
 
     async def first_handler(db, current_job):
         await enqueue_editing_job(
@@ -540,31 +536,26 @@ async def test_editing_worker_drains_jobs_enqueued_by_completed_jobs(tmp_path):
     async def second_handler(db, current_job):
         return EditingJobResult(result_json={"drained": current_job.id})
 
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        async with session_maker() as db:
-            project = Project(title="连续任务", type=ProjectType.MEMOIR.value)
-            db.add(project)
-            await db.flush()
-            await enqueue_editing_job(
-                db,
-                project_id=project.id,
-                job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-                run_after=_utcnow() - timedelta(seconds=1),
-                dedupe_key="route:drain",
-            )
-            await db.commit()
+    async with session_maker() as db:
+        project = Project(title="连续任务", type=ProjectType.MEMOIR.value)
+        db.add(project)
+        await db.flush()
+        await enqueue_editing_job(
+            db,
+            project_id=project.id,
+            job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+            run_after=_utcnow() - timedelta(seconds=1),
+            dedupe_key="route:drain",
+        )
+        await db.commit()
 
-        register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, first_handler)
-        register_editing_job_handler(MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY, second_handler)
-        assert await run_available_editing_jobs(session_maker) == 2
-        async with session_maker() as db:
-            statuses = (await db.scalars(select(MemoirEditingJob.status))).all()
-            assert len(statuses) == 2
-            assert set(statuses) == {MemoirEditingJobStatus.SUCCEEDED.value}
-    finally:
-        await engine.dispose()
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, first_handler)
+    register_editing_job_handler(MemoirEditingJobType.GENERATE_BOOK_EDITORIAL_COPY, second_handler)
+    assert await run_available_editing_jobs(session_maker) == 2
+    async with session_maker() as db:
+        statuses = (await db.scalars(select(MemoirEditingJob.status))).all()
+        assert len(statuses) == 2
+        assert set(statuses) == {MemoirEditingJobStatus.SUCCEEDED.value}
 
 
 async def test_lease_heartbeat_cancels_work_after_ownership_is_lost():

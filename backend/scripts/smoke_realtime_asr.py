@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import get_settings
-from app.migrations.memoir_voice import assert_memoir_voice_schema
+from app.migrations.postgres_runtime import assert_postgres_runtime_schema
 from app.services.asr.volc_protocol import VolcASRProtocolCodec
 from app.services.asr.volc_streaming import VolcStreamingASRClient, VolcStreamingASRConfig
 
@@ -83,7 +83,7 @@ def _env_status(config: VolcStreamingASRConfig) -> dict[str, Any]:
 async def _schema_status(database_url: str) -> dict[str, str]:
     engine = create_async_engine(database_url, echo=False)
     try:
-        await assert_memoir_voice_schema(engine)
+        await assert_postgres_runtime_schema(engine)
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "failed", "error": str(exc)}

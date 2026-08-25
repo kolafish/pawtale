@@ -1,8 +1,7 @@
 from io import BytesIO
 
 from PIL import Image
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import select
 
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
@@ -11,11 +10,8 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
     MemoirShareVideoJobStatus,
 )
-from app.migrations.memoir_images import migrate_memoir_image_schema
-from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraftVersion,
-    MemoirBookImagePlacement,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirEditingJob,
@@ -392,150 +388,8 @@ async def test_image_asset_api_places_image_near_source_and_syncs_latest_manuscr
     assert exported.content.startswith(b"%PDF")
 
 
-async def test_image_migration_relocates_legacy_source_linked_appendix_and_resyncs_output(
-    client,
-    test_db,
-    tmp_path,
-    monkeypatch,
-):
-    _, project_id, chapter_id, asset_id = await _seed_image_asset(
-        client,
-        test_db,
-        tmp_path,
-        monkeypatch,
-    )
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements",
-        json={
-            "placement_type": "chapter_inline",
-            "display_size": "full_width",
-        },
-    )
-    assert response.status_code == 201
-    placement_id = response.json()["placements"][0]["id"]
-
-    await test_db.execute(
-        text(
-            """
-            UPDATE memoir_book_image_placements
-            SET placement_type = 'appendix', chapter_id = NULL
-            WHERE id = :placement_id
-            """
-        ),
-        {"placement_id": placement_id},
-    )
-    output_version = await test_db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.project_id == project_id)
-        .order_by(MemoirBookOutputVersion.version.desc())
-    )
-    assert output_version is not None
-    manuscript = dict(output_version.manuscript_json)
-    chapters = [dict(chapter) for chapter in manuscript["chapters"]]
-    legacy_illustration = dict(chapters[0]["illustrations"][0])
-    legacy_illustration["placement"] = "appendix"
-    legacy_illustration.pop("section_id", None)
-    chapters[0]["illustrations"] = []
-    manuscript["chapters"] = chapters
-    manuscript["image_appendix"] = [legacy_illustration]
-    manuscript["render_settings"] = {
-        **manuscript["render_settings"],
-        "photo_mode": "appendix",
-    }
-    output_version.manuscript_json = manuscript
-    await test_db.commit()
-
-    result = await migrate_memoir_image_schema(test_db.bind)
-    assert result["relocated_source_linked_placements"] == 1
-    changed_outputs = await image_assets.resync_all_latest_book_output_image_snapshots(
-        test_db
-    )
-    await test_db.commit()
-
-    placement = (
-        await test_db.execute(
-            text(
-                """
-                SELECT placement_type, chapter_id
-                FROM memoir_book_image_placements
-                WHERE id = :placement_id
-                """
-            ),
-            {"placement_id": placement_id},
-        )
-    ).one()
-    assert placement.placement_type == "chapter_inline"
-    assert placement.chapter_id == chapter_id
-    assert changed_outputs == 1
-    await test_db.refresh(output_version)
-    assert output_version.manuscript_json["image_appendix"] == [legacy_illustration]
-    migrated_version = await test_db.scalar(
-        select(MemoirBookOutputVersion)
-        .where(MemoirBookOutputVersion.project_id == project_id)
-        .order_by(MemoirBookOutputVersion.version.desc())
-    )
-    assert migrated_version is not None
-    assert migrated_version.id != output_version.id
-    migrated_manuscript = migrated_version.manuscript_json
-    assert migrated_manuscript["image_appendix"] == []
-    migrated_illustration = migrated_manuscript["chapters"][0]["illustrations"][0]
-    assert migrated_illustration["placement"] == "chapter_inline"
-    assert migrated_illustration["section_id"]
 
 
-async def test_image_migration_disables_redundant_source_linked_appendix(
-    client,
-    test_db,
-    tmp_path,
-    monkeypatch,
-):
-    _, project_id, chapter_id, asset_id = await _seed_image_asset(
-        client,
-        test_db,
-        tmp_path,
-        monkeypatch,
-    )
-    response = await client.post(
-        f"/api/mobile/memoir/projects/{project_id}/image-assets/{asset_id}/placements",
-        json={
-            "placement_type": "chapter_inline",
-            "display_size": "full_width",
-        },
-    )
-    assert response.status_code == 201
-    legacy_appendix = MemoirBookImagePlacement(
-        project_id=project_id,
-        image_asset_id=asset_id,
-        placement_type="appendix",
-        chapter_id=None,
-        sort_order=1,
-        enabled=True,
-    )
-    test_db.add(legacy_appendix)
-    await test_db.commit()
-
-    result = await migrate_memoir_image_schema(test_db.bind)
-    assert result["relocated_source_linked_placements"] == 0
-    enabled_rows = (
-        await test_db.execute(
-            text(
-                """
-                SELECT placement_type, chapter_id
-                FROM memoir_book_image_placements
-                    WHERE image_asset_id = :asset_id AND enabled IS TRUE
-                """
-            ),
-            {"asset_id": asset_id},
-        )
-    ).all()
-
-    assert enabled_rows == [("chapter_inline", chapter_id)]
-    chapter_images, appendix_images = await image_assets.manuscript_image_snapshots(
-        test_db,
-        project_id=project_id,
-    )
-    assert len(chapter_images[chapter_id]) == 1
-    assert appendix_images == []
 
 
 async def test_generated_image_download_is_branded_without_changing_clean_source(
@@ -614,20 +468,3 @@ async def test_image_assets_are_project_owner_scoped(client, test_db, tmp_path, 
         json={"caption": "不应该能改"},
     )
     assert response.status_code == 404
-
-
-async def test_runtime_migration_creates_memoir_image_tables():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        result = await migrate_runtime_schema(engine)
-        assert "memoir_images" in result
-        async with engine.begin() as conn:
-            rows = (
-                await conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memoir_%image%'")
-                )
-            ).scalars().all()
-        assert "memoir_image_assets" in rows
-        assert "memoir_book_image_placements" in rows
-    finally:
-        await engine.dispose()

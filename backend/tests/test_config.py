@@ -6,10 +6,13 @@ from app import database
 from app.auth import SESSION_COOKIE_NAME, set_session_cookie
 from app.config import (
     DEFAULT_APP_SECRET_KEY,
+    DEFAULT_DATABASE_URL,
     Settings,
     is_production_environment,
     validate_runtime_settings,
 )
+
+PRODUCTION_DATABASE_URL = "postgresql+asyncpg://pawtale:secret@example.test/pawtale"
 
 
 def test_validate_runtime_settings_rejects_invalid_app_env():
@@ -27,28 +30,44 @@ def test_validate_runtime_settings_rejects_unknown_default_ai_model():
 
 
 def test_validate_runtime_settings_rejects_default_production_secret():
-    settings = Settings(app_env="production", app_secret_key=DEFAULT_APP_SECRET_KEY)
+    settings = Settings(
+        app_env="production",
+        app_secret_key=DEFAULT_APP_SECRET_KEY,
+        database_url=PRODUCTION_DATABASE_URL,
+    )
 
     with pytest.raises(RuntimeError, match="non-default"):
         validate_runtime_settings(settings)
 
 
 def test_validate_runtime_settings_rejects_short_production_secret():
-    settings = Settings(app_env="production", app_secret_key="short-secret")
+    settings = Settings(
+        app_env="production",
+        app_secret_key="short-secret",
+        database_url=PRODUCTION_DATABASE_URL,
+    )
 
     with pytest.raises(RuntimeError, match="at least 32 characters"):
         validate_runtime_settings(settings)
 
 
 def test_validate_runtime_settings_accepts_strong_production_secret():
-    settings = Settings(app_env=" Production ", app_secret_key="x" * 32)
+    settings = Settings(
+        app_env=" Production ",
+        app_secret_key="x" * 32,
+        database_url=PRODUCTION_DATABASE_URL,
+    )
 
     validate_runtime_settings(settings)
     assert is_production_environment(settings)
 
 
 def test_session_cookie_is_secure_in_production(monkeypatch):
-    settings = Settings(app_env="production", app_secret_key="x" * 32)
+    settings = Settings(
+        app_env="production",
+        app_secret_key="x" * 32,
+        database_url=PRODUCTION_DATABASE_URL,
+    )
     monkeypatch.setattr(auth, "get_settings", lambda: settings)
 
     response = Response()
@@ -69,19 +88,22 @@ def test_session_cookie_remains_http_compatible_in_development(monkeypatch):
     assert "Secure" not in response.headers["set-cookie"]
 
 
-def test_sqlite_engine_connect_args_use_busy_timeout_seconds():
+def test_validate_runtime_settings_rejects_non_postgres_database():
+    settings = Settings(database_url="mysql+asyncmy://pawtale@example.test/db")
+
+    with pytest.raises(RuntimeError, match=r"postgresql\+asyncpg"):
+        validate_runtime_settings(settings)
+
+
+def test_validate_runtime_settings_requires_explicit_production_database():
     settings = Settings(
-        database_url="sqlite+aiosqlite:///tmp/pawtale.db",
-        sqlite_busy_timeout_ms=7500,
+        app_env="production",
+        app_secret_key="x" * 32,
+        database_url=DEFAULT_DATABASE_URL,
     )
 
-    assert database.sqlite_engine_connect_args(settings) == {"timeout": 7.5}
-
-
-def test_non_sqlite_engine_connect_args_stay_empty():
-    settings = Settings(database_url="postgresql+asyncpg://pawtale@example.test/db")
-
-    assert database.sqlite_engine_connect_args(settings) == {}
+    with pytest.raises(RuntimeError, match="explicitly configured"):
+        validate_runtime_settings(settings)
 
 
 def test_postgres_engine_uses_bounded_health_checked_pool(monkeypatch):
@@ -106,13 +128,19 @@ def test_postgres_engine_uses_bounded_health_checked_pool(monkeypatch):
     assert captured == {
         "url": settings.database_url,
         "echo": settings.app_env == "development",
-        "connect_args": {},
         "pool_pre_ping": True,
         "pool_size": 7,
         "max_overflow": 4,
         "pool_timeout": 12.5,
         "pool_recycle": 900,
     }
+
+
+def test_database_engine_rejects_non_postgres_url():
+    settings = Settings(database_url="mysql+asyncmy://pawtale@example.test/db")
+
+    with pytest.raises(RuntimeError, match=r"postgresql\+asyncpg"):
+        database.create_database_engine(settings)
 
 
 def test_small_concurrency_provider_limit_defaults():
@@ -131,57 +159,3 @@ def test_small_concurrency_provider_limit_defaults():
     assert settings.tts_max_concurrent_requests == 3
     assert settings.volc_tts_resource_id == "seed-tts-2.0"
     assert settings.volc_tts_speaker == "zh_female_vv_uranus_bigtts"
-
-
-def test_configure_sqlite_connection_applies_small_concurrency_pragmas():
-    settings = Settings(
-        sqlite_busy_timeout_ms=3000,
-        sqlite_journal_mode="wal",
-        sqlite_synchronous="normal",
-    )
-    connection = FakeDBAPIConnection()
-
-    database.configure_sqlite_connection(connection, settings)
-
-    assert connection.cursor_obj.statements == [
-        "PRAGMA foreign_keys = ON",
-        "PRAGMA busy_timeout = 3000",
-        "PRAGMA journal_mode = WAL",
-        "PRAGMA synchronous = NORMAL",
-    ]
-    assert connection.cursor_obj.closed
-
-    migration_connection = FakeDBAPIConnection()
-    database.configure_sqlite_connection(
-        migration_connection,
-        settings,
-        enforce_foreign_keys=False,
-    )
-    assert migration_connection.cursor_obj.statements[0] == "PRAGMA foreign_keys = OFF"
-
-
-def test_configure_sqlite_connection_rejects_invalid_pragma_values():
-    settings = Settings(sqlite_journal_mode="wal; drop table users")
-
-    with pytest.raises(RuntimeError, match="SQLITE_JOURNAL_MODE"):
-        database.configure_sqlite_connection(FakeDBAPIConnection(), settings)
-
-
-class FakeDBAPICursor:
-    def __init__(self):
-        self.statements: list[str] = []
-        self.closed = False
-
-    def execute(self, statement: str):
-        self.statements.append(statement)
-
-    def close(self):
-        self.closed = True
-
-
-class FakeDBAPIConnection:
-    def __init__(self):
-        self.cursor_obj = FakeDBAPICursor()
-
-    def cursor(self):
-        return self.cursor_obj

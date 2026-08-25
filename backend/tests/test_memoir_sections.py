@@ -1,19 +1,11 @@
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.database import Base, register_models
 from app.domain.memoir.types import (
     MemoirGuidanceMode,
     MemoirSectionMaterialAssignedBy,
     MemoirSectionType,
 )
-from app.migrations.memoir_sections import (
-    MEMOIR_SECTION_TABLES,
-    assert_memoir_section_schema,
-    migrate_memoir_section_schema,
-)
-from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookPlan,
     MemoirBookPlanChapter,
@@ -25,14 +17,8 @@ from app.models.memoir import (
 from app.models.projects import Project
 
 
-async def _table_columns(conn, table_name: str) -> set[str]:
-    rows = (await conn.execute(text(f"PRAGMA table_info({table_name})"))).fetchall()
-    return {row[1] for row in rows}
 
 
-async def _index_names(conn, table_name: str) -> set[str]:
-    rows = (await conn.execute(text(f"PRAGMA index_list({table_name})"))).fetchall()
-    return {row[1] for row in rows}
 
 
 async def _add_project_chapter_and_material(test_db):
@@ -69,109 +55,10 @@ async def _add_project_chapter_and_material(test_db):
     return project, chapter, utterance
 
 
-async def test_section_migration_creates_missing_tables():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            for table_name in reversed(MEMOIR_SECTION_TABLES):
-                await conn.execute(text(f"DROP TABLE {table_name}"))
-
-        result = await migrate_memoir_section_schema(engine)
-        second_result = await migrate_memoir_section_schema(engine)
-
-        assert result["changed_tables"] == list(MEMOIR_SECTION_TABLES)
-        assert second_result["changed_tables"] == []
-        await assert_memoir_section_schema(engine)
-
-        async with engine.begin() as conn:
-            assert "section_type" in await _table_columns(conn, "memoir_sections")
-            assert "utterance_id" in await _table_columns(
-                conn,
-                "memoir_section_materials",
-            )
-            assert "input_signature" in await _table_columns(
-                conn,
-                "memoir_section_digests",
-            )
-    finally:
-        await engine.dispose()
 
 
-async def test_runtime_migration_creates_section_tables():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            for table_name in reversed(MEMOIR_SECTION_TABLES):
-                await conn.execute(text(f"DROP TABLE {table_name}"))
-
-        await migrate_runtime_schema(engine)
-        await migrate_runtime_schema(engine)
-
-        async with engine.begin() as conn:
-            for table_name in MEMOIR_SECTION_TABLES:
-                assert await _table_columns(conn, table_name)
-    finally:
-        await engine.dispose()
 
 
-async def test_section_tables_define_constraints_and_indexes():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            section_sql = (
-                await conn.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'table' AND name = 'memoir_sections'"
-                    )
-                )
-            ).scalar_one()
-            material_sql = (
-                await conn.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'table' AND name = 'memoir_section_materials'"
-                    )
-                )
-            ).scalar_one()
-            digest_sql = (
-                await conn.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'table' AND name = 'memoir_section_digests'"
-                    )
-                )
-            ).scalar_one()
-
-            assert "uq_memoir_sections_chapter_order" in section_sql
-            assert "ck_memoir_sections_type" in section_sql
-            assert "ck_memoir_sections_status" in section_sql
-            assert "uq_memoir_section_materials_project_utterance" in material_sql
-            assert "ck_memoir_section_materials_assigned_by" in material_sql
-            assert "ck_memoir_section_materials_confidence" in material_sql
-            assert "uq_memoir_section_digests_signature" in digest_sql
-            assert "ck_memoir_section_digests_status" in digest_sql
-
-            section_indexes = await _index_names(conn, "memoir_sections")
-            material_indexes = await _index_names(
-                conn,
-                "memoir_section_materials",
-            )
-            digest_indexes = await _index_names(conn, "memoir_section_digests")
-            assert "ix_memoir_sections_project_id" in section_indexes
-            assert "ix_memoir_sections_chapter_id" in section_indexes
-            assert "ix_memoir_section_materials_section_id" in material_indexes
-            assert "ix_memoir_section_materials_utterance_id" in material_indexes
-            assert "ix_memoir_section_digests_section_id" in digest_indexes
-            assert "ix_memoir_section_digests_input_signature" in digest_indexes
-    finally:
-        await engine.dispose()
 
 
 async def test_one_material_has_one_section_membership(test_db):

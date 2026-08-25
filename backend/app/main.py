@@ -10,7 +10,9 @@ from app.application_errors import (
 )
 from app.config import get_settings, validate_runtime_settings
 from app.database import engine
-from app.migrations.runtime import assert_runtime_schema
+from app.migrations.postgres_runtime import (
+    assert_postgres_runtime_schema as assert_runtime_schema,
+)
 from app.routers import audit_router, auth_router, github_router, memoir_router, projects_router
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import editing_worker_loop

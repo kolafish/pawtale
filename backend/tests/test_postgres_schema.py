@@ -4,7 +4,6 @@ import os
 import asyncio
 from pathlib import Path
 
-import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect
@@ -15,10 +14,8 @@ from app.migrations.postgres_runtime import assert_postgres_runtime_schema
 
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
-pytestmark = pytest.mark.skipif(
-    not POSTGRES_DATABASE_URL,
-    reason="TEST_POSTGRES_DATABASE_URL is not configured",
-)
+if not POSTGRES_DATABASE_URL:
+    raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required")
 
 
 def _alembic_config() -> Config:

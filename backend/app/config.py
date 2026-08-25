@@ -1,11 +1,13 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 from pathlib import Path
+from sqlalchemy.engine import make_url
 
 # 获取 backend 目录的绝对路径
 BACKEND_DIR = Path(__file__).parent.parent.resolve()
 DATA_DIR = BACKEND_DIR.parent / "data"
 DEFAULT_APP_SECRET_KEY = "dev-secret-key-change-in-production"
+DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale"
 MIN_PRODUCTION_SECRET_LENGTH = 32
 VALID_APP_ENVS = {"development", "test", "production"}
 DEFAULT_AI_TEXT_MODEL = "claude-opus-4-8"
@@ -30,14 +32,11 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     app_secret_key: str = DEFAULT_APP_SECRET_KEY
-    database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
+    database_url: str = DEFAULT_DATABASE_URL
     database_pool_size: int = 5
     database_max_overflow: int = 10
     database_pool_timeout_seconds: float = 30.0
     database_pool_recycle_seconds: int = 1800
-    sqlite_journal_mode: str = "WAL"
-    sqlite_synchronous: str = "NORMAL"
-    sqlite_busy_timeout_ms: int = 5000
     local_default_user_email: str = "local@pawtale.local"
     local_default_user_password: str = "pawtale-local"
     local_default_user_display_name: str = "本地作者"
@@ -170,6 +169,10 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
         valid_envs = ", ".join(sorted(VALID_APP_ENVS))
         raise RuntimeError(f"APP_ENV must be one of: {valid_envs}")
 
+    database_url = make_url(current_settings.database_url)
+    if database_url.drivername != "postgresql+asyncpg":
+        raise RuntimeError("DATABASE_URL must use postgresql+asyncpg")
+
     default_ai_model = current_settings.default_ai_model.strip().lower()
     if default_ai_model not in VALID_AI_TEXT_MODELS:
         raise RuntimeError(
@@ -178,6 +181,9 @@ def validate_runtime_settings(settings: Settings | None = None) -> None:
 
     if app_env != "production":
         return
+
+    if current_settings.database_url == DEFAULT_DATABASE_URL:
+        raise RuntimeError("DATABASE_URL must be explicitly configured in production")
 
     secret = current_settings.app_secret_key.strip()
     if not secret or secret == DEFAULT_APP_SECRET_KEY:
