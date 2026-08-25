@@ -9,6 +9,7 @@
     <view class="field">
       <text class="field-label ui-section-heading">回忆录名称</text>
       <input
+        id="project-title-input"
         class="text-input"
         value="{{title}}"
         maxlength="40"
@@ -35,6 +36,7 @@
     <view class="field">
       <text class="field-label ui-section-heading">籍贯</text>
       <input
+        id="project-origin-input"
         class="text-input"
         value="{{narratorOrigin}}"
         maxlength="40"
@@ -46,6 +48,7 @@
     <view class="field">
       <text class="field-label ui-section-heading">年龄</text>
       <input
+        id="project-age-input"
         class="text-input"
         value="{{narratorAgeText}}"
         type="number"
@@ -73,8 +76,8 @@
   </view>
 
   <view class="actions">
-    <button class="ghost-button" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
-    <button class="primary-button" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
+    <button id="project-cancel-action" class="ghost-button" disabled="{{saving || loading}}" bindtap="cancel">取消</button>
+    <button id="project-save-action" class="primary-button" loading="{{saving}}" disabled="{{saving || loading}}" bindtap="saveProject">
       {{saving ? "保存中" : "保存"}}
     </button>
   </view>

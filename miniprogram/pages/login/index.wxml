@@ -14,6 +14,7 @@
     <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
     <view
+      id="wechat-login-action"
       class="primary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{loading || wechatLoading}}"
@@ -23,6 +24,7 @@
     </view>
 
     <view
+      id="account-login-toggle"
       class="mode-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{loading || wechatLoading}}"
@@ -35,6 +37,7 @@
       <view class="field">
         <text class="field-label">邮箱</text>
         <input
+          id="account-email-input"
           class="field-input"
           type="text"
           value="{{email}}"
@@ -46,6 +49,7 @@
       <view class="field">
         <text class="field-label">密码</text>
         <input
+          id="account-password-input"
           class="field-input"
           password
           value="{{password}}"
@@ -55,6 +59,7 @@
       </view>
 
       <view
+        id="account-login-action"
         class="secondary-button ui-block-action ui-pressable {{loading || wechatLoading ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{loading || wechatLoading}}"

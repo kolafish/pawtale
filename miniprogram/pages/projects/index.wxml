@@ -3,6 +3,7 @@
 
   <view class="action-bar">
     <view
+      id="create-project-action"
       class="primary-button ui-block-action ui-pressable {{busy ? 'is-disabled' : ''}}"
       aria-role="button"
       aria-disabled="{{busy}}"

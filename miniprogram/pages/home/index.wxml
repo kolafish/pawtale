@@ -21,6 +21,7 @@
     <text class="launch-title">{{launchTitle}}</text>
     <text class="launch-body">{{launchBody}}</text>
     <view
+      id="launch-voice-action"
       class="{{voiceStartButtonClass}}"
       bindtap="startLaunchVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
@@ -54,6 +55,7 @@
     </view>
     <view
       wx:if="{{hasProject}}"
+      id="active-project-action"
       class="active-project-link"
       bindtap="openProjects"
       hover-class="ui-subtle-action-hover"
@@ -73,6 +75,7 @@
     <text wx:if="{{hasProject}}" class="resume-note">可以接着这里讲，也可以随便说点别的。</text>
 
     <view
+      id="primary-voice-action"
       class="{{voiceStartButtonClass}}"
       bindtap="startPrimaryVoiceChat"
       hover-class="{{voiceStartButtonHoverClass}}"
