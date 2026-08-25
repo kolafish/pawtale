@@ -1,5 +1,5 @@
 const { prepareE2ERuntime } = require("./session");
-const { withTimeout } = require("./wait");
+const { sleep, withTimeout } = require("./wait");
 
 function assertIOSPlatform(systemInfo) {
   const platform = String(systemInfo?.platform || "").toLowerCase();
@@ -13,19 +13,35 @@ function assertIOSPlatform(systemInfo) {
 async function connectIOSDevice(session, dependencies = {}) {
   const prepareRuntime = dependencies.prepareRuntime || prepareE2ERuntime;
   const writeLine = dependencies.writeLine || ((message) => process.stdout.write(`${message}\n`));
+  const waitForStabilization = dependencies.waitForStabilization || (() => sleep(5000));
   const { artifacts, config, miniProgram } = session;
-  if (config.iosAutoConnect) {
-    writeLine("正在等待微信开发者工具自动连接 iOS 真机……");
-  } else {
-    writeLine("请使用 iPhone 微信扫描开发者工具或终端显示的真机调试二维码……");
-  }
+  const waitForManualPairing = dependencies.waitForManualPairing || (() => new Promise(
+    (resolve) => miniProgram.connection.once("Tool.onRemoteDebugConnected", resolve),
+  ));
   artifacts.mark("ios:pairing:start");
   try {
-    await withTimeout(
-      miniProgram.remote(config.iosAutoConnect),
-      config.iosConnectTimeoutMs,
-      "等待 iOS 真机连接",
-    );
+    if (config.iosSdkPairing) {
+      writeLine(
+        config.iosAutoConnect
+          ? "正在等待微信开发者工具自动连接 iOS 真机……"
+          : "请使用 iPhone 微信扫描开发者工具或终端显示的真机调试二维码……",
+      );
+      await withTimeout(
+        miniProgram.remote(config.iosAutoConnect),
+        config.iosConnectTimeoutMs,
+        "等待 iOS 真机连接",
+      );
+    } else {
+      writeLine(
+        "请在开发者工具点击“真机调试 → 二维码真机调试”，待二维码生成后用 iPhone 微信扫码……",
+      );
+      await withTimeout(
+        waitForManualPairing(),
+        config.iosConnectTimeoutMs,
+        "等待 iOS 真机连接",
+      );
+      await waitForStabilization();
+    }
   } catch (error) {
     if (String(error?.message || "").includes("等待 iOS 真机连接超时")) {
       throw new Error(

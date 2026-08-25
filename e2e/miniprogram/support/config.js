@@ -87,6 +87,7 @@ function readE2EConfig() {
       "PAWTALE_E2E_IOS_CONNECT_TIMEOUT_MS",
       3 * 60 * 1000,
     ),
+    iosSdkPairing: booleanEnvironmentValue("PAWTALE_E2E_IOS_SDK_PAIRING"),
     wsBaseUrl: String(
       process.env.PAWTALE_E2E_WS_BASE_URL || "wss://pawtale-api.spaceflows.cn",
     ).replace(/\/$/, ""),

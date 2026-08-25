@@ -22,7 +22,11 @@ test("device connector pairs before preparing isolated iOS storage", async () =>
   const stages = [];
   const session = {
     artifacts: { mark: (stage) => stages.push(stage) },
-    config: { iosAutoConnect: true, iosConnectTimeoutMs: 1000 },
+    config: {
+      iosAutoConnect: true,
+      iosConnectTimeoutMs: 1000,
+      iosSdkPairing: true,
+    },
     miniProgram: {
       async remote(auto) {
         calls.push(["remote", auto]);
@@ -59,11 +63,13 @@ test("device connector reports pairing timeout without simulator fallback", asyn
   let prepared = false;
   const session = {
     artifacts: { mark() {} },
-    config: { iosAutoConnect: false, iosConnectTimeoutMs: 10 },
+    config: {
+      iosAutoConnect: false,
+      iosConnectTimeoutMs: 10,
+      iosSdkPairing: false,
+    },
     miniProgram: {
-      remote() {
-        return new Promise(() => undefined);
-      },
+      connection: { once() {} },
     },
   };
 
@@ -77,4 +83,43 @@ test("device connector reports pairing timeout without simulator fallback", asyn
     /请确认 iPhone 已登录有调试权限的微信/,
   );
   assert.equal(prepared, false);
+});
+
+test("manual pairing waits for the remote event and AppService stabilization", async () => {
+  const calls = [];
+  const session = {
+    artifacts: { mark: (stage) => calls.push(stage) },
+    config: {
+      iosAutoConnect: false,
+      iosConnectTimeoutMs: 1000,
+      iosSdkPairing: false,
+    },
+    miniProgram: {
+      async systemInfo() {
+        calls.push("systemInfo");
+        return { platform: "ios" };
+      },
+    },
+  };
+
+  await connectIOSDevice(session, {
+    async prepareRuntime() {
+      calls.push("prepareRuntime");
+    },
+    async waitForManualPairing() {
+      calls.push("manualPairing");
+    },
+    async waitForStabilization() {},
+    writeLine() {},
+  });
+
+  assert.deepEqual(calls, [
+    "ios:pairing:start",
+    "manualPairing",
+    "ios:pairing:connected",
+    "systemInfo",
+    "ios:platform:verified",
+    "prepareRuntime",
+    "ios:runtime:prepared",
+  ]);
 });
