@@ -57,16 +57,21 @@ async function launchE2ESession() {
   const artifacts = await createArtifactRecorder(config);
   let miniProgram;
   try {
+    artifacts.mark("setup:window-close:start");
     closeDeveloperToolsProject(config);
+    artifacts.mark("setup:window-close:complete");
     miniProgram = await automator.launch({
       cliPath: config.cliPath,
       port: config.automationPort,
       projectPath: config.projectPath,
       timeout: 60000,
     });
+    artifacts.mark("setup:automator-launch:complete");
     artifacts.attach(miniProgram);
-    await configureRuntime(miniProgram, config);
     await waitForCurrentPageReady(miniProgram);
+    artifacts.mark("setup:first-page-ready");
+    await configureRuntime(miniProgram, config);
+    artifacts.mark("setup:runtime-configured");
     return {
       artifacts,
       config,

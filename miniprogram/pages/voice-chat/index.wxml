@@ -5,6 +5,7 @@
       <text class="top-subtitle">{{topSubtitle}}</text>
     </view>
     <button
+      id="voice-finish-action"
       class="finish-button ui-button"
       loading="{{finishingSession}}"
       disabled="{{finishingSession}}"
@@ -242,6 +243,7 @@
   <view wx:if="{{showControlBar}}" class="control-bar ui-fixed-action-dock">
     <text wx:if="{{controlHintText}}" class="control-hint">{{controlHintText}}</text>
     <view
+      id="voice-primary-action"
       class="{{micButtonClass}}"
       bindtap="toggleRecording"
       aria-role="button"

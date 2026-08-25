@@ -8,10 +8,12 @@
   },
   "scripts": {
     "test": "node --test --test-concurrency=1 specs/*.test.js",
-    "test:devtools": "node --test --test-concurrency=1 specs/foundation.test.js"
+    "test:devtools": "node --test --test-concurrency=1 specs/*.test.js",
+    "test:voice": "node --test --test-concurrency=1 specs/voice.test.js"
   },
   "devDependencies": {
-    "miniprogram-automator": "0.12.1"
+    "miniprogram-automator": "0.12.1",
+    "ws": "8.21.3"
   },
   "overrides": {
     "jpeg-js": "0.4.4",
