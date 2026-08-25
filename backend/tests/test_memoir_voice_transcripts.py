@@ -1726,6 +1726,52 @@ async def test_share_video_worker_reclaims_expired_lease_without_get_side_effect
     assert stored_job.lease_token == reclaimed.token
 
 
+async def test_postgres_share_video_claim_skips_locked_queue_head(client, test_db):
+    if test_db.get_bind().dialect.name != "postgresql":
+        pytest.skip("requires PostgreSQL row-level locking")
+    text = "我小时候住在外婆家。后来我去县城读书。"
+    created = await create_test_voice_transcript(client, test_db, text=text)
+    first_end = text.index("。") + 1
+    first_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": 0, "end_char": first_end},
+    )
+    second_response = await client.post(
+        f"/api/mobile/memoir/voice-transcripts/{created['utterance_id']}/share-video/jobs",
+        json={"start_char": first_end, "end_char": len(text)},
+    )
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+    first_id = first_response.json()["id"]
+    second_id = second_response.json()["id"]
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with session_maker() as locking_db:
+        await locking_db.execute(
+            select(MemoirMaterialShareVideo)
+            .where(MemoirMaterialShareVideo.id == first_id)
+            .with_for_update(of=MemoirMaterialShareVideo)
+        )
+        async with session_maker() as claiming_db:
+            leases = await asyncio.wait_for(
+                share_video_jobs.claim_due_share_video_jobs(
+                    claiming_db,
+                    now=utcnow_naive() + timedelta(seconds=1),
+                    limit=1,
+                    lease_seconds=30,
+                    max_attempts=3,
+                ),
+                timeout=2,
+            )
+        await locking_db.rollback()
+
+    assert [lease.job_id for lease in leases] == [second_id]
+
+
 async def test_mobile_memoir_lists_unfinalized_audio_for_transcription_recovery(
     client,
     test_db,
