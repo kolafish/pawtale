@@ -1,8 +1,10 @@
 const assert = require("node:assert/strict");
 const { after, before, test } = require("node:test");
 const {
+  captureStorageEntries,
   elementById,
   launchE2ESession,
+  restoreStorageEntries,
   shutdownE2ESession,
 } = require("../support/session");
 const { waitForPageData } = require("../support/wait");
@@ -14,12 +16,18 @@ const {
 } = require("../support/voice-fixture-server");
 
 const BACKEND_COOKIE_STORAGE_KEY = "pawtale_backend_cookie";
+const AI_MODEL_STORAGE_KEY = "pawtale_ai_model_settings";
+const TTS_SETTINGS_STORAGE_KEY = "pawtale_memoir_tts_settings";
 const VOICE_AUTHORIZATION_STORAGE_KEY = "pawtale_voice_authorization_consent";
 const VOICE_AUTHORIZATION_VERSION = "2026-06-18";
+const FIXTURE_AI_MODEL = "deepseek-v4-flash";
+const FIXTURE_TTS_VOICE = "zh_male_m191_uranus_bigtts";
+const FIXTURE_TTS_SPEED_RATIO = 0.7;
 
 let fixture;
 let session;
 let failed = false;
+let originalVoicePreferences = [];
 
 function deterministicRecorderManager() {
   const handlers = {};
@@ -69,6 +77,12 @@ before(async () => {
   process.env.PAWTALE_E2E_WS_BASE_URL = endpoints.wsBaseUrl;
   session = await launchE2ESession();
   session.artifacts.mark("voice:setup:session-launched");
+  originalVoicePreferences = await captureStorageEntries(session.miniProgram, [
+    AI_MODEL_STORAGE_KEY,
+    TTS_SETTINGS_STORAGE_KEY,
+    VOICE_AUTHORIZATION_STORAGE_KEY,
+  ]);
+  session.artifacts.mark("voice:setup:preferences-captured");
   await session.miniProgram.callWxMethod(
     "setStorageSync",
     BACKEND_COOKIE_STORAGE_KEY,
@@ -85,6 +99,20 @@ before(async () => {
     },
   );
   session.artifacts.mark("voice:setup:consent-stored");
+  await session.miniProgram.callWxMethod(
+    "setStorageSync",
+    AI_MODEL_STORAGE_KEY,
+    { model: FIXTURE_AI_MODEL },
+  );
+  await session.miniProgram.callWxMethod(
+    "setStorageSync",
+    TTS_SETTINGS_STORAGE_KEY,
+    {
+      chat: { voice: FIXTURE_TTS_VOICE, speedRatio: FIXTURE_TTS_SPEED_RATIO },
+      book: { voice: "", speedRatio: 1 },
+    },
+  );
+  session.artifacts.mark("voice:setup:model-settings-stored");
   await session.miniProgram.mockWxMethod("getRecorderManager", deterministicRecorderManager);
   session.artifacts.mark("voice:setup:recorder-mocked");
   await session.miniProgram.mockWxMethod("getPrivacySetting", { needAuthorization: false });
@@ -96,22 +124,64 @@ before(async () => {
 });
 
 after(async () => {
-  if (session) {
-    for (const method of ["getRecorderManager", "getPrivacySetting", "showModal"]) {
+  let teardownError = null;
+  try {
+    if (session) {
       try {
-        await session.miniProgram.restoreWxMethod(method);
-      } catch {
-        // The automation connection may already be closing.
+        await restoreStorageEntries(session.miniProgram, originalVoicePreferences);
+        assert.deepEqual(
+          await captureStorageEntries(
+            session.miniProgram,
+            originalVoicePreferences.map((entry) => entry.key),
+          ),
+          originalVoicePreferences,
+        );
+        session.artifacts.mark("voice:teardown:preferences-restored");
+      } catch (error) {
+        teardownError = error;
+      }
+      for (const method of ["getRecorderManager", "getPrivacySetting", "showModal"]) {
+        try {
+          await session.miniProgram.restoreWxMethod(method);
+        } catch {
+          // The automation connection may already be closing.
+        }
+      }
+      try {
+        await shutdownE2ESession(session);
+      } catch (error) {
+        teardownError = teardownError
+          ? new AggregateError(
+              [teardownError, error],
+              "语音偏好与运行时存储恢复均失败",
+            )
+          : error;
+      }
+      try {
+        await session.artifacts.finish({
+          failed: failed || Boolean(teardownError),
+          fixtureUnexpectedRequests: fixture?.state.unexpectedRequests || [],
+          target: "devtools-voice-fixture",
+          teardownError,
+        });
+      } catch (error) {
+        teardownError = teardownError
+          ? new AggregateError([teardownError, error], "测试清理与报告写入均失败")
+          : error;
       }
     }
-    await session.artifacts.finish({
-      failed,
-      fixtureUnexpectedRequests: fixture?.state.unexpectedRequests || [],
-      target: "devtools-voice-fixture",
-    });
-    await shutdownE2ESession(session);
+  } finally {
+    try {
+      await fixture?.close();
+    } catch (error) {
+      teardownError = teardownError
+        ? new AggregateError([teardownError, error], "测试清理与 fixture 关闭均失败")
+        : error;
+    }
   }
-  await fixture?.close();
+  if (teardownError) {
+    throw teardownError;
+  }
 });
 
 test("deterministic voice journey records, transcribes, answers, and plays TTS", async () => {
@@ -162,21 +232,26 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     assert.equal(completed.persistenceStateText, "小余已回应");
     session.artifacts.mark("voice:assistant:complete");
 
-    const gatewayTypes = fixture.state.gatewayClientEvents.map((event) => event.type);
+    const activeGatewayEvents = fixture.state.activeGatewayClientEvents;
+    const gatewayTypes = activeGatewayEvents.map((event) => event.type);
     assert.deepEqual(gatewayTypes.slice(0, 3), ["session.start", "audio.frame", "audio.end"]);
-    const sessionStart = fixture.state.gatewayClientEvents.find(
+    const sessionStart = activeGatewayEvents.find(
       (event) => event.type === "session.start",
     );
     assert.ok(sessionStart, "ASR gateway 应收到 session.start");
     assert.equal(sessionStart.guidance_mode, "free_narration");
     assert.equal(sessionStart.speaker_role, "narrator");
-    assert.equal(typeof fixture.state.gatewayClientEvents[1].audio, "string");
+    assert.equal(sessionStart.ai_model, FIXTURE_AI_MODEL);
+    assert.equal(typeof activeGatewayEvents[1].audio, "string");
     const turnStart = fixture.state.assistantClientEvents.find(
       (event) => event.type === "turn.start",
     );
     assert.ok(turnStart, "assistant stream 应收到 turn.start");
     assert.equal(turnStart.audio_protocol, "pcm_frame");
+    assert.equal(turnStart.ai_model, FIXTURE_AI_MODEL);
     assert.equal(turnStart.regenerate, false);
+    assert.equal(turnStart.voice, FIXTURE_TTS_VOICE);
+    assert.equal(turnStart.speed_ratio, FIXTURE_TTS_SPEED_RATIO);
     assert.deepEqual(fixture.state.unexpectedRequests, []);
 
     await (await elementById(page, "voice-finish-action")).tap();
@@ -188,7 +263,7 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
     );
     assert.equal(stopped.primaryActionText, "已保存");
     assert.equal(
-      fixture.state.gatewayClientEvents.at(-1)?.type,
+      activeGatewayEvents.at(-1)?.type,
       "session.stop",
     );
     session.artifacts.mark("voice:session:stopped");

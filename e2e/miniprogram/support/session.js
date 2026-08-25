@@ -17,6 +17,37 @@ const {
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
 const BACKEND_COOKIE_STORAGE_KEY = "pawtale_backend_cookie";
 const MEMOIR_SESSION_STORAGE_KEY = "pawtale_memoir_session";
+const RUNTIME_STORAGE_KEYS = [
+  BACKEND_CONFIG_STORAGE_KEY,
+  BACKEND_COOKIE_STORAGE_KEY,
+  MEMOIR_SESSION_STORAGE_KEY,
+];
+
+async function captureStorageEntries(miniProgram, keys) {
+  const info = await miniProgram.callWxMethod("getStorageInfoSync");
+  const existingKeys = new Set(Array.isArray(info?.keys) ? info.keys : []);
+  const entries = [];
+  for (const key of keys) {
+    entries.push({
+      key,
+      exists: existingKeys.has(key),
+      value: existingKeys.has(key)
+        ? await miniProgram.callWxMethod("getStorageSync", key)
+        : undefined,
+    });
+  }
+  return entries;
+}
+
+async function restoreStorageEntries(miniProgram, entries) {
+  for (const entry of entries) {
+    if (entry.exists) {
+      await miniProgram.callWxMethod("setStorageSync", entry.key, entry.value);
+    } else {
+      await miniProgram.callWxMethod("removeStorageSync", entry.key);
+    }
+  }
+}
 
 async function elementById(page, id) {
   return waitForValue(
@@ -56,6 +87,7 @@ async function launchE2ESession() {
   };
   const artifacts = await createArtifactRecorder(config);
   let miniProgram;
+  let originalRuntimeStorage = [];
   try {
     artifacts.mark("setup:window-close:start");
     closeDeveloperToolsProject(config);
@@ -70,6 +102,8 @@ async function launchE2ESession() {
     artifacts.attach(miniProgram);
     await waitForCurrentPageReady(miniProgram);
     artifacts.mark("setup:first-page-ready");
+    originalRuntimeStorage = await captureStorageEntries(miniProgram, RUNTIME_STORAGE_KEYS);
+    artifacts.mark("setup:runtime-storage-captured");
     await configureRuntime(miniProgram, config);
     artifacts.mark("setup:runtime-configured");
     try {
@@ -88,8 +122,16 @@ async function launchE2ESession() {
       createdProjectTitles: [],
       initialActiveProjectId: "",
       miniProgram,
+      originalRuntimeStorage,
     };
   } catch (error) {
+    if (miniProgram && originalRuntimeStorage.length) {
+      try {
+        await restoreStorageEntries(miniProgram, originalRuntimeStorage);
+      } catch {
+        // Preserve the setup error; a closed automation connection cannot restore storage.
+      }
+    }
     miniProgram?.disconnect();
     await artifacts.finish({
       failed: true,
@@ -117,11 +159,24 @@ async function shutdownE2ESession(session) {
   if (!session?.miniProgram) {
     return;
   }
+  let restoreError = null;
+  try {
+    await restoreStorageEntries(
+      session.miniProgram,
+      session.originalRuntimeStorage || [],
+    );
+    session.artifacts.mark("teardown:runtime-storage-restored");
+  } catch (error) {
+    restoreError = error;
+  }
   try {
     await withTimeout(session.miniProgram.close(), 8000, "关闭自动化窗口");
   } catch {
     session.miniProgram.disconnect();
     closeDeveloperToolsProject(session.config);
+  }
+  if (restoreError) {
+    throw restoreError;
   }
 }
 
@@ -321,6 +376,7 @@ async function cleanupProjectsThroughApi(session) {
 
 module.exports = {
   activateProject,
+  captureStorageEntries,
   cleanupProjectsThroughApi,
   cleanupSession,
   deleteProject,
@@ -329,5 +385,6 @@ module.exports = {
   launchE2ESession,
   loginWithTestAccount,
   openProjects,
+  restoreStorageEntries,
   shutdownE2ESession,
 };

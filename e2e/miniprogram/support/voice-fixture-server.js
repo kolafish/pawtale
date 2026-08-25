@@ -37,8 +37,10 @@ function createVoiceFixtureServer() {
   const webSockets = new WebSocketServer({ noServer: true });
   const clients = new Set();
   const state = {
+    activeGatewayClientEvents: [],
     assistantClientEvents: [],
     gatewayClientEvents: [],
+    gatewayConnections: [],
     httpRequests: [],
     sessionStatus: "created",
     unexpectedRequests: [],
@@ -196,12 +198,19 @@ function createVoiceFixtureServer() {
   }
 
   function handleGateway(webSocket) {
+    const connection = {
+      id: `gateway-${state.gatewayConnections.length + 1}`,
+      events: [],
+    };
+    state.gatewayConnections.push(connection);
     setTimeout(() => send(webSocket, { type: "session.ready", state: "ready" }), 10);
     let partialSent = false;
     webSocket.on("message", (raw) => {
       const event = JSON.parse(raw.toString("utf8"));
+      connection.events.push(event);
       state.gatewayClientEvents.push(event);
       if (event.type === "session.start") {
+        state.activeGatewayClientEvents = connection.events;
         state.sessionStatus = "listening";
         send(webSocket, { type: "session.started", state: "listening" });
         return;
@@ -342,8 +351,10 @@ function createVoiceFixtureServer() {
   return {
     state,
     reset() {
+      state.activeGatewayClientEvents = [];
       state.assistantClientEvents.length = 0;
       state.gatewayClientEvents.length = 0;
+      state.gatewayConnections.length = 0;
       state.httpRequests.length = 0;
       state.unexpectedRequests.length = 0;
       state.sessionStatus = "created";

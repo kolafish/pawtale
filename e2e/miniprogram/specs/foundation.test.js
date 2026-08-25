@@ -43,19 +43,32 @@ after(async () => {
       ? new AggregateError([cleanupError, error], "UI 与 API 清理均失败")
       : error;
   }
+  let teardownError = cleanupError;
+  if (cleanupError) {
+    await session.artifacts.captureFailure(session.miniProgram, cleanupError);
+  }
   try {
-    if (cleanupError) {
-      await session.artifacts.captureFailure(session.miniProgram, cleanupError);
-      throw cleanupError;
-    }
-  } finally {
+    await shutdownE2ESession(session);
+  } catch (error) {
+    teardownError = teardownError
+      ? new AggregateError([teardownError, error], "项目清理与运行时存储恢复均失败")
+      : error;
+  }
+  try {
     await session.artifacts.finish({
       createdProjectIds: session.createdProjectIds,
       createdProjectTitles: session.createdProjectTitles,
-      failed,
+      failed: failed || Boolean(teardownError),
       target: "devtools",
+      teardownError,
     });
-    await shutdownE2ESession(session);
+  } catch (error) {
+    teardownError = teardownError
+      ? new AggregateError([teardownError, error], "测试清理与报告写入均失败")
+      : error;
+  }
+  if (teardownError) {
+    throw teardownError;
   }
 });
 
