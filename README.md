@@ -66,11 +66,12 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements-dev.txt
 cp .env.example .env
-PYTHONPATH=. python scripts/migrate_runtime_schema.py
+createdb pawtale
+PYTHONPATH=. alembic upgrade head
 PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 ```
 
-已有本地数据库时，迁移脚本默认先在 `data/backups/` 创建备份。服务启动只校验 schema，不会自动修改数据库。
+`DATABASE_URL` 使用 `postgresql+asyncpg`。服务启动只校验 schema，不会自动修改数据库。
 
 ### Web 前端
 
@@ -110,8 +111,10 @@ cd frontend && npm run lint && npm test && npm run build
 # 小程序
 cd miniprogram && npm run typecheck && npm test
 
-# 后端
-cd backend && venv/bin/ruff check app tests scripts && venv/bin/python -m pytest -q
+# 后端（TEST_POSTGRES_DATABASE_URL 指向专用测试库）
+cd backend && venv/bin/ruff check app tests scripts
+TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
+  venv/bin/python -m pytest -q
 ```
 
 真机语音、后台切换、权限和播放体验不能只依赖单元测试，合入相关改动前还应执行 [小程序真机 Smoke](./docs/MINIPROGRAM_REAL_DEVICE_SMOKE.md)。

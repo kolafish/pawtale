@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.migrations.audit import migrate_audit_schema
+from sqlalchemy import select
 from app.models.audit import AuditDailyFeatureUsage, AuditDailyUserUsage, AuditEvent, AuditSession
 from app.models.users import User
 
@@ -168,51 +165,3 @@ async def test_admin_can_query_audit_dashboard_and_user_day(client, test_db):
         "event-2",
         "event-3",
     ]
-
-
-async def test_audit_migration_creates_tables_idempotently():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE users (
-                        id VARCHAR(36) NOT NULL,
-                        email VARCHAR(255) NOT NULL,
-                        password_hash VARCHAR(255) NOT NULL,
-                        password_login_enabled BOOLEAN NOT NULL DEFAULT 1,
-                        role VARCHAR(20) NOT NULL DEFAULT 'user',
-                        display_name VARCHAR(100) NOT NULL,
-                        avatar_url VARCHAR(500),
-                        created_at DATETIME,
-                        updated_at DATETIME,
-                        PRIMARY KEY (id)
-                    )
-                    """
-                )
-            )
-
-        result = await migrate_audit_schema(engine)
-        second = await migrate_audit_schema(engine)
-
-        async with engine.begin() as conn:
-            tables = {
-                row[0]
-                for row in (
-                    await conn.execute(
-                        text("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'audit_%'")
-                    )
-                ).fetchall()
-            }
-
-        assert set(result["changed_tables"]) == {
-            "audit_sessions",
-            "audit_events",
-            "audit_daily_user_usage",
-            "audit_daily_feature_usage",
-        }
-        assert second["changed_tables"] == []
-        assert tables == set(result["changed_tables"])
-    finally:
-        await engine.dispose()

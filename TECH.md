@@ -12,7 +12,7 @@ Xiaoyu Mini Program ─────┤                          │
                                       ├─ project services
                                       ├─ memoir domain services
                                       ├─ editing/share-video workers
-                                      ├─ SQLite + file storage
+                                      ├─ PostgreSQL + file storage
                                       └─ AI / ASR / TTS providers
 ```
 
@@ -22,7 +22,7 @@ Pawtale 是单仓库、单后端的多产品系统。认证、用户、项目、
 
 | 模块 | 当前技术 |
 | --- | --- |
-| 后端 | Python 3.12、FastAPI、async SQLAlchemy、Pydantic、SQLite/aiosqlite、pytest |
+| 后端 | Python 3.12、FastAPI、async SQLAlchemy、Pydantic、PostgreSQL/asyncpg、Alembic、pytest |
 | Web | React 19、TypeScript 5.9、Vite 7、TailwindCSS 4、Zustand、TanStack Query、Vitest |
 | 小程序 | 微信原生小程序、TypeScript、Node test runner |
 | 文本 AI | Claude Fable 5 / Opus 4.8 / Sonnet 4.6 兼容代理、DeepSeek V4、火山方舟 Doubao Seed 2.0 |
@@ -36,7 +36,7 @@ backend/app/
 ├── main.py                         # 应用生命周期、路由和后台 worker
 ├── config.py                       # 运行配置和生产环境校验
 ├── database.py
-├── migrations/                     # runtime schema 校验与迁移
+├── migrations/                     # PostgreSQL runtime schema 校验
 ├── domain/                         # 项目类型、模板和稳定领域类型
 ├── models/                         # SQLAlchemy 持久化模型
 ├── schemas/                        # HTTP/WebSocket 边界类型
@@ -249,18 +249,18 @@ miniprogram/
 
 ## 数据库和迁移
 
-- 默认数据库为仓库根目录 `data/pawtale.db`；
-- SQLite 默认使用 WAL、`NORMAL` synchronous 和 busy timeout；
-- schema 变更通过 `backend/scripts/migrate_runtime_schema.py` 显式执行；
-- 应用启动调用 `assert_runtime_schema`，不隐式创建或迁移表；
-- 迁移默认创建运行时备份，可在全新环境显式使用 `--skip-backup`。
+- 数据库只支持 PostgreSQL，异步驱动为 asyncpg；
+- schema 变更通过 Alembic revision 显式执行；
+- 应用启动调用 PostgreSQL runtime schema 断言，不隐式创建或迁移表；
+- 生产迁移先备份，再执行 `PYTHONPATH=. alembic upgrade head`，最后核对数据和外键。
 
 ## 验证
 
 ```bash
 # 后端
 cd backend
-venv/bin/python -m pytest -q
+TEST_POSTGRES_DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_test' \
+  venv/bin/python -m pytest -q
 
 # Web
 cd frontend

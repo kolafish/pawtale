@@ -347,7 +347,6 @@ async def claim_due_editing_jobs(
         statement = statement.where(MemoirEditingJob.job_type == job_type.value)
     if project_id is not None:
         statement = statement.where(MemoirEditingJob.project_id == project_id)
-    use_skip_locked = db.get_bind().dialect.name == "postgresql"
     statement = statement.order_by(
         case(
             (
@@ -365,13 +364,10 @@ async def claim_due_editing_jobs(
         MemoirEditingJob.run_after,
         MemoirEditingJob.created_at,
     ).limit(batch_size)
-    if use_skip_locked:
-        statement = statement.with_for_update(skip_locked=True)
+    statement = statement.with_for_update(skip_locked=True)
     candidate_ids = (
         await db.scalars(statement)
     ).all()
-    if not use_skip_locked:
-        await db.commit()
     return await _claim_editing_job_ids(
         db,
         candidate_ids,
@@ -697,22 +693,15 @@ async def _run_due_editing_job_batch(
     project_id: str | None = None,
 ) -> tuple[int, int]:
     async with session_maker() as db:
-        serialize_writes = db.get_bind().dialect.name == "sqlite"
         leases = await claim_due_editing_jobs(
             db,
-            limit=1 if serialize_writes else limit,
+            limit=limit,
             job_type=job_type,
             project_id=project_id,
         )
-    if serialize_writes:
-        results = [
-            await _run_claimed_editing_job(session_maker, lease)
-            for lease in leases
-        ]
-    else:
-        results = await asyncio.gather(
-            *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
-        )
+    results = await asyncio.gather(
+        *(_run_claimed_editing_job(session_maker, lease) for lease in leases)
+    )
     return len(leases), sum(results)
 
 

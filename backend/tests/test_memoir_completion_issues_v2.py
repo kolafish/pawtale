@@ -2,10 +2,7 @@ from hashlib import sha256
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.database import Base, register_models
+from sqlalchemy import select
 from app.domain.memoir.types import (
     MemoirCreatedBy,
     MemoirCompletionIssueOutcome,
@@ -14,11 +11,6 @@ from app.domain.memoir.types import (
     MemoirEditingJobType,
     MemoirTranscriptVersionType,
 )
-from app.migrations.memoir_completion import (
-    assert_memoir_completion_schema,
-    migrate_memoir_completion_schema,
-)
-from app.migrations.memoir_voice import _ensure_completion_issue_columns
 from app.models.memoir import (
     MemoirCompletionIssue,
     MemoirEditingJob,
@@ -101,114 +93,8 @@ async def _completion_issue(
     return issue
 
 
-async def test_completion_issue_migration_has_only_chapter_and_book_targets():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP TABLE memoir_completion_issues"))
-
-        first = await migrate_memoir_completion_schema(engine)
-        second = await migrate_memoir_completion_schema(engine)
-        assert first["changed_tables"] == ["memoir_completion_issues"]
-        assert second["changed_tables"] == []
-        await assert_memoir_completion_schema(engine)
-
-        async with engine.begin() as conn:
-            columns = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text("PRAGMA table_info(memoir_completion_issues)")
-                    )
-                ).fetchall()
-            }
-            table_sql = (
-                await conn.execute(
-                    text(
-                        "SELECT sql FROM sqlite_master "
-                        "WHERE type = 'table' "
-                        "AND name = 'memoir_completion_issues'"
-                    )
-                )
-            ).scalar_one()
-        assert {"chapter_id", "related_material_ids_json"} <= columns
-        assert "section_id" not in columns
-        assert "story_id" not in columns
-        assert "claim_id" not in columns
-        assert "evidence_id" not in columns
-        assert "ck_memoir_completion_issues_lifecycle" in table_sql
-        assert "'chapter', 'book'" in table_sql
-        assert "'section'" not in table_sql
-    finally:
-        await engine.dispose()
 
 
-async def test_voice_migration_adds_layered_completion_targets_idempotently():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(
-                text("CREATE TABLE memoir_completion_issues (id VARCHAR(36) PRIMARY KEY)")
-            )
-            await conn.execute(
-                text(
-                    "CREATE TABLE memoir_voice_sessions ("
-                    "id VARCHAR(36) PRIMARY KEY, "
-                    "current_completion_item_id VARCHAR(36))"
-                )
-            )
-            await conn.execute(
-                text(
-                    "CREATE TABLE memoir_voice_utterances ("
-                    "id VARCHAR(36) PRIMARY KEY, "
-                    "completion_item_id VARCHAR(36))"
-                )
-            )
-            first = await _ensure_completion_issue_columns(conn)
-            second = await _ensure_completion_issue_columns(conn)
-            session_columns = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text("PRAGMA table_info(memoir_voice_sessions)")
-                    )
-                ).fetchall()
-            }
-            utterance_columns = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text("PRAGMA table_info(memoir_voice_utterances)")
-                    )
-                ).fetchall()
-            }
-            indexes = {
-                row[1]
-                for row in (
-                    await conn.execute(
-                        text(
-                            "SELECT type, name FROM sqlite_master "
-                            "WHERE type = 'index'"
-                        )
-                    )
-                ).fetchall()
-            }
-
-        assert first == [
-            "memoir_voice_sessions.current_completion_issue_id",
-            "memoir_voice_utterances.completion_issue_id",
-        ]
-        assert second == []
-        assert "current_completion_issue_id" in session_columns
-        assert "completion_issue_id" in utterance_columns
-        assert {
-            "ix_memoir_voice_sessions_current_completion_issue_id",
-            "ix_memoir_voice_utterances_completion_issue_id",
-        } <= indexes
-    finally:
-        await engine.dispose()
 
 
 async def test_completion_voice_session_appends_every_answer_segment_to_section(

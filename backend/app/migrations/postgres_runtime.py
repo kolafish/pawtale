@@ -4,22 +4,66 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.database import Base, register_models
-from app.migrations.memoir_client_snapshots import (
-    DIRECT_PROJECT_TABLES,
-    INDIRECT_PROJECT_EXPRESSIONS,
-)
-from app.migrations.memoir_narrative import MEMOIR_NARRATIVE_TRIGGERS
-from app.migrations.memoir_voice import VOICE_INTEGRITY_TRIGGERS
 
 
 POSTGRES_SCHEMA_REVISION = "3b5e639b4b76"
+DIRECT_PROJECT_TABLES = (
+    "memoir_automation_events",
+    "memoir_book_chapter_draft_versions",
+    "memoir_book_chapter_drafts",
+    "memoir_book_image_placements",
+    "memoir_book_output_versions",
+    "memoir_book_outputs",
+    "memoir_book_plan_chapters",
+    "memoir_book_plans",
+    "memoir_book_reviews",
+    "memoir_book_revision_proposals",
+    "memoir_chapter_digests",
+    "memoir_chat_messages",
+    "memoir_completion_issues",
+    "memoir_editing_jobs",
+    "memoir_image_assets",
+    "memoir_material_share_videos",
+    "memoir_project_frameworks",
+    "memoir_section_digests",
+    "memoir_section_materials",
+    "memoir_sections",
+    "memoir_share_video_outputs",
+    "memoir_voice_sessions",
+)
+INDIRECT_PROJECT_TABLES = (
+    "memoir_framework_item_materials",
+    "memoir_framework_items",
+    "memoir_interview_policy_decisions",
+    "memoir_interview_policy_evaluations",
+    "memoir_transcript_alignments",
+    "memoir_transcript_versions",
+    "memoir_voice_authorization_consents",
+    "memoir_voice_utterances",
+)
+MEMOIR_NARRATIVE_TRIGGERS = (
+    "memoir_interview_policy_decisions_immutable_selection",
+    "memoir_interview_policy_decisions_candidate_membership",
+    "memoir_interview_policy_decisions_append_only_evaluation",
+    "memoir_interview_policy_evaluations_failure_codes",
+    "memoir_interview_policy_evaluations_no_update",
+    "memoir_interview_policy_evaluations_no_delete",
+)
+VOICE_INTEGRITY_TRIGGERS = (
+    "memoir_voice_sessions_targets_insert",
+    "memoir_voice_sessions_targets_update",
+    "memoir_voice_utterances_targets_insert",
+    "memoir_voice_utterances_targets_update",
+    "memoir_automation_events_job_insert",
+    "memoir_automation_events_job_update",
+)
 POSTGRES_TRANSCRIPT_INDEXES = {
     "ix_memoir_voice_utterances_transcript_edited_trgm",
     "ix_memoir_voice_utterances_transcript_raw_trgm",
 }
 POSTGRES_REVISION_TRIGGERS = {
     *(f"trg_memoir_revision_{table}" for table in DIRECT_PROJECT_TABLES),
-    *(f"trg_memoir_revision_{table}" for table in INDIRECT_PROJECT_EXPRESSIONS),
+    *(f"trg_memoir_revision_{table}" for table in INDIRECT_PROJECT_TABLES),
     "trg_memoir_revision_projects_content_update",
 }
 POSTGRES_RUNTIME_TRIGGERS = {

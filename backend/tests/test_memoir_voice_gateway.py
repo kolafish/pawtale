@@ -725,7 +725,7 @@ async def test_voice_gateway_masks_final_persistence_errors():
     stopped_with: list[str | None] = []
 
     async def fail_persist(_event: StreamingASREvent) -> dict[str, Any]:
-        raise RuntimeError("sqlite raw insert failure should not reach the mini program")
+        raise RuntimeError("database raw insert failure should not reach the mini program")
 
     session = VoiceGatewaySession(
         client=client,
@@ -751,7 +751,7 @@ async def test_voice_gateway_masks_final_persistence_errors():
     await asyncio.wait_for(run_task, timeout=1)
 
     assert error["error"] == "asr_final_persistence_failed"
-    assert "sqlite raw insert" not in str(error)
+    assert "database raw insert" not in str(error)
     assert stopped["status"] == "failed"
     assert stopped_with == ["asr_final_persistence_failed"]
 

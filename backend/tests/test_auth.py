@@ -2,11 +2,8 @@ from io import BytesIO
 
 import pytest
 from PIL import Image
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.migrations.auth import migrate_auth_schema
 from app.models.users import AuthIdentity, User
 from app.config import Settings
 from app.services.wechat_auth import WeChatAuthError, WeChatSession
@@ -593,51 +590,3 @@ async def test_auth_identity_provider_user_is_unique(test_db):
     with pytest.raises(IntegrityError):
         await test_db.commit()
     await test_db.rollback()
-
-
-async def test_auth_migration_creates_identity_table_and_credentials_flag():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    CREATE TABLE users (
-                        id VARCHAR(36) NOT NULL,
-                        email VARCHAR(255) NOT NULL,
-                        password_hash VARCHAR(255) NOT NULL,
-                        display_name VARCHAR(100) NOT NULL,
-                        avatar_url VARCHAR(500),
-                        created_at DATETIME,
-                        updated_at DATETIME,
-                        PRIMARY KEY (id)
-                    )
-                    """
-                )
-            )
-            await conn.execute(text("CREATE UNIQUE INDEX ix_users_email ON users (email)"))
-
-        result = await migrate_auth_schema(engine)
-        second_result = await migrate_auth_schema(engine)
-
-        async with engine.begin() as conn:
-            user_columns = {
-                row[1]
-                for row in (
-                    await conn.execute(text("PRAGMA table_info(users)"))
-                ).fetchall()
-            }
-            identity_table = await conn.scalar(
-                text("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'auth_identities'")
-            )
-
-        assert "users.password_login_enabled" in result["changed_columns"]
-        assert "users.role" in result["changed_columns"]
-        assert "auth_identities" in result["changed_tables"]
-        assert second_result["changed_columns"] == []
-        assert second_result["changed_tables"] == []
-        assert "password_login_enabled" in user_columns
-        assert "role" in user_columns
-        assert identity_table == "auth_identities"
-    finally:
-        await engine.dispose()

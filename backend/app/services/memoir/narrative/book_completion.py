@@ -196,8 +196,7 @@ async def rewrite_chapter(
     # not generate another section/chapter review here: those auxiliary LLM
     # calls can fail even though the section structure is already complete.
     # Reuse ready guidance when present, then commit the remembered model
-    # preference before the long generation call so SQLite is not write-locked
-    # while the provider is working.
+    # preference before the long generation call.
     await db.commit()
     await chapter_generation.generate_and_save_chapter_draft(
         db,

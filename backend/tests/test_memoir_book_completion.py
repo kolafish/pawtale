@@ -4,20 +4,13 @@ import json
 
 from httpx import Response
 import pytest
-from sqlalchemy import func, select, text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.database import Base, register_models
+from sqlalchemy import func, select
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
     MemoirCompletionIssueScope,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
-)
-from app.migrations.memoir_books import (
-    assert_memoir_book_schema,
-    migrate_memoir_book_schema,
 )
 from app.models.memoir import (
     MemoirBookChapterDraft,
@@ -438,125 +431,10 @@ def test_section_revision_job_validates_each_operation_input():
         )
 
 
-async def test_book_review_migration_creates_review_and_revision_proposal_tables():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP TABLE memoir_book_revision_proposals"))
-            await conn.execute(text("DROP TABLE memoir_book_reviews"))
-
-        first = await migrate_memoir_book_schema(engine)
-        second = await migrate_memoir_book_schema(engine)
-
-        assert first == {
-            "changed_tables": [
-                "memoir_book_reviews",
-                "memoir_book_revision_proposals",
-            ],
-            "changed_columns": [],
-            "removed_legacy_revision_proposals": 0,
-        }
-        assert second == {
-            "changed_tables": [],
-            "changed_columns": [],
-            "removed_legacy_revision_proposals": 0,
-        }
-        await assert_memoir_book_schema(engine)
-    finally:
-        await engine.dispose()
 
 
-async def test_book_review_migration_adds_revision_plan_columns():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("ALTER TABLE memoir_book_revision_proposals DROP COLUMN revision_plan_json"))
-            await conn.execute(text("ALTER TABLE memoir_book_revision_proposals DROP COLUMN phase"))
-
-        first = await migrate_memoir_book_schema(engine)
-        second = await migrate_memoir_book_schema(engine)
-
-        assert first == {
-            "changed_tables": [],
-            "changed_columns": [
-                "memoir_book_revision_proposals.phase",
-                "memoir_book_revision_proposals.revision_plan_json",
-            ],
-            "removed_legacy_revision_proposals": 0,
-        }
-        assert second == {
-            "changed_tables": [],
-            "changed_columns": [],
-            "removed_legacy_revision_proposals": 0,
-        }
-        await assert_memoir_book_schema(engine)
-    finally:
-        await engine.dispose()
 
 
-async def test_book_review_migration_removes_only_unreviewable_ready_proposals():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    table = Base.metadata.tables["memoir_book_revision_proposals"]
-    shared_values = {
-        "project_id": "project-1",
-        "review_id": "review-1",
-        "review_input_signature": "review-signature",
-        "base_output_version_id": "version-1",
-        "selected_actions_json": {"source": "book_review_answers"},
-        "generation_json": {},
-        "summary": "",
-    }
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                table.insert(),
-                [
-                    {
-                        **shared_values,
-                        "id": "legacy-ready",
-                        "status": "ready",
-                        "phase": "draft_ready",
-                        "revision_plan_json": {},
-                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
-                    },
-                    {
-                        **shared_values,
-                        "id": "current-draft",
-                        "status": "ready",
-                        "phase": "draft_ready",
-                        "revision_plan_json": {
-                            "summary": "统一人物称谓",
-                            "items": [],
-                        },
-                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
-                    },
-                    {
-                        **shared_values,
-                        "id": "dismissed-legacy",
-                        "status": "dismissed",
-                        "phase": "draft_ready",
-                        "revision_plan_json": {},
-                        "candidate_chapter_snapshot_json": [{"id": "chapter-1"}],
-                    },
-                ],
-            )
-
-        first = await migrate_memoir_book_schema(engine)
-        second = await migrate_memoir_book_schema(engine)
-
-        assert first["removed_legacy_revision_proposals"] == 1
-        assert second["removed_legacy_revision_proposals"] == 0
-        async with engine.connect() as conn:
-            proposal_ids = set((await conn.scalars(select(table.c.id))).all())
-        assert proposal_ids == {"current-draft", "dismissed-legacy"}
-    finally:
-        await engine.dispose()
 
 
 def _prompt_ids(prompt: str, key: str) -> list[str]:

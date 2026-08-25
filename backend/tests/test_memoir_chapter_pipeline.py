@@ -4,21 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.database import Base, register_models
+from sqlalchemy import select
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirSectionMaterialAssignedBy,
     MemoirSemanticCacheStatus,
     MemoirTranscriptPolishLevel,
 )
-from app.migrations.memoir_chapters import (
-    assert_memoir_chapter_schema,
-    migrate_memoir_chapter_schema,
-)
-from app.migrations.runtime import migrate_runtime_schema
 from app.models.memoir import (
     MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
@@ -717,160 +709,8 @@ async def _chapter(client, test_db):
     )
 
 
-async def test_chapter_migration_adds_digest_and_draft_provenance():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(text("DROP TABLE memoir_chapter_digests"))
-            await conn.execute(
-                text(
-                    "DROP INDEX "
-                    "ix_memoir_book_chapter_draft_versions_input_signature"
-                )
-            )
-            await conn.execute(
-                text(
-                    "ALTER TABLE memoir_book_chapter_draft_versions "
-                    "DROP COLUMN input_signature"
-                )
-            )
-            await conn.execute(
-                text(
-                    "ALTER TABLE memoir_book_chapter_draft_versions "
-                    "DROP COLUMN used_material_ids_json"
-                )
-            )
-            await conn.execute(
-                text(
-                    "ALTER TABLE memoir_book_chapter_draft_versions "
-                    "DROP COLUMN material_snapshot_json"
-                )
-            )
-            await conn.execute(
-                text(
-                    "ALTER TABLE memoir_book_chapter_draft_versions "
-                    "DROP COLUMN section_snapshot_json"
-                )
-            )
-
-        first = await migrate_memoir_chapter_schema(engine)
-        second = await migrate_memoir_chapter_schema(engine)
-        assert first["changed_tables"] == ["memoir_chapter_digests"]
-        assert len(first["changed_columns"]) == 4
-        assert second["changed_tables"] == []
-        assert second["changed_columns"] == []
-        await assert_memoir_chapter_schema(engine)
-    finally:
-        await engine.dispose()
 
 
-async def test_runtime_cutover_preserves_legacy_draft_rows():
-    register_models()
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-            await conn.execute(
-                text(
-                    "DROP INDEX "
-                    "ix_memoir_book_chapter_draft_versions_input_signature"
-                )
-            )
-            for column_name in (
-                "input_signature",
-                "used_material_ids_json",
-                "material_snapshot_json",
-                "section_snapshot_json",
-            ):
-                await conn.execute(
-                    text(
-                        "ALTER TABLE memoir_book_chapter_draft_versions "
-                        f"DROP COLUMN {column_name}"
-                    )
-                )
-            await conn.execute(
-                text(
-                    "INSERT INTO projects ("
-                    "id, type, title, metadata_json, created_at, updated_at"
-                    ") VALUES ("
-                    "'project-1', 'memoir', '旧项目', '{}', "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO memoir_book_plans ("
-                    "id, project_id, title, status, created_by, "
-                    "prompt_snapshot, metadata_json, created_at, updated_at"
-                    ") VALUES ("
-                    "'plan-1', 'project-1', '旧规划', 'confirmed', 'user', "
-                    "'', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO memoir_book_plan_chapters ("
-                    "id, plan_id, project_id, title, sort_order, "
-                    "include_in_book, metadata_json, "
-                    "created_at, updated_at"
-                    ") VALUES ("
-                    "'chapter-1', 'plan-1', 'project-1', '旧章节', 0, "
-                    "1, '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO memoir_book_chapter_drafts ("
-                    "id, project_id, chapter_id, status, metadata_json, "
-                    "created_at, updated_at"
-                    ") VALUES ("
-                    "'draft-1', 'project-1', 'chapter-1', 'draft', '{}', "
-                    "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-                )
-            )
-            await conn.execute(
-                text(
-                    "INSERT INTO memoir_book_chapter_draft_versions ("
-                    "id, draft_id, project_id, chapter_id, version, content, "
-                    "created_by, model, prompt_snapshot, feedback, created_at"
-                    ") VALUES ("
-                    "'version-1', 'draft-1', 'project-1', 'chapter-1', 1, "
-                    "'不能丢失的旧正文', 'user', NULL, '', NULL, CURRENT_TIMESTAMP"
-                    ")"
-                )
-            )
-
-        result = await migrate_runtime_schema(engine)
-
-        assert (
-            "memoir_book_chapter_draft_versions"
-            in result["memoir_schema_cutover"]["rebuilt_tables"]
-        )
-        async with engine.begin() as conn:
-            row = (
-                await conn.execute(
-                    text(
-                        "SELECT content, input_signature, "
-                        "used_material_ids_json, material_snapshot_json, "
-                        "section_snapshot_json "
-                        "FROM memoir_book_chapter_draft_versions "
-                        "WHERE id = 'version-1'"
-                    )
-                )
-            ).one()
-            temp = await conn.scalar(
-                text(
-                    "SELECT 1 FROM sqlite_master WHERE type = 'table' "
-                    "AND name = "
-                    "'_memoir_book_chapter_draft_versions_before_cutover'"
-                )
-            )
-        assert row == ("不能丢失的旧正文", "", "[]", "[]", "[]")
-        assert temp is None
-    finally:
-        await engine.dispose()
 
 
 async def test_chapter_digest_uses_section_digests_and_allowlists(client, test_db):

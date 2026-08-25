@@ -13,9 +13,9 @@ import json
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import async_session_maker, engine, init_db
+from app.database import async_session_maker, engine
 from app.domain.projects.types import ProjectType
-from app.migrations.memoir_voice import migrate_memoir_voice_schema
+from app.migrations.postgres_runtime import assert_postgres_runtime_schema
 from app.models.projects import Project
 from app.services.memoir.offline_asr import DEFAULT_OFFLINE_ASR_PROVIDERS
 from app.services.memoir.offline_asr_reprocessing import (
@@ -87,8 +87,7 @@ async def _main() -> None:
     args = _parse_args()
     cutoff_utc = beijing_to_utc_naive(parse_beijing_datetime(args.cutoff_created_at_bj))
     try:
-        await init_db()
-        await migrate_memoir_voice_schema(engine)
+        await assert_postgres_runtime_schema(engine)
         async with async_session_maker() as db:
             project_id = await _resolve_project_id(
                 db,

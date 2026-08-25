@@ -11,17 +11,23 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.main import app
-from app.database import Base, create_database_engine, get_db, register_models, settings
-from app.migrations.audit import migrate_audit_schema
-from app.migrations.memoir_client_snapshots import migrate_memoir_client_snapshot_schema
-from app.migrations.memoir_images import migrate_memoir_image_schema
-from app.migrations.memoir_narrative import migrate_memoir_narrative_schema
-from app.migrations.memoir_voice import migrate_memoir_voice_schema
-from app.migrations.postgres_runtime import assert_postgres_runtime_schema
-
-
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
+if not POSTGRES_DATABASE_URL:
+    raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for backend tests")
+os.environ["DATABASE_URL"] = POSTGRES_DATABASE_URL
+os.environ["APP_ENV"] = "test"
+
+from app.main import app  # noqa: E402
+from app.database import (  # noqa: E402
+    Base,
+    create_database_engine,
+    get_db,
+    register_models,
+    settings,
+)
+from app.migrations.postgres_runtime import (  # noqa: E402
+    assert_postgres_runtime_schema,
+)
 
 
 def _assert_dedicated_postgres_test_database() -> None:
@@ -42,9 +48,6 @@ def _postgres_alembic_config() -> Config:
 
 @pytest.fixture(scope="session", autouse=True)
 def postgres_schema():
-    if not POSTGRES_DATABASE_URL:
-        yield
-        return
     _assert_dedicated_postgres_test_database()
     command.upgrade(_postgres_alembic_config(), "head")
     yield
@@ -58,50 +61,23 @@ async def _truncate_postgres_tables(engine) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_db(tmp_path):
-    """创建测试数据库"""
+async def test_db():
+    """创建隔离的 PostgreSQL 测试会话。"""
     register_models()
-    if POSTGRES_DATABASE_URL:
-        test_settings = settings.model_copy(
-            update={"app_env": "test", "database_url": POSTGRES_DATABASE_URL}
-        )
-        engine = create_database_engine(test_settings)
-        async_session = async_sessionmaker(
-            engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-        )
-        await assert_postgres_runtime_schema(engine)
-        await _truncate_postgres_tables(engine)
-        async with async_session() as session:
-            yield session
-        await _truncate_postgres_tables(engine)
-        await engine.dispose()
-        return
-
-    database_url = f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
     test_settings = settings.model_copy(
-        update={"app_env": "test", "database_url": database_url}
+        update={"app_env": "test", "database_url": POSTGRES_DATABASE_URL}
     )
     engine = create_database_engine(test_settings)
-    async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-    async with engine.begin() as conn:
-        foreign_keys = await conn.exec_driver_sql("PRAGMA foreign_keys")
-        assert foreign_keys.scalar_one() == 1
-        await conn.run_sync(Base.metadata.create_all)
-    await migrate_memoir_voice_schema(engine)
-    await migrate_memoir_image_schema(engine)
-    await migrate_memoir_narrative_schema(engine)
-    await migrate_memoir_client_snapshot_schema(engine)
-    await migrate_audit_schema(engine)
-
+    async_session = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    await assert_postgres_runtime_schema(engine)
+    await _truncate_postgres_tables(engine)
     async with async_session() as session:
         yield session
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-
+    await _truncate_postgres_tables(engine)
     await engine.dispose()
 
 
