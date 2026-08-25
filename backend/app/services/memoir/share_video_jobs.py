@@ -365,19 +365,25 @@ async def _fail_exhausted_share_video_jobs(
     now: datetime,
     max_attempts: int,
 ) -> None:
-    exhausted = (
-        await db.scalars(
-            select(MemoirMaterialShareVideo).where(
-                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
-                MemoirMaterialShareVideo.attempts >= max(1, max_attempts),
-                or_(
-                    MemoirMaterialShareVideo.lease_expires_at.is_(None),
-                    MemoirMaterialShareVideo.lease_expires_at <= now,
-                ),
-            )
+    use_skip_locked = db.get_bind().dialect.name == "postgresql"
+    statement = select(MemoirMaterialShareVideo).where(
+        MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.RUNNING.value,
+        MemoirMaterialShareVideo.attempts >= max(1, max_attempts),
+        or_(
+            MemoirMaterialShareVideo.lease_expires_at.is_(None),
+            MemoirMaterialShareVideo.lease_expires_at <= now,
+        ),
+    )
+    if use_skip_locked:
+        statement = statement.with_for_update(
+            skip_locked=True,
+            of=MemoirMaterialShareVideo,
         )
+    exhausted = (
+        await db.scalars(statement)
     ).all()
-    await db.commit()
+    if not use_skip_locked:
+        await db.commit()
     for job in exhausted:
         result = await db.execute(
             update(MemoirMaterialShareVideo)
@@ -459,18 +465,21 @@ async def claim_due_share_video_jobs(
         now=claimed_at,
         max_attempts=attempt_limit,
     )
-    candidate_ids = (
-        await db.scalars(
-            select(MemoirMaterialShareVideo.id)
-            .where(_claimable_share_video_job(claimed_at, attempt_limit))
-            .order_by(
-                MemoirMaterialShareVideo.run_after,
-                MemoirMaterialShareVideo.created_at,
-            )
-            .limit(batch_size)
+    use_skip_locked = db.get_bind().dialect.name == "postgresql"
+    statement = (
+        select(MemoirMaterialShareVideo.id)
+        .where(_claimable_share_video_job(claimed_at, attempt_limit))
+        .order_by(
+            MemoirMaterialShareVideo.run_after,
+            MemoirMaterialShareVideo.created_at,
         )
-    ).all()
-    await db.commit()
+        .limit(batch_size)
+    )
+    if use_skip_locked:
+        statement = statement.with_for_update(skip_locked=True)
+    candidate_ids = (await db.scalars(statement)).all()
+    if not use_skip_locked:
+        await db.commit()
     return await _claim_share_video_job_ids(
         db,
         candidate_ids,

@@ -347,28 +347,31 @@ async def claim_due_editing_jobs(
         statement = statement.where(MemoirEditingJob.job_type == job_type.value)
     if project_id is not None:
         statement = statement.where(MemoirEditingJob.project_id == project_id)
-    candidate_ids = (
-        await db.scalars(
-            statement.order_by(
-                case(
+    use_skip_locked = db.get_bind().dialect.name == "postgresql"
+    statement = statement.order_by(
+        case(
+            (
+                MemoirEditingJob.job_type.in_(
                     (
-                        MemoirEditingJob.job_type.in_(
-                            (
-                                MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
-                                MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
-                                MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
-                            )
-                        ),
-                        1,
-                    ),
-                    else_=0,
+                        MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+                        MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
+                        MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
+                    )
                 ),
-                MemoirEditingJob.run_after,
-                MemoirEditingJob.created_at,
-            ).limit(batch_size)
-        )
+                1,
+            ),
+            else_=0,
+        ),
+        MemoirEditingJob.run_after,
+        MemoirEditingJob.created_at,
+    ).limit(batch_size)
+    if use_skip_locked:
+        statement = statement.with_for_update(skip_locked=True)
+    candidate_ids = (
+        await db.scalars(statement)
     ).all()
-    await db.commit()
+    if not use_skip_locked:
+        await db.commit()
     return await _claim_editing_job_ids(
         db,
         candidate_ids,

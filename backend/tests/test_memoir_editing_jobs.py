@@ -436,6 +436,53 @@ async def test_editing_job_claim_is_atomic_across_workers(tmp_path):
         await engine.dispose()
 
 
+async def test_postgres_editing_claim_skips_locked_queue_head(test_db):
+    if test_db.get_bind().dialect.name != "postgresql":
+        pytest.skip("requires PostgreSQL row-level locking")
+    due_at = _utcnow()
+    project = await _create_project(test_db)
+    first = await enqueue_editing_job(
+        test_db,
+        project_id=project.id,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+        run_after=due_at - timedelta(seconds=2),
+        dedupe_key="skip-locked:first",
+    )
+    second = await enqueue_editing_job(
+        test_db,
+        project_id=project.id,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+        run_after=due_at - timedelta(seconds=1),
+        dedupe_key="skip-locked:second",
+    )
+    await test_db.commit()
+    session_maker = async_sessionmaker(
+        test_db.bind,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    async with session_maker() as locking_db:
+        await locking_db.execute(
+            select(MemoirEditingJob)
+            .where(MemoirEditingJob.id == first.id)
+            .with_for_update()
+        )
+        async with session_maker() as claiming_db:
+            leases = await asyncio.wait_for(
+                claim_due_editing_jobs(
+                    claiming_db,
+                    now=due_at,
+                    limit=1,
+                    lease_seconds=30,
+                ),
+                timeout=2,
+            )
+        await locking_db.rollback()
+
+    assert [lease.job_id for lease in leases] == [second.id]
+
+
 async def test_sqlite_editing_worker_serializes_claimed_job_writes(tmp_path):
     register_models()
     engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path / 'editing-serial.db'}", echo=False)
