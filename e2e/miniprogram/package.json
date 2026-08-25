@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "description": "Developer Tools and real-device end-to-end tests for the Pawtale memoir mini program.",
+  "engines": {
+    "node": ">=20.12"
+  },
   "scripts": {
     "test": "node --test --test-concurrency=1 specs/*.test.js",
     "test:devtools": "node --test --test-concurrency=1 specs/foundation.test.js"

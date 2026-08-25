@@ -50,7 +50,7 @@ function readE2EConfig() {
   return {
     account: requiredAccountConfig(),
     artifactsPath: path.join(E2E_ROOT, "artifacts"),
-    automationPort: integerEnvironmentValue("PAWTALE_E2E_AUTOMATION_PORT", 9420),
+    automationPort: integerEnvironmentValue("PAWTALE_E2E_AUTOMATION_PORT", undefined),
     cliPath,
     httpBaseUrl: String(
       process.env.PAWTALE_E2E_HTTP_BASE_URL || "https://pawtale-api.spaceflows.cn",

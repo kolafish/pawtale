@@ -2,6 +2,7 @@ const { execFileSync } = require("node:child_process");
 const automator = require("./automator");
 const { createArtifactRecorder } = require("./artifacts");
 const { readE2EConfig } = require("./config");
+const { findAvailablePort } = require("./port");
 const {
   sleep,
   waitForCurrentPage,
@@ -46,10 +47,15 @@ async function configureRuntime(miniProgram, config) {
 }
 
 async function launchE2ESession() {
-  const config = readE2EConfig();
+  const configured = readE2EConfig();
+  const config = {
+    ...configured,
+    automationPort: configured.automationPort || await findAvailablePort(),
+  };
   const artifacts = await createArtifactRecorder(config);
   let miniProgram;
   try {
+    closeDeveloperToolsProject(config);
     miniProgram = await automator.launch({
       cliPath: config.cliPath,
       port: config.automationPort,

@@ -129,17 +129,22 @@ test("test account completes the project create, rename, switch, and delete jour
 
     await session.miniProgram.mockWxMethod("showActionSheet", { tapIndex: 0 });
     await session.miniProgram.mockWxMethod("showModal", { confirm: true, cancel: false });
-    await (await elementByDataId(projectsPage, ".more-button", createdProject.id)).tap();
-    await waitForPageData(
-      projectsPage,
-      (data) => data.busy === false
-        && !data.projects.some((project) => project.id === createdProject.id),
-      "本轮创建的回忆录已删除",
-      30000,
-    );
-    session.createdProjectIds = session.createdProjectIds.filter((id) => id !== createdProject.id);
-    await session.miniProgram.restoreWxMethod("showActionSheet");
-    await session.miniProgram.restoreWxMethod("showModal");
+    try {
+      await (await elementByDataId(projectsPage, ".more-button", createdProject.id)).tap();
+      await waitForPageData(
+        projectsPage,
+        (data) => data.busy === false
+          && !data.projects.some((project) => project.id === createdProject.id),
+        "本轮创建的回忆录已删除",
+        30000,
+      );
+      session.createdProjectIds = session.createdProjectIds.filter(
+        (id) => id !== createdProject.id,
+      );
+    } finally {
+      await session.miniProgram.restoreWxMethod("showActionSheet");
+      await session.miniProgram.restoreWxMethod("showModal");
+    }
   } catch (error) {
     failed = true;
     await session.artifacts.captureFailure(session.miniProgram, error);

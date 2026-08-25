@@ -6,12 +6,8 @@ target="${1:-devtools}"
 
 case "$target" in
   devtools)
-    if [ ! -d "$repository_root/miniprogram/node_modules" ]; then
-      npm --prefix "$repository_root/miniprogram" ci
-    fi
-    if [ ! -d "$repository_root/e2e/miniprogram/node_modules" ]; then
-      npm --prefix "$repository_root/e2e/miniprogram" ci
-    fi
+    npm --prefix "$repository_root/miniprogram" ci
+    npm --prefix "$repository_root/e2e/miniprogram" ci
     npm --prefix "$repository_root/e2e/miniprogram" run test:devtools
     ;;
   *)
