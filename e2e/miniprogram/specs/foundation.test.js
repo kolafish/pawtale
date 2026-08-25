@@ -32,6 +32,7 @@ after(async () => {
   } finally {
     await session.artifacts.finish({
       createdProjectIds: session.createdProjectIds,
+      createdProjectTitles: session.createdProjectTitles,
       failed,
       target: "devtools",
     });

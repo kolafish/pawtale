@@ -44,7 +44,7 @@ async function readCurrentPage(miniProgram) {
     const message = String(error?.message || "");
     // Developer Tools can announce App.initialized before it has registered the
     // first simulator webview. It can also drop App.getCurrentPage's reply while
-    // replacing the login webview. Both are bounded by the caller's wait.
+    // replacing a webview during navigation. Both are bounded by the caller's wait.
     if (
       message.includes("getPageMetaByWebviewId")
       || isAutomatorResponseTimeout(error)

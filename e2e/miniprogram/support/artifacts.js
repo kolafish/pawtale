@@ -47,6 +47,7 @@ function redactValue(value, secrets, seen = new WeakSet()) {
 async function createArtifactRecorder(config) {
   const runPath = path.join(config.artifactsPath, `foundation-${safeTimestamp()}`);
   const events = [];
+  let failureCount = 0;
   const secrets = [config.account.email, config.account.password];
   await fs.mkdir(runPath, { recursive: true });
 
@@ -77,6 +78,8 @@ async function createArtifactRecorder(config) {
       });
     },
     async captureFailure(miniProgram, error) {
+      failureCount += 1;
+      const suffix = failureCount === 1 ? "" : `-${failureCount}`;
       let pageSnapshot = null;
       try {
         const page = await withTimeout(
@@ -96,7 +99,9 @@ async function createArtifactRecorder(config) {
           : null;
         if (page && page.path !== "pages/login/index") {
           await withTimeout(
-            miniProgram.screenshot({ path: path.join(runPath, "failure.png") }),
+            miniProgram.screenshot({
+              path: path.join(runPath, `failure${suffix}.png`),
+            }),
             5000,
             "保存失败截图",
           );
@@ -109,7 +114,7 @@ async function createArtifactRecorder(config) {
         });
       }
       await fs.writeFile(
-        path.join(runPath, "failure.json"),
+        path.join(runPath, `failure${suffix}.json`),
         `${JSON.stringify({
           error: redactValue(error, secrets),
           page: pageSnapshot,
