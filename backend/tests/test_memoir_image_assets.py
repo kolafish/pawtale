@@ -522,7 +522,7 @@ async def test_image_migration_disables_redundant_source_linked_appendix(
                 """
                 SELECT placement_type, chapter_id
                 FROM memoir_book_image_placements
-                WHERE image_asset_id = :asset_id AND enabled = 1
+                    WHERE image_asset_id = :asset_id AND enabled IS TRUE
                 """
             ),
             {"asset_id": asset_id},

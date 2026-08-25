@@ -347,11 +347,14 @@ async def user_day(db: AsyncSession, user_id: str, day: date) -> AuditUserDayRes
 
     result = await db.execute(
         select(AuditSession)
-        .join(AuditEvent, AuditEvent.session_id == AuditSession.id)
-        .where(AuditSession.user_id == user_id, AuditEvent.event_date == day)
+        .where(
+            AuditSession.user_id == user_id,
+            AuditSession.id.in_(
+                select(AuditEvent.session_id).where(AuditEvent.event_date == day)
+            ),
+        )
         .options(selectinload(AuditSession.events))
         .order_by(AuditSession.started_at)
-        .distinct()
     )
     sessions = result.scalars().all()
 

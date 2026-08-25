@@ -11,6 +11,8 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from app.migrations.postgres_runtime import assert_postgres_runtime_schema
+
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
 pytestmark = pytest.mark.skipif(
@@ -46,12 +48,21 @@ async def _table_names() -> set[str]:
         await engine.dispose()
 
 
+async def _assert_runtime_schema() -> None:
+    engine = create_async_engine(POSTGRES_DATABASE_URL)
+    try:
+        await assert_postgres_runtime_schema(engine)
+    finally:
+        await engine.dispose()
+
+
 def test_postgres_baseline_round_trip_matches_models():
     _assert_dedicated_test_database()
     config = _alembic_config()
 
     command.upgrade(config, "head")
     command.check(config)
+    asyncio.run(_assert_runtime_schema())
 
     tables = asyncio.run(_table_names())
     assert "users" in tables

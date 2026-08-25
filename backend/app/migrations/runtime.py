@@ -34,12 +34,18 @@ from app.migrations.memoir_sections import (
 )
 from app.migrations.memoir_voice import assert_memoir_voice_schema, migrate_memoir_voice_schema
 from app.migrations.projects import assert_project_schema, migrate_project_schema
+from app.migrations.postgres_runtime import assert_postgres_runtime_schema
 from app.migrations.runtime_base import assert_base_runtime_schema
 from app.migrations.sqlite_integrity import assert_sqlite_foreign_key_integrity
 
 
 async def migrate_runtime_schema(engine: AsyncEngine) -> dict[str, object]:
     """Apply explicit schema migrations for the current application version."""
+    if engine.dialect.name == "postgresql":
+        raise RuntimeError(
+            "PostgreSQL schema changes are managed by Alembic; "
+            "run `PYTHONPATH=. alembic upgrade head`"
+        )
     register_models()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -81,6 +87,9 @@ async def assert_runtime_schema(
     require_sqlite_foreign_keys: bool = True,
 ) -> None:
     """Validate runtime schema without creating tables or altering columns."""
+    if engine.dialect.name == "postgresql":
+        await assert_postgres_runtime_schema(engine)
+        return
     await assert_base_runtime_schema(engine)
     await assert_project_schema(engine)
     await assert_memoir_voice_schema(engine)

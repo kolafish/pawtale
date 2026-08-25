@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy.schema import Column, Table
 
@@ -35,14 +35,20 @@ def expected_memoir_image_schema() -> dict[str, list[dict[str, object]]]:
 
 
 async def _table_column_schema(conn, table: str) -> list[dict[str, object]]:
-    result = await conn.execute(text(f"PRAGMA table_info({table})"))
+    columns, primary_key = await conn.run_sync(
+        lambda sync_conn: (
+            inspect(sync_conn).get_columns(table),
+            inspect(sync_conn).get_pk_constraint(table),
+        )
+    )
+    primary_key_columns = set(primary_key.get("constrained_columns") or ())
     return [
         {
-            "name": row[1],
-            "nullable": not bool(row[3]),
-            "primary_key": bool(row[5]),
+            "name": column["name"],
+            "nullable": bool(column["nullable"]),
+            "primary_key": column["name"] in primary_key_columns,
         }
-        for row in result.fetchall()
+        for column in columns
     ]
 
 
@@ -60,9 +66,9 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
         text(
             """
             UPDATE memoir_book_image_placements
-            SET enabled = 0,
+            SET enabled = FALSE,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE enabled = 1
+            WHERE enabled IS TRUE
               AND placement_type = 'appendix'
               AND EXISTS (
                     SELECT 1
@@ -72,7 +78,7 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
                       AND inline_placement.image_asset_id =
                           memoir_book_image_placements.image_asset_id
                       AND inline_placement.placement_type = 'chapter_inline'
-                      AND inline_placement.enabled = 1
+                      AND inline_placement.enabled IS TRUE
               )
               AND EXISTS (
                     SELECT 1
@@ -90,8 +96,8 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
                         'chapter_illustration',
                         'utterance_illustration'
                       )
-                      AND material.include_in_book = 1
-                      AND section.include_in_book = 1
+                      AND material.include_in_book IS TRUE
+                      AND section.include_in_book IS TRUE
                       AND section.status = 'active'
               )
             """
@@ -118,13 +124,13 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
                         'chapter_illustration',
                         'utterance_illustration'
                       )
-                      AND material.include_in_book = 1
-                      AND section.include_in_book = 1
+                      AND material.include_in_book IS TRUE
+                      AND section.include_in_book IS TRUE
                       AND section.status = 'active'
                     LIMIT 1
                 ),
                 updated_at = CURRENT_TIMESTAMP
-            WHERE enabled = 1
+            WHERE enabled IS TRUE
               AND placement_type = 'appendix'
               AND EXISTS (
                     SELECT 1
@@ -142,8 +148,8 @@ async def _relocate_source_linked_appendix_placements(conn) -> int:
                         'chapter_illustration',
                         'utterance_illustration'
                       )
-                      AND material.include_in_book = 1
-                      AND section.include_in_book = 1
+                      AND material.include_in_book IS TRUE
+                      AND section.include_in_book IS TRUE
                       AND section.status = 'active'
               )
             """

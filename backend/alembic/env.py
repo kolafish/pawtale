@@ -13,14 +13,23 @@ from app.database import Base, register_models
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 register_models()
 target_metadata = Base.metadata
+RUNTIME_MANAGED_INDEXES = {
+    "ix_memoir_voice_utterances_transcript_edited_trgm",
+    "ix_memoir_voice_utterances_transcript_raw_trgm",
+}
+
+
+def include_object(object_, name, type_, reflected, compare_to) -> bool:
+    del object_, reflected, compare_to
+    return not (type_ == "index" and name in RUNTIME_MANAGED_INDEXES)
 
 
 def database_url() -> str:
-    configured_url = config.get_main_option("sqlalchemy.url").strip()
+    configured_url = (config.get_main_option("sqlalchemy.url") or "").strip()
     if configured_url:
         return configured_url
     return get_settings().database_url
@@ -33,6 +42,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
         render_as_batch=False,
     )
     with context.begin_transaction():
@@ -44,6 +54,7 @@ def do_run_migrations(connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
+        include_object=include_object,
         render_as_batch=False,
     )
     with context.begin_transaction():

@@ -435,8 +435,8 @@ def _fts_match_query(term: str) -> str:
     return f'"{escaped}"'
 
 
-def _transcript_text_search_filter(term: str):
-    if len(term) < TRANSCRIPT_FTS_MIN_TERM_LENGTH:
+def _transcript_text_search_filter(term: str, *, use_postgres: bool):
+    if use_postgres or len(term) < TRANSCRIPT_FTS_MIN_TERM_LENGTH:
         pattern = _like_pattern(term)
         return or_(
             MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
@@ -511,10 +511,10 @@ def _parent_question_search_filter(pattern: str):
     )
 
 
-def _search_filter(term: str):
+def _search_filter(term: str, *, use_postgres: bool):
     pattern = _like_pattern(term)
     return or_(
-        _transcript_text_search_filter(term),
+        _transcript_text_search_filter(term, use_postgres=use_postgres),
         _parent_question_search_filter(pattern),
         _question_search_filter(pattern),
     )
@@ -863,7 +863,11 @@ async def list_voice_transcripts(
     if included not in INCLUDED_FILTER_VALUES:
         raise HTTPException(status_code=400, detail="不支持的讲述记录收录筛选条件")
     filters = _transcript_filter(user_id, project_id, allow_admin=allow_admin)
-    filters.extend(_search_filter(term) for term in _search_terms(search_query))
+    use_postgres = db.get_bind().dialect.name == "postgresql"
+    filters.extend(
+        _search_filter(term, use_postgres=use_postgres)
+        for term in _search_terms(search_query)
+    )
     if guidance_mode:
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
     if current_guidance_module:
