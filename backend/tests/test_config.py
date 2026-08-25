@@ -84,6 +84,37 @@ def test_non_sqlite_engine_connect_args_stay_empty():
     assert database.sqlite_engine_connect_args(settings) == {}
 
 
+def test_postgres_engine_uses_bounded_health_checked_pool(monkeypatch):
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def fake_create_async_engine(url: str, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(database, "create_async_engine", fake_create_async_engine)
+    settings = Settings(
+        database_url="postgresql+asyncpg://pawtale@example.test/db",
+        database_pool_size=7,
+        database_max_overflow=4,
+        database_pool_timeout_seconds=12.5,
+        database_pool_recycle_seconds=900,
+    )
+
+    assert database.create_database_engine(settings) is sentinel
+    assert captured == {
+        "url": settings.database_url,
+        "echo": settings.app_env == "development",
+        "connect_args": {},
+        "pool_pre_ping": True,
+        "pool_size": 7,
+        "max_overflow": 4,
+        "pool_timeout": 12.5,
+        "pool_recycle": 900,
+    }
+
+
 def test_small_concurrency_provider_limit_defaults():
     settings = Settings(_env_file=None)
 

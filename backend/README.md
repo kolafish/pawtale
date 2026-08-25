@@ -20,6 +20,21 @@ PYTHONPATH=. uvicorn app.main:app --reload --port 8000
 - 全新数据库可显式使用 `--skip-backup`；
 - API 启动只执行运行时配置和 schema 校验，不自动建表或迁移。
 
+## PostgreSQL 迁移开发
+
+PostgreSQL 迁移使用 Alembic 和 asyncpg 连接。Alembic 必须连接独立的开发数据库，
+不能使用生产数据库生成 schema 或执行测试。
+
+```bash
+export DATABASE_URL='postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/pawtale_dev'
+PYTHONPATH=. alembic upgrade head
+PYTHONPATH=. alembic check
+```
+
+后端 CI 通过 `TEST_POSTGRES_DATABASE_URL` 验证 baseline 能完整升级、与 SQLAlchemy
+metadata 一致、降级并再次升级。分阶段迁移期间仍保留 SQLite 默认值；生产切换后将
+删除 SQLite 运行时支持。
+
 本地入口：
 
 - 健康检查：<http://localhost:8000/health>
