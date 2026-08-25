@@ -20,6 +20,7 @@ case "$target" in
     ;;
   ios)
     install_dependencies
+    export PAWTALE_E2E_PROJECT_PATH="${PAWTALE_E2E_PROJECT_PATH:-$repository_root/miniprogram}"
     npm --prefix "$repository_root/e2e/miniprogram" run test:ios
     ;;
   *)
