@@ -66,7 +66,17 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
         triggers = set(
             (
                 await conn.scalars(
-                    text("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal")
+                    text(
+                        """
+                        SELECT trigger.tgname
+                        FROM pg_trigger AS trigger
+                        JOIN pg_class AS relation ON relation.oid = trigger.tgrelid
+                        JOIN pg_namespace AS namespace
+                          ON namespace.oid = relation.relnamespace
+                        WHERE NOT trigger.tgisinternal
+                          AND namespace.nspname = current_schema()
+                        """
+                    )
                 )
             ).all()
         )

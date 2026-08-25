@@ -28,9 +28,13 @@ async def schema_object_exists(conn, *, object_type: str, name: str) -> bool:
             text(
                 """
                 SELECT 1
-                FROM pg_trigger
-                WHERE tgname = :name
-                  AND NOT tgisinternal
+                FROM pg_trigger AS trigger
+                JOIN pg_class AS relation ON relation.oid = trigger.tgrelid
+                JOIN pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE trigger.tgname = :name
+                  AND NOT trigger.tgisinternal
+                  AND namespace.nspname = current_schema()
                 """
             ),
             {"name": name},

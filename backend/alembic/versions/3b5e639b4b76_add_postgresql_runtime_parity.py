@@ -591,4 +591,3 @@ def downgrade() -> None:
 
     _execute("DROP INDEX ix_memoir_voice_utterances_transcript_edited_trgm")
     _execute("DROP INDEX ix_memoir_voice_utterances_transcript_raw_trgm")
-    _execute("DROP EXTENSION IF EXISTS pg_trgm")
