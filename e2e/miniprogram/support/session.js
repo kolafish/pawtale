@@ -17,6 +17,37 @@ const {
 const BACKEND_CONFIG_STORAGE_KEY = "pawtale_backend_config";
 const BACKEND_COOKIE_STORAGE_KEY = "pawtale_backend_cookie";
 const MEMOIR_SESSION_STORAGE_KEY = "pawtale_memoir_session";
+const RUNTIME_STORAGE_KEYS = [
+  BACKEND_CONFIG_STORAGE_KEY,
+  BACKEND_COOKIE_STORAGE_KEY,
+  MEMOIR_SESSION_STORAGE_KEY,
+];
+
+async function captureStorageEntries(miniProgram, keys) {
+  const info = await miniProgram.callWxMethod("getStorageInfoSync");
+  const existingKeys = new Set(Array.isArray(info?.keys) ? info.keys : []);
+  const entries = [];
+  for (const key of keys) {
+    entries.push({
+      key,
+      exists: existingKeys.has(key),
+      value: existingKeys.has(key)
+        ? await miniProgram.callWxMethod("getStorageSync", key)
+        : undefined,
+    });
+  }
+  return entries;
+}
+
+async function restoreStorageEntries(miniProgram, entries) {
+  for (const entry of entries) {
+    if (entry.exists) {
+      await miniProgram.callWxMethod("setStorageSync", entry.key, entry.value);
+    } else {
+      await miniProgram.callWxMethod("removeStorageSync", entry.key);
+    }
+  }
+}
 
 async function elementById(page, id) {
   return waitForValue(
@@ -56,17 +87,34 @@ async function launchE2ESession() {
   };
   const artifacts = await createArtifactRecorder(config);
   let miniProgram;
+  let originalRuntimeStorage = [];
   try {
+    artifacts.mark("setup:window-close:start");
     closeDeveloperToolsProject(config);
+    artifacts.mark("setup:window-close:complete");
     miniProgram = await automator.launch({
       cliPath: config.cliPath,
       port: config.automationPort,
       projectPath: config.projectPath,
       timeout: 60000,
     });
+    artifacts.mark("setup:automator-launch:complete");
     artifacts.attach(miniProgram);
-    await configureRuntime(miniProgram, config);
     await waitForCurrentPageReady(miniProgram);
+    artifacts.mark("setup:first-page-ready");
+    originalRuntimeStorage = await captureStorageEntries(miniProgram, RUNTIME_STORAGE_KEYS);
+    artifacts.mark("setup:runtime-storage-captured");
+    await configureRuntime(miniProgram, config);
+    artifacts.mark("setup:runtime-configured");
+    try {
+      await miniProgram.reLaunch("/pages/login/index");
+    } catch (error) {
+      if (!isAutomatorResponseTimeout(error)) {
+        throw error;
+      }
+    }
+    await waitForCurrentPage(miniProgram, "pages/login/index", 30000);
+    artifacts.mark("setup:neutral-page-ready");
     return {
       artifacts,
       config,
@@ -74,8 +122,16 @@ async function launchE2ESession() {
       createdProjectTitles: [],
       initialActiveProjectId: "",
       miniProgram,
+      originalRuntimeStorage,
     };
   } catch (error) {
+    if (miniProgram && originalRuntimeStorage.length) {
+      try {
+        await restoreStorageEntries(miniProgram, originalRuntimeStorage);
+      } catch {
+        // Preserve the setup error; a closed automation connection cannot restore storage.
+      }
+    }
     miniProgram?.disconnect();
     await artifacts.finish({
       failed: true,
@@ -103,11 +159,24 @@ async function shutdownE2ESession(session) {
   if (!session?.miniProgram) {
     return;
   }
+  let restoreError = null;
+  try {
+    await restoreStorageEntries(
+      session.miniProgram,
+      session.originalRuntimeStorage || [],
+    );
+    session.artifacts.mark("teardown:runtime-storage-restored");
+  } catch (error) {
+    restoreError = error;
+  }
   try {
     await withTimeout(session.miniProgram.close(), 8000, "关闭自动化窗口");
   } catch {
     session.miniProgram.disconnect();
     closeDeveloperToolsProject(session.config);
+  }
+  if (restoreError) {
+    throw restoreError;
   }
 }
 
@@ -231,8 +300,84 @@ async function cleanupSession(session) {
   }
 }
 
+async function cleanupProjectsThroughApi(session) {
+  const ids = new Set(session.createdProjectIds);
+  const titles = new Set(session.createdProjectTitles);
+  if (!ids.size && !titles.size) {
+    return;
+  }
+  const { account, httpBaseUrl } = session.config;
+  const login = await fetch(`${httpBaseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(account),
+  });
+  if (!login.ok) {
+    throw new Error(`API 清理登录失败：HTTP ${login.status}`);
+  }
+  const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  if (!cookie) {
+    throw new Error("API 清理登录未返回会话 cookie");
+  }
+  const headers = { Cookie: cookie, "content-type": "application/json" };
+  const listProjects = async () => {
+    const response = await fetch(`${httpBaseUrl}/api/mobile/memoir/projects`, { headers });
+    if (!response.ok) {
+      throw new Error(`API 清理读取回忆录失败：HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+  const before = await listProjects();
+  for (const project of before.projects) {
+    if (titles.has(project.title)) {
+      ids.add(project.id);
+    }
+  }
+  if (
+    session.initialActiveProjectId
+    && before.active_project_id !== session.initialActiveProjectId
+    && before.projects.some((project) => project.id === session.initialActiveProjectId)
+  ) {
+    const response = await fetch(
+      `${httpBaseUrl}/api/mobile/memoir/projects/${encodeURIComponent(session.initialActiveProjectId)}/activate`,
+      { method: "POST", headers, body: "{}" },
+    );
+    if (!response.ok) {
+      throw new Error(`API 清理恢复原回忆录失败：HTTP ${response.status}`);
+    }
+  }
+  for (const id of ids) {
+    if (!before.projects.some((project) => project.id === id)) {
+      continue;
+    }
+    const response = await fetch(
+      `${httpBaseUrl}/api/mobile/memoir/projects/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers },
+    );
+    if (!response.ok) {
+      throw new Error(`API 清理删除测试回忆录失败：HTTP ${response.status}`);
+    }
+  }
+  const after = await listProjects();
+  const residue = after.projects.filter(
+    (project) => ids.has(project.id) || titles.has(project.title),
+  );
+  if (residue.length) {
+    throw new Error(`API 清理后仍残留 ${residue.length} 本测试回忆录`);
+  }
+  if (
+    session.initialActiveProjectId
+    && after.projects.some((project) => project.id === session.initialActiveProjectId)
+    && after.active_project_id !== session.initialActiveProjectId
+  ) {
+    throw new Error("API 清理后未恢复原活动回忆录");
+  }
+}
+
 module.exports = {
   activateProject,
+  captureStorageEntries,
+  cleanupProjectsThroughApi,
   cleanupSession,
   deleteProject,
   elementByDataId,
@@ -240,5 +385,6 @@ module.exports = {
   launchE2ESession,
   loginWithTestAccount,
   openProjects,
+  restoreStorageEntries,
   shutdownE2ESession,
 };
