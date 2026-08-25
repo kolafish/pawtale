@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = DEFAULT_APP_SECRET_KEY
     database_url: str = f"sqlite+aiosqlite:///{DATA_DIR}/pawtale.db"
+    database_pool_size: int = 5
+    database_max_overflow: int = 10
+    database_pool_timeout_seconds: float = 30.0
+    database_pool_recycle_seconds: int = 1800
     sqlite_journal_mode: str = "WAL"
     sqlite_synchronous: str = "NORMAL"
     sqlite_busy_timeout_ms: int = 5000

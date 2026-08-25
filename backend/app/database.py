@@ -68,10 +68,21 @@ def create_database_engine(
     *,
     enforce_sqlite_foreign_keys: bool = True,
 ) -> AsyncEngine:
+    engine_kwargs: dict[str, Any] = {
+        "echo": current_settings.app_env == "development",
+        "connect_args": sqlite_engine_connect_args(current_settings),
+    }
+    if not is_sqlite_database_url(current_settings.database_url):
+        engine_kwargs.update(
+            pool_pre_ping=True,
+            pool_size=max(1, current_settings.database_pool_size),
+            max_overflow=max(0, current_settings.database_max_overflow),
+            pool_timeout=max(0.1, current_settings.database_pool_timeout_seconds),
+            pool_recycle=max(0, current_settings.database_pool_recycle_seconds),
+        )
     engine = create_async_engine(
         current_settings.database_url,
-        echo=current_settings.app_env == "development",
-        connect_args=sqlite_engine_connect_args(current_settings),
+        **engine_kwargs,
     )
     if is_sqlite_database_url(current_settings.database_url):
         @event.listens_for(engine.sync_engine, "connect")
