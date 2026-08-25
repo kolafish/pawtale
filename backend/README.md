@@ -35,6 +35,25 @@ PYTHONPATH=. alembic check
 metadata 一致、降级并再次升级。分阶段迁移期间仍保留 SQLite 默认值；生产切换后将
 删除 SQLite 运行时支持。
 
+生产数据只允许从 `backup_runtime_data.py` 生成并校验过的 manifest 导入空 PG 库。
+先停止全部数据库 writer 并创建最终备份，再 dry-run，最后显式执行：
+
+```bash
+PYTHONPATH=. python scripts/migrate_sqlite_to_postgres.py \
+  --manifest /path/to/backup/manifest.json \
+  --target-database-url "$POSTGRES_DATABASE_URL" \
+  --report /path/to/postgres-migration-report.json
+
+PYTHONPATH=. python scripts/migrate_sqlite_to_postgres.py \
+  --manifest /path/to/backup/manifest.json \
+  --target-database-url "$POSTGRES_DATABASE_URL" \
+  --report /path/to/postgres-migration-report.json \
+  --execute --writers-stopped
+```
+
+目标库只要有任一业务表非空就会拒绝导入。导入在单个 PG 事务内完成，并逐表校验
+行数、规范化内容 SHA-256 和全部外键；任一校验失败都会整批回滚。
+
 本地入口：
 
 - 健康检查：<http://localhost:8000/health>
