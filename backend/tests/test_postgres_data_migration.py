@@ -12,7 +12,10 @@ from app.database import Base, register_models
 from app.models.projects import Project
 from app.models.users import AuthIdentity, User
 from scripts.backup_runtime_data import create_backup
-from scripts.migrate_sqlite_to_postgres import migrate_sqlite_backup_to_postgres
+from scripts.migrate_sqlite_to_postgres import (
+    _table_digest,
+    migrate_sqlite_backup_to_postgres,
+)
 
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
@@ -73,6 +76,12 @@ def _source_backup(tmp_path, *, orphaned_project: bool = False):
         backend_data_dir=tmp_path / "backend-data",
         backups_dir=tmp_path / "backups",
     )
+
+
+def test_table_digest_is_independent_of_database_row_order():
+    rows = [bytes.fromhex("00" * 32), bytes.fromhex("ff" * 32)]
+
+    assert _table_digest(rows) == _table_digest(list(reversed(rows)))
 
 
 async def test_migrates_validated_sqlite_backup_with_exact_content(test_db, tmp_path):
@@ -178,3 +187,28 @@ async def test_execute_requires_stopped_writers(test_db, tmp_path):
             POSTGRES_DATABASE_URL,
             execute=True,
         )
+
+
+async def test_execute_rejects_nonempty_postgres_target(test_db, tmp_path):
+    backup_dir = _source_backup(tmp_path)
+    test_db.add(
+        User(
+            id="existing-user",
+            email="existing@example.com",
+            password_hash="hash",
+            display_name="existing",
+        )
+    )
+    await test_db.commit()
+
+    with pytest.raises(RuntimeError, match="PostgreSQL target is not empty"):
+        await migrate_sqlite_backup_to_postgres(
+            backup_dir / "manifest.json",
+            POSTGRES_DATABASE_URL,
+            execute=True,
+            writers_stopped=True,
+        )
+
+    existing = await test_db.get(User, "existing-user")
+    assert existing is not None
+    assert existing.email == "existing@example.com"

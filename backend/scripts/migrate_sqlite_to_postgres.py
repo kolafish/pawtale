@@ -47,18 +47,23 @@ def _normalized_value(value: Any) -> Any:
     return value
 
 
-def _update_digest(digest, table: Table, row: dict[str, Any]) -> None:
+def _row_digest(table: Table, row: dict[str, Any]) -> bytes:
     payload = [_normalized_value(row[column.name]) for column in table.columns]
-    digest.update(
-        json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-    )
-    digest.update(b"\n")
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).digest()
+
+
+def _table_digest(row_digests: list[bytes]) -> str:
+    digest = hashlib.sha256()
+    for row_digest in sorted(row_digests):
+        digest.update(row_digest)
+    return digest.hexdigest()
 
 
 def _ordered_table_select(table: Table):
@@ -72,13 +77,13 @@ async def _table_fingerprint(
     connection: AsyncConnection,
     table: Table,
 ) -> dict[str, int | str]:
-    digest = hashlib.sha256()
+    row_digests: list[bytes] = []
     count = 0
     async with connection.stream(_ordered_table_select(table)) as result:
         async for row in result.mappings():
-            _update_digest(digest, table, dict(row))
+            row_digests.append(_row_digest(table, dict(row)))
             count += 1
-    return {"count": count, "sha256": digest.hexdigest()}
+    return {"count": count, "sha256": _table_digest(row_digests)}
 
 
 async def _source_table_names(connection: AsyncConnection) -> set[str]:
@@ -115,6 +120,15 @@ async def _target_nonempty_tables(connection: AsyncConnection) -> dict[str, int]
     return nonempty
 
 
+def _require_empty_target(nonempty: dict[str, int]) -> None:
+    if not nonempty:
+        return
+    details = ", ".join(
+        f"{table}={count}" for table, count in sorted(nonempty.items())
+    )
+    raise RuntimeError(f"PostgreSQL target is not empty: {details}")
+
+
 async def _set_user_triggers(
     connection: AsyncConnection,
     *,
@@ -136,13 +150,13 @@ async def _copy_table(
     *,
     chunk_size: int,
 ) -> dict[str, int | str]:
-    digest = hashlib.sha256()
+    row_digests: list[bytes] = []
     count = 0
     chunk: list[dict[str, Any]] = []
     async with source.stream(_ordered_table_select(table)) as result:
         async for mapping in result.mappings():
             row = dict(mapping)
-            _update_digest(digest, table, row)
+            row_digests.append(_row_digest(table, row))
             chunk.append(row)
             count += 1
             if len(chunk) >= chunk_size:
@@ -150,7 +164,7 @@ async def _copy_table(
                 chunk.clear()
     if chunk:
         await target.execute(insert(table), chunk)
-    return {"count": count, "sha256": digest.hexdigest()}
+    return {"count": count, "sha256": _table_digest(row_digests)}
 
 
 async def _foreign_key_violations(
@@ -232,13 +246,6 @@ async def migrate_sqlite_backup_to_postgres(
         async with source_engine.connect() as source:
             await _validate_sqlite_source(source)
             await assert_postgres_runtime_schema(target_engine)
-            async with target_engine.connect() as target:
-                nonempty = await _target_nonempty_tables(target)
-            if nonempty:
-                details = ", ".join(
-                    f"{table}={count}" for table, count in sorted(nonempty.items())
-                )
-                raise RuntimeError(f"PostgreSQL target is not empty: {details}")
 
             table_results: dict[str, dict[str, int | str]]
             foreign_keys: dict[str, int] = {}
@@ -246,6 +253,7 @@ async def migrate_sqlite_backup_to_postgres(
                 table_results = {}
                 async with target_engine.begin() as target:
                     await _set_user_triggers(target, enabled=False)
+                    _require_empty_target(await _target_nonempty_tables(target))
                     for table in Base.metadata.sorted_tables:
                         source_result = await _copy_table(
                             source,
@@ -274,6 +282,8 @@ async def migrate_sqlite_backup_to_postgres(
                         )
                 await assert_postgres_runtime_schema(target_engine)
             else:
+                async with target_engine.connect() as target:
+                    _require_empty_target(await _target_nonempty_tables(target))
                 table_results = await _source_fingerprints(source)
 
         finished_at = datetime.now(timezone.utc)
