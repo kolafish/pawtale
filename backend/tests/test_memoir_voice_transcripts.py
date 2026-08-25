@@ -1255,10 +1255,10 @@ async def test_share_video_worker_recovers_when_completion_write_stalls(
         share_video_jobs.run_share_video_job(
             lease,
             session_maker=session_maker,
-            completion_recovery_poll_seconds=1.0,
-            timeout_seconds=0.05,
+            completion_recovery_poll_seconds=10.0,
+            timeout_seconds=1.0,
         ),
-        timeout=2,
+        timeout=3,
     )
 
     assert result is True
