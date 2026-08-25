@@ -72,6 +72,15 @@ async function launchE2ESession() {
     artifacts.mark("setup:first-page-ready");
     await configureRuntime(miniProgram, config);
     artifacts.mark("setup:runtime-configured");
+    try {
+      await miniProgram.reLaunch("/pages/login/index");
+    } catch (error) {
+      if (!isAutomatorResponseTimeout(error)) {
+        throw error;
+      }
+    }
+    await waitForCurrentPage(miniProgram, "pages/login/index", 30000);
+    artifacts.mark("setup:neutral-page-ready");
     return {
       artifacts,
       config,
@@ -236,8 +245,83 @@ async function cleanupSession(session) {
   }
 }
 
+async function cleanupProjectsThroughApi(session) {
+  const ids = new Set(session.createdProjectIds);
+  const titles = new Set(session.createdProjectTitles);
+  if (!ids.size && !titles.size) {
+    return;
+  }
+  const { account, httpBaseUrl } = session.config;
+  const login = await fetch(`${httpBaseUrl}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(account),
+  });
+  if (!login.ok) {
+    throw new Error(`API 清理登录失败：HTTP ${login.status}`);
+  }
+  const cookie = String(login.headers.get("set-cookie") || "").split(";")[0];
+  if (!cookie) {
+    throw new Error("API 清理登录未返回会话 cookie");
+  }
+  const headers = { Cookie: cookie, "content-type": "application/json" };
+  const listProjects = async () => {
+    const response = await fetch(`${httpBaseUrl}/api/mobile/memoir/projects`, { headers });
+    if (!response.ok) {
+      throw new Error(`API 清理读取回忆录失败：HTTP ${response.status}`);
+    }
+    return response.json();
+  };
+  const before = await listProjects();
+  for (const project of before.projects) {
+    if (titles.has(project.title)) {
+      ids.add(project.id);
+    }
+  }
+  if (
+    session.initialActiveProjectId
+    && before.active_project_id !== session.initialActiveProjectId
+    && before.projects.some((project) => project.id === session.initialActiveProjectId)
+  ) {
+    const response = await fetch(
+      `${httpBaseUrl}/api/mobile/memoir/projects/${encodeURIComponent(session.initialActiveProjectId)}/activate`,
+      { method: "POST", headers, body: "{}" },
+    );
+    if (!response.ok) {
+      throw new Error(`API 清理恢复原回忆录失败：HTTP ${response.status}`);
+    }
+  }
+  for (const id of ids) {
+    if (!before.projects.some((project) => project.id === id)) {
+      continue;
+    }
+    const response = await fetch(
+      `${httpBaseUrl}/api/mobile/memoir/projects/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers },
+    );
+    if (!response.ok) {
+      throw new Error(`API 清理删除测试回忆录失败：HTTP ${response.status}`);
+    }
+  }
+  const after = await listProjects();
+  const residue = after.projects.filter(
+    (project) => ids.has(project.id) || titles.has(project.title),
+  );
+  if (residue.length) {
+    throw new Error(`API 清理后仍残留 ${residue.length} 本测试回忆录`);
+  }
+  if (
+    session.initialActiveProjectId
+    && after.projects.some((project) => project.id === session.initialActiveProjectId)
+    && after.active_project_id !== session.initialActiveProjectId
+  ) {
+    throw new Error("API 清理后未恢复原活动回忆录");
+  }
+}
+
 module.exports = {
   activateProject,
+  cleanupProjectsThroughApi,
   cleanupSession,
   deleteProject,
   elementByDataId,

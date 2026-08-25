@@ -23,6 +23,17 @@ page method、view model、service 和状态机测试；本目录只覆盖真实
 ./scripts/test-miniprogram-e2e.sh devtools
 ```
 
+`devtools` 会顺序运行账号主链和确定性语音主链。只验证语音链路时可执行：
+
+```bash
+./scripts/test-miniprogram-e2e.sh voice
+```
+
+语音测试启动仅监听 `127.0.0.1` 随机端口的内存 fixture，模拟后端 HTTP、Streaming
+ASR、LLM 回应和 PCM TTS；开发者工具中的录音器输入也使用固定 PCM 帧。小程序仍走
+真实页面绑定、授权同步、WebSocket 协议、语音状态机和 WebAudio 播放代码。该目标不
+调用生产后端，也不需要真实 provider key 或麦克风输入。
+
 运行前请保存开发者工具中的编辑内容；脚本会先关闭同一路径的项目窗口，再以独立
 自动化端口重新打开，避免连接到上一次异常退出遗留的 AppService。
 

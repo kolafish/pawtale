@@ -196,7 +196,7 @@ function createVoiceFixtureServer() {
   }
 
   function handleGateway(webSocket) {
-    send(webSocket, { type: "session.ready", state: "ready" });
+    setTimeout(() => send(webSocket, { type: "session.ready", state: "ready" }), 10);
     let partialSent = false;
     webSocket.on("message", (raw) => {
       const event = JSON.parse(raw.toString("utf8"));
@@ -241,7 +241,7 @@ function createVoiceFixtureServer() {
   }
 
   function handleAssistant(webSocket) {
-    send(webSocket, { type: "turn.ready" });
+    setTimeout(() => send(webSocket, { type: "turn.ready" }), 10);
     webSocket.on("message", (raw) => {
       const event = JSON.parse(raw.toString("utf8"));
       state.assistantClientEvents.push(event);
@@ -341,6 +341,15 @@ function createVoiceFixtureServer() {
 
   return {
     state,
+    reset() {
+      state.assistantClientEvents.length = 0;
+      state.gatewayClientEvents.length = 0;
+      state.httpRequests.length = 0;
+      state.unexpectedRequests.length = 0;
+      state.sessionStatus = "created";
+      state.messages = [initialAssistantMessage()];
+      state.utterances = [];
+    },
     async start() {
       await new Promise((resolve, reject) => {
         server.once("error", reject);

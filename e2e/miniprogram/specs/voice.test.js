@@ -91,6 +91,8 @@ before(async () => {
   session.artifacts.mark("voice:setup:privacy-mocked");
   await session.miniProgram.mockWxMethod("showModal", { confirm: false, cancel: true });
   session.artifacts.mark("voice:setup:modal-mocked");
+  fixture.reset();
+  session.artifacts.mark("voice:setup:fixture-reset");
 });
 
 after(async () => {
@@ -162,10 +164,19 @@ test("deterministic voice journey records, transcribes, answers, and plays TTS",
 
     const gatewayTypes = fixture.state.gatewayClientEvents.map((event) => event.type);
     assert.deepEqual(gatewayTypes.slice(0, 3), ["session.start", "audio.frame", "audio.end"]);
-    assert.equal(
-      fixture.state.assistantClientEvents.some((event) => event.type === "turn.start"),
-      true,
+    const sessionStart = fixture.state.gatewayClientEvents.find(
+      (event) => event.type === "session.start",
     );
+    assert.ok(sessionStart, "ASR gateway 应收到 session.start");
+    assert.equal(sessionStart.guidance_mode, "free_narration");
+    assert.equal(sessionStart.speaker_role, "narrator");
+    assert.equal(typeof fixture.state.gatewayClientEvents[1].audio, "string");
+    const turnStart = fixture.state.assistantClientEvents.find(
+      (event) => event.type === "turn.start",
+    );
+    assert.ok(turnStart, "assistant stream 应收到 turn.start");
+    assert.equal(turnStart.audio_protocol, "pcm_frame");
+    assert.equal(turnStart.regenerate, false);
     assert.deepEqual(fixture.state.unexpectedRequests, []);
 
     await (await elementById(page, "voice-finish-action")).tap();

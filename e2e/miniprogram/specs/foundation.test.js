@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const { after, before, test } = require("node:test");
 const {
   activateProject,
+  cleanupProjectsThroughApi,
   cleanupSession,
   elementByDataId,
   elementById,
@@ -23,12 +24,30 @@ after(async () => {
   if (!session) {
     return;
   }
+  let cleanupError = null;
   try {
+    session.artifacts.mark("cleanup:ui:start");
     await cleanupSession(session);
+    session.artifacts.mark("cleanup:ui:complete");
   } catch (error) {
     failed = true;
-    await session.artifacts.captureFailure(session.miniProgram, error);
-    throw error;
+    cleanupError = error;
+  }
+  try {
+    session.artifacts.mark("cleanup:api:start");
+    await cleanupProjectsThroughApi(session);
+    session.artifacts.mark("cleanup:api:complete");
+  } catch (error) {
+    failed = true;
+    cleanupError = cleanupError
+      ? new AggregateError([cleanupError, error], "UI 与 API 清理均失败")
+      : error;
+  }
+  try {
+    if (cleanupError) {
+      await session.artifacts.captureFailure(session.miniProgram, cleanupError);
+      throw cleanupError;
+    }
   } finally {
     await session.artifacts.finish({
       createdProjectIds: session.createdProjectIds,
