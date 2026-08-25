@@ -59,7 +59,9 @@ test("developer tools runtime opens the memoir mini program", async () => {
 
 test("test account completes the project create, rename, switch, and delete journey", async () => {
   try {
+    session.artifacts.mark("login:start");
     const homePage = await loginWithTestAccount(session);
+    session.artifacts.mark("login:complete");
     assert.equal(homePage.path, "pages/home/index");
 
     for (const tabPath of [
@@ -68,11 +70,15 @@ test("test account completes the project create, rename, switch, and delete jour
       "/pages/me/index",
       "/pages/home/index",
     ]) {
+      session.artifacts.mark(`tab:${tabPath}:start`);
       const page = await session.miniProgram.switchTab(tabPath);
       assert.equal(page.path, tabPath.slice(1));
+      session.artifacts.mark(`tab:${tabPath}:complete`);
     }
 
+    session.artifacts.mark("projects:open:start");
     let projectsPage = await openProjects(session);
+    session.artifacts.mark("projects:open:complete");
     const initial = await projectsPage.data();
     assert.ok(
       initial.projects.length > 0,
@@ -80,11 +86,13 @@ test("test account completes the project create, rename, switch, and delete jour
     );
     session.initialActiveProjectId = initial.activeProjectId;
 
+    session.artifacts.mark("project:create:start");
     await (await elementById(projectsPage, "create-project-action")).tap();
     let editPage = await waitForCurrentPage(session.miniProgram, "pages/project-edit/index");
     const runSuffix = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const initialTitle = `E2E-${runSuffix}`;
     const renamedTitle = `${initialTitle}-已重命名`;
+    session.createdProjectTitles.push(initialTitle);
     await (await elementById(editPage, "project-title-input")).input(initialTitle);
     await (await elementById(editPage, "project-origin-input")).input("自动化测试");
     await (await elementById(editPage, "project-age-input")).input("72");
@@ -99,9 +107,11 @@ test("test account completes the project create, rename, switch, and delete jour
     );
     const createdProject = createdState.projects.find((project) => project.title === initialTitle);
     session.createdProjectIds.push(createdProject.id);
+    session.artifacts.mark("project:create:complete");
     assert.equal(createdState.activeProjectId, createdProject.id);
 
     await (await elementByDataId(projectsPage, ".ghost-button", createdProject.id)).tap();
+    session.artifacts.mark("project:rename:start");
     editPage = await waitForCurrentPage(session.miniProgram, "pages/project-edit/index");
     await waitForPageData(
       editPage,
@@ -122,11 +132,15 @@ test("test account completes the project create, rename, switch, and delete jour
       "重命名结果显示在列表",
       30000,
     );
+    session.artifacts.mark("project:rename:complete");
 
+    session.artifacts.mark("project:switch:start");
     await activateProject(projectsPage, session.initialActiveProjectId);
     await activateProject(projectsPage, createdProject.id);
     await activateProject(projectsPage, session.initialActiveProjectId);
+    session.artifacts.mark("project:switch:complete");
 
+    session.artifacts.mark("project:delete:start");
     await session.miniProgram.mockWxMethod("showActionSheet", { tapIndex: 0 });
     await session.miniProgram.mockWxMethod("showModal", { confirm: true, cancel: false });
     try {
@@ -141,6 +155,10 @@ test("test account completes the project create, rename, switch, and delete jour
       session.createdProjectIds = session.createdProjectIds.filter(
         (id) => id !== createdProject.id,
       );
+      session.createdProjectTitles = session.createdProjectTitles.filter(
+        (title) => title !== initialTitle,
+      );
+      session.artifacts.mark("project:delete:complete");
     } finally {
       await session.miniProgram.restoreWxMethod("showActionSheet");
       await session.miniProgram.restoreWxMethod("showModal");

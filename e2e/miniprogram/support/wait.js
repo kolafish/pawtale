@@ -15,6 +15,10 @@ function withTimeout(promise, timeoutMs, description) {
   ]).finally(() => clearTimeout(timer));
 }
 
+function isAutomatorResponseTimeout(error) {
+  return String(error?.message || "") === "timeout waiting for automator response";
+}
+
 async function waitForValue(readValue, predicate, options = {}) {
   const timeoutMs = options.timeoutMs ?? 20000;
   const intervalMs = options.intervalMs ?? 250;
@@ -37,9 +41,14 @@ async function readCurrentPage(miniProgram) {
   try {
     return await miniProgram.currentPage();
   } catch (error) {
+    const message = String(error?.message || "");
     // Developer Tools can announce App.initialized before it has registered the
-    // first simulator webview. Retry only that known startup race.
-    if (String(error?.message || "").includes("getPageMetaByWebviewId")) {
+    // first simulator webview. It can also drop App.getCurrentPage's reply while
+    // replacing the login webview. Both are bounded by the caller's wait.
+    if (
+      message.includes("getPageMetaByWebviewId")
+      || isAutomatorResponseTimeout(error)
+    ) {
       return null;
     }
     throw error;
@@ -87,6 +96,8 @@ async function waitForPageData(page, predicate, description, timeoutMs = 20000) 
 }
 
 module.exports = {
+  isAutomatorResponseTimeout,
+  readCurrentPage,
   sleep,
   waitForCurrentPage,
   waitForCurrentPageReady,

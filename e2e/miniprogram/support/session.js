@@ -4,6 +4,8 @@ const { createArtifactRecorder } = require("./artifacts");
 const { readE2EConfig } = require("./config");
 const { findAvailablePort } = require("./port");
 const {
+  isAutomatorResponseTimeout,
+  readCurrentPage,
   sleep,
   waitForCurrentPage,
   waitForCurrentPageReady,
@@ -69,6 +71,7 @@ async function launchE2ESession() {
       artifacts,
       config,
       createdProjectIds: [],
+      createdProjectTitles: [],
       initialActiveProjectId: "",
       miniProgram,
     };
@@ -110,22 +113,39 @@ async function shutdownE2ESession(session) {
 
 async function loginWithTestAccount(session) {
   const { miniProgram, config } = session;
+  session.artifacts.mark("login:relaunch:start");
   let page = await miniProgram.reLaunch("/pages/login/index");
   if (!page) {
     page = await waitForCurrentPage(miniProgram, "pages/login/index");
   }
+  session.artifacts.mark("login:relaunch:complete");
   await (await elementById(page, "account-login-toggle")).tap();
+  session.artifacts.mark("login:account-form:visible");
   await (await elementById(page, "account-email-input")).input(config.account.email);
+  session.artifacts.mark("login:email:complete");
   await (await elementById(page, "account-password-input")).input(config.account.password);
-  await (await elementById(page, "account-login-action")).tap();
+  session.artifacts.mark("login:password:complete");
+  const loginAction = await elementById(page, "account-login-action");
+  session.artifacts.mark("login:submit:start");
+  await loginAction.tap();
+  session.artifacts.mark("login:submit:complete");
   const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
-    const currentPage = await miniProgram.currentPage();
+    const currentPage = await readCurrentPage(miniProgram);
     if (currentPage?.path === "pages/home/index") {
       return currentPage;
     }
     if (currentPage?.path === "pages/login/index") {
-      const data = await currentPage.data();
+      let data;
+      try {
+        data = await currentPage.data();
+      } catch (error) {
+        if (isAutomatorResponseTimeout(error)) {
+          await sleep(250);
+          continue;
+        }
+        throw error;
+      }
       if (data.error) {
         throw new Error(`测试账号登录失败：${data.error}`);
       }
@@ -194,6 +214,13 @@ async function cleanupSession(session) {
     }
     for (const id of [...session.createdProjectIds].reverse()) {
       await deleteProject(page, id);
+    }
+    for (const title of [...session.createdProjectTitles].reverse()) {
+      const data = await page.data();
+      const project = data.projects.find((item) => item.title === title);
+      if (project) {
+        await deleteProject(page, project.id);
+      }
     }
   } finally {
     try {

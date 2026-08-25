@@ -53,6 +53,13 @@ async function createArtifactRecorder(config) {
   return {
     events,
     runPath,
+    mark(stage) {
+      events.push({
+        at: new Date().toISOString(),
+        kind: "stage",
+        value: stage,
+      });
+    },
     attach(miniProgram) {
       miniProgram.on("console", (message) => {
         events.push({
