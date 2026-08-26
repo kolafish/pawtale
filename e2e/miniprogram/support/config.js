@@ -72,6 +72,10 @@ function readIOSRuntimeConfig() {
       "http://127.0.0.1:4723",
     ),
     artifactsPath: path.join(E2E_ROOT, "artifacts"),
+    httpBaseUrl: urlEnvironmentValue(
+      "PAWTALE_E2E_HTTP_BASE_URL",
+      "https://pawtale-api.spaceflows.cn",
+    ),
     iosUdid: String(process.env.PAWTALE_E2E_IOS_UDID || "").trim(),
     recentSlot: recentSlotEnvironmentValue(),
     tunnelRegistryUrl: urlEnvironmentValue(
