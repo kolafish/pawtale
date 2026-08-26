@@ -33,6 +33,71 @@ function requiredAccountConfig() {
   return { email, password };
 }
 
+function requiredEnvironmentValue(name) {
+  const value = String(process.env[name] || "").trim();
+  if (!value) {
+    throw new Error(`缺少 ${name}；请填写 e2e/miniprogram/.env.e2e.local`);
+  }
+  return value;
+}
+
+function urlEnvironmentValue(name, fallback) {
+  const value = String(process.env[name] || fallback).trim().replace(/\/$/, "");
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} 必须是有效的 HTTP URL`);
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`${name} 必须使用 http 或 https`);
+  }
+  return value;
+}
+
+function recentSlotEnvironmentValue() {
+  const raw = String(process.env.PAWTALE_E2E_IOS_RECENT_SLOT || "1").trim();
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 4) {
+    throw new Error("PAWTALE_E2E_IOS_RECENT_SLOT 必须是 1 到 4 之间的整数");
+  }
+  return value;
+}
+
+function readIOSRuntimeConfig() {
+  return {
+    appiumHome: path.join(E2E_ROOT, ".appium"),
+    appiumServerUrl: urlEnvironmentValue(
+      "PAWTALE_E2E_APPIUM_SERVER_URL",
+      "http://127.0.0.1:4723",
+    ),
+    artifactsPath: path.join(E2E_ROOT, "artifacts"),
+    iosUdid: String(process.env.PAWTALE_E2E_IOS_UDID || "").trim(),
+    recentSlot: recentSlotEnvironmentValue(),
+    tunnelRegistryUrl: urlEnvironmentValue(
+      "PAWTALE_E2E_IOS_TUNNEL_REGISTRY_URL",
+      "http://127.0.0.1:43000",
+    ),
+    wdaBundleId: String(
+      process.env.PAWTALE_E2E_IOS_WDA_BUNDLE_ID
+      || "cn.spaceflows.pawtale.webdriveragent",
+    ).trim(),
+    wechatBundleId: "com.tencent.xin",
+    xcodeDeveloperDir: path.resolve(
+      process.env.PAWTALE_E2E_XCODE_DEVELOPER_DIR
+      || "/Applications/Xcode.app/Contents/Developer",
+    ),
+  };
+}
+
+function readIOSNativeConfig() {
+  return {
+    ...readIOSRuntimeConfig(),
+    account: requiredAccountConfig(),
+    iosTeamId: requiredEnvironmentValue("PAWTALE_E2E_IOS_TEAM_ID"),
+  };
+}
+
 function readE2EConfig() {
   const cliPath = path.resolve(
     process.env.PAWTALE_E2E_CLI_PATH
@@ -66,5 +131,10 @@ module.exports = {
   E2E_ROOT,
   LOCAL_ENV_PATH,
   REPOSITORY_ROOT,
+  readIOSNativeConfig,
+  readIOSRuntimeConfig,
   readE2EConfig,
+  recentSlotEnvironmentValue,
+  requiredEnvironmentValue,
+  urlEnvironmentValue,
 };

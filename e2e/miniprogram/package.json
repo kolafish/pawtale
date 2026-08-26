@@ -9,9 +9,14 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 specs/*.test.js",
     "test:devtools": "node --test --test-concurrency=1 specs/*.test.js",
+    "ios:setup": "node bin/setup-ios-appium.js",
+    "ios:tunnel": "node bin/start-ios-tunnel.js",
+    "test:ios": "node bin/run-ios-ui-test.js",
+    "test:ios:node": "node --test --test-concurrency=1 device-specs/ios-ui.test.js",
     "test:voice": "node --test --test-concurrency=1 specs/voice.test.js"
   },
   "devDependencies": {
+    "appium": "3.7.0",
     "miniprogram-automator": "0.12.1",
     "ws": "8.21.3"
   },

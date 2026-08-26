@@ -79,7 +79,42 @@ async function configureRuntime(miniProgram, config) {
   await miniProgram.callWxMethod("removeStorageSync", MEMOIR_SESSION_STORAGE_KEY);
 }
 
-async function launchE2ESession() {
+async function prepareE2ERuntime(session) {
+  const { artifacts, config, miniProgram } = session;
+  const originalRuntimeStorage = await captureStorageEntries(
+    miniProgram,
+    RUNTIME_STORAGE_KEYS,
+  );
+  session.originalRuntimeStorage = originalRuntimeStorage;
+  session.runtimeStoragePrepared = true;
+  artifacts.mark("setup:runtime-storage-captured");
+  try {
+    await configureRuntime(miniProgram, config);
+    artifacts.mark("setup:runtime-configured");
+    try {
+      await miniProgram.reLaunch("/pages/login/index");
+    } catch (error) {
+      if (!isAutomatorResponseTimeout(error)) {
+        throw error;
+      }
+    }
+    await waitForCurrentPage(miniProgram, "pages/login/index", 30000);
+    artifacts.mark("setup:neutral-page-ready");
+  } catch (error) {
+    try {
+      await restoreStorageEntries(miniProgram, originalRuntimeStorage);
+      session.runtimeStoragePrepared = false;
+    } catch (restoreError) {
+      throw new AggregateError(
+        [error, restoreError],
+        "E2E 运行时配置失败，且原存储未能恢复",
+      );
+    }
+    throw error;
+  }
+}
+
+async function launchE2ESession(options = {}) {
   const configured = readE2EConfig();
   const config = {
     ...configured,
@@ -87,7 +122,7 @@ async function launchE2ESession() {
   };
   const artifacts = await createArtifactRecorder(config);
   let miniProgram;
-  let originalRuntimeStorage = [];
+  let session;
   try {
     artifacts.mark("setup:window-close:start");
     closeDeveloperToolsProject(config);
@@ -102,32 +137,24 @@ async function launchE2ESession() {
     artifacts.attach(miniProgram);
     await waitForCurrentPageReady(miniProgram);
     artifacts.mark("setup:first-page-ready");
-    originalRuntimeStorage = await captureStorageEntries(miniProgram, RUNTIME_STORAGE_KEYS);
-    artifacts.mark("setup:runtime-storage-captured");
-    await configureRuntime(miniProgram, config);
-    artifacts.mark("setup:runtime-configured");
-    try {
-      await miniProgram.reLaunch("/pages/login/index");
-    } catch (error) {
-      if (!isAutomatorResponseTimeout(error)) {
-        throw error;
-      }
-    }
-    await waitForCurrentPage(miniProgram, "pages/login/index", 30000);
-    artifacts.mark("setup:neutral-page-ready");
-    return {
+    session = {
       artifacts,
       config,
       createdProjectIds: [],
       createdProjectTitles: [],
       initialActiveProjectId: "",
       miniProgram,
-      originalRuntimeStorage,
+      originalRuntimeStorage: [],
+      runtimeStoragePrepared: false,
     };
+    if (!options.deferRuntimePreparation) {
+      await prepareE2ERuntime(session);
+    }
+    return session;
   } catch (error) {
-    if (miniProgram && originalRuntimeStorage.length) {
+    if (miniProgram && session?.runtimeStoragePrepared) {
       try {
-        await restoreStorageEntries(miniProgram, originalRuntimeStorage);
+        await restoreStorageEntries(miniProgram, session.originalRuntimeStorage);
       } catch {
         // Preserve the setup error; a closed automation connection cannot restore storage.
       }
@@ -160,14 +187,16 @@ async function shutdownE2ESession(session) {
     return;
   }
   let restoreError = null;
-  try {
-    await restoreStorageEntries(
-      session.miniProgram,
-      session.originalRuntimeStorage || [],
-    );
-    session.artifacts.mark("teardown:runtime-storage-restored");
-  } catch (error) {
-    restoreError = error;
+  if (session.runtimeStoragePrepared) {
+    try {
+      await restoreStorageEntries(
+        session.miniProgram,
+        session.originalRuntimeStorage || [],
+      );
+      session.artifacts.mark("teardown:runtime-storage-restored");
+    } catch (error) {
+      restoreError = error;
+    }
   }
   try {
     await withTimeout(session.miniProgram.close(), 8000, "关闭自动化窗口");
@@ -385,6 +414,7 @@ module.exports = {
   launchE2ESession,
   loginWithTestAccount,
   openProjects,
+  prepareE2ERuntime,
   restoreStorageEntries,
   shutdownE2ESession,
 };
