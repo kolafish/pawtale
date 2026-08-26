@@ -91,8 +91,8 @@ class AppiumClient {
     });
   }
 
-  async source() {
-    return (await this.request(this.sessionPath("/source"))).value;
+  async source(timeoutMs = 30000) {
+    return (await this.request(this.sessionPath("/source"), { timeoutMs })).value;
   }
 
   async windowRect() {
@@ -111,6 +111,12 @@ class AppiumClient {
     });
   }
 
+  async isKeyboardShown() {
+    return Boolean((await this.request(
+      this.sessionPath("/appium/device/is_keyboard_shown"),
+    )).value);
+  }
+
   async findElements(using, value) {
     return (await this.request(this.sessionPath("/elements"), {
       method: "POST",
@@ -123,6 +129,10 @@ class AppiumClient {
       method: "POST",
       body: { using, value },
     })).value;
+  }
+
+  async activeElement() {
+    return (await this.request(this.sessionPath("/element/active"))).value;
   }
 
   elementId(element) {
@@ -152,6 +162,7 @@ class AppiumClient {
   async clickElement(element) {
     await this.request(this.elementPath(element, "/click"), {
       method: "POST",
+      timeoutMs: 60000,
       body: {},
     });
   }
@@ -159,6 +170,7 @@ class AppiumClient {
   async clearElement(element) {
     await this.request(this.elementPath(element, "/clear"), {
       method: "POST",
+      timeoutMs: 60000,
       body: {},
     });
   }
@@ -166,20 +178,29 @@ class AppiumClient {
   async typeElement(element, text) {
     await this.request(this.elementPath(element, "/value"), {
       method: "POST",
+      timeoutMs: 60000,
       body: { text, value: [text] },
     });
   }
 
-  async typeKeys(text) {
-    await this.request(this.sessionPath("/keys"), {
+  async mobileKeys(element, keys) {
+    await this.request(this.sessionPath("/execute/sync"), {
       method: "POST",
-      body: { value: [text] },
+      timeoutMs: 60000,
+      body: {
+        script: "mobile: keys",
+        args: [{
+          elementId: this.elementId(element),
+          keys,
+        }],
+      },
     });
   }
 
   async tap(x, y, pauseMs = 120) {
     await this.request(this.sessionPath("/actions"), {
       method: "POST",
+      timeoutMs: 60000,
       body: {
         actions: [{
           type: "pointer",
@@ -189,6 +210,36 @@ class AppiumClient {
             { type: "pointerMove", duration: 0, x: Math.round(x), y: Math.round(y) },
             { type: "pointerDown", button: 0 },
             { type: "pause", duration: pauseMs },
+            { type: "pointerUp", button: 0 },
+          ],
+        }],
+      },
+    });
+  }
+
+  async swipe(fromX, fromY, toX, toY, durationMs = 500) {
+    await this.request(this.sessionPath("/actions"), {
+      method: "POST",
+      timeoutMs: 60000,
+      body: {
+        actions: [{
+          type: "pointer",
+          id: "finger1",
+          parameters: { pointerType: "touch" },
+          actions: [
+            {
+              type: "pointerMove",
+              duration: 0,
+              x: Math.round(fromX),
+              y: Math.round(fromY),
+            },
+            { type: "pointerDown", button: 0 },
+            {
+              type: "pointerMove",
+              duration: durationMs,
+              x: Math.round(toX),
+              y: Math.round(toY),
+            },
             { type: "pointerUp", button: 0 },
           ],
         }],

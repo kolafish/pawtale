@@ -5,6 +5,10 @@ const { AppiumClient } = require("../support/appium-client");
 const { E2E_ROOT, readIOSNativeConfig } = require("../support/config");
 const { readTunnel } = require("../support/ios-appium-runtime");
 const { createIOSUIArtifacts } = require("../support/ios-ui-artifacts");
+const { createIOSProjectFixture } = require("../support/ios-project-fixture");
+const {
+  runIOSAccountProjectJourney,
+} = require("../support/ios-ui-account-projects");
 const {
   iosSessionCapabilities,
   runIOSUISmoke,
@@ -14,11 +18,13 @@ let artifacts;
 let client;
 let config;
 let failed = false;
+let fixture;
 let result = null;
 let tunnel;
 
 before(async () => {
   config = readIOSNativeConfig();
+  fixture = await createIOSProjectFixture(config);
   tunnel = await readTunnel(config);
   const runPath = process.env.PAWTALE_E2E_IOS_RUN_PATH
     || path.join(E2E_ROOT, "artifacts", "ios-ui-direct");
@@ -36,14 +42,25 @@ before(async () => {
 });
 
 after(async () => {
-  let teardownError = null;
+  const teardownErrors = [];
+  if (fixture) {
+    try {
+      await fixture.cleanup();
+      artifacts?.mark("ios-ui:project-fixture:cleaned");
+    } catch (error) {
+      teardownErrors.push(error);
+    }
+  }
   if (client) {
     try {
       await client.deleteSession();
     } catch (error) {
-      teardownError = error;
+      teardownErrors.push(error);
     }
   }
+  const teardownError = teardownErrors.length > 1
+    ? new AggregateError(teardownErrors, "真机项目夹具与 Appium 会话清理失败")
+    : teardownErrors[0] || null;
   if (artifacts) {
     await artifacts.finish({
       device: tunnel ? { connectionType: tunnel.connectionType, udid: tunnel.udid } : null,
@@ -58,11 +75,25 @@ after(async () => {
   }
 });
 
-test("iOS real device controls WeChat and verifies the authenticated memoir journey", async () => {
+test("iOS real device verifies account authentication and the memoir project lifecycle", async () => {
   try {
-    result = await runIOSUISmoke(client, config, artifacts);
+    const smoke = await runIOSUISmoke(client, config, artifacts);
+    const projects = await runIOSAccountProjectJourney(
+      client,
+      config,
+      artifacts,
+      fixture,
+      await client.source(),
+    );
+    result = { ...smoke, ...projects };
     assert.equal(result.accountVerified, true);
+    assert.equal(result.accountReauthenticated, true);
+    assert.equal(result.baselineRestored, true);
     assert.deepEqual(result.tabs, ["首页", "记录", "书稿", "我的"]);
+    assert.deepEqual(
+      result.projectJourney,
+      ["cancel", "create", "rename", "switch", "delete"],
+    );
   } catch (error) {
     failed = true;
     await artifacts.captureFailure(client, error);

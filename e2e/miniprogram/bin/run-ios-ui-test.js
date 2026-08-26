@@ -92,7 +92,7 @@ async function runStep(report, name, secrets, callback) {
       secrets,
       () => startAppiumServer(config, runPath),
     );
-    await runStep(report, "ios-ui-smoke", secrets, async () => {
+    await runStep(report, "ios-ui-account-projects", secrets, async () => {
       const result = await runTests({
         ...process.env,
         PAWTALE_E2E_IOS_RUN_PATH: runPath,
