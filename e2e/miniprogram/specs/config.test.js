@@ -1,8 +1,8 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const {
-  booleanEnvironmentValue,
-  durationEnvironmentValue,
+  recentSlotEnvironmentValue,
+  urlEnvironmentValue,
 } = require("../support/config");
 
 function withEnvironment(name, value, callback) {
@@ -23,32 +23,26 @@ function withEnvironment(name, value, callback) {
   }
 }
 
-test("iOS connection boolean accepts explicit values and rejects ambiguity", () => {
-  withEnvironment("E2E_BOOLEAN", "yes", () => {
-    assert.equal(booleanEnvironmentValue("E2E_BOOLEAN"), true);
+test("iOS recent slot stays within the four visible WeChat entries", () => {
+  withEnvironment("PAWTALE_E2E_IOS_RECENT_SLOT", undefined, () => {
+    assert.equal(recentSlotEnvironmentValue(), 1);
   });
-  withEnvironment("E2E_BOOLEAN", "0", () => {
-    assert.equal(booleanEnvironmentValue("E2E_BOOLEAN", true), false);
+  withEnvironment("PAWTALE_E2E_IOS_RECENT_SLOT", "4", () => {
+    assert.equal(recentSlotEnvironmentValue(), 4);
   });
-  withEnvironment("E2E_BOOLEAN", "sometimes", () => {
-    assert.throws(
-      () => booleanEnvironmentValue("E2E_BOOLEAN"),
-      /必须是 1\/0、true\/false 或 yes\/no/,
-    );
+  withEnvironment("PAWTALE_E2E_IOS_RECENT_SLOT", "5", () => {
+    assert.throws(recentSlotEnvironmentValue, /1 到 4/);
   });
 });
 
-test("iOS connection timeout stays within the interactive pairing window", () => {
-  withEnvironment("E2E_DURATION", undefined, () => {
-    assert.equal(durationEnvironmentValue("E2E_DURATION", 180000), 180000);
+test("Appium URL settings reject unsafe values", () => {
+  withEnvironment("E2E_URL", "http://127.0.0.1:4723/", () => {
+    assert.equal(urlEnvironmentValue("E2E_URL", "http://unused"), "http://127.0.0.1:4723");
   });
-  withEnvironment("E2E_DURATION", "90000", () => {
-    assert.equal(durationEnvironmentValue("E2E_DURATION", 180000), 90000);
-  });
-  withEnvironment("E2E_DURATION", "999", () => {
+  withEnvironment("E2E_URL", "file:///tmp/appium", () => {
     assert.throws(
-      () => durationEnvironmentValue("E2E_DURATION", 180000),
-      /1000 到 600000/,
+      () => urlEnvironmentValue("E2E_URL", "http://unused"),
+      /http 或 https/,
     );
   });
 });

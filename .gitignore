@@ -19,6 +19,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/.env
 e2e/miniprogram/.env.e2e.local
+e2e/miniprogram/.appium/
 e2e/miniprogram/artifacts/
 
 # Logs
