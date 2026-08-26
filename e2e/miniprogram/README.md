@@ -52,26 +52,31 @@ ASR、LLM 回应和 PCM TTS；开发者工具中的录音器输入也使用固�
 5. 在 `.env.e2e.local` 填写 `PAWTALE_E2E_IOS_TEAM_ID`。只有连接多个 iPhone 时才需要
    填 `PAWTALE_E2E_IOS_UDID`；单台 USB 设备会从隧道注册表自动发现。
 
-安装隔离的 XCUITest driver：
-
-```bash
-npm --prefix e2e/miniprogram run ios:setup
-```
-
-另开一个 Terminal 启动 RemoteXPC 隧道：
-
-```bash
-npm --prefix e2e/miniprogram run ios:tunnel
-```
-
-系统若询问密码，请在 Terminal 中输入 Mac 登录密码；输入时不会显示字符。隧道运行期间
-保持该 Terminal 窗口开启。随后从仓库根目录执行：
+从仓库根目录运行一条命令：
 
 ```bash
 ./scripts/test-miniprogram-e2e.sh ios
 ```
 
-测试会自动复用或启动本机 Appium server，并把 XCUITest driver 缓存在未跟踪的
+运行器会依次检查 Xcode、隔离的 XCUITest driver、后端健康状态和测试账号，随后按需启动
+RemoteXPC 隧道与 Appium server。系统若显示 `Password:`，输入一次 Mac 登录密码并回车；
+输入时不会显示字符。测试结束、失败或运行器异常退出时，本轮创建的隧道都会自动清理。
+若已经有 USB 隧道，运行器只复用它，不会停止其他 Terminal 管理的进程。
+
+需要连续调试并跨多次运行复用隧道时，仍可选用：
+
+```bash
+npm --prefix e2e/miniprogram run ios:tunnel
+```
+
+该命令同样使用受监控的 root supervisor；按 `Ctrl-C` 会安全停止，即使上层 Node 进程
+意外退出也会自动回收。单独安装或核对 driver 可运行：
+
+```bash
+npm --prefix e2e/miniprogram run ios:setup
+```
+
+XCUITest driver 缓存在未跟踪的
 `e2e/miniprogram/.appium/`。会话使用 10 次/秒的低速键入并按实时控件坐标输入，避免
 微信小程序受控输入框在真机上丢字符。登录页截图会被跳过，失败 XML 会脱敏，账号和
 密码不会写入产物或 Appium 普通命令日志。
@@ -80,5 +85,8 @@ npm --prefix e2e/miniprogram run ios:tunnel
 采集、锁屏/后台切换、扬声器听感和弱网恢复仍需单独的人工体验测试；开发者工具目标继续
 负责页面 `data`、存储恢复、WebSocket 协议和确定性语音 fixture 等更深层断言。
 
-失败产物写入 `artifacts/`。测试只按本轮记录的 ID 或唯一运行标题精确清理数据，
+每轮产物写入 `artifacts/ios-ui-<timestamp>/`。`runner.json` 记录环境自检、隧道、Appium、
+UI smoke 和资源清理各阶段的耗时及结果；`run.json` 记录真机 UI 断言。产物目录不跟踪，
+账号密码会从错误与报告中脱敏，无法确认为老余口述的微信页面不会保存 XML 或截图。
+测试只按本轮记录的 ID 或唯一运行标题精确清理数据，
 不会模糊匹配名称，也不会修改测试账号中原有回忆录。

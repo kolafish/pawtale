@@ -2,9 +2,22 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { once } = require("node:events");
 const { test } = require("node:test");
 const { AppiumClient, AppiumCommandError } = require("../support/appium-client");
+const {
+  validateBackendAccount,
+  validateIOSDeviceEnvironment,
+} = require("../support/ios-device-preflight");
 const { parseJSONOutput, selectTunnel } = require("../support/ios-appium-runtime");
+const {
+  authorizeSudo,
+  ensureRemoteXPCTunnel,
+  parseSupervisorPid,
+  stopSupervisor,
+  supervisorScript,
+} = require("../support/ios-tunnel-manager");
 const { createIOSUIArtifacts } = require("../support/ios-ui-artifacts");
 const {
   containsAll,
@@ -41,6 +54,160 @@ test("RemoteXPC tunnel selection discovers one USB iPhone and honors an explicit
   assert.throws(
     () => selectTunnel(tunnelRegistry("ios-a"), "missing"),
     /未找到指定 iPhone/,
+  );
+});
+
+test("one-command tunnel runner reuses an existing USB tunnel without sudo", async () => {
+  let sudoCalls = 0;
+  const handle = await ensureRemoteXPCTunnel({
+    iosUdid: "",
+    tunnelRegistryUrl: "http://127.0.0.1:43000",
+  }, "/tmp/not-used", {
+    fetch: async () => ({
+      ok: true,
+      async json() {
+        return tunnelRegistry("ios-a");
+      },
+    }),
+    runCommand: async () => {
+      sudoCalls += 1;
+      return { code: 0 };
+    },
+  });
+  assert.equal(handle.owned, false);
+  assert.equal(handle.tunnel.udid, "ios-a");
+  assert.equal(sudoCalls, 0);
+});
+
+test("sudo authorization requires an interactive Terminal when no ticket is cached", async () => {
+  await assert.rejects(
+    authorizeSudo({
+      stdinIsTTY: false,
+      runCommand: async () => ({ code: 1 }),
+    }),
+    /交互式 Terminal/,
+  );
+  const calls = [];
+  await authorizeSudo({
+    stdinIsTTY: true,
+    write: () => {},
+    runCommand: async (command, args) => {
+      calls.push([command, args]);
+      return { code: calls.length === 1 ? 1 : 0 };
+    },
+  });
+  assert.deepEqual(calls, [
+    ["sudo", ["-n", "-v"]],
+    ["sudo", ["-v"]],
+  ]);
+});
+
+test("managed tunnel cleanup only signals its verified supervisor PID", async () => {
+  const runPath = await fs.mkdtemp(path.join(os.tmpdir(), "pawtale-ios-tunnel-"));
+  const pidPath = path.join(runPath, "tunnel-supervisor.pid");
+  const calls = [];
+  try {
+    await fs.writeFile(pidPath, "4242\n");
+    await stopSupervisor(pidPath, {
+      processCommand: async () => (
+        `/bin/sh ${supervisorScript()} 123 ${pidPath} node tunnel-creation.mjs `
+        + "--tunnel-registry-port 43000"
+      ),
+      runCommand: async (command, args) => {
+        calls.push([command, args]);
+        return { code: 0 };
+      },
+      waitForProcessExit: async () => true,
+    });
+    assert.deepEqual(calls, [["sudo", ["-n", "kill", "-TERM", "4242"]]]);
+    await assert.rejects(fs.access(pidPath), { code: "ENOENT" });
+  } finally {
+    await fs.rm(runPath, { recursive: true, force: true });
+  }
+  assert.equal(parseSupervisorPid("42\n"), 42);
+  assert.throws(() => parseSupervisorPid("not-a-pid"), /有效 PID/);
+});
+
+test("tunnel supervisor stops its child when the owning runner disappears", async () => {
+  const runPath = await fs.mkdtemp(path.join(os.tmpdir(), "pawtale-ios-watchdog-"));
+  const pidPath = path.join(runPath, "supervisor.pid");
+  const runner = spawn(process.execPath, ["-e", "setTimeout(() => {}, 150)"], {
+    stdio: "ignore",
+  });
+  const supervisor = spawn(supervisorScript(), [
+    String(runner.pid),
+    pidPath,
+    process.execPath,
+    "-e",
+    "setInterval(() => {}, 1000)",
+  ], { stdio: "ignore" });
+  let timeout;
+  try {
+    await Promise.race([
+      once(supervisor, "exit"),
+      new Promise((_, reject) => {
+        timeout = setTimeout(
+          () => reject(new Error("supervisor watchdog did not exit")),
+          5000,
+        );
+      }),
+    ]);
+    assert.equal(supervisor.exitCode, 0);
+    await assert.rejects(fs.access(pidPath), { code: "ENOENT" });
+  } finally {
+    clearTimeout(timeout);
+    runner.kill("SIGKILL");
+    supervisor.kill("SIGKILL");
+    await fs.rm(runPath, { recursive: true, force: true });
+  }
+});
+
+test("iOS preflight verifies Xcode, the tunnel driver, backend health, and account", async () => {
+  const accessed = [];
+  const requests = [];
+  const config = {
+    account: { email: "fixture@example.invalid", password: "private-password" },
+    httpBaseUrl: "https://api.example.invalid",
+    xcodeDeveloperDir: "/Applications/Xcode.app/Contents/Developer",
+  };
+  const fetchImpl = async (url, options = {}) => {
+    requests.push({ body: options.body, method: options.method || "GET", url });
+    return { ok: true, status: 200 };
+  };
+  const result = await validateIOSDeviceEnvironment(config, {
+    access: async (filePath) => { accessed.push(filePath); },
+    fetch: fetchImpl,
+    tunnelScriptPath: "/isolated/appium/tunnel-creation.mjs",
+  });
+  assert.deepEqual(result, {
+    accountVerified: true,
+    backendHost: "api.example.invalid",
+  });
+  assert.deepEqual(accessed, [
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild",
+    "/isolated/appium/tunnel-creation.mjs",
+  ]);
+  assert.deepEqual(requests.map(({ method, url }) => [method, url]), [
+    ["GET", "https://api.example.invalid/health"],
+    ["POST", "https://api.example.invalid/api/auth/login"],
+  ]);
+  assert.deepEqual(JSON.parse(requests[1].body), config.account);
+});
+
+test("backend preflight reports status without echoing account credentials", async () => {
+  await assert.rejects(
+    validateBackendAccount({
+      account: { email: "private@example.invalid", password: "private-password" },
+      httpBaseUrl: "https://api.example.invalid",
+    }, async (url) => ({
+      ok: !url.endsWith("/api/auth/login"),
+      status: 401,
+    })),
+    (error) => {
+      assert.match(error.message, /HTTP 401/);
+      assert.doesNotMatch(error.message, /private@example|private-password/);
+      return true;
+    },
   );
 });
 
