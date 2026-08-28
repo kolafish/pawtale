@@ -9,7 +9,10 @@ const {
   ensureXCUITestDriver,
   startAppiumServer,
 } = require("../support/ios-appium-runtime");
-const { validateIOSDeviceEnvironment } = require("../support/ios-device-preflight");
+const {
+  validateIOSDeviceEnvironment,
+  validateIOSDeviceUnlocked,
+} = require("../support/ios-device-preflight");
 const {
   ensureRemoteXPCTunnel,
   tunnelCreationScript,
@@ -86,6 +89,12 @@ async function runStep(report, name, secrets, callback) {
     );
     report.tunnelMode = tunnelHandle.owned ? "managed" : "reused";
     process.stdout.write(`已连接 iOS USB 真机：${tunnelHandle.tunnel.udid}\n`);
+    await runStep(
+      report,
+      "device-unlocked",
+      secrets,
+      () => validateIOSDeviceUnlocked(config, tunnelHandle.tunnel.udid),
+    );
     server = await runStep(
       report,
       "appium-server",

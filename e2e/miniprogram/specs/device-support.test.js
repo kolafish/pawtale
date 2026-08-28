@@ -9,6 +9,7 @@ const { AppiumClient, AppiumCommandError } = require("../support/appium-client")
 const {
   validateBackendAccount,
   validateIOSDeviceEnvironment,
+  validateIOSDeviceUnlocked,
 } = require("../support/ios-device-preflight");
 const {
   descendantProcessGroups,
@@ -231,6 +232,22 @@ test("backend preflight reports status without echoing account credentials", asy
       assert.doesNotMatch(error.message, /private@example|private-password/);
       return true;
     },
+  );
+});
+
+test("iOS preflight rejects a locked phone before starting WebDriverAgent", async () => {
+  const config = { xcodeDeveloperDir: "/Applications/Xcode.app/Contents/Developer" };
+  await assert.rejects(
+    validateIOSDeviceUnlocked(config, "ios-device", {
+      readLockState: async () => ({ passcodeRequired: true }),
+    }),
+    /iPhone 已锁定/,
+  );
+  assert.deepEqual(
+    await validateIOSDeviceUnlocked(config, "ios-device", {
+      readLockState: async () => ({ passcodeRequired: false }),
+    }),
+    { deviceUnlocked: true },
   );
 });
 
