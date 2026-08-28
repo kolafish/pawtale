@@ -40,9 +40,15 @@ function loginSourceState(source) {
   return "unchanged";
 }
 
-async function waitForSource(client, predicate, description, timeoutMs = 20000) {
+async function waitForSource(
+  client,
+  predicate,
+  description,
+  timeoutMs = 20000,
+  sourceTimeoutMs = 30000,
+) {
   return waitForValue(
-    () => client.source(),
+    () => client.source(sourceTimeoutMs),
     predicate,
     {
       timeoutMs,
@@ -102,6 +108,7 @@ async function tapLargestNamedElementAndWait(client, name, options) {
         acknowledgementPredicate,
         acknowledgementDescription,
         options.acknowledgementTimeoutMs ?? 5000,
+        options.acknowledgementSourceTimeoutMs,
       );
     } catch (error) {
       if (!String(error?.message || "").startsWith(`等待${acknowledgementDescription}超时`)) {
@@ -115,7 +122,7 @@ async function tapLargestNamedElementAndWait(client, name, options) {
   await client.clickElement(selected.element);
   let source = await tryAcknowledgement();
   if (source === null) {
-    source = await client.source();
+    source = await client.source(options.guardSourceTimeoutMs);
     if (options.guardPredicate && !options.guardPredicate(source)) {
       throw new Error(`${options.description}点击后页面状态未知；为避免误触，未执行第二次点击`);
     }
@@ -130,6 +137,7 @@ async function tapLargestNamedElementAndWait(client, name, options) {
       acknowledgementPredicate,
       acknowledgementDescription,
       options.acknowledgementTimeoutMs ?? 5000,
+      options.acknowledgementSourceTimeoutMs,
     );
   }
   if (options.finalPredicate(source)) {
@@ -140,6 +148,7 @@ async function tapLargestNamedElementAndWait(client, name, options) {
     options.finalPredicate,
     options.description,
     options.finalTimeoutMs ?? 30000,
+    options.finalSourceTimeoutMs,
   );
 }
 
@@ -156,15 +165,18 @@ async function returnToPreviousPage(client, previousSource, options = {}) {
     return await tapLargestNamedElementAndWait(client, "返回", {
       description: "返回上一页",
       acknowledgementTimeoutMs: options.acknowledgementTimeoutMs,
+      acknowledgementSourceTimeoutMs: options.sourceTimeoutMs,
       finalPredicate: (value) => value !== previousSource,
+      guardSourceTimeoutMs: options.sourceTimeoutMs,
       guardPredicate: (value) => value.includes("返回"),
+      finalSourceTimeoutMs: options.sourceTimeoutMs,
     });
   } catch (error) {
     if (!String(error?.message || "").startsWith("等待返回上一页动作生效超时")) {
       throw error;
     }
   }
-  const source = await client.source();
+  const source = await client.source(options.sourceTimeoutMs);
   if (!source.includes("返回")) {
     throw new Error("返回点击未生效，页面已变化；为避免误触，未执行边缘手势");
   }
@@ -182,6 +194,7 @@ async function returnToPreviousPage(client, previousSource, options = {}) {
     (value) => value !== source,
     "iOS 左边缘返回手势",
     options.gestureTimeoutMs ?? 10000,
+    options.sourceTimeoutMs,
   );
 }
 
@@ -235,7 +248,7 @@ async function reachDiscoverPage(client) {
       continue;
     }
     if (source.includes("返回")) {
-      await returnToPreviousPage(client, source);
+      await returnToPreviousPage(client, source, { sourceTimeoutMs: 90000 });
       continue;
     }
     throw new Error(

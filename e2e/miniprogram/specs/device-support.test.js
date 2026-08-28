@@ -706,6 +706,32 @@ test("native back navigation uses one iOS edge gesture after both button taps ar
   assert.match(source, /首页/);
 });
 
+test("native back navigation allows a slow WeChat hierarchy after leaving a deep page", async () => {
+  const back = { id: "back" };
+  const previous = '<Button name="返回"/><Text name="联系人详情"/>';
+  const sourceTimeouts = [];
+  const client = {
+    async findElements() {
+      return [back];
+    },
+    async elementRect() {
+      return { x: 16, y: 54, width: 30, height: 44 };
+    },
+    async clickElement() {},
+    async source(timeoutMs) {
+      sourceTimeouts.push(timeoutMs);
+      return '<Button name="微信"/><Button name="通讯录"/><Button name="发现"/>';
+    },
+  };
+
+  const source = await returnToPreviousPage(client, previous, {
+    sourceTimeoutMs: 90000,
+  });
+
+  assert.match(source, /发现/);
+  assert.deepEqual(sourceTimeouts, [90000]);
+});
+
 test("native project actions tap the exact CSS action area inside its accessible card", async () => {
   const window = { x: 0, y: 0, width: 430, height: 932 };
   const cardRect = { x: 20, y: 185, width: 390, height: 199 };
