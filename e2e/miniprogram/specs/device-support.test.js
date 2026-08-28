@@ -40,6 +40,7 @@ const {
   iosSessionCapabilities,
   isDeleteConfirmationSource,
   isPawtaleSource,
+  isWechatDiscoverSource,
   loginSourceState,
   maskedValuePresent,
   predicateLiteral,
@@ -818,6 +819,22 @@ test("Pawtale source matching recognizes an authenticated non-home tab", () => {
   );
   assert.equal(isPawtaleSource("微信 通讯录 发现 我"), false);
   assert.equal(isPawtaleSource("聊天文字提到首页记录书稿我的"), false);
+});
+
+test("WeChat discover matching ignores chat messages that merely mention its rows", () => {
+  assert.equal(
+    isWechatDiscoverSource(
+      '<Button name="发现"/><StaticText name="朋友圈"/>'
+        + '<StaticText name="小程序"/>',
+    ),
+    true,
+  );
+  assert.equal(
+    isWechatDiscoverSource(
+      '<Button name="发现"/><StaticText name="朋友圈里发现一个小程序"/>',
+    ),
+    false,
+  );
 });
 
 test("Appium driver JSON parser ignores log lines before and after the object", () => {

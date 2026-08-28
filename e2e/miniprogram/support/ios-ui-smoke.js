@@ -12,6 +12,16 @@ function containsAll(source, values) {
   return values.every((value) => source.includes(value));
 }
 
+function hasExactNamedElement(source, name) {
+  return source.includes(`name="${name}"`) || source.includes(`label="${name}"`);
+}
+
+function isWechatDiscoverSource(source) {
+  return ["发现", "小程序", "朋友圈"].every(
+    (name) => hasExactNamedElement(source, name),
+  );
+}
+
 function maskedValuePresent(value, placeholder) {
   const normalized = String(value || "").trim();
   return Boolean(normalized && normalized !== placeholder);
@@ -216,7 +226,7 @@ async function reachDiscoverPage(client) {
     if (isPawtaleSource(source)) {
       return "pawtale";
     }
-    if (containsAll(source, ["发现", "小程序", "朋友圈"])) {
+    if (isWechatDiscoverSource(source)) {
       return "discover";
     }
     if (source.length < 1200 && source.includes("bundleId=\"com.tencent.xin\"")) {
@@ -631,6 +641,7 @@ module.exports = {
   iosSessionCapabilities,
   isDeleteConfirmationSource,
   isPawtaleSource,
+  isWechatDiscoverSource,
   largestElement,
   loginIfNeeded,
   loginSourceState,
