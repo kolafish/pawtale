@@ -73,14 +73,22 @@ test("iOS project fixture captures only this run and restores the baseline exact
     state.projects.push({
       id: "created-id",
       title: generatedTitle,
-      narrator_age: 72,
+      metadata_json: {
+        memoir_profile: {
+          default_guidance_mode: "guided_interview",
+          narrator_age: 72,
+          narrator_origin: "iOS",
+        },
+      },
     });
     state.activeProjectId = "created-id";
     const created = await fixture.captureCreatedProject(generatedTitle);
     assert.equal(created.id, "created-id");
     state.projects.find((project) => project.id === "created-id").title = fixture.renamedTitle;
     await fixture.assertProject("created-id", fixture.renamedTitle, true, {
+      default_guidance_mode: "guided_interview",
       narrator_age: 72,
+      narrator_origin: "iOS",
     });
     await fixture.cleanup();
     await fixture.cleanup();

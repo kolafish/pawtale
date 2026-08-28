@@ -108,7 +108,7 @@ async function createIOSProjectFixture(config, options = {}) {
       this.createdProjectIds.add(matches[0].id);
       return matches[0];
     },
-    async assertProject(projectId, title, active, expectedFields = {}) {
+    async assertProject(projectId, title, active, expectedProfile = {}) {
       const current = await this.api.listProjects();
       const project = current.projects.find((item) => item.id === projectId);
       if (!project || project.title !== title) {
@@ -117,8 +117,9 @@ async function createIOSProjectFixture(config, options = {}) {
       if (active !== undefined && (current.active_project_id === projectId) !== active) {
         throw new Error(active ? "真机 UI 未激活目标回忆录" : "真机 UI 未恢复基线回忆录");
       }
-      for (const [field, expected] of Object.entries(expectedFields)) {
-        if (project[field] !== expected) {
+      const profile = project.metadata_json?.memoir_profile;
+      for (const [field, expected] of Object.entries(expectedProfile)) {
+        if (!profile || typeof profile !== "object" || profile[field] !== expected) {
           throw new Error(`后端未保存真机 UI 中的回忆录字段：${field}`);
         }
       }
