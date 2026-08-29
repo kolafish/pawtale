@@ -6,6 +6,7 @@ const {
   loginIfNeeded,
   replaceTextField,
   tapLargestNamedElement,
+  tapLargestNamedElementCenter,
   tapLargestNamedElementAndWait,
   verifyTab,
   waitForSource,
@@ -200,8 +201,11 @@ async function createProject(client, fixture, artifacts) {
   await hideIOSKeyboard(client, "籍贯输入后的 iOS 键盘收起");
   await replaceTextField(client, "例如：72", "72");
   await hideIOSKeyboard(client, "保存新建前的 iOS 键盘收起");
-  await tapLargestNamedElement(client, "小余陪着问");
-  await tapLargestNamedElement(client, "保存");
+  // WebDriverAgent's semantic click can focus mini-program custom controls
+  // without dispatching their WXML bindtap. A center touch mirrors the user's
+  // real gesture while the backend assertions below prove the selected mode.
+  await tapLargestNamedElementCenter(client, "小余陪着问");
+  await tapLargestNamedElementCenter(client, "保存");
   const source = await waitForSource(
     client,
     (value) => value.includes(`当前回忆录，${fixture.initialTitle}`),
@@ -235,7 +239,7 @@ async function renameProject(client, fixture, project, artifacts) {
   );
   await replaceTextField(client, "例如：母亲的回忆", fixture.renamedTitle);
   await hideIOSKeyboard(client, "保存编辑前的 iOS 键盘收起");
-  await tapLargestNamedElement(client, "保存");
+  await tapLargestNamedElementCenter(client, "保存");
   const source = await waitForSource(
     client,
     (value) => (

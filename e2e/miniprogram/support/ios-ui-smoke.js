@@ -107,6 +107,12 @@ async function tapLargestNamedElement(client, name) {
   return selected.rect;
 }
 
+async function tapLargestNamedElementCenter(client, name) {
+  const selected = await largestElement(client, "accessibility id", name);
+  await client.tapElementCenter(selected.element);
+  return selected.rect;
+}
+
 async function tapLargestNamedElementAndWait(client, name, options) {
   const acknowledgementPredicate = options.acknowledgementPredicate
     || options.finalPredicate;
@@ -655,6 +661,7 @@ module.exports = {
   submitAccountLogin,
   tapCanonicalPoint,
   tapLargestNamedElement,
+  tapLargestNamedElementCenter,
   tapLargestNamedElementAndWait,
   verifyTab,
   waitForSource,

@@ -48,6 +48,7 @@ const {
   returnToPreviousPage,
   submitAccountLogin,
   tapLargestNamedElementAndWait,
+  tapLargestNamedElementCenter,
   waitForMaskedTextField,
 } = require("../support/ios-ui-smoke");
 
@@ -685,6 +686,30 @@ test("native named action refinds the guarded element before its one pointer fal
   assert.match(source, /当前回忆录/);
   assert.equal(findCalls, 2);
   assert.equal(fallbackMarks, 1);
+});
+
+test("mini-program custom controls use a real center touch for WXML bindtap", async () => {
+  const control = { id: "guided-mode" };
+  let tapped = null;
+  const client = {
+    async findElements() {
+      return [control];
+    },
+    async elementRect() {
+      return { x: 20, y: 600, width: 390, height: 64 };
+    },
+    async tapElementCenter(element) {
+      tapped = element;
+    },
+    async clickElement() {
+      throw new Error("semantic click must not be used for this custom control");
+    },
+  };
+
+  const rect = await tapLargestNamedElementCenter(client, "小余陪着问");
+
+  assert.equal(tapped, control);
+  assert.deepEqual(rect, { x: 20, y: 600, width: 390, height: 64 });
 });
 
 test("native back navigation uses one iOS edge gesture after both button taps are ignored", async () => {
