@@ -11,6 +11,12 @@ const {
   waitForSource,
 } = require("./ios-ui-smoke");
 
+const EXPECTED_PROJECT_PROFILE = {
+  default_guidance_mode: "guided_interview",
+  narrator_age: 72,
+  narrator_origin: "iOS",
+};
+
 function projectCardActionPoint(window, card, action) {
   if (!["edit", "more"].includes(action)) {
     throw new Error(`未知回忆录卡片操作：${action}`);
@@ -203,11 +209,12 @@ async function createProject(client, fixture, artifacts) {
     30000,
   );
   const project = await fixture.captureCreatedProject(fixture.initialTitle);
-  await fixture.assertProject(project.id, fixture.initialTitle, true, {
-    default_guidance_mode: "guided_interview",
-    narrator_age: 72,
-    narrator_origin: "iOS",
-  });
+  await fixture.assertProject(
+    project.id,
+    fixture.initialTitle,
+    true,
+    EXPECTED_PROJECT_PROFILE,
+  );
   artifacts.mark("ios-ui:project:create:complete");
   await artifacts.screenshot(client, "project-created.png", source);
   return { project, source };
@@ -238,7 +245,12 @@ async function renameProject(client, fixture, project, artifacts) {
     "回忆录重命名结果",
     30000,
   );
-  await fixture.assertProject(project.id, fixture.renamedTitle, true);
+  await fixture.assertProject(
+    project.id,
+    fixture.renamedTitle,
+    true,
+    EXPECTED_PROJECT_PROFILE,
+  );
   artifacts.mark("ios-ui:project:rename:complete");
   return source;
 }
@@ -268,7 +280,7 @@ async function switchProjects(client, fixture, project, baselineTitle, artifacts
     "恢复基线回忆录",
     30000,
   );
-  await fixture.assertProject(project.id, fixture.renamedTitle, false);
+  await fixture.assertProject(fixture.initialActiveProjectId, baselineTitle, true);
   artifacts.mark("ios-ui:project:switch:complete");
 }
 
