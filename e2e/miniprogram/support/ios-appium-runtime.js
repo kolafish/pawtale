@@ -1,11 +1,13 @@
 const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const path = require("node:path");
-const { spawn } = require("node:child_process");
+const { execFile, spawn } = require("node:child_process");
+const { promisify } = require("node:util");
 const { E2E_ROOT } = require("./config");
 const { sleep } = require("./wait");
 
 const XCUITEST_DRIVER_VERSION = "12.8.0";
+const execFileAsync = promisify(execFile);
 
 function appiumExecutable() {
   return path.join(E2E_ROOT, "node_modules", ".bin", "appium");
@@ -135,6 +137,100 @@ async function isAppiumReady(serverUrl, fetchImpl = globalThis.fetch) {
   }
 }
 
+function processGroupExists(processGroupId, kill = process.kill) {
+  try {
+    kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    if (error.code === "ESRCH") {
+      return false;
+    }
+    if (error.code === "EPERM") {
+      // The original user-owned group has exited. A protected system helper may
+      // briefly retain the same process group, but it is outside this runner's ownership.
+      return false;
+    }
+    throw error;
+  }
+}
+
+async function waitForProcessGroupExit(processGroupId, timeoutMs, options = {}) {
+  const exists = options.processGroupExists || processGroupExists;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!exists(processGroupId, options.kill)) {
+      return true;
+    }
+    await (options.sleep || sleep)(100);
+  }
+  return !exists(processGroupId, options.kill);
+}
+
+async function stopOwnedProcessGroup(processGroupId, options = {}) {
+  const kill = options.kill || process.kill;
+  if (!processGroupExists(processGroupId, kill)) {
+    return;
+  }
+  kill(-processGroupId, "SIGTERM");
+  if (await waitForProcessGroupExit(processGroupId, 5000, options)) {
+    return;
+  }
+  kill(-processGroupId, "SIGKILL");
+  if (!(await waitForProcessGroupExit(processGroupId, 5000, options))) {
+    throw new Error(`Appium 进程组未退出：${processGroupId}`);
+  }
+}
+
+function parseProcessTable(output) {
+  return String(output || "")
+    .split("\n")
+    .map((line) => line.match(/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/))
+    .filter(Boolean)
+    .map((match) => ({
+      pid: Number(match[1]),
+      ppid: Number(match[2]),
+      processGroupId: Number(match[3]),
+      command: match[4],
+    }));
+}
+
+function descendantProcessGroups(rootPid, processes) {
+  const descendantIds = new Set([rootPid]);
+  let added = true;
+  while (added) {
+    added = false;
+    for (const processInfo of processes) {
+      if (descendantIds.has(processInfo.ppid) && !descendantIds.has(processInfo.pid)) {
+        descendantIds.add(processInfo.pid);
+        added = true;
+      }
+    }
+  }
+  return [...new Set(processes
+    .filter((processInfo) => (
+      processInfo.pid !== rootPid
+      && descendantIds.has(processInfo.pid)
+      && processInfo.processGroupId > 1
+      && processInfo.processGroupId !== rootPid
+    ))
+    .map((processInfo) => processInfo.processGroupId))];
+}
+
+async function readProcessTable(options = {}) {
+  const run = options.execFile || execFileAsync;
+  const result = await run("ps", ["-axo", "pid=,ppid=,pgid=,command="]);
+  return parseProcessTable(typeof result === "string" ? result : result.stdout);
+}
+
+async function stopOwnedProcessTree(rootPid, options = {}) {
+  const processes = await (options.readProcessTable || readProcessTable)(options);
+  const childGroups = descendantProcessGroups(rootPid, processes);
+  for (const processGroupId of childGroups.reverse()) {
+    await stopOwnedProcessGroup(processGroupId, options);
+  }
+  await stopOwnedProcessGroup(rootPid, options);
+}
+
 async function startAppiumServer(config, runPath) {
   if (await isAppiumReady(config.appiumServerUrl)) {
     return { owned: false, stop: async () => {} };
@@ -158,6 +254,7 @@ async function startAppiumServer(config, runPath) {
       "--log-no-colors",
     ], {
       cwd: E2E_ROOT,
+      detached: true,
       env: sanitizedIOSProcessEnvironment(config),
       stdio: ["ignore", logDescriptor, logDescriptor],
     });
@@ -166,35 +263,37 @@ async function startAppiumServer(config, runPath) {
   }
   let startupError = null;
   child.once("error", (error) => { startupError = error; });
-  const deadline = Date.now() + 60000;
-  while (Date.now() < deadline) {
-    if (startupError) {
-      throw startupError;
+  try {
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      if (startupError) {
+        throw startupError;
+      }
+      if (child.exitCode !== null) {
+        throw new Error(`Appium server 启动失败，日志：${logPath}`);
+      }
+      if (await isAppiumReady(config.appiumServerUrl)) {
+        return {
+          owned: true,
+          async stop() {
+            await stopOwnedProcessTree(child.pid);
+          },
+        };
+      }
+      await sleep(500);
     }
-    if (child.exitCode !== null) {
-      throw new Error(`Appium server 启动失败，日志：${logPath}`);
+    throw new Error(`等待 Appium server 启动超时，日志：${logPath}`);
+  } catch (error) {
+    try {
+      await stopOwnedProcessTree(child.pid);
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Appium server 启动失败且未能清理进程组",
+      );
     }
-    if (await isAppiumReady(config.appiumServerUrl)) {
-      return {
-        owned: true,
-        async stop() {
-          if (child.exitCode === null) {
-            await new Promise((resolve) => {
-              const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
-              child.once("exit", () => {
-                clearTimeout(timer);
-                resolve();
-              });
-              child.kill("SIGTERM");
-            });
-          }
-        },
-      };
-    }
-    await sleep(500);
+    throw error;
   }
-  child.kill("SIGTERM");
-  throw new Error(`等待 Appium server 启动超时，日志：${logPath}`);
 }
 
 function selectTunnel(registry, requestedUdid = "") {
@@ -244,6 +343,7 @@ module.exports = {
   XCUITEST_DRIVER_VERSION,
   appiumExecutable,
   ensureXCUITestDriver,
+  descendantProcessGroups,
   isAppiumReady,
   parseJSONOutput,
   readTunnel,
@@ -251,4 +351,6 @@ module.exports = {
   sanitizedIOSProcessEnvironment,
   selectTunnel,
   startAppiumServer,
+  stopOwnedProcessGroup,
+  stopOwnedProcessTree,
 };

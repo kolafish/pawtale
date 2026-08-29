@@ -34,23 +34,29 @@ ASR、LLM 回应和 PCM TTS；开发者工具中的录音器输入也使用固�
 真实页面绑定、授权同步、WebSocket 协议、语音状态机和 WebAudio 播放代码。该目标不
 调用生产后端，也不需要真实 provider key 或麦克风输入。
 
-## iOS 真机 smoke
+## iOS 真机自动化
 
 这条链路使用 Appium + XCUITest + WebDriverAgent 控制 iPhone 上的真实微信界面，不依赖
 开发者工具的 `miniprogram-automator` 真机桥。它覆盖微信“发现 → 小程序”、老余口述启动、
-测试账号登录以及首页/记录/书稿/我的四个主 Tab；断言用户可见内容，不读取页面 `data`
-或小程序存储。
+测试账号退出与重新登录、首页/记录/书稿/我的四个主 Tab，以及回忆录取消新建、创建、
+重命名、切换和删除；断言用户可见内容，不读取页面 `data` 或小程序存储。项目变更还会
+通过测试账号的后端 API 二次核对，避免只根据最终 UI 状态判断成功。
 
 首次准备：
 
 1. 安装完整 Xcode，只需下载与 iPhone 对应的 iOS Platform；不需要 watchOS Platform。
 2. iPhone 使用 USB 连接 Mac，保持解锁，并开启“开发者模式”和“UI 自动化”。
-3. Xcode 中登录 Apple ID，使用个人 Team 签名 WebDriverAgent，并在 iPhone 上信任开发者。
-4. iPhone 微信登录有老余口述开发版权限的账号，至少手动打开一次老余口述，使它出现在
+3. 无人值守运行时，在 iPhone“设置 → 通用 → 自动填充与密码”中关闭“自动填充密码和
+   通行密钥”。也可以保持开启并使用有人值守模式：密码框弹出 Face ID 后在 Terminal
+   提示的 45 秒内完成面容识别，脚本会等待系统界面退出后继续输入。
+4. Xcode 中登录 Apple ID，使用个人 Team 签名 WebDriverAgent，并在 iPhone 上信任开发者。
+5. iPhone 微信登录有老余口述开发版权限的账号，至少手动打开一次老余口述，使它出现在
    微信“小程序 → 最近使用”的第一位。若不是第一位，可设置
    `PAWTALE_E2E_IOS_RECENT_SLOT=1..4`。
-5. 在 `.env.e2e.local` 填写 `PAWTALE_E2E_IOS_TEAM_ID`。只有连接多个 iPhone 时才需要
+6. 在 `.env.e2e.local` 填写 `PAWTALE_E2E_IOS_TEAM_ID`。只有连接多个 iPhone 时才需要
    填 `PAWTALE_E2E_IOS_UDID`；单台 USB 设备会从隧道注册表自动发现。
+7. 测试账号至少保留一本已激活的基线回忆录，且它的名称在该账号中唯一；每轮结束会恢复
+   这一本为活动回忆录。
 
 从仓库根目录运行一条命令：
 
@@ -70,23 +76,27 @@ npm --prefix e2e/miniprogram run ios:tunnel
 ```
 
 该命令同样使用受监控的 root supervisor；按 `Ctrl-C` 会安全停止，即使上层 Node 进程
-意外退出也会自动回收。单独安装或核对 driver 可运行：
+意外退出也会自动回收。启动时只需输入一次 Mac 密码；保持这个 Terminal 和隧道运行，
+后续多轮 `./scripts/test-miniprogram-e2e.sh ios` 会直接复用，不再逐轮请求 Mac 密码。
+单独安装或核对 driver 可运行：
 
 ```bash
 npm --prefix e2e/miniprogram run ios:setup
 ```
 
 XCUITest driver 缓存在未跟踪的
-`e2e/miniprogram/.appium/`。会话使用 10 次/秒的低速键入并按实时控件坐标输入，避免
-微信小程序受控输入框在真机上丢字符。登录页截图会被跳过，失败 XML 会脱敏，账号和
+`e2e/miniprogram/.appium/`。会话使用 10 次/秒的低速键入，并在写入前校验目标输入框的
+Appium 元素身份，避免微信小程序受控输入框在真机上丢字符或串字段。登录页截图会被跳过，失败 XML 会脱敏，账号和
 密码不会写入产物或 Appium 普通命令日志。
 
-真机 smoke 不创建、重命名或删除回忆录，也不会发送语音。首次系统权限弹窗、真实麦克风
-采集、锁屏/后台切换、扬声器听感和弱网恢复仍需单独的人工体验测试；开发者工具目标继续
-负责页面 `data`、存储恢复、WebSocket 协议和确定性语音 fixture 等更深层断言。
+真机测试会临时创建一本带唯一运行标识的回忆录，完成重命名和切换后删除，并恢复运行前
+的活动回忆录。运行前会记录基线项目 ID；测试失败时也只会清理不属于基线且标题或 ID
+被本轮明确记录的项目，不会删除原有数据。它目前不会发送语音。首次系统权限弹窗、真实
+麦克风采集、锁屏/后台切换、扬声器听感和弱网恢复仍需后续真机阶段覆盖；开发者工具目标
+继续负责页面 `data`、存储恢复、WebSocket 协议和确定性语音 fixture 等更深层断言。
 
 每轮产物写入 `artifacts/ios-ui-<timestamp>/`。`runner.json` 记录环境自检、隧道、Appium、
-UI smoke 和资源清理各阶段的耗时及结果；`run.json` 记录真机 UI 断言。产物目录不跟踪，
+账号/项目 UI 主链和资源清理各阶段的耗时及结果；`run.json` 记录真机 UI 断言。产物目录不跟踪，
 账号密码会从错误与报告中脱敏，无法确认为老余口述的微信页面不会保存 XML 或截图。
 测试只按本轮记录的 ID 或唯一运行标题精确清理数据，
 不会模糊匹配名称，也不会修改测试账号中原有回忆录。

@@ -10,6 +10,23 @@ function redactSource(source, secrets) {
   );
 }
 
+function isSafePawtaleArtifactSource(source) {
+  return isPawtaleSource(source) || (
+    source.includes("我的回忆录")
+    && source.includes("新建回忆录")
+    && (
+      source.includes("当前回忆录，")
+      || source.includes("切换到回忆录，")
+      || source.includes("暂无回忆录")
+    )
+  ) || (
+    source.includes("资料会用于语音访谈和小余追问")
+    && source.includes("回忆录名称")
+    && source.includes("取消")
+    && source.includes("保存")
+  );
+}
+
 async function createIOSUIArtifacts(config, runPath) {
   const events = [];
   const secrets = [config.account.email, config.account.password];
@@ -25,7 +42,7 @@ async function createIOSUIArtifacts(config, runPath) {
     },
     async screenshot(client, fileName, source = "") {
       if (
-        !isPawtaleSource(source)
+        !isSafePawtaleArtifactSource(source)
         || source.includes("欢迎登录")
         || source.includes(config.account.email)
       ) {
@@ -37,7 +54,10 @@ async function createIOSUIArtifacts(config, runPath) {
       let source = "";
       try {
         source = await client.source();
-        if (isPawtaleSource(source)) {
+        const safePage = isSafePawtaleArtifactSource(source)
+          && !source.includes("欢迎登录")
+          && !source.includes(config.account.email);
+        if (safePage) {
           await fs.writeFile(
             path.join(runPath, "failure-source.xml"),
             redactSource(source, secrets),
@@ -57,7 +77,7 @@ async function createIOSUIArtifacts(config, runPath) {
         });
       }
       if (
-        isPawtaleSource(source)
+        isSafePawtaleArtifactSource(source)
         && !source.includes("欢迎登录")
         && !source.includes(config.account.email)
       ) {
@@ -87,5 +107,6 @@ async function createIOSUIArtifacts(config, runPath) {
 
 module.exports = {
   createIOSUIArtifacts,
+  isSafePawtaleArtifactSource,
   redactSource,
 };
