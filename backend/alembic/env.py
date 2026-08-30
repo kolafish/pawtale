@@ -22,11 +22,18 @@ RUNTIME_MANAGED_INDEXES = {
     "ix_memoir_voice_utterances_transcript_edited_trgm",
     "ix_memoir_voice_utterances_transcript_raw_trgm",
 }
+EXTENSION_MANAGED_TABLES = {
+    "_typmod_cache",
+    "spatial_ref_sys",
+}
 
 
 def include_object(object_, name, type_, reflected, compare_to) -> bool:
     del object_, reflected, compare_to
-    return not (type_ == "index" and name in RUNTIME_MANAGED_INDEXES)
+    return not (
+        (type_ == "index" and name in RUNTIME_MANAGED_INDEXES)
+        or (type_ == "table" and name in EXTENSION_MANAGED_TABLES)
+    )
 
 
 def database_url() -> str:

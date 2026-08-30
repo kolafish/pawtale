@@ -100,7 +100,6 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
         )
         expected_tables = set(Base.metadata.tables)
         missing_tables = expected_tables - actual_tables
-        unexpected_tables = actual_tables - expected_tables - {"alembic_version"}
 
         missing_columns: list[str] = []
         unexpected_columns: list[str] = []
@@ -125,6 +124,27 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
         revision = await conn.scalar(text("SELECT version_num FROM alembic_version"))
         extensions = set(
             (await conn.scalars(text("SELECT extname FROM pg_extension"))).all()
+        )
+        extension_tables = set(
+            (
+                await conn.scalars(
+                    text(
+                        """
+                        SELECT relation.relname
+                        FROM pg_class AS relation
+                        JOIN pg_namespace AS namespace
+                          ON namespace.oid = relation.relnamespace
+                        JOIN pg_depend AS dependency
+                          ON dependency.classid = 'pg_class'::regclass
+                         AND dependency.objid = relation.oid
+                         AND dependency.deptype = 'e'
+                        JOIN pg_extension AS extension
+                          ON extension.oid = dependency.refobjid
+                        WHERE namespace.nspname = current_schema()
+                        """
+                    )
+                )
+            ).all()
         )
         triggers = set(
             (
@@ -152,6 +172,12 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
                     )
                 )
             ).all()
+        )
+        unexpected_tables = (
+            actual_tables
+            - expected_tables
+            - extension_tables
+            - {"alembic_version"}
         )
 
     details: list[str] = []
