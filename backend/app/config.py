@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     ai_text_interactive_timeout_seconds: float = 60.0
     ai_text_generation_timeout_seconds: float = 180.0
 
+    # Local embedding service
+    embedding_service_base_url: str = "http://127.0.0.1:8102"
+    embedding_model: str = "BAAI/bge-small-zh-v1.5"
+    embedding_dimensions: int = 512
+    embedding_timeout_seconds: float = 5.0
+
     # StepFun batch ASR for user-triggered material reprocessing and offline tools.
     stepfun_api_key: str = ""
     stepfun_base_url: str = "https://api.stepfun.com"
