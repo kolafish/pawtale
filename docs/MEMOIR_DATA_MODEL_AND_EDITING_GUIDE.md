@@ -363,7 +363,7 @@ sequenceDiagram
 
 内部的 provider payload、TranscriptVersion ID、confidence 不应默认暴露给普通用户，可放在诊断或来源详情中。
 
-### 3.7 素材当前如何编辑
+### 3.8 素材当前如何编辑
 
 当前小程序已支持：
 
