@@ -176,3 +176,67 @@ async def test_hybrid_retrieval_returns_empty_trace_without_queries(test_db):
     assert trace.candidates == ()
     assert trace.requested_embedding_model is None
     assert trace.retrieved_entry_union_count == 0
+
+
+async def test_channel_limits_apply_to_distinct_source_utterances(client, test_db):
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我小时候住在外婆家的院子里。",
+    )
+    second = await create_test_voice_transcript(
+        client,
+        test_db,
+        project_id=first["session"]["project_id"],
+        text="后来我们搬到了另一座城市。",
+    )
+    index_client = FakeEmbeddingClient()
+    await _index_transcript(test_db, first, index_client)
+    await _index_transcript(test_db, second, index_client)
+    first_entry = await test_db.scalar(
+        select(MemoirRetrievalEntry).where(
+            MemoirRetrievalEntry.utterance_id == first["utterance_id"]
+        )
+    )
+    second_entry = await test_db.scalar(
+        select(MemoirRetrievalEntry).where(
+            MemoirRetrievalEntry.utterance_id == second["utterance_id"]
+        )
+    )
+    assert first_entry is not None
+    assert second_entry is not None
+    second_entry.embedding = list(_vector(1))
+    for ordinal in range(2):
+        test_db.add(
+            MemoirRetrievalEntry(
+                project_id=first_entry.project_id,
+                voice_session_id=first_entry.voice_session_id,
+                utterance_id=first_entry.utterance_id,
+                transcript_version_id=first_entry.transcript_version_id,
+                audio_file_id=first_entry.audio_file_id,
+                entry_kind="semantic_unit",
+                ordinal=ordinal,
+                search_text=f"外婆家的院子语义入口{ordinal}",
+                text_source=first_entry.text_source,
+                source_text_hash=first_entry.source_text_hash,
+                embedding=list(_vector(0)),
+                embedding_model=first_entry.embedding_model,
+                index_version=1,
+            )
+        )
+    await test_db.commit()
+
+    trace = await retrieve_hybrid_candidates(
+        test_db,
+        project_id=first["session"]["project_id"],
+        queries=["外婆家的院子"],
+        vector_limit=2,
+        bm25_limit=2,
+        candidate_limit=2,
+        embedding_client=FakeEmbeddingClient(),
+    )
+
+    assert [hit.utterance_id for hit in trace.queries[0].vector_hits] == [
+        first["utterance_id"],
+        second["utterance_id"],
+    ]

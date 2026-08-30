@@ -149,14 +149,37 @@ async def _vector_hits(
     limit: int,
 ) -> tuple[RetrievalHit, ...]:
     distance = MemoirRetrievalEntry.embedding.cosine_distance(list(embedding))
+    best_entry_per_source = (
+        select(
+            MemoirRetrievalEntry.id.label("entry_id"),
+            distance.label("distance"),
+        )
+        .where(
+            *_filters(project_id, excluded_voice_session_id),
+            MemoirRetrievalEntry.embedding_model == embedding_model,
+        )
+        .distinct(MemoirRetrievalEntry.utterance_id)
+        .order_by(
+            MemoirRetrievalEntry.utterance_id,
+            distance,
+            MemoirRetrievalEntry.id,
+        )
+        .subquery()
+    )
     rows = (
         await db.execute(
-            select(MemoirRetrievalEntry, (1 - distance).label("score"))
-            .where(
-                *_filters(project_id, excluded_voice_session_id),
-                MemoirRetrievalEntry.embedding_model == embedding_model,
+            select(
+                MemoirRetrievalEntry,
+                (1 - best_entry_per_source.c.distance).label("score"),
             )
-            .order_by(distance, MemoirRetrievalEntry.id)
+            .join(
+                best_entry_per_source,
+                best_entry_per_source.c.entry_id == MemoirRetrievalEntry.id,
+            )
+            .order_by(
+                best_entry_per_source.c.distance,
+                MemoirRetrievalEntry.id,
+            )
             .limit(limit)
         )
     ).all()
@@ -183,14 +206,37 @@ async def _bm25_hits(
     limit: int,
 ) -> tuple[RetrievalHit, ...]:
     score = func.pdb.score(MemoirRetrievalEntry.id)
+    best_entry_per_source = (
+        select(
+            MemoirRetrievalEntry.id.label("entry_id"),
+            score.label("score"),
+        )
+        .where(
+            MemoirRetrievalEntry.search_text.op("|||")(query_text),
+            *_filters(project_id, excluded_voice_session_id),
+        )
+        .distinct(MemoirRetrievalEntry.utterance_id)
+        .order_by(
+            MemoirRetrievalEntry.utterance_id,
+            score.desc(),
+            MemoirRetrievalEntry.id,
+        )
+        .subquery()
+    )
     rows = (
         await db.execute(
-            select(MemoirRetrievalEntry, score.label("score"))
-            .where(
-                MemoirRetrievalEntry.search_text.op("|||")(query_text),
-                *_filters(project_id, excluded_voice_session_id),
+            select(
+                MemoirRetrievalEntry,
+                best_entry_per_source.c.score,
             )
-            .order_by(score.desc(), MemoirRetrievalEntry.id)
+            .join(
+                best_entry_per_source,
+                best_entry_per_source.c.entry_id == MemoirRetrievalEntry.id,
+            )
+            .order_by(
+                best_entry_per_source.c.score.desc(),
+                MemoirRetrievalEntry.id,
+            )
             .limit(limit)
         )
     ).all()

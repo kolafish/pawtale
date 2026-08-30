@@ -28,6 +28,10 @@ def register_memoir_editing_job_handlers() -> None:
         retrieval_source_index.run_source_indexing_job,
     )
     register_editing_job_handler(
+        MemoirEditingJobType.INDEX_RETRIEVAL_SEMANTICS,
+        retrieval_source_index.run_semantic_indexing_job,
+    )
+    register_editing_job_handler(
         MemoirEditingJobType.REPROCESS_MATERIAL_OFFLINE_ASR,
         material_offline_asr_jobs.run_material_offline_asr_job,
     )

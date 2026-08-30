@@ -155,7 +155,12 @@ async def generate_retrieval_units(
     if purpose is RetrievalUnitPurpose.QUERY and supplied_context:
         raise ValueError("query retrieval units do not accept context")
     normalized_context = supplied_context
-    policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
+    workload = (
+        AITextWorkload.REALTIME_STRUCTURED
+        if purpose is RetrievalUnitPurpose.QUERY
+        else AITextWorkload.INTERACTIVE_STRUCTURED
+    )
+    policy = ai_text_workload_policy(workload)
     timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
     if not normalized_input:
         return RetrievalUnitGenerationTrace(
