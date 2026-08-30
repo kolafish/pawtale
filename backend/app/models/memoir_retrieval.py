@@ -5,12 +5,14 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
     Identity,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -103,5 +105,68 @@ class MemoirRetrievalEntry(Base):
         DateTime,
         default=utcnow_naive,
         onupdate=utcnow_naive,
+        nullable=False,
+    )
+
+
+class MemoirMemoryActivationTrace(Base):
+    __tablename__ = "memoir_memory_activation_traces"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('skipped', 'succeeded', 'failed')",
+            name="ck_memoir_memory_activation_traces_status",
+        ),
+        CheckConstraint(
+            "query_count >= 0 AND candidate_count >= 0 AND selected_count >= 0",
+            name="ck_memoir_memory_activation_traces_nonnegative_counts",
+        ),
+        Index(
+            "ix_memoir_memory_activation_traces_project_created",
+            "project_id",
+            "created_at",
+        ),
+        Index(
+            "ix_memoir_memory_activation_traces_session_created",
+            "voice_session_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    voice_session_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    current_message_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_chat_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    current_utterance_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("memoir_voice_utterances.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    should_retrieve: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    query_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    candidate_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    selected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
+    requested_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    resolved_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    elapsed_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    trace_json: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow_naive,
         nullable=False,
     )

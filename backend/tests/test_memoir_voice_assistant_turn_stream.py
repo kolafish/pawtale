@@ -27,6 +27,7 @@ from app.models.memoir_narrative import (
 from app.services.ai_streaming import AITextStreamChunk
 from app.services.memoir import automation_event_metadata
 from app.services.memoir import automation_events
+from app.services.memoir.memory_activation import MemoryActivationResult
 from app.services.memoir.tts_alignment import TTSAlignmentSegment
 from app.services.memoir.voice_assistant_turn_stream import VoiceAssistantTurnStreamSession
 from app.services.memoir.voice_tts_types import StreamingTTSChunk
@@ -129,12 +130,16 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert tts_client.calls[0]["sample_rate"] == 16000
 
     messages = (
-        await test_db.execute(
-            select(MemoirChatMessage)
-            .where(MemoirChatMessage.voice_session_id == created["session"]["id"])
-            .order_by(MemoirChatMessage.turn_index)
+        (
+            await test_db.execute(
+                select(MemoirChatMessage)
+                .where(MemoirChatMessage.voice_session_id == created["session"]["id"])
+                .order_by(MemoirChatMessage.turn_index)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assistant_messages = [message for message in messages if message.role == MemoirChatMessageRole.ASSISTANT.value]
     assert len(assistant_messages) == 1
     assistant_message = assistant_messages[0]
@@ -161,6 +166,49 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert audio_file.size_bytes == len(b"audio-0-1audio-0-2")
     audio_relative_path = Path(audio_file.storage_path).relative_to(Path("memoir") / "audio")
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
+
+
+async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我又想起她去医院前很害怕。",
+        guidance_mode="free_narration",
+    )
+    activated_context = (
+        "以下是从同一回忆录过往讲述中激活的原文片段。\n历史讲述 1：李桂芳去华西医院做手术前很害怕，是姐姐陪她办的住院。"
+    )
+
+    async def fake_activate(*args, **kwargs):
+        return MemoryActivationResult(
+            trace_id="activation-trace-1",
+            status="succeeded",
+            context=activated_context,
+            selected_count=1,
+        )
+
+    monkeypatch.setattr(
+        "app.services.memoir.memory_activation.activate_memory_for_turn",
+        fake_activate,
+    )
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["听起来那次住院让她很不安，当时姐姐是怎么陪着她的？"],
+    )
+
+    assert activated_context in ai_client.calls[0]["user_prompt"]
+    assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert assistant_message is not None
+    assert assistant_message.metadata_json["memory_activation_trace_id"] == ("activation-trace-1")
+    assert assistant_message.metadata_json["memory_activation_status"] == "succeeded"
+    assert assistant_message.metadata_json["memory_activation_selected_count"] == 1
 
 
 async def test_book_completion_acknowledgement_suppresses_global_progress_and_ends_round(
@@ -222,18 +270,19 @@ async def test_book_completion_acknowledgement_suppresses_global_progress_and_en
     assert completed["progress_spoken_text"] == ""
     assert "另有5条讲述未归入章节" not in ai_client.calls[0]["user_prompt"]
     assert "不要播报全书进度" in ai_client.calls[0]["user_prompt"]
-    assert "这段内容开始前，读者还需要知道哪些重要背景" in ai_client.calls[0][
-        "user_prompt"
-    ]
+    assert "这段内容开始前，读者还需要知道哪些重要背景" in ai_client.calls[0]["user_prompt"]
     assert "只做结束确认，不再追问" in ai_client.calls[0]["user_prompt"]
     assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert assistant_message is not None
     assert assistant_message.metadata_json["expects_answer"] is False
-    assert await test_db.scalar(
-        select(func.count(MemoirInterviewPolicyDecision.id)).where(
-            MemoirInterviewPolicyDecision.session_id == session.id
+    assert (
+        await test_db.scalar(
+            select(func.count(MemoirInterviewPolicyDecision.id)).where(
+                MemoirInterviewPolicyDecision.session_id == session.id
+            )
         )
-    ) == 0
+        == 0
+    )
 
 
 async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing_reply(
@@ -244,9 +293,7 @@ async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing
     current_settings = get_settings()
     monkeypatch.setattr(
         "app.services.memoir.narrative.interview_policy_runtime.get_settings",
-        lambda: current_settings.model_copy(
-            update={"memoir_interview_policy_shadow_enabled": True}
-        ),
+        lambda: current_settings.model_copy(update={"memoir_interview_policy_shadow_enabled": True}),
     )
     created = await create_test_voice_transcript(
         client,
@@ -265,8 +312,7 @@ async def test_voice_assistant_turn_only_enqueues_shadow_policy_without_changing
     shadow_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
         )
     )
     assistant_message = await test_db.get(
@@ -315,15 +361,13 @@ async def test_voice_assistant_turn_applies_and_records_low_risk_active_policy(
 
     decision = await test_db.scalar(
         select(MemoirInterviewPolicyDecision).where(
-            MemoirInterviewPolicyDecision.generated_message_id
-            == completed["message_id"]
+            MemoirInterviewPolicyDecision.generated_message_id == completed["message_id"]
         )
     )
     shadow_job_count = await test_db.scalar(
         select(func.count(MemoirEditingJob.id)).where(
             MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
         )
     )
 
@@ -371,8 +415,7 @@ async def test_voice_assistant_turn_records_medium_policy_as_suggestion_only(
 
     decision = await test_db.scalar(
         select(MemoirInterviewPolicyDecision).where(
-            MemoirInterviewPolicyDecision.generated_message_id
-            == completed["message_id"]
+            MemoirInterviewPolicyDecision.generated_message_id == completed["message_id"]
         )
     )
     assert "当前受控访谈策略" not in reply_ai.calls[0]["user_prompt"]
@@ -415,8 +458,7 @@ async def test_voice_assistant_turn_policy_failure_falls_back_to_existing_reply_
     shadow_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
         )
     )
     decision = await test_db.scalar(select(MemoirInterviewPolicyDecision))
@@ -448,8 +490,7 @@ async def test_voice_assistant_turn_policy_persistence_failure_falls_back_to_sha
         raise RuntimeError("policy persistence unavailable")
 
     monkeypatch.setattr(
-        "app.services.memoir.narrative.interview_policy_runtime."
-        "persist_policy_turn_decision",
+        "app.services.memoir.narrative.interview_policy_runtime.persist_policy_turn_decision",
         fail_policy_persistence,
     )
     created = await create_test_voice_transcript(
@@ -470,8 +511,7 @@ async def test_voice_assistant_turn_policy_persistence_failure_falls_back_to_sha
     shadow_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.project_id == created["session"]["project_id"],
-            MemoirEditingJob.job_type
-            == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
+            MemoirEditingJob.job_type == MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
         )
     )
     assistant_message = await test_db.get(
@@ -509,8 +549,7 @@ async def test_voice_assistant_turn_cancel_does_not_persist_partial_message(
     assert cancelled["state"] == "interrupted"
     assert cancelled["reason"] == "interrupted_by_user"
     assistant_count = await test_db.scalar(
-        select(func.count(MemoirChatMessage.id))
-        .where(
+        select(func.count(MemoirChatMessage.id)).where(
             MemoirChatMessage.voice_session_id == created["session"]["id"],
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
         )
@@ -786,7 +825,7 @@ async def test_voice_assistant_turn_skips_voice_played_automation_event(
     assert completed["progress_update"]["kind"] != "automation_event"
 
 
-async def test_voice_assistant_turn_guided_opening_references_previous_session(
+async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_session_text(
     client,
     test_db,
 ):
@@ -824,9 +863,10 @@ async def test_voice_assistant_turn_guided_opening_references_previous_session(
     assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
     assert "今天想先讲哪一段" in prompt
-    assert "不要一开场就切进上次的具体细节" in prompt
+    assert "当前没有激活具体历史内容" in prompt
     assert "想不起来也没关系" in prompt
-    assert "叙述者：上次讲到我第一次去上海找工作。" in prompt
+    assert "叙述者：上次讲到我第一次去上海找工作。" not in prompt
+    assert "本轮没有激活历史讲述" in prompt
 
 
 async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(
@@ -923,8 +963,7 @@ async def test_voice_assistant_turn_tts_failure_does_not_persist_partial_message
     assert "tts failed" in failed["error"]
     assert not [event for event in stream_client.sent if event["type"].startswith("audio.")]
     assistant_count = await test_db.scalar(
-        select(func.count(MemoirChatMessage.id))
-        .where(
+        select(func.count(MemoirChatMessage.id)).where(
             MemoirChatMessage.voice_session_id == created["session"]["id"],
             MemoirChatMessage.role == MemoirChatMessageRole.ASSISTANT.value,
         )
@@ -952,9 +991,7 @@ async def _run_stream_turn(
         user_id=user_id,
         ai_client_factory=lambda model=None: ai_client,
         policy_ai_client_factory=(
-            (lambda model=None: policy_ai_client)
-            if policy_ai_client is not None
-            else (lambda model=None: ai_client)
+            (lambda model=None: policy_ai_client) if policy_ai_client is not None else (lambda model=None: ai_client)
         ),
         tts_client_factory=lambda: tts_client,
     )
