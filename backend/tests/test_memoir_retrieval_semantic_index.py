@@ -93,6 +93,14 @@ class FailingAIClient:
         raise RuntimeError("simulated provider failure")
 
 
+class FailingEmbeddingClient:
+    model = "test-bge-small"
+    timeout_seconds = 5.0
+
+    async def embed(self, texts: list[str]) -> EmbeddingBatchResult:
+        raise RuntimeError("simulated embedding failure")
+
+
 async def _load_utterance(test_db, utterance_id: str) -> MemoirVoiceUtterance:
     utterance = await test_db.scalar(
         select(MemoirVoiceUtterance)
@@ -159,20 +167,24 @@ async def test_semantic_provider_failure_does_not_rollback_source_index(
     semantic_job = await _create_source_and_semantic_job(test_db, created)
     await test_db.commit()
 
-    try:
-        await run_semantic_indexing_job(
-            test_db,
-            semantic_job,
-            embedding_client=FakeEmbeddingClient(),
-            ai_client=FailingAIClient(),
-        )
-    except RuntimeError as exc:
-        assert str(exc) == "simulated provider failure"
-    else:
-        raise AssertionError("semantic provider failure must be visible to the worker")
-    await test_db.rollback()
+    result = await run_semantic_indexing_job(
+        test_db,
+        semantic_job,
+        embedding_client=FakeEmbeddingClient(),
+        ai_client=FailingAIClient(),
+    )
+    await test_db.commit()
 
     entries = (await test_db.scalars(select(MemoirRetrievalEntry))).all()
+    assert result.status is MemoirEditingJobStatus.FAILED
+    assert result.error_message == "语义索引提取失败"
+    assert result.result_json["stage"] == "generate_semantic_units"
+    assert result.result_json["requested_model"] == SEMANTIC_INDEX_MODEL
+    assert result.result_json["model"] == FailingAIClient.model_name
+    assert result.result_json["provider"] == FailingAIClient.provider_name
+    assert result.result_json["timeout_seconds"] > 0
+    assert result.result_json["elapsed_ms"] >= 0
+    assert result.result_json["error_type"] == "RuntimeError"
     assert len(entries) == 1
     assert entries[0].entry_kind == MemoirRetrievalEntryKind.SOURCE_TEXT.value
     assert entries[0].utterance_id == created["utterance_id"]
@@ -231,6 +243,40 @@ async def test_semantic_job_persists_multiple_units_with_source_evidence(
     assert f"source_text:\n{source_text}" in ai.calls[0]["user_prompt"]
     assert "context_anchor:\n无" in ai.calls[0]["user_prompt"]
     assert ai.calls[0]["max_tokens"] == 2400
+
+
+async def test_semantic_embedding_failure_keeps_source_and_records_diagnostics(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="语义生成成功后，本地向量服务暂时失败。",
+    )
+    semantic_job = await _create_source_and_semantic_job(test_db, created)
+    await test_db.commit()
+
+    result = await run_semantic_indexing_job(
+        test_db,
+        semantic_job,
+        embedding_client=FailingEmbeddingClient(),
+        ai_client=FakeAIClient(["本地向量服务暂时失败"]),
+    )
+    await test_db.commit()
+    entries = (await test_db.scalars(select(MemoirRetrievalEntry))).all()
+
+    assert result.status is MemoirEditingJobStatus.FAILED
+    assert result.error_message == "语义索引向量化失败"
+    assert result.result_json["stage"] == "embed_semantic_units"
+    assert result.result_json["requested_model"] == FailingEmbeddingClient.model
+    assert result.result_json["resolved_model"] is None
+    assert result.result_json["provider"] == "local_embedding"
+    assert result.result_json["timeout_seconds"] == 5.0
+    assert result.result_json["elapsed_ms"] >= 0
+    assert result.result_json["error_type"] == "RuntimeError"
+    assert len(entries) == 1
+    assert entries[0].entry_kind == MemoirRetrievalEntryKind.SOURCE_TEXT.value
 
 
 async def test_empty_semantic_decision_removes_existing_units(client, test_db):

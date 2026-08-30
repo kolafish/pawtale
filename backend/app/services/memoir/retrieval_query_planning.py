@@ -142,6 +142,15 @@ def _unique_texts(values: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
+def retrieval_unit_workload_policy(purpose: RetrievalUnitPurpose):
+    workload = (
+        AITextWorkload.REALTIME_STRUCTURED
+        if purpose is RetrievalUnitPurpose.QUERY
+        else AITextWorkload.INTERACTIVE_STRUCTURED
+    )
+    return ai_text_workload_policy(workload)
+
+
 async def generate_retrieval_units(
     *,
     purpose: RetrievalUnitPurpose,
@@ -155,12 +164,7 @@ async def generate_retrieval_units(
     if purpose is RetrievalUnitPurpose.QUERY and supplied_context:
         raise ValueError("query retrieval units do not accept context")
     normalized_context = supplied_context
-    workload = (
-        AITextWorkload.REALTIME_STRUCTURED
-        if purpose is RetrievalUnitPurpose.QUERY
-        else AITextWorkload.INTERACTIVE_STRUCTURED
-    )
-    policy = ai_text_workload_policy(workload)
+    policy = retrieval_unit_workload_policy(purpose)
     timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
     if not normalized_input:
         return RetrievalUnitGenerationTrace(

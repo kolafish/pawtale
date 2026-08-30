@@ -3,13 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 import logging
 import time
-from typing import Literal, Protocol
+from typing import Literal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.memoir_retrieval import MemoirRetrievalEntry
-from app.services.embeddings import EmbeddingBatchResult, create_embedding_client
+from app.services.embeddings import (
+    EmbeddingClient,
+    create_embedding_client,
+    embed_texts_in_batches,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -20,10 +24,6 @@ DEFAULT_CANDIDATE_LIMIT = 12
 RRF_RANK_CONSTANT = 60
 
 RetrievalChannel = Literal["vector", "bm25"]
-
-
-class EmbeddingClient(Protocol):
-    async def embed(self, texts: list[str]) -> EmbeddingBatchResult: ...
 
 
 @dataclass(frozen=True)
@@ -336,7 +336,7 @@ async def retrieve_hybrid_candidates(
         )
 
     client: EmbeddingClient = embedding_client or create_embedding_client()
-    embedded = await client.embed(normalized_queries)
+    embedded = await embed_texts_in_batches(client, normalized_queries)
     if len(embedded.embeddings) != len(normalized_queries):
         raise ValueError("embedding count does not match retrieval query count")
 

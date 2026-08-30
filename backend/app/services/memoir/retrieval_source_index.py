@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Protocol
+import logging
+import time
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -15,11 +16,17 @@ from app.domain.memoir.types import (
 )
 from app.models.memoir import MemoirEditingJob, MemoirVoiceUtterance
 from app.models.memoir_retrieval import MemoirRetrievalEntry
-from app.services.ai_factory import DEEPSEEK_V4_PRO_MODEL
+from app.services.ai_factory import DEEPSEEK_V4_PRO_MODEL, get_ai_service
+from app.services.ai_timeouts import (
+    ai_error_metadata,
+    ai_text_timeout_seconds,
+    ai_user_error_message,
+)
 from app.services.ai_types import AITextClient
 from app.services.embeddings import (
-    EmbeddingBatchResult,
+    EmbeddingClient,
     create_embedding_client,
+    embed_texts_in_batches,
 )
 from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
@@ -27,6 +34,7 @@ from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.retrieval_query_planning import (
     RetrievalUnitPurpose,
     generate_retrieval_units,
+    retrieval_unit_workload_policy,
 )
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -39,10 +47,7 @@ SOURCE_INDEX_VERSION = 1
 SOURCE_ENTRY_ORDINAL = 0
 SEMANTIC_INDEX_VERSION = 1
 SEMANTIC_INDEX_MODEL = DEEPSEEK_V4_PRO_MODEL
-
-
-class EmbeddingClient(Protocol):
-    async def embed(self, texts: list[str]) -> EmbeddingBatchResult: ...
+logger = logging.getLogger(__name__)
 
 
 async def schedule_source_indexing_job(
@@ -359,12 +364,46 @@ async def run_semantic_indexing_job(
             utterance=utterance,
         )
 
-    generation = await generate_retrieval_units(
-        purpose=RetrievalUnitPurpose.INDEX,
-        input_text=text,
-        requested_model=SEMANTIC_INDEX_MODEL,
-        ai_client=ai_client,
-    )
+    generation_client = ai_client or get_ai_service(SEMANTIC_INDEX_MODEL)
+    generation_started = time.perf_counter()
+    try:
+        generation = await generate_retrieval_units(
+            purpose=RetrievalUnitPurpose.INDEX,
+            input_text=text,
+            requested_model=SEMANTIC_INDEX_MODEL,
+            ai_client=generation_client,
+        )
+    except Exception as error:
+        policy = retrieval_unit_workload_policy(RetrievalUnitPurpose.INDEX)
+        metadata = ai_error_metadata(
+            error,
+            requested_model=SEMANTIC_INDEX_MODEL,
+            provider=getattr(generation_client, "provider_name", None),
+            resolved_model=getattr(generation_client, "model_name", None),
+            timeout_seconds=ai_text_timeout_seconds(policy.timeout_profile),
+            elapsed_ms=round((time.perf_counter() - generation_started) * 1000),
+        )
+        logger.warning(
+            "memoir semantic retrieval generation failed utterance_id=%s "
+            "requested_model=%s resolved_model=%s provider=%s "
+            "elapsed_ms=%s error_type=%s",
+            utterance_id,
+            metadata["requested_model"],
+            metadata["model"],
+            metadata["provider"],
+            metadata["elapsed_ms"],
+            metadata["error_type"],
+        )
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.FAILED,
+            result_json={
+                "stage": "generate_semantic_units",
+                "utterance_id": utterance_id,
+                "source_text_hash": expected_hash,
+                **metadata,
+            },
+            error_message=ai_user_error_message(error, "语义索引提取失败"),
+        )
 
     current = await _load_utterance(db, utterance_id)
     if current is None or current.voice_session.project_id != job.project_id:
@@ -386,7 +425,42 @@ async def run_semantic_indexing_job(
     embedded = None
     if generation.units:
         client: EmbeddingClient = embedding_client or create_embedding_client()
-        embedded = await client.embed(list(generation.units))
+        embedding_started = time.perf_counter()
+        try:
+            embedded = await embed_texts_in_batches(
+                client,
+                list(generation.units),
+            )
+        except Exception as error:
+            embedding_model = getattr(client, "model", None)
+            elapsed_ms = round((time.perf_counter() - embedding_started) * 1000)
+            logger.warning(
+                "memoir semantic retrieval embedding failed utterance_id=%s "
+                "model=%s elapsed_ms=%d error_type=%s",
+                utterance_id,
+                embedding_model,
+                elapsed_ms,
+                type(error).__name__,
+            )
+            return EditingJobResult(
+                status=MemoirEditingJobStatus.FAILED,
+                result_json={
+                    "stage": "embed_semantic_units",
+                    "utterance_id": utterance_id,
+                    "source_text_hash": expected_hash,
+                    "requested_model": embedding_model,
+                    "resolved_model": None,
+                    "provider": "local_embedding",
+                    "timeout_seconds": getattr(client, "timeout_seconds", None),
+                    "elapsed_ms": elapsed_ms,
+                    "error_type": type(error).__name__,
+                    "generation_requested_model": generation.requested_model,
+                    "generation_resolved_model": generation.resolved_model,
+                    "generation_provider": generation.provider,
+                    "generation_elapsed_ms": generation.elapsed_ms,
+                },
+                error_message=ai_user_error_message(error, "语义索引向量化失败"),
+            )
         if len(embedded.embeddings) != len(generation.units):
             raise ValueError("embedding count does not match semantic unit count")
 
