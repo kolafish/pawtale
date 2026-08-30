@@ -6,7 +6,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -53,6 +53,22 @@ async def _assert_runtime_schema() -> None:
         await engine.dispose()
 
 
+async def _retrieval_index_names() -> set[str]:
+    engine = create_async_engine(POSTGRES_DATABASE_URL)
+    try:
+        async with engine.connect() as connection:
+            rows = await connection.execute(
+                text(
+                    "SELECT indexname FROM pg_indexes "
+                    "WHERE schemaname = current_schema() "
+                    "AND tablename = 'memoir_retrieval_entries'"
+                )
+            )
+            return set(rows.scalars())
+    finally:
+        await engine.dispose()
+
+
 def test_postgres_baseline_round_trip_matches_models():
     _assert_dedicated_test_database()
     config = _alembic_config()
@@ -66,6 +82,10 @@ def test_postgres_baseline_round_trip_matches_models():
     assert "projects" in tables
     assert "memoir_voice_utterances" in tables
     assert "memoir_book_outputs" in tables
+
+    retrieval_indexes = asyncio.run(_retrieval_index_names())
+    assert "ix_memoir_retrieval_entries_bm25" in retrieval_indexes
+    assert "ix_memoir_retrieval_entries_embedding_hnsw" not in retrieval_indexes
 
     command.downgrade(config, "base")
     command.upgrade(config, "head")
