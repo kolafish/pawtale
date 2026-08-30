@@ -36,28 +36,21 @@ class MemoirVoiceSessionCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_interview_target(self):
-        if (
-            self.current_completion_issue_id
-            and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION
-        ):
-            raise ValueError(
-                "current_completion_issue_id requires book_completion session_goal"
-            )
+        if self.current_completion_issue_id and self.session_goal != MemoirSessionGoal.BOOK_COMPLETION:
+            raise ValueError("current_completion_issue_id requires book_completion session_goal")
         if self.anchor_framework_item_id and (
             self.guidance_mode != MemoirGuidanceMode.GUIDED_INTERVIEW
             or self.session_goal != MemoirSessionGoal.OPEN_NARRATION
         ):
-            raise ValueError(
-                "anchor_framework_item_id requires guided_interview open_narration"
-            )
+            raise ValueError("anchor_framework_item_id requires guided_interview open_narration")
         if self.current_completion_issue_id and self.anchor_framework_item_id:
-            raise ValueError(
-                "voice session cannot target a completion issue and framework item together"
-            )
+            raise ValueError("voice session cannot target a completion issue and framework item together")
         return self
+
 
 class MemoirVoiceSessionStopRequest(BaseModel):
     error_message: str | None = None
+
 
 class MemoirVoiceAuthorizationConsentRequest(BaseModel):
     version: str
@@ -81,6 +74,7 @@ class MemoirVoiceAuthorizationConsentRequest(BaseModel):
             return None
         normalized = value.strip()
         return normalized or None
+
 
 class MemoirVoiceAuthorizationConsentResponse(BaseModel):
     id: str
@@ -133,6 +127,7 @@ class MemoirVoiceSessionResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class MemoirChatMessageResponse(BaseModel):
     id: str
     project_id: str
@@ -150,6 +145,7 @@ class MemoirChatMessageResponse(BaseModel):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
 
 class MemoirVoiceUtteranceResponse(BaseModel):
     id: str
@@ -169,10 +165,12 @@ class MemoirVoiceUtteranceResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
 class MemoirVoiceSessionDetailResponse(BaseModel):
     session: MemoirVoiceSessionResponse
     messages: list[MemoirChatMessageResponse] = Field(default_factory=list)
     utterances: list[MemoirVoiceUtteranceResponse] = Field(default_factory=list)
+
 
 class MemoirVoiceSessionSummaryResponse(BaseModel):
     id: str
@@ -197,11 +195,45 @@ class MemoirVoiceSessionSummaryResponse(BaseModel):
     last_message_role: MemoirChatMessageRole | None = None
     last_message_at: datetime | None = None
 
+
 class MemoirVoiceSessionListResponse(BaseModel):
     items: list[MemoirVoiceSessionSummaryResponse] = Field(default_factory=list)
     total: int
     limit: int
     offset: int
+
+
+class MemoirMemoryActivationTraceResponse(BaseModel):
+    id: str
+    project_id: str
+    voice_session_id: str
+    current_message_id: str | None = None
+    current_utterance_id: str | None = None
+    status: Literal["skipped", "succeeded", "failed"]
+    should_retrieve: bool
+    query_count: int
+    candidate_count: int
+    selected_count: int
+    prompt_version: str
+    requested_model: str | None = None
+    resolved_model: str | None = None
+    provider: str | None = None
+    elapsed_ms: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MemoirMemoryActivationTraceDetailResponse(MemoirMemoryActivationTraceResponse):
+    trace_json: dict[str, object] = Field(default_factory=dict)
+
+
+class MemoirMemoryActivationTraceListResponse(BaseModel):
+    items: list[MemoirMemoryActivationTraceResponse] = Field(default_factory=list)
+    total: int
+    limit: int
+    offset: int
+
 
 class MemoirVoiceModuleProgressResponse(BaseModel):
     module: str
@@ -260,6 +292,7 @@ class MemoirVoiceProgressResponse(BaseModel):
     modules: list[MemoirVoiceModuleProgressResponse] = Field(default_factory=list)
     snapshot: MemoirProjectProgressSnapshotResponse | None = None
 
+
 class MemoirVoiceFollowUpResponse(BaseModel):
     message: MemoirChatMessageResponse
     follow_up_text: str
@@ -276,6 +309,7 @@ class MemoirTTSAlignmentSegmentResponse(BaseModel):
     text_end: int
     confidence: float | None = None
 
+
 class MemoirAssistantTTSResponse(BaseModel):
     message: MemoirChatMessageResponse
     audio_file_id: str
@@ -285,6 +319,7 @@ class MemoirAssistantTTSResponse(BaseModel):
     duration_seconds: float | None = None
     alignment_provider: str | None = None
     alignment: list[MemoirTTSAlignmentSegmentResponse] = Field(default_factory=list)
+
 
 class MemoirVoiceTranscriptIncludedChapterResponse(BaseModel):
     chapter_id: str
@@ -370,6 +405,7 @@ class MemoirVoiceTranscriptItemResponse(BaseModel):
     created_at: datetime
     session_created_at: datetime
     session_started_at: datetime | None = None
+
 
 class MemoirVoiceTranscriptListResponse(BaseModel):
     items: list[MemoirVoiceTranscriptItemResponse] = Field(default_factory=list)
@@ -526,8 +562,10 @@ class MemoirVoiceSearchTranscriptionRequest(BaseModel):
             raise ValueError("不能为空")
         return normalized
 
+
 class MemoirVoiceSearchTranscriptionResponse(BaseModel):
     transcript: str
+
 
 class MemoirVoiceSearchQueryParseRequest(BaseModel):
     text: str = Field(min_length=1, max_length=240)
@@ -541,10 +579,12 @@ class MemoirVoiceSearchQueryParseRequest(BaseModel):
             raise ValueError("不能为空")
         return normalized
 
+
 class MemoirVoiceSearchQueryFiltersResponse(BaseModel):
     included: str = "all"
     guidance_mode: str | None = None
     module: str | None = None
+
 
 class MemoirVoiceSearchQueryParseResponse(BaseModel):
     original_text: str
@@ -556,8 +596,10 @@ class MemoirVoiceSearchQueryParseResponse(BaseModel):
     provider: str | None = None
     model: str | None = None
 
+
 class MemoirVoiceTranscriptUpdateRequest(BaseModel):
     transcript_edited: str
+
 
 class MemoirVoiceTranscriptCleanupRequest(BaseModel):
     ai_model: str | None = None

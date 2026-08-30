@@ -87,6 +87,7 @@ def interviewer_persona_for_voice(voice: str | None) -> InterviewerPersona:
 def system_prompt_for_persona(persona: InterviewerPersona) -> str:
     return f"{SYSTEM_PROMPT}你在对话中自称“{persona.host_name}”。"
 
+
 GUIDED_TOPIC_MENU = "人物、事情、家庭、工作、地点、某一天、人生阶段、闲聊"
 
 GUIDED_TOPIC_KEYWORDS = {
@@ -155,8 +156,7 @@ def build_progress_prompt_context(snapshot: MemoirProjectProgressSnapshotRespons
     if not selected_update:
         return ProgressPromptContext(
             prompt_text=(
-                "项目进度事实：本轮没有可播报的结构化进度变化。"
-                "不要编造记录数、章节名、成文字数或自动整理结果。"
+                "项目进度事实：本轮没有可播报的结构化进度变化。不要编造记录数、章节名、成文字数或自动整理结果。"
             ),
             progress_update=None,
             automation_event_ids=[],
@@ -202,8 +202,7 @@ def _progress_prompt_text(selected_update: dict[str, object]) -> str:
             lines.append(f"- 章节状态：{line}")
     if has_speech_prefix:
         lines.append(
-            "使用规则：上面的语音开头会由系统先播放；你不要重复同一条进度、数字或章节名，"
-            "只需要自然承接，然后继续访谈。"
+            "使用规则：上面的语音开头会由系统先播放；你不要重复同一条进度、数字或章节名，只需要自然承接，然后继续访谈。"
         )
     else:
         lines.append(
@@ -408,14 +407,9 @@ def _recent_context(messages: list[MemoirChatMessage]) -> str:
     return _message_context(_ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]) or "暂无对话。"
 
 
-def _previous_context(messages: list[MemoirChatMessage]) -> str:
-    return _message_context(messages) or "暂无历史会话。"
-
-
 def _has_user_message(messages: list[MemoirChatMessage]) -> bool:
     return any(
-        message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
-        for message in messages
+        message.role == MemoirChatMessageRole.USER.value and message.content_text.strip() for message in messages
     )
 
 
@@ -472,7 +466,7 @@ def strip_streaming_speaker_label_prefix(text: str) -> tuple[str, bool]:
 
 
 def _clean_speech_text(value: object) -> str:
-    text = str(value or "").strip().strip("\"“”").strip()
+    text = str(value or "").strip().strip('"“”').strip()
     return _strip_speaker_label_prefix(text)
 
 
@@ -503,10 +497,7 @@ def _parse_interviewer_turn(
     payload = extract_json_payload(raw_text)
     if isinstance(payload, dict):
         speech_text = _clean_speech_text(
-            payload.get("speech_text")
-            or payload.get("text")
-            or payload.get("follow_up_text")
-            or payload.get("message")
+            payload.get("speech_text") or payload.get("text") or payload.get("follow_up_text") or payload.get("message")
         )
         if speech_text:
             primary_intent = _normalize_primary_intent(

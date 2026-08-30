@@ -23,6 +23,7 @@ from app.services.ai_timeouts import AITextTimeoutProfile, ai_text_timeout_secon
 from app.services.ai_types import AITextClient
 from app.services.memoir import automation_events
 from app.services.memoir import completion_interviews
+from app.services.memoir import memory_activation
 from app.services.memoir import progress_snapshot
 from app.services.memoir.narrative import interview_policy_runtime
 from app.services.memoir.audio_files import StagedAudioFile, discard_staged_audio, stage_audio_bytes
@@ -39,7 +40,6 @@ from app.services.memoir.voice_followup_ai import (
     _llm_max_tokens,
     _module_label,
     _parse_interviewer_turn,
-    _previous_context,
     _question_mark_count,
     _recent_context,
     _requested_topic_hint,
@@ -55,9 +55,9 @@ from app.services.memoir.streaming_tts_events import (
     stream_tts_events,
 )
 from app.services.memoir.voice_chat_context import (
-    load_previous_project_messages,
     load_voice_session,
     next_turn_index,
+    project_has_previous_narration,
 )
 from app.services.memoir.voice_tts import get_tts_client
 from app.services.memoir.voice_tts_types import (
@@ -67,18 +67,16 @@ from app.services.memoir.voice_tts_types import (
 )
 
 
-STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v2"
+STREAM_PROMPT_VERSION = "memoir_voice_interviewer_stream_turn_v3"
 STREAM_TEXT_TEMPERATURE = 0.72
 _PCM_MIME_TYPES = {"audio/l16", "audio/pcm", "audio/x-pcm"}
 logger = logging.getLogger(__name__)
 
 
 class AssistantTurnStreamClient(Protocol):
-    async def receive_json(self) -> dict:
-        ...
+    async def receive_json(self) -> dict: ...
 
-    async def send_json(self, payload: dict) -> None:
-        ...
+    async def send_json(self, payload: dict) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -134,6 +132,9 @@ class AssistantTurnArtifacts:
     tts_speed_ratio: float = DEFAULT_TTS_SPEED_RATIO
     tts_duration_seconds: float | None = None
     tts_alignment: list = field(default_factory=list)
+    memory_activation_trace_id: str | None = None
+    memory_activation_status: str | None = None
+    memory_activation_selected_count: int = 0
 
     def append_tts_chunk(self, chunk: StreamingTTSChunk) -> None:
         if chunk.audio:
@@ -155,9 +156,7 @@ class AssistantTurnArtifacts:
     @property
     def ai_model_mismatch(self) -> bool:
         return bool(
-            self.resolved_ai_model
-            and self.response_ai_model
-            and self.resolved_ai_model != self.response_ai_model
+            self.resolved_ai_model and self.response_ai_model and self.resolved_ai_model != self.response_ai_model
         )
 
     @property
@@ -237,8 +236,8 @@ class VoiceAssistantTurnStreamSession:
             stream_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stream_task
+            await self.db.rollback()
             if cancel_signal.client_disconnected:
-                await self.db.rollback()
                 return
             await self.client.send_json(
                 {
@@ -301,7 +300,10 @@ class VoiceAssistantTurnStreamSession:
                 req.ai_model,
             ),
         )
-        previous_messages = await load_previous_project_messages(self.db, voice_session)
+        has_previous_project_narration = await project_has_previous_narration(
+            self.db,
+            voice_session,
+        )
         messages = list(voice_session.messages)
         has_user_message = _has_user_message(messages)
         fallback_intent = "follow_up" if has_user_message else "opening"
@@ -313,8 +315,7 @@ class VoiceAssistantTurnStreamSession:
         if voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
             project_progress_context = ProgressPromptContext(
                 prompt_text=(
-                    "当前是单项成书补访。不要播报全书进度、其他章节状态、"
-                    "未归章数量或后台任务；只围绕当前补全问题回应。"
+                    "当前是单项成书补访。不要播报全书进度、其他章节状态、未归章数量或后台任务；只围绕当前补全问题回应。"
                 ),
                 progress_update=None,
                 automation_event_ids=[],
@@ -330,11 +331,9 @@ class VoiceAssistantTurnStreamSession:
                     voice_unannounced_events_only=True,
                 )
             )
-        completion_prompt_context = (
-            await completion_interviews.prompt_context_for_session(
-                self.db,
-                voice_session=voice_session,
-            )
+        completion_prompt_context = await completion_interviews.prompt_context_for_session(
+            self.db,
+            voice_session=voice_session,
         )
         tts_client = self.tts_client_factory()
         persona = interviewer_persona_for_voice(req.voice or tts_client.default_voice)
@@ -361,34 +360,59 @@ class VoiceAssistantTurnStreamSession:
                 "audio_protocol": req.audio_protocol,
                 "max_tokens": max_tokens,
                 "current_completion_issue_id": (
-                    completion_prompt_context.issue_id
-                    if completion_prompt_context
-                    else None
+                    completion_prompt_context.issue_id if completion_prompt_context else None
                 ),
             }
         )
 
+        current_user_message = next(
+            (
+                message
+                for message in reversed(messages)
+                if message.role == MemoirChatMessageRole.USER.value and message.content_text.strip()
+            ),
+            None,
+        )
+        activation_context = ""
+        if current_user_message is not None:
+            try:
+                activation = await memory_activation.activate_memory_for_turn(
+                    self.db,
+                    project_id=voice_session.project_id,
+                    voice_session_id=voice_session.id,
+                    current_message=current_user_message,
+                )
+                activation_context = activation.context
+                artifacts.memory_activation_trace_id = activation.trace_id
+                artifacts.memory_activation_status = activation.status
+                artifacts.memory_activation_selected_count = activation.selected_count
+            except Exception:
+                await self.db.rollback()
+                artifacts.memory_activation_status = "failed"
+                logger.exception(
+                    "Memory activation orchestration failed; continuing without "
+                    "historical context voice_session_id=%s turn_id=%s",
+                    self.voice_session_id,
+                    turn_id,
+                )
+            voice_session = await load_voice_session(
+                self.db,
+                self.voice_session_id,
+                self.user_id,
+            )
+
         policy_turn: interview_policy_runtime.ActivePolicyTurn | None = None
         anchor_instruction = ""
-        completion_answered = bool(
-            completion_prompt_context is not None
-            and completion_prompt_context.answered
-        )
+        completion_answered = bool(completion_prompt_context is not None and completion_prompt_context.answered)
         if not completion_answered:
             try:
                 async with self.db.begin_nested():
-                    policy_turn = (
-                        await interview_policy_runtime.prepare_active_policy_turn(
-                            self.db,
-                            session=voice_session,
-                            completion_issue_id=(
-                                completion_prompt_context.issue_id
-                                if completion_prompt_context
-                                else None
-                            ),
-                            requested_ai_model=req.ai_model,
-                            ai_client_factory=self.policy_ai_client_factory,
-                        )
+                    policy_turn = await interview_policy_runtime.prepare_active_policy_turn(
+                        self.db,
+                        session=voice_session,
+                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
+                        requested_ai_model=req.ai_model,
+                        ai_client_factory=self.policy_ai_client_factory,
                     )
             except Exception:
                 logger.exception(
@@ -399,11 +423,9 @@ class VoiceAssistantTurnStreamSession:
                 )
         if policy_turn is None:
             try:
-                anchor_instruction = (
-                    await interview_policy_runtime.anchored_opening_reply_instruction(
-                        self.db,
-                        session=voice_session,
-                    )
+                anchor_instruction = await interview_policy_runtime.anchored_opening_reply_instruction(
+                    self.db,
+                    session=voice_session,
                 )
             except Exception:
                 logger.exception(
@@ -415,14 +437,13 @@ class VoiceAssistantTurnStreamSession:
 
         prompt = _build_stream_turn_prompt(
             voice_session,
-            previous_messages=previous_messages,
+            has_previous_project_narration=has_previous_project_narration,
+            activation_context=activation_context,
             regenerate=req.regenerate,
             progress_context=project_progress_context,
             persona=persona,
             completion_prompt_context=completion_prompt_context,
-            policy_instruction=interview_policy_runtime.active_reply_instruction(
-                policy_turn
-            ) or anchor_instruction,
+            policy_instruction=interview_policy_runtime.active_reply_instruction(policy_turn) or anchor_instruction,
         )
 
         await self._stream_text_and_audio(
@@ -481,19 +502,14 @@ class VoiceAssistantTurnStreamSession:
                         self.db,
                         session=voice_session,
                         generated_message=message,
-                        completion_issue_id=(
-                            completion_prompt_context.issue_id
-                            if completion_prompt_context
-                            else None
-                        ),
+                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
                         requested_ai_model=req.ai_model,
                     )
             await self.db.commit()
         except Exception:
             await self.db.rollback()
             logger.exception(
-                "Failed to persist interview policy result "
-                "voice_session_id=%s message_id=%s",
+                "Failed to persist interview policy result voice_session_id=%s message_id=%s",
                 self.voice_session_id,
                 persisted_message_id,
             )
@@ -509,26 +525,19 @@ class VoiceAssistantTurnStreamSession:
                         persisted_message_id,
                     )
                     if fallback_message is None:
-                        raise RuntimeError(
-                            "Persisted assistant message unavailable for shadow fallback"
-                        )
+                        raise RuntimeError("Persisted assistant message unavailable for shadow fallback")
                     await interview_policy_runtime.schedule_shadow_policy_evaluation(
                         self.db,
                         session=fallback_session,
                         generated_message=fallback_message,
-                        completion_issue_id=(
-                            completion_prompt_context.issue_id
-                            if completion_prompt_context
-                            else None
-                        ),
+                        completion_issue_id=(completion_prompt_context.issue_id if completion_prompt_context else None),
                         requested_ai_model=req.ai_model,
                     )
                     await self.db.commit()
                 except Exception:
                     await self.db.rollback()
                     logger.exception(
-                        "Failed to schedule interview policy shadow fallback "
-                        "voice_session_id=%s message_id=%s",
+                        "Failed to schedule interview policy shadow fallback voice_session_id=%s message_id=%s",
                         self.voice_session_id,
                         persisted_message_id,
                     )
@@ -557,9 +566,7 @@ class VoiceAssistantTurnStreamSession:
                 "progress_spoken_text": project_progress_context.speech_prefix,
                 "progress_voice_selected_event_ids": project_progress_context.voice_announcement_event_ids or [],
                 "current_completion_issue_id": (
-                    completion_prompt_context.issue_id
-                    if completion_prompt_context
-                    else None
+                    completion_prompt_context.issue_id if completion_prompt_context else None
                 ),
             }
         )
@@ -676,15 +683,9 @@ class VoiceAssistantTurnStreamSession:
             if chunk.usage:
                 artifacts.usage.update(chunk.usage)
             artifacts.ai_provider = chunk.provider or artifacts.ai_provider
-            artifacts.requested_ai_model = (
-                chunk.requested_model or artifacts.requested_ai_model
-            )
-            artifacts.resolved_ai_model = (
-                chunk.resolved_model or artifacts.resolved_ai_model
-            )
-            artifacts.response_ai_model = (
-                chunk.response_model or artifacts.response_ai_model
-            )
+            artifacts.requested_ai_model = chunk.requested_model or artifacts.requested_ai_model
+            artifacts.resolved_ai_model = chunk.resolved_model or artifacts.resolved_ai_model
+            artifacts.response_ai_model = chunk.response_model or artifacts.response_ai_model
             if not chunk.text_delta:
                 continue
             text_delta = chunk.text_delta
@@ -742,9 +743,7 @@ class VoiceAssistantTurnStreamSession:
         max_tokens: int,
         req: AssistantTurnStartRequest,
         progress_context: ProgressPromptContext,
-        completion_prompt_context: (
-            completion_interviews.CompletionIssuePromptContext | None
-        ),
+        completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
     ) -> tuple[MemoirChatMessage, str | None]:
         if not turn.speech_text:
             raise HTTPException(status_code=502, detail="AI 未返回可用访谈回应")
@@ -759,9 +758,7 @@ class VoiceAssistantTurnStreamSession:
                 mime_type=mime_type,
                 extension=extension,
                 duration_seconds=(
-                    math.ceil(artifacts.tts_duration_seconds)
-                    if artifacts.tts_duration_seconds is not None
-                    else None
+                    math.ceil(artifacts.tts_duration_seconds) if artifacts.tts_duration_seconds is not None else None
                 ),
             )
         try:
@@ -784,22 +781,19 @@ class VoiceAssistantTurnStreamSession:
                     "progress_voice_selected_event_ids": progress_context.voice_announcement_event_ids or [],
                     "progress_spoken_text": progress_context.speech_prefix,
                     "current_completion_issue_id": (
-                        completion_prompt_context.issue_id
-                        if completion_prompt_context
-                        else None
+                        completion_prompt_context.issue_id if completion_prompt_context else None
                     ),
+                    "memory_activation_trace_id": artifacts.memory_activation_trace_id,
+                    "memory_activation_status": artifacts.memory_activation_status,
+                    "memory_activation_selected_count": artifacts.memory_activation_selected_count,
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
                     "parsed_json": turn.parsed_json,
                     "provider": artifacts.ai_provider or ai_client.provider_name,
-                    "model": (
-                        artifacts.resolved_ai_model or ai_client.model_name
-                    ),
+                    "model": (artifacts.resolved_ai_model or ai_client.model_name),
                     "requested_model": artifacts.requested_ai_model,
-                    "resolved_model": (
-                        artifacts.resolved_ai_model or ai_client.model_name
-                    ),
+                    "resolved_model": (artifacts.resolved_ai_model or ai_client.model_name),
                     "response_model": artifacts.response_ai_model,
                     "model_mismatch": artifacts.ai_model_mismatch,
                     "max_tokens": max_tokens,
@@ -835,29 +829,22 @@ class VoiceAssistantTurnStreamSession:
 def _build_stream_turn_prompt(
     voice_session: MemoirVoiceSession,
     *,
-    previous_messages: list[MemoirChatMessage],
+    has_previous_project_narration: bool,
+    activation_context: str,
     regenerate: bool,
     progress_context: ProgressPromptContext,
     persona: InterviewerPersona,
-    completion_prompt_context: (
-        completion_interviews.CompletionIssuePromptContext | None
-    ),
+    completion_prompt_context: (completion_interviews.CompletionIssuePromptContext | None),
     policy_instruction: str = "",
 ) -> str:
     messages = list(voice_session.messages)
     has_user_message = _has_user_message(messages)
-    has_previous_user_message = _has_user_message(previous_messages)
     context = _recent_context(messages)
-    history_context = _previous_context(previous_messages)
     module_label = _module_label(voice_session.current_guidance_module)
     topic_hint = _requested_topic_hint(messages)
     host_name = persona.host_name
     regenerate_instruction = "这次是在替换上一句回应，请换一个角度，不要重复上一句。" if regenerate else ""
-    policy_section = (
-        f"\n当前受控访谈策略：\n{policy_instruction}\n"
-        if policy_instruction
-        else ""
-    )
+    policy_section = f"\n当前受控访谈策略：\n{policy_instruction}\n" if policy_instruction else ""
     if voice_session.session_goal == MemoirSessionGoal.BOOK_COMPLETION.value:
         if has_user_message:
             mode_instruction = """当前是成书补访，只围绕“当前补全问题”推进。
@@ -881,10 +868,10 @@ def _build_stream_turn_prompt(
 - 优先顺着当前故事的势能继续听或只追一个自然方向，不要为了“完整”机械补齐时间、地点、人物、起因和结果
 - 只有确实影响理解时，才询问背景、人物关系、原因、结果、转场或感受
 - 不要连续追同一个细节超过两轮；当前受控访谈策略存在时，以它为最高优先级"""
-        elif has_previous_user_message:
+        elif has_previous_project_narration:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
-- 最多两句：第一句轻轻回访并宽泛概括上次聊到的大方向；第二句只问“今天想先讲哪一段？”
-- 只能复述历史会话里明确出现过的内容；不要一开场就切进上次的具体细节
+- 最多两句：第一句简短欢迎回来；第二句只问“今天想先讲哪一段？”
+- 当前没有激活具体历史内容，不要猜测或概括上次聊过什么
 - 可以自然给出几个轻选项，但不要念成长列表，选项来自：{GUIDED_TOPIC_MENU}
 - 必须说明想不起来也没关系，可以随便聊"""
         else:
@@ -899,10 +886,10 @@ def _build_stream_turn_prompt(
 - 顺着叙述者自己的时间线走，尽量不要突然换主题
 - 如果这件事重要、有情绪或有转折，鼓励他多讲一点
 - 如果这件事已经讲得差不多，就自然引导到前后时间、相关人物，或下一段回忆"""
-        elif has_previous_user_message:
+        elif has_previous_project_narration:
             mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
-- 最多两句：第一句轻轻回访并宽泛概括上次聊到的大方向；第二句给一个很小的开口
-- 只能复述历史会话里明确出现过的内容；不要一开场就切进上次的具体细节
+- 最多两句：第一句简短欢迎回来；第二句给一个很小的开口
+- 当前没有激活具体历史内容，不要猜测或概括上次聊过什么
 - 结尾可以问“今天想接着讲哪一段？”或“先说一件想起来的小事也可以”"""
         else:
             mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导。
@@ -920,7 +907,7 @@ def _build_stream_turn_prompt(
 - 不要上来就追问历史细节，不要给叙述者压力
 - 不要机械重复叙述者刚说过的话；认可必须落在具体内容上，但不要把用户原话换个说法再说一遍
 - 如果要问问题，一次只问一个自然问题
-- 不要编造上下文没有的信息；如果提醒“上次讲到哪里”，只能概括历史会话里明确出现过的内容
+- 不要编造上下文没有的信息；只有“激活的历史讲述”中出现的内容才能作为跨会话事实使用
 - 如果用户最新一句明确要求换方向，必须尊重最新一句
 {regenerate_instruction}
 {topic_hint}
@@ -937,8 +924,8 @@ def _build_stream_turn_prompt(
 访谈上下文：
 {context}
 
-历史会话进度：
-{history_context}
+激活的历史讲述：
+{activation_context or "本轮没有激活历史讲述。"}
 """
 
 

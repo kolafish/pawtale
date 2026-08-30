@@ -22,6 +22,8 @@ from app.schemas.memoir_voice import (
     MemoirAssistantTTSResponse,
     MemoirMaterialOfflineASRRequest,
     MemoirMaterialOfflineASRStateResponse,
+    MemoirMemoryActivationTraceDetailResponse,
+    MemoirMemoryActivationTraceListResponse,
     MemoirAutomationEventAcknowledgeDismissibleResponse,
     MemoirAutomationEventListResponse,
     MemoirAutomationEventResponse,
@@ -69,6 +71,7 @@ from app.services.memoir import share_video_jobs as memoir_share_video_jobs
 from app.services.memoir import voice_transcript_recovery as memoir_voice_transcript_recovery
 from app.services.memoir import material_offline_asr_jobs as memoir_material_offline_asr_jobs
 from app.services.memoir import material_image_generation as memoir_material_image_generation
+from app.services.memoir import memory_activation as memoir_memory_activation
 from app.services.memoir import transcript_voice_edit as memoir_transcript_voice_edit
 from app.services.memoir import voice_transcripts as memoir_voice_transcripts
 from app.services.memoir.access import load_audio_file, load_memoir_project
@@ -173,6 +176,48 @@ async def get_mobile_memoir_project_progress_snapshot(
     )
 
 
+@router.get(
+    "/projects/{project_id}/memory-activation-traces",
+    response_model=MemoirMemoryActivationTraceListResponse,
+)
+async def list_mobile_memoir_memory_activation_traces(
+    project_id: str,
+    voice_session_id: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_memory_activation.list_memory_activation_traces(
+        db,
+        project_id=project_id,
+        user_id=current_user.id,
+        allow_admin=is_admin_user(current_user),
+        voice_session_id=voice_session_id,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get(
+    "/projects/{project_id}/memory-activation-traces/{trace_id}",
+    response_model=MemoirMemoryActivationTraceDetailResponse,
+)
+async def get_mobile_memoir_memory_activation_trace(
+    project_id: str,
+    trace_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await memoir_memory_activation.get_memory_activation_trace(
+        db,
+        project_id=project_id,
+        trace_id=trace_id,
+        user_id=current_user.id,
+        allow_admin=is_admin_user(current_user),
+    )
+
+
 @router.get("/projects/{project_id}/automation-events", response_model=MemoirAutomationEventListResponse)
 async def list_mobile_memoir_automation_events(
     project_id: str,
@@ -202,9 +247,7 @@ async def acknowledge_dismissible_mobile_memoir_automation_events(
         user_id=current_user.id,
         project_id=project_id,
     )
-    return MemoirAutomationEventAcknowledgeDismissibleResponse(
-        updated_count=updated_count
-    )
+    return MemoirAutomationEventAcknowledgeDismissibleResponse(updated_count=updated_count)
 
 
 @router.post(
@@ -630,9 +673,7 @@ async def recover_mobile_memoir_voice_transcript(
             current_user.id,
             f"transcript-recovery-{utterance_id}-{uuid.uuid4().hex}",
         ),
-        transcript_polish_level=(
-            req.transcript_polish_level if req is not None else None
-        ),
+        transcript_polish_level=(req.transcript_polish_level if req is not None else None),
         allow_admin=is_admin_user(current_user),
     )
 
