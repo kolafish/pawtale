@@ -67,6 +67,16 @@ def test_embedding_service_rejects_a_model_that_is_not_loaded():
     assert "other-model" in response.json()["detail"]
 
 
+def test_embedding_service_rejects_a_blank_model():
+    with TestClient(create_app(runtime=FakeEmbeddingRuntime())) as client:
+        response = client.post(
+            "/v1/embeddings",
+            json={"model": "   ", "texts": ["一段回忆"]},
+        )
+
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize("texts", [[], ["  "]])
 def test_embedding_service_rejects_empty_texts(texts: list[str]):
     with TestClient(create_app(runtime=FakeEmbeddingRuntime())) as client:

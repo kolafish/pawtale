@@ -13,7 +13,10 @@ class EmbeddingRequest(BaseModel):
     @field_validator("model")
     @classmethod
     def normalize_model(cls, value: str) -> str:
-        return value.strip()
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("model cannot be empty")
+        return normalized
 
     @field_validator("texts")
     @classmethod

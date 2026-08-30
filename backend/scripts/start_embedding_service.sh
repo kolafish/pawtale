@@ -9,5 +9,5 @@ export PYTHONPATH="${dependencies_dir}:${backend_dir}"
 export PAWTALE_EMBEDDING_MODEL_PATH="${PAWTALE_EMBEDDING_MODEL_PATH:-${runtime_dir}/models/bge-small-zh-v1.5}"
 
 exec python3 -m uvicorn embedding_service.app:app \
-  --host "${PAWTALE_EMBEDDING_HOST:-127.0.0.1}" \
+  --host 127.0.0.1 \
   --port "${PAWTALE_EMBEDDING_PORT:-8102}"
