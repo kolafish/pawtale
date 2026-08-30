@@ -211,6 +211,40 @@ async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
     assert assistant_message.metadata_json["memory_activation_selected_count"] == 1
 
 
+async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
+    client,
+    test_db,
+    monkeypatch,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        text="我继续讲刚才那件事。",
+    )
+
+    async def fail_activation(*args, **kwargs):
+        raise RuntimeError("trace database unavailable")
+
+    monkeypatch.setattr(
+        "app.services.memoir.memory_activation.activate_memory_for_turn",
+        fail_activation,
+    )
+
+    _, ai_client, _, completed = await _run_stream_turn(
+        test_db,
+        voice_session_id=created["session"]["id"],
+        user_id=created["user_id"],
+        chunks=["好，您接着讲，我在听。"],
+    )
+
+    assert completed["state"] == "completed"
+    assert "本轮没有激活历史讲述" in ai_client.calls[0]["user_prompt"]
+    assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
+    assert assistant_message is not None
+    assert assistant_message.metadata_json["memory_activation_status"] == "failed"
+    assert assistant_message.metadata_json["memory_activation_trace_id"] is None
+
+
 async def test_book_completion_acknowledgement_suppresses_global_progress_and_ends_round(
     client,
     test_db,

@@ -375,16 +375,26 @@ class VoiceAssistantTurnStreamSession:
         )
         activation_context = ""
         if current_user_message is not None:
-            activation = await memory_activation.activate_memory_for_turn(
-                self.db,
-                project_id=voice_session.project_id,
-                voice_session_id=voice_session.id,
-                current_message=current_user_message,
-            )
-            activation_context = activation.context
-            artifacts.memory_activation_trace_id = activation.trace_id
-            artifacts.memory_activation_status = activation.status
-            artifacts.memory_activation_selected_count = activation.selected_count
+            try:
+                activation = await memory_activation.activate_memory_for_turn(
+                    self.db,
+                    project_id=voice_session.project_id,
+                    voice_session_id=voice_session.id,
+                    current_message=current_user_message,
+                )
+                activation_context = activation.context
+                artifacts.memory_activation_trace_id = activation.trace_id
+                artifacts.memory_activation_status = activation.status
+                artifacts.memory_activation_selected_count = activation.selected_count
+            except Exception:
+                await self.db.rollback()
+                artifacts.memory_activation_status = "failed"
+                logger.exception(
+                    "Memory activation orchestration failed; continuing without "
+                    "historical context voice_session_id=%s turn_id=%s",
+                    self.voice_session_id,
+                    turn_id,
+                )
             voice_session = await load_voice_session(
                 self.db,
                 self.voice_session_id,

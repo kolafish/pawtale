@@ -116,7 +116,7 @@ async def test_memory_activation_selects_exact_source_excerpt_and_persists_full_
     unrelated_prefix = "那几年我一直在纺织厂上班，每天骑车往返。" * 18
     relevant = "李桂芳去华西医院做手术前很害怕，是姐姐陪她办的住院。"
     unrelated_suffix = "出院很久以后，家里又搬到了城南。" * 18
-    historical_text = unrelated_prefix + relevant + unrelated_suffix
+    historical_text = unrelated_prefix + "\n\n" + relevant + "\n" + unrelated_suffix
     historical = await create_test_voice_transcript(
         client,
         test_db,
@@ -276,3 +276,4 @@ async def test_selection_failure_keeps_retrieval_trace_and_does_not_inject_conte
     assert trace.trace_json["query_planning"]["hybrid_retrieval"]["queries"]
     assert trace.trace_json["candidate_preparation"]["candidates"]
     assert trace.trace_json["failure"]["error_type"] == "RuntimeError"
+    assert trace.trace_json["failure"]["stage"] == "llm_activation_selection"

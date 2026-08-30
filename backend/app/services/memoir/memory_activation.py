@@ -44,7 +44,7 @@ MEMORY_ACTIVATION_TEMPERATURE = 0.1
 SOURCE_EXCERPT_MAX_CHARS = 520
 ACTIVATION_CONTEXT_MAX_CHARS = 4_000
 MAX_MATCHED_INDEX_TEXTS = 4
-_SENTENCE_END = re.compile(r"(?<=[。！？!?；;])|\n+")
+_SENTENCE_PART = re.compile(r".*?(?:[。！？!?；;]+|\n+|$)", re.DOTALL)
 
 
 class _SelectedCandidate(BaseModel):
@@ -128,7 +128,7 @@ def _split_source_text(text: str) -> tuple[str, ...]:
     normalized = text.strip()
     if len(normalized) <= SOURCE_EXCERPT_MAX_CHARS:
         return (normalized,) if normalized else ()
-    pieces = [piece.strip() for piece in _SENTENCE_END.split(normalized) if piece.strip()]
+    pieces = [match.group() for match in _SENTENCE_PART.finditer(normalized) if match.group()]
     chunks: list[str] = []
     current = ""
     for piece in pieces:
@@ -136,18 +136,18 @@ def _split_source_text(text: str) -> tuple[str, ...]:
             if current:
                 chunks.append(current)
                 current = ""
-            chunks.append(piece[:SOURCE_EXCERPT_MAX_CHARS])
+            chunks.append(piece[:SOURCE_EXCERPT_MAX_CHARS].strip())
             piece = piece[SOURCE_EXCERPT_MAX_CHARS:]
         if not piece:
             continue
         if current and len(current) + len(piece) > SOURCE_EXCERPT_MAX_CHARS:
-            chunks.append(current)
+            chunks.append(current.strip())
             current = piece
         else:
             current += piece
     if current:
-        chunks.append(current)
-    return tuple(chunks)
+        chunks.append(current.strip())
+    return tuple(chunk for chunk in chunks if chunk)
 
 
 def _dot(left: tuple[float, ...], right: tuple[float, ...]) -> float:
@@ -428,6 +428,7 @@ async def activate_memory_for_turn(
     planning_json: dict[str, object] | None = None
     candidates: tuple[MemoryActivationCandidate, ...] = ()
     excerpt_embedding: dict[str, object] = {}
+    failure_stage = "query_planning_and_retrieval"
     try:
         async with db.begin_nested():
             planning = await plan_and_retrieve_memory_candidates(
@@ -466,6 +467,7 @@ async def activate_memory_for_turn(
                 await _persist_trace(db, trace)
                 return MemoryActivationResult(trace_id=trace_id, status="skipped", context="")
 
+            failure_stage = "candidate_excerpt_selection"
             candidates, excerpt_embedding = await _prepare_candidates(
                 db,
                 planning=planning,
@@ -505,6 +507,7 @@ async def activate_memory_for_turn(
             policy = ai_text_workload_policy(AITextWorkload.REALTIME_STRUCTURED)
             timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
             selector = selection_ai_client or get_ai_service(MEMORY_ACTIVATION_MODEL)
+            failure_stage = "llm_activation_selection"
             generated = await generate_structured_with_client(
                 selector,
                 memory_activation_system_prompt(),
@@ -607,11 +610,19 @@ async def activate_memory_for_turn(
         )
     except Exception as error:
         elapsed_ms = round((time.perf_counter() - started) * 1000)
-        provider = getattr(selection_ai_client or query_ai_client, "provider_name", None)
-        resolved_model = getattr(selection_ai_client or query_ai_client, "model_name", None)
+        active_client = selection_ai_client if failure_stage == "llm_activation_selection" else query_ai_client
+        provider = getattr(error, "provider", None) or getattr(active_client, "provider_name", None)
+        resolved_model = getattr(error, "model", None) or getattr(active_client, "model_name", None)
+        requested_model = (
+            MEMORY_ACTIVATION_MODEL if failure_stage == "llm_activation_selection" else QUERY_PLANNING_MODEL
+        )
+        if failure_stage == "candidate_excerpt_selection" and planning and planning.hybrid_retrieval:
+            provider = provider or "local_embedding"
+            requested_model = planning.hybrid_retrieval.requested_embedding_model or requested_model
+            resolved_model = planning.hybrid_retrieval.resolved_embedding_model or resolved_model
         failure = ai_error_metadata(
             error,
-            requested_model=MEMORY_ACTIVATION_MODEL,
+            requested_model=requested_model,
             provider=provider,
             resolved_model=resolved_model,
             timeout_seconds=ai_text_timeout_seconds(
@@ -619,6 +630,7 @@ async def activate_memory_for_turn(
             ),
             elapsed_ms=elapsed_ms,
         )
+        failure["stage"] = failure_stage
         failure["message"] = str(error)
         trace = MemoirMemoryActivationTrace(
             id=trace_id,
@@ -632,7 +644,7 @@ async def activate_memory_for_turn(
             candidate_count=len(candidates),
             selected_count=0,
             prompt_version=MEMORY_ACTIVATION_PROMPT_VERSION,
-            requested_model=MEMORY_ACTIVATION_MODEL,
+            requested_model=requested_model,
             resolved_model=resolved_model,
             provider=provider,
             elapsed_ms=elapsed_ms,
