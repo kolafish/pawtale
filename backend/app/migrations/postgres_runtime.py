@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base, register_models
 
 
-POSTGRES_SCHEMA_REVISION = "8d3f9a1c2b47"
+POSTGRES_SCHEMA_REVISION = "f47c2a91d6e8"
 POSTGRES_REQUIRED_EXTENSIONS = {
     "pg_search",
     "pg_trgm",
@@ -69,7 +69,6 @@ POSTGRES_TRANSCRIPT_INDEXES = {
 }
 POSTGRES_RETRIEVAL_INDEXES = {
     "ix_memoir_retrieval_entries_bm25",
-    "ix_memoir_retrieval_entries_embedding_hnsw",
     "ix_memoir_retrieval_entries_scope",
 }
 POSTGRES_RETRIEVAL_TRIGGERS = {

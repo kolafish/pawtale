@@ -54,12 +54,6 @@ class MemoirRetrievalEntry(Base):
             "voice_session_id",
             "entry_kind",
         ),
-        Index(
-            "ix_memoir_retrieval_entries_embedding_hnsw",
-            "embedding",
-            postgresql_using="hnsw",
-            postgresql_ops={"embedding": "vector_cosine_ops"},
-        ),
     )
 
     id: Mapped[int] = mapped_column(
