@@ -11,7 +11,7 @@
 
 本文描述的是当前实现，不是脱离代码的目标模型。更上层的不变量以主架构文档为准：
 
-最后核对日期：2026-07-28。
+最后核对日期：2026-08-30。
 
 - `MEMOIR_INTERVIEW_AND_BOOK_ARCHITECTURE.md`：事实来源、素材归属、主题讲述、成书、缓存和请求边界；
 - `MEMOIR_VOICE_CHAT_ARCHITECTURE.md`：实时录音、ASR、对话和 TTS；
@@ -324,7 +324,13 @@ sequenceDiagram
 
 它是可重新生成的技术派生数据，不是新的事实来源。
 
-### 3.6 素材当前如何展示
+### 3.6 RetrievalEntry：素材的检索投影
+
+物理表 `memoir_retrieval_entries` 是可重建的检索投影，不是新的事实来源。当前每条叙述者素材有一条 `source_text` 投影：优先索引校正或人工编辑文字，否则索引 ASR 原文；它通过项目、会话、素材、文字版本和音频外键回到证据链。
+
+该投影同时维护 512 维 HNSW 向量索引和使用 Jieba 分词的 BM25 索引。原始讲述落库后异步建立第一版索引，文字校正或人工编辑后以同一素材槽位幂等更新；过期任务不能覆盖较新的文字。后续由 LLM 产生的一对多语义检索单元仍属于未来能力，不在当前表中伪装成已确认事实。
+
+### 3.7 素材当前如何展示
 
 当前小程序已有两个主要层级。
 
@@ -1319,6 +1325,7 @@ Digest、Review、Issue、Version、Job 等术语放在系统内部，通过“�
 | `memoir_voice_utterances` | 规范 Material |
 | `memoir_transcript_versions` | 文字版本 |
 | `memoir_transcript_alignments` | 文本与音频对齐 |
+| `memoir_retrieval_entries` | 可重建的 Vector/BM25 检索投影 |
 
 ### 17.2 结构与审阅
 

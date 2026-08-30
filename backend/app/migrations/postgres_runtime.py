@@ -6,7 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from app.database import Base, register_models
 
 
-POSTGRES_SCHEMA_REVISION = "3b5e639b4b76"
+POSTGRES_SCHEMA_REVISION = "8d3f9a1c2b47"
+POSTGRES_REQUIRED_EXTENSIONS = {
+    "pg_search",
+    "pg_trgm",
+    "vector",
+}
 DIRECT_PROJECT_TABLES = (
     "memoir_automation_events",
     "memoir_book_chapter_draft_versions",
@@ -61,6 +66,15 @@ POSTGRES_TRANSCRIPT_INDEXES = {
     "ix_memoir_voice_utterances_transcript_edited_trgm",
     "ix_memoir_voice_utterances_transcript_raw_trgm",
 }
+POSTGRES_RETRIEVAL_INDEXES = {
+    "ix_memoir_retrieval_entries_bm25",
+    "ix_memoir_retrieval_entries_embedding_hnsw",
+    "ix_memoir_retrieval_entries_scope",
+}
+POSTGRES_RETRIEVAL_TRIGGERS = {
+    "memoir_retrieval_entries_source_insert",
+    "memoir_retrieval_entries_source_update",
+}
 POSTGRES_REVISION_TRIGGERS = {
     *(f"trg_memoir_revision_{table}" for table in DIRECT_PROJECT_TABLES),
     *(f"trg_memoir_revision_{table}" for table in INDIRECT_PROJECT_TABLES),
@@ -69,7 +83,12 @@ POSTGRES_REVISION_TRIGGERS = {
 POSTGRES_RUNTIME_TRIGGERS = {
     *VOICE_INTEGRITY_TRIGGERS,
     *MEMOIR_NARRATIVE_TRIGGERS,
+    *POSTGRES_RETRIEVAL_TRIGGERS,
     *POSTGRES_REVISION_TRIGGERS,
+}
+POSTGRES_RUNTIME_INDEXES = {
+    *POSTGRES_TRANSCRIPT_INDEXES,
+    *POSTGRES_RETRIEVAL_INDEXES,
 }
 
 
@@ -148,9 +167,12 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
         details.append("missing columns: " + ", ".join(missing_columns))
     if unexpected_columns:
         details.append("unexpected columns: " + ", ".join(unexpected_columns))
-    if "pg_trgm" not in extensions:
-        details.append("missing extension: pg_trgm")
-    missing_indexes = POSTGRES_TRANSCRIPT_INDEXES - indexes
+    missing_extensions = POSTGRES_REQUIRED_EXTENSIONS - extensions
+    if missing_extensions:
+        details.append(
+            "missing extensions: " + ", ".join(sorted(missing_extensions))
+        )
+    missing_indexes = POSTGRES_RUNTIME_INDEXES - indexes
     if missing_indexes:
         details.append("missing indexes: " + ", ".join(sorted(missing_indexes)))
     missing_triggers = POSTGRES_RUNTIME_TRIGGERS - triggers

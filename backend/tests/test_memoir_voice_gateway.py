@@ -961,6 +961,13 @@ async def test_voice_gateway_persistence_saves_final_message_utterance_and_audio
     assert correction_job.payload_json["utterance_id"] == utterance.id
     assert correction_job.payload_json["raw_transcript_version_id"] == raw_version.id
     assert correction_job.payload_json["transcript_polish_level"] == "high"
+    retrieval_job = jobs_by_type.get(
+        MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value
+    )
+    assert retrieval_job is not None
+    assert retrieval_job.payload_json["utterance_id"] == utterance.id
+    assert retrieval_job.payload_json["text_source"] == "raw"
+    assert "search_text" not in retrieval_job.payload_json
     assert MemoirEditingJobType.ORGANIZE_MATERIAL.value not in jobs_by_type
     assert MemoirEditingJobType.UPDATE_TOPIC_MAP.value not in jobs_by_type
 
@@ -1032,8 +1039,14 @@ async def test_voice_gateway_persistence_saves_human_interviewer_turn_as_ignored
     assert narrator_message.role == "user"
     assert narrator_message.parent_message_id == interviewer_message.id
     assert narrator_message.metadata_json["speaker_role"] == "narrator"
-    assert [job.job_type for job in editing_jobs] == [MemoirEditingJobType.CORRECT_TRANSCRIPT.value]
-    assert editing_jobs[0].payload_json["utterance_id"] == narrator.utterance_id
+    assert [job.job_type for job in editing_jobs] == [
+        MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
+        MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value,
+    ]
+    assert all(
+        job.payload_json["utterance_id"] == narrator.utterance_id
+        for job in editing_jobs
+    )
 
 
 async def test_voice_gateway_persistence_rejects_interviewer_role_for_ai_session(

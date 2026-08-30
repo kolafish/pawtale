@@ -18,6 +18,7 @@ if config.config_file_name is not None:
 register_models()
 target_metadata = Base.metadata
 RUNTIME_MANAGED_INDEXES = {
+    "ix_memoir_retrieval_entries_bm25",
     "ix_memoir_voice_utterances_transcript_edited_trgm",
     "ix_memoir_voice_utterances_transcript_raw_trgm",
 }

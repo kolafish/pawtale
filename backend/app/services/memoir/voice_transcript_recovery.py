@@ -28,6 +28,7 @@ from app.services.memoir.material_roles import is_narrator_material
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
 )
+from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.voice_transcripts import (
     get_voice_transcript,
@@ -377,6 +378,12 @@ async def _apply_recovered_transcript(
             voice_session_id=voice_session.id,
             raw_transcript_version_id=transcript_version.id,
             transcript_polish_level=polish_level,
+        )
+        await schedule_source_indexing_job(
+            db,
+            project_id=voice_session.project_id,
+            utterance=utterance,
+            source="transcript_recovery",
         )
     await db.commit()
 
