@@ -4,6 +4,7 @@ sqlalchemy==2.0.25
 greenlet==3.5.1
 alembic==1.16.5
 asyncpg==0.30.0
+pgvector==0.4.1
 pydantic==2.5.3
 pydantic-settings==2.1.0
 python-multipart==0.0.6

@@ -13,6 +13,7 @@ from app.models.memoir import (
     MemoirVoiceUtterance,
 )
 from app.services.memoir import editing_jobs, sections
+from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.narrative.framework_matching import (
     schedule_framework_matching_job,
 )
@@ -85,6 +86,12 @@ async def schedule_material_organization_for_ready_utterance(
     text = current_utterance_text(utterance)
     if not text:
         return None
+    await schedule_source_indexing_job(
+        db,
+        project_id=project_id,
+        utterance=utterance,
+        source=source,
+    )
     await schedule_framework_matching_job(
         db,
         project_id=project_id,

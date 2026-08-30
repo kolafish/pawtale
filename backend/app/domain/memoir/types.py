@@ -111,6 +111,7 @@ class MemoirSectionMaterialAssignedBy(str, Enum):
 
 class MemoirEditingJobType(str, Enum):
     CORRECT_TRANSCRIPT = "correct_transcript"
+    INDEX_RETRIEVAL_SOURCE = "index_retrieval_source"
     REPROCESS_MATERIAL_OFFLINE_ASR = "reprocess_material_offline_asr"
     GENERATE_MATERIAL_IMAGE = "generate_material_image"
     REGENERATE_CHAPTER_SECTIONS = "regenerate_chapter_sections"
@@ -124,6 +125,10 @@ class MemoirEditingJobType(str, Enum):
     GENERATE_BOOK_REVISION_PROPOSAL = "generate_book_revision_proposal"
     GENERATE_CHAPTER_SECTION_REVISION = "generate_chapter_section_revision"
     PREPARE_CHAPTER = "prepare_chapter"
+
+
+class MemoirRetrievalEntryKind(str, Enum):
+    SOURCE_TEXT = "source_text"
 
 
 class MemoirEditingJobStatus(str, Enum):

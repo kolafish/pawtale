@@ -22,6 +22,7 @@ from app.services.memoir import audio_files as memoir_audio_files
 from app.services.memoir import completion_interviews, completion_issues
 from app.services.memoir import voice_transcript_correction
 from app.services.memoir.project_ai_preferences import load_project_transcript_polish_level
+from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.narrative import interview_policy, interview_policy_outcomes
 from app.services.memoir.voice_transcripts import (
@@ -213,6 +214,12 @@ class VoiceFinalPersistenceService:
                     raw_transcript_version_id=transcript_version.id,
                     ai_model=ai_model,
                     transcript_polish_level=polish_level,
+                )
+                await schedule_source_indexing_job(
+                    self.db,
+                    project_id=voice_session.project_id,
+                    utterance=utterance,
+                    source="asr_final",
                 )
             await self.db.commit()
             return VoiceFinalPersistenceResult(
