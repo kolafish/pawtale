@@ -7,9 +7,11 @@ import pytest
 
 from app.config import Settings
 from app.services.embeddings import (
+    EmbeddingBatchResult,
     EmbeddingServiceError,
     LocalEmbeddingClient,
     create_embedding_client,
+    embed_texts_in_batches,
 )
 
 
@@ -117,3 +119,30 @@ def test_create_embedding_client_uses_shared_backend_settings():
     assert service.model == "configured-model"
     assert service.dimensions == 384
     assert service.timeout_seconds == 2.5
+
+
+async def test_embed_texts_in_batches_preserves_all_logical_inputs():
+    class FakeClient:
+        def __init__(self) -> None:
+            self.batch_sizes: list[int] = []
+
+        async def embed(self, texts: list[str]) -> EmbeddingBatchResult:
+            self.batch_sizes.append(len(texts))
+            return EmbeddingBatchResult(
+                requested_model="test-model",
+                resolved_model="test-model",
+                dimensions=2,
+                normalized=True,
+                embeddings=tuple((1.0, 0.0) for _ in texts),
+                service_elapsed_ms=2,
+            )
+
+    client = FakeClient()
+    result = await embed_texts_in_batches(
+        client,
+        [f"语义单元 {index}" for index in range(130)],
+    )
+
+    assert client.batch_sizes == [128, 2]
+    assert len(result.embeddings) == 130
+    assert result.service_elapsed_ms == 4

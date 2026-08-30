@@ -355,6 +355,7 @@ async def claim_due_editing_jobs(
                         MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_SHADOW.value,
                         MemoirEditingJobType.EVALUATE_INTERVIEW_POLICY_OUTCOME.value,
                         MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value,
+                        MemoirEditingJobType.INDEX_RETRIEVAL_SEMANTICS.value,
                         MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
                     )
                 ),

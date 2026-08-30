@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import logging
 import math
 import time
+from typing import Protocol
 
 import httpx
 from pydantic import BaseModel, Field, ValidationError
@@ -36,6 +37,10 @@ class EmbeddingBatchResult:
     normalized: bool
     embeddings: tuple[tuple[float, ...], ...]
     service_elapsed_ms: int
+
+
+class EmbeddingClient(Protocol):
+    async def embed(self, texts: list[str]) -> EmbeddingBatchResult: ...
 
 
 class LocalEmbeddingClient:
@@ -167,6 +172,45 @@ def create_embedding_client(settings: Settings | None = None) -> LocalEmbeddingC
         model=current_settings.embedding_model,
         dimensions=current_settings.embedding_dimensions,
         timeout_seconds=current_settings.embedding_timeout_seconds,
+    )
+
+
+async def embed_texts_in_batches(
+    client: EmbeddingClient,
+    texts: list[str],
+) -> EmbeddingBatchResult:
+    if not texts:
+        raise ValueError("embedding texts cannot be empty")
+    batches: list[EmbeddingBatchResult] = []
+    for offset in range(0, len(texts), MAX_BATCH_SIZE):
+        batch_texts = texts[offset : offset + MAX_BATCH_SIZE]
+        batch = await client.embed(batch_texts)
+        if len(batch.embeddings) != len(batch_texts):
+            raise EmbeddingServiceError("embedding count mismatch within batch")
+        batches.append(batch)
+    first = batches[0]
+    if any(
+        (
+            batch.requested_model != first.requested_model
+            or batch.resolved_model != first.resolved_model
+            or batch.dimensions != first.dimensions
+            or batch.normalized != first.normalized
+        )
+        for batch in batches[1:]
+    ):
+        raise EmbeddingServiceError("embedding batch metadata mismatch")
+    embeddings = tuple(
+        embedding
+        for batch in batches
+        for embedding in batch.embeddings
+    )
+    return EmbeddingBatchResult(
+        requested_model=first.requested_model,
+        resolved_model=first.resolved_model,
+        dimensions=first.dimensions,
+        normalized=first.normalized,
+        embeddings=embeddings,
+        service_elapsed_ms=sum(batch.service_elapsed_ms for batch in batches),
     )
 
 
