@@ -236,8 +236,8 @@ class VoiceAssistantTurnStreamSession:
             stream_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stream_task
+            await self.db.rollback()
             if cancel_signal.client_disconnected:
-                await self.db.rollback()
                 return
             await self.client.send_json(
                 {
