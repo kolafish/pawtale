@@ -12,6 +12,7 @@ POSTGRES_REQUIRED_EXTENSIONS = {
     "pg_trgm",
     "vector",
 }
+POSTGRES_EXTENSION_RUNTIME_TABLES = {"_typmod_cache"}
 DIRECT_PROJECT_TABLES = (
     "memoir_automation_events",
     "memoir_book_chapter_draft_versions",
@@ -177,6 +178,7 @@ async def assert_postgres_runtime_schema(engine: AsyncEngine) -> None:
             actual_tables
             - expected_tables
             - extension_tables
+            - POSTGRES_EXTENSION_RUNTIME_TABLES
             - {"alembic_version"}
         )
 
