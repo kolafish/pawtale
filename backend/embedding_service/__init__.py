@@ -1,0 +1,1 @@
+"""Pawtale local embedding service."""
