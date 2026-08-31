@@ -168,7 +168,7 @@ async def test_voice_assistant_turn_streams_text_audio_and_persists_message(
     assert (tmp_path / "audio" / audio_relative_path).read_bytes() == b"audio-0-1audio-0-2"
 
 
-async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
+async def test_voice_assistant_turn_injects_retrieved_context_and_records_trace(
     client,
     test_db,
     monkeypatch,
@@ -180,7 +180,8 @@ async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
         guidance_mode="free_narration",
     )
     activated_context = (
-        "以下是从同一回忆录过往讲述中激活的原文片段。\n历史讲述 1：李桂芳去华西医院做手术前很害怕，是姐姐陪她办的住院。"
+        "以下是从同一回忆录过往讲述中检索到的候选原文。\n"
+        "历史候选 1：李桂芳去华西医院做手术前很害怕，是姐姐陪她办的住院。"
     )
 
     async def fake_activate(*args, **kwargs):
@@ -188,7 +189,7 @@ async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
             trace_id="activation-trace-1",
             status="succeeded",
             context=activated_context,
-            selected_count=1,
+            injected_count=1,
         )
 
     monkeypatch.setattr(
@@ -208,7 +209,7 @@ async def test_voice_assistant_turn_injects_selected_memory_and_records_trace(
     assert assistant_message is not None
     assert assistant_message.metadata_json["memory_activation_trace_id"] == ("activation-trace-1")
     assert assistant_message.metadata_json["memory_activation_status"] == "succeeded"
-    assert assistant_message.metadata_json["memory_activation_selected_count"] == 1
+    assert assistant_message.metadata_json["memory_activation_injected_count"] == 1
 
 
 async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
@@ -238,7 +239,7 @@ async def test_voice_assistant_turn_continues_when_memory_activation_crashes(
     )
 
     assert completed["state"] == "completed"
-    assert "本轮没有激活历史讲述" in ai_client.calls[0]["user_prompt"]
+    assert "本轮没有检索到历史讲述候选" in ai_client.calls[0]["user_prompt"]
     assistant_message = await test_db.get(MemoirChatMessage, completed["message_id"])
     assert assistant_message is not None
     assert assistant_message.metadata_json["memory_activation_status"] == "failed"
@@ -897,10 +898,10 @@ async def test_voice_assistant_turn_guided_opening_does_not_copy_previous_sessio
     assert "主题讲述继续开场" in prompt
     assert "叙述者之前已有同模式讲述记录" in prompt
     assert "今天想先讲哪一段" in prompt
-    assert "当前没有激活具体历史内容" in prompt
+    assert "当前没有检索具体历史内容" in prompt
     assert "想不起来也没关系" in prompt
     assert "叙述者：上次讲到我第一次去上海找工作。" not in prompt
-    assert "本轮没有激活历史讲述" in prompt
+    assert "本轮没有检索到历史讲述候选" in prompt
 
 
 async def test_voice_assistant_turn_prompt_marks_explicit_topic_switch(

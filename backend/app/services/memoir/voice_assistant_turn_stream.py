@@ -134,7 +134,7 @@ class AssistantTurnArtifacts:
     tts_alignment: list = field(default_factory=list)
     memory_activation_trace_id: str | None = None
     memory_activation_status: str | None = None
-    memory_activation_selected_count: int = 0
+    memory_activation_injected_count: int = 0
 
     def append_tts_chunk(self, chunk: StreamingTTSChunk) -> None:
         if chunk.audio:
@@ -385,7 +385,7 @@ class VoiceAssistantTurnStreamSession:
                 activation_context = activation.context
                 artifacts.memory_activation_trace_id = activation.trace_id
                 artifacts.memory_activation_status = activation.status
-                artifacts.memory_activation_selected_count = activation.selected_count
+                artifacts.memory_activation_injected_count = activation.injected_count
             except Exception:
                 await self.db.rollback()
                 artifacts.memory_activation_status = "failed"
@@ -785,7 +785,7 @@ class VoiceAssistantTurnStreamSession:
                     ),
                     "memory_activation_trace_id": artifacts.memory_activation_trace_id,
                     "memory_activation_status": artifacts.memory_activation_status,
-                    "memory_activation_selected_count": artifacts.memory_activation_selected_count,
+                    "memory_activation_injected_count": artifacts.memory_activation_injected_count,
                     "primary_intent": turn.primary_intent,
                     "intent_tags": turn.intent_tags,
                     "expects_answer": turn.expects_answer,
@@ -871,7 +871,7 @@ def _build_stream_turn_prompt(
         elif has_previous_project_narration:
             mode_instruction = f"""当前是主题讲述继续开场，叙述者之前已有同模式讲述记录。
 - 最多两句：第一句简短欢迎回来；第二句只问“今天想先讲哪一段？”
-- 当前没有激活具体历史内容，不要猜测或概括上次聊过什么
+- 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
 - 可以自然给出几个轻选项，但不要念成长列表，选项来自：{GUIDED_TOPIC_MENU}
 - 必须说明想不起来也没关系，可以随便聊"""
         else:
@@ -889,7 +889,7 @@ def _build_stream_turn_prompt(
         elif has_previous_project_narration:
             mode_instruction = """当前是自由讲述开场，AI 只做弱引导，叙述者之前已有讲述记录。
 - 最多两句：第一句简短欢迎回来；第二句给一个很小的开口
-- 当前没有激活具体历史内容，不要猜测或概括上次聊过什么
+- 当前没有检索具体历史内容，不要猜测或概括上次聊过什么
 - 结尾可以问“今天想接着讲哪一段？”或“先说一件想起来的小事也可以”"""
         else:
             mode_instruction = f"""当前是自由讲述开场，AI 只做弱引导。
@@ -907,7 +907,7 @@ def _build_stream_turn_prompt(
 - 不要上来就追问历史细节，不要给叙述者压力
 - 不要机械重复叙述者刚说过的话；认可必须落在具体内容上，但不要把用户原话换个说法再说一遍
 - 如果要问问题，一次只问一个自然问题
-- 不要编造上下文没有的信息；只有“激活的历史讲述”中出现的内容才能作为跨会话事实使用
+- 不要编造上下文没有的信息；只有“历史讲述候选”中出现的内容才能作为跨会话事实使用
 - 如果用户最新一句明确要求换方向，必须尊重最新一句
 {regenerate_instruction}
 {topic_hint}
@@ -924,8 +924,8 @@ def _build_stream_turn_prompt(
 访谈上下文：
 {context}
 
-激活的历史讲述：
-{activation_context or "本轮没有激活历史讲述。"}
+历史讲述候选：
+{activation_context or "本轮没有检索到历史讲述候选。"}
 """
 
 
