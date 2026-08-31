@@ -7,6 +7,7 @@
     "pages/book-completion/index",
     "pages/revision-workbench/index",
     "pages/transcripts/index",
+    "pages/story/index",
     "pages/transcript-detail/index",
     "pages/transcript-media/index",
     "pages/book/index",
