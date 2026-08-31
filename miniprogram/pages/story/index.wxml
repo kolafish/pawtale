@@ -53,7 +53,7 @@
         wx:for="{{chapters}}"
         wx:for-index="chapterIndex"
         wx:key="id"
-        class="chapter-block tone-{{item.tone}} {{item.expanded ? 'is-expanded' : ''}}"
+        class="chapter-block tone-{{item.tone}}"
       >
         <view class="chapter-decoration" aria-hidden="true"></view>
         <view class="chapter-branch" aria-hidden="true"></view>

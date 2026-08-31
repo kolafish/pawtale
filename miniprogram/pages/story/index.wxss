@@ -647,10 +647,19 @@
   align-items: flex-start;
 }
 
+.large-text .memoir-title {
+  font-size: 46rpx;
+}
+
 .large-text .story-toolbar {
   align-items: flex-start;
   flex-direction: column;
   gap: 10rpx;
+}
+
+.large-text .view-option {
+  min-height: 96rpx;
+  font-size: 30rpx;
 }
 
 .large-text .chapter-card {
@@ -674,6 +683,11 @@
 
 .large-text .section-copy {
   min-width: 260rpx;
+}
+
+.large-text .overview-title,
+.large-text .unassigned-title {
+  font-size: 34rpx;
 }
 
 .large-text .media-chip {
