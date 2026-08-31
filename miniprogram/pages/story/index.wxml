@@ -182,6 +182,10 @@
           <text class="unassigned-title">待整理的故事</text>
           <text class="unassigned-meta">{{unassignedMaterialText}}</text>
         </view>
+        <view wx:if="{{unassignedImageCount || unassignedVideoCount}}" class="section-media">
+          <text wx:if="{{unassignedImageCount}}" class="media-chip image-chip">{{unassignedImageCount}} 图</text>
+          <text wx:if="{{unassignedVideoCount}}" class="media-chip video-chip">{{unassignedVideoCount}} 视频</text>
+        </view>
         <text class="unassigned-action">查看 ›</text>
       </view>
     </view>

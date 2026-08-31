@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -21,6 +21,7 @@ from app.schemas.memoir_voice import (
     MemoirShareVideoJobCreateRequest,
     MemoirShareVideoJobResponse,
     MemoirShareVideoOutputResponse,
+    MemoirShareVideoCountResponse,
 )
 from app.services.memoir import share_video_background_orchestration as background_orchestration
 from app.services.memoir import share_video_rendering as rendering
@@ -309,6 +310,37 @@ async def get_share_video_job(
 ) -> MemoirShareVideoJobResponse:
     job = await _load_owned_job(db, job_id, user_id, allow_admin=allow_admin)
     return _job_response(job)
+
+
+async def list_completed_share_video_counts(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    user_id: str,
+) -> list[MemoirShareVideoCountResponse]:
+    rows = (
+        await db.execute(
+            select(
+                MemoirMaterialShareVideo.utterance_id,
+                func.count(MemoirShareVideoOutput.id),
+            )
+            .join(
+                MemoirShareVideoOutput,
+                MemoirShareVideoOutput.job_id == MemoirMaterialShareVideo.id,
+            )
+            .where(
+                MemoirMaterialShareVideo.project_id == project_id,
+                MemoirMaterialShareVideo.user_id == user_id,
+                MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
+            )
+            .group_by(MemoirMaterialShareVideo.utterance_id)
+            .order_by(MemoirMaterialShareVideo.utterance_id)
+        )
+    ).all()
+    return [
+        MemoirShareVideoCountResponse(utterance_id=utterance_id, count=count)
+        for utterance_id, count in rows
+    ]
 
 
 async def load_completed_share_video_job(

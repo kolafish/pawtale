@@ -14,6 +14,11 @@ export interface MemoirHomeSnapshot {
   latest_transcript?: MemoirVoiceTranscriptItem | null;
 }
 
+export interface MemoirShareVideoCount {
+  utterance_id: string;
+  count: number;
+}
+
 export interface MemoirBookSnapshot {
   server_revision: number;
   identity: MemoirIdentity;
@@ -22,4 +27,5 @@ export interface MemoirBookSnapshot {
   output?: MemoirBookOutput | null;
   automation_events: MemoirAutomationEventListResponse;
   image_assets: MemoirImageAssetListResponse;
+  share_video_counts: MemoirShareVideoCount[];
 }

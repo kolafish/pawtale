@@ -20,7 +20,7 @@ import {
 import { readMemoirStore } from "./session";
 
 const HOME_CACHE_SCHEMA_VERSION = 1;
-const BOOK_CACHE_SCHEMA_VERSION = 1;
+const BOOK_CACHE_SCHEMA_VERSION = 2;
 const CHAPTER_WORKSPACE_CACHE_SCHEMA_VERSION = 1;
 const HOME_CACHE_MAX_AGE_MS = 30 * 60 * 1000;
 const BOOK_CACHE_MAX_AGE_MS = 15 * 60 * 1000;
@@ -59,7 +59,8 @@ function isBookSnapshot(value: unknown): value is MemoirBookSnapshot {
     && isObject(value.automation_events)
     && Array.isArray(value.automation_events.items)
     && isObject(value.image_assets)
-    && Array.isArray(value.image_assets.items);
+    && Array.isArray(value.image_assets.items)
+    && Array.isArray(value.share_video_counts);
 }
 
 function isChapterWorkspace(value: unknown): value is MemoirChapterWorkspace {
