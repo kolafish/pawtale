@@ -16,9 +16,13 @@ import type {
 
 const CHAPTER_TONES: StoryChapterTone[] = ["clay", "amber", "sage", "blue", "stone"];
 
-interface ImageCounts {
+interface MediaCounts {
   chapterImages: Record<string, number>;
   sectionImages: Record<string, number>;
+  chapterVideos: Record<string, number>;
+  sectionVideos: Record<string, number>;
+  unassignedImages: number;
+  unassignedVideos: number;
 }
 
 function uniqueSourceCount(chapter: MemoirBookPlanChapter): number {
@@ -35,12 +39,17 @@ function increment(counts: Record<string, number>, id: string): void {
   counts[id] = (counts[id] || 0) + 1;
 }
 
-function imageMediaCounts(
+function storyMediaCounts(
   chapters: MemoirBookPlanChapter[],
   assets: MemoirImageAsset[],
-): ImageCounts {
+  videos: MemoirBookSnapshot["share_video_counts"],
+): MediaCounts {
   const chapterImages: Record<string, number> = {};
   const sectionImages: Record<string, number> = {};
+  const chapterVideos: Record<string, number> = {};
+  const sectionVideos: Record<string, number> = {};
+  let unassignedImages = 0;
+  let unassignedVideos = 0;
   const sectionByUtteranceId = new Map<string, string>();
   const chapterByUtteranceId = new Map<string, string>();
   const chapterIds = new Set(chapters.map((chapter) => chapter.id));
@@ -74,10 +83,33 @@ function imageMediaCounts(
     );
     if (chapterIds.has(chapterId)) {
       increment(chapterImages, chapterId);
+    } else if (utteranceId) {
+      unassignedImages += 1;
     }
   });
 
-  return { chapterImages, sectionImages };
+  videos.forEach((video) => {
+    const sectionId = sectionByUtteranceId.get(video.utterance_id);
+    if (sectionId) {
+      sectionVideos[sectionId] = (sectionVideos[sectionId] || 0) + video.count;
+      return;
+    }
+    const chapterId = chapterByUtteranceId.get(video.utterance_id) || "";
+    if (chapterIds.has(chapterId)) {
+      chapterVideos[chapterId] = (chapterVideos[chapterId] || 0) + video.count;
+    } else {
+      unassignedVideos += video.count;
+    }
+  });
+
+  return {
+    chapterImages,
+    sectionImages,
+    chapterVideos,
+    sectionVideos,
+    unassignedImages,
+    unassignedVideos,
+  };
 }
 
 function chapterOutcome(
@@ -101,14 +133,14 @@ function chapterOutcome(
 
 function sectionView(
   section: MemoirChapterSectionSummary,
-  media: ImageCounts,
+  media: MediaCounts,
 ): StorySectionView {
   return {
     id: section.id,
     title: section.title || "未命名小节",
     materialText: `${section.material_count || 0} 段讲述`,
     imageCount: media.sectionImages[section.id] || 0,
-    videoCount: 0,
+    videoCount: media.sectionVideos[section.id] || 0,
   };
 }
 
@@ -116,7 +148,7 @@ function chapterView(
   chapter: MemoirBookPlanChapter,
   draft: MemoirBookChapterDraft | null,
   index: number,
-  media: ImageCounts,
+  media: MediaCounts,
 ): StoryChapterView {
   const sections = activeSections(chapter).map((section) => sectionView(section, media));
   return {
@@ -126,7 +158,7 @@ function chapterView(
     summaryText: `${sections.length} 小节 · ${uniqueSourceCount(chapter)} 段讲述`,
     outcomeText: chapterOutcome(chapter, draft),
     imageCount: media.chapterImages[chapter.id] || 0,
-    videoCount: 0,
+    videoCount: media.chapterVideos[chapter.id] || 0,
     tone: CHAPTER_TONES[index % CHAPTER_TONES.length],
     expanded: index === 0,
     sections,
@@ -229,7 +261,11 @@ export function storyViewData(
   const project = snapshot.identity.active_project;
   const planChapters = [...(snapshot.plan?.chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order);
-  const media = imageMediaCounts(planChapters, snapshot.image_assets.items || []);
+  const media = storyMediaCounts(
+    planChapters,
+    snapshot.image_assets.items || [],
+    snapshot.share_video_counts || [],
+  );
   const chapters = planChapters.map((chapter, index) => chapterView(
     chapter,
     snapshot.drafts_by_chapter_id[chapter.id] || null,
@@ -269,5 +305,7 @@ export function storyViewData(
     unassignedMaterialText: materialCounts.pending
       ? `还有 ${materialCounts.pending} 段讲述等待整理`
       : "所有讲述都已归入章节",
+    unassignedImageCount: media.unassignedImages,
+    unassignedVideoCount: media.unassignedVideos,
   };
 }

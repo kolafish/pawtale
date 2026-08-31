@@ -14,6 +14,7 @@ from app.services.memoir import book_outputs
 from app.services.memoir import book_plan_sources
 from app.services.memoir import image_assets
 from app.services.memoir import projects
+from app.services.memoir import share_video_jobs
 from app.services.memoir import voice_transcripts
 from app.services.memoir.access import load_memoir_project
 
@@ -106,6 +107,11 @@ async def book_snapshot(
         user_id=user.id,
         project_id=project.id,
     )
+    share_video_counts = await share_video_jobs.list_completed_share_video_counts(
+        db,
+        user_id=user.id,
+        project_id=project.id,
+    )
     return MemoirBookSnapshotResponse(
         server_revision=project.memoir_data_revision,
         identity=identity,
@@ -114,4 +120,5 @@ async def book_snapshot(
         output=output,
         automation_events=recent_events,
         image_assets=assets,
+        share_video_counts=share_video_counts,
     )

@@ -1,7 +1,17 @@
 from sqlalchemy import func, select
 
-from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole
-from app.models.memoir import AudioFile, MemoirChatMessage, MemoirVoiceUtterance
+from app.domain.memoir.types import (
+    MemoirChatContentStatus,
+    MemoirChatMessageRole,
+    MemoirShareVideoJobStatus,
+)
+from app.models.memoir import (
+    AudioFile,
+    MemoirChatMessage,
+    MemoirMaterialShareVideo,
+    MemoirShareVideoOutput,
+    MemoirVoiceUtterance,
+)
 from app.services.memoir import audio_files as memoir_audio_files
 from tests.memoir_helpers import create_test_voice_transcript
 
@@ -65,6 +75,48 @@ async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_d
         "小时候我常跟母亲去赶集。",
         project_id=project_id,
     )
+    completed_video = MemoirMaterialShareVideo(
+        id="completed-snapshot-video",
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+        audio_file_id=created["audio_file_id"],
+        user_id=created["user_id"],
+        status=MemoirShareVideoJobStatus.SUCCEEDED.value,
+        text_source="edited",
+        text_hash="completed-snapshot-video-hash",
+        selected_text="小时候我常跟母亲去赶集。",
+        start_char=0,
+        end_char=13,
+        start_ms=0,
+        end_ms=8000,
+    )
+    pending_video = MemoirMaterialShareVideo(
+        id="pending-snapshot-video",
+        project_id=project_id,
+        utterance_id=created["utterance_id"],
+        audio_file_id=created["audio_file_id"],
+        user_id=created["user_id"],
+        status=MemoirShareVideoJobStatus.PENDING.value,
+        text_source="edited",
+        text_hash="pending-snapshot-video-hash",
+        selected_text="小时候我常跟母亲去赶集。",
+        start_char=0,
+        end_char=13,
+        start_ms=0,
+        end_ms=8000,
+    )
+    test_db.add_all([completed_video, pending_video])
+    await test_db.flush()
+    test_db.add(
+        MemoirShareVideoOutput(
+            job_id=completed_video.id,
+            project_id=project_id,
+            storage_path="memoir/share-videos/test/completed-snapshot-video.mp4",
+            mime_type="video/mp4",
+            size_bytes=1024,
+        )
+    )
+    await test_db.commit()
     after = (await client.get("/api/mobile/memoir/home-snapshot")).json()
     book = (await client.get("/api/mobile/memoir/book-snapshot")).json()
 
@@ -80,6 +132,12 @@ async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_d
     assert book["output"] is None
     assert book["automation_events"]["items"] == []
     assert book["image_assets"]["items"] == []
+    assert book["share_video_counts"] == [
+        {
+            "utterance_id": created["utterance_id"],
+            "count": 1,
+        }
+    ]
 
 
 async def test_mobile_memoir_projects_can_be_created_updated_and_activated(client):

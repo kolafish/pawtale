@@ -100,9 +100,15 @@ function snapshot(patch = {}) {
         image("section-image", { source_utterance_id: "utterance-1" }),
         image("chapter-image", { source_chapter_id: "chapter-1" }),
         image("unsectioned-image", { source_utterance_id: "utterance-2" }),
+        image("unassigned-image", { source_utterance_id: "utterance-4" }),
         image("pending-image", { status: "pending", source_chapter_id: "chapter-1" }),
       ],
     },
+    share_video_counts: [
+      { utterance_id: "utterance-1", count: 2 },
+      { utterance_id: "utterance-2", count: 1 },
+      { utterance_id: "utterance-5", count: 1 },
+    ],
     ...patch,
   };
 }
@@ -169,9 +175,12 @@ test("story adapter maps current chapters, outcomes and existing image ownership
   assert.deepEqual(view.chapters.map((item) => item.id), ["chapter-1", "chapter-2"]);
   assert.equal(view.chapters[0].sections.length, 1);
   assert.equal(view.chapters[0].sections[0].imageCount, 1);
+  assert.equal(view.chapters[0].sections[0].videoCount, 2);
   assert.equal(view.chapters[0].imageCount, 2);
-  assert.equal(view.chapters[0].videoCount, 0);
+  assert.equal(view.chapters[0].videoCount, 1);
   assert.equal(view.chapters[1].outcomeText, "暂不入书");
+  assert.equal(view.unassignedImageCount, 1);
+  assert.equal(view.unassignedVideoCount, 1);
   assert.equal(view.chapters[0].expanded, true);
   assert.equal(view.chapters[1].expanded, false);
 });
@@ -190,6 +199,7 @@ test("story adapter handles a memoir before chapters have been generated", () =>
   assert.equal(view.memoir.progressDetail, "等待整理");
   assert.equal(view.chapters.length, 0);
   assert.equal(view.overview.summaryText, "0 章 · 0 小节 · 5 段讲述");
+  assert.equal(view.unassignedVideoCount, 4);
 });
 
 test("story page loads the active project and preserves a user's expanded chapters", async () => {

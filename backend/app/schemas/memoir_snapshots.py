@@ -9,6 +9,7 @@ from app.schemas.memoir_images import MemoirImageAssetListResponse
 from app.schemas.memoir_projects import MemoirIdentityResponse
 from app.schemas.memoir_voice import (
     MemoirAutomationEventListResponse,
+    MemoirShareVideoCountResponse,
     MemoirVoiceTranscriptItemResponse,
 )
 
@@ -30,3 +31,4 @@ class MemoirBookSnapshotResponse(BaseModel):
     output: MemoirBookOutputResponse | None = None
     automation_events: MemoirAutomationEventListResponse
     image_assets: MemoirImageAssetListResponse
+    share_video_counts: list[MemoirShareVideoCountResponse] = Field(default_factory=list)

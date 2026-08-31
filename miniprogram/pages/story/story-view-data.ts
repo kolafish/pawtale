@@ -41,6 +41,8 @@ export interface StoryViewData {
   overview: StoryOverviewView;
   chapters: StoryChapterView[];
   unassignedMaterialText: string;
+  unassignedImageCount: number;
+  unassignedVideoCount: number;
 }
 
 export function emptyStoryViewData(): StoryViewData {
@@ -60,6 +62,8 @@ export function emptyStoryViewData(): StoryViewData {
     },
     chapters: [],
     unassignedMaterialText: "还没有待整理的讲述",
+    unassignedImageCount: 0,
+    unassignedVideoCount: 0,
   };
 }
 

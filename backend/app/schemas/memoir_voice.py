@@ -504,6 +504,11 @@ class MemoirShareVideoOutputResponse(BaseModel):
     download_url: str
 
 
+class MemoirShareVideoCountResponse(BaseModel):
+    utterance_id: str
+    count: int = Field(ge=1)
+
+
 class MemoirShareVideoJobResponse(BaseModel):
     id: str
     project_id: str
