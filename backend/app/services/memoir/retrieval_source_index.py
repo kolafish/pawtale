@@ -31,10 +31,9 @@ from app.services.embeddings import (
 from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_countable_material
-from app.services.memoir.retrieval_query_planning import (
-    RetrievalUnitPurpose,
-    generate_retrieval_units,
-    retrieval_unit_workload_policy,
+from app.services.memoir.retrieval_semantic_units import (
+    generate_semantic_units,
+    semantic_unit_workload_policy,
 )
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
@@ -367,14 +366,13 @@ async def run_semantic_indexing_job(
     generation_client = ai_client or get_ai_service(SEMANTIC_INDEX_MODEL)
     generation_started = time.perf_counter()
     try:
-        generation = await generate_retrieval_units(
-            purpose=RetrievalUnitPurpose.INDEX,
-            input_text=text,
+        generation = await generate_semantic_units(
+            source_text=text,
             requested_model=SEMANTIC_INDEX_MODEL,
             ai_client=generation_client,
         )
     except Exception as error:
-        policy = retrieval_unit_workload_policy(RetrievalUnitPurpose.INDEX)
+        policy = semantic_unit_workload_policy()
         metadata = ai_error_metadata(
             error,
             requested_model=SEMANTIC_INDEX_MODEL,

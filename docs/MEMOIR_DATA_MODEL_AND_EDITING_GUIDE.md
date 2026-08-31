@@ -332,9 +332,9 @@ sequenceDiagram
 
 历史数据默认只统计、不自动触发有成本的 LLM 调用。`scripts/backfill_memoir_retrieval_semantics.py` 不带参数时只返回符合条件的数量，只有显式传入 `--enqueue` 才会排入回填任务。
 
-查询侧使用 DeepSeek V4 Flash 判断当前讲述是否有明确的历史召回方向，并生成零个或多个可独立检索的语义单元；空结果表示不检索。仅在需要检索时，系统把当前讲述原文与生成单元一起交给 Vector/BM25/RRF 混合召回。最多 12 个融合候选连同命中的索引文字和原讲述片段交给 DeepSeek V4 Flash 选择，选择数量不设固定上下限；长讲述先按自然句切块，再由本地 embedding 选出与本轮最相关的原文片段。最终提示词只注入总计不超过 4000 字的已选原文，不注入 LLM 改写摘要。
+实时查询侧不再调用额外 LLM。系统直接把当前讲述原文作为唯一 Query，通过本地 embedding 和 PostgreSQL Vector/BM25/RRF 召回最多 12 个历史素材候选；长讲述先按自然句切块，再由本地 embedding 选出与本轮最相关的原文片段。按融合顺序、总计不超过 4000 字的候选原文直接进入原本就要调用的下一句追问 LLM，由该模型同时判断候选是否相关并生成回应。不相关候选必须忽略，不注入索引文字、LLM 改写摘要或内部检索信息。
 
-物理表 `memoir_memory_activation_traces` 保存每次激活的完整调试轨迹，包括 Query 转换、Vector/BM25 命中、RRF 候选、LLM 选择和拒绝、最终实际注入内容以及失败诊断，但不保存向量本身。重复生成同一条用户消息的回应时复用已成功或已跳过的轨迹，避免重复付费调用。调试 API 的列表只返回摘要，单条详情才返回完整 trace。
+物理表 `memoir_memory_activation_traces` 保存每次激活的完整调试轨迹，包括当前原文 Query、Vector/BM25 命中、RRF 候选、实际送入下一句追问 LLM 的原文以及失败诊断，但不保存向量本身。重复生成同一条用户消息的回应时复用已成功或已跳过的轨迹，避免重复本地检索。调试 API 的列表只返回摘要，单条详情才返回完整 trace。由于不再单独调用选择模型，日志只表达哪些候选被送入最终提示词，不声称最终回答一定使用了某条候选。
 
 旧的“跨会话最近 8 条用户消息”不再直接进入提示词。新会话开场只保留“该项目是否已有同模式讲述”的布尔状态，不读取具体历史内容；有当前讲述时，跨会话事实必须经过上述检索和激活流程才能进入下一问。
 
@@ -1334,7 +1334,7 @@ Digest、Review、Issue、Version、Job 等术语放在系统内部，通过“�
 | `memoir_transcript_versions` | 文字版本 |
 | `memoir_transcript_alignments` | 文本与音频对齐 |
 | `memoir_retrieval_entries` | 可重建的 Vector/BM25 检索投影 |
-| `memoir_memory_activation_traces` | Query、召回、选择和实际注入的调试轨迹 |
+| `memoir_memory_activation_traces` | 当前原文 Query、召回候选和实际注入的调试轨迹 |
 
 ### 17.2 结构与审阅
 

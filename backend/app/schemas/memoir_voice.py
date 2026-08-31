@@ -210,10 +210,8 @@ class MemoirMemoryActivationTraceResponse(BaseModel):
     current_message_id: str | None = None
     current_utterance_id: str | None = None
     status: Literal["skipped", "succeeded", "failed"]
-    should_retrieve: bool
-    query_count: int
     candidate_count: int
-    selected_count: int
+    injected_count: int
     prompt_version: str
     requested_model: str | None = None
     resolved_model: str | None = None

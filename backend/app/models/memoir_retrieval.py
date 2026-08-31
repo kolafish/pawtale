@@ -5,7 +5,6 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
-    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -117,7 +116,7 @@ class MemoirMemoryActivationTrace(Base):
             name="ck_memoir_memory_activation_traces_status",
         ),
         CheckConstraint(
-            "query_count >= 0 AND candidate_count >= 0 AND selected_count >= 0",
+            "candidate_count >= 0 AND injected_count >= 0",
             name="ck_memoir_memory_activation_traces_nonnegative_counts",
         ),
         Index(
@@ -155,10 +154,8 @@ class MemoirMemoryActivationTrace(Base):
         nullable=True,
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False)
-    should_retrieve: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    query_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     candidate_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    selected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    injected_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(80), nullable=False)
     requested_model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     resolved_model: Mapped[str | None] = mapped_column(String(120), nullable=True)

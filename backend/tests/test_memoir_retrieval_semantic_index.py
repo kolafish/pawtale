@@ -74,7 +74,6 @@ class FakeAIClient:
             }
         )
         payload = {
-            "purpose": "index",
             "units": self.units,
             "decision_reason": self.reason,
         }
@@ -239,9 +238,9 @@ async def test_semantic_job_persists_multiple_units_with_source_evidence(
     assert result.result_json["unit_count"] == 2
     assert result.result_json["generation_usage"] == {"total_tokens": 90}
     assert len(ai.calls) == 1
-    assert "purpose=index" in ai.calls[0]["system_prompt"]
+    assert "语义索引生成器" in ai.calls[0]["system_prompt"]
     assert f"source_text:\n{source_text}" in ai.calls[0]["user_prompt"]
-    assert "context_anchor:\n无" in ai.calls[0]["user_prompt"]
+    assert "context_anchor" not in ai.calls[0]["user_prompt"]
     assert ai.calls[0]["max_tokens"] == 2400
 
 

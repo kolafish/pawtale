@@ -61,7 +61,10 @@ async def _index_transcript(test_db, created: dict, client: FakeEmbeddingClient)
     await test_db.commit()
 
 
-async def test_hybrid_retrieval_fuses_queries_and_keeps_source_trace(client, test_db):
+async def test_hybrid_retrieval_uses_raw_narration_and_keeps_source_trace(
+    client,
+    test_db,
+):
     current = await create_test_voice_transcript(
         client,
         test_db,
@@ -110,44 +113,37 @@ async def test_hybrid_retrieval_fuses_queries_and_keeps_source_trace(client, tes
         test_db,
         project_id=project_id,
         excluded_voice_session_id=current["session"]["id"],
-        queries=["外婆家的院子", "上海纺织厂", "外婆家的院子", "  "],
+        query_text="我想起外婆家的院子，也想起后来工作的上海纺织厂。",
         vector_limit=8,
         bm25_limit=8,
         candidate_limit=12,
         embedding_client=query_client,
     )
 
-    assert query_client.batches == [["外婆家的院子", "上海纺织厂"]]
+    assert query_client.batches == [
+        ["我想起外婆家的院子，也想起后来工作的上海纺织厂。"]
+    ]
     assert trace.requested_embedding_model == "test-bge-small"
     assert trace.embedding_dimensions == 512
-    assert [item.query_text for item in trace.queries] == [
-        "外婆家的院子",
-        "上海纺织厂",
-    ]
-    assert trace.retrieved_entry_union_count == 2
-    assert trace.retrieved_source_union_count == 2
+    assert trace.query_text == "我想起外婆家的院子，也想起后来工作的上海纺织厂。"
+    assert trace.retrieved_entry_count == 2
+    assert trace.retrieved_source_count == 2
     assert {item.utterance_id for item in trace.candidates} == {
         family["utterance_id"],
         work["utterance_id"],
     }
 
-    all_hits = [
-        hit
-        for query in trace.queries
-        for hit in (*query.vector_hits, *query.bm25_hits)
-    ]
+    all_hits = [*trace.vector_hits, *trace.bm25_hits]
     assert current["utterance_id"] not in {hit.utterance_id for hit in all_hits}
     assert other["utterance_id"] not in {hit.utterance_id for hit in all_hits}
     assert any(
         hit.channel == "bm25"
         and hit.utterance_id == family["utterance_id"]
-        and hit.query_text == "外婆家的院子"
         for hit in all_hits
     )
     assert any(
         hit.channel == "bm25"
         and hit.utterance_id == work["utterance_id"]
-        and hit.query_text == "上海纺织厂"
         for hit in all_hits
     )
     candidates = {candidate.utterance_id: candidate for candidate in trace.candidates}
@@ -165,17 +161,19 @@ async def test_hybrid_retrieval_fuses_queries_and_keeps_source_trace(client, tes
         assert candidate.representative_hit.index_version == 1
 
 
-async def test_hybrid_retrieval_returns_empty_trace_without_queries(test_db):
+async def test_hybrid_retrieval_returns_empty_trace_without_query(test_db):
     trace = await retrieve_hybrid_candidates(
         test_db,
         project_id="unused-project",
-        queries=["", "  "],
+        query_text="  ",
     )
 
-    assert trace.queries == ()
+    assert trace.query_text == ""
+    assert trace.vector_hits == ()
+    assert trace.bm25_hits == ()
     assert trace.candidates == ()
     assert trace.requested_embedding_model is None
-    assert trace.retrieved_entry_union_count == 0
+    assert trace.retrieved_entry_count == 0
 
 
 async def test_channel_limits_apply_to_distinct_source_utterances(client, test_db):
@@ -229,14 +227,14 @@ async def test_channel_limits_apply_to_distinct_source_utterances(client, test_d
     trace = await retrieve_hybrid_candidates(
         test_db,
         project_id=first["session"]["project_id"],
-        queries=["外婆家的院子"],
+        query_text="外婆家的院子",
         vector_limit=2,
         bm25_limit=2,
         candidate_limit=2,
         embedding_client=FakeEmbeddingClient(),
     )
 
-    assert [hit.utterance_id for hit in trace.queries[0].vector_hits] == [
+    assert [hit.utterance_id for hit in trace.vector_hits] == [
         first["utterance_id"],
         second["utterance_id"],
     ]
