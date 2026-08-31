@@ -1,36 +1,113 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
+import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
+import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
+import {
+  CHAPTER_WORKSPACE_PAGE_URL,
+  isAuthError,
+  navigateToLogin,
+  switchToBook,
+} from "../../services/navigation";
 import { definePage } from "../../services/page-definition";
 import {
   datasetString,
+  pageUrl,
   type PageDatasetEvent,
 } from "../../services/page-input";
+import { storyViewData } from "./story-view-adapter";
 import {
-  storyPreviewData,
-  togglePreviewChapter,
+  emptyStoryViewData,
+  toggleStoryChapter,
   type StoryViewData,
 } from "./story-view-data";
 
 interface StoryDataset {
   id?: string;
-  action?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<StoryDataset>;
 
 interface StoryPageData extends StoryViewData {
   pageClass: string;
+  loading: boolean;
+  error: string;
+  needsLogin: boolean;
+  projectId: string;
 }
 
 const STORY_PAGE_CLASS = "story-page ui-page-shell ui-accessible-page";
 
 definePage<StoryPageData>()({
+  loadSequence: 0,
+
   data: {
     pageClass: STORY_PAGE_CLASS,
-    ...storyPreviewData(),
+    loading: true,
+    error: "",
+    needsLogin: false,
+    projectId: "",
+    ...emptyStoryViewData(),
   },
 
-  onShow() {
+  async onShow() {
     this.setData({ pageClass: accessibilityPageClass(STORY_PAGE_CLASS) });
+    await this.loadStory();
+  },
+
+  async loadStory() {
+    const loadSequence = ++this.loadSequence;
+    this.setData({ loading: true, error: "" });
+    try {
+      const snapshot = await getMemoirBookSnapshot();
+      if (loadSequence !== this.loadSequence) {
+        return;
+      }
+      const projectId = snapshot.identity.active_project?.id || "";
+      if (!projectId) {
+        this.setData({
+          ...emptyStoryViewData(),
+          loading: false,
+          needsLogin: false,
+          projectId: "",
+        });
+        return;
+      }
+      const progress = await getMemoirVoiceProgress(projectId);
+      if (loadSequence !== this.loadSequence) {
+        return;
+      }
+      const previousExpansion = new Map(
+        this.data.chapters.map((chapter) => [chapter.id, chapter.expanded]),
+      );
+      const viewData = storyViewData(snapshot, progress);
+      this.setData({
+        ...viewData,
+        chapters: viewData.chapters.map((chapter) => (
+          previousExpansion.has(chapter.id)
+            ? { ...chapter, expanded: previousExpansion.get(chapter.id) || false }
+            : chapter
+        )),
+        loading: false,
+        needsLogin: false,
+        projectId,
+      });
+    } catch (error) {
+      if (loadSequence !== this.loadSequence) {
+        return;
+      }
+      if (isAuthError(error)) {
+        this.setData({
+          ...emptyStoryViewData(),
+          loading: false,
+          needsLogin: true,
+          projectId: "",
+        });
+        return;
+      }
+      this.setData({
+        loading: false,
+        error: error instanceof Error ? error.message : "故事页面加载失败",
+      });
+    }
   },
 
   toggleChapter(event: DatasetEvent) {
@@ -39,15 +116,36 @@ definePage<StoryPageData>()({
       return;
     }
     this.setData({
-      chapters: togglePreviewChapter(this.data.chapters, chapterId),
+      chapters: toggleStoryChapter(this.data.chapters, chapterId),
     });
   },
 
-  showPreviewNotice(event: DatasetEvent) {
-    const action = datasetString(event, "action") || "这项功能";
-    wx.showToast({
-      title: `${action}将在接入数据后开放`,
-      icon: "none",
+  openBook() {
+    switchToBook();
+  },
+
+  openTranscripts() {
+    wx.switchTab({ url: "/pages/transcripts/index" });
+  },
+
+  openChapter(event: DatasetEvent) {
+    const chapterId = datasetString(event, "id");
+    if (!this.data.projectId || !chapterId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl(CHAPTER_WORKSPACE_PAGE_URL, {
+        projectId: this.data.projectId,
+        chapterId,
+      }),
     });
+  },
+
+  openLogin() {
+    navigateToLogin();
+  },
+
+  createProject() {
+    wx.navigateTo({ url: "/pages/project-edit/index" });
   },
 });
