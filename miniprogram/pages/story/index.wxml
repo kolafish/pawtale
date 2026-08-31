@@ -1,0 +1,138 @@
+<view class="{{pageClass}}">
+  <view class="story-shell">
+    <view
+      class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"
+      data-action="编辑与成书"
+      bindtap="showPreviewNotice"
+      hover-class="ui-subtle-action-hover"
+      aria-role="button"
+      aria-label="查看{{memoir.title}}的编辑与成书进度"
+    >
+      <view class="memoir-copy">
+        <text class="memoir-eyebrow">回忆录名称</text>
+        <text class="memoir-title">{{memoir.title}}</text>
+        <text class="memoir-meta">{{memoir.createdText}} · {{memoir.updatedText}}</text>
+      </view>
+      <view class="memoir-progress">
+        <text class="memoir-progress-label">{{memoir.progressLabel}}</text>
+        <text class="memoir-progress-value ui-tabular">{{memoir.progressValue}}</text>
+        <text class="memoir-progress-detail">{{memoir.progressDetail}} ›</text>
+      </view>
+    </view>
+
+    <view class="story-toolbar">
+      <view class="timeline-label">
+        <view class="timeline-mark"></view>
+        <text>生命时间线</text>
+      </view>
+      <view class="view-switch" aria-label="故事查看方式">
+        <view class="view-option active" aria-role="button" aria-current="true">树形</view>
+        <view
+          class="view-option ui-pressable"
+          data-action="全部讲述"
+          bindtap="showPreviewNotice"
+          hover-class="ui-subtle-action-hover"
+          aria-role="button"
+        >列表</view>
+      </view>
+    </view>
+
+    <view class="story-tree">
+      <view class="overview-row">
+        <view class="overview-symbol" aria-hidden="true">树</view>
+        <view class="overview-card ui-card ui-card-borderless">
+          <view class="overview-copy">
+            <text class="overview-title">{{overview.title}}</text>
+            <text class="overview-summary ui-tabular">{{overview.summaryText}}</text>
+          </view>
+          <text class="overview-outcome ui-tabular">{{overview.outcomeText}}</text>
+        </view>
+      </view>
+
+      <view
+        wx:for="{{chapters}}"
+        wx:for-index="chapterIndex"
+        wx:key="id"
+        class="chapter-block tone-{{item.tone}}"
+      >
+        <view class="chapter-decoration" aria-hidden="true"></view>
+        <view class="chapter-branch" aria-hidden="true"></view>
+        <view class="chapter-node ui-tabular" aria-hidden="true">{{chapterIndex + 1}}</view>
+
+        <view
+          class="chapter-card ui-card ui-card-borderless ui-pressable"
+          data-id="{{item.id}}"
+          bindtap="toggleChapter"
+          hover-class="ui-subtle-action-hover"
+          aria-role="button"
+          aria-expanded="{{item.expanded}}"
+          aria-label="{{item.title}}，{{item.summaryText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
+        >
+          <view class="chapter-index ui-tabular">{{chapterIndex + 1}}</view>
+          <view class="chapter-copy">
+            <text class="chapter-title">{{item.title}}</text>
+            <text class="chapter-meta ui-tabular">{{item.timeRangeText}} · {{item.summaryText}}</text>
+          </view>
+          <view class="chapter-outcome">
+            <text class="chapter-outcome-label">当前成果</text>
+            <text class="chapter-outcome-value">{{item.outcomeText}}</text>
+          </view>
+          <view class="chapter-chevron {{item.expanded ? 'expanded' : ''}}" aria-hidden="true">⌄</view>
+        </view>
+
+        <view wx:if="{{item.expanded}}" class="section-list">
+          <view
+            wx:for="{{item.sections}}"
+            wx:for-item="section"
+            wx:key="id"
+            class="section-row ui-pressable"
+            data-action="小节详情"
+            bindtap="showPreviewNotice"
+            hover-class="ui-subtle-action-hover"
+            aria-role="button"
+            aria-label="{{section.title}}，{{section.materialText}}"
+          >
+            <view class="section-marker" aria-hidden="true"></view>
+            <view class="section-copy">
+              <text class="section-title">{{section.title}}</text>
+              <text class="section-meta ui-tabular">{{section.materialText}}</text>
+            </view>
+            <view wx:if="{{section.imageCount || section.videoCount}}" class="section-media">
+              <text wx:if="{{section.imageCount}}" class="media-chip image-chip">{{section.imageCount}} 图</text>
+              <text wx:if="{{section.videoCount}}" class="media-chip video-chip">{{section.videoCount}} 视频</text>
+            </view>
+            <text class="section-action" aria-hidden="true">›</text>
+          </view>
+        </view>
+      </view>
+
+      <view
+        class="unassigned-card ui-pressable"
+        data-action="待整理讲述"
+        bindtap="showPreviewNotice"
+        hover-class="ui-subtle-action-hover"
+        aria-role="button"
+      >
+        <text class="unassigned-mark">＋</text>
+        <view class="unassigned-copy">
+          <text class="unassigned-title">待整理的故事</text>
+          <text class="unassigned-meta">{{unassignedMaterialText}}</text>
+        </view>
+        <text class="unassigned-action">查看 ›</text>
+      </view>
+    </view>
+
+    <view
+      class="add-chapter-action ui-pressable"
+      data-action="新增章节"
+      bindtap="showPreviewNotice"
+      hover-class="ui-subtle-action-hover"
+      aria-role="button"
+    >
+      <text class="add-chapter-mark">＋</text>
+      <text>新增章节</text>
+    </view>
+
+    <text class="preview-note">当前为故事页视觉预览，下一步接入真实回忆录数据</text>
+  </view>
+</view>
