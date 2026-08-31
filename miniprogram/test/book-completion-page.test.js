@@ -25,7 +25,7 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     ...voiceApiExports,
   });
   mockModule("../services/navigation.ts", {
-    redirectToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
+    returnToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
     routeAuthError: () => false,
   });
   return loadPageModule("../pages/book-completion/index.ts");

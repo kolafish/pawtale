@@ -15,7 +15,11 @@ import {
   placeMemoirChapterMaterial,
   type MemoirSectionMaterialPlacementRequest,
 } from "../../services/memoir-chapter-workspace-api";
-import { redirectToBook, routeAuthError } from "../../services/navigation";
+import {
+  redirectToBook,
+  returnToBook,
+  routeAuthError,
+} from "../../services/navigation";
 import {
   pageUrl,
   datasetString,
@@ -66,6 +70,7 @@ definePage<ChapterWorkspacePageData>()({
   workspaceLoadSequence: 0,
   chapterPreparationLoadSequence: 0,
   sectionRegenerationLoadSequence: 0,
+  pendingSectionId: "",
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -116,6 +121,7 @@ definePage<ChapterWorkspacePageData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
+    this.pendingSectionId = queryParam(query, "sectionId");
     this.setData({
       projectId,
       chapterId,
@@ -244,7 +250,7 @@ definePage<ChapterWorkspacePageData>()({
 
   openBookHome() {
     this.leaveAfterEditConfirmation(() => {
-      redirectToBook();
+      returnToBook();
     });
   },
 
@@ -347,16 +353,32 @@ definePage<ChapterWorkspacePageData>()({
           : summary.active_issue,
       },
     };
+    const targetSectionId = this.pendingSectionId;
+    const hasTargetSection = Boolean(
+      targetSectionId
+      && viewWorkspace.sections.some((section) => section.id === targetSectionId),
+    );
+    const expandedSectionIds = hasTargetSection
+      ? {
+        ...this.data.expandedSectionIds,
+        [targetSectionId]: true,
+      }
+      : this.data.expandedSectionIds;
     setPageNavigationTitle(viewWorkspace.chapter_title || "本章正文");
     this.setData({
       workspace: viewWorkspace,
       ...chapterWorkspaceViewPatch(
         viewWorkspace,
-        this.data.expandedSectionIds,
+        expandedSectionIds,
       ),
+      expandedSectionIds,
       loading: false,
       error: "",
     });
+    if (hasTargetSection) {
+      this.pendingSectionId = "";
+      scrollToSection(`#chapter-section-${targetSectionId}`);
+    }
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }

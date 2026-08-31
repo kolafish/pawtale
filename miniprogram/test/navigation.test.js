@@ -13,6 +13,7 @@ const {
   redirectToBook,
   redirectToTranscripts,
   relaunchHome,
+  returnToBook,
   routeAuthError,
   switchToHome,
   switchToMe,
@@ -23,6 +24,54 @@ test("navigation helper identifies backend auth errors", () => {
   assert.equal(isAuthError(new ApiError(403, "forbidden", null)), true);
   assert.equal(isAuthError(new ApiError(404, "missing", null)), false);
   assert.equal(isAuthError(new Error("network")), false);
+});
+
+test("navigation helper returns to the existing book page without stacking a duplicate", () => {
+  const calls = [];
+  global.getCurrentPages = () => [
+    { route: "pages/story/index" },
+    { route: "pages/book/index" },
+    { route: "pages/chapter-workspace/index" },
+    { route: "pages/book-completion/index" },
+  ];
+  global.wx = {
+    navigateBack(options) {
+      calls.push({ method: "navigateBack", delta: options.delta });
+    },
+    redirectTo(options) {
+      calls.push({ method: "redirectTo", url: options.url });
+    },
+  };
+
+  returnToBook();
+
+  assert.deepEqual(calls, [{ method: "navigateBack", delta: 2 }]);
+  delete global.getCurrentPages;
+  delete global.wx;
+});
+
+test("navigation helper replaces the current page when no book page exists", () => {
+  const calls = [];
+  global.getCurrentPages = () => [
+    { route: "pages/story/index" },
+    { route: "pages/book-completion/index" },
+  ];
+  global.wx = {
+    navigateBack(options) {
+      calls.push({ method: "navigateBack", delta: options.delta });
+    },
+    redirectTo(options) {
+      calls.push({ method: "redirectTo", url: options.url });
+    },
+  };
+
+  returnToBook();
+
+  assert.deepEqual(calls, [
+    { method: "redirectTo", url: "/pages/book/index" },
+  ]);
+  delete global.getCurrentPages;
+  delete global.wx;
 });
 
 test("navigation helper routes auth errors to login or me", () => {

@@ -23,7 +23,7 @@ import {
 } from "../../services/memoir-book-api";
 import { listMemoirAutomationEvents } from "../../services/memoir-voice-session-api";
 import { optionalApiResource } from "../../services/request";
-import { redirectToBook, routeAuthError } from "../../services/navigation";
+import { returnToBook, routeAuthError } from "../../services/navigation";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
   datasetChoice,
@@ -710,7 +710,7 @@ definePage<BookExportData>()({
 
   openBookHome() {
     writeBookWorkspaceNavigationTarget("tools");
-    redirectToBook();
+    returnToBook();
   },
 
   toggleBookSettings() {

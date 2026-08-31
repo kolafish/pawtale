@@ -57,6 +57,21 @@ export function redirectToBook(): void {
   wx.redirectTo({ url: BOOK_PAGE_URL });
 }
 
+export function returnToBook(): void {
+  const pages = typeof getCurrentPages === "function" ? getCurrentPages() : [];
+  const bookRoute = BOOK_PAGE_URL.slice(1);
+  for (let index = pages.length - 2; index >= 0; index -= 1) {
+    if (pages[index]?.route === bookRoute) {
+      wx.navigateBack({
+        delta: pages.length - 1 - index,
+        fail: redirectToBook,
+      });
+      return;
+    }
+  }
+  redirectToBook();
+}
+
 export function navigateToTranscripts(): void {
   wx.navigateTo({ url: TRANSCRIPTS_PAGE_URL });
 }

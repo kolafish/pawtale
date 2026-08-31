@@ -135,7 +135,8 @@
             wx:for-item="section"
             wx:key="id"
             class="section-row ui-pressable"
-            data-id="{{item.id}}"
+            data-chapter-id="{{item.id}}"
+            data-section-id="{{section.id}}"
             bindtap="openChapter"
             hover-class="ui-subtle-action-hover"
             aria-role="button"
@@ -192,12 +193,12 @@
 
     <view
       class="add-chapter-action ui-pressable"
-      bindtap="openBook"
+      bindtap="openChapterManager"
       hover-class="ui-subtle-action-hover"
       aria-role="button"
     >
       <text class="add-chapter-mark">＋</text>
-      <text>新增章节</text>
+      <text>整理章节</text>
     </view>
     </block>
   </view>
