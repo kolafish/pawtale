@@ -130,7 +130,12 @@ function loadStoryPage({
   snapshotError = null,
   largeText = false,
 } = {}) {
-  const calls = { book: 0, login: 0, progressProjectIds: [] };
+  const calls = {
+    book: 0,
+    login: 0,
+    transcripts: 0,
+    progressProjectIds: [],
+  };
   mockModule("../services/accessibility-settings.ts", {
     accessibilityPageClass: (baseClass) => largeText ? `${baseClass} large-text` : baseClass,
   });
@@ -151,17 +156,29 @@ function loadStoryPage({
   mockModule("../services/navigation.ts", {
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => error?.statusCode === 401 || error?.statusCode === 403,
+    navigateToBook: () => { calls.book += 1; },
     navigateToLogin: () => { calls.login += 1; },
-    switchToBook: () => { calls.book += 1; },
+    navigateToTranscripts: () => { calls.transcripts += 1; },
   });
   return { ...loadPageModule("../pages/story/index.ts"), calls };
 }
 
-test("story page is registered without replacing the current tab bar", () => {
+test("story page replaces record and book with the three-tab product navigation", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
 
   assert.ok(appJson.pages.includes("pages/story/index"));
-  assert.ok(!appJson.tabBar.list.some((item) => item.pagePath === "pages/story/index"));
+  assert.deepEqual(
+    appJson.tabBar.list.map(({ pagePath, text }) => ({ pagePath, text })),
+    [
+      { pagePath: "pages/home/index", text: "讲述" },
+      { pagePath: "pages/story/index", text: "故事" },
+      { pagePath: "pages/me/index", text: "我的" },
+    ],
+  );
+  appJson.tabBar.list.forEach(({ iconPath, selectedIconPath }) => {
+    assert.ok(fs.existsSync(path.join(__dirname, "..", iconPath)));
+    assert.ok(fs.existsSync(path.join(__dirname, "..", selectedIconPath)));
+  });
 });
 
 test("story adapter maps current chapters, outcomes and existing image ownership", () => {
@@ -252,10 +269,8 @@ test("story page exposes login state after an authentication error", async () =>
 test("story page reuses the existing book, record and chapter destinations", async () => {
   const { page, calls } = loadStoryPage();
   const context = pageContext(page, { projectId: "project-1" });
-  const switched = [];
   const navigated = [];
   global.wx = {
-    switchTab: ({ url }) => switched.push(url),
     navigateTo: ({ url }) => navigated.push(url),
   };
 
@@ -269,7 +284,7 @@ test("story page reuses the existing book, record and chapter destinations", asy
 
   assert.equal(calls.book, 1);
   assert.equal(calls.login, 1);
-  assert.deepEqual(switched, ["/pages/transcripts/index"]);
+  assert.equal(calls.transcripts, 1);
   assert.deepEqual(navigated, [
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
   ]);

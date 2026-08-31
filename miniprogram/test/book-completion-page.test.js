@@ -24,7 +24,10 @@ function loadBookCompletionPage({ voiceApiExports = {} } = {}) {
     enqueueMemoirChapterPreparationJob: unmockedAsync("enqueueMemoirChapterPreparationJob"),
     ...voiceApiExports,
   });
-  mockModule("../services/navigation.ts", { routeAuthError: () => false });
+  mockModule("../services/navigation.ts", {
+    redirectToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
+    routeAuthError: () => false,
+  });
   return loadPageModule("../pages/book-completion/index.ts");
 }
 
@@ -325,10 +328,10 @@ test("book revision reports its real background stage", () => {
 });
 
 test("book completion returns to the book hub for generation and chapter management", () => {
-  const tabNavigations = [];
+  const navigations = [];
   global.wx = {
-    switchTab(options) {
-      tabNavigations.push(options.url);
+    redirectTo(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadBookCompletionPage();
@@ -336,7 +339,7 @@ test("book completion returns to the book hub for generation and chapter managem
 
   page.openBookHome.call(context);
 
-  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  assert.deepEqual(navigations, ["/pages/book/index"]);
 });
 
 test("book completion submits answers and editorial actions as one revision", async () => {

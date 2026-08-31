@@ -23,7 +23,11 @@ import {
   guidanceModeLabel,
   memoirProjectProfile,
 } from "../../services/memoir-project-profile";
-import { isAuthError, navigateToLogin } from "../../services/navigation";
+import {
+  isAuthError,
+  navigateToBook,
+  navigateToLogin,
+} from "../../services/navigation";
 import { pageUrl } from "../../services/page-input";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import {
@@ -561,7 +565,7 @@ definePage<HomeData>()({
       return;
     }
     writeBookWorkspaceNavigationTarget("chapters");
-    wx.switchTab({ url: "/pages/book/index" });
+    navigateToBook();
   },
 
   openNarrationOverview() {

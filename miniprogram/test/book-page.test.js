@@ -524,7 +524,7 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(context.data.bookContentAvailable, false);
 });
 
-test("book page stays on the book tab when login is required", async () => {
+test("book page stays available when login is required", async () => {
   const switches = [];
   global.wx = {
     switchTab(options) {
@@ -547,6 +547,21 @@ test("book page stays on the book tab when login is required", async () => {
   assert.equal(context.data.projectTitle, "我的回忆录");
   assert.equal(context.data.progressText, "登录后可以开始整理");
   assert.deepEqual(switches, []);
+});
+
+test("book page opens the transcript list as a secondary page", () => {
+  const navigations = [];
+  global.wx = {
+    navigateTo(options) {
+      navigations.push(options.url);
+    },
+  };
+  const { page } = loadBookPage();
+  const context = pageContext(page);
+
+  page.openTranscripts.call(context);
+
+  assert.deepEqual(navigations, ["/pages/transcripts/index"]);
 });
 
 test("book page asks logged-in users to create a memoir before loading book content", async () => {

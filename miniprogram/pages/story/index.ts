@@ -4,8 +4,9 @@ import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api"
 import {
   CHAPTER_WORKSPACE_PAGE_URL,
   isAuthError,
+  navigateToBook,
   navigateToLogin,
-  switchToBook,
+  navigateToTranscripts,
 } from "../../services/navigation";
 import { definePage } from "../../services/page-definition";
 import {
@@ -121,11 +122,11 @@ definePage<StoryPageData>()({
   },
 
   openBook() {
-    switchToBook();
+    navigateToBook();
   },
 
   openTranscripts() {
-    wx.switchTab({ url: "/pages/transcripts/index" });
+    navigateToTranscripts();
   },
 
   openChapter(event: DatasetEvent) {

@@ -11,6 +11,7 @@ import { definePage } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
+import { redirectToTranscripts } from "../../services/navigation";
 import {
   type AssistantTurnQueueItem,
 } from "../../services/voice-assistant-turn-queue";
@@ -567,7 +568,7 @@ definePage<VoiceChatData>()({
       canReconnect: false,
       canFinishAfterDisconnect: false,
     });
-    wx.switchTab({ url: "/pages/transcripts/index" });
+    redirectToTranscripts();
   },
 
   maybeGenerateOpeningFollowUp() {

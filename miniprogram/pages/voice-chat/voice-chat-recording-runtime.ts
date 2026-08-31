@@ -12,6 +12,7 @@ import {
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
+import { redirectToTranscripts } from "../../services/navigation";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
   canRequestFollowUp,
@@ -424,7 +425,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         cancelText: "留在本页",
         success: (result) => {
           if (result.confirm) {
-            wx.switchTab({ url: "/pages/transcripts/index" });
+            redirectToTranscripts();
           }
         },
       });
