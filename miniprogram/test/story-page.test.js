@@ -132,12 +132,18 @@ function loadStoryPage({
 } = {}) {
   const calls = {
     book: 0,
+    bookTargets: [],
     login: 0,
     transcripts: 0,
     progressProjectIds: [],
   };
   mockModule("../services/accessibility-settings.ts", {
     accessibilityPageClass: (baseClass) => largeText ? `${baseClass} large-text` : baseClass,
+  });
+  mockModule("../services/book-workspace-navigation.ts", {
+    writeBookWorkspaceNavigationTarget: (target) => {
+      calls.bookTargets.push(target);
+    },
   });
   mockModule("../services/memoir-snapshot-api.ts", {
     getMemoirBookSnapshot: async () => {
@@ -275,17 +281,25 @@ test("story page reuses the existing book, record and chapter destinations", asy
   };
 
   page.openBook.call(context);
+  page.openChapterManager.call(context);
   page.openTranscripts.call(context);
   page.openChapter.call(context, {
     currentTarget: { dataset: { id: "chapter-1" } },
   });
+  page.openChapter.call(context, {
+    currentTarget: {
+      dataset: { chapterId: "chapter-1", sectionId: "section-1" },
+    },
+  });
   page.openLogin.call(context);
   await flushAsyncWork();
 
-  assert.equal(calls.book, 1);
+  assert.equal(calls.book, 2);
+  assert.deepEqual(calls.bookTargets, ["chapters"]);
   assert.equal(calls.login, 1);
   assert.equal(calls.transcripts, 1);
   assert.deepEqual(navigated, [
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
   ]);
 });

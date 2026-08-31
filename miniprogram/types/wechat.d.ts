@@ -1,5 +1,11 @@
 declare const wx: WechatMiniprogram.Wx;
 
+interface MiniProgramPageStackItem {
+  route?: string;
+}
+
+declare function getCurrentPages(): MiniProgramPageStackItem[];
+
 declare function App<T extends Record<string, unknown>>(options: T): void;
 
 declare function Page<TData extends object, TMethods extends object>(

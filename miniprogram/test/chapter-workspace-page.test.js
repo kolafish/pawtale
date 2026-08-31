@@ -212,6 +212,7 @@ function loadWorkspacePage({
   });
   mockModule("../services/navigation.ts", {
     redirectToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
+    returnToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
     routeAuthError: () => false,
   });
   mockModule("../services/audit-tracker.ts", { trackAuditAction() {} });
@@ -298,6 +299,22 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
     JSON.stringify(context.data.workspace),
     /contract|nodes|draft_blocks|answer_updates/,
   );
+});
+
+test("chapter workspace opens and locates a section selected from the story tree", async () => {
+  const { scrolls } = installWx();
+  const { page } = loadWorkspacePage();
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    sectionId: "section-1",
+  });
+
+  assert.equal(context.data.sectionViews[0].expanded, true);
+  assert.equal(context.data.expandedSectionIds["section-1"], true);
+  assert.deepEqual(scrolls, ["#chapter-section-section-1"]);
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {

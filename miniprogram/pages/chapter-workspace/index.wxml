@@ -140,7 +140,12 @@
       </view>
 
       <view wx:if="{{sectionViews.length}}" class="section-list unified-section-list">
-        <view wx:for="{{sectionViews}}" wx:key="id" class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}">
+        <view
+          wx:for="{{sectionViews}}"
+          wx:key="id"
+          id="chapter-section-{{item.id}}"
+          class="section-item {{item.requires_user_assignment ? 'is-unassigned' : ''}}"
+        >
           <view
             class="section-toggle"
             data-id="{{item.id}}"

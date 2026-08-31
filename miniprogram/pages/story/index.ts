@@ -1,4 +1,5 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
+import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { getMemoirVoiceProgress } from "../../services/memoir-voice-session-api";
 import {
@@ -22,7 +23,9 @@ import {
 } from "./story-view-data";
 
 interface StoryDataset {
+  chapterId?: string;
   id?: string;
+  sectionId?: string;
 }
 
 type DatasetEvent = PageDatasetEvent<StoryDataset>;
@@ -125,19 +128,28 @@ definePage<StoryPageData>()({
     navigateToBook();
   },
 
+  openChapterManager() {
+    writeBookWorkspaceNavigationTarget("chapters");
+    navigateToBook();
+  },
+
   openTranscripts() {
     navigateToTranscripts();
   },
 
   openChapter(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
+    const chapterId = (
+      datasetString(event, "chapterId") || datasetString(event, "id")
+    );
     if (!this.data.projectId || !chapterId) {
       return;
     }
+    const sectionId = datasetString(event, "sectionId");
     wx.navigateTo({
       url: pageUrl(CHAPTER_WORKSPACE_PAGE_URL, {
         projectId: this.data.projectId,
         chapterId,
+        sectionId,
       }),
     });
   },
