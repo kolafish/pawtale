@@ -715,10 +715,10 @@ test("home daily actions create free narration and human interview sessions", as
 });
 
 test("home routes book organization through the book workspace without requiring microphone consent", () => {
-  const tabNavigations = [];
+  const navigations = [];
   global.wx = {
-    switchTab(options) {
-      tabNavigations.push(options.url);
+    navigateTo(options) {
+      navigations.push(options.url);
     },
   };
   const { page } = loadHomePage();
@@ -740,7 +740,7 @@ test("home routes book organization through the book workspace without requiring
   page.openBookWorkspace.call(context);
 
   const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
-  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  assert.deepEqual(navigations, ["/pages/book/index"]);
   assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
   assert.equal(context.data.error, "");
 });

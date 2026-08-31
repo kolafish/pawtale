@@ -15,7 +15,7 @@ import {
   placeMemoirChapterMaterial,
   type MemoirSectionMaterialPlacementRequest,
 } from "../../services/memoir-chapter-workspace-api";
-import { routeAuthError } from "../../services/navigation";
+import { redirectToBook, routeAuthError } from "../../services/navigation";
 import {
   pageUrl,
   datasetString,
@@ -244,7 +244,7 @@ definePage<ChapterWorkspacePageData>()({
 
   openBookHome() {
     this.leaveAfterEditConfirmation(() => {
-      wx.switchTab({ url: "/pages/book/index" });
+      redirectToBook();
     });
   },
 
@@ -252,7 +252,7 @@ definePage<ChapterWorkspacePageData>()({
     this.leaveAfterEditConfirmation(() => {
       wx.navigateBack({
         fail: () => {
-          wx.switchTab({ url: "/pages/book/index" });
+          redirectToBook();
         },
       });
     });

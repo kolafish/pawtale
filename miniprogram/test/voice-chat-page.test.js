@@ -857,7 +857,11 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   let finishCalls = 0;
   let resolveFinish = () => {};
   const modals = [];
+  const redirects = [];
   global.wx = {
+    redirectTo(options) {
+      redirects.push(options.url);
+    },
     showModal(options) {
       modals.push(options);
     },
@@ -914,6 +918,8 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   assert.equal(modals.length, 1);
+  modals[0].success({ confirm: true, cancel: false });
+  assert.deepEqual(redirects, ["/pages/transcripts/index"]);
 });
 
 test("book completion finish explains that the answer is already in its section", async () => {

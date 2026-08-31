@@ -2,6 +2,7 @@ import { ApiError } from "./request";
 
 export const HOME_PAGE_URL = "/pages/home/index";
 export const BOOK_PAGE_URL = "/pages/book/index";
+export const TRANSCRIPTS_PAGE_URL = "/pages/transcripts/index";
 export const LOGIN_PAGE_URL = "/pages/login/index";
 export const ME_PAGE_URL = "/pages/me/index";
 export const CHAPTER_WORKSPACE_PAGE_URL = "/pages/chapter-workspace/index";
@@ -48,8 +49,20 @@ export function switchToHome(): void {
   wx.switchTab({ url: HOME_PAGE_URL });
 }
 
-export function switchToBook(): void {
-  wx.switchTab({ url: BOOK_PAGE_URL });
+export function navigateToBook(): void {
+  wx.navigateTo({ url: BOOK_PAGE_URL });
+}
+
+export function redirectToBook(): void {
+  wx.redirectTo({ url: BOOK_PAGE_URL });
+}
+
+export function navigateToTranscripts(): void {
+  wx.navigateTo({ url: TRANSCRIPTS_PAGE_URL });
+}
+
+export function redirectToTranscripts(): void {
+  wx.redirectTo({ url: TRANSCRIPTS_PAGE_URL });
 }
 
 export function relaunchHome(): void {

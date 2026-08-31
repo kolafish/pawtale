@@ -371,7 +371,7 @@ test("book export page suggests titles and queues book-level editorial copy", as
     showToast(options) {
       toasts.push(options);
     },
-    switchTab(options) {
+    redirectTo(options) {
       navigations.push(options.url);
     },
   };

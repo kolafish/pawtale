@@ -38,6 +38,7 @@ import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
 import {
   isAuthError,
+  navigateToTranscripts,
   navigateToLogin,
   routeAuthError,
   switchToHome,
@@ -524,7 +525,7 @@ definePage<BookPageData>()({
         return;
       }
       writeTranscriptNavigationTarget(utteranceId);
-      wx.switchTab({ url: "/pages/transcripts/index" });
+      navigateToTranscripts();
       return;
     }
     if (action !== "acknowledge" && action !== "acknowledge_group") {
@@ -1228,7 +1229,7 @@ definePage<BookPageData>()({
     if (utteranceId) {
       writeTranscriptNavigationTarget(utteranceId);
     }
-    wx.switchTab({ url: "/pages/transcripts/index" });
+    navigateToTranscripts();
   },
 
   openHome() {

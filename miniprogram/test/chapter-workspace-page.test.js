@@ -210,7 +210,10 @@ function loadWorkspacePage({
     }),
     ...voiceApiExports,
   });
-  mockModule("../services/navigation.ts", { routeAuthError: () => false });
+  mockModule("../services/navigation.ts", {
+    redirectToBook: () => wx.redirectTo({ url: "/pages/book/index" }),
+    routeAuthError: () => false,
+  });
   mockModule("../services/audit-tracker.ts", { trackAuditAction() {} });
   mockModule("../stores/memoir-read-cache.ts", {
     readCachedMemoirChapterWorkspace: () => ({ status: "miss" }),
@@ -458,7 +461,7 @@ test("chapter workspace blocks row actions while another operation is active", a
 });
 
 test("chapter workspace protects unsaved edits before returning to the book flow", () => {
-  const tabNavigations = [];
+  const redirects = [];
   const modalResults = [
     { confirm: false, cancel: true },
     { confirm: true, cancel: false },
@@ -467,8 +470,8 @@ test("chapter workspace protects unsaved edits before returning to the book flow
     navigateBack(options) {
       options.fail?.();
     },
-    switchTab(options) {
-      tabNavigations.push(options.url);
+    redirectTo(options) {
+      redirects.push(options.url);
     },
     showModal(options) {
       options.success?.(modalResults.shift());
@@ -482,10 +485,10 @@ test("chapter workspace protects unsaved edits before returning to the book flow
   });
 
   page.returnToBookFlow.call(context);
-  assert.deepEqual(tabNavigations, []);
+  assert.deepEqual(redirects, []);
 
   page.returnToBookFlow.call(context);
-  assert.deepEqual(tabNavigations, ["/pages/book/index"]);
+  assert.deepEqual(redirects, ["/pages/book/index"]);
 });
 
 test("chapter workspace expands materials under their section", async () => {

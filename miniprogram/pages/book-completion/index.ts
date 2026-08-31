@@ -28,7 +28,7 @@ import {
   type MemoirBookReviewJob,
   type MemoirBookCompletionJob,
 } from "../../services/memoir-book-completion-api";
-import { routeAuthError } from "../../services/navigation";
+import { redirectToBook, routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pageUrl,
@@ -501,7 +501,7 @@ definePage<BookCompletionData>()({
   },
 
   openBookHome() {
-    wx.switchTab({ url: "/pages/book/index" });
+    redirectToBook();
   },
 
   openBookRevision() {

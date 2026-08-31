@@ -6,11 +6,14 @@ const { ApiError } = require("../services/request.ts");
 const {
   isAuthError,
   missingPageRecoveryUrl,
+  navigateToBook,
   navigateToLogin,
+  navigateToTranscripts,
   recoverMissingPage,
+  redirectToBook,
+  redirectToTranscripts,
   relaunchHome,
   routeAuthError,
-  switchToBook,
   switchToHome,
   switchToMe,
 } = require("../services/navigation.ts");
@@ -31,6 +34,9 @@ test("navigation helper routes auth errors to login or me", () => {
     reLaunch(options) {
       calls.push({ method: "reLaunch", url: options.url });
     },
+    redirectTo(options) {
+      calls.push({ method: "redirectTo", url: options.url });
+    },
     switchTab(options) {
       calls.push({ method: "switchTab", url: options.url });
     },
@@ -40,18 +46,24 @@ test("navigation helper routes auth errors to login or me", () => {
   assert.equal(routeAuthError(new ApiError(403, "forbidden", null), "me"), true);
   assert.equal(routeAuthError(new ApiError(404, "missing", null)), false);
   navigateToLogin();
+  navigateToBook();
+  navigateToTranscripts();
+  redirectToBook();
+  redirectToTranscripts();
   relaunchHome();
   switchToHome();
-  switchToBook();
   switchToMe();
 
   assert.deepEqual(calls, [
     { method: "reLaunch", url: "/pages/login/index" },
     { method: "switchTab", url: "/pages/me/index" },
     { method: "navigateTo", url: "/pages/login/index" },
+    { method: "navigateTo", url: "/pages/book/index" },
+    { method: "navigateTo", url: "/pages/transcripts/index" },
+    { method: "redirectTo", url: "/pages/book/index" },
+    { method: "redirectTo", url: "/pages/transcripts/index" },
     { method: "reLaunch", url: "/pages/home/index" },
     { method: "switchTab", url: "/pages/home/index" },
-    { method: "switchTab", url: "/pages/book/index" },
     { method: "switchTab", url: "/pages/me/index" },
   ]);
   delete global.wx;
