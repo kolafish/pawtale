@@ -5,53 +5,262 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const {
+  flushAsyncWork,
   loadPageModule,
   mockModule,
   pageContext,
 } = require("./page-harness");
+const { storyViewData } = require("../pages/story/story-view-adapter.ts");
 
-function loadStoryPage({ largeText = false } = {}) {
+function source(utteranceId) {
+  return { utterance_id: utteranceId };
+}
+
+function section(id, sortOrder, utteranceIds, patch = {}) {
+  return {
+    id,
+    title: `小节 ${id}`,
+    status: "active",
+    sort_order: sortOrder,
+    material_count: utteranceIds.length,
+    materials: utteranceIds.map((utteranceId) => ({ utterance_id: utteranceId })),
+    ...patch,
+  };
+}
+
+function chapter(id, sortOrder, utteranceIds, sections, patch = {}) {
+  return {
+    id,
+    title: `章节 ${id}`,
+    sort_order: sortOrder,
+    include_in_book: true,
+    source_refs: utteranceIds.map(source),
+    sections,
+    pending_source_count: 0,
+    removed_source_count: 0,
+    ...patch,
+  };
+}
+
+function image(id, patch = {}) {
+  return {
+    id,
+    status: "ready",
+    source_utterance_id: null,
+    source_chapter_id: null,
+    updated_at: "2026-08-03T00:00:00Z",
+    ...patch,
+  };
+}
+
+function snapshot(patch = {}) {
+  const firstChapter = chapter(
+    "chapter-1",
+    1,
+    ["utterance-1", "utterance-2"],
+    [
+      section("section-1", 1, ["utterance-1"]),
+      section("section-archived", 2, ["utterance-2"], { status: "archived" }),
+    ],
+  );
+  const secondChapter = chapter(
+    "chapter-2",
+    2,
+    ["utterance-3"],
+    [section("section-2", 1, ["utterance-3"])],
+    { include_in_book: false },
+  );
+  return {
+    identity: {
+      active_project_id: "project-1",
+      active_project: {
+        id: "project-1",
+        title: "余仲尤的回忆录",
+        created_at: "2026-08-01T00:00:00Z",
+        updated_at: "2026-08-02T00:00:00Z",
+      },
+    },
+    plan: {
+      updated_at: "2026-08-03T00:00:00Z",
+      chapters: [secondChapter, firstChapter],
+    },
+    drafts_by_chapter_id: {
+      "chapter-1": {
+        status: "confirmed",
+        pending_source_count: 0,
+        removed_source_count: 0,
+        latest_version: { content: "已经写好的章节正文" },
+        updated_at: "2026-08-04T00:00:00Z",
+      },
+      "chapter-2": null,
+    },
+    output: null,
+    image_assets: {
+      items: [
+        image("section-image", { source_utterance_id: "utterance-1" }),
+        image("chapter-image", { source_chapter_id: "chapter-1" }),
+        image("unsectioned-image", { source_utterance_id: "utterance-2" }),
+        image("pending-image", { status: "pending", source_chapter_id: "chapter-1" }),
+      ],
+    },
+    ...patch,
+  };
+}
+
+function progress(patch = {}) {
+  return {
+    utterance_count: 6,
+    snapshot: {
+      valid_utterance_count: 5,
+      pending_utterance_count: 2,
+    },
+    ...patch,
+  };
+}
+
+function loadStoryPage({
+  bookSnapshot = snapshot(),
+  voiceProgress = progress(),
+  snapshotError = null,
+  largeText = false,
+} = {}) {
+  const calls = { book: 0, login: 0, progressProjectIds: [] };
   mockModule("../services/accessibility-settings.ts", {
     accessibilityPageClass: (baseClass) => largeText ? `${baseClass} large-text` : baseClass,
   });
-  return loadPageModule("../pages/story/index.ts");
+  mockModule("../services/memoir-snapshot-api.ts", {
+    getMemoirBookSnapshot: async () => {
+      if (snapshotError) {
+        throw snapshotError;
+      }
+      return bookSnapshot;
+    },
+  });
+  mockModule("../services/memoir-voice-session-api.ts", {
+    getMemoirVoiceProgress: async (projectId) => {
+      calls.progressProjectIds.push(projectId);
+      return voiceProgress;
+    },
+  });
+  mockModule("../services/navigation.ts", {
+    CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
+    isAuthError: (error) => error?.statusCode === 401 || error?.statusCode === 403,
+    navigateToLogin: () => { calls.login += 1; },
+    switchToBook: () => { calls.book += 1; },
+  });
+  return { ...loadPageModule("../pages/story/index.ts"), calls };
 }
 
-test("story preview is registered without replacing the current tab bar", () => {
+test("story page is registered without replacing the current tab bar", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
 
   assert.ok(appJson.pages.includes("pages/story/index"));
   assert.ok(!appJson.tabBar.list.some((item) => item.pagePath === "pages/story/index"));
 });
 
-test("story preview starts with a representative typed life tree", () => {
-  const { page } = loadStoryPage();
+test("story adapter maps current chapters, outcomes and existing image ownership", () => {
+  const view = storyViewData(snapshot(), progress());
 
-  assert.equal(page.data.memoir.title, "一路走来的故事");
-  assert.equal(page.data.chapters.length, 5);
-  assert.equal(page.data.chapters[0].expanded, true);
-  assert.equal(page.data.chapters[0].sections[1].videoCount, 1);
-  assert.equal(page.data.chapters[1].expanded, false);
+  assert.equal(view.memoir.title, "余仲尤的回忆录");
+  assert.equal(view.memoir.progressValue, "1/1 章");
+  assert.equal(view.memoir.progressDetail, "已经成稿");
+  assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
+  assert.equal(view.unassignedMaterialText, "还有 2 段讲述等待整理");
+  assert.deepEqual(view.chapters.map((item) => item.id), ["chapter-1", "chapter-2"]);
+  assert.equal(view.chapters[0].sections.length, 1);
+  assert.equal(view.chapters[0].sections[0].imageCount, 1);
+  assert.equal(view.chapters[0].imageCount, 2);
+  assert.equal(view.chapters[0].videoCount, 0);
+  assert.equal(view.chapters[1].outcomeText, "暂不入书");
+  assert.equal(view.chapters[0].expanded, true);
+  assert.equal(view.chapters[1].expanded, false);
 });
 
-test("story preview expands and collapses only the selected chapter", () => {
-  const { page } = loadStoryPage();
-  const context = pageContext(page);
-  const beforeSecondChapter = context.data.chapters[1];
+test("story adapter falls back to current source assignments when progress has no snapshot", () => {
+  const view = storyViewData(snapshot(), { utterance_count: 5 });
 
-  page.toggleChapter.call(context, {
-    currentTarget: { dataset: { id: "childhood" } },
-  });
-
-  assert.equal(context.data.chapters[0].expanded, false);
-  assert.equal(context.data.chapters[1], beforeSecondChapter);
+  assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
+  assert.equal(view.unassignedMaterialText, "还有 2 段讲述等待整理");
 });
 
-test("story preview follows the shared large text preference", () => {
-  const { page } = loadStoryPage({ largeText: true });
-  const context = pageContext(page);
+test("story adapter handles a memoir before chapters have been generated", () => {
+  const view = storyViewData(snapshot({ plan: null, drafts_by_chapter_id: {} }), progress());
 
-  page.onShow.call(context);
+  assert.equal(view.memoir.progressValue, "0 章");
+  assert.equal(view.memoir.progressDetail, "等待整理");
+  assert.equal(view.chapters.length, 0);
+  assert.equal(view.overview.summaryText, "0 章 · 0 小节 · 5 段讲述");
+});
+
+test("story page loads the active project and preserves a user's expanded chapters", async () => {
+  const { page, calls } = loadStoryPage({ largeText: true });
+  const context = pageContext(page);
+  global.wx = {};
+
+  await page.onShow.call(context);
 
   assert.match(context.data.pageClass, /large-text/);
+  assert.deepEqual(calls.progressProjectIds, ["project-1"]);
+  assert.equal(context.data.projectId, "project-1");
+  assert.equal(context.data.chapters[0].expanded, true);
+
+  page.toggleChapter.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+  assert.equal(context.data.chapters[0].expanded, false);
+
+  await page.loadStory.call(context);
+  assert.equal(context.data.chapters[0].expanded, false);
+});
+
+test("story page does not request progress before a memoir exists", async () => {
+  const bookSnapshot = snapshot({
+    identity: { active_project_id: "", active_project: null },
+    plan: null,
+    drafts_by_chapter_id: {},
+  });
+  const { page, calls } = loadStoryPage({ bookSnapshot });
+  const context = pageContext(page);
+
+  await page.loadStory.call(context);
+
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.data.loading, false);
+  assert.deepEqual(calls.progressProjectIds, []);
+});
+
+test("story page exposes login state after an authentication error", async () => {
+  const { page } = loadStoryPage({ snapshotError: { statusCode: 401 } });
+  const context = pageContext(page);
+
+  await page.loadStory.call(context);
+
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.error, "");
+});
+
+test("story page reuses the existing book, record and chapter destinations", async () => {
+  const { page, calls } = loadStoryPage();
+  const context = pageContext(page, { projectId: "project-1" });
+  const switched = [];
+  const navigated = [];
+  global.wx = {
+    switchTab: ({ url }) => switched.push(url),
+    navigateTo: ({ url }) => navigated.push(url),
+  };
+
+  page.openBook.call(context);
+  page.openTranscripts.call(context);
+  page.openChapter.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+  page.openLogin.call(context);
+  await flushAsyncWork();
+
+  assert.equal(calls.book, 1);
+  assert.equal(calls.login, 1);
+  assert.deepEqual(switched, ["/pages/transcripts/index"]);
+  assert.deepEqual(navigated, [
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
+  ]);
 });
