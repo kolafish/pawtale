@@ -70,6 +70,7 @@ function loadPageModule(relativePath) {
       global.Page = previousPage;
     }
   }
+  page?.__initializePageRuntime?.call(page);
   return { mod, page };
 }
 

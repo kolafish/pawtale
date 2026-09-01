@@ -6,7 +6,7 @@ import {
   accessibilityPageClass,
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   applyMemoirBookRevisionProposal,
   dismissMemoirBookRevisionProposal,
@@ -296,8 +296,8 @@ function finalizeTargetRevision(
 }
 
 definePage<RevisionWorkbenchData>()({
-  feedbackPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
-  draftPoller: new PollingTimer(FEEDBACK_POLL_INTERVAL_MS),
+  feedbackPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
+  draftPoller: pageRuntime(() => new PollingTimer(FEEDBACK_POLL_INTERVAL_MS)),
   feedbackBaselineUpdatedAt: "",
   revisionProposal: null as MemoirBookRevisionProposal | null,
   wholeChapterCache: {} as Partial<Record<PreviewVersion, WholeChapterView[]>>,

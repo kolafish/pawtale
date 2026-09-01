@@ -523,13 +523,6 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
   });
   const context = pageContext(page);
   context.pageActive = true;
-  context.feedbackPoller = {
-    cancel() {},
-    schedule(callback) {
-      scheduledFeedbackPoll = callback;
-      return true;
-    },
-  };
   await page.onLoad.call(context, {
     scope: "chapter_section",
     projectId: "project-1",
@@ -537,6 +530,13 @@ test("section revision uses the shared plan, preview, and apply workbench", asyn
     sectionId: "section-1",
     sectionTitle: "旧校舍",
   });
+  context.feedbackPoller = {
+    cancel() {},
+    schedule(callback) {
+      scheduledFeedbackPoll = callback;
+      return true;
+    },
+  };
 
   await page.submitFeedback.call(context, {
     detail: { value: "保留事实，把语气写得更平实。" },

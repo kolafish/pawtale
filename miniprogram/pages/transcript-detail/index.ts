@@ -1,4 +1,4 @@
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
@@ -30,10 +30,12 @@ import {
 } from "./transcript-detail-edit-workflow";
 
 definePage<TranscriptDetailData>()({
-  audioPlayback: new AudioPlaybackController(),
+  audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   loadToken: 0,
   voiceEditRequestToken: 0,
-  offlineAsrPoller: new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
+  offlineAsrPoller: pageRuntime(
+    () => new PollingTimer(OFFLINE_ASR_POLL_INTERVAL_MS),
+  ),
   offlineAsrPollToken: 0,
   offlineAsrPollAttempts: 0,
 

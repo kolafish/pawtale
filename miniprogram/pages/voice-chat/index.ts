@@ -7,7 +7,7 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
@@ -107,16 +107,16 @@ const SESSION_GOAL_VALUES: readonly MemoirSessionGoal[] = ["open_narration", "bo
 const SPEAKER_ROLE_VALUES: readonly MemoirSpeakerRole[] = ["narrator", "interviewer"];
 
 definePage<VoiceChatData>()({
-  audioPlayback: new AudioPlaybackController(),
-  voiceStreaming: new StreamingVoiceController(),
-  assistantBargeInMonitor: new VoiceBargeInMonitor(),
+  audioPlayback: pageRuntime(() => new AudioPlaybackController()),
+  voiceStreaming: pageRuntime(() => new StreamingVoiceController()),
+  assistantBargeInMonitor: pageRuntime(() => new VoiceBargeInMonitor()),
   assistantTurnRuntime: null as VoiceAssistantTurnRuntime | null,
   assistantTurnQueue: [] as AssistantTurnQueueItem[],
   assistantTurnQueueRunning: false,
   assistantAudioPrepareCount: 0,
   assistantStreamLineId: "",
   ttsPlayToken: 0,
-  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
+  ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   ttsRequestSerial: 0,
   noAnswerPromptInFlight: false,
   noAnswerPromptRequestSerial: 0,

@@ -9,10 +9,52 @@ type PageDefinition<TData extends object, TDefinition extends { data: TData }> =
   data: TData;
 } & TDefinition & ThisType<PageContext<TData, TDefinition>>;
 
+type PageRuntimeFactory = () => unknown;
+
+const pageRuntimeFactories = new WeakMap<object, PageRuntimeFactory>();
+
+export function pageRuntime<T>(factory: () => T): T {
+  const placeholder = {};
+  pageRuntimeFactories.set(placeholder, factory);
+  return placeholder as T;
+}
+
 export function definePage<TData extends object>() {
   return function <TDefinition extends { data: TData }>(
     definition: PageDefinition<TData, TDefinition>,
   ): void {
-    Page<TData, PageMethods<TDefinition>>(definition);
+    const registeredDefinition = { ...definition };
+    const registeredRecord = registeredDefinition as unknown as Record<string, unknown>;
+    const runtimeFields: Array<[string, PageRuntimeFactory]> = [];
+    for (const [key, value] of Object.entries(definition)) {
+      const factory = value && typeof value === "object"
+        ? pageRuntimeFactories.get(value)
+        : undefined;
+      if (!factory) {
+        continue;
+      }
+      runtimeFields.push([key, factory]);
+      delete registeredRecord[key];
+    }
+    if (runtimeFields.length) {
+      const originalOnLoad = registeredRecord.onLoad;
+      const initializePageRuntime = function (this: Record<string, unknown>) {
+        runtimeFields.forEach(([key, factory]) => {
+          this[key] = factory();
+        });
+      };
+      registeredRecord.__initializePageRuntime = initializePageRuntime;
+      registeredRecord.onLoad = function (
+        this: Record<string, unknown>,
+        ...args: unknown[]
+      ) {
+        initializePageRuntime.call(this);
+        if (typeof originalOnLoad === "function") {
+          return originalOnLoad.apply(this, args);
+        }
+        return undefined;
+      };
+    }
+    Page<TData, PageMethods<TDefinition>>(registeredDefinition);
   };
 }

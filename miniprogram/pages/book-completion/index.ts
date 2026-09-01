@@ -11,7 +11,7 @@ import {
   accessibilityPageClass,
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirBookReviewJob,
@@ -433,7 +433,7 @@ export function bookCompletionViewPatch(
 }
 
 definePage<BookCompletionData>()({
-  overviewPoller: new PollingTimer(POLL_INTERVAL_MS),
+  overviewPoller: pageRuntime(() => new PollingTimer(POLL_INTERVAL_MS)),
   pageVisible: false,
 
   data: {
