@@ -12,7 +12,6 @@ import {
   type VoiceChatConnectionStatus,
 } from "../../services/memoir-streaming-asr";
 import { createMemoirVoiceNoAnswerPrompt } from "../../services/memoir-voice-session-api";
-import { redirectToTranscripts } from "../../services/navigation";
 import { StreamingVoiceController } from "../../services/streaming-voice-controller";
 import {
   canRequestFollowUp,
@@ -98,6 +97,7 @@ export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   stopCompletionIssueRefresh(): void;
   generateFollowUp(regenerate?: boolean): Promise<void>;
   persistPendingVoiceClose(reason: "hide" | "unload" | "connection_error"): void;
+  startStoryGrowthWatch(): void;
 }
 
 type VoiceChatRecordingRuntimeContext = VoiceChatRecordingRuntimeHost
@@ -418,17 +418,13 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         });
         return;
       }
-      wx.showModal({
-        title: "本次讲述已保存",
-        content: "可以到讲述记录里查看和整理文字。",
-        confirmText: "查看记录",
-        cancelText: "留在本页",
-        success: (result) => {
-          if (result.confirm) {
-            redirectToTranscripts();
-          }
-        },
+      applyVoiceChatDataPatch(this, {
+        storyGrowthNoticeState: "pending",
+        storyGrowthNoticeTitle: "讲述已经保存",
+        storyGrowthNoticeDetail: "小余正在后台把它整理进故事树，您可以先离开。",
+        storyGrowthNoticeActionText: "先返回",
       });
+      this.startStoryGrowthWatch();
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");

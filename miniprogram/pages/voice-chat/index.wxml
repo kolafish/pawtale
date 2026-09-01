@@ -20,6 +20,21 @@
     <text class="topic-title">{{topicTitleText}}</text>
   </view>
 
+  <view
+    wx:if="{{storyGrowthNoticeState !== 'hidden'}}"
+    class="story-growth-bubble {{storyGrowthNoticeState}}"
+    aria-live="polite"
+  >
+    <view class="story-growth-mark" aria-hidden="true"></view>
+    <view class="story-growth-copy">
+      <text class="story-growth-title">{{storyGrowthNoticeTitle}}</text>
+      <text class="story-growth-detail">{{storyGrowthNoticeDetail}}</text>
+    </view>
+    <button class="story-growth-action" bindtap="handleStoryGrowthNoticeAction">
+      {{storyGrowthNoticeActionText}}
+    </button>
+  </view>
+
   <view wx:if="{{showHumanRecordActions}}" class="human-record-panel">
     <view
       class="{{interviewerRecordButtonClass}}"

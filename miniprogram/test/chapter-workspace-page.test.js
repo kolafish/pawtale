@@ -215,6 +215,7 @@ function loadWorkspacePage({
     }),
     regenerateMemoirChapterSections: async () => {},
     mergeMemoirChapterSections: async () => {},
+    renameMemoirChapterSection: async () => {},
     cancelMemoirChapterSectionRegenerationJob: async () => {},
     placeMemoirChapterMaterial: async () => {},
     closeMemoirCompletionIssue: async () => {},
@@ -637,6 +638,40 @@ test("chapter workspace expands materials under their section", async () => {
     context.data.sectionViews[0].visibleMaterials[0].text,
     "十八岁那年，我第一次离开家。",
   );
+});
+
+test("chapter workspace renames a section through the existing section update API", async () => {
+  const { toasts } = installWx({ editableContent: "出发前的准备" });
+  const calls = [];
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      renameMemoirChapterSection: async (...args) => calls.push(args),
+    },
+  });
+  const context = pageContext(page);
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
+
+  await page.renameSection.call(context, {
+    currentTarget: {
+      dataset: {
+        id: "section-1",
+        title: "离家前的准备",
+        version: "1",
+      },
+    },
+  });
+
+  assert.deepEqual(calls, [[
+    "project-1",
+    "section-1",
+    "出发前的准备",
+    1,
+  ]]);
+  assert.equal(toasts.at(-1).title, "小节名称已更新");
+  assert.equal(context.data.operationKind, "");
 });
 
 test("confirmed chapter can reopen its structure and merge with the previous section", async () => {

@@ -26,6 +26,13 @@
     </view>
 
     <block wx:else>
+    <view wx:if="{{growthNoticeText}}" class="growth-notice" aria-live="polite">
+      <view class="growth-notice-mark" aria-hidden="true"></view>
+      <view class="growth-notice-copy">
+        <text class="growth-notice-title">故事树长出了新内容</text>
+        <text class="growth-notice-detail">{{growthNoticeText}}</text>
+      </view>
+    </view>
     <view
       class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"
       bindtap="openBook"
@@ -80,7 +87,7 @@
         wx:for="{{chapters}}"
         wx:for-index="chapterIndex"
         wx:key="id"
-        class="chapter-block"
+        class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}}"
       >
         <view class="chapter-decoration" aria-hidden="true"></view>
         <view class="chapter-branch" aria-hidden="true"></view>
@@ -126,7 +133,7 @@
             wx:for="{{item.sections}}"
             wx:for-item="section"
             wx:key="id"
-            class="section-row ui-pressable"
+            class="section-row ui-pressable {{section.highlighted ? 'is-new-growth' : ''}}"
             data-chapter-id="{{item.id}}"
             data-section-id="{{section.id}}"
             bindtap="openChapter"

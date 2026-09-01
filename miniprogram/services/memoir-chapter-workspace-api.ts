@@ -101,6 +101,27 @@ export function mergeMemoirChapterSections(
   );
 }
 
+export function renameMemoirChapterSection(
+  projectId: string,
+  sectionId: string,
+  title: string,
+  expectedVersion: number,
+): Promise<unknown> {
+  return memoirRequest<unknown>(
+    memoirNarrativeProjectPath(
+      projectId,
+      `/sections/${encodeURIComponent(sectionId)}`,
+    ),
+    {
+      method: "PATCH",
+      data: {
+        title,
+        expected_version: expectedVersion,
+      },
+    },
+  );
+}
+
 export function getMemoirChapterSectionRegenerationJob(
   projectId: string,
   chapterId: string,
