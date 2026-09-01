@@ -1,4 +1,4 @@
-export type StoryChapterTone = "clay" | "amber" | "sage" | "blue" | "stone";
+export type StoryChapterState = "settled" | "attention" | "draft" | "muted";
 
 export interface StoryMemoirSummaryView {
   title: string;
@@ -25,7 +25,7 @@ export interface StoryChapterView {
   outcomeText: string;
   imageCount: number;
   videoCount: number;
-  tone: StoryChapterTone;
+  state: StoryChapterState;
   expanded: boolean;
   sections: StorySectionView[];
 }
@@ -41,6 +41,7 @@ export interface StoryViewData {
   overview: StoryOverviewView;
   chapters: StoryChapterView[];
   unassignedMaterialText: string;
+  unassignedMaterialDetail: string;
   unassignedImageCount: number;
   unassignedVideoCount: number;
 }
@@ -51,9 +52,9 @@ export function emptyStoryViewData(): StoryViewData {
       title: "我的故事",
       createdText: "",
       updatedText: "",
-      progressLabel: "成书进度",
-      progressValue: "0 章",
-      progressDetail: "等待整理",
+      progressLabel: "书稿",
+      progressValue: "尚未生成",
+      progressDetail: "开始整理",
     },
     overview: {
       title: "人生总览",
@@ -61,7 +62,8 @@ export function emptyStoryViewData(): StoryViewData {
       outcomeText: "还没有正文",
     },
     chapters: [],
-    unassignedMaterialText: "还没有待整理的讲述",
+    unassignedMaterialText: "还没有讲述",
+    unassignedMaterialDetail: "讲下第一段回忆后，它会从这里长成故事",
     unassignedImageCount: 0,
     unassignedVideoCount: 0,
   };
