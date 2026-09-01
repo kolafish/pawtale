@@ -70,7 +70,7 @@ definePage<ChapterWorkspacePageData>()({
   workspaceLoadSequence: 0,
   chapterPreparationLoadSequence: 0,
   sectionRegenerationLoadSequence: 0,
-  pendingSectionId: "",
+  sectionFocusId: "",
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -78,6 +78,8 @@ definePage<ChapterWorkspacePageData>()({
     error: "",
     projectId: "",
     chapterId: "",
+    focusedSectionId: "",
+    focusedSectionTitle: "",
     workspace: null,
     nextAction: LOADING_NEXT_ACTION,
     readinessTitle: "正在读取本章",
@@ -121,7 +123,7 @@ definePage<ChapterWorkspacePageData>()({
   async onLoad(query: PageQuery = {}) {
     const projectId = queryParam(query, "projectId");
     const chapterId = queryParam(query, "chapterId");
-    this.pendingSectionId = queryParam(query, "sectionId");
+    this.sectionFocusId = queryParam(query, "sectionId");
     this.setData({
       projectId,
       chapterId,
@@ -353,36 +355,40 @@ definePage<ChapterWorkspacePageData>()({
           : summary.active_issue,
       },
     };
-    const targetSectionId = this.pendingSectionId;
-    const hasTargetSection = Boolean(
-      targetSectionId
-      && viewWorkspace.sections.some((section) => section.id === targetSectionId),
+    const focusedSectionId = this.sectionFocusId;
+    const hasFocusedSection = Boolean(
+      focusedSectionId
+      && viewWorkspace.sections.some((section) => section.id === focusedSectionId),
     );
-    const expandedSectionIds = hasTargetSection
+    const expandedSectionIds = hasFocusedSection
       ? {
         ...this.data.expandedSectionIds,
-        [targetSectionId]: true,
+        [focusedSectionId]: true,
       }
       : this.data.expandedSectionIds;
-    setPageNavigationTitle(viewWorkspace.chapter_title || "本章正文");
-    this.setData(
-      {
-        workspace: viewWorkspace,
-        ...chapterWorkspaceViewPatch(
-          viewWorkspace,
-          expandedSectionIds,
-        ),
-        expandedSectionIds,
-        loading: false,
-        error: "",
-      },
-      () => {
-        if (hasTargetSection && this.pendingSectionId === targetSectionId) {
-          this.pendingSectionId = "";
-          scrollToSection(`#chapter-section-${targetSectionId}`);
-        }
-      },
+    const viewPatch = chapterWorkspaceViewPatch(
+      viewWorkspace,
+      expandedSectionIds,
     );
+    const focusedSection = hasFocusedSection
+      ? viewPatch.sectionViews.find((section) => section.id === focusedSectionId)
+      : undefined;
+    setPageNavigationTitle(
+      focusedSection?.title || viewWorkspace.chapter_title || "本章正文",
+    );
+    this.setData({
+      workspace: viewWorkspace,
+      ...viewPatch,
+      focusedSectionId: focusedSection?.id || "",
+      focusedSectionTitle: focusedSection?.title || "",
+      sectionViews: focusedSection
+        ? [{ ...focusedSection, expanded: true }]
+        : viewPatch.sectionViews,
+      sectionStructureSummary: focusedSection?.metaText || viewPatch.sectionStructureSummary,
+      expandedSectionIds,
+      loading: false,
+      error: "",
+    });
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }

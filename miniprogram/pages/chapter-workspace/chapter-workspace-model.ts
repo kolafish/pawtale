@@ -233,6 +233,8 @@ export interface ChapterWorkspacePageData {
   error: string;
   projectId: string;
   chapterId: string;
+  focusedSectionId: string;
+  focusedSectionTitle: string;
   workspace: MemoirChapterWorkspace | null;
   nextAction: ChapterNextAction;
   readinessTitle: string;
