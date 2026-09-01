@@ -568,11 +568,7 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     test_db.add(job)
     await test_db.flush()
 
-    result = await story_tree_growth.grow_story_tree(
-        test_db,
-        job=job,
-        session=session,
-    )
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
 
     created_section = await test_db.scalar(
         select(MemoirSection).where(
