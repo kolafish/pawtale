@@ -161,13 +161,11 @@ definePage<StoryPageData>()({
     const chapterId = (
       datasetString(event, "chapterId") || datasetString(event, "id")
     );
-    const sectionId = datasetString(event, "sectionId");
     wx.navigateTo({
       url: pageUrl("/pages/image-assets/index", {
         projectId: this.data.projectId,
-        scope: sectionId ? "section" : (chapterId ? "chapter" : "unassigned"),
+        scope: chapterId ? "chapter" : "unassigned",
         chapterId,
-        sectionId,
       }),
     });
   },

@@ -127,6 +127,7 @@ definePage<ChapterWorkspacePageData>()({
     this.setData({
       projectId,
       chapterId,
+      suggestionsExpanded: Boolean(this.sectionFocusId),
     });
     if (!projectId || !chapterId) {
       this.setData({ loading: false, error: "缺少章节信息" });
@@ -308,9 +309,11 @@ definePage<ChapterWorkspacePageData>()({
       writeCachedMemoirChapterWorkspace(workspace);
       this.applyWorkspace(workspace);
       this.setData({
-        requiredIssues: issueCollection.issues.filter(
-          (issue) => issue.channel === "manual_review",
-        ).map((issue) => readableIssue(issue, workspace)),
+        requiredIssues: this.sectionFocusId
+          ? []
+          : issueCollection.issues.filter(
+            (issue) => issue.channel === "manual_review",
+          ).map((issue) => readableIssue(issue, workspace)),
         optionalIssues: issueCollection.issues.filter(
           (issue) => issue.channel === "interview",
         ).map((issue) => readableIssue(issue, workspace)),
@@ -405,6 +408,24 @@ definePage<ChapterWorkspacePageData>()({
     }
     wx.navigateTo({
       url: pageUrl("/pages/transcript-detail/index", { id: utteranceId }),
+    });
+  },
+
+  openFocusedSectionMedia() {
+    if (
+      !this.data.projectId
+      || !this.data.chapterId
+      || !this.data.focusedSectionId
+    ) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl("/pages/image-assets/index", {
+        projectId: this.data.projectId,
+        scope: "section",
+        chapterId: this.data.chapterId,
+        sectionId: this.data.focusedSectionId,
+      }),
     });
   },
 

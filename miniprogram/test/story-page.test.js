@@ -337,11 +337,6 @@ test("story page reuses the existing book, record and chapter destinations", asy
   page.openMedia.call(context, {
     currentTarget: { dataset: { id: "chapter-1" } },
   });
-  page.openMedia.call(context, {
-    currentTarget: {
-      dataset: { chapterId: "chapter-1", sectionId: "section-1" },
-    },
-  });
   page.openMedia.call(context, { currentTarget: { dataset: {} } });
   page.openLogin.call(context);
   await flushAsyncWork();
@@ -354,7 +349,6 @@ test("story page reuses the existing book, record and chapter destinations", asy
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
     "/pages/image-assets/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
-    "/pages/image-assets/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
     "/pages/image-assets/index?projectId=project-1&scope=unassigned",
   ]);
 });
