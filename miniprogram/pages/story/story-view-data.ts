@@ -40,6 +40,7 @@ export interface StoryViewData {
   memoir: StoryMemoirSummaryView;
   overview: StoryOverviewView;
   chapters: StoryChapterView[];
+  unassignedMaterialTitle: string;
   unassignedMaterialText: string;
   unassignedMaterialDetail: string;
   unassignedImageCount: number;
@@ -62,6 +63,7 @@ export function emptyStoryViewData(): StoryViewData {
       outcomeText: "还没有正文",
     },
     chapters: [],
+    unassignedMaterialTitle: "从一段讲述开始",
     unassignedMaterialText: "还没有讲述",
     unassignedMaterialDetail: "讲下第一段回忆后，它会从这里长成故事",
     unassignedImageCount: 0,

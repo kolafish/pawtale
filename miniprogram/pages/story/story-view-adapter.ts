@@ -154,6 +154,28 @@ function progressCounts(
   };
 }
 
+function unassignedMaterialCopy(counts: { total: number; pending: number }) {
+  if (counts.pending) {
+    return {
+      unassignedMaterialTitle: "待归入故事的讲述",
+      unassignedMaterialText: `已经记录了 ${counts.pending} 段讲述`,
+      unassignedMaterialDetail: "小余会把它们整理成人生故事",
+    };
+  }
+  if (counts.total) {
+    return {
+      unassignedMaterialTitle: "全部讲述",
+      unassignedMaterialText: "所有讲述都已归入故事",
+      unassignedMaterialDetail: "继续讲下新的回忆，它们会在这里等待整理",
+    };
+  }
+  return {
+    unassignedMaterialTitle: "从一段讲述开始",
+    unassignedMaterialText: "还没有讲述",
+    unassignedMaterialDetail: "讲下第一段回忆后，它会从这里长成故事",
+  };
+}
+
 export function storyViewData(
   snapshot: MemoirBookSnapshot,
   progress: MemoirVoiceProgressResponse | null,
@@ -196,16 +218,7 @@ export function storyViewData(
       outcomeText: charCountText(bookCharCount(snapshot)),
     },
     chapters,
-    unassignedMaterialText: materialCounts.pending
-      ? `已经记录了 ${materialCounts.pending} 段讲述`
-      : (materialCounts.total ? "所有讲述都已归入故事" : "还没有讲述"),
-    unassignedMaterialDetail: materialCounts.pending
-      ? "小余会把它们整理成人生故事"
-      : (
-        materialCounts.total
-          ? "继续讲下新的回忆，它们会在这里等待整理"
-          : "讲下第一段回忆后，它会从这里长成故事"
-      ),
+    ...unassignedMaterialCopy(materialCounts),
     unassignedImageCount: media.unassignedImages.length,
     unassignedVideoCount: media.unassignedVideos.length,
   };

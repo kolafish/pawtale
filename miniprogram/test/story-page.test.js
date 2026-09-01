@@ -199,6 +199,7 @@ test("story adapter maps current chapters, outcomes and existing image ownership
   assert.equal(view.memoir.progressValue, "1 章");
   assert.equal(view.memoir.progressDetail, "已整理");
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
+  assert.equal(view.unassignedMaterialTitle, "待归入故事的讲述");
   assert.equal(view.unassignedMaterialText, "已经记录了 2 段讲述");
   assert.equal(view.unassignedMaterialDetail, "小余会把它们整理成人生故事");
   assert.deepEqual(view.chapters.map((item) => item.id), ["chapter-1", "chapter-2"]);
@@ -242,10 +243,29 @@ test("story adapter distinguishes an empty memoir from fully assigned narration"
     snapshot: { valid_utterance_count: 3, pending_utterance_count: 0 },
   }));
 
+  assert.equal(empty.unassignedMaterialTitle, "从一段讲述开始");
   assert.equal(empty.unassignedMaterialText, "还没有讲述");
   assert.match(empty.unassignedMaterialDetail, /第一段回忆/);
+  assert.equal(assigned.unassignedMaterialTitle, "全部讲述");
   assert.equal(assigned.unassignedMaterialText, "所有讲述都已归入故事");
   assert.match(assigned.unassignedMaterialDetail, /继续讲下新的回忆/);
+});
+
+test("story adapter uses semantic states instead of chapter position colors", () => {
+  const current = snapshot();
+  const firstChapter = current.plan.chapters.find((item) => item.id === "chapter-1");
+  firstChapter.pending_source_count = 1;
+  let view = storyViewData(current, progress());
+
+  assert.equal(view.chapters[0].state, "attention");
+  assert.equal(view.chapters[0].outcomeText, "有新内容");
+  assert.equal(view.memoir.progressDetail, "继续整理");
+
+  firstChapter.pending_source_count = 0;
+  current.drafts_by_chapter_id["chapter-1"].status = "draft";
+  view = storyViewData(current, progress());
+  assert.equal(view.chapters[0].state, "draft");
+  assert.equal(view.chapters[0].outcomeText, "已有正文");
 });
 
 test("story page loads the active project and preserves a user's expanded chapters", async () => {

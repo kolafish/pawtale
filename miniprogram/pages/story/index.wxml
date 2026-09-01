@@ -93,7 +93,7 @@
           hover-class="ui-subtle-action-hover"
           aria-role="button"
           aria-expanded="{{item.expanded}}"
-          aria-label="{{item.title}}，{{item.summaryText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
+          aria-label="{{item.title}}，{{item.summaryText}}，{{item.outcomeText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
         >
           <view class="chapter-copy">
             <text class="chapter-title">{{item.title}}</text>
@@ -180,7 +180,7 @@
       >
         <text class="unassigned-mark">＋</text>
         <view class="unassigned-copy">
-          <text class="unassigned-title">待归入故事的讲述</text>
+          <text class="unassigned-title">{{unassignedMaterialTitle}}</text>
           <text class="unassigned-meta">{{unassignedMaterialText}}</text>
           <text class="unassigned-detail">{{unassignedMaterialDetail}}</text>
         </view>
