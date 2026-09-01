@@ -23,7 +23,7 @@ from app.services.memoir.project_ai_preferences import (
     normalize_transcript_polish_level,
 )
 from app.services.memoir.utterance_editing_pipeline import (
-    schedule_material_organization_for_ready_utterance,
+    schedule_ready_utterance_background_work,
 )
 from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
@@ -146,23 +146,17 @@ async def run_transcript_correction_job(
                 message.transcript_version_id if message else None
             ),
         )
-        organization_job = (
-            None
-            if is_layered
-            else await schedule_material_organization_for_ready_utterance(
+        if not is_layered:
+            await schedule_ready_utterance_background_work(
                 db,
                 project_id=job.project_id,
                 utterance=utterance,
                 source="transcript_already_edited",
                 ai_model=ai_model,
             )
-        )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
-            result_json={
-                "utterance_id": utterance.id,
-                "organization_job_id": organization_job.id if organization_job else None,
-            },
+            result_json={"utterance_id": utterance.id},
             error_message="transcript already edited",
         )
     if message and raw_transcript_version_id and message.transcript_version_id != raw_transcript_version_id:
@@ -172,23 +166,17 @@ async def run_transcript_correction_job(
             utterance=utterance,
             transcript_version_id=message.transcript_version_id,
         )
-        organization_job = (
-            None
-            if is_layered
-            else await schedule_material_organization_for_ready_utterance(
+        if not is_layered:
+            await schedule_ready_utterance_background_work(
                 db,
                 project_id=job.project_id,
                 utterance=utterance,
                 source="transcript_version_already_changed",
                 ai_model=ai_model,
             )
-        )
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
-            result_json={
-                "utterance_id": utterance.id,
-                "organization_job_id": organization_job.id if organization_job else None,
-            },
+            result_json={"utterance_id": utterance.id},
             error_message="transcript version changed",
         )
 
@@ -246,17 +234,14 @@ async def run_transcript_correction_job(
         utterance=utterance,
         transcript_version_id=corrected_version.id,
     )
-    organization_job = (
-        None
-        if is_layered
-        else await schedule_material_organization_for_ready_utterance(
+    if not is_layered:
+        await schedule_ready_utterance_background_work(
             db,
             project_id=job.project_id,
             utterance=utterance,
             source="transcript_correction_succeeded",
             ai_model=ai_model,
         )
-    )
     return EditingJobResult(
         result_json={
             "utterance_id": utterance.id,
@@ -268,6 +253,5 @@ async def run_transcript_correction_job(
             "created_by": cleaned.created_by.value,
             "transcript_polish_level": polish_level.value,
             "polish_fallback": cleaned.provider is None,
-            "organization_job_id": organization_job.id if organization_job else None,
         }
     )

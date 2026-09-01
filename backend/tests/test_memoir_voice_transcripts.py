@@ -51,7 +51,6 @@ from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
 )
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
-from app.services.memoir.transcript_projection import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan,
     create_test_voice_transcript,
@@ -2236,13 +2235,7 @@ async def test_mobile_memoir_updates_voice_transcript_without_overwriting_raw(cl
             MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
         )
     )
-    assert organization_job is not None
-    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
-    assert organization_job.payload_json["source"] == "transcript_user_edited"
-    assert organization_job.payload_json["transcript_version_id"] == versions[-1].id
-    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
-        "我小时候住在外婆家。"
-    )
+    assert organization_job is None
 
 
 async def test_mobile_memoir_editing_included_transcript_marks_chapter_for_revision(client, test_db):
@@ -2492,11 +2485,7 @@ async def test_mobile_memoir_ai_cleanup_creates_corrected_version(client, test_d
             MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
         )
     )
-    assert organization_job is not None
-    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
-    assert organization_job.payload_json["source"] == "transcript_dialect_corrected"
-    assert organization_job.payload_json["ai_model"] == "deepseek"
-    assert organization_job.payload_json["transcript_version_id"] == version.id
+    assert organization_job is None
     topic_map_job = await test_db.scalar(
         select(MemoirEditingJob).where(
             MemoirEditingJob.job_type == MemoirEditingJobType.UPDATE_TOPIC_MAP.value

@@ -119,7 +119,8 @@ export interface MemoirVoiceModuleProgress {
 export type MemoirAutomationEventType =
   | "chapter_draft_generated"
   | "book_output_generated"
-  | "book_editorial_copy_generated";
+  | "book_editorial_copy_generated"
+  | "story_structure_updated";
 export type MemoirAutomationEventStatus = "pending" | "completed" | "failed" | "needs_review";
 
 export interface MemoirAutomationEvent {

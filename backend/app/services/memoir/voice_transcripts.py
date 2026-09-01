@@ -64,7 +64,7 @@ from app.services.memoir.section_roles import requires_user_assignment
 from app.services.memoir.sections import refresh_material_transcript_version
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
-    schedule_material_organization_for_ready_utterance,
+    schedule_ready_utterance_background_work,
 )
 
 
@@ -1073,7 +1073,7 @@ async def _apply_edited_text(
         content=content,
         transcript_version_id=version.id,
     )
-    await schedule_material_organization_for_ready_utterance(
+    await schedule_ready_utterance_background_work(
         db,
         project_id=utterance.voice_session.project_id,
         utterance=utterance,

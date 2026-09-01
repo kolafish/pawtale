@@ -45,7 +45,7 @@ from app.services.memoir.material_roles import (
 )
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
-    schedule_material_organization_for_ready_utterance,
+    schedule_ready_utterance_background_work,
 )
 
 
@@ -767,7 +767,7 @@ async def convert_interview_question_to_answer(
             )
 
     for utterance in utterances:
-        await schedule_material_organization_for_ready_utterance(
+        await schedule_ready_utterance_background_work(
             db,
             project_id=project_id,
             utterance=utterance,

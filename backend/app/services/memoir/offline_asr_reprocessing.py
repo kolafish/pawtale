@@ -49,7 +49,7 @@ from app.services.memoir.project_ai_preferences import (
 )
 from app.services.memoir.transcript_projection import current_utterance_text
 from app.services.memoir.utterance_editing_pipeline import (
-    schedule_material_organization_for_ready_utterance,
+    schedule_ready_utterance_background_work,
 )
 from app.services.memoir.voice_transcripts import (
     MemoirTranscriptCleanupContext,
@@ -337,7 +337,7 @@ async def _apply_corrected_reprocess_text(
         transcript_version_id=version.id,
     )
     project_id = utterance.voice_session.project_id
-    await schedule_material_organization_for_ready_utterance(
+    await schedule_ready_utterance_background_work(
         db,
         project_id=project_id,
         utterance=utterance,

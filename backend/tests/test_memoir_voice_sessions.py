@@ -8,10 +8,12 @@ from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirChatContentStatus,
     MemoirChatMessageRole,
+    MemoirEditingJobType,
 )
 from app.models.memoir import (
     AudioFile,
     MemoirChatMessage,
+    MemoirEditingJob,
     MemoirSectionMaterial,
     MemoirVoiceSession,
     MemoirVoiceUtterance,
@@ -258,6 +260,45 @@ async def test_mobile_memoir_voice_session_stop_and_failure_states(client):
     failed = failed_response.json()["session"]
     assert failed["status"] == "failed"
     assert failed["error_message"] == "provider disconnected"
+
+
+async def test_stopping_narration_schedules_one_session_story_growth_job(
+    client,
+    test_db,
+):
+    created = await create_test_voice_transcript(
+        client,
+        test_db,
+        "我退休以后第一次和老同事去爬山。",
+    )
+    session_id = created["session"]["id"]
+
+    first = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop",
+        json={},
+    )
+    second = await client.post(
+        f"/api/mobile/memoir/voice-sessions/{session_id}/stop",
+        json={},
+    )
+
+    jobs = list(
+        (
+            await test_db.scalars(
+                select(MemoirEditingJob).where(
+                    MemoirEditingJob.job_type
+                    == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+                    MemoirEditingJob.dedupe_key == f"organize_session:{session_id}",
+                )
+            )
+        ).all()
+    )
+    assert first.status_code == second.status_code == 200
+    assert len(jobs) == 1
+    assert jobs[0].payload_json == {
+        "voice_session_id": session_id,
+        "source": "voice_session_stopped",
+    }
 
 
 async def test_mobile_memoir_voice_no_answer_prompt_saves_assistant_message(client, test_db):

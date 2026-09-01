@@ -184,6 +184,7 @@ class MemoirAutomationEventType(str, Enum):
     CHAPTER_DRAFT_GENERATED = "chapter_draft_generated"
     BOOK_OUTPUT_GENERATED = "book_output_generated"
     BOOK_EDITORIAL_COPY_GENERATED = "book_editorial_copy_generated"
+    STORY_STRUCTURE_UPDATED = "story_structure_updated"
 
 
 class MemoirAutomationEventStatus(str, Enum):
