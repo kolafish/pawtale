@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  flushAsyncWork,
   mockMemoirApiModules,
   loadPageModule,
   mockModule,
@@ -70,7 +71,10 @@ function loadImageAssetsPage(apiExports = {}) {
     deleteMemoirBookImagePlacement: unmockedAsync("deleteMemoirBookImagePlacement"),
     deleteMemoirImageAsset: unmockedAsync("deleteMemoirImageAsset"),
     downloadMemoirImageAssetFile: unmockedAsync("downloadMemoirImageAssetFile"),
+    downloadMemoirShareVideoJob: unmockedAsync("downloadMemoirShareVideoJob"),
     getMemoirBookPlan: async () => null,
+    getMemoirBookSnapshot: unmockedAsync("getMemoirBookSnapshot"),
+    getMemoirShareVideoJob: unmockedAsync("getMemoirShareVideoJob"),
     listMemoirImageAssets: async () => ({
       items: [],
       total: 0,
@@ -83,6 +87,82 @@ function loadImageAssetsPage(apiExports = {}) {
   });
   return loadPageModule("../pages/image-assets/index.ts");
 }
+
+test("image assets page reuses its cards for one story section and its videos", async () => {
+  const asset = imageAsset("asset-section", {
+    source_utterance_id: "utterance-1",
+    title: "外婆家的院子",
+  });
+  const videoJobs = [];
+  const videoDownloads = [];
+  const navigationTitles = [];
+  const { page } = loadImageAssetsPage({
+    downloadMemoirImageAssetFile: async () => "/tmp/asset-section.jpg",
+    getMemoirBookSnapshot: async () => ({
+      identity: { active_project: { id: "project-1", title: "我的故事" } },
+      plan: {
+        chapters: [{
+          id: "chapter-1",
+          title: "童年",
+          sort_order: 0,
+          source_refs: [{ utterance_id: "utterance-1" }],
+          sections: [{
+            id: "section-1",
+            title: "外婆家的夏天",
+            sort_order: 0,
+            status: "active",
+            materials: [{
+              utterance_id: "utterance-1",
+              text: "每年夏天，我都会去外婆家住上一阵子。",
+            }],
+          }],
+        }],
+      },
+      image_assets: { items: [asset] },
+      share_video_counts: [{
+        utterance_id: "utterance-1",
+        count: 2,
+        job_ids: ["video-2", "video-1"],
+      }],
+    }),
+    getMemoirShareVideoJob: async (id) => {
+      videoJobs.push(id);
+      return { id, output: { download_url: `/videos/${id}` } };
+    },
+    downloadMemoirShareVideoJob: async (job) => {
+      videoDownloads.push(job.id);
+      return `/tmp/${job.id}.mp4`;
+    },
+  });
+  global.wx = {
+    setNavigationBarTitle({ title }) { navigationTitles.push(title); },
+  };
+  const context = pageContext(page);
+
+  page.onLoad.call(context, {
+    projectId: "project-1",
+    scope: "section",
+    chapterId: "chapter-1",
+    sectionId: "section-1",
+  });
+  await page.onShow.call(context);
+  await flushAsyncWork();
+
+  assert.equal(context.data.isStoryMaterialView, true);
+  assert.deepEqual(context.data.items.map((item) => item.id), ["asset-section"]);
+  assert.deepEqual(context.data.videos.map((item) => item.id), ["video-2", "video-1"]);
+  assert.deepEqual(navigationTitles, ["外婆家的夏天"]);
+
+  await page.previewVideo.call(context, {
+    currentTarget: { dataset: { id: "video-2" } },
+  });
+  assert.deepEqual(videoJobs, ["video-2"]);
+  assert.deepEqual(videoDownloads, ["video-2"]);
+  assert.equal(context.data.videoPreviewPath, "/tmp/video-2.mp4");
+
+  page.closeVideoPreview.call(context);
+  assert.equal(context.data.videoPreviewPath, "");
+});
 
 test("image assets page batches real thumbnails and previews the cached thumbnail", async () => {
   const assets = Array.from({ length: 9 }, (_, index) => imageAsset(`asset-${index + 1}`));

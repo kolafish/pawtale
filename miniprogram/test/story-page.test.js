@@ -314,8 +314,8 @@ test("story page reuses the existing book, record and chapter destinations", asy
   assert.deepEqual(navigated, [
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
-    "/pages/story-media/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
-    "/pages/story-media/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
-    "/pages/story-media/index?projectId=project-1&scope=unassigned",
+    "/pages/image-assets/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
+    "/pages/image-assets/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
+    "/pages/image-assets/index?projectId=project-1&scope=unassigned",
   ]);
 });
