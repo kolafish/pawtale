@@ -95,6 +95,7 @@ function snapshot(patch = {}) {
       "chapter-2": null,
     },
     output: null,
+    automation_events: { items: [], total: 0, limit: 8 },
     image_assets: {
       items: [
         image("section-image", { source_utterance_id: "utterance-1" }),
@@ -140,6 +141,7 @@ function loadStoryPage({
     login: 0,
     transcripts: 0,
     progressProjectIds: [],
+    acknowledgedEventIds: [],
   };
   mockModule("../services/accessibility-settings.ts", {
     accessibilityPageClass: (baseClass) => largeText ? `${baseClass} large-text` : baseClass,
@@ -158,6 +160,10 @@ function loadStoryPage({
     },
   });
   mockModule("../services/memoir-voice-session-api.ts", {
+    acknowledgeMemoirAutomationEvent: async (_projectId, eventId) => {
+      calls.acknowledgedEventIds.push(eventId);
+      return {};
+    },
     getMemoirVoiceProgress: async (projectId) => {
       calls.progressProjectIds.push(projectId);
       return voiceProgress;
@@ -287,6 +293,44 @@ test("story page loads the active project and preserves a user's expanded chapte
 
   await page.loadStory.call(context);
   assert.equal(context.data.chapters[0].expanded, false);
+});
+
+test("story page expands and acknowledges newly grown sections", async () => {
+  const growthEvent = {
+    id: "growth-1",
+    project_id: "project-1",
+    event_type: "story_structure_updated",
+    status: "completed",
+    utterance_ids: ["utterance-3"],
+    summary_text: "故事树新长出了 1 个新小节",
+    metadata_json: {
+      voice_session_id: "voice-1",
+      new_chapter_ids: [],
+      new_section_ids: ["section-2"],
+    },
+    created_at: "2026-09-01T00:00:00Z",
+    updated_at: "2026-09-01T00:00:00Z",
+  };
+  const { page, calls } = loadStoryPage({
+    bookSnapshot: snapshot({
+      automation_events: { items: [growthEvent], total: 1, limit: 8 },
+    }),
+  });
+  const context = pageContext(page);
+  const hidden = [];
+  global.wx = {
+    hideTabBarRedDot: ({ index }) => hidden.push(index),
+  };
+
+  await page.onShow.call(context);
+  await flushAsyncWork();
+
+  const chapter = context.data.chapters.find((item) => item.id === "chapter-2");
+  assert.equal(context.data.growthNoticeText, growthEvent.summary_text);
+  assert.equal(chapter.expanded, true);
+  assert.equal(chapter.sections[0].highlighted, true);
+  assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
+  assert.deepEqual(hidden, [1]);
 });
 
 test("story page does not request progress before a memoir exists", async () => {

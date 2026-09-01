@@ -166,7 +166,17 @@
               <text class="section-name">{{item.title}}</text>
               <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
             </view>
-            <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
+            <view class="section-heading-actions">
+              <text
+                wx:if="{{!item.requires_user_assignment}}"
+                class="section-rename-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+                data-id="{{item.id}}"
+                data-title="{{item.title}}"
+                data-version="{{item.version}}"
+                catchtap="renameSection"
+              >改名</text>
+              <text class="section-expand-mark">{{item.expanded ? "收起" : "查看"}}</text>
+            </view>
           </view>
           <view wx:else class="section-focus-heading">
             <view class="section-index"><text>{{item.indexText}}</text></view>
@@ -174,6 +184,14 @@
               <text class="section-name">本节内容</text>
               <text class="section-meta">{{item.typeText}} · {{item.metaText}}</text>
             </view>
+            <text
+              wx:if="{{!item.requires_user_assignment}}"
+              class="section-rename-action {{operationKind !== '' ? 'is-disabled' : ''}}"
+              data-id="{{item.id}}"
+              data-title="{{item.title}}"
+              data-version="{{item.version}}"
+              bindtap="renameSection"
+            >改名</text>
           </view>
 
           <block wx:if="{{item.expanded}}">

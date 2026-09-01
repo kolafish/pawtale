@@ -56,6 +56,7 @@ function sectionView(
     materialText: `${section.material_count || 0} 段讲述`,
     imageCount: media.sectionImages[section.id]?.length || 0,
     videoCount: media.sectionVideos[section.id]?.length || 0,
+    highlighted: false,
   };
 }
 
@@ -77,6 +78,7 @@ function chapterView(
     videoCount: media.chapterVideos[chapter.id]?.length || 0,
     state: outcome.state,
     expanded,
+    highlighted: false,
     sections,
   };
 }

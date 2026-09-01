@@ -108,6 +108,10 @@ export interface VoiceChatData {
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
   finishButtonText: string;
+  storyGrowthNoticeState: "hidden" | "pending" | "ready";
+  storyGrowthNoticeTitle: string;
+  storyGrowthNoticeDetail: string;
+  storyGrowthNoticeActionText: string;
   topModeLabel: string;
   topSubtitle: string;
   topicTitleText: string;
@@ -256,6 +260,10 @@ export function initialVoiceChatData(): VoiceChatData {
     canReconnect: false,
     canFinishAfterDisconnect: false,
     finishButtonText: "保存离开",
+    storyGrowthNoticeState: "hidden",
+    storyGrowthNoticeTitle: "",
+    storyGrowthNoticeDetail: "",
+    storyGrowthNoticeActionText: "",
     topModeLabel: "AI 访谈",
     topSubtitle: "小余陪您慢慢讲",
     topicTitleText: "这段回忆",

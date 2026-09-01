@@ -13,6 +13,7 @@ import { enqueueMemoirChapterPreparationJob } from "../../services/memoir-book-c
 import {
   getMemoirChapterWorkspace,
   placeMemoirChapterMaterial,
+  renameMemoirChapterSection,
   type MemoirSectionMaterialPlacementRequest,
 } from "../../services/memoir-chapter-workspace-api";
 import {
@@ -416,6 +417,40 @@ definePage<ChapterWorkspacePageData>()({
     wx.navigateTo({
       url: pageUrl("/pages/transcript-detail/index", { id: utteranceId }),
     });
+  },
+
+  async renameSection(
+    event: PageDatasetEvent<{ id?: string; title?: string; version?: string }>,
+  ) {
+    const sectionId = datasetString(event, "id");
+    const currentTitle = datasetString(event, "title");
+    const expectedVersion = Number(datasetString(event, "version"));
+    if (!sectionId || !expectedVersion || this.data.operationKind) {
+      return;
+    }
+    const title = await promptRequiredText("小节改名", currentTitle || "请输入小节名称");
+    if (!title || title === currentTitle || !this.beginOperation("rename_section", sectionId)) {
+      return;
+    }
+    try {
+      await renameMemoirChapterSection(
+        this.data.projectId,
+        sectionId,
+        title,
+        expectedVersion,
+      );
+      await this.loadPageData(true);
+      wx.showToast({ title: "小节名称已更新", icon: "success" });
+    } catch (error) {
+      if (routeAuthError(error, "login")) {
+        return;
+      }
+      this.setData({
+        error: error instanceof Error ? error.message : "小节改名失败",
+      });
+    } finally {
+      this.finishOperation("rename_section", sectionId);
+    }
   },
 
   openFocusedSectionMedia() {

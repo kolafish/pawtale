@@ -42,6 +42,7 @@ function loadHomePage({
   });
   mockMemoirApiModules({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
+    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
     getMemoirHomeSnapshot: async () => {
       const identity = await getMemoirIdentity();

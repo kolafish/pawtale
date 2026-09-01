@@ -3,6 +3,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  flushAsyncWork,
   mockMemoirApiModules,
   clearModule,
   loadPageModule,
@@ -62,6 +63,7 @@ function loadVoiceChatPage({
     listMemoirCompletionIssues: unmockedAsync("listMemoirCompletionIssues"),
     closeMemoirCompletionIssue: unmockedAsync("closeMemoirCompletionIssue"),
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
+    listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     stopMemoirVoiceSession: unmockedAsync("stopMemoirVoiceSession"),
     ...voiceApiExports,
   });
@@ -856,14 +858,11 @@ test("voice chat does not auto reconnect when recorder start is not ready", asyn
 test("voice chat finishSession ignores duplicate finish taps", async () => {
   let finishCalls = 0;
   let resolveFinish = () => {};
-  const modals = [];
-  const redirects = [];
+  const storyTabs = [];
   global.wx = {
-    redirectTo(options) {
-      redirects.push(options.url);
-    },
-    showModal(options) {
-      modals.push(options);
+    showTabBarRedDot() {},
+    switchTab(options) {
+      storyTabs.push(options.url);
     },
   };
   const page = loadVoiceChatPage({
@@ -882,6 +881,8 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
     voiceApiExports: {
       getMemoirVoiceSession: async () => ({
         session: {
+          id: "voice-1",
+          project_id: "project-1",
           status: "stopped",
           guidance_mode: "free_narration",
           current_guidance_module: "",
@@ -889,6 +890,21 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
         },
         messages: [],
         utterances: [],
+      }),
+      listMemoirAutomationEvents: async () => ({
+        items: [{
+          id: "growth-1",
+          project_id: "project-1",
+          event_type: "story_structure_updated",
+          status: "completed",
+          utterance_ids: [],
+          summary_text: "故事树新长出了 1 个新小节",
+          metadata_json: { voice_session_id: "voice-1" },
+          created_at: "2026-09-01T00:00:00Z",
+          updated_at: "2026-09-01T00:00:00Z",
+        }],
+        total: 1,
+        limit: 8,
       }),
     },
   });
@@ -917,9 +933,11 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.status, "closed");
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
-  assert.equal(modals.length, 1);
-  modals[0].success({ confirm: true, cancel: false });
-  assert.deepEqual(redirects, ["/pages/transcripts/index"]);
+  await flushAsyncWork();
+  assert.equal(context.data.storyGrowthNoticeState, "ready");
+  assert.equal(context.data.storyGrowthNoticeActionText, "去看看");
+  page.handleStoryGrowthNoticeAction.call(context);
+  assert.deepEqual(storyTabs, ["/pages/story/index"]);
 });
 
 test("book completion finish explains that the answer is already in its section", async () => {

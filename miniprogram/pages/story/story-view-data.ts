@@ -15,6 +15,7 @@ export interface StorySectionView {
   materialText: string;
   imageCount: number;
   videoCount: number;
+  highlighted: boolean;
 }
 
 export interface StoryChapterView {
@@ -27,6 +28,7 @@ export interface StoryChapterView {
   videoCount: number;
   state: StoryChapterState;
   expanded: boolean;
+  highlighted: boolean;
   sections: StorySectionView[];
 }
 
@@ -80,4 +82,28 @@ export function toggleStoryChapter(
       ? { ...chapter, expanded: !chapter.expanded }
       : chapter
   ));
+}
+
+export function highlightStoryGrowth(
+  chapters: StoryChapterView[],
+  chapterIds: string[],
+  sectionIds: string[],
+): StoryChapterView[] {
+  const highlightedChapters = new Set(chapterIds);
+  const highlightedSections = new Set(sectionIds);
+  return chapters.map((chapter) => {
+    const sections = chapter.sections.map((section) => ({
+      ...section,
+      highlighted: highlightedSections.has(section.id),
+    }));
+    const highlighted = highlightedChapters.has(chapter.id);
+    return {
+      ...chapter,
+      sections,
+      highlighted,
+      expanded: chapter.expanded
+        || highlighted
+        || sections.some((section) => section.highlighted),
+    };
+  });
 }

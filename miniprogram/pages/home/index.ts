@@ -12,7 +12,10 @@ import {
   memoirStoryTitle,
 } from "../../services/memoir-display-copy";
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
-import { createMemoirVoiceSession } from "../../services/memoir-voice-session-api";
+import {
+  createMemoirVoiceSession,
+  listMemoirAutomationEvents,
+} from "../../services/memoir-voice-session-api";
 import { getMemoirHomeSnapshot } from "../../services/memoir-snapshot-api";
 import {
   dismissHomeLaunch,
@@ -47,6 +50,7 @@ import {
   writeCachedMemoirHome,
 } from "../../stores/memoir-read-cache";
 import { userDisplayName } from "../../services/user-display-name";
+import { syncStoryTabRedDot } from "../../services/story-growth-notice";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
@@ -453,11 +457,17 @@ definePage<HomeData>()({
       }
       writeCachedMemoirHome(snapshot);
       applyHomeSnapshotData(this, snapshot);
+      if (snapshot.identity.active_project?.id) {
+        void this.refreshStoryGrowthNotice(snapshot.identity.active_project.id);
+      } else {
+        syncStoryTabRedDot([]);
+      }
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
         return;
       }
       if (isAuthError(error)) {
+        syncStoryTabRedDot([]);
         setHomeData(this, {
           needsLogin: true,
           userId: "",
@@ -486,6 +496,17 @@ definePage<HomeData>()({
       if (loadSequence === this.homeLoadSequence) {
         setHomeData(this, { loading: false });
       }
+    }
+  },
+
+  async refreshStoryGrowthNotice(projectId: string) {
+    try {
+      const response = await listMemoirAutomationEvents(projectId, 8);
+      if (this.data.projectId === projectId) {
+        syncStoryTabRedDot(response.items);
+      }
+    } catch (error) {
+      console.warn("refresh story growth notice failed", error);
     }
   },
 

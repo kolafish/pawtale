@@ -25,9 +25,14 @@ import { StreamingVoiceController } from "../../services/streaming-voice-control
 import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
   getMemoirVoiceSession,
+  listMemoirAutomationEvents,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
 } from "../../services/memoir-voice-session-api";
+import {
+  storyGrowthEvent,
+  syncStoryTabRedDot,
+} from "../../services/story-growth-notice";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -129,6 +134,7 @@ definePage<VoiceChatData>()({
   recordingStartPromise: null as Promise<boolean> | null,
   recordingStartGeneration: 0,
   completionIssueRuntime: null as VoiceChatCompletionIssueRuntime | null,
+  storyGrowthWatchToken: 0,
 
   data: initialVoiceChatData(),
 
@@ -203,6 +209,9 @@ definePage<VoiceChatData>()({
     this.pageSuspended = false;
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
+    if (wasSuspended && this.data.storyGrowthNoticeState === "pending") {
+      this.startStoryGrowthWatch();
+    }
     if (
       wasSuspended
       && this.data.voiceSessionId
@@ -242,6 +251,7 @@ definePage<VoiceChatData>()({
     this.followUpRequestSerial += 1;
     this.noAnswerPromptRequestSerial += 1;
     this.noAnswerPromptInFlight = false;
+    this.stopStoryGrowthWatch();
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose(reason);
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
@@ -258,6 +268,48 @@ definePage<VoiceChatData>()({
         recoveryNotice: "已暂停收音，返回后会恢复已保存的讲述记录",
       });
     }
+  },
+
+  stopStoryGrowthWatch() {
+    this.storyGrowthWatchToken += 1;
+  },
+
+  startStoryGrowthWatch() {
+    const token = ++this.storyGrowthWatchToken;
+    void this.watchStoryGrowth(token);
+  },
+
+  async watchStoryGrowth(token: number) {
+    for (let attempt = 0; attempt < 48; attempt += 1) {
+      if (token !== this.storyGrowthWatchToken || this.pageSuspended) {
+        return;
+      }
+      try {
+        const response = await listMemoirAutomationEvents(this.data.projectId, 8);
+        const event = storyGrowthEvent(response.items, this.data.voiceSessionId);
+        if (event) {
+          applyVoiceChatDataPatch(this, {
+            storyGrowthNoticeState: "ready",
+            storyGrowthNoticeTitle: "故事树长出了新内容",
+            storyGrowthNoticeDetail: event.summary_text || "本次讲述已经整理进故事树。",
+            storyGrowthNoticeActionText: "去看看",
+          });
+          syncStoryTabRedDot(response.items);
+          return;
+        }
+      } catch (error) {
+        console.warn("watch story growth failed", error);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    }
+  },
+
+  handleStoryGrowthNoticeAction() {
+    if (this.data.storyGrowthNoticeState === "ready") {
+      wx.switchTab({ url: "/pages/story/index" });
+      return;
+    }
+    wx.navigateBack({ delta: 1 });
   },
 
   refreshVoiceAuthorizationConsent() {
