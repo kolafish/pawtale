@@ -1,6 +1,8 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const {
   mockMemoirApiModules,
@@ -301,17 +303,26 @@ test("chapter workspace loads a chapter draft with visible small sections", asyn
   );
 });
 
-test("chapter workspace opens and locates a section selected from the story tree", async () => {
-  const { scrolls } = installWx();
-  const { page } = loadWorkspacePage();
+test("chapter workspace opens a focused section selected from the story tree", async () => {
+  const base = workspace();
+  const currentWorkspace = workspace({
+    sections: [
+      ...base.sections,
+      {
+        ...base.sections[0],
+        id: "section-2",
+        title: "抵达陌生城市",
+        sort_order: 1,
+        materials: [{
+          ...base.sections[0].materials[0],
+          utterance_id: "utterance-2",
+        }],
+      },
+    ],
+  });
+  const { navigationTitles, navigations, scrolls } = installWx();
+  const { page } = loadWorkspacePage({ currentWorkspace });
   const context = pageContext(page);
-  const renderCallbacks = [];
-  context.setData = function setDataAfterRender(patch, callback) {
-    this.data = { ...this.data, ...patch };
-    if (callback) {
-      renderCallbacks.push(callback);
-    }
-  };
 
   await page.onLoad.call(context, {
     projectId: "project-1",
@@ -319,15 +330,37 @@ test("chapter workspace opens and locates a section selected from the story tree
     sectionId: "section-1",
   });
 
+  assert.equal(context.data.focusedSectionId, "section-1");
+  assert.equal(context.data.focusedSectionTitle, "离家前的准备");
+  assert.equal(context.data.sectionViews.length, 1);
   assert.equal(context.data.sectionViews[0].expanded, true);
   assert.equal(context.data.expandedSectionIds["section-1"], true);
   assert.deepEqual(scrolls, []);
-  assert.equal(context.pendingSectionId, "section-1");
+  assert.deepEqual(navigationTitles, ["离家前的准备"]);
 
-  renderCallbacks.forEach((callback) => callback());
+  page.openMaterialEditor.call(context, {
+    currentTarget: { dataset: { utteranceId: "utterance-1" } },
+  });
+  assert.equal(
+    navigations.at(-1),
+    "/pages/transcript-detail/index?id=utterance-1",
+  );
+});
 
-  assert.deepEqual(scrolls, ["#chapter-section-section-1"]);
-  assert.equal(context.pendingSectionId, "");
+test("chapter workspace template opens assigned materials in their existing editor", () => {
+  const template = fs.readFileSync(
+    path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
+    "utf8",
+  );
+  const materialStart = template.indexOf('wx:for="{{item.visibleMaterials}}"');
+  const materialEnd = template.indexOf("</picker>", materialStart);
+  const materialTemplate = template.slice(materialStart, materialEnd);
+
+  assert.match(materialTemplate, /bindtap="openMaterialEditor"/);
+  assert.doesNotMatch(
+    materialTemplate,
+    /wx:if="\{\{item\.requires_user_assignment\}\}"[\s\S]*bindtap="openMaterialEditor"/,
+  );
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {

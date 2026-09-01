@@ -271,7 +271,8 @@
   background: var(--ui-surface);
 }
 
-.section-toggle {
+.section-toggle,
+.section-focus-heading {
   width: 100%;
   min-height: 104rpx;
   margin: 0;
@@ -285,6 +286,9 @@
   background: transparent;
   color: var(--ui-text-primary);
   text-align: left;
+}
+
+.section-toggle {
   transition-property: opacity, transform;
   transition-duration: 120ms;
   transition-timing-function: ease-out;
