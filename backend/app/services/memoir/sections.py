@@ -876,6 +876,7 @@ async def mark_section_structure_changed(
     plan: MemoirBookPlan,
     chapter_ids: set[str],
     operation: str,
+    updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
 ) -> None:
     drafts = list(
         (
@@ -903,11 +904,11 @@ async def mark_section_structure_changed(
         db.add(output)
 
     now = datetime.now(UTC).isoformat()
-    plan.created_by = MemoirCreatedBy.USER.value
+    plan.created_by = updated_by.value
     plan.metadata_json = {
         **(plan.metadata_json or {}),
         "structure_updated_at": now,
-        "structure_updated_by": "user",
+        "structure_updated_by": updated_by.value,
         "structure_operation": operation,
     }
     db.add(plan)
@@ -921,6 +922,9 @@ async def place_material(
     utterance_id: str,
     req: MemoirSectionMaterialPlacementRequest,
     allow_admin: bool = False,
+    assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
+    structure_updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
+    assignment_reason: str | None = None,
 ) -> MemoirSectionMaterialPlacementResponse:
     await load_memoir_project(
         db,
@@ -1036,6 +1040,7 @@ async def place_material(
             include_in_book=True,
             metadata_json={
                 "created_from_material_assignment_at": datetime.now(UTC).isoformat(),
+                "created_from_material_assignment_by": structure_updated_by.value,
             },
         )
         db.add(chapter)
@@ -1054,8 +1059,8 @@ async def place_material(
         project_id=project_id,
         target=target,
         utterance_ids=[utterance_id],
-        assigned_by=MemoirSectionMaterialAssignedBy.USER,
-        assignment_reason=(
+        assigned_by=assigned_by,
+        assignment_reason=assignment_reason or (
             "manual_create_chapter"
             if created_chapter
             else "manual_create_section"
@@ -1078,6 +1083,7 @@ async def place_material(
             if created_section
             else "place_material"
         ),
+        updated_by=structure_updated_by,
     )
     await db.commit()
     return MemoirSectionMaterialPlacementResponse(

@@ -14,6 +14,7 @@ from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
     MemoirBookPlanStatus,
+    MemoirCreatedBy,
     MemoirEditingJobStatus,
     MemoirEditingJobType,
     MemoirSectionMaterialAssignedBy,
@@ -611,6 +612,7 @@ async def regenerate_chapter_sections(
     req: MemoirSectionRegenerateRequest,
     allow_admin: bool = False,
     progress_callback: ProgressCallback | None = None,
+    structure_updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
 ) -> dict[str, int | str | None]:
     project = await load_memoir_project(
         db,
@@ -754,6 +756,7 @@ async def regenerate_chapter_sections(
         plan=plan,
         chapter_ids={chapter_id},
         operation="regenerate_chapter_sections",
+        updated_by=structure_updated_by,
     )
 
     return {
