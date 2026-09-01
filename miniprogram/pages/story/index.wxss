@@ -577,6 +577,13 @@
   gap: 7rpx;
 }
 
+.section-media-entry {
+  min-height: 80rpx;
+  padding: 0 8rpx;
+  box-sizing: border-box;
+  border-radius: 18rpx;
+}
+
 .media-chip {
   padding: 7rpx 11rpx;
   border-radius: 999rpx;

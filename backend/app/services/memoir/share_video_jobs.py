@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -322,7 +322,7 @@ async def list_completed_share_video_counts(
         await db.execute(
             select(
                 MemoirMaterialShareVideo.utterance_id,
-                func.count(MemoirShareVideoOutput.id),
+                MemoirMaterialShareVideo.id,
             )
             .join(
                 MemoirShareVideoOutput,
@@ -333,13 +333,23 @@ async def list_completed_share_video_counts(
                 MemoirMaterialShareVideo.user_id == user_id,
                 MemoirMaterialShareVideo.status == MemoirShareVideoJobStatus.SUCCEEDED.value,
             )
-            .group_by(MemoirMaterialShareVideo.utterance_id)
-            .order_by(MemoirMaterialShareVideo.utterance_id)
+            .order_by(
+                MemoirMaterialShareVideo.utterance_id,
+                MemoirMaterialShareVideo.created_at.desc(),
+                MemoirMaterialShareVideo.id,
+            )
         )
     ).all()
+    job_ids_by_utterance: dict[str, list[str]] = {}
+    for utterance_id, job_id in rows:
+        job_ids_by_utterance.setdefault(utterance_id, []).append(job_id)
     return [
-        MemoirShareVideoCountResponse(utterance_id=utterance_id, count=count)
-        for utterance_id, count in rows
+        MemoirShareVideoCountResponse(
+            utterance_id=utterance_id,
+            count=len(job_ids),
+            job_ids=job_ids,
+        )
+        for utterance_id, job_ids in job_ids_by_utterance.items()
     ]
 
 

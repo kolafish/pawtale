@@ -136,6 +136,7 @@ async def test_mobile_memoir_snapshots_advance_after_new_material(client, test_d
         {
             "utterance_id": created["utterance_id"],
             "count": 1,
+            "job_ids": [completed_video.id],
         }
     ]
 

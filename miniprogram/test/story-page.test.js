@@ -109,9 +109,9 @@ function snapshot(patch = {}) {
       ],
     },
     share_video_counts: [
-      { utterance_id: "utterance-1", count: 2 },
-      { utterance_id: "utterance-2", count: 1 },
-      { utterance_id: "utterance-5", count: 1 },
+      { utterance_id: "utterance-1", count: 2, job_ids: ["video-1", "video-2"] },
+      { utterance_id: "utterance-2", count: 1, job_ids: ["video-3"] },
+      { utterance_id: "utterance-5", count: 1, job_ids: ["video-4"] },
     ],
     ...patch,
   };
@@ -295,6 +295,15 @@ test("story page reuses the existing book, record and chapter destinations", asy
       dataset: { chapterId: "chapter-1", sectionId: "section-1" },
     },
   });
+  page.openMedia.call(context, {
+    currentTarget: { dataset: { id: "chapter-1" } },
+  });
+  page.openMedia.call(context, {
+    currentTarget: {
+      dataset: { chapterId: "chapter-1", sectionId: "section-1" },
+    },
+  });
+  page.openMedia.call(context, { currentTarget: { dataset: {} } });
   page.openLogin.call(context);
   await flushAsyncWork();
 
@@ -305,5 +314,8 @@ test("story page reuses the existing book, record and chapter destinations", asy
   assert.deepEqual(navigated, [
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
     "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
+    "/pages/story-media/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
+    "/pages/story-media/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
+    "/pages/story-media/index?projectId=project-1&scope=unassigned",
   ]);
 });
