@@ -83,9 +83,21 @@ function storyMediaCounts(
     );
     if (chapterIds.has(chapterId)) {
       increment(chapterImages, chapterId);
-    } else if (utteranceId) {
-      unassignedImages += 1;
+      return;
     }
+    const placementChapterIds = new Set(
+      (asset.placements || [])
+        .filter((placement) => placement.enabled && placement.chapter_id)
+        .map((placement) => placement.chapter_id || "")
+        .filter((placementChapterId) => chapterIds.has(placementChapterId)),
+    );
+    if (placementChapterIds.size) {
+      placementChapterIds.forEach((placementChapterId) => {
+        increment(chapterImages, placementChapterId);
+      });
+      return;
+    }
+    unassignedImages += 1;
   });
 
   videos.forEach((video) => {

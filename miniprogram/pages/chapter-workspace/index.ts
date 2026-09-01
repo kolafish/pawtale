@@ -365,20 +365,24 @@ definePage<ChapterWorkspacePageData>()({
       }
       : this.data.expandedSectionIds;
     setPageNavigationTitle(viewWorkspace.chapter_title || "本章正文");
-    this.setData({
-      workspace: viewWorkspace,
-      ...chapterWorkspaceViewPatch(
-        viewWorkspace,
+    this.setData(
+      {
+        workspace: viewWorkspace,
+        ...chapterWorkspaceViewPatch(
+          viewWorkspace,
+          expandedSectionIds,
+        ),
         expandedSectionIds,
-      ),
-      expandedSectionIds,
-      loading: false,
-      error: "",
-    });
-    if (hasTargetSection) {
-      this.pendingSectionId = "";
-      scrollToSection(`#chapter-section-${targetSectionId}`);
-    }
+        loading: false,
+        error: "",
+      },
+      () => {
+        if (hasTargetSection && this.pendingSectionId === targetSectionId) {
+          this.pendingSectionId = "";
+          scrollToSection(`#chapter-section-${targetSectionId}`);
+        }
+      },
+    );
     if (!isActiveChapterPreparation(this.data.chapterPreparationJob)) {
       this.stopPreparationPolling();
     }

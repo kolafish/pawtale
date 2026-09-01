@@ -97,8 +97,9 @@ function pageContext(page, dataPatch = {}) {
   return {
     ...page,
     data: { ...page.data, ...dataPatch },
-    setData(patch) {
+    setData(patch, callback) {
       this.data = { ...this.data, ...patch };
+      callback?.();
     },
   };
 }

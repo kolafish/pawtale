@@ -305,6 +305,13 @@ test("chapter workspace opens and locates a section selected from the story tree
   const { scrolls } = installWx();
   const { page } = loadWorkspacePage();
   const context = pageContext(page);
+  const renderCallbacks = [];
+  context.setData = function setDataAfterRender(patch, callback) {
+    this.data = { ...this.data, ...patch };
+    if (callback) {
+      renderCallbacks.push(callback);
+    }
+  };
 
   await page.onLoad.call(context, {
     projectId: "project-1",
@@ -314,7 +321,13 @@ test("chapter workspace opens and locates a section selected from the story tree
 
   assert.equal(context.data.sectionViews[0].expanded, true);
   assert.equal(context.data.expandedSectionIds["section-1"], true);
+  assert.deepEqual(scrolls, []);
+  assert.equal(context.pendingSectionId, "section-1");
+
+  renderCallbacks.forEach((callback) => callback());
+
   assert.deepEqual(scrolls, ["#chapter-section-section-1"]);
+  assert.equal(context.pendingSectionId, "");
 });
 
 test("chapter workspace accepts a refresh started after cache invalidation", async () => {

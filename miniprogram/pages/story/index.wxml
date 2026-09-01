@@ -48,16 +48,17 @@
     <view class="story-toolbar">
       <view class="timeline-label">
         <view class="timeline-mark"></view>
-        <text>生命时间线</text>
+        <text>人生脉络</text>
       </view>
-      <view class="view-switch" aria-label="故事查看方式">
-        <view class="view-option active" aria-role="button" aria-current="true">树形</view>
-        <view
-          class="view-option ui-pressable"
-          bindtap="openTranscripts"
-          hover-class="ui-subtle-action-hover"
-          aria-role="button"
-        >列表</view>
+      <view
+        class="transcript-list-entry ui-pressable"
+        bindtap="openTranscripts"
+        hover-class="ui-subtle-action-hover"
+        aria-role="button"
+        aria-label="查看全部讲述列表"
+      >
+        <text>讲述列表</text>
+        <text class="transcript-list-mark" aria-hidden="true">›</text>
       </view>
     </view>
 

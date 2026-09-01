@@ -2,7 +2,7 @@ type PageMethods<TDefinition extends { data: object }> = Omit<TDefinition, "data
 
 type PageContext<TData extends object, TDefinition extends { data: TData }> = PageMethods<TDefinition> & {
   data: TData;
-  setData(data: Partial<TData>): void;
+  setData(data: Partial<TData>, callback?: () => void): void;
 };
 
 type PageDefinition<TData extends object, TDefinition extends { data: TData }> = {
