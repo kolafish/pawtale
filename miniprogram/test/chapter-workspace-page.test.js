@@ -388,6 +388,30 @@ test("chapter workspace opens a focused section selected from the story tree", a
   );
 });
 
+test("chapter workspace falls back to full chapter for a stale section link", async () => {
+  installWx();
+  const { page } = loadWorkspacePage({
+    voiceApiExports: {
+      listMemoirCompletionIssues: async () => ({
+        project_id: "project-1",
+        issues: [completionIssue({ channel: "manual_review" })],
+      }),
+    },
+  });
+  const context = pageContext(page);
+
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+    sectionId: "stale-section",
+  });
+
+  assert.equal(context.data.focusedSectionId, "");
+  assert.equal(context.data.sectionViews.length, 1);
+  assert.equal(context.data.suggestionsExpanded, false);
+  assert.equal(context.data.requiredIssues.length, 1);
+});
+
 test("chapter workspace template opens assigned materials in their existing editor", () => {
   const template = fs.readFileSync(
     path.join(__dirname, "../pages/chapter-workspace/index.wxml"),
