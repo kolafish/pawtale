@@ -47,7 +47,7 @@
       <view
         class="structure-heading"
         aria-role="button"
-        aria-label="{{suggestionsExpanded ? '收起' : '展开'}}审阅建议"
+        aria-label="{{suggestionsExpanded ? '收起' : '展开'}}{{focusedSectionId ? '本章建议' : '审阅建议'}}"
         bindtap="toggleSuggestions"
       >
         <view>

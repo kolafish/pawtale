@@ -309,7 +309,7 @@ definePage<ChapterWorkspacePageData>()({
       writeCachedMemoirChapterWorkspace(workspace);
       this.applyWorkspace(workspace);
       this.setData({
-        requiredIssues: this.sectionFocusId
+        requiredIssues: this.data.focusedSectionId
           ? []
           : issueCollection.issues.filter(
             (issue) => issue.channel === "manual_review",
@@ -384,6 +384,9 @@ definePage<ChapterWorkspacePageData>()({
       ...viewPatch,
       focusedSectionId: focusedSection?.id || "",
       focusedSectionTitle: focusedSection?.title || "",
+      suggestionsExpanded: focusedSectionId && !hasFocusedSection
+        ? false
+        : this.data.suggestionsExpanded,
       sectionViews: focusedSection
         ? [{ ...focusedSection, expanded: true }]
         : viewPatch.sectionViews,
