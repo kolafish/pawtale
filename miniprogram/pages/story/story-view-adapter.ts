@@ -7,8 +7,8 @@ import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
 import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-session";
 import { formatBeijingDateTimeShort, timestampMs } from "../../services/time";
 import type {
-  StoryChapterTone,
   StoryChapterView,
+  StoryChapterState,
   StorySectionView,
   StoryViewData,
 } from "./story-view-data";
@@ -16,8 +16,6 @@ import {
   buildStoryMediaIndex,
   type StoryMediaIndex,
 } from "./story-media-index";
-
-const CHAPTER_TONES: StoryChapterTone[] = ["clay", "amber", "sage", "blue", "stone"];
 
 function uniqueSourceCount(chapter: MemoirBookPlanChapter): number {
   return new Set((chapter.source_refs || []).map((item) => item.utterance_id).filter(Boolean)).size;
@@ -32,20 +30,20 @@ function activeSections(chapter: MemoirBookPlanChapter): MemoirChapterSectionSum
 function chapterOutcome(
   chapter: MemoirBookPlanChapter,
   draft: MemoirBookChapterDraft | null,
-): string {
+): { state: StoryChapterState; text: string } {
   if (chapter.include_in_book === false) {
-    return "暂不入书";
+    return { state: "muted", text: "暂不入书" };
   }
   if (chapter.pending_source_count || chapter.removed_source_count) {
-    return "需更新";
+    return { state: "attention", text: "有新内容" };
   }
   if (draft?.latest_version && draft.status === "confirmed") {
-    return "已成稿";
+    return { state: "settled", text: "已整理" };
   }
   if (draft?.latest_version) {
-    return "已有正文";
+    return { state: "draft", text: "已有正文" };
   }
-  return "待成稿";
+  return { state: "muted", text: "待整理" };
 }
 
 function sectionView(
@@ -64,58 +62,43 @@ function sectionView(
 function chapterView(
   chapter: MemoirBookPlanChapter,
   draft: MemoirBookChapterDraft | null,
-  index: number,
+  expanded: boolean,
   media: StoryMediaIndex,
 ): StoryChapterView {
   const sections = activeSections(chapter).map((section) => sectionView(section, media));
+  const outcome = chapterOutcome(chapter, draft);
   return {
     id: chapter.id,
     title: chapter.title || "未命名章节",
     timeRangeText: "",
     summaryText: `${sections.length} 小节 · ${uniqueSourceCount(chapter)} 段讲述`,
-    outcomeText: chapterOutcome(chapter, draft),
+    outcomeText: outcome.text,
     imageCount: media.chapterImages[chapter.id]?.length || 0,
     videoCount: media.chapterVideos[chapter.id]?.length || 0,
-    tone: CHAPTER_TONES[index % CHAPTER_TONES.length],
-    expanded: index === 0,
+    state: outcome.state,
+    expanded,
     sections,
   };
 }
 
-function confirmedIncludedChapterCount(
-  chapters: MemoirBookPlanChapter[],
-  drafts: MemoirBookSnapshot["drafts_by_chapter_id"],
-): number {
-  return chapters.filter((chapter) => {
-    const draft = drafts[chapter.id];
-    return chapter.include_in_book !== false
-      && draft?.status === "confirmed"
-      && Boolean(draft.latest_version)
-      && !chapter.pending_source_count
-      && !chapter.removed_source_count;
-  }).length;
-}
-
 function progressDetail(
   chapters: MemoirBookPlanChapter[],
-  includedCount: number,
-  confirmedCount: number,
   drafts: MemoirBookSnapshot["drafts_by_chapter_id"],
 ): string {
-  if (!includedCount) {
-    return "等待整理";
+  const included = chapters.filter((chapter) => chapter.include_in_book !== false);
+  if (!included.length) {
+    return "开始整理";
   }
-  if (confirmedCount === includedCount) {
-    return "已经成稿";
+  const outcomes = included.map((chapter) => chapterOutcome(
+    chapter,
+    drafts[chapter.id] || null,
+  ));
+  if (outcomes.every((outcome) => outcome.state === "settled")) {
+    return "已整理";
   }
-  if (confirmedCount) {
-    return `${confirmedCount} 章已成稿`;
-  }
-  const draftedCount = chapters.filter((chapter) => (
-    chapter.include_in_book !== false
-    && Boolean(drafts[chapter.id]?.latest_version)
-  )).length;
-  return draftedCount ? `${draftedCount} 章已有正文` : "等待成稿";
+  return outcomes.some((outcome) => outcome.state !== "muted")
+    ? "继续整理"
+    : "等待整理";
 }
 
 function bookCharCount(snapshot: MemoirBookSnapshot): number {
@@ -171,6 +154,28 @@ function progressCounts(
   };
 }
 
+function unassignedMaterialCopy(counts: { total: number; pending: number }) {
+  if (counts.pending) {
+    return {
+      unassignedMaterialTitle: "待归入故事的讲述",
+      unassignedMaterialText: `已经记录了 ${counts.pending} 段讲述`,
+      unassignedMaterialDetail: "小余会把它们整理成人生故事",
+    };
+  }
+  if (counts.total) {
+    return {
+      unassignedMaterialTitle: "全部讲述",
+      unassignedMaterialText: "所有讲述都已归入故事",
+      unassignedMaterialDetail: "继续讲下新的回忆，它们会在这里等待整理",
+    };
+  }
+  return {
+    unassignedMaterialTitle: "从一段讲述开始",
+    unassignedMaterialText: "还没有讲述",
+    unassignedMaterialDetail: "讲下第一段回忆后，它会从这里长成故事",
+  };
+}
+
 export function storyViewData(
   snapshot: MemoirBookSnapshot,
   progress: MemoirVoiceProgressResponse | null,
@@ -186,14 +191,10 @@ export function storyViewData(
   const chapters = planChapters.map((chapter, index) => chapterView(
     chapter,
     snapshot.drafts_by_chapter_id[chapter.id] || null,
-    index,
+    index === 0,
     media,
   ));
   const includedCount = planChapters.filter((chapter) => chapter.include_in_book !== false).length;
-  const confirmedCount = confirmedIncludedChapterCount(
-    planChapters,
-    snapshot.drafts_by_chapter_id,
-  );
   const sectionCount = chapters.reduce((total, chapter) => total + chapter.sections.length, 0);
   const materialCounts = progressCounts(progress, planChapters);
   const createdAt = project?.created_at ? formatBeijingDateTimeShort(project.created_at) : "";
@@ -204,12 +205,10 @@ export function storyViewData(
       title: project?.title || "我的故事",
       createdText: createdAt ? `创建于 ${createdAt}` : "",
       updatedText: updatedAt ? `更新于 ${updatedAt}` : "",
-      progressLabel: "成书进度",
-      progressValue: includedCount ? `${confirmedCount}/${includedCount} 章` : "0 章",
+      progressLabel: "书稿",
+      progressValue: includedCount ? `${includedCount} 章` : "尚未生成",
       progressDetail: progressDetail(
         planChapters,
-        includedCount,
-        confirmedCount,
         snapshot.drafts_by_chapter_id,
       ),
     },
@@ -219,9 +218,7 @@ export function storyViewData(
       outcomeText: charCountText(bookCharCount(snapshot)),
     },
     chapters,
-    unassignedMaterialText: materialCounts.pending
-      ? `还有 ${materialCounts.pending} 段讲述等待整理`
-      : "所有讲述都已归入章节",
+    ...unassignedMaterialCopy(materialCounts),
     unassignedImageCount: media.unassignedImages.length,
     unassignedVideoCount: media.unassignedVideos.length,
   };

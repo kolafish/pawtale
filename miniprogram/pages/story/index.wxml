@@ -31,7 +31,7 @@
       bindtap="openBook"
       hover-class="ui-subtle-action-hover"
       aria-role="button"
-      aria-label="查看{{memoir.title}}的编辑与成书进度"
+      aria-label="查看{{memoir.title}}的书稿"
     >
       <view class="memoir-copy">
         <text class="memoir-eyebrow">回忆录名称</text>
@@ -57,14 +57,16 @@
         aria-role="button"
         aria-label="查看全部讲述列表"
       >
-        <text>讲述列表</text>
+        <text>全部讲述</text>
         <text class="transcript-list-mark" aria-hidden="true">›</text>
       </view>
     </view>
 
     <view class="story-tree">
       <view class="overview-row">
-        <view class="overview-symbol" aria-hidden="true">树</view>
+        <view class="overview-symbol" aria-hidden="true">
+          <view class="overview-sprout"></view>
+        </view>
         <view class="overview-card ui-card ui-card-borderless">
           <view class="overview-copy">
             <text class="overview-title">{{overview.title}}</text>
@@ -78,7 +80,7 @@
         wx:for="{{chapters}}"
         wx:for-index="chapterIndex"
         wx:key="id"
-        class="chapter-block tone-{{item.tone}}"
+        class="chapter-block"
       >
         <view class="chapter-decoration" aria-hidden="true"></view>
         <view class="chapter-branch" aria-hidden="true"></view>
@@ -91,26 +93,15 @@
           hover-class="ui-subtle-action-hover"
           aria-role="button"
           aria-expanded="{{item.expanded}}"
-          aria-label="{{item.title}}，{{item.summaryText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
+          aria-label="{{item.title}}，{{item.summaryText}}，{{item.outcomeText}}，{{item.expanded ? '点击收起' : '点击展开'}}"
         >
-          <view class="chapter-index ui-tabular">{{chapterIndex + 1}}</view>
           <view class="chapter-copy">
             <text class="chapter-title">{{item.title}}</text>
             <text class="chapter-meta ui-tabular">
               <text wx:if="{{item.timeRangeText}}">{{item.timeRangeText}} · </text>{{item.summaryText}}
             </text>
           </view>
-          <view class="chapter-outcome">
-            <text class="chapter-outcome-label">当前成果</text>
-            <text class="chapter-outcome-value">{{item.outcomeText}}</text>
-            <view
-              class="chapter-detail-action"
-              data-id="{{item.id}}"
-              catchtap="openChapter"
-              aria-role="button"
-              aria-label="进入{{item.title}}整理"
-            >整理 ›</view>
-          </view>
+          <text class="chapter-status {{item.state}}">{{item.outcomeText}}</text>
           <view class="chapter-chevron {{item.expanded ? 'expanded' : ''}}" aria-hidden="true">⌄</view>
         </view>
 
@@ -189,8 +180,9 @@
       >
         <text class="unassigned-mark">＋</text>
         <view class="unassigned-copy">
-          <text class="unassigned-title">待整理的故事</text>
+          <text class="unassigned-title">{{unassignedMaterialTitle}}</text>
           <text class="unassigned-meta">{{unassignedMaterialText}}</text>
+          <text class="unassigned-detail">{{unassignedMaterialDetail}}</text>
         </view>
         <view
           wx:if="{{unassignedImageCount || unassignedVideoCount}}"
@@ -202,7 +194,7 @@
           <text wx:if="{{unassignedImageCount}}" class="media-chip image-chip">{{unassignedImageCount}} 图</text>
           <text wx:if="{{unassignedVideoCount}}" class="media-chip video-chip">{{unassignedVideoCount}} 视频</text>
         </view>
-        <text class="unassigned-action">查看 ›</text>
+        <text class="unassigned-action">查看讲述 ›</text>
       </view>
     </view>
 
@@ -211,9 +203,10 @@
       bindtap="openChapterManager"
       hover-class="ui-subtle-action-hover"
       aria-role="button"
+      aria-label="开始整理故事"
     >
       <text class="add-chapter-mark">＋</text>
-      <text>整理章节</text>
+      <text>开始整理故事</text>
     </view>
     </block>
   </view>
