@@ -29,6 +29,7 @@ from app.services.memoir import (
     completion_interviews,
     completion_issues,
     progress_snapshot,
+    story_tree_growth,
 )
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.material_roles import (
@@ -325,5 +326,12 @@ async def stop_voice_session(
         )
         voice_session.error_message = req.error_message or ""
         voice_session.stopped_at = datetime.now(UTC).replace(tzinfo=None)
+        if not req.error_message:
+            await story_tree_growth.schedule_story_tree_growth(
+                db,
+                project_id=voice_session.project_id,
+                voice_session_id=voice_session.id,
+                source="voice_session_stopped",
+            )
     await db.commit()
     return await get_voice_session_detail(db, voice_session.id, user_id)

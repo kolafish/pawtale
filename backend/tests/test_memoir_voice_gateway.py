@@ -33,7 +33,6 @@ from app.services.asr.gateway import (
 )
 from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
-from app.services.memoir.transcript_projection import source_text_hash
 from app.services.memoir.voice_final_persistence import VoiceFinalPersistenceService
 from app.services.memoir.voice_gateway_persistence import VoiceGatewayPersistence
 from app.services.memoir.voice_transcripts import CleanedTranscriptText
@@ -1171,16 +1170,8 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
             MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert organization_job is not None
-    assert organization_job.status == MemoirEditingJobStatus.PENDING.value
-    assert organization_job.dedupe_key == f"organize_material:{utterance.id}"
-    assert organization_job.payload_json["utterance_id"] == utterance.id
-    assert organization_job.payload_json["source"] == "transcript_correction_succeeded"
-    assert organization_job.payload_json["transcript_version_id"] == corrected_versions[0].id
-    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
-        "我小时候住在外婆家。"
-    )
-    assert result.result_json["organization_job_id"] == organization_job.id
+    assert organization_job is None
+    assert "organization_job_id" not in result.result_json
 
 
 async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
@@ -1251,13 +1242,8 @@ async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
             MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert organization_job is not None
-    assert organization_job.payload_json["source"] == "transcript_already_edited"
-    assert organization_job.payload_json["transcript_version_id"] == user_version.id
-    assert organization_job.payload_json["source_text_hash"] == source_text_hash(
-        "用户自己整理后的文字。"
-    )
-    assert result.result_json["organization_job_id"] == organization_job.id
+    assert organization_job is None
+    assert "organization_job_id" not in result.result_json
 
 
 async def test_voice_gateway_persistence_rejects_audio_stream_over_limit(client, test_db, monkeypatch):

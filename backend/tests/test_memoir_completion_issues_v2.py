@@ -316,7 +316,7 @@ async def test_completion_answer_correction_refreshes_layered_material_version(
     assert material.section_id == section["id"]
     assert corrected is not None
     assert material.transcript_version_id == corrected.id
-    assert result.result_json["organization_job_id"] is None
+    assert "organization_job_id" not in result.result_json
     with pytest.raises(
         HTTPException,
         match="正文文本版本不属于当前讲述素材",

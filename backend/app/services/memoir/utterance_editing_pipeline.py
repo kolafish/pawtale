@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirEditingJobType
+from app.domain.memoir.types import MemoirVoiceSessionStatus
 from app.models.memoir import (
     MemoirChatMessage,
-    MemoirEditingJob,
     MemoirSectionMaterial,
+    MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
-from app.services.memoir import editing_jobs, sections
+from app.services.memoir import sections, story_tree_growth
 from app.services.memoir.retrieval_source_index import schedule_source_indexing_job
 from app.services.memoir.narrative.framework_matching import (
     schedule_framework_matching_job,
@@ -75,17 +75,17 @@ async def claim_transcript_mutation_guard(
     return result.rowcount == 1
 
 
-async def schedule_material_organization_for_ready_utterance(
+async def schedule_ready_utterance_background_work(
     db: AsyncSession,
     *,
     project_id: str,
     utterance: MemoirVoiceUtterance,
     source: str,
     ai_model: str | None = None,
-) -> MemoirEditingJob | None:
+) -> None:
     text = current_utterance_text(utterance)
     if not text:
-        return None
+        return
     await schedule_source_indexing_job(
         db,
         project_id=project_id,
@@ -114,24 +114,11 @@ async def schedule_material_organization_for_ready_utterance(
                 utterance_id=utterance.id,
                 transcript_version_id=transcript_version_id,
             )
-        return None
-    if utterance.completion_issue_id:
-        return None
-
-    payload: dict[str, object] = {
-        "utterance_id": utterance.id,
-        "voice_session_id": utterance.voice_session_id,
-        "transcript_version_id": transcript_version_id,
-        "source_text_hash": source_text_hash(text),
-        "source": source,
-    }
-    if ai_model:
-        payload["ai_model"] = ai_model
-    return await editing_jobs.enqueue_editing_job(
-        db,
-        project_id=project_id,
-        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
-        payload_json=payload,
-        dedupe_key=f"organize_material:{utterance.id}",
-        replace_completed=True,
-    )
+    voice_session = await db.get(MemoirVoiceSession, utterance.voice_session_id)
+    if voice_session and voice_session.status == MemoirVoiceSessionStatus.STOPPED.value:
+        await story_tree_growth.schedule_story_tree_growth(
+            db,
+            project_id=project_id,
+            voice_session_id=voice_session.id,
+            source=source,
+        )

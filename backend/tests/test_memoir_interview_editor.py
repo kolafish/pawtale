@@ -440,12 +440,8 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     jobs_by_type = {job.job_type: job for job in jobs}
     assert set(jobs_by_type) == {
         MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value,
-        MemoirEditingJobType.ORGANIZE_MATERIAL.value,
         MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
     }
-    assert jobs_by_type[MemoirEditingJobType.ORGANIZE_MATERIAL.value].payload_json["source"] == (
-        "interview_question_converted_to_answer"
-    )
 
 
 async def test_interview_editor_converts_question_to_unassigned_answer_for_mobile(client, test_db):

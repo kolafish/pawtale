@@ -143,11 +143,7 @@ async def test_memoir_transcript_cleanup_confirm_writes_corrected_versions_and_j
             MemoirEditingJob.dedupe_key == f"organize_material:{created['utterance_id']}"
         )
     )
-    assert organization_job is not None
-    assert organization_job.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
-    assert organization_job.payload_json["source"] == "transcript_dialect_corrected"
-    assert organization_job.payload_json["ai_model"] == "deepseek"
-    assert organization_job.payload_json["transcript_version_id"] == version.id
+    assert organization_job is None
 
     topic_map_job = await test_db.scalar(
         select(MemoirEditingJob).where(

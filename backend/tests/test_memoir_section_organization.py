@@ -1,23 +1,25 @@
 import json
 import re
+from datetime import datetime
 
 import pytest
 from sqlalchemy import select
 
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
+    MemoirAutomationEvent,
     MemoirChatMessage,
+    MemoirEditingJob,
     MemoirSection,
     MemoirSectionMaterial,
+    MemoirVoiceSession,
 )
-from app.services.memoir.material_organization import organize_material
-from app.services.memoir import chapter_generation, section_regeneration
+from app.services.memoir import chapter_generation, section_regeneration, story_tree_growth
 from app.services.memoir.narrative import book_completion
 from app.services.memoir.editing_job_handlers import (
     register_memoir_editing_job_handlers,
 )
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
-from app.services.memoir.transcript_projection import source_text_hash
 from tests.memoir_helpers import (
     create_test_book_plan_with_chapters,
     create_test_chapter_draft,
@@ -28,7 +30,10 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeMaterialOrganizationAI:
+class FakeStoryGrowthAI:
+    provider_name = "fake"
+    model_name = "fake-story-growth"
+
     def __init__(self, payload: dict[str, object]):
         self.payload = payload
         self.calls = 0
@@ -519,99 +524,72 @@ async def test_section_api_excludes_and_rejects_interviewer_material(
     assert response.json()["detail"] == "只有已有文字的叙述者素材可以归入小章节"
 
 
-async def test_material_organization_assigns_existing_or_keeps_pending(
+async def test_story_tree_growth_groups_session_materials_into_new_section(
     client,
     test_db,
+    monkeypatch,
 ):
-    project_id, chapters, _, data = await _bootstrap_two_chapters(client, test_db)
-    existing = await test_db.get(MemoirSection, data["sections"][0]["id"])
-    assert existing is not None
-    existing.sort_order = 4
-    test_db.add(existing)
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    first = await create_test_voice_transcript(
+        client,
+        test_db,
+        "后来我们又一起去爬了香山。",
+        project_id=project_id,
+    )
+    session = await test_db.get(MemoirVoiceSession, first["session"]["id"])
+    assert session is not None
+    session.status = "stopped"
+    test_db.add(session)
     await test_db.commit()
-    organization_sections = list(
-        (
-            await test_db.scalars(
-                select(MemoirSection)
-                .where(MemoirSection.project_id == project_id)
-                .order_by(
-                    MemoirSection.chapter_id,
-                    MemoirSection.sort_order,
-                    MemoirSection.id,
-                )
-            )
-        ).all()
-    )
-    existing_ref = f"S{organization_sections.index(existing) + 1}"
-    assigned = await create_test_voice_transcript(
-        client,
-        test_db,
-        "后来我又和朋友去走了另一条山路。",
-        project_id=project_id,
-    )
-    assigned_ai = FakeMaterialOrganizationAI(
+    fake = FakeStoryGrowthAI(
         {
-            "action": "assign_existing",
-            "section_id": existing_ref,
-            "chapter_id": None,
-            "confidence": 0.9,
-            "reason": "延续已有的同行经历",
+            "groups": [
+                {
+                    "source_indices": [1],
+                    "action": "create_section",
+                    "section_id": None,
+                    "chapter_id": "C1",
+                    "new_chapter_title": None,
+                    "new_section_title": "后来一起爬香山",
+                    "confidence": 0.91,
+                    "reason": "同属爬山经历，但形成了新的具体事件",
+                }
+            ]
         }
     )
-    assigned_result = await organize_material(
-        test_db,
+    monkeypatch.setattr(story_tree_growth, "get_ai_service", lambda _model=None: fake)
+    job = MemoirEditingJob(
         project_id=project_id,
-        utterance_id=assigned["utterance_id"],
-        expected_text_hash=source_text_hash("后来我又和朋友去走了另一条山路。"),
-        expected_transcript_version_id=assigned["transcript_version_id"],
-        ai_client=assigned_ai,
+        job_type="organize_material",
+        status="running",
+        run_after=datetime.now(),
+        payload_json={"voice_session_id": session.id},
     )
-    assert assigned_result.result_json["section_id"] == existing.id
+    test_db.add(job)
+    await test_db.flush()
 
-    pending = await create_test_voice_transcript(
-        client,
-        test_db,
-        "我还想讲一段暂时不知道该放在哪里的新经历。",
-        project_id=project_id,
-    )
-    pending_ai = FakeMaterialOrganizationAI(
-        {
-            "action": "leave_unassigned",
-            "section_id": None,
-            "chapter_id": "C1",
-            "confidence": 0.6,
-            "reason": "现有小节都不合适",
-        }
-    )
-    pending_result = await organize_material(
-        test_db,
-        project_id=project_id,
-        utterance_id=pending["utterance_id"],
-        expected_text_hash=source_text_hash(
-            "我还想讲一段暂时不知道该放在哪里的新经历。"
-        ),
-        expected_transcript_version_id=pending["transcript_version_id"],
-        ai_client=pending_ai,
-    )
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
 
-    pending_section = await test_db.scalar(
+    created_section = await test_db.scalar(
         select(MemoirSection).where(
             MemoirSection.project_id == project_id,
-            MemoirSection.title == "待归类素材",
+            MemoirSection.title == "后来一起爬香山",
         )
     )
-    assert pending_section is not None
-    assert pending_result.result_json["section_id"] == pending_section.id
-    assert pending_section.chapter_id == chapters[0].id
-    assert pending_section.sort_order == 5
-    assert pending_section.include_in_book is False
-    assert pending_section.metadata_json["system_role"] == (
-        "pending_material_assignment"
+    event = await test_db.scalar(
+        select(MemoirAutomationEvent).where(
+            MemoirAutomationEvent.event_type == "story_structure_updated"
+        )
     )
-    assert assigned_ai.calls == pending_ai.calls == 1
-    assert chapters[0].id not in pending_ai.prompts[0]
-    assert "assign_existing|leave_unassigned" in pending_ai.prompts[0]
-    assert "create_section" not in pending_ai.prompts[0]
+    assert created_section is not None
+    assert created_section.chapter_id == chapters[0].id
+    assert result.result_json["organized_utterance_ids"] == [first["utterance_id"]]
+    assert result.result_json["new_section_ids"] == [created_section.id]
+    assert event is not None
+    assert event.metadata_json["new_section_ids"] == [created_section.id]
+    assert fake.calls == 1
+    assert "create_section" in fake.prompts[0]
+    assert chapters[0].id not in fake.prompts[0]
 
 
 async def test_section_regeneration_job_reports_progress_and_deduplicates(
@@ -1066,42 +1044,6 @@ async def test_regenerate_chapter_sections_rejects_stale_structure_before_ai(
     assert response.status_code == 409
     assert response.json()["detail"] == "本章小节已经变化，请刷新后重试"
     assert fake.prompts == []
-
-
-async def test_material_organization_skips_interviewer_material(
-    client,
-    test_db,
-):
-    project_id, _, _, _ = await _bootstrap_two_chapters(client, test_db)
-    created = await create_test_voice_transcript(
-        client,
-        test_db,
-        "你还记得当时有哪些人在场吗？",
-        project_id=project_id,
-    )
-    message = await test_db.get(MemoirChatMessage, created["message_id"])
-    assert message is not None
-    message.role = MemoirChatMessageRole.INTERVIEWER.value
-    test_db.add(message)
-    await test_db.commit()
-    ai = FakeMaterialOrganizationAI(
-        {
-            "action": "assign_existing",
-            "section_id": "should-not-be-used",
-        }
-    )
-
-    result = await organize_material(
-        test_db,
-        project_id=project_id,
-        utterance_id=created["utterance_id"],
-        expected_text_hash=source_text_hash("你还记得当时有哪些人在场吗？"),
-        expected_transcript_version_id=created["transcript_version_id"],
-        ai_client=ai,
-    )
-
-    assert result.result_json["reason"] == "not_narrator_material"
-    assert ai.calls == 0
 
 
 async def test_section_update_rejects_stale_version(client, test_db):
