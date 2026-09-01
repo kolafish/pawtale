@@ -281,6 +281,7 @@ async def generate_book_plan(
     req: MemoirBookPlanGenerateRequest,
     ai_client: AITextClient | None = None,
     allow_admin: bool = False,
+    status: MemoirBookPlanStatus = MemoirBookPlanStatus.DRAFT,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     sources = await _source_segments(
@@ -303,13 +304,18 @@ async def generate_book_plan(
         project_id=project_id,
         title=generated.title,
         chapters=generated.chapters,
-        status=MemoirBookPlanStatus.DRAFT,
+        status=status,
         created_by=MemoirCreatedBy.AI,
         model=generated.model,
         prompt_snapshot=generated.prompt,
         metadata_json={
             "source_utterance_count": len(sources),
             "prompt_version": "memoir_book_plan_v1",
+            **(
+                {"confirmed_by": MemoirCreatedBy.AI.value}
+                if status == MemoirBookPlanStatus.CONFIRMED
+                else {}
+            ),
         },
     )
 
