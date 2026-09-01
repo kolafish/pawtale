@@ -163,7 +163,7 @@ definePage<StoryPageData>()({
     );
     const sectionId = datasetString(event, "sectionId");
     wx.navigateTo({
-      url: pageUrl("/pages/story-media/index", {
+      url: pageUrl("/pages/image-assets/index", {
         projectId: this.data.projectId,
         scope: sectionId ? "section" : (chapterId ? "chapter" : "unassigned"),
         chapterId,

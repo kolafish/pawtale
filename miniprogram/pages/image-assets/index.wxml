@@ -1,36 +1,68 @@
 <view class="{{pageClass}}">
   <view class="ui-page-context-row">
-    <text class="ui-page-context">统一管理生成图片，选择可入书的插图</text>
+    <text class="ui-page-context">{{contextText}}</text>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
   <view class="summary-card">
-    <view class="summary-item">
-      <text class="summary-value">{{total}}</text>
-      <text class="summary-label">全部图片</text>
-    </view>
-    <view class="summary-item">
-      <text class="summary-value">{{includedCount}}</text>
-      <text class="summary-label">已入书</text>
-    </view>
-    <view class="summary-item">
-      <text class="summary-value">{{unusedCount}}</text>
-      <text class="summary-label">待选择</text>
-    </view>
+    <block wx:if="{{isStoryMaterialView}}">
+      <view class="summary-item">
+        <text class="summary-value">{{items.length + videos.length}}</text>
+        <text class="summary-label">全部素材</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-value">{{items.length}}</text>
+        <text class="summary-label">图片</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-value">{{videos.length}}</text>
+        <text class="summary-label">视频</text>
+      </view>
+    </block>
+    <block wx:else>
+      <view class="summary-item">
+        <text class="summary-value">{{total}}</text>
+        <text class="summary-label">全部图片</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-value">{{includedCount}}</text>
+        <text class="summary-label">已入书</text>
+      </view>
+      <view class="summary-item">
+        <text class="summary-value">{{unusedCount}}</text>
+        <text class="summary-label">待选择</text>
+      </view>
+    </block>
   </view>
 
-  <view wx:if="{{loading && !items.length}}" class="empty-card">
-    <text class="empty-title">正在同步图片素材</text>
-    <text class="empty-copy">根据讲述生成的插图和分享视频背景都会自动收集到这里。</text>
+  <view wx:if="{{videoPreviewPath}}" class="asset-card video-preview-card">
+    <view class="video-preview-heading">
+      <text class="asset-title">{{videoPreviewTitle}}</text>
+      <button class="action-button video-preview-close" bindtap="closeVideoPreview">关闭</button>
+    </view>
+    <video
+      class="video-preview"
+      src="{{videoPreviewPath}}"
+      controls
+      show-center-play-btn
+      show-fullscreen-btn
+      object-fit="contain"
+    />
   </view>
 
-  <view wx:elif="{{!items.length}}" class="empty-card">
-    <text class="empty-title">还没有图片素材</text>
-    <text class="empty-copy">可在讲述详情选择内容直接生成插图；分享视频背景和封面候选也会自动出现在这里。</text>
+  <view wx:if="{{loading && !items.length && !videos.length}}" class="empty-card">
+    <text class="empty-title">正在同步素材</text>
+    <text class="empty-copy">根据讲述生成的图片和分享视频都会自动收集到这里。</text>
   </view>
 
-  <view wx:else class="asset-list">
+  <view wx:elif="{{!items.length && !videos.length}}" class="empty-card">
+    <text class="empty-title">{{isStoryMaterialView ? "这里还没有素材" : "还没有图片素材"}}</text>
+    <text class="empty-copy">{{isStoryMaterialView ? "返回故事页可以继续查看其他章节和小节。" : "可在讲述详情选择内容直接生成插图；分享视频背景和封面候选也会自动出现在这里。"}}</text>
+  </view>
+
+  <text wx:if="{{isStoryMaterialView && items.length}}" class="asset-section-title">图片</text>
+  <view wx:if="{{items.length}}" class="asset-list">
     <view wx:for="{{items}}" wx:key="id" class="asset-card">
       <view class="asset-main">
         <view
@@ -156,6 +188,37 @@
         bindtap="toggleAssetDetails"
       >
         {{item.detailsExpanded ? "收起图片说明与更多操作" : "编辑图片说明与更多操作"}}
+      </view>
+    </view>
+  </view>
+
+  <text wx:if="{{videos.length}}" class="asset-section-title video-section-title">视频</text>
+  <view wx:if="{{videos.length}}" class="asset-list">
+    <view
+      wx:for="{{videos}}"
+      wx:key="id"
+      class="asset-card ui-pressable"
+      data-id="{{item.id}}"
+      aria-role="button"
+      aria-label="播放{{item.title}}"
+      bindtap="previewVideo"
+    >
+      <view class="asset-main">
+        <view class="asset-thumb video-thumb">
+          <view class="asset-placeholder">
+            <text>视频</text>
+            <text class="asset-placeholder-hint">点按播放</text>
+          </view>
+        </view>
+        <view class="asset-copy">
+          <view class="asset-title-row">
+            <text class="asset-title">{{item.title}}</text>
+            <text class="asset-status included">已生成</text>
+          </view>
+          <text class="asset-meta">分享视频</text>
+          <text class="asset-source">{{item.detail}}</text>
+          <text class="asset-placement">{{previewingVideoId === item.id ? "加载中" : "播放视频 ›"}}</text>
+        </view>
       </view>
     </view>
   </view>

@@ -2,8 +2,8 @@ import type {
   MemoirBookImagePlacement,
   MemoirBookImagePlacementCreateRequest,
   MemoirBookPlan,
+  MemoirBookPlanChapter,
   MemoirImageAsset,
-  MemoirImageAssetListResponse,
 } from "../../domain/memoir-book";
 import {
   accessibilityPageClass,
@@ -20,16 +20,28 @@ import {
   listMemoirImageAssets,
   updateMemoirImageAsset,
 } from "../../services/memoir-book-api";
+import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
+import {
+  downloadMemoirShareVideoJob,
+  getMemoirShareVideoJob,
+} from "../../services/memoir-transcript-api";
 import { optionalApiResource } from "../../services/request";
 import { routeAuthError } from "../../services/navigation";
 import {
   datasetString,
   pickerIndex,
+  queryParam,
   type PageDatasetEvent,
   type PagePickerEvent,
+  type PageQuery,
   type PageTextInputEvent,
 } from "../../services/page-input";
+import { setPageNavigationTitle } from "../../services/page-navigation";
 import { formatBeijingDateTimeShort } from "../../services/time";
+import {
+  buildStoryMediaIndex,
+  type StoryVideoAsset,
+} from "../story/story-media-index";
 
 interface ChapterOption {
   label: string;
@@ -53,6 +65,14 @@ interface ImageAssetView extends MemoirImageAsset {
   enabledPlacements: MemoirBookImagePlacement[];
 }
 
+interface VideoAssetView {
+  id: string;
+  title: string;
+  detail: string;
+}
+
+type StoryMaterialScope = "" | "chapter" | "section" | "unassigned";
+
 interface ImageAssetsData {
   pageClass: string;
   loading: boolean;
@@ -66,6 +86,15 @@ interface ImageAssetsData {
   savingTarget: string;
   placingTarget: string;
   deletingTarget: string;
+  isStoryMaterialView: boolean;
+  scope: StoryMaterialScope;
+  chapterId: string;
+  sectionId: string;
+  contextText: string;
+  videos: VideoAssetView[];
+  previewingVideoId: string;
+  videoPreviewPath: string;
+  videoPreviewTitle: string;
 }
 
 interface ImageAssetDataset {
@@ -174,11 +203,39 @@ function buildAssetView(
 }
 
 function buildAssetViews(
-  response: MemoirImageAssetListResponse,
+  assets: MemoirImageAsset[],
   currentItems: ImageAssetView[],
 ): ImageAssetView[] {
   const currentById = new Map(currentItems.map((item) => [item.id, item]));
-  return response.items.map((asset) => buildAssetView(asset, currentById.get(asset.id)));
+  return assets.map((asset) => buildAssetView(asset, currentById.get(asset.id)));
+}
+
+function shortText(value: string, maxLength = 42): string {
+  const text = value.trim().replace(/\s+/g, " ");
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+function materialTextByUtterance(
+  chapters: MemoirBookPlanChapter[],
+): Map<string, string> {
+  return new Map(
+    chapters.flatMap((chapter) => chapter.sections.flatMap(
+      (section) => section.materials.map(
+        (material) => [material.utterance_id, material.text] as const,
+      ),
+    )),
+  );
+}
+
+function videoViews(
+  videos: StoryVideoAsset[],
+  materialText: Map<string, string>,
+): VideoAssetView[] {
+  return videos.map((video, index) => ({
+    id: video.id,
+    title: `分享视频 ${index + 1}`,
+    detail: shortText(materialText.get(video.utteranceId) || "") || "点按播放视频",
+  }));
 }
 
 function assetCountData(items: ImageAssetView[]): Pick<
@@ -205,6 +262,7 @@ function chapterOptions(plan: MemoirBookPlan | null): ChapterOption[] {
 
 definePage<ImageAssetsData>()({
   loadToken: 0,
+  videoPreviewPaths: {} as Record<string, string>,
 
   data: {
     pageClass: accessibilityPageClass(PAGE_CLASS),
@@ -219,13 +277,31 @@ definePage<ImageAssetsData>()({
     savingTarget: "",
     placingTarget: "",
     deletingTarget: "",
+    isStoryMaterialView: false,
+    scope: "",
+    chapterId: "",
+    sectionId: "",
+    contextText: "统一管理生成图片，选择可入书的插图",
+    videos: [],
+    previewingVideoId: "",
+    videoPreviewPath: "",
+    videoPreviewTitle: "",
   },
 
-  onLoad(options: { projectId?: string }) {
-    const projectId = trimText(options.projectId);
-    if (projectId) {
-      this.setData({ projectId });
-    }
+  onLoad(options: PageQuery = {}) {
+    const scopeValue = queryParam(options, "scope");
+    const scope: StoryMaterialScope = (
+      scopeValue === "chapter" || scopeValue === "section" || scopeValue === "unassigned"
+        ? scopeValue
+        : ""
+    );
+    this.setData({
+      projectId: queryParam(options, "projectId"),
+      isStoryMaterialView: Boolean(scope),
+      scope,
+      chapterId: queryParam(options, "chapterId"),
+      sectionId: queryParam(options, "sectionId"),
+    });
   },
 
   async onShow() {
@@ -256,6 +332,52 @@ definePage<ImageAssetsData>()({
     this.setData({ loading: true, error: "" });
     try {
       const projectId = await this.ensureProjectId();
+      if (this.data.isStoryMaterialView) {
+        const snapshot = await getMemoirBookSnapshot();
+        const activeProjectId = snapshot.identity.active_project?.id || "";
+        if (!activeProjectId || activeProjectId !== projectId) {
+          throw new Error("当前故事已经切换，请返回故事页重新进入");
+        }
+        const chapters = [...(snapshot.plan?.chapters || [])]
+          .sort((left, right) => left.sort_order - right.sort_order);
+        const media = buildStoryMediaIndex(
+          chapters,
+          snapshot.image_assets.items || [],
+          snapshot.share_video_counts || [],
+        );
+        const chapter = chapters.find((item) => item.id === this.data.chapterId);
+        const section = chapter?.sections.find((item) => item.id === this.data.sectionId);
+        const assets = this.data.scope === "section"
+          ? (media.sectionImages[this.data.sectionId] || [])
+          : this.data.scope === "chapter"
+            ? (media.chapterImages[this.data.chapterId] || [])
+            : media.unassignedImages;
+        const videos = this.data.scope === "section"
+          ? (media.sectionVideos[this.data.sectionId] || [])
+          : this.data.scope === "chapter"
+            ? (media.chapterVideos[this.data.chapterId] || [])
+            : media.unassignedVideos;
+        const title = this.data.scope === "section"
+          ? (section?.title || "小节素材")
+          : this.data.scope === "chapter"
+            ? `${chapter?.title || "本章"}的素材`
+            : "待整理素材";
+        const items = buildAssetViews(assets, this.data.items);
+        if (requestToken !== this.loadToken || projectId !== this.data.projectId) {
+          return;
+        }
+        setPageNavigationTitle(title);
+        this.setData({
+          ...assetCountData(items),
+          total: items.length,
+          chapterOptions: chapterOptions(snapshot.plan || null),
+          contextText: "查看这里已有的图片和分享视频；点按素材后再预览",
+          items,
+          videos: videoViews(videos, materialTextByUtterance(chapters)),
+        });
+        void this.downloadVisibleImages(assets, projectId, requestToken);
+        return;
+      }
       const [response, plan] = await Promise.all([
         listMemoirImageAssets(projectId),
         optionalApiResource(getMemoirBookPlan(projectId)),
@@ -268,7 +390,8 @@ definePage<ImageAssetsData>()({
         includedCount: response.included_count,
         unusedCount: response.unused_count,
         chapterOptions: chapterOptions(plan),
-        items: buildAssetViews(response, this.data.items),
+        items: buildAssetViews(response.items, this.data.items),
+        videos: [],
       });
       void this.downloadVisibleImages(response.items, projectId, requestToken);
     } catch (error) {
@@ -407,6 +530,34 @@ definePage<ImageAssetsData>()({
         )),
       });
     }
+  },
+
+  async previewVideo(event: DatasetEvent) {
+    const videoId = datasetString(event, "id");
+    if (!videoId || this.data.previewingVideoId) {
+      return;
+    }
+    const video = this.data.videos.find((item) => item.id === videoId);
+    this.setData({ previewingVideoId: videoId, error: "" });
+    try {
+      let path = this.videoPreviewPaths[videoId];
+      if (!path) {
+        path = await downloadMemoirShareVideoJob(await getMemoirShareVideoJob(videoId));
+        this.videoPreviewPaths[videoId] = path;
+      }
+      this.setData({
+        videoPreviewPath: path,
+        videoPreviewTitle: video?.title || "分享视频",
+      });
+    } catch (error) {
+      this.setData({ error: error instanceof Error ? error.message : "视频预览失败" });
+    } finally {
+      this.setData({ previewingVideoId: "" });
+    }
+  },
+
+  closeVideoPreview() {
+    this.setData({ videoPreviewPath: "", videoPreviewTitle: "" });
   },
 
   onThumbnailError(event: DatasetEvent) {
