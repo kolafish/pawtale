@@ -7,7 +7,7 @@ const { clearModule } = require("./page-harness");
 test("page runtime values are created per instance at the start of onLoad", () => {
   let registeredPage = null;
   global.Page = (definition) => {
-    registeredPage = definition;
+    registeredPage = { ...definition };
   };
   const modulePath = clearModule("../services/page-definition.ts");
   const { definePage, pageRuntime } = require(modulePath);
