@@ -1,0 +1,69 @@
+<view class="{{pageClass}}">
+  <view wx:if="{{error}}" class="ui-error-banner">{{error}}</view>
+  <view wx:if="{{loading}}" class="media-empty">正在读取素材…</view>
+
+  <block wx:else>
+    <view class="media-summary ui-card ui-card-borderless">
+      <text class="media-kicker">故事素材</text>
+      <text class="page-title media-title">{{title}}</text>
+      <text class="media-summary-text ui-tabular">{{images.length}} 张图片 · {{videos.length}} 个视频</text>
+    </view>
+
+    <view wx:if="{{videoPreviewPath}}" class="video-preview-card ui-card ui-card-borderless">
+      <view class="media-section-heading">
+        <text class="ui-section-heading">{{videoPreviewTitle}}</text>
+        <view class="preview-close ui-pressable" aria-role="button" bindtap="closeVideoPreview">关闭</view>
+      </view>
+      <video class="video-preview" src="{{videoPreviewPath}}" controls autoplay show-fullscreen-btn />
+    </view>
+
+    <view wx:if="{{images.length}}" class="media-section">
+      <text class="ui-section-heading">图片</text>
+      <view class="media-list">
+        <view
+          wx:for="{{images}}"
+          wx:key="id"
+          class="media-item ui-card ui-card-borderless ui-pressable"
+          data-id="{{item.id}}"
+          aria-role="button"
+          aria-label="查看图片 {{item.title}}"
+          bindtap="previewImage"
+        >
+          <view class="media-kind image-kind">图</view>
+          <view class="media-copy">
+            <text class="section-title media-item-title">{{item.title}}</text>
+            <text class="section-detail media-item-detail">{{item.detail}}</text>
+          </view>
+          <text class="media-action">{{previewingImageId === item.id ? "加载中" : "预览 ›"}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{videos.length}}" class="media-section">
+      <text class="ui-section-heading">视频</text>
+      <view class="media-list">
+        <view
+          wx:for="{{videos}}"
+          wx:key="id"
+          class="media-item ui-card ui-card-borderless ui-pressable"
+          data-id="{{item.id}}"
+          aria-role="button"
+          aria-label="播放视频 {{item.title}}"
+          bindtap="previewVideo"
+        >
+          <view class="media-kind video-kind">▶</view>
+          <view class="media-copy">
+            <text class="section-title media-item-title">{{item.title}}</text>
+            <text class="section-detail media-item-detail">{{item.detail}}</text>
+          </view>
+          <text class="media-action">{{previewingVideoId === item.id ? "加载中" : "播放 ›"}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{!images.length && !videos.length}}" class="media-empty">
+      <text class="empty-title media-empty-title">这里还没有素材</text>
+      <text class="empty-copy media-empty-detail">返回故事页可以继续查看其他章节和小节。</text>
+    </view>
+  </block>
+</view>

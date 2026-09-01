@@ -154,6 +154,24 @@ definePage<StoryPageData>()({
     });
   },
 
+  openMedia(event: DatasetEvent) {
+    if (!this.data.projectId) {
+      return;
+    }
+    const chapterId = (
+      datasetString(event, "chapterId") || datasetString(event, "id")
+    );
+    const sectionId = datasetString(event, "sectionId");
+    wx.navigateTo({
+      url: pageUrl("/pages/story-media/index", {
+        projectId: this.data.projectId,
+        scope: sectionId ? "section" : (chapterId ? "chapter" : "unassigned"),
+        chapterId,
+        sectionId,
+      }),
+    });
+  },
+
   openLogin() {
     navigateToLogin();
   },

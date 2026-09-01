@@ -507,6 +507,7 @@ class MemoirShareVideoOutputResponse(BaseModel):
 class MemoirShareVideoCountResponse(BaseModel):
     utterance_id: str
     count: int = Field(ge=1)
+    job_ids: list[str] = Field(min_length=1)
 
 
 class MemoirShareVideoJobResponse(BaseModel):

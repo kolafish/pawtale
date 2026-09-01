@@ -17,6 +17,7 @@ export interface MemoirHomeSnapshot {
 export interface MemoirShareVideoCount {
   utterance_id: string;
   count: number;
+  job_ids: string[];
 }
 
 export interface MemoirBookSnapshot {

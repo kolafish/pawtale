@@ -2,7 +2,6 @@ import type {
   MemoirBookChapterDraft,
   MemoirBookPlanChapter,
   MemoirChapterSectionSummary,
-  MemoirImageAsset,
 } from "../../domain/memoir-book";
 import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
 import type { MemoirVoiceProgressResponse } from "../../domain/memoir-voice-session";
@@ -13,17 +12,12 @@ import type {
   StorySectionView,
   StoryViewData,
 } from "./story-view-data";
+import {
+  buildStoryMediaIndex,
+  type StoryMediaIndex,
+} from "./story-media-index";
 
 const CHAPTER_TONES: StoryChapterTone[] = ["clay", "amber", "sage", "blue", "stone"];
-
-interface MediaCounts {
-  chapterImages: Record<string, number>;
-  sectionImages: Record<string, number>;
-  chapterVideos: Record<string, number>;
-  sectionVideos: Record<string, number>;
-  unassignedImages: number;
-  unassignedVideos: number;
-}
 
 function uniqueSourceCount(chapter: MemoirBookPlanChapter): number {
   return new Set((chapter.source_refs || []).map((item) => item.utterance_id).filter(Boolean)).size;
@@ -33,95 +27,6 @@ function activeSections(chapter: MemoirBookPlanChapter): MemoirChapterSectionSum
   return (chapter.sections || [])
     .filter((section) => section.status === "active")
     .sort((left, right) => left.sort_order - right.sort_order);
-}
-
-function increment(counts: Record<string, number>, id: string): void {
-  counts[id] = (counts[id] || 0) + 1;
-}
-
-function storyMediaCounts(
-  chapters: MemoirBookPlanChapter[],
-  assets: MemoirImageAsset[],
-  videos: MemoirBookSnapshot["share_video_counts"],
-): MediaCounts {
-  const chapterImages: Record<string, number> = {};
-  const sectionImages: Record<string, number> = {};
-  const chapterVideos: Record<string, number> = {};
-  const sectionVideos: Record<string, number> = {};
-  let unassignedImages = 0;
-  let unassignedVideos = 0;
-  const sectionByUtteranceId = new Map<string, string>();
-  const chapterByUtteranceId = new Map<string, string>();
-  const chapterIds = new Set(chapters.map((chapter) => chapter.id));
-
-  chapters.forEach((chapter) => {
-    chapter.source_refs.forEach((source) => {
-      if (source.utterance_id && !chapterByUtteranceId.has(source.utterance_id)) {
-        chapterByUtteranceId.set(source.utterance_id, chapter.id);
-      }
-    });
-    activeSections(chapter).forEach((section) => {
-      section.materials.forEach((material) => {
-        if (material.utterance_id && !sectionByUtteranceId.has(material.utterance_id)) {
-          sectionByUtteranceId.set(material.utterance_id, section.id);
-        }
-      });
-    });
-  });
-
-  assets.filter((asset) => asset.status === "ready").forEach((asset) => {
-    const utteranceId = asset.source_utterance_id || "";
-    const sectionId = utteranceId ? sectionByUtteranceId.get(utteranceId) : "";
-    if (sectionId) {
-      increment(sectionImages, sectionId);
-      return;
-    }
-    const chapterId = (
-      (utteranceId ? chapterByUtteranceId.get(utteranceId) : "")
-      || asset.source_chapter_id
-      || ""
-    );
-    if (chapterIds.has(chapterId)) {
-      increment(chapterImages, chapterId);
-      return;
-    }
-    const placementChapterIds = new Set(
-      (asset.placements || [])
-        .filter((placement) => placement.enabled && placement.chapter_id)
-        .map((placement) => placement.chapter_id || "")
-        .filter((placementChapterId) => chapterIds.has(placementChapterId)),
-    );
-    if (placementChapterIds.size) {
-      placementChapterIds.forEach((placementChapterId) => {
-        increment(chapterImages, placementChapterId);
-      });
-      return;
-    }
-    unassignedImages += 1;
-  });
-
-  videos.forEach((video) => {
-    const sectionId = sectionByUtteranceId.get(video.utterance_id);
-    if (sectionId) {
-      sectionVideos[sectionId] = (sectionVideos[sectionId] || 0) + video.count;
-      return;
-    }
-    const chapterId = chapterByUtteranceId.get(video.utterance_id) || "";
-    if (chapterIds.has(chapterId)) {
-      chapterVideos[chapterId] = (chapterVideos[chapterId] || 0) + video.count;
-    } else {
-      unassignedVideos += video.count;
-    }
-  });
-
-  return {
-    chapterImages,
-    sectionImages,
-    chapterVideos,
-    sectionVideos,
-    unassignedImages,
-    unassignedVideos,
-  };
 }
 
 function chapterOutcome(
@@ -145,14 +50,14 @@ function chapterOutcome(
 
 function sectionView(
   section: MemoirChapterSectionSummary,
-  media: MediaCounts,
+  media: StoryMediaIndex,
 ): StorySectionView {
   return {
     id: section.id,
     title: section.title || "未命名小节",
     materialText: `${section.material_count || 0} 段讲述`,
-    imageCount: media.sectionImages[section.id] || 0,
-    videoCount: media.sectionVideos[section.id] || 0,
+    imageCount: media.sectionImages[section.id]?.length || 0,
+    videoCount: media.sectionVideos[section.id]?.length || 0,
   };
 }
 
@@ -160,7 +65,7 @@ function chapterView(
   chapter: MemoirBookPlanChapter,
   draft: MemoirBookChapterDraft | null,
   index: number,
-  media: MediaCounts,
+  media: StoryMediaIndex,
 ): StoryChapterView {
   const sections = activeSections(chapter).map((section) => sectionView(section, media));
   return {
@@ -169,8 +74,8 @@ function chapterView(
     timeRangeText: "",
     summaryText: `${sections.length} 小节 · ${uniqueSourceCount(chapter)} 段讲述`,
     outcomeText: chapterOutcome(chapter, draft),
-    imageCount: media.chapterImages[chapter.id] || 0,
-    videoCount: media.chapterVideos[chapter.id] || 0,
+    imageCount: media.chapterImages[chapter.id]?.length || 0,
+    videoCount: media.chapterVideos[chapter.id]?.length || 0,
     tone: CHAPTER_TONES[index % CHAPTER_TONES.length],
     expanded: index === 0,
     sections,
@@ -273,7 +178,7 @@ export function storyViewData(
   const project = snapshot.identity.active_project;
   const planChapters = [...(snapshot.plan?.chapters || [])]
     .sort((left, right) => left.sort_order - right.sort_order);
-  const media = storyMediaCounts(
+  const media = buildStoryMediaIndex(
     planChapters,
     snapshot.image_assets.items || [],
     snapshot.share_video_counts || [],
@@ -317,7 +222,7 @@ export function storyViewData(
     unassignedMaterialText: materialCounts.pending
       ? `还有 ${materialCounts.pending} 段讲述等待整理`
       : "所有讲述都已归入章节",
-    unassignedImageCount: media.unassignedImages,
-    unassignedVideoCount: media.unassignedVideos,
+    unassignedImageCount: media.unassignedImages.length,
+    unassignedVideoCount: media.unassignedVideos.length,
   };
 }
