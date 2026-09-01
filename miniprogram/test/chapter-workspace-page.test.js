@@ -1128,6 +1128,10 @@ test("chapter workspace reads one draft section with saved book voice settings",
   });
   const context = pageContext(page);
   let token = 0;
+  await page.onLoad.call(context, {
+    projectId: "project-1",
+    chapterId: "chapter-1",
+  });
   context.audioPlayback = {
     nextToken() {
       token += 1;
@@ -1143,10 +1147,6 @@ test("chapter workspace reads one draft section with saved book voice settings",
       played.push([audioFileId, playToken]);
     },
   };
-  await page.onLoad.call(context, {
-    projectId: "project-1",
-    chapterId: "chapter-1",
-  });
 
   await page.playDraftSection.call(context, {
     currentTarget: { dataset: { id: "section-1" } },

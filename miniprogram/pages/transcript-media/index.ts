@@ -1,5 +1,5 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   createMemoirMaterialImageGenerationJob,
   createMemoirTranscriptShareVideoJob,
@@ -34,16 +34,16 @@ import {
 } from "../transcript-detail/transcript-detail-share-video-workflow";
 
 definePage<TranscriptMediaData>()({
-  shareVideoController: new TranscriptShareVideoController({
+  shareVideoController: pageRuntime(() => new TranscriptShareVideoController({
     createJob: createMemoirTranscriptShareVideoJob,
     getJob: getMemoirShareVideoJob,
     downloadJob: downloadMemoirShareVideoJob,
     shareFile: shareLocalFileMessage,
-  }),
-  materialImageController: new TranscriptMaterialImageController({
+  })),
+  materialImageController: pageRuntime(() => new TranscriptMaterialImageController({
     createJob: createMemoirMaterialImageGenerationJob,
     getJob: getMemoirMaterialImageGenerationJob,
-  }),
+  })),
   loadToken: 0,
   shareVideoBackgroundUploadToken: 0,
 

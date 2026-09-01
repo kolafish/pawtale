@@ -10,7 +10,7 @@ import {
   accessibilityPageClass,
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   downloadMemoirBookOutputExport,
   assembleMemoirBookOutput,
@@ -181,7 +181,9 @@ function defaultTitle(plan: MemoirBookPlan | null, output: MemoirBookOutput | nu
 definePage<BookExportData>()({
   bookDesignAutosaveTimer: null as number | null,
   bookEditorialCopyEvent: null as MemoirAutomationEvent | null,
-  bookEditorialCopyPoller: new PollingTimer(BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS),
+  bookEditorialCopyPoller: pageRuntime(
+    () => new PollingTimer(BOOK_EDITORIAL_COPY_POLL_INTERVAL_MS),
+  ),
   bookOutput: null as MemoirBookOutput | null,
   bookOutputVersion: null as MemoirBookOutputVersion | null,
   bookPlan: null as MemoirBookPlan | null,

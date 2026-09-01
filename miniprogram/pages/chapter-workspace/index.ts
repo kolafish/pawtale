@@ -4,7 +4,7 @@ import {
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
 import { AudioPlaybackController } from "../../services/audio-playback";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   closeMemoirCompletionIssue,
   listMemoirCompletionIssues,
@@ -61,10 +61,14 @@ export { chapterWorkspaceViewPatch };
 const PAGE_CLASS = "workspace-page ui-page-shell ui-accessible-page";
 
 definePage<ChapterWorkspacePageData>()({
-  audioPlayback: new AudioPlaybackController(),
+  audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   playToken: 0,
-  preparationPoller: new PollingTimer(PREPARATION_POLL_INTERVAL_MS),
-  sectionRegenerationPoller: new PollingTimer(SECTION_REGENERATION_POLL_INTERVAL_MS),
+  preparationPoller: pageRuntime(
+    () => new PollingTimer(PREPARATION_POLL_INTERVAL_MS),
+  ),
+  sectionRegenerationPoller: pageRuntime(
+    () => new PollingTimer(SECTION_REGENERATION_POLL_INTERVAL_MS),
+  ),
   pageVisible: false,
   loadedOnce: false,
   workspaceLoadSequence: 0,

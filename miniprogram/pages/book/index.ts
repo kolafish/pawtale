@@ -8,7 +8,7 @@ import type {
 } from "../../domain/memoir-book";
 import type { MemoirAutomationEvent } from "../../domain/memoir-voice-session";
 import type { MemoirBookSnapshot } from "../../domain/memoir-snapshots";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
@@ -161,10 +161,12 @@ type BookPageData = BookHomeData & {
 };
 
 definePage<BookPageData>()({
-  audioPlayback: new AudioPlaybackController(),
-  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
+  audioPlayback: pageRuntime(() => new AudioPlaybackController()),
+  ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
-  bookGenerationPoller: new PollingTimer(BOOK_GENERATION_EVENT_POLL_INTERVAL_MS),
+  bookGenerationPoller: pageRuntime(
+    () => new PollingTimer(BOOK_GENERATION_EVENT_POLL_INTERVAL_MS),
+  ),
   bookGenerationPollAttempts: 0,
   automationEvents: [] as MemoirAutomationEvent[],
   bookLoadSequence: 0,

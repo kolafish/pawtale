@@ -8,7 +8,7 @@ import {
   accessibilityPageClass,
   accessibilityPagePatch,
 } from "../../services/accessibility-settings";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   createMemoirBookChapterDraftTTS,
   createMemoirBookOutputTTS,
@@ -269,8 +269,8 @@ function chapterReaderData(
 }
 
 definePage<BookReaderData>()({
-  audioPlayback: new AudioPlaybackController(),
-  ttsProgress: new VoiceAssistantTTSProgressRuntime(),
+  audioPlayback: pageRuntime(() => new AudioPlaybackController()),
+  ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
   chapterParagraphRanges: [] as ChapterParagraphRange[],
   readerHighlightKey: "",
