@@ -141,12 +141,7 @@
             </view>
             <view
               wx:if="{{section.imageCount || section.videoCount}}"
-              class="section-media section-media-entry ui-pressable"
-              data-chapter-id="{{item.id}}"
-              data-section-id="{{section.id}}"
-              catchtap="openMedia"
-              aria-role="button"
-              aria-label="查看{{section.title}}的图片和视频"
+              class="section-media"
             >
               <text wx:if="{{section.imageCount}}" class="media-chip image-chip">{{section.imageCount}} 图</text>
               <text wx:if="{{section.videoCount}}" class="media-chip video-chip">{{section.videoCount}} 视频</text>

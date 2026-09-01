@@ -40,7 +40,7 @@
     </view>
 
     <view
-      wx:if="{{!focusedSectionId && (requiredIssues.length || optionalIssues.length)}}"
+      wx:if="{{requiredIssues.length || optionalIssues.length}}"
       class="content-card suggestions-card ui-card ui-card-borderless"
       id="chapter-suggestions"
     >
@@ -51,11 +51,11 @@
         bindtap="toggleSuggestions"
       >
         <view>
-          <text class="section-kicker">审阅建议</text>
-          <text class="section-title">必须确认与可选补充</text>
+          <text class="section-kicker">{{focusedSectionId ? "本章建议" : "审阅建议"}}</text>
+          <text class="section-title">{{focusedSectionId ? "还可以补充的内容" : "必须确认与可选补充"}}</text>
         </view>
         <view class="structure-heading-meta">
-          <text class="suggestion-count">必须 {{requiredIssues.length}} · 可选 {{optionalIssues.length}}</text>
+          <text class="suggestion-count">{{focusedSectionId ? "可选补充 " + optionalIssues.length + " 项" : "必须 " + requiredIssues.length + " · 可选 " + optionalIssues.length}}</text>
           <text class="structure-expand-mark">{{suggestionsExpanded ? "收起" : "查看全部"}}</text>
         </view>
       </view>
@@ -80,10 +80,17 @@
           <text class="section-title">{{focusedSectionId ? focusedSectionTitle : "讲述素材与当前正文"}}</text>
           <text class="section-structure-summary">{{sectionStructureSummary}}</text>
         </view>
-        <view wx:if="{{!focusedSectionId}}" class="draft-heading-actions">
-          <text wx:if="{{workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
+        <view class="draft-heading-actions">
+          <text wx:if="{{!focusedSectionId && workspace.completion_summary.state === 'confirmed'}}" class="confirmed-badge">已确认</text>
           <view
-            wx:if="{{workspace.draft_version_id && workspace.draft_content}}"
+            wx:if="{{focusedSectionId}}"
+            class="chapter-read-action ui-pressable"
+            aria-role="button"
+            aria-label="查看{{focusedSectionTitle}}的图片和视频"
+            bindtap="openFocusedSectionMedia"
+          >图片与视频</view>
+          <view
+            wx:elif="{{workspace.draft_version_id && workspace.draft_content}}"
             class="chapter-read-action {{operationKind !== '' || editingSectionId !== '' ? 'is-disabled' : ''}}"
             aria-role="button"
             aria-disabled="{{operationKind !== '' || editingSectionId !== ''}}"
@@ -178,14 +185,14 @@
                   class="section-material-open"
                   data-utterance-id="{{material.utterance_id}}"
                   aria-role="button"
-                  aria-label="{{item.requires_user_assignment ? '编辑或删除' : '编辑'}}{{material.indexText}}"
+                  aria-label="{{item.requires_user_assignment ? '编辑或删除' : '查看与修改'}}{{material.indexText}}"
                   bindtap="openMaterialEditor"
                 >
                   <view class="section-material-open-copy">
                     <text class="section-material-index">{{material.indexText}}</text>
                     <text class="section-material-text">{{material.text}}</text>
                   </view>
-                  <text class="section-material-open-action">{{item.requires_user_assignment ? "编辑或删除" : "编辑"}} ›</text>
+                  <text class="section-material-open-action">{{item.requires_user_assignment ? "编辑或删除" : "查看与修改"}} ›</text>
                 </view>
                 <picker
                   wx:if="{{item.requires_user_assignment}}"

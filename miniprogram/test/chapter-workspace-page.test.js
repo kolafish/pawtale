@@ -167,6 +167,27 @@ function chapterPreparationJob(overrides = {}) {
   };
 }
 
+function completionIssue(overrides = {}) {
+  return {
+    id: "issue-1",
+    project_id: "project-1",
+    scope: "chapter",
+    chapter_id: "chapter-1",
+    issue_type: "meaning",
+    channel: "interview",
+    question: "S1之后的第一晚是什么感受？",
+    reason: "补充S1之后的感受会让这一段更丰富。",
+    priority: "medium",
+    related_material_ids: [],
+    input_signature: "signature-1",
+    status: "open",
+    outcome_note: "",
+    created_at: "2026-07-27T00:00:00",
+    updated_at: "2026-07-27T00:00:00",
+    ...overrides,
+  };
+}
+
 function loadWorkspacePage({
   currentWorkspace = workspace(),
   voiceApiExports = {},
@@ -321,7 +342,18 @@ test("chapter workspace opens a focused section selected from the story tree", a
     ],
   });
   const { navigationTitles, navigations, scrolls } = installWx();
-  const { page } = loadWorkspacePage({ currentWorkspace });
+  const { page } = loadWorkspacePage({
+    currentWorkspace,
+    voiceApiExports: {
+      listMemoirCompletionIssues: async () => ({
+        project_id: "project-1",
+        issues: [
+          completionIssue(),
+          completionIssue({ id: "issue-required", channel: "manual_review" }),
+        ],
+      }),
+    },
+  });
   const context = pageContext(page);
 
   await page.onLoad.call(context, {
@@ -335,6 +367,9 @@ test("chapter workspace opens a focused section selected from the story tree", a
   assert.equal(context.data.sectionViews.length, 1);
   assert.equal(context.data.sectionViews[0].expanded, true);
   assert.equal(context.data.expandedSectionIds["section-1"], true);
+  assert.equal(context.data.suggestionsExpanded, true);
+  assert.equal(context.data.requiredIssues.length, 0);
+  assert.equal(context.data.optionalIssues.length, 1);
   assert.deepEqual(scrolls, []);
   assert.deepEqual(navigationTitles, ["离家前的准备"]);
 
@@ -344,6 +379,12 @@ test("chapter workspace opens a focused section selected from the story tree", a
   assert.equal(
     navigations.at(-1),
     "/pages/transcript-detail/index?id=utterance-1",
+  );
+
+  page.openFocusedSectionMedia.call(context);
+  assert.equal(
+    navigations.at(-1),
+    "/pages/image-assets/index?projectId=project-1&scope=section&chapterId=chapter-1&sectionId=section-1",
   );
 });
 
@@ -943,23 +984,7 @@ test("chapter workspace confirms the current completion issue then prepares agai
 
 test("chapter workspace separates optional suggestions from required decisions", async () => {
   installWx();
-  const optionalIssue = {
-    id: "issue-1",
-    project_id: "project-1",
-    scope: "chapter",
-    chapter_id: "chapter-1",
-    issue_type: "meaning",
-    channel: "interview",
-    question: "S1之后的第一晚是什么感受？",
-    reason: "补充S1之后的感受会让这一段更丰富。",
-    priority: "medium",
-    related_material_ids: [],
-    input_signature: "signature-1",
-    status: "open",
-    outcome_note: "",
-    created_at: "2026-07-27T00:00:00",
-    updated_at: "2026-07-27T00:00:00",
-  };
+  const optionalIssue = completionIssue();
   const { page } = loadWorkspacePage({
     currentWorkspace: workspace({
       completion_summary: summary({ detail: "S1之后需要补充。" }),
