@@ -101,6 +101,10 @@ function snapshot(patch = {}) {
         image("chapter-image", { source_chapter_id: "chapter-1" }),
         image("unsectioned-image", { source_utterance_id: "utterance-2" }),
         image("unassigned-image", { source_utterance_id: "utterance-4" }),
+        image("placed-manual-image", {
+          placements: [{ enabled: true, chapter_id: "chapter-1" }],
+        }),
+        image("unassigned-manual-image", { placements: [] }),
         image("pending-image", { status: "pending", source_chapter_id: "chapter-1" }),
       ],
     },
@@ -199,10 +203,10 @@ test("story adapter maps current chapters, outcomes and existing image ownership
   assert.equal(view.chapters[0].sections.length, 1);
   assert.equal(view.chapters[0].sections[0].imageCount, 1);
   assert.equal(view.chapters[0].sections[0].videoCount, 2);
-  assert.equal(view.chapters[0].imageCount, 2);
+  assert.equal(view.chapters[0].imageCount, 3);
   assert.equal(view.chapters[0].videoCount, 1);
   assert.equal(view.chapters[1].outcomeText, "暂不入书");
-  assert.equal(view.unassignedImageCount, 1);
+  assert.equal(view.unassignedImageCount, 2);
   assert.equal(view.unassignedVideoCount, 1);
   assert.equal(view.chapters[0].expanded, true);
   assert.equal(view.chapters[1].expanded, false);

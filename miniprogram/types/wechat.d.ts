@@ -15,7 +15,10 @@ declare function Page<TData extends object, TMethods extends object>(
     onShow?(): void | Promise<void>;
     onShareAppMessage?(option?: WechatMiniprogram.ShareAppMessageOption): WechatMiniprogram.ShareAppMessagePayload;
     onShareTimeline?(): WechatMiniprogram.ShareTimelinePayload;
-  } & ThisType<TMethods & { data: TData; setData(data: Partial<TData>): void }>
+  } & ThisType<TMethods & {
+    data: TData;
+    setData(data: Partial<TData>, callback?: () => void): void;
+  }>
 ): void;
 
 type ComponentPropertyValue<T> =
