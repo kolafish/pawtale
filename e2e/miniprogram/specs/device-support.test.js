@@ -582,7 +582,7 @@ test("native login treats loading as proof that the semantic element click submi
       sourceReads += 1;
       return sourceReads === 1
         ? '<Button name="登录中"/><Text name="欢迎登录"/>'
-        : '<Button name="首页"/><Button name="记录"/>';
+        : '<Button name="老余口述"/><Button name="分享给家人"/><Button name="设置"/>';
     },
     async tapElementCenter() {
       throw new Error("acknowledged element click must not use pointer fallback");
@@ -617,7 +617,7 @@ test("native login uses one guarded pointer fallback when element click leaves t
     async clickElement() {},
     async source() {
       return pointerTapped
-        ? '<Button name="首页"/><Button name="记录"/>'
+        ? '<Button name="老余口述"/><Button name="分享给家人"/><Button name="设置"/>'
         : '<Text name="欢迎登录"/><Button name="账号登录"/>';
     },
     async isKeyboardShown() {
@@ -838,7 +838,7 @@ test("native account actions scroll an offscreen button into the safe viewport b
 
 test("Pawtale source matching recognizes an authenticated non-home tab", () => {
   assert.equal(
-    isPawtaleSource('<Button name="首页"/><Button name="记录"/>'
+    isPawtaleSource('<Button name="老余口述"/><Button name="分享给家人"/><Button name="设置"/>'
       + '<Button name="书稿"/><Button name="我的"/>'),
     true,
   );

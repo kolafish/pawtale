@@ -863,7 +863,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   const storyTabs = [];
   global.wx = {
     showTabBarRedDot() {},
-    switchTab(options) {
+    reLaunch(options) {
       storyTabs.push(options.url);
     },
   };
@@ -939,7 +939,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.storyGrowthNoticeState, "ready");
   assert.equal(context.data.storyGrowthNoticeActionText, "查看故事");
   page.handleStoryGrowthNoticeAction.call(context);
-  assert.deepEqual(storyTabs, ["/pages/story/index"]);
+  assert.deepEqual(storyTabs, ["/pages/home/index"]);
 });
 
 test("book completion finish explains that the answer is already in its section", async () => {

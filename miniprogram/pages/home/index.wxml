@@ -5,28 +5,16 @@
         <text class="hello">{{greetingText}}</text>
         <text class="subtitle">老余口述</text>
       </view>
+      <view class="header-actions">
+      <button id="home-settings" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
       <button class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
         分享给家人
       </button>
+      </view>
     </view>
   </view>
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
-
-  <view
-    wx:if="{{growthNoticeText}}"
-    class="return-prompt ui-pressable"
-    bindtap="openStoryProgress"
-    aria-role="button"
-    aria-live="polite"
-    aria-label="{{growthNoticeTitle}}，查看故事"
-  >
-    <view class="return-prompt-copy">
-      <text class="return-prompt-title">{{growthNoticeTitle}}</text>
-      <text class="return-prompt-text">{{growthNoticeText}}</text>
-    </view>
-    <text class="narration-overview-action">查看 ›</text>
-  </view>
 
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
@@ -187,5 +175,33 @@
       </label>
     </checkbox-group>
     <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
+  </view>
+
+  <view id="home-story" class="home-story">
+    <view class="home-story-heading">
+      <text class="home-story-title">讲过的回忆，在这里长成故事</text>
+    </view>
+    <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
+    <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
+    <view wx:if="{{progress && progress.status !== 'idle'}}" class="home-story-progress ui-card" aria-live="polite">
+      <text class="home-story-progress-title">{{progress.title}}</text>
+      <text class="home-story-progress-detail">{{progress.detail}}</text>
+      <text wx:if="{{progress.total_chapter_count}}" class="home-story-progress-detail ui-tabular">已有 {{progress.readable_chapter_count}} / {{progress.total_chapter_count}} 章可读</text>
+      <view class="home-story-progress-actions">
+        <button wx:if="{{bookReadable}}" class="home-story-action ui-button" bindtap="openBook">阅读草稿</button>
+        <button wx:if="{{progress.can_retry}}" class="home-story-action ui-button" bindtap="retryDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续后台整理</button>
+        <button wx:if="{{progress.status === 'needs_input'}}" class="home-story-action ui-button" bindtap="openReviewIssues">查看待确认事项</button>
+      </view>
+    </view>
+    <view wx:if="{{growthNoticeText}}" class="home-growth-notice" aria-live="polite">
+      <view class="home-growth-copy">
+        <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
+        <text class="home-story-progress-detail">{{growthNoticeText}}</text>
+      </view>
+      <button size="mini" class="home-story-action ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+    </view>
+    <story-tree id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject}}"
+      bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
+      bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
   </view>
 </view>

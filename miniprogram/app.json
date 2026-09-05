@@ -7,7 +7,6 @@
     "pages/book-completion/index",
     "pages/revision-workbench/index",
     "pages/transcripts/index",
-    "pages/story/index",
     "pages/transcript-detail/index",
     "pages/transcript-media/index",
     "pages/book/index",
@@ -21,32 +20,6 @@
     "pages/voice-settings/index",
     "pages/me/index"
   ],
-  "tabBar": {
-    "color": "#766F6B",
-    "selectedColor": "#A84F43",
-    "backgroundColor": "#FFFDFC",
-    "borderStyle": "black",
-    "list": [
-      {
-        "pagePath": "pages/home/index",
-        "text": "讲述",
-        "iconPath": "assets/tab-home.png",
-        "selectedIconPath": "assets/tab-home-active.png"
-      },
-      {
-        "pagePath": "pages/story/index",
-        "text": "故事",
-        "iconPath": "assets/tab-story.png",
-        "selectedIconPath": "assets/tab-story-active.png"
-      },
-      {
-        "pagePath": "pages/me/index",
-        "text": "我的",
-        "iconPath": "assets/tab-me.png",
-        "selectedIconPath": "assets/tab-me-active.png"
-      }
-    ]
-  },
   "window": {
     "navigationBarTitleText": "老余口述",
     "navigationBarBackgroundColor": "#A84F43",

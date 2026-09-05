@@ -7,6 +7,8 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
   const progress = snapshot.progress;
   const chapters = snapshot.chapters.map((chapter, index) => ({
     id: chapter.id,
+    ordinal: index + 1,
+    hasSections: chapter.sections.length > 0,
     title: chapter.title || "未命名章节",
     timeRangeText: "",
     summaryText: `${chapter.sections.length} 小节 · ${chapter.material_count} 段讲述`,

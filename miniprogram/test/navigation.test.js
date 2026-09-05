@@ -15,8 +15,10 @@ const {
   relaunchHome,
   returnToBook,
   routeAuthError,
-  switchToHome,
-  switchToMe,
+  returnToHome,
+  returnToStory,
+  consumeHomeStoryTarget,
+  navigateToMe,
 } = require("../services/navigation.ts");
 
 test("navigation helper identifies backend auth errors", () => {
@@ -24,6 +26,30 @@ test("navigation helper identifies backend auth errors", () => {
   assert.equal(isAuthError(new ApiError(403, "forbidden", null)), true);
   assert.equal(isAuthError(new ApiError(404, "missing", null)), false);
   assert.equal(isAuthError(new Error("network")), false);
+});
+
+test("home is the single root and settings remains a regular page", () => {
+  const config = require("../app.json");
+  assert.equal(config.pages[0], "pages/home/index");
+  assert.equal(config.tabBar, undefined);
+  assert.equal(config.pages.includes("pages/story/index"), false);
+  assert.equal(config.pages.includes("pages/me/index"), true);
+  assert.equal(missingPageRecoveryUrl("pages/story/index", { projectId: "project-1" }), "/pages/home/index?projectId=project-1&section=story");
+});
+
+test("returning to stories keeps the existing home and consumes the target once", () => {
+  const calls = [];
+  global.getCurrentPages = () => [{ route: "pages/home/index" }, { route: "pages/book/index" }, { route: "pages/chapter-workspace/index" }];
+  global.wx = { navigateBack: ({ delta }) => calls.push(delta) };
+  returnToStory("project-1");
+  assert.deepEqual(calls, [2]);
+  assert.equal(consumeHomeStoryTarget(), "project-1");
+  assert.equal(consumeHomeStoryTarget(), null);
+  global.getCurrentPages = () => [{ route: "pages/home/index" }];
+  returnToHome();
+  assert.deepEqual(calls, [2]);
+  delete global.getCurrentPages;
+  delete global.wx;
 });
 
 test("navigation helper returns to the existing book page without stacking a duplicate", () => {
@@ -100,20 +126,20 @@ test("navigation helper routes auth errors to login or me", () => {
   redirectToBook();
   redirectToTranscripts();
   relaunchHome();
-  switchToHome();
-  switchToMe();
+  returnToHome();
+  navigateToMe();
 
   assert.deepEqual(calls, [
     { method: "reLaunch", url: "/pages/login/index" },
-    { method: "switchTab", url: "/pages/me/index" },
+    { method: "navigateTo", url: "/pages/me/index" },
     { method: "navigateTo", url: "/pages/login/index" },
     { method: "navigateTo", url: "/pages/book/index" },
     { method: "navigateTo", url: "/pages/transcripts/index" },
     { method: "redirectTo", url: "/pages/book/index" },
     { method: "redirectTo", url: "/pages/transcripts/index" },
     { method: "reLaunch", url: "/pages/home/index" },
-    { method: "switchTab", url: "/pages/home/index" },
-    { method: "switchTab", url: "/pages/me/index" },
+    { method: "reLaunch", url: "/pages/home/index" },
+    { method: "navigateTo", url: "/pages/me/index" },
   ]);
   delete global.wx;
 });

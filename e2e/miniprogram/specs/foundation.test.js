@@ -97,16 +97,17 @@ test("test account completes the project create, rename, switch, and delete jour
     session.artifacts.mark("login:complete");
     assert.equal(homePage.path, "pages/home/index");
 
-    for (const tabPath of [
+    for (const pagePath of [
       "/pages/transcripts/index",
       "/pages/book/index",
       "/pages/me/index",
-      "/pages/home/index",
     ]) {
-      session.artifacts.mark(`tab:${tabPath}:start`);
-      const page = await session.miniProgram.switchTab(tabPath);
-      assert.equal(page.path, tabPath.slice(1));
-      session.artifacts.mark(`tab:${tabPath}:complete`);
+      session.artifacts.mark(`page:${pagePath}:start`);
+      const page = await session.miniProgram.navigateTo(pagePath);
+      assert.equal(page.path, pagePath.slice(1));
+      await session.miniProgram.navigateBack();
+      assert.equal((await session.miniProgram.currentPage()).path, "pages/home/index");
+      session.artifacts.mark(`page:${pagePath}:complete`);
     }
 
     session.artifacts.mark("projects:open:start");

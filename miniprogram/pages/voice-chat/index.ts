@@ -11,7 +11,7 @@ import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { AudioPlaybackController } from "../../services/audio-playback";
 import { readAccessibilitySettings } from "../../services/accessibility-settings";
-import { redirectToTranscripts } from "../../services/navigation";
+import { redirectToTranscripts, returnToStory } from "../../services/navigation";
 import {
   type AssistantTurnQueueItem,
 } from "../../services/voice-assistant-turn-queue";
@@ -311,7 +311,7 @@ definePage<VoiceChatData>()({
   },
 
   handleStoryGrowthNoticeAction() {
-    wx.switchTab({ url: "/pages/story/index" });
+    returnToStory(this.data.projectId);
   },
 
   startProgressNoticeWatch() {

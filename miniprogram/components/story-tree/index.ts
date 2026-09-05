@@ -12,6 +12,7 @@ Component({
   properties: {
     story: { type: Object, value: emptyStoryViewData() },
     largeText: { type: Boolean, value: false },
+    showSummary: { type: Boolean, value: true },
   },
 
   methods: {

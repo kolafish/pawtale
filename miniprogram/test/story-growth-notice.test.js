@@ -22,17 +22,12 @@ function setup(loadEvents) {
 }
 
 test("significant progress includes chapter and book drafts and excludes acknowledged or unfinished work", () => {
-  const { storyProgressEvents, syncStoryTabRedDot } = setup(async () => ({ items: [] }));
+  const { storyProgressEvents } = setup(async () => ({ items: [] }));
   const events = [event("seen", { metadata_json: { acknowledged_at: "2026-09-05T08:50:49Z" } }),
     event("pending", { status: "pending" }), event("failed", { status: "failed" }),
     event("draft"), event("book", { event_type: "book_output_generated", created_at: "2026-09-05T08:52:00" })];
   assert.deepEqual(storyProgressEvents(events).map((item) => item.id), ["book", "draft"]);
-  let redDot = false;
-  global.wx = { showTabBarRedDot() { redDot = true; }, hideTabBarRedDot() { redDot = false; } };
-  syncStoryTabRedDot(events);
-  assert.equal(redDot, true);
-  syncStoryTabRedDot([events[0]]);
-  assert.equal(redDot, false);
+
 });
 
 test("watcher receives later progress after an empty poll without finishing narration", async () => {
