@@ -152,6 +152,6 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         result.updated_at = max(project.updated_at, book[2]).isoformat()
     result.book_readable = result.book_char_count > 0
     result.automation_events = await automation_events.list_automation_events(
-        db, user_id=user.id, project_id=project.id, limit=8
+        db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
     )
     return result

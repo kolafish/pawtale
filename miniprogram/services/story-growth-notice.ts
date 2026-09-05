@@ -74,7 +74,7 @@ export class StoryProgressWatcher {
     const token = this.token;
     const refresh = async () => {
       try {
-        const response = await listMemoirAutomationEvents(projectId, 8);
+        const response = await listMemoirAutomationEvents(projectId, 8, { completedOnly: true });
         if (token === this.token) onEvents(storyProgressEvents(response.items));
       } catch (error) {
         if (token === this.token) console.warn("refresh story progress notice failed", error);

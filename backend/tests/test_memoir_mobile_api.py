@@ -445,3 +445,26 @@ async def test_mobile_memoir_legacy_routes_are_removed(client):
         request = getattr(client, method.lower())
         response = await request(path, json=body) if body is not None else await request(path)
         assert response.status_code == 404, f"{method} {path}"
+
+
+async def test_completed_progress_notifications_are_not_hidden_by_old_failures(client, test_db):
+    from app.models.memoir import MemoirAutomationEvent
+    from tests.memoir_helpers import ensure_mobile_memoir_project
+
+    project_id = await ensure_mobile_memoir_project(client)
+    test_db.add_all([
+        MemoirAutomationEvent(project_id=project_id, event_type="chapter_draft_generated",
+            status="failed", summary_text="旧任务失败")
+        for _ in range(8)
+    ])
+    completed = MemoirAutomationEvent(project_id=project_id, event_type="chapter_draft_generated",
+        status="completed", summary_text="新章节正文已完成", metadata_json={"draft_version_id": "new-version"})
+    test_db.add(completed)
+    await test_db.commit()
+    response = await client.get(f"/api/mobile/memoir/projects/{project_id}/automation-events?limit=8&completed_only=true")
+    assert response.status_code == 200
+    assert [event["id"] for event in response.json()["items"]] == [completed.id]
+    assert response.json()["total"] == 1
+    snapshot = (await client.get("/api/mobile/memoir/story-snapshot")).json()
+    assert [event["id"] for event in snapshot["automation_events"]["items"]] == [completed.id]
+    assert not completed.metadata_json.get("acknowledged_at")

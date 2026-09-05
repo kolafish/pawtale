@@ -230,11 +230,14 @@ test("project automation event APIs encode routes and payloads", async () => {
     message_id: "message/1",
   });
 
+  await listMemoirAutomationEvents("project/1", 8, { completedOnly: true });
   const apiRequests = requests.filter((request) => request.url.includes("/api/mobile/memoir/"));
   assert.equal(
     apiRequests[0].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events?limit=5",
   );
+  assert.equal(apiRequests.at(-1).url,
+    "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events?limit=8&completed_only=true");
   assert.equal(
     apiRequests[1].url,
     "http://backend.local:8000/api/mobile/memoir/projects/project%2F1/automation-events/event%2F1/acknowledge",
