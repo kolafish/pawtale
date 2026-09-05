@@ -891,7 +891,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
           error_message: "",
         },
         messages: [],
-        utterances: [],
+        utterances: [{id:"utterance-1",transcript_raw:"小时候我住在外婆家。",transcript_edited:""}],
       }),
       listMemoirAutomationEvents: async () => ({
         items: [{
@@ -936,9 +936,8 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.finishingSession, false);
   assert.equal(context.data.persistenceStateText, "已保存");
   await flushAsyncWork();
-  assert.equal(context.data.storyGrowthNoticeState, "ready");
-  assert.equal(context.data.storyGrowthNoticeActionText, "查看故事");
-  page.handleStoryGrowthNoticeAction.call(context);
+  const { consumeHomeStoryTarget } = require("../services/navigation.ts");
+  assert.deepEqual(consumeHomeStoryTarget(), { projectId: "project-1", narrationSaved: true });
   assert.deepEqual(storyTabs, ["/pages/home/index"]);
 });
 
@@ -3225,4 +3224,56 @@ test("voice page starts progress notifications for an active session before fini
   assert.equal(context.data.progressNoticeDetail, "故事树新长出了1个新章节");
   assert.notEqual(context.data.status, "closed");
   context.progressNoticeWatcher?.stop();
+});
+
+
+test("failed saving and finishing in the background never navigate away or claim new growth", async () => {
+  for (const suspended of [false, true]) {
+    const routes = [], errors = [];
+    global.wx = { reLaunch: options => routes.push(options.url) };
+    const page = loadVoiceChatPage();
+    const context = { ...page, pageSuspended: suspended,
+      data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
+      setData(patch) { this.data = {...this.data, ...patch}; },
+      voiceStreaming: {hasClient: () => true, finishSession: async () => { if (!suspended) throw Error("音频尚未保存"); }},
+      refreshVoiceSessionSnapshot: async () => {},
+      stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
+      handleError: message => errors.push(message),
+    };
+    await context.finishSession();
+    assert.deepEqual(routes, []);
+    assert.equal(context.data.finishingSession, false);
+    if (!suspended) {
+      assert.deepEqual(errors, ["音频尚未保存"]);
+      assert.notEqual(context.data.persistenceStateText, "已保存");
+    }
+  }
+});
+
+
+test("a closed voice client returns home only when the persisted session confirms it stopped", async () => {
+  for (const status of [null, "active", "stopped"]) {
+    const routes = [], errors = [];
+    global.wx = { reLaunch: options => routes.push(options.url) };
+    const page = loadVoiceChatPage();
+    const context = { ...page, pageSuspended: false,
+      data: { ...page.data, projectId:"project-1", voiceSessionId:"voice-1" },
+      setData(patch) { this.data = {...this.data, ...patch}; },
+      voiceStreaming: {hasClient: () => false},
+      refreshVoiceSessionSnapshot: async () => status ? {session:{status}, utterances:[]} : null,
+      stopCompletionIssueRefresh() {}, cancelFollowUpTTS() {},
+      handleError: message => errors.push(message),
+    };
+    await context.finishSession();
+    assert.equal(context.data.finishingSession, false);
+    if (status === "stopped") {
+      assert.deepEqual(routes, ["/pages/home/index"]);
+      assert.equal(require("../services/navigation.ts").consumeHomeStoryTarget().narrationSaved, false);
+      assert.equal(context.data.persistenceStateText, "已保存");
+    } else {
+      assert.deepEqual(routes, []);
+      assert.notEqual(context.data.persistenceStateText, "已保存");
+      assert.equal(errors.length, 1);
+    }
+  }
 });

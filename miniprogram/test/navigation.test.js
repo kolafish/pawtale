@@ -41,9 +41,9 @@ test("returning to stories keeps the existing home and consumes the target once"
   const calls = [];
   global.getCurrentPages = () => [{ route: "pages/home/index" }, { route: "pages/book/index" }, { route: "pages/chapter-workspace/index" }];
   global.wx = { navigateBack: ({ delta }) => calls.push(delta) };
-  returnToStory("project-1");
+  returnToStory("project-1", true);
   assert.deepEqual(calls, [2]);
-  assert.equal(consumeHomeStoryTarget(), "project-1");
+  assert.deepEqual(consumeHomeStoryTarget(), { projectId: "project-1", narrationSaved: true });
   assert.equal(consumeHomeStoryTarget(), null);
   global.getCurrentPages = () => [{ route: "pages/home/index" }];
   returnToHome();

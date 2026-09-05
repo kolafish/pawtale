@@ -16,6 +16,7 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
+  <view id="home-narration">
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
       <text class="panel-label">{{launchEyebrow}}</text>
@@ -67,7 +68,6 @@
     >
       <view class="active-project-copy">
         <text class="project-title">{{projectHeadingText}}</text>
-        <text class="project-switch-hint">当前回忆录 · 点击切换</text>
       </view>
       <text class="project-switch-action">切换 ›</text>
     </view>
@@ -75,7 +75,6 @@
     <text class="project-meta">
       {{projectMetaText}}
     </text>
-    <text wx:if="{{hasProject}}" class="resume-note">可以接着这里讲，也可以随便说点别的。</text>
 
     <view
       id="primary-voice-action"
@@ -98,6 +97,20 @@
       {{voiceStartNoteText}}
     </text>
 
+
+    <view wx:if="{{showResumeActions}}" class="resume-actions">
+      <view
+        class="more-actions-toggle"
+        bindtap="toggleMoreActions"
+        hover-class="ui-subtle-action-hover"
+        aria-role="button"
+        aria-expanded="{{showMoreActions}}"
+        aria-label="{{moreActionsToggleAriaLabel}}"
+      >
+        <text>{{moreActionsToggleText}}</text>
+        <text class="more-actions-chevron">{{showMoreActions ? "⌃" : "⌄"}}</text>
+      </view>
+      <view wx:if="{{showMoreActions}}" class="more-actions-panel">
     <view
       wx:if="{{hasProject}}"
       class="narration-overview-link"
@@ -113,19 +126,6 @@
       <text class="narration-overview-action">查看 ›</text>
     </view>
 
-    <view wx:if="{{showResumeActions}}" class="resume-actions">
-      <view
-        class="more-actions-toggle"
-        bindtap="toggleMoreActions"
-        hover-class="ui-subtle-action-hover"
-        aria-role="button"
-        aria-expanded="{{showMoreActions}}"
-        aria-label="{{moreActionsToggleAriaLabel}}"
-      >
-        <text>{{moreActionsToggleText}}</text>
-        <text class="more-actions-chevron">{{showMoreActions ? "⌃" : "⌄"}}</text>
-      </view>
-      <view wx:if="{{showMoreActions}}" class="more-actions-panel">
         <view
           class="{{resumeAskButtonClass}}"
           bindtap="startAlternateGuidance"
@@ -160,7 +160,7 @@
     </view>
   </view>
 
-  <view wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
+  <view id="home-voice-authorization" wx:if="{{showVoiceAuthorizationPanel}}" class="voice-auth-panel">
     <checkbox-group bindchange="changeVoiceAuthorization">
       <label class="voice-auth-row">
         <checkbox
@@ -177,11 +177,15 @@
     <text class="voice-auth-hint">同意后才会打开麦克风，并上传语音用于实时识别文字、原始音频留存和成书。</text>
   </view>
 
+  </view>
+
   <view id="home-story" class="home-story">
     <view class="home-story-heading">
       <text class="home-story-title">讲过的回忆，在这里长成故事</text>
     </view>
+    <text wx:if="{{narrationSaved}}" class="home-saved-notice" aria-live="polite">这次讲述已保存。看看故事，也可以接着讲。</text>
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
+    <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory" loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
     <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
     <view wx:if="{{progress && progress.status !== 'idle'}}" class="home-story-progress ui-card" aria-live="polite">
       <text class="home-story-progress-title">{{progress.title}}</text>
@@ -198,10 +202,16 @@
         <text class="home-story-progress-title">{{growthNoticeTitle}}</text>
         <text class="home-story-progress-detail">{{growthNoticeText}}</text>
       </view>
-      <button size="mini" class="home-story-action ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+      <view class="home-growth-actions">
+        <button wx:if="{{growthTarget}}" id="view-story-growth" class="home-story-action ui-button" bindtap="viewStoryGrowth">看看变化</button>
+        <button size="mini" class="home-story-action home-growth-dismiss ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+      </view>
     </view>
-    <story-tree id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject}}"
-      bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
+    <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && story.chapters.length > 0}}"
+      bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
       bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
+  </view>
+  <view wx:if="{{showContinueNarration}}" class="continue-narration-bar">
+    <button id="continue-narration" class="continue-narration-button ui-button" bindtap="continueNarration" loading="{{creatingVoice}}" disabled="{{creatingVoice}}" hover-class="voice-start-button-hover">继续讲述</button>
   </view>
 </view>

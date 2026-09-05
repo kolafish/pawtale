@@ -14,12 +14,14 @@ const LEGACY_PAGE_REDIRECTS: Record<string, string> = {
   "pages/book-chapter/index": CHAPTER_WORKSPACE_PAGE_URL,
 };
 
-let pendingStoryProjectId: string | null = null;
+export interface HomeStoryTarget { projectId: string; narrationSaved: boolean }
 
-export function consumeHomeStoryTarget(): string | null {
-  const projectId = pendingStoryProjectId;
-  pendingStoryProjectId = null;
-  return projectId;
+let pendingStoryTarget: HomeStoryTarget | null = null;
+
+export function consumeHomeStoryTarget(): HomeStoryTarget | null {
+  const target = pendingStoryTarget;
+  pendingStoryTarget = null;
+  return target;
 }
 
 function appendQuery(url: string, query: PageNotFoundQuery): string {
@@ -69,8 +71,8 @@ export function returnToHome(): void {
   relaunchHome();
 }
 
-export function returnToStory(projectId = ""): void {
-  pendingStoryProjectId = projectId;
+export function returnToStory(projectId = "", narrationSaved = false): void {
+  pendingStoryTarget = { projectId, narrationSaved };
   returnToHome();
 }
 

@@ -39,6 +39,7 @@ type ComponentInstance<
   };
   setData(data: Partial<TData>): void;
   triggerEvent(name: string, detail?: unknown): void;
+  createSelectorQuery(): WechatMiniprogram.SelectorQuery;
 };
 
 declare function Component<
@@ -63,6 +64,10 @@ declare function Component<
 ): void;
 
 declare namespace WechatMiniprogram {
+  interface BoundingClientRectResult { top: number; bottom: number; left: number; right: number; width: number; height: number }
+  interface NodesRef { boundingClientRect(callback: (rect: BoundingClientRectResult | null) => void): SelectorQuery }
+  interface SelectorQuery { select(selector: string): NodesRef; exec(): void }
+
   type RequestMethod = "OPTIONS" | "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "TRACE" | "CONNECT" | "PATCH";
 
   interface GeneralCallbackResult {
@@ -466,6 +471,7 @@ declare namespace WechatMiniprogram {
     reLaunch(option: NavigateOption): void;
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
+    createSelectorQuery(): SelectorQuery;
     pageScrollTo(option: { scrollTop?: number; selector?: string; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;

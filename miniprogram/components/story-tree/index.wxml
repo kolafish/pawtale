@@ -54,7 +54,8 @@
       wx:for="{{story.chapters}}"
       wx:for-index="chapterIndex"
       wx:key="id"
-      class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}}"
+      id="story-chapter-{{item.id}}"
+      class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
     >
       <view class="chapter-decoration" aria-hidden="true"></view>
       <view class="chapter-branch" aria-hidden="true"></view>
@@ -71,6 +72,7 @@
       >
         <view class="chapter-copy">
           <text class="chapter-title">{{item.title}}</text>
+          <text wx:if="{{item.growthLabel}}" class="growth-label">{{item.growthLabel}}</text>
           <text class="chapter-meta ui-tabular">
             <text wx:if="{{item.timeRangeText}}">{{item.timeRangeText}} · </text>{{item.summaryText}}
           </text>
@@ -104,7 +106,8 @@
           wx:for="{{item.sections}}"
           wx:for-item="section"
           wx:key="id"
-          class="section-row ui-pressable {{section.highlighted ? 'is-new-growth' : ''}}"
+          id="story-section-{{section.id}}"
+          class="section-row ui-pressable {{section.highlighted ? 'is-new-growth' : ''}} {{section.growthAnimating ? 'growth-arriving' : ''}}"
           data-chapter-id="{{item.id}}"
           data-section-id="{{section.id}}"
           bindtap="openChapter"
@@ -115,6 +118,7 @@
           <view class="section-marker" aria-hidden="true"></view>
           <view class="section-copy">
             <text class="section-title">{{section.title}}</text>
+            <text wx:if="{{section.growthLabel}}" class="growth-label">{{section.growthLabel}}</text>
             <text class="section-meta ui-tabular">{{section.materialText}}</text>
           </view>
           <view

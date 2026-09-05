@@ -16,6 +16,13 @@ Component({
   },
 
   methods: {
+    focusGrowth(chapterId: string, sectionId?: string) {
+      const selector = sectionId ? `#story-section-${sectionId}` : `#story-chapter-${chapterId}`;
+      this.createSelectorQuery().select(selector).boundingClientRect(rect => {
+        if (rect) this.triggerEvent("focusgrowth", { top: rect.top });
+      }).exec();
+    },
+
     toggleChapter(event: TreeTapEvent) {
       const chapterId = datasetString(event, "id");
       if (chapterId) this.triggerEvent("togglechapter", { chapterId } satisfies StoryTreeChapterEvent["detail"]);

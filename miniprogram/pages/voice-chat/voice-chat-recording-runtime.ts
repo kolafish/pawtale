@@ -1,8 +1,10 @@
 import type {
   MemoirSpeakerRole,
+  MemoirVoiceSessionDetail,
   VoiceChatErrorInfo,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
+import { returnToStory } from "../../services/navigation";
 import { trackAuditAction } from "../../services/audit-tracker";
 import { assistantTurnQueueItem } from "../../services/voice-assistant-turn-queue";
 import {
@@ -91,7 +93,7 @@ export interface VoiceChatRecordingRuntimeHost extends VoiceChatDataContext {
   ensureVoiceAuthorization(autoTriggered?: boolean): boolean;
   syncVoiceAuthorizationForSession(forRecording?: boolean): Promise<boolean>;
   autoListenGateSnapshot(): AutoListenGateSnapshot;
-  refreshVoiceSessionSnapshot(): Promise<void>;
+  refreshVoiceSessionSnapshot(): Promise<MemoirVoiceSessionDetail | null>;
   confirmSavedTranscriptSnapshot(event: VoiceGatewayServerEvent): Promise<void>;
   startCompletionIssueVerification(): void;
   stopCompletionIssueRefresh(): void;
@@ -395,16 +397,15 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     this.stopCompletionIssueRefresh();
     this.cancelFollowUpTTS();
     applyVoiceChatDataPatch(this, finishSessionStartPatch(this.data.recording));
-    if (!this.voiceStreaming.hasClient()) {
-      await this.refreshVoiceSessionSnapshot();
-      applyVoiceChatDataPatch(this, { finishingSession: false });
-      return;
-    }
     try {
-      await this.voiceStreaming.finishSession();
+      if (this.voiceStreaming.hasClient()) await this.voiceStreaming.finishSession();
+      const saved = await this.refreshVoiceSessionSnapshot();
+      if (saved?.session.status !== "stopped") {
+        this.handleError("暂未确认保存结果，请留在此页稍后重试。");
+        return;
+      }
       trackAuditAction("voice_chat.finish", {}, { voiceSessionId: this.data.voiceSessionId });
       applyVoiceChatDataPatch(this, finishSessionSavedPatch());
-      await this.refreshVoiceSessionSnapshot();
       applyVoiceChatDataPatch(this, { persistenceStateText: "已保存" });
       if (this.data.sessionGoal === "book_completion") {
         wx.showModal({
@@ -418,13 +419,7 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
         });
         return;
       }
-      applyVoiceChatDataPatch(this, {
-        storyGrowthNoticeState: "pending",
-        storyGrowthNoticeTitle: "讲述已经保存",
-        storyGrowthNoticeDetail: "小余正在后台整理章节和可读草稿，离开页面也会继续。",
-        storyGrowthNoticeActionText: "看整理进度",
-      });
-      this.startStoryGrowthWatch();
+      if (!this.pageSuspended) returnToStory(this.data.projectId, saved.utterances.length > 0);
     } catch (error) {
       await this.refreshVoiceSessionSnapshot();
       this.handleError(error instanceof Error ? error.message : "语音保存失败");

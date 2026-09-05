@@ -19,9 +19,9 @@ import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services
 import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
 import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
 import { PollingTimer } from "../../services/polling-timer";
-import { emptyHomeStoryData, homeStorySnapshotData, type HomeStoryData } from "./home-story-state";
+import { emptyHomeStoryData, homeStorySnapshotData, clearStoryGrowthAnimation, HomeGrowthTracker, type HomeStoryData } from "./home-story-state";
 import { toggleStoryChapter } from "../../components/story-tree/story-view-data";
-import type { StoryTreeChapterEvent, StoryTreeMediaEvent } from "../../components/story-tree/events";
+import type { StoryTreeChapterEvent, StoryTreeMediaEvent, StoryTreeHandle, StoryTreeFocusEvent } from "../../components/story-tree/events";
 import {
   dismissHomeLaunch,
   resolveHomeLaunch,
@@ -35,6 +35,7 @@ import {
   isAuthError,
   CHAPTER_WORKSPACE_PAGE_URL,
   consumeHomeStoryTarget,
+  type HomeStoryTarget,
   navigateToMe,
   navigateToTranscripts,
   navigateToBook,
@@ -112,6 +113,7 @@ interface HomeData extends HomeStoryData {
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
+  showContinueNarration: boolean;
 }
 
 interface CheckboxChangeEvent {
@@ -342,7 +344,7 @@ function applyHomeSnapshotData(
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
-    ...(changedProject ? emptyHomeStoryData() : {}),
+    ...(changedProject ? { ...emptyHomeStoryData(), showContinueNarration: false } : {}),
     lastStoryHint: latestHint,
     lastStoryText: lastStoryText(latestHint),
     hasLastStoryHint: Boolean(latestHint),
@@ -357,7 +359,11 @@ definePage<HomeData>()({
   homeLoadSequence: 0,
   homeVisible: false,
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
-  storyNavigationProjectId: null as string | null,
+  storyNavigationTarget: null as HomeStoryTarget | null,
+  growthTracker: pageRuntime(() => new HomeGrowthTracker()),
+  growthAnimationTimer: pageRuntime(() => new PollingTimer(800)),
+  homeScrollTop: 0,
+  narrationBottom: Infinity,
 
   data: {
     loading: false,
@@ -406,16 +412,17 @@ definePage<HomeData>()({
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
+    showContinueNarration: false,
     ...emptyHomeStoryData(),
   },
 
   onLoad(query?: { section?: string; projectId?: string }) {
-    if (query?.section === "story") this.storyNavigationProjectId = query.projectId || "";
+    if (query?.section === "story") this.storyNavigationTarget = { projectId: query.projectId || "", narrationSaved: false };
   },
 
   async onShow() {
     this.homeVisible = true;
-    this.storyNavigationProjectId = consumeHomeStoryTarget() ?? this.storyNavigationProjectId;
+    this.storyNavigationTarget = consumeHomeStoryTarget() ?? this.storyNavigationTarget;
     this.homeRefreshTimer.cancel();
     enableMiniProgramShareMenu();
     this.refreshAccessibilitySettings();
@@ -427,6 +434,8 @@ definePage<HomeData>()({
     this.homeVisible = false;
     this.homeLoadSequence += 1;
     this.homeRefreshTimer.cancel();
+    this.growthAnimationTimer.cancel();
+    this.setData({ story: clearStoryGrowthAnimation(this.data.story), narrationSaved: false });
   },
 
   onUnload() {
@@ -488,22 +497,30 @@ definePage<HomeData>()({
       writeMemoirIdentitySnapshot(snapshot.identity);
       writeCachedMemoirHome({ server_revision: snapshot.server_revision, identity: snapshot.identity, latest_transcript: snapshot.latest_transcript });
       applyHomeSnapshotData(this, snapshot);
-      this.setData(homeStorySnapshotData(snapshot, this.data.story), () => {
+      const freshEvents = this.growthTracker.observe(snapshot.identity.id, this.data.projectId, snapshot.growth_events);
+      const target = this.storyNavigationTarget;
+      this.storyNavigationTarget = null;
+      const validTarget = target && (!target.projectId || target.projectId === this.data.projectId);
+      this.setData({
+        ...homeStorySnapshotData(snapshot, this.data.story, freshEvents),
+        ...(validTarget ? { narrationSaved: target.narrationSaved } : {}),
+      }, () => {
         if (loadSequence !== this.homeLoadSequence) return;
-        if (this.storyNavigationProjectId !== null) {
-          if (!this.storyNavigationProjectId || this.storyNavigationProjectId === this.data.projectId) this.openStoryProgress();
-          this.storyNavigationProjectId = null;
-        }
+        if (!background) this.measureNarration();
+        if (validTarget) this.openStoryProgress();
       });
+      if (freshEvents.size) this.growthAnimationTimer.schedule(() => this.clearGrowthAnimation());
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
         return;
       }
       if (isAuthError(error)) {
         this.homeRefreshTimer.cancel();
+        this.growthTracker.reset();
         setHomeData(this, {
           ...emptyHomeStoryData(),
           needsLogin: true,
+          showContinueNarration: false,
           userId: "",
           displayName: "作者",
           projectId: "",
@@ -537,12 +554,55 @@ definePage<HomeData>()({
     }
   },
 
+  onPageScroll(event: { scrollTop: number }) {
+    this.homeScrollTop = event.scrollTop;
+    const showContinueNarration = this.data.hasProject && !this.data.needsLogin && event.scrollTop > this.narrationBottom;
+    if (showContinueNarration !== this.data.showContinueNarration) this.setData({ showContinueNarration });
+  },
+
+  measureNarration() {
+    wx.createSelectorQuery().select("#home-narration").boundingClientRect(rect => {
+      if (rect) {
+        this.narrationBottom = rect.bottom + this.homeScrollTop;
+        this.onPageScroll({ scrollTop: this.homeScrollTop });
+      }
+    }).exec();
+  },
+
+  clearGrowthAnimation() {
+    this.growthAnimationTimer.cancel();
+    this.setData({ story: clearStoryGrowthAnimation(this.data.story) });
+  },
+
+  viewStoryGrowth() {
+    const target = this.data.growthTarget;
+    if (!target) return;
+    this.setData({ story: { ...this.data.story, chapters: this.data.story.chapters.map(chapter => ({
+      ...chapter, expanded: chapter.id === target.chapterId ? true : chapter.expanded,
+    })) } }, () => {
+      this.selectComponent<StoryTreeHandle>("#story-tree")?.focusGrowth(target.chapterId, target.sectionId);
+    });
+  },
+
+  focusStoryGrowth(event: StoryTreeFocusEvent) {
+    wx.pageScrollTo({ scrollTop: Math.max(0, this.homeScrollTop + event.detail.top - 16), duration: 250 });
+  },
+
+  async continueNarration() {
+    if (!this.data.voiceAuthorizationAgreed) wx.pageScrollTo({ selector: "#home-voice-authorization", duration: 250 });
+    await this.startPrimaryVoiceChat();
+  },
+
   openSettings() {
     navigateToMe();
   },
 
   openStoryProgress() {
     wx.pageScrollTo({ selector: "#home-story", duration: 250 });
+  },
+
+  async refreshStory() {
+    await this.loadHome();
   },
 
   async dismissGrowthNotice() {
@@ -555,7 +615,7 @@ definePage<HomeData>()({
       if (this.homeVisible && this.data.projectId === projectId) await this.loadHome(true);
     } catch (error) {
       if (this.homeVisible && this.data.projectId === projectId) {
-        this.setData({ error: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+        this.setData({ storyError: error instanceof Error ? error.message : "提醒确认失败，请重试" });
       }
     } finally {
       this.setData({ dismissingGrowth: false });
@@ -565,7 +625,7 @@ definePage<HomeData>()({
   async retryDraft() {
     const projectId = this.data.projectId;
     if (!projectId || this.data.retryingDraft || !this.data.progress?.can_retry) return;
-    this.setData({ retryingDraft: true, error: "" });
+    this.setData({ retryingDraft: true, storyError: "" });
     try {
       const progress = await retryMemoirDraftProgress(projectId);
       if (this.homeVisible && projectId === this.data.projectId) {
@@ -574,7 +634,7 @@ definePage<HomeData>()({
       }
     } catch (error) {
       if (this.homeVisible && projectId === this.data.projectId) {
-        this.setData({ error: error instanceof Error ? error.message : "继续整理失败" });
+        this.setData({ storyError: error instanceof Error ? error.message : "继续整理失败" });
       }
     } finally {
       this.setData({ retryingDraft: false });
@@ -586,6 +646,7 @@ definePage<HomeData>()({
     if (!chapterId) {
       return;
     }
+    this.clearGrowthAnimation();
     this.setData({
       story: { ...this.data.story, chapters: toggleStoryChapter(this.data.story.chapters, chapterId) },
     });

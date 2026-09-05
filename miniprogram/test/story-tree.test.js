@@ -2,7 +2,7 @@ require("./register-ts");
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { componentContext, loadComponentModule } = require("./page-harness");
-const { emptyStoryViewData, toggleStoryChapter, highlightStoryGrowth } = require("../components/story-tree/story-view-data.ts");
+const { emptyStoryViewData, toggleStoryChapter } = require("../components/story-tree/story-view-data.ts");
 
 const tap = (dataset = {}) => ({ currentTarget: { dataset } });
 function tree(story = emptyStoryViewData()) {
@@ -55,17 +55,19 @@ test("tree ignores chapter actions without a target", () => {
   assert.deepEqual(context.events, []);
 });
 
-test("growth highlights open the affected chapters and preserve other expanded chapters", () => {
-  const chapters = [
-    { id: "new", expanded: false, sections: [] },
-    { id: "updated", expanded: false, sections: [{ id: "new-section" }, { id: "old-section" }] },
-    { id: "reading", expanded: true, sections: [] },
-    { id: "closed", expanded: false, sections: [] },
-  ];
-  const highlighted = highlightStoryGrowth(chapters, ["new"], ["new-section"]);
-  assert.deepEqual(highlighted.map(({ expanded }) => expanded), [true, true, true, false]);
-  assert.deepEqual(highlighted.map(({ highlighted }) => highlighted), [true, false, false, false]);
-  assert.deepEqual(highlighted[1].sections.map(({ highlighted }) => highlighted), [true, false]);
-  assert.equal(chapters[0].expanded, false);
-  assert.equal(chapters[1].sections[0].highlighted, undefined);
+
+test("tree reports the requested growth position, without navigating or guessing a missing node", () => {
+  const context = tree();
+  let rect = { top: 175 };
+  const targets = [];
+  context.createSelectorQuery = () => ({select: selector => {
+    targets.push(selector);
+    return {boundingClientRect: callback => ({exec: () => callback(rect)})};
+  }});
+  context.focusGrowth("childhood", "summer");
+  assert.deepEqual(context.events, [{name:"focusgrowth",detail:{top:175}}]);
+  rect = null;
+  context.focusGrowth("deleted");
+  assert.equal(context.events.length, 1);
+  assert.deepEqual(targets, ["#story-section-summer", "#story-chapter-deleted"]);
 });
