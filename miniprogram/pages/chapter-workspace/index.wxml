@@ -12,7 +12,7 @@
       <text class="section-kicker">本章进度</text>
       <text class="status-title">{{readinessTitle}}</text>
       <text class="status-detail">{{readinessDetail}}</text>
-      <view wx:if="{{chapterPreparationJob}}" class="chapter-preparation-status">
+      <view wx:if="{{chapterPreparationJob && !chapterPreparationJob.candidate_content}}" class="chapter-preparation-status">
         <ai-task-progress
           title="{{chapterPreparationTitle}}"
           detail="{{chapterPreparationDetail}}"
@@ -37,6 +37,13 @@
         aria-disabled="{{operationKind !== ''}}"
         bindtap="openSectionStructure"
       >调整小节结构</view>
+    </view>
+
+    <view wx:if="{{chapterPreparationJob.candidate_content}}" class="content-card ui-card ui-card-borderless">
+      <text class="section-kicker">后台整理的新稿</text>
+      <text class="status-detail">您修改或确认过的正文已保留。阅读下面的新稿后，可以决定是否采用。</text>
+      <text class="candidate-content" selectable="{{true}}">{{chapterPreparationJob.candidate_content}}</text>
+      <button class="primary-action ui-button" bindtap="acceptChapterCandidate" disabled="{{operationKind !== '' || editingSectionId !== ''}}">采用这版新稿</button>
     </view>
 
     <view

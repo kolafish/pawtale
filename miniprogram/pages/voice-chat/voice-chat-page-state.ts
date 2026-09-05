@@ -108,7 +108,7 @@ export interface VoiceChatData {
   canReconnect: boolean;
   canFinishAfterDisconnect: boolean;
   finishButtonText: string;
-  storyGrowthNoticeState: "hidden" | "pending" | "ready";
+  storyGrowthNoticeState: "hidden" | "pending" | "ready" | "failed" | "needs_input" | "no_change";
   storyGrowthNoticeTitle: string;
   storyGrowthNoticeDetail: string;
   storyGrowthNoticeActionText: string;

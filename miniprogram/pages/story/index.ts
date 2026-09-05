@@ -1,9 +1,10 @@
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
-import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
+import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
+import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import { PollingTimer } from "../../services/polling-timer";
 import {
   acknowledgeMemoirAutomationEvent,
-  getMemoirVoiceProgress,
 } from "../../services/memoir-voice-session-api";
 import {
   CHAPTER_WORKSPACE_PAGE_URL,
@@ -12,7 +13,7 @@ import {
   navigateToLogin,
   navigateToTranscripts,
 } from "../../services/navigation";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import {
   storyGrowthEvent,
   storyGrowthTargets,
@@ -46,12 +47,17 @@ interface StoryPageData extends StoryViewData {
   needsLogin: boolean;
   projectId: string;
   growthNoticeText: string;
+  progress: MemoirDraftProgress | null;
+  bookReadable: boolean;
+  retrying: boolean;
 }
 
 const STORY_PAGE_CLASS = "story-page ui-page-shell ui-accessible-page";
 
 definePage<StoryPageData>()({
   loadSequence: 0,
+  pageVisible: false,
+  progressTimer: pageRuntime(() => new PollingTimer(3000)),
 
   data: {
     pageClass: STORY_PAGE_CLASS,
@@ -60,19 +66,34 @@ definePage<StoryPageData>()({
     needsLogin: false,
     projectId: "",
     growthNoticeText: "",
+    progress: null,
+    bookReadable: false,
+    retrying: false,
     ...emptyStoryViewData(),
   },
 
   async onShow() {
+    this.pageVisible = true;
     this.setData({ pageClass: accessibilityPageClass(STORY_PAGE_CLASS) });
     await this.loadStory();
   },
 
-  async loadStory() {
+  onHide() {
+    this.pageVisible = false;
+    this.loadSequence += 1;
+    this.progressTimer.cancel();
+  },
+
+  onUnload() {
+    this.onHide();
+  },
+
+  async loadStory(background = false) {
     const loadSequence = ++this.loadSequence;
-    this.setData({ loading: true, error: "" });
+    this.progressTimer.cancel();
+    if (!background) this.setData({ loading: true, error: "" });
     try {
-      const snapshot = await getMemoirBookSnapshot();
+      const snapshot = await getMemoirStorySnapshot();
       if (loadSequence !== this.loadSequence) {
         return;
       }
@@ -85,17 +106,15 @@ definePage<StoryPageData>()({
           needsLogin: false,
           projectId: "",
           growthNoticeText: "",
+          progress: null,
+          bookReadable: false,
         });
         return;
       }
-      const progress = await getMemoirVoiceProgress(projectId);
-      if (loadSequence !== this.loadSequence) {
-        return;
-      }
       const previousExpansion = new Map(
-        this.data.chapters.map((chapter) => [chapter.id, chapter.expanded]),
+        (projectId === this.data.projectId ? this.data.chapters : []).map((chapter) => [chapter.id, chapter.expanded]),
       );
-      const viewData = storyViewData(snapshot, progress);
+      const viewData = storyViewData(snapshot);
       const growthEvent = storyGrowthEvent(snapshot.automation_events?.items || []);
       const growthTargets = storyGrowthTargets(growthEvent);
       const restoredChapters = viewData.chapters.map((chapter) => (
@@ -114,7 +133,11 @@ definePage<StoryPageData>()({
         needsLogin: false,
         projectId,
         growthNoticeText: growthEvent?.summary_text || "",
+        progress: snapshot.progress,
+        bookReadable: snapshot.book_readable,
+        error: "",
       });
+      this.scheduleProgressPolling();
       syncStoryTabRedDot([]);
       if (growthEvent) {
         void acknowledgeMemoirAutomationEvent(projectId, growthEvent.id).catch((error) => {
@@ -133,13 +156,41 @@ definePage<StoryPageData>()({
           needsLogin: true,
           projectId: "",
           growthNoticeText: "",
+          progress: null,
+          bookReadable: false,
         });
         return;
       }
       this.setData({
         loading: false,
-        error: error instanceof Error ? error.message : "故事页面加载失败",
+        error: background ? "进度暂未刷新，后台会继续处理" : error instanceof Error ? error.message : "故事页面加载失败",
       });
+      this.scheduleProgressPolling();
+    }
+  },
+
+  scheduleProgressPolling() {
+    if (this.pageVisible && this.data.progress?.status === "processing") {
+      this.progressTimer.schedule(() => { void this.loadStory(true); });
+    }
+  },
+
+  async retryDraft() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.retrying || !this.data.progress?.can_retry) return;
+    this.setData({ retrying: true, error: "" });
+    try {
+      const progress = await retryMemoirDraftProgress(projectId);
+      if (this.pageVisible && projectId === this.data.projectId) {
+        this.setData({ progress });
+        await this.loadStory(true);
+      }
+    } catch (error) {
+      if (this.pageVisible && projectId === this.data.projectId) {
+        this.setData({ error: error instanceof Error ? error.message : "继续整理失败" });
+      }
+    } finally {
+      this.setData({ retrying: false });
     }
   },
 
@@ -154,7 +205,17 @@ definePage<StoryPageData>()({
   },
 
   openBook() {
-    navigateToBook();
+    if (this.data.bookReadable) {
+      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId }) });
+    } else {
+      navigateToBook();
+    }
+  },
+
+  readChapter(event: DatasetEvent) {
+    const chapterId = datasetString(event, "id");
+    if (!this.data.projectId || !this.data.chapters.some((chapter) => chapter.id === chapterId && chapter.readable)) return;
+    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId, chapterId }) });
   },
 
   openChapterManager() {

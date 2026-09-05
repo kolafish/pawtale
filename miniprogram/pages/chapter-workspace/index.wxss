@@ -843,3 +843,9 @@ button[disabled] {
   background: var(--ui-accent-surface);
   color: var(--ui-danger-text);
 }
+.candidate-content {
+  display: block;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  margin: 24rpx 0;
+}

@@ -13,6 +13,8 @@ from app.schemas.memoir_projects import (
 from app.schemas.memoir_snapshots import (
     MemoirBookSnapshotResponse,
     MemoirHomeSnapshotResponse,
+    MemoirDraftProgressResponse,
+    MemoirStorySnapshotResponse,
 )
 from app.schemas.memoir_topic_map import (
     MemoirTopicMapItemResponse,
@@ -22,6 +24,7 @@ from app.schemas.memoir_topic_map import (
 from app.schemas.projects import ProjectResponse
 from app.services.memoir import projects as memoir_projects
 from app.services.memoir import read_snapshots as memoir_read_snapshots
+from app.services.memoir import draft_progress, story_snapshot
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.narrative import topic_map
 
@@ -59,6 +62,25 @@ async def list_mobile_memoir_projects(
     current_user: User = Depends(get_current_user),
 ):
     return await memoir_projects.mobile_project_list(db, current_user.id)
+
+
+@router.get("/story-snapshot", response_model=MemoirStorySnapshotResponse)
+async def get_story_snapshot(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    return await story_snapshot.story_snapshot(db, current_user)
+
+
+@router.get("/projects/{project_id}/draft-progress", response_model=MemoirDraftProgressResponse)
+async def get_draft_progress(project_id: str, voice_session_id: str | None = None,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await load_memoir_project(db, project_id, current_user.id)
+    return await draft_progress.read_draft_progress(db, project_id=project_id, voice_session_id=voice_session_id)
+
+
+@router.post("/projects/{project_id}/draft-progress/retry", response_model=MemoirDraftProgressResponse, status_code=202)
+async def retry_draft_progress(project_id: str, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
+    await load_memoir_project(db, project_id, current_user.id)
+    await draft_progress.retry_draft_progress(db, project_id=project_id)
+    return await draft_progress.read_draft_progress(db, project_id=project_id)
 
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)

@@ -1,6 +1,7 @@
 import { PollingTimer } from "../../services/polling-timer";
 import {
   cancelMemoirChapterPreparationJob,
+  acceptMemoirChapterCandidate,
   enqueueMemoirChapterPreparationJob,
   getMemoirChapterPreparationJob,
   type MemoirChapterPreparationJob,
@@ -269,6 +270,10 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
       job.operation === "rewrite" ? "rewrite_chapter" : "prepare",
     );
     if (job.status === "succeeded") {
+      if (job.outcome === "needs_review" && job.candidate_content) {
+        this.setData({ chapterPreparationJob: job });
+        return;
+      }
       this.setData({ chapterPreparationJob: null });
       if (!wasActive) {
         return;
@@ -332,6 +337,27 @@ export const chapterWorkspaceJobMethods = defineChapterWorkspaceJobMethods({
         chapterPreparationJob: job,
         error: error instanceof Error ? error.message : "取消处理失败",
       });
+    }
+  },
+
+  async acceptChapterCandidate() {
+    const job = this.data.chapterPreparationJob;
+    if (!job?.job_id || !job.candidate_content || this.data.operationKind || this.data.editingSectionId) return;
+    const projectId = this.data.projectId;
+    const chapterId = this.data.chapterId;
+    this.setData({ operationKind: "prepare", error: "" });
+    try {
+      await acceptMemoirChapterCandidate(projectId, chapterId, job.job_id);
+      if (!this.pageVisible || this.data.projectId !== projectId || this.data.chapterId !== chapterId) return;
+      this.setData({ chapterPreparationJob: null });
+      await this.loadPageData(true);
+      wx.showToast({ title: "已采用新稿", icon: "success" });
+    } catch (error) {
+      if (this.pageVisible && this.data.projectId === projectId && this.data.chapterId === chapterId) {
+        this.setData({ error: error instanceof Error ? error.message : "新稿采用失败" });
+      }
+    } finally {
+      this.finishOperation("prepare");
     }
   },
 

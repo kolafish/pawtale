@@ -25,14 +25,11 @@ import { StreamingVoiceController } from "../../services/streaming-voice-control
 import { VoiceBargeInMonitor } from "../../services/voice-barge-in-monitor";
 import {
   getMemoirVoiceSession,
-  listMemoirAutomationEvents,
   markMemoirAutomationEventsVoicePlayed,
   stopMemoirVoiceSession,
 } from "../../services/memoir-voice-session-api";
-import {
-  storyGrowthEvent,
-  syncStoryTabRedDot,
-} from "../../services/story-growth-notice";
+import { getMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import { PollingTimer } from "../../services/polling-timer";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -135,6 +132,7 @@ definePage<VoiceChatData>()({
   recordingStartGeneration: 0,
   completionIssueRuntime: null as VoiceChatCompletionIssueRuntime | null,
   storyGrowthWatchToken: 0,
+  storyGrowthTimer: pageRuntime(() => new PollingTimer(3000)),
 
   data: initialVoiceChatData(),
 
@@ -272,44 +270,44 @@ definePage<VoiceChatData>()({
 
   stopStoryGrowthWatch() {
     this.storyGrowthWatchToken += 1;
+    this.storyGrowthTimer.cancel();
   },
 
   startStoryGrowthWatch() {
+    this.stopStoryGrowthWatch();
     const token = ++this.storyGrowthWatchToken;
     void this.watchStoryGrowth(token);
   },
 
   async watchStoryGrowth(token: number) {
-    for (let attempt = 0; attempt < 48; attempt += 1) {
-      if (token !== this.storyGrowthWatchToken || this.pageSuspended) {
-        return;
-      }
-      try {
-        const response = await listMemoirAutomationEvents(this.data.projectId, 8);
-        const event = storyGrowthEvent(response.items, this.data.voiceSessionId);
-        if (event) {
-          applyVoiceChatDataPatch(this, {
-            storyGrowthNoticeState: "ready",
-            storyGrowthNoticeTitle: "故事树长出了新内容",
-            storyGrowthNoticeDetail: event.summary_text || "本次讲述已经整理进故事树。",
-            storyGrowthNoticeActionText: "去看看",
-          });
-          syncStoryTabRedDot(response.items);
-          return;
-        }
-      } catch (error) {
-        console.warn("watch story growth failed", error);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 2500));
+    const projectId = this.data.projectId;
+    const sessionId = this.data.voiceSessionId;
+    const current = () => token === this.storyGrowthWatchToken && !this.pageSuspended
+      && projectId === this.data.projectId && sessionId === this.data.voiceSessionId;
+    if (!current()) return;
+    try {
+      const progress = await getMemoirDraftProgress(projectId, sessionId);
+      if (!current()) return;
+      const pending = progress.status === "processing" || progress.status === "idle";
+      applyVoiceChatDataPatch(this, {
+        storyGrowthNoticeState: pending ? "pending" : progress.status === "failed" ? "failed" : progress.status === "needs_input" ? "needs_input" : progress.status === "no_change" ? "no_change" : "ready",
+        storyGrowthNoticeTitle: progress.title,
+        storyGrowthNoticeDetail: progress.detail,
+        storyGrowthNoticeActionText: pending ? "看整理进度" : "查看故事",
+      });
+      if (!pending) return;
+    } catch (error) {
+      if (!current()) return;
+      applyVoiceChatDataPatch(this, { storyGrowthNoticeDetail: "进度暂未刷新，后台会继续处理" });
+      console.warn("watch story growth failed", error);
+    }
+    if (current()) {
+      this.storyGrowthTimer.schedule(() => { void this.watchStoryGrowth(token); });
     }
   },
 
   handleStoryGrowthNoticeAction() {
-    if (this.data.storyGrowthNoticeState === "ready") {
-      wx.switchTab({ url: "/pages/story/index" });
-      return;
-    }
-    wx.navigateBack({ delta: 1 });
+    wx.switchTab({ url: "/pages/story/index" });
   },
 
   refreshVoiceAuthorizationConsent() {
