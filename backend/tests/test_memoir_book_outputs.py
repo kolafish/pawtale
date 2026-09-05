@@ -508,10 +508,10 @@ async def test_book_output_requires_structured_small_sections(test_db, client):
     assert plan is not None
 
     with pytest.raises(HTTPException) as error:
-        book_outputs._require_confirmed_chapters(plan)
+        book_outputs.readable_chapter_versions(plan)
 
-    assert error.value.status_code == 400
-    assert "重新整理以下章节以生成小节" in error.value.detail
+    assert error.value.status_code == 409
+    assert "还没有可读正文" in error.value.detail
     assert first_chapter_title in error.value.detail
 
 
@@ -1035,7 +1035,7 @@ async def test_mobile_memoir_book_output_excludes_hidden_chapter_and_invalidates
         .execution_options(populate_existing=True)
     )
     assert plan is not None
-    included = book_outputs._require_confirmed_chapters(plan)
+    included = book_outputs.readable_chapter_versions(plan)
     assert [chapter.id for chapter, _ in included] == [chapters[0].id]
 
     stale = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")

@@ -310,8 +310,8 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
                 digest_id="digest-1",
                 digest_signature="digest-signature-1",
                 digest={},
-                confirmed_draft_version_id="version-1",
-                confirmed_draft_hash="hash-1",
+                draft_version_id="version-1",
+                draft_hash="hash-1",
                 material_ids=frozenset({"material-1"}),
             ),
             BookReviewChapter(
@@ -321,8 +321,8 @@ def test_book_review_restores_chapter_titles_and_promotes_editorial_changes():
                 digest_id="digest-2",
                 digest_signature="digest-signature-2",
                 digest={},
-                confirmed_draft_version_id="version-2",
-                confirmed_draft_hash="hash-2",
+                draft_version_id="version-2",
+                draft_hash="hash-2",
                 material_ids=frozenset({"material-2"}),
             ),
         ),
@@ -1694,8 +1694,8 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     unreviewed = await client.post(
         f"/api/memoir/projects/{project_id}/book-output/assemble",
     )
-    assert unreviewed.status_code == 409
-    assert "完成当前版本的全书检查" in unreviewed.json()["detail"]
+    assert unreviewed.status_code == 200
+    assert len(unreviewed.json()["chapter_snapshot_json"]) == 2
 
     generated = await _run_book_review(
         client,
@@ -1711,6 +1711,7 @@ async def test_book_review_uses_chapter_digests_and_creates_book_issue(
     book_prompt = next(prompt for prompt in fake.prompts if "请通读下面这本回忆录" in prompt)
     assert all(chapter.id not in book_prompt for chapter in chapters)
     assert "chapter_id: C1" in book_prompt
+    assert "这是已经存在的完整章节正文。" in book_prompt
     assert review["review"]["summary"] == "全书记录了几段重要成长经历。"
     assert "candidate_issues" not in review["review"]
     assert "generation" not in review["review"]
@@ -2546,21 +2547,21 @@ async def test_book_review_job_preserves_failure_and_can_retry(
     assert retried.json()["error_message"] == ""
 
 
-async def test_book_review_job_requires_every_chapter_draft_to_be_confirmed(
+async def test_book_review_job_accepts_readable_chapters_without_confirmation(
     client,
     test_db,
 ):
     project_id, chapters, _ = await _book(client, test_db)
+    for chapter in chapters:
+        await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
+                                    status=MemoirBookChapterDraftStatus.DRAFT)
 
     queued = await client.post(
         f"/api/memoir/projects/{project_id}/book-review/jobs",
         json={},
     )
 
-    assert queued.status_code == 409
-    assert queued.json()["detail"] == (
-        f"请先确认章节“{chapters[0].title}”的正文，再检查全书"
-    )
+    assert queued.status_code == 202
 
 
 async def test_book_review_uses_the_current_output_title(

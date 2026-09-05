@@ -9,7 +9,6 @@ from sqlalchemy.orm import selectinload
 
 from app.config import get_settings
 from app.domain.memoir.types import (
-    MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
@@ -66,6 +65,8 @@ from app.services.memoir.book_output_manuscript import (
     updated_manuscript_payload as _updated_manuscript_payload,
 )
 from app.services.memoir.book_output_snapshots import (
+    latest_chapter_version,
+    readable_chapter_versions,
     book_content_from_chapter_snapshots,
     chapter_snapshot,
     normalized_section_snapshots,
@@ -97,12 +98,6 @@ SNAPSHOT_COMPARE_KEYS = (
     "content_char_count",
     "section_count",
 )
-
-
-def _latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
-    if not draft or not draft.versions:
-        return None
-    return draft.versions[-1]
 
 
 def _output_version_response(
@@ -198,43 +193,6 @@ async def _load_plan(
     return plan
 
 
-def _require_confirmed_chapters(plan: MemoirBookPlan) -> list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]]:
-    if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        raise HTTPException(status_code=400, detail="请先确认章节规划")
-    chapters = included_book_chapters(plan)
-    if not chapters:
-        raise HTTPException(status_code=400, detail="章节规划不能为空")
-
-    missing: list[str] = []
-    unstructured: list[str] = []
-    confirmed: list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]] = []
-    for chapter in chapters:
-        version = _latest_chapter_version(chapter.draft)
-        if (
-            not chapter.draft
-            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
-            or not version
-        ):
-            missing.append(chapter.title)
-            continue
-        if not normalized_section_snapshots(version.section_snapshot_json):
-            unstructured.append(chapter.title)
-            continue
-        confirmed.append((chapter, version))
-    if missing:
-        preview = "、".join(missing[:3])
-        suffix = "等章节" if len(missing) > 3 else ""
-        raise HTTPException(status_code=400, detail=f"请先确认所有章节：{preview}{suffix}")
-    if unstructured:
-        preview = "、".join(unstructured[:3])
-        suffix = "等章节" if len(unstructured) > 3 else ""
-        raise HTTPException(
-            status_code=400,
-            detail=f"请先重新整理以下章节以生成小节：{preview}{suffix}",
-        )
-    return confirmed
-
-
 def _compose_book_content(
     *,
     title: str,
@@ -276,10 +234,9 @@ def _current_book_snapshot(
     snapshot: list[dict[str, object]] = []
     unavailable_titles: list[str] = []
     for index, chapter in enumerate(chapters, start=1):
-        version = _latest_chapter_version(chapter.draft)
+        version = latest_chapter_version(chapter.draft)
         if (
             not chapter.draft
-            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
             or not version
             or not normalized_section_snapshots(version.section_snapshot_json)
         ):
@@ -637,7 +594,7 @@ async def suggest_book_output_titles(
         project_id=project_id,
         allow_admin=allow_admin,
     )
-    chapters = _require_confirmed_chapters(plan)
+    chapters = readable_chapter_versions(plan)
     base_title = _formal_book_title(plan.title)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     _, snapshot = _compose_book_content(

@@ -12,12 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import (
-    MemoirBookChapterDraftStatus,
     MemoirSemanticCacheStatus,
 )
 from app.models.memoir import (
-    MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
     MemoirBookPlan,
@@ -49,16 +46,18 @@ from app.services.memoir.book_output_manuscript import (
     formal_book_title,
     stored_manuscript_metadata,
 )
+from app.services.memoir.book_output_snapshots import load_book_plan_drafts, readable_chapter_versions
+from app.services.memoir.chapter_generation import latest_chapter_draft_version
 from app.services.memoir.semantic_state import (
     semantic_json_signature,
     semantic_text_hash,
 )
 
 
-BOOK_REVIEW_ENGINE = "llm_book_review_v4"
+BOOK_REVIEW_ENGINE = "llm_book_review_v5"
 BOOK_REVIEW_SYSTEM_PROMPT = (
     "你是一位克制的中文回忆录总编辑。"
-    "你根据章节摘要通读全书并判断阅读体验，不创造人生经历。"
+    "你根据当前章节正文通读全书并判断阅读体验，不创造人生经历。"
 )
 logger = logging.getLogger(__name__)
 BookReviewProgressCallback = Callable[
@@ -89,9 +88,10 @@ class BookReviewChapter:
     digest_id: str
     digest_signature: str
     digest: dict
-    confirmed_draft_version_id: str
-    confirmed_draft_hash: str
+    draft_version_id: str
+    draft_hash: str
     material_ids: frozenset[str]
+    draft_content: str = ""
 
 
 @dataclass(frozen=True)
@@ -214,72 +214,9 @@ async def _plan(
     return plan, chapters
 
 
-async def _confirmed_version(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-) -> MemoirBookChapterDraftVersion | None:
-    return await db.scalar(
-        select(MemoirBookChapterDraftVersion)
-        .join(
-            MemoirBookChapterDraft,
-            MemoirBookChapterDraft.id
-            == MemoirBookChapterDraftVersion.draft_id,
-        )
-        .where(
-            MemoirBookChapterDraftVersion.project_id == project_id,
-            MemoirBookChapterDraftVersion.chapter_id == chapter_id,
-            MemoirBookChapterDraft.status
-            == MemoirBookChapterDraftStatus.CONFIRMED.value,
-        )
-        .order_by(
-            MemoirBookChapterDraftVersion.version.desc(),
-            MemoirBookChapterDraftVersion.created_at.desc(),
-            MemoirBookChapterDraftVersion.id.desc(),
-        )
-        .limit(1)
-    )
-
-
-async def require_confirmed_chapter_drafts(
-    db: AsyncSession,
-    *,
-    project_id: str,
-) -> int:
-    _, chapters = await _plan(db, project_id=project_id)
-    confirmed_chapter_ids = set(
-        (
-            await db.scalars(
-                select(MemoirBookChapterDraftVersion.chapter_id)
-                .join(
-                    MemoirBookChapterDraft,
-                    MemoirBookChapterDraft.id
-                    == MemoirBookChapterDraftVersion.draft_id,
-                )
-                .where(
-                    MemoirBookChapterDraftVersion.project_id == project_id,
-                    MemoirBookChapterDraftVersion.chapter_id.in_(
-                        [chapter.id for chapter in chapters]
-                    ),
-                    MemoirBookChapterDraft.status
-                    == MemoirBookChapterDraftStatus.CONFIRMED.value,
-                )
-                .distinct()
-            )
-        ).all()
-    )
-    unconfirmed = [
-        chapter.title
-        for chapter in chapters
-        if chapter.id not in confirmed_chapter_ids
-    ]
-    if unconfirmed:
-        raise HTTPException(
-            status_code=409,
-            detail=f"请先确认章节“{unconfirmed[0]}”的正文，再检查全书",
-        )
-    return len(chapters)
+async def require_readable_chapter_drafts(db: AsyncSession, *, project_id: str) -> int:
+    plan = await load_book_plan_drafts(db, project_id=project_id)
+    return len(readable_chapter_versions(plan))
 
 
 async def ensure_chapter_digests(
@@ -296,6 +233,9 @@ async def ensure_chapter_digests(
         for chapter in chapters
     )
     total_chapter_count = len(chapter_refs)
+    async def request_progress(patch: dict[str, object]) -> None:
+        if progress_callback is not None:
+            await progress_callback({key: patch[key] for key in ("provider_request_pending", "provider", "resolved_ai_model") if key in patch})
     for index, (chapter_id, chapter_title) in enumerate(chapter_refs):
         if progress_callback is not None:
             await progress_callback(
@@ -312,6 +252,7 @@ async def ensure_chapter_digests(
             chapter_id=chapter_id,
             ai_model=ai_model,
             ai_client=ai_client,
+            progress_callback=request_progress,
         )
         if digest.status != MemoirSemanticCacheStatus.READY.value:
             raise HTTPException(
@@ -371,7 +312,7 @@ async def load_book_review_context(
                 status_code=409,
                 detail=f"章节“{chapter.title}”摘要缺失或已过期",
             )
-        confirmed = await _confirmed_version(
+        confirmed = await latest_chapter_draft_version(
             db,
             project_id=project_id,
             chapter_id=chapter.id,
@@ -379,7 +320,7 @@ async def load_book_review_context(
         if confirmed is None:
             raise HTTPException(
                 status_code=409,
-                detail=f"请先确认章节“{chapter.title}”的正文，再检查全书",
+                detail=f"章节“{chapter.title}”还没有可读正文",
             )
         chapters.append(
             BookReviewChapter(
@@ -389,8 +330,9 @@ async def load_book_review_context(
                 digest_id=digest.id,
                 digest_signature=digest.input_signature,
                 digest=digest.digest_json,
-                confirmed_draft_version_id=confirmed.id,
-                confirmed_draft_hash=semantic_text_hash(confirmed.content),
+                draft_version_id=confirmed.id,
+                draft_hash=semantic_text_hash(confirmed.content),
+                draft_content=confirmed.content,
                 material_ids=digest_context.allowed_material_ids,
             )
         )
@@ -406,10 +348,10 @@ async def load_book_review_context(
                     "digest_id": chapter.digest_id,
                     "digest_signature": chapter.digest_signature,
                     "digest_hash": semantic_json_signature(chapter.digest),
-                    "confirmed_draft_version_id": (
-                        chapter.confirmed_draft_version_id
+                    "draft_version_id": (
+                        chapter.draft_version_id
                     ),
-                    "confirmed_draft_hash": chapter.confirmed_draft_hash,
+                    "draft_hash": chapter.draft_hash,
                 }
                 for chapter in chapters
             ],
@@ -444,7 +386,8 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
             f"chapter_id: {references.encode(chapter.chapter_id)}\n"
             f"章节: {chapter.title}\n"
             f"摘要: {chapter.digest.get('summary', '')}\n"
-            f"重点: {chapter.digest.get('focus', '')}"
+            f"重点: {chapter.digest.get('focus', '')}\n"
+            f"当前正文（以此为准，摘要仅辅助理解）:\n{chapter.draft_content}"
         )
         for chapter in context.chapters
     )
@@ -493,7 +436,7 @@ def build_book_review_prompt(context: BookReviewContext) -> str:
 - 只有回答会提供新的亲历事实，而且这些事实适合写入某章正文时，resolution 才能是 new_material。
 - 只有隐私、事实冲突、内容是否收录等必须由用户拍板的决定，resolution 才能是 user_decision。
 - candidate_issues 数量不设配额，只保留彼此独立且确实需要用户处理的问题，并合并相似问题。
-- 不能创建摘要中没有的人生事实。
+- 不能创建正文和来源中没有的人生事实。
 - 每个 candidate_issue 至少关联一个章节；chapter_ids 只能使用输入中出现的本次请求短编号 chapter_id。
 - summary、strengths、structure_guidance、editorial_actions 的 title/reason、question 和 reason 会直接展示给用户；引用章节时使用章节标题。
 """
@@ -782,6 +725,10 @@ async def generate_or_reuse_book_review(
     policy = ai_text_workload_policy(AITextWorkload.GENERATION_STRUCTURED)
     timeout_seconds = ai_text_timeout_seconds(policy.timeout_profile)
     started_at = time.monotonic()
+    if progress_callback is not None:
+        await progress_callback({"provider_request_pending": True,
+                                 "provider": getattr(client, "provider_name", None),
+                                 "resolved_ai_model": getattr(client, "model_name", ai_model)})
     generation: dict[str, object]
     try:
         generated = await generate_structured_with_client(
@@ -810,6 +757,7 @@ async def generate_or_reuse_book_review(
             await progress_callback(
                 {
                     "stage": "saving",
+                    "provider_request_pending": False,
                     "total_chapter_count": len(context.chapters),
                     "processed_chapter_count": len(context.chapters),
                     "current_chapter_title": "",
@@ -859,6 +807,8 @@ async def generate_or_reuse_book_review(
     review.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(review)
     await db.flush()
+    if progress_callback is not None:
+        await progress_callback({"provider_request_pending": False})
     if status == MemoirSemanticCacheStatus.READY:
         await completion_issues.sync_book_review_issues(
             db,

@@ -310,6 +310,8 @@ class MemoirBookChapterDraftResponse(BaseModel):
 
 
 class MemoirBookAssemblyResponse(BaseModel):
+    omitted_chapter_ids: list[str] = Field(default_factory=list)
+    preserved_manual: bool = False
     project_id: str
     output_id: str
     output_version_id: str
