@@ -40,7 +40,7 @@
         <text class="growth-notice-title">{{growthNoticeTitle}}</text>
         <text class="growth-notice-detail">{{growthNoticeText}}</text>
       </view>
-      <button class="growth-notice-dismiss story-secondary-action ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
+      <button size="mini" class="growth-notice-dismiss story-secondary-action ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
     </view>
     <view
       class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"

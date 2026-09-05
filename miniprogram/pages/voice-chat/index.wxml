@@ -30,7 +30,7 @@
       <text class="story-growth-title">{{progressNoticeTitle || storyGrowthNoticeTitle}}</text>
       <text class="story-growth-detail">{{progressNoticeTitle ? progressNoticeDetail : storyGrowthNoticeDetail}}</text>
     </view>
-    <button class="story-growth-action" bindtap="handleStoryGrowthNoticeAction">
+    <button size="mini" class="story-growth-action" bindtap="handleStoryGrowthNoticeAction">
       {{progressNoticeTitle ? '查看故事' : storyGrowthNoticeActionText}}
     </button>
   </view>
