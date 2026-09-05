@@ -1,6 +1,39 @@
 from __future__ import annotations
 
-from app.models.memoir import MemoirBookChapterDraftVersion, MemoirBookPlanChapter
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models.memoir import MemoirBookChapterDraft, MemoirBookChapterDraftVersion, MemoirBookPlan, MemoirBookPlanChapter
+
+
+def latest_chapter_version(draft: MemoirBookChapterDraft | None) -> MemoirBookChapterDraftVersion | None:
+    return max(draft.versions, key=lambda version: (version.version, version.created_at, version.id)) if draft and draft.versions else None
+
+
+async def load_book_plan_drafts(db: AsyncSession, *, project_id: str) -> MemoirBookPlan:
+    plan = await db.scalar(select(MemoirBookPlan).where(MemoirBookPlan.project_id == project_id).options(
+        selectinload(MemoirBookPlan.chapters).selectinload(MemoirBookPlanChapter.draft).selectinload(MemoirBookChapterDraft.versions),
+    ).execution_options(populate_existing=True))
+    if plan is None:
+        raise HTTPException(status_code=404, detail="章节规划不存在")
+    return plan
+
+
+def readable_chapter_versions(plan: MemoirBookPlan, *, allow_partial: bool = False) -> list[tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]]:
+    chapters = sorted((chapter for chapter in plan.chapters if chapter.include_in_book), key=lambda chapter: (chapter.sort_order, chapter.id))
+    result = []
+    for chapter in chapters:
+        version = latest_chapter_version(chapter.draft)
+        if version is None or not version.content.strip() or not normalized_section_snapshots(version.section_snapshot_json):
+            if allow_partial:
+                continue
+            raise HTTPException(status_code=409, detail=f"章节“{chapter.title}”还没有可读正文")
+        result.append((chapter, version))
+    if not result and not allow_partial:
+        raise HTTPException(status_code=409, detail="还没有可读的章节正文")
+    return result
 
 
 def _safe_str(value: object) -> str:

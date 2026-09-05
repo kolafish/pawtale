@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,6 +54,9 @@ async def enqueue_book_review_job(
     project_id: str,
     req: MemoirBookReviewGenerateRequest,
     allow_admin: bool = False,
+    input_signature: str | None = None,
+    automatic: bool = False,
+    on_enqueued: Callable[[MemoirEditingJob], Awaitable[None]] | None = None,
 ) -> dict[str, object]:
     project = await load_memoir_project(
         db,
@@ -64,11 +68,14 @@ async def enqueue_book_review_job(
     existing = await _load_job(db, project_id=project_id)
     if (
         existing is not None
-        and existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+        and (existing.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES
+             or (automatic and (existing.payload_json or {}).get("input_signature") == input_signature))
     ):
+        if on_enqueued is not None:
+            await on_enqueued(existing)
         return _job_state(project_id=project_id, job=existing)
 
-    total_chapter_count = await book_reviews.require_confirmed_chapter_drafts(
+    total_chapter_count = await book_reviews.require_readable_chapter_drafts(
         db,
         project_id=project_id,
     )
@@ -84,6 +91,7 @@ async def enqueue_book_review_job(
             "allow_admin": allow_admin,
             "force_regenerate": req.force_regenerate,
             "requested_ai_model": selected_ai_model,
+            "input_signature": input_signature,
         },
     )
     job.result_json = {
@@ -96,6 +104,8 @@ async def enqueue_book_review_job(
         "review_id": None,
     }
     db.add(job)
+    if on_enqueued is not None:
+        await on_enqueued(job)
     await db.commit()
     await db.refresh(job)
     return _job_state(project_id=project_id, job=job)
@@ -153,6 +163,9 @@ async def run_book_review_job(
         job=job,
         progress=progress,
     )
+    if progress.get("provider_request_pending"):
+        return EditingJobResult(status=MemoirEditingJobStatus.FAILED, result_json=progress,
+            error_message="服务中断时全书审阅请求尚未确认完成，请确认后重试；已有书稿可以继续阅读")
 
     try:
         await load_memoir_project(

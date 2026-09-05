@@ -14,13 +14,17 @@ from app.domain.memoir.types import MemoirEditingJobStatus, MemoirEditingJobType
 from app.models.memoir import MemoirBookPlanChapter, MemoirEditingJob
 from app.models.projects import Project
 from app.schemas.memoir_narrative import MemoirChapterPreparationJobRequest
-from app.services.memoir import chapter_generation, chapter_preparation_jobs, editing_jobs
+from app.schemas.memoir_book_review import MemoirBookReviewGenerateRequest
+from app.services.memoir import book_review_jobs, chapter_generation, chapter_preparation_jobs, editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
+from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+from app.services.memoir.semantic_state import semantic_json_signature
 
 
 class ChapterProgress(BaseModel):
     job_id: str | None = None
     input_signature: str = ""
+    draft_version_id: str | None = None
     status: Literal["pending", "running", "ready", "failed", "cancelled", "needs_input", "needs_review", "needs_material"] = "pending"
     error_message: str = ""
 
@@ -28,6 +32,13 @@ class ChapterProgress(BaseModel):
 class DraftProgress(BaseModel):
     stage: str = "queued"
     chapters: dict[str, ChapterProgress] = Field(default_factory=dict)
+    output_id: str | None = None
+    output_version_id: str | None = None
+    omitted_chapter_ids: list[str] = Field(default_factory=list)
+    preserved_manual: bool = False
+    review_job_id: str | None = None
+    review_status: str = "not_started"
+    review_error: str = ""
 
 
 async def schedule_book_draft(db: AsyncSession, *, project_id: str, source: str = "materials") -> MemoirEditingJob:
@@ -94,6 +105,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         latest = await chapter_generation.latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
         if chapter_generation.chapter_draft_is_current(context, latest):
             state.status, state.error_message = "ready", ""
+            state.draft_version_id = latest.id
             continue
 
         async def record_child(child: MemoirEditingJob) -> None:
@@ -119,14 +131,40 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         state.error_message = str(child.get("error_message") or "")
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
+    readable = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
+    if readable or progress.output_id:
+        assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
+        progress.output_id = assembled.output_id
+        progress.output_version_id = assembled.output_version_id
+        progress.omitted_chapter_ids = assembled.omitted_chapter_ids
+        progress.preserved_manual = assembled.preserved_manual
+        # Persist deterministic assembly before any review dispatch or external request.
+        job.result_json = progress.model_dump(mode="json")
+        await db.commit()
     if any(item.status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES for item in progress.chapters.values()):
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
-    progress.stage = (
-        "chapters_ready"
-        if progress.chapters and all(item.status == "ready" for item in progress.chapters.values())
-        else "needs_attention"
-    )
+    progress.stage = "partial_ready" if readable else "needs_attention"
+    if readable and len(readable) == len(progress.chapters):
+        review_signature = semantic_json_signature({"output_version_id": progress.output_version_id,
+            "chapters": {key: item.draft_version_id for key, item in progress.chapters.items()}})
+
+        async def record_review(child: MemoirEditingJob) -> None:
+            progress.review_job_id = child.id
+            job.result_json = progress.model_dump(mode="json")
+            db.add(job)
+
+        review = await book_review_jobs.enqueue_book_review_job(db, user_id=project.user_id, project_id=project_id,
+            req=MemoirBookReviewGenerateRequest(), input_signature=review_signature, automatic=not retry,
+            on_enqueued=record_review)
+        progress.review_status = str(review["status"])
+        progress.review_error = str(review.get("error_message") or "")
+        if progress.review_status in editing_jobs.ACTIVE_EDITING_JOB_STATUSES:
+            progress.stage = "reviewing_book"
+            return _waiting(job, progress)
+        progress.stage = "ready" if progress.review_status == "succeeded" else "ready_review_failed"
+    if progress.preserved_manual or progress.omitted_chapter_ids:
+        progress.stage = "needs_attention"
     return EditingJobResult(result_json=progress.model_dump(mode="json"))
 
 

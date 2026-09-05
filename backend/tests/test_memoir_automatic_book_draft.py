@@ -1,4 +1,5 @@
 import copy
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -22,8 +23,15 @@ async def _setup(client, test_db, monkeypatch):
         chapter_material_id=materials[0]["utterance_id"],
         draft_material_ids=[materials[0]["utterance_id"]],
     )
-    for module in ("chapter_generation", "chapter_digests", "section_digests"):
+    for module in ("chapter_generation", "chapter_digests", "section_digests", "book_reviews"):
         monkeypatch.setattr(f"app.services.memoir.{module}.get_ai_service", lambda *_: fake)
+    call = fake._call_llm
+    async def with_book_review(system, prompt, **kwargs):
+        if "请通读下面这本回忆录" in prompt:
+            fake.prompts.append(prompt)
+            return json.dumps({"summary": "一段旧友重逢的故事。", "strengths": [], "structure_guidance": [], "candidate_issues": [], "editorial_actions": []}, ensure_ascii=False)
+        return await call(system, prompt, **kwargs)
+    fake._call_llm = with_book_review
     clear_editing_job_handlers()
     register_memoir_editing_job_handlers()
     parent = await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
@@ -37,6 +45,9 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
     parent = await test_db.get(MemoirEditingJob, parent_id)
     child_id = parent.result_json["chapters"][chapter_id]["job_id"]
     assert await run_test_editing_job(test_db, child_id)
+    assert not await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["output_version_id"]
+    assert await run_test_editing_job(test_db, parent.result_json["review_job_id"])
     assert await run_test_editing_job(test_db, parent_id)
     latest = await chapter_generation.latest_chapter_draft_version(
         test_db, project_id=project_id, chapter_id=chapter_id
@@ -47,7 +58,10 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
     await test_db.commit()
     assert await run_test_editing_job(test_db, parent_id)
     assert len(fake.prompts) == calls
-    assert parent.result_json["stage"] == "chapters_ready"
+    assert parent.result_json["stage"] == "ready"
+    output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
+    assert output.status_code == 200
+    assert output.json()["is_stale"] is False
 
 
 async def test_failed_chapter_is_not_automatically_reissued(client, test_db, monkeypatch):
@@ -191,3 +205,60 @@ async def test_new_privacy_decision_during_generation_prevents_publication(clien
             chapter_id=chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
     assert await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id,
         chapter_id=chapter_id) is None
+
+
+async def test_review_failure_leaves_readable_book_and_does_not_repeat_model(client, test_db, monkeypatch):
+    from app.models.memoir import MemoirBookOutputVersion, MemoirBookChapterDraft
+    project_id, chapter_id, _, _, parent_id = await _setup(client, test_db, monkeypatch)
+    assert not await run_test_editing_job(test_db, parent_id)
+    parent = await test_db.get(MemoirEditingJob, parent_id)
+    assert await run_test_editing_job(test_db, parent.result_json["chapters"][chapter_id]["job_id"])
+    assert not await run_test_editing_job(test_db, parent_id)
+    version_id = parent.result_json["output_version_id"]
+    review_id = parent.result_json["review_job_id"]
+    calls = 0
+    class FailedReview:
+        provider_name = "test"
+        model_name = "failed-review"
+        async def _call_llm(self, *args, **kwargs):
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("provider unavailable")
+    monkeypatch.setattr("app.services.memoir.book_reviews.get_ai_service", lambda *_: FailedReview())
+    assert not await run_test_editing_job(test_db, review_id)
+    assert await run_test_editing_job(test_db, parent_id)
+    assert parent.result_json["stage"] == "ready_review_failed"
+    assert (await test_db.get(MemoirBookOutputVersion, version_id)).content
+    draft = await test_db.scalar(select(MemoirBookChapterDraft).where(MemoirBookChapterDraft.chapter_id == chapter_id))
+    assert draft.status == "draft"
+    previous_calls = calls
+    await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
+    await test_db.commit()
+    assert await run_test_editing_job(test_db, parent_id)
+    assert calls == previous_calls
+    assert parent.result_json["output_version_id"] == version_id
+
+
+async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(client, test_db):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.models.memoir import MemoirBookOutputVersion
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    for chapter in chapters:
+        await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
+                                    status=MemoirBookChapterDraftStatus.DRAFT)
+    test_db.add(MemoirCompletionIssue(project_id=project_id, chapter_id=chapters[0].id, scope="chapter",
+        issue_type="privacy", channel="manual_review", question="是否保留这段私人经历？",
+        priority="high", fingerprint="b" * 64, input_signature="review"))
+    await test_db.commit()
+    partial = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert partial.omitted_chapter_ids == [chapters[0].id]
+    assert [item["chapter_id"] for item in partial.chapter_snapshot_json] == [chapters[1].id]
+    version = await test_db.get(MemoirBookOutputVersion, partial.output_version_id)
+    version.content, version.created_by = "用户亲自整理的全书。", "user"
+    await test_db.commit()
+    preserved = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert preserved.preserved_manual
+    assert preserved.output_version_id == partial.output_version_id
+    assert preserved.content == "用户亲自整理的全书。"

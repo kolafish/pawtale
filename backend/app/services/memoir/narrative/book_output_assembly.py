@@ -3,25 +3,18 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
-    MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
-    MemoirCompletionIssueScope,
     MemoirCompletionIssueStatus,
     MemoirCreatedBy,
     MemoirOutputStatus,
 )
 from app.models.memoir import (
-    MemoirBookChapterDraft,
-    MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
-    MemoirBookPlan,
-    MemoirBookPlanChapter,
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
@@ -31,6 +24,7 @@ from app.services.memoir import (
     book_output_versions,
     book_review_answer_state,
     book_reviews,
+    completion_issues,
 )
 from app.services.memoir.book_output_manuscript import (
     effective_book_metadata,
@@ -41,7 +35,8 @@ from app.services.memoir.book_output_manuscript import (
 from app.services.memoir.book_output_snapshots import (
     book_content_from_chapter_snapshots,
     chapter_snapshot,
-    normalized_section_snapshots,
+    load_book_plan_drafts,
+    readable_chapter_versions,
 )
 from app.services.memoir.book_plan_sources import included_book_chapters
 from app.services.memoir.book_source_links import plan_source_ref_dicts_by_chapter
@@ -49,94 +44,40 @@ from app.services.memoir.book_output_state import invalidate_book_output
 from app.services.memoir.image_assets import manuscript_image_snapshots
 
 
-def _latest_chapter_version(
-    chapter: MemoirBookPlanChapter,
-) -> MemoirBookChapterDraftVersion | None:
-    if chapter.draft is None or not chapter.draft.versions:
-        return None
-    return max(
-        chapter.draft.versions,
-        key=lambda version: (version.version, version.created_at, version.id),
-    )
-
-
 async def assemble_book_output(
     db: AsyncSession,
     *,
     project_id: str,
+    eligible_chapter_ids: set[str] | None = None,
+    automatic: bool = False,
 ) -> MemoirBookAssemblyResponse:
-    plan = await db.scalar(
-        select(MemoirBookPlan)
-        .where(MemoirBookPlan.project_id == project_id)
-        .options(
-            selectinload(MemoirBookPlan.chapters)
-            .selectinload(MemoirBookPlanChapter.draft)
-            .selectinload(MemoirBookChapterDraft.versions)
-        )
-    )
-    if plan is None:
-        raise ValueError("book plan does not belong to the project")
+    plan = await load_book_plan_drafts(db, project_id=project_id)
     if plan.status != MemoirBookPlanStatus.CONFIRMED.value:
-        raise ValueError("confirm the book plan before assembling the book output")
+        raise ValueError("请先确认章节规划")
     chapters = included_book_chapters(plan)
-    if not chapters:
-        raise ValueError("book plan has no chapters")
-    chapter_versions: list[
-        tuple[MemoirBookPlanChapter, MemoirBookChapterDraftVersion]
-    ] = []
-    incomplete_titles: list[str] = []
-    unstructured_titles: list[str] = []
-    for chapter in chapters:
-        version = _latest_chapter_version(chapter)
-        if (
-            chapter.draft is None
-            or chapter.draft.status != MemoirBookChapterDraftStatus.CONFIRMED.value
-            or version is None
-            or not version.content.strip()
-        ):
-            incomplete_titles.append(chapter.title or "未命名章节")
-            continue
-        if not normalized_section_snapshots(version.section_snapshot_json):
-            unstructured_titles.append(chapter.title or "未命名章节")
-            continue
-        chapter_versions.append((chapter, version))
-    if incomplete_titles:
-        raise ValueError(
-            "book output requires confirmed chapter drafts: "
-            + ", ".join(incomplete_titles)
-        )
-    if unstructured_titles:
-        raise ValueError(
-            "book output requires structured chapter drafts: "
-            + ", ".join(unstructured_titles)
-        )
+    chapter_versions = readable_chapter_versions(plan, allow_partial=automatic)
+    if eligible_chapter_ids is not None:
+        chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id in eligible_chapter_ids]
     current_review = await book_reviews.get_current_book_review(
         db,
         project_id=project_id,
     )
-    if current_review is None or current_review.status != "ready":
-        raise ValueError("book output requires a current book review")
-    unresolved_decision = await db.scalar(
-        select(MemoirCompletionIssue.id)
-        .where(
-            MemoirCompletionIssue.project_id == project_id,
-            MemoirCompletionIssue.scope
-            == MemoirCompletionIssueScope.BOOK.value,
-            MemoirCompletionIssue.channel
-            == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
-            MemoirCompletionIssue.status
-            != MemoirCompletionIssueStatus.CLOSED.value,
-            MemoirCompletionIssue.input_signature
-            == current_review.input_signature,
-        )
-        .limit(1)
-    )
-    if unresolved_decision:
+    decisions = (await db.scalars(select(MemoirCompletionIssue).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+    ))).all()
+    if decisions and not automatic:
         raise ValueError("book output requires resolving book review decisions")
-    answer_context = await book_review_answer_state.load_answer_context(
-        db,
-        review=current_review,
-    )
+    blocked_chapter_ids = {issue.chapter_id for issue in decisions if issue.chapter_id}
+    unresolved = {issue.fingerprint for issue in decisions if issue.scope == "book"}
+    if current_review:
+        for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(current_review.review_json.get("candidate_issues", [])):
+            if fingerprint in unresolved:
+                blocked_chapter_ids.update(candidate.get("chapter_ids", []))
+    chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
+    omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]
+    answer_context = await book_review_answer_state.load_answer_context(db, review=current_review) if current_review else None
 
     project = await db.get(Project, project_id)
     if project is None:
@@ -154,6 +95,7 @@ async def assemble_book_output(
         )
     output = await db.scalar(
         select(MemoirBookOutput).where(MemoirBookOutput.project_id == project_id)
+        .with_for_update().execution_options(populate_existing=True)
     )
     title = (
         output.title
@@ -180,16 +122,17 @@ async def assemble_book_output(
             db,
             output_id=output.id,
         )
-        if book_review_answer_state.marker_matches_context(
-            output=output,
-            version=previous_version,
-            context=answer_context,
-        ) or book_editorial_actions.marker_matches_review(
-            output=output,
-            version=previous_version,
-            review=current_review,
-            answers_signature=answer_context.answers_signature,
-        ):
+        protected = bool(previous_version and (
+            previous_version.created_by == MemoirCreatedBy.USER.value
+            or book_review_answer_state.application_marker(output).get("output_version_id") == previous_version.id
+            or book_editorial_actions.application_marker(output).get("output_version_id") == previous_version.id
+        ))
+        preserves_applied_answers = bool(answer_context and (
+            book_review_answer_state.marker_matches_context(output=output, version=previous_version, context=answer_context)
+            or book_editorial_actions.marker_matches_review(output=output, version=previous_version,
+                review=current_review, answers_signature=answer_context.answers_signature)
+        ))
+        if (automatic and protected) or preserves_applied_answers:
             return MemoirBookAssemblyResponse(
                 project_id=project_id,
                 output_id=output.id,
@@ -199,6 +142,8 @@ async def assemble_book_output(
                 chapter_snapshot_json=list(
                     previous_version.chapter_snapshot_json or []
                 ),
+                preserved_manual=protected,
+                omitted_chapter_ids=omitted,
                 created_at=previous_version.created_at,
             )
         if (
@@ -213,6 +158,7 @@ async def assemble_book_output(
                 version=previous_version.version,
                 content=previous_version.content,
                 chapter_snapshot_json=chapter_snapshots,
+                omitted_chapter_ids=omitted,
                 created_at=previous_version.created_at,
             )
         output.plan_id = plan.id
@@ -264,5 +210,6 @@ async def assemble_book_output(
         version=version.version,
         content=version.content,
         chapter_snapshot_json=chapter_snapshots,
+        omitted_chapter_ids=omitted,
         created_at=version.created_at,
     )

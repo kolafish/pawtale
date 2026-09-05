@@ -35,6 +35,7 @@ async def append_book_output_version(
     manuscript_json: dict[str, object],
     created_by: MemoirCreatedBy,
 ) -> MemoirBookOutputVersion:
+    await db.execute(select(MemoirBookOutput.id).where(MemoirBookOutput.id == output.id).with_for_update())
     latest = await load_latest_book_output_version(db, output_id=output.id)
     version = MemoirBookOutputVersion(
         output_id=output.id,
