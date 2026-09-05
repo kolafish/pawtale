@@ -157,6 +157,19 @@ async def get_memoir_chapter_preparation_job(
     )
 
 
+@router.post(
+    "/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{job_id}/candidate/accept",
+    response_model=MemoirChapterPreparationJobResponse,
+)
+async def accept_memoir_chapter_candidate(
+    project_id: str, chapter_id: str, job_id: str,
+    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    return await chapter_preparation_jobs.accept_chapter_candidate(
+        db, user_id=current_user.id, project_id=project_id, chapter_id=chapter_id, job_id=job_id,
+    )
+
+
 @router.delete(
     "/projects/{project_id}/book-completion/chapters/{chapter_id}/jobs/{job_id}",
     response_model=MemoirChapterPreparationJobResponse,

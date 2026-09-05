@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,10 +16,7 @@ from app.services.memoir.narrative import book_completion
 from app.services.memoir.project_ai_preferences import select_project_ai_model
 
 
-_ACTIVE_STATUSES = {
-    MemoirEditingJobStatus.PENDING.value,
-    MemoirEditingJobStatus.RUNNING.value,
-}
+_ACTIVE_STATUSES = editing_jobs.ACTIVE_EDITING_JOB_STATUSES
 _CHECKPOINT_KEYS = {
     "checkpoint_input_signature",
     "checkpoint_sections",
@@ -46,41 +44,9 @@ def _job_state(
     chapter_id: str,
     job: MemoirEditingJob | None,
 ) -> dict[str, object]:
-    if job is None:
-        return {
-            "project_id": project_id,
-            "chapter_id": chapter_id,
-            "status": "idle",
-        }
-    result = _public_result(dict(job.result_json or {}))
-    cancelled = result.get("cancelled") is True
-    status = (
-        "cancelled"
-        if cancelled
-        else (
-            job.status
-            if job.status
-            in {
-                MemoirEditingJobStatus.PENDING.value,
-                MemoirEditingJobStatus.RUNNING.value,
-                MemoirEditingJobStatus.SUCCEEDED.value,
-                MemoirEditingJobStatus.FAILED.value,
-            }
-            else MemoirEditingJobStatus.FAILED.value
-        )
-    )
     return {
-        **result,
-        "job_id": job.id,
-        "project_id": project_id,
+        **_public_result(editing_jobs.project_editing_job_state(project_id=project_id, job=job)),
         "chapter_id": chapter_id,
-        "status": status,
-        "can_cancel": status in _ACTIVE_STATUSES,
-        "error_message": (
-            job.error_message
-            if status == MemoirEditingJobStatus.FAILED.value
-            else ""
-        ),
     }
 
 
@@ -114,6 +80,8 @@ async def enqueue_chapter_preparation_job(
     req: MemoirChapterPreparationJobRequest,
     allow_admin: bool = False,
     on_enqueued: Callable[[MemoirEditingJob], Awaitable[None]] | None = None,
+    automatic: bool = False,
+    retry: bool = False,
 ) -> dict[str, object]:
     project = await load_memoir_project(
         db,
@@ -153,6 +121,16 @@ async def enqueue_chapter_preparation_job(
 
     previous_result = dict(existing.result_json or {}) if existing else {}
     previous_payload = dict(existing.payload_json or {}) if existing else {}
+    from app.services.memoir import completion_issues
+    decision_resolved = previous_result.get("outcome") == "needs_input" and not any(
+        issue.channel == "manual_review" for issue in await completion_issues.list_issues(
+            db, project_id=project_id, chapter_id=chapter_id,
+        )
+    )
+    if automatic and not retry and not decision_resolved and existing is not None and previous_payload.get("input_signature") == context.input_signature:
+        if on_enqueued is not None:
+            await on_enqueued(existing)
+        return _job_state(project_id=project_id, chapter_id=chapter_id, job=existing)
     can_resume = bool(
         existing is not None
         and existing.status == MemoirEditingJobStatus.FAILED.value
@@ -199,6 +177,7 @@ async def enqueue_chapter_preparation_job(
             "operation": req.operation,
             "requested_ai_model": selected_ai_model,
             "input_signature": context.input_signature,
+            "automatic": automatic,
         },
     )
     job.result_json = {
@@ -296,6 +275,9 @@ async def run_chapter_preparation_job(
         job=job,
         progress=progress,
     )
+    if progress.get("provider_request_pending"):
+        return EditingJobResult(status=MemoirEditingJobStatus.FAILED, result_json=progress,
+            error_message="服务中断时模型请求尚未确认完成，已保留进度，请确认后重试")
 
     try:
         if operation == "rewrite":
@@ -325,7 +307,12 @@ async def run_chapter_preparation_job(
                 ),
                 checkpoint=progress,
                 progress_callback=update_progress,
+                automatic=payload.get("automatic") is True,
             )
+    except chapter_generation.ChapterDraftCandidateReady as ready:
+        progress.update(ready.candidate)
+        progress.update(stage="completed", outcome="needs_review")
+        return EditingJobResult(result_json=progress)
     except editing_jobs.EditingJobProgressLost:
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
@@ -370,3 +357,25 @@ async def run_chapter_preparation_job(
         }
     )
     return EditingJobResult(result_json=completed)
+
+
+async def accept_chapter_candidate(
+    db: AsyncSession, *, user_id: str, project_id: str, chapter_id: str, job_id: str,
+) -> dict[str, object]:
+    await load_memoir_project(db, project_id, user_id)
+    job = await _load_job(db, project_id=project_id, chapter_id=chapter_id, job_id=job_id)
+    if job is None or job.status != "succeeded" or (job.result_json or {}).get("outcome") != "needs_review":
+        raise HTTPException(status_code=409, detail="没有可采纳的候选稿")
+    from app.services.memoir import completion_issues
+    if any(issue.channel == "manual_review" for issue in await completion_issues.list_issues(
+        db, project_id=project_id, chapter_id=chapter_id,
+    )):
+        raise HTTPException(status_code=409, detail="本章还有事实或隐私事项需要先确认")
+    await chapter_generation.save_chapter_draft_candidate(
+        db, project_id=project_id, chapter_id=chapter_id, checkpoint=job.result_json,
+    )
+    job.result_json = {**_public_result(job.result_json), "outcome": "ready", "candidate_content": None}
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="candidate_accepted")
+    await db.commit()
+    return _job_state(project_id=project_id, chapter_id=chapter_id, job=job)

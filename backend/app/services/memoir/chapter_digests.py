@@ -206,6 +206,7 @@ async def ensure_section_digests(
                     "stage": "checking_sections",
                     "total_section_count": len(sections),
                     "checked_section_count": index,
+                    "provider_request_pending": True,
                     "current_section_id": section.id,
                     "current_section_title": section.title,
                 }
@@ -245,6 +246,7 @@ async def ensure_section_digests(
                     "stage": "checking_sections",
                     "total_section_count": len(sections),
                     "checked_section_count": index + 1,
+                    "provider_request_pending": False,
                     "current_section_id": section.id,
                     "current_section_title": section.title,
                 }
@@ -578,6 +580,9 @@ async def generate_or_reuse_chapter_digest(
         await progress_callback(
             {
                 "stage": "checking_chapter",
+                "provider_request_pending": True,
+                "provider": getattr(client, "provider_name", None),
+                "resolved_ai_model": getattr(client, "model_name", ai_model),
                 "total_section_count": len(context.sections),
                 "checked_section_count": len(context.sections),
                 "current_section_id": None,
@@ -682,4 +687,6 @@ async def generate_or_reuse_chapter_digest(
             input_signature=digest.input_signature,
             candidates=digest.digest_json.get("candidate_issues", []),
         )
+    if progress_callback is not None:
+        await progress_callback({"provider_request_pending": False})
     return digest

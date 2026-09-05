@@ -98,6 +98,8 @@ class MemoirChapterPreparationJobResponse(BaseModel):
     current_section_id: str | None = None
     current_section_title: str = ""
     outcome: str = ""
+    candidate_content: str | None = None
+    candidate_base_version_id: str | None = None
     requested_ai_model: str | None = None
     resolved_ai_model: str | None = None
     can_cancel: bool = False
