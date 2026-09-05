@@ -5,11 +5,9 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.memoir.types import MemoirVoiceSessionStatus
 from app.models.memoir import (
     MemoirChatMessage,
     MemoirSectionMaterial,
-    MemoirVoiceSession,
     MemoirVoiceUtterance,
 )
 from app.services.memoir import sections, story_tree_growth
@@ -114,11 +112,6 @@ async def schedule_ready_utterance_background_work(
                 utterance_id=utterance.id,
                 transcript_version_id=transcript_version_id,
             )
-    voice_session = await db.get(MemoirVoiceSession, utterance.voice_session_id)
-    if voice_session and voice_session.status == MemoirVoiceSessionStatus.STOPPED.value:
-        await story_tree_growth.schedule_story_tree_growth(
-            db,
-            project_id=project_id,
-            voice_session_id=voice_session.id,
-            source=source,
-        )
+    await story_tree_growth.schedule_story_tree_growth(
+        db, project_id=project_id, voice_session_id=utterance.voice_session_id, source=source,
+    )

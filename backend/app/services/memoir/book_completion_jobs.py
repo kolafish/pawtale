@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
     MemoirEditingJobStatus,
 )
 from app.models.memoir import MemoirBookCompletionJob, MemoirEditingJob
+from app.models.projects import Project
 from app.schemas.memoir_narrative import (
     MemoirBookCompletionJobRequest,
     MemoirChapterPreparationJobRequest,
@@ -267,6 +268,10 @@ async def _enqueue_missing_chapter_jobs(
         if chapter_job_ids.get(chapter_id) or enqueue_errors.get(chapter_id):
             continue
         child_job_id = ""
+        async def record_child(child: MemoirEditingJob) -> None:
+            chapter_job_ids[chapter_id] = child.id
+            job.chapter_job_ids_json = dict(chapter_job_ids)
+            db.add(job)
         try:
             child = await chapter_preparation_jobs.enqueue_chapter_preparation_job(
                 db,
@@ -278,6 +283,7 @@ async def _enqueue_missing_chapter_jobs(
                     ai_model=job.requested_ai_model,
                 ),
                 allow_admin=allow_admin,
+                on_enqueued=record_child,
             )
             child_job_id = str(child.get("job_id") or "").strip()
             if not child_job_id:
@@ -483,3 +489,13 @@ async def cancel_book_completion_job(
     db.add(job)
     await db.commit()
     return await _job_response(db, project_id=project_id, job=job)
+
+
+async def advance_book_completion_jobs(db: AsyncSession) -> None:
+    """Recover partial dispatch and persist terminal batches without a client GET."""
+    rows = (await db.execute(select(MemoirBookCompletionJob, Project.user_id).join(
+        Project, Project.id == MemoirBookCompletionJob.project_id,
+    ).where(MemoirBookCompletionJob.status.in_(_ACTIVE_BATCH_STATUSES)))).all()
+    for job, user_id in rows:
+        await _enqueue_missing_chapter_jobs(db, job=job, user_id=user_id, allow_admin=False)
+        await _job_response(db, project_id=job.project_id, job=job, persist_status=True)

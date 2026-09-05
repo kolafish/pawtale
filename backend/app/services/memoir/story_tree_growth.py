@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.clock import utcnow_naive
+from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookPlanStatus,
@@ -49,7 +50,7 @@ from app.services.memoir.book_plan_sources import load_plan_with_chapters
 from app.services.memoir.book_plan_write_workflow import generate_book_plan
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
-from app.services.memoir.material_roles import is_countable_material
+from app.services.memoir.material_roles import is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import SectionRegenerationConflict, regenerate_chapter_sections
 from app.services.memoir.sections import place_material
@@ -319,46 +320,36 @@ async def schedule_story_tree_growth(
     )
     if (
         session is None
-        or session.status != MemoirVoiceSessionStatus.STOPPED.value
         or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
-        or not any(is_countable_material(item) for item in session.utterances)
+        or not any(is_ready_story_material(item) for item in session.utterances)
     ):
         return None
+    existing = await editing_jobs.load_project_editing_job(
+        db, project_id=project_id, job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
+        dedupe_key=f"organize_session:{voice_session_id}",
+    )
+    if existing is not None and existing.status == MemoirEditingJobStatus.FAILED.value and source != "retry":
+        return existing
+    delay = SETTLE_SECONDS if session.status == MemoirVoiceSessionStatus.STOPPED.value else get_settings().memoir_story_settle_seconds
     return await editing_jobs.enqueue_editing_job(
         db,
         project_id=project_id,
         job_type=MemoirEditingJobType.ORGANIZE_MATERIAL,
         payload_json={"voice_session_id": voice_session_id, "source": source},
-        run_after=utcnow_naive() + timedelta(seconds=SETTLE_SECONDS),
+        run_after=utcnow_naive() + timedelta(seconds=delay),
         dedupe_key=f"organize_session:{voice_session_id}",
         replace_completed=True,
         preserve_progress=True,
+        reschedule_running=True,
     )
 
 
-async def _active_corrections_exist(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    utterance_ids: set[str],
-) -> bool:
-    jobs = list(
-        (
-            await db.scalars(
-                select(MemoirEditingJob).where(
-                    MemoirEditingJob.project_id == project_id,
-                    MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
-                    MemoirEditingJob.status.in_(
-                        {
-                            MemoirEditingJobStatus.PENDING.value,
-                            MemoirEditingJobStatus.RUNNING.value,
-                        }
-                    ),
-                )
-            )
-        ).all()
-    )
-    return any((job.payload_json or {}).get("utterance_id") in utterance_ids for job in jobs)
+async def _active_corrections_exist(db: AsyncSession, *, project_id: str) -> bool:
+    return await db.scalar(select(MemoirEditingJob.id).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.job_type == MemoirEditingJobType.CORRECT_TRANSCRIPT.value,
+        MemoirEditingJob.status.in_(editing_jobs.ACTIVE_EDITING_JOB_STATUSES),
+    ).limit(1)) is not None
 
 
 async def _load_tree(
@@ -547,7 +538,6 @@ async def grow_story_tree(
             .join(MemoirVoiceSession)
             .where(
                 MemoirVoiceSession.project_id == job.project_id,
-                MemoirVoiceSession.status == MemoirVoiceSessionStatus.STOPPED.value,
                 MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
             )
             .options(selectinload(MemoirVoiceUtterance.chat_message))
@@ -573,7 +563,7 @@ async def grow_story_tree(
         for item in project_sources
         if item.id not in existing_material_ids
         and not item.completion_issue_id
-        and is_countable_material(item)
+        and is_ready_story_material(item)
         and not (
             item.id in deferred
             and deferred[item.id].status == "needs_user"
@@ -691,24 +681,21 @@ async def run_story_tree_growth_job(
     )
     if (
         session is None
-        or session.status != MemoirVoiceSessionStatus.STOPPED.value
         or session.session_goal != MemoirSessionGoal.OPEN_NARRATION.value
     ):
         return EditingJobResult(
             status=MemoirEditingJobStatus.SKIPPED,
             error_message="讲述会话尚未完成或不参与故事树生长",
         )
-    utterance_ids = {item.id for item in session.utterances}
     if await _active_corrections_exist(
         db,
         project_id=job.project_id,
-        utterance_ids=utterance_ids,
     ):
         job.run_after = utcnow_naive() + timedelta(seconds=SETTLE_SECONDS)
         db.add(job)
         await db.flush()
         return EditingJobResult(
             status=MemoirEditingJobStatus.PENDING,
-            result_json={"voice_session_id": session.id, "stage": "waiting_for_transcripts"},
+            result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
     return await grow_story_tree(db, job=job, session=session)

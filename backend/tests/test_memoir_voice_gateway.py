@@ -1170,7 +1170,9 @@ async def test_voice_transcript_correction_job_updates_saved_raw_turn(
             MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert organization_job is None
+    assert organization_job is not None
+    assert organization_job.status == "pending"
+    assert organization_job.payload_json["voice_session_id"] == voice_session_id
     assert "organization_job_id" not in result.result_json
 
 
@@ -1242,7 +1244,9 @@ async def test_voice_transcript_correction_job_does_not_overwrite_user_edit(
             MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value
         )
     )
-    assert organization_job is None
+    assert organization_job is not None
+    assert organization_job.status == "pending"
+    assert organization_job.payload_json["voice_session_id"] == voice_session_id
     assert "organization_job_id" not in result.result_json
 
 

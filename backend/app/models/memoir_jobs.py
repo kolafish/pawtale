@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -81,6 +82,8 @@ class MemoirEditingJob(Base):
         index=True,
     )
     run_after: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    first_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    rerun_requested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     lease_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

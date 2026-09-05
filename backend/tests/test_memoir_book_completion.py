@@ -2532,7 +2532,7 @@ async def test_book_review_job_preserves_failure_and_can_retry(
     failed = await _completion_field(client, project_id, "book_review_job")
     assert failed["status"] == "failed"
     assert failed["stage"] == "reviewing"
-    assert failed["error_message"] == "provider unavailable"
+    assert "已保存的进度会保留" in failed["error_message"]
     assert failed["can_retry"] is True
 
     retried = await client.post(
@@ -2606,3 +2606,33 @@ async def test_book_review_uses_the_current_output_title(
 
     assert context.book_metadata["title"] == "一个人的故园与远方"
     assert context.input_signature != reviewed.json()["input_signature"]
+
+
+async def test_background_batch_recovers_after_child_dispatch_without_client_reads(client, test_db, monkeypatch):
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=1)
+    project = await test_db.get(Project, project_id)
+    chapter_id, user_id = chapters[0].id, project.user_id
+    batch = MemoirBookCompletionJob(project_id=project_id, active_key=f"book-completion:{project_id}",
+        status="pending", target_chapters_json=[{"chapter_id": chapters[0].id, "title": chapters[0].title}])
+    test_db.add(batch)
+    await test_db.commit()
+    enqueue = chapter_preparation_jobs.enqueue_chapter_preparation_job
+    async def stopped_after_dispatch(*args, **kwargs):
+        await enqueue(*args, **kwargs)
+        raise RuntimeError("worker stopped after child commit")
+    monkeypatch.setattr(chapter_preparation_jobs, "enqueue_chapter_preparation_job", stopped_after_dispatch)
+    with pytest.raises(RuntimeError, match="worker stopped"):
+        await book_completion_jobs.advance_book_completion_jobs(test_db)
+    await test_db.rollback()
+    await test_db.refresh(batch)
+    child_id = batch.chapter_job_ids_json[chapter_id]
+    monkeypatch.setattr(chapter_preparation_jobs, "enqueue_chapter_preparation_job", enqueue)
+    child = await test_db.get(MemoirEditingJob, child_id)
+    assert child.payload_json["user_id"] == user_id
+    child.status = "succeeded"
+    await test_db.commit()
+    await book_completion_jobs.advance_book_completion_jobs(test_db)
+    await test_db.refresh(batch)
+    assert batch.status == "succeeded"
+    assert batch.active_key is None
+    assert batch.chapter_job_ids_json == {chapter_id: child_id}

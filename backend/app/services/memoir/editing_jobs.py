@@ -6,12 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Awaitable, Callable
 
-from sqlalchemy import and_, case, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.clock import utcnow_naive
 from app.config import get_settings
+from app.services.ai_timeouts import ai_error_metadata, ai_user_error_message
 from app.database import async_session_maker
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -201,6 +202,7 @@ async def enqueue_editing_job(
     replace_completed: bool = False,
     retry_failed: bool = False,
     preserve_progress: bool = False,
+    reschedule_running: bool = False,
 ) -> MemoirEditingJob:
     scheduled_at = run_after or utcnow_naive()
     payload = payload_json or {}
@@ -210,6 +212,14 @@ async def enqueue_editing_job(
             select(MemoirEditingJob).where(MemoirEditingJob.dedupe_key == dedupe_key)
         )
     if existing:
+        if existing.status == MemoirEditingJobStatus.RUNNING.value and reschedule_running:
+            updated = await db.execute(update(MemoirEditingJob).where(
+                MemoirEditingJob.id == existing.id,
+                MemoirEditingJob.status == MemoirEditingJobStatus.RUNNING.value,
+            ).values(rerun_requested=True, payload_json=payload, run_after=scheduled_at))
+            await db.refresh(existing)
+            if updated.rowcount:
+                return existing
         replaceable_statuses: set[str] = set()
         if replace_completed:
             replaceable_statuses = {
@@ -244,7 +254,7 @@ async def enqueue_editing_job(
                 "result_json": dict(existing.result_json or {}) if preserve_progress else {},
             }
             if reset_attempts:
-                values["attempts"] = 0
+                values.update(attempts=0, first_started_at=None, rerun_requested=False)
             await db.execute(
                 update(MemoirEditingJob)
                 .where(
@@ -318,6 +328,7 @@ async def _claim_editing_job_ids(
             .values(
                 status=MemoirEditingJobStatus.RUNNING.value,
                 locked_at=claimed_at,
+                first_started_at=func.coalesce(MemoirEditingJob.first_started_at, claimed_at),
                 lease_token=lease.token,
                 lease_expires_at=lease_deadline(claimed_at, lease_seconds),
                 attempts=MemoirEditingJob.attempts + 1,
@@ -473,7 +484,8 @@ async def _mark_job(
     *,
     result_json: dict | None = None,
     error_message: str = "",
-) -> bool:
+) -> str | None:
+    rerun = and_(MemoirEditingJob.rerun_requested.is_(True), status == MemoirEditingJobStatus.SUCCEEDED)
     result = await db.execute(
         update(MemoirEditingJob)
         .where(
@@ -482,19 +494,23 @@ async def _mark_job(
             MemoirEditingJob.lease_token == lease.token,
         )
         .values(
-            status=status.value,
+            status=case((rerun, MemoirEditingJobStatus.PENDING.value), else_=status.value),
+            first_started_at=case((rerun, None), else_=MemoirEditingJob.first_started_at),
+            rerun_requested=False,
             locked_at=None,
             lease_token=None,
             lease_expires_at=None,
             result_json=result_json or {},
             error_message=error_message,
-        )
+        ).returning(MemoirEditingJob).execution_options(populate_existing=True, synchronize_session="fetch")
     )
-    if result.rowcount != 1:
+    updated_job = result.scalar_one_or_none()
+    if updated_job is None:
         await db.rollback()
-        return False
+        return None
+    final_status = updated_job.status
     await db.commit()
-    return True
+    return final_status
 
 
 def _deadline_error_message(timeout_seconds: float) -> str:
@@ -546,7 +562,13 @@ async def run_editing_job(
         if timeout_seconds is not None
         else get_settings().memoir_editing_job_deadline_seconds,
     )
+    elapsed_before_run = (
+        max(0.0, (utcnow_naive() - job.first_started_at).total_seconds())
+        if job.first_started_at is not None and timeout_seconds is None else 0.0
+    )
     try:
+        if elapsed_before_run >= deadline_seconds:
+            raise EditingJobDeadlineExceeded
         job_type = MemoirEditingJobType(job.job_type)
         handler = _HANDLERS.get(job_type)
         if handler is None:
@@ -555,14 +577,14 @@ async def run_editing_job(
                 job,
                 lease,
                 MemoirEditingJobStatus.SKIPPED,
-                error_message=f"no handler registered for {job_type.value}",
+                error_message="后台任务暂不支持此操作，请联系管理员",
             )
             return False
         handler_task = asyncio.create_task(handler(db, job))
         try:
             done, _pending = await asyncio.wait(
                 {handler_task},
-                timeout=deadline_seconds,
+                timeout=deadline_seconds - elapsed_before_run,
             )
             if handler_task not in done:
                 raise EditingJobDeadlineExceeded
@@ -579,7 +601,7 @@ async def run_editing_job(
             result_json=handler_result.result_json,
             error_message=handler_result.error_message,
         )
-        return marked and handler_result.status == MemoirEditingJobStatus.SUCCEEDED
+        return marked == MemoirEditingJobStatus.SUCCEEDED.value
     except EditingJobDeadlineExceeded:
         await db.rollback()
         error_message = _deadline_error_message(deadline_seconds)
@@ -598,6 +620,9 @@ async def run_editing_job(
             )
             result_json = {
                 **(job.result_json or {}),
+                "requested_model": (job.payload_json or {}).get("requested_ai_model"),
+                "model": (job.result_json or {}).get("resolved_ai_model"),
+                "provider": (job.result_json or {}).get("provider"),
                 "error_type": "job_deadline_exceeded",
                 "timeout_seconds": deadline_seconds,
                 "elapsed_seconds": deadline_seconds,
@@ -622,8 +647,15 @@ async def run_editing_job(
                 job,
                 lease,
                 MemoirEditingJobStatus.FAILED,
-                result_json=dict(job.result_json or {}),
-                error_message=str(exc),
+                result_json={**(job.result_json or {}), "failure": {"message": str(exc), **ai_error_metadata(
+                    exc, requested_model=(job.payload_json or {}).get("requested_ai_model"),
+                    provider=None, resolved_model=(job.result_json or {}).get("resolved_ai_model"),
+                    timeout_seconds=(getattr(exc, "diagnostics", None) or {}).get("timeout_seconds", deadline_seconds),
+                    elapsed_ms=round(
+                        (utcnow_naive() - (job.first_started_at or job.created_at)).total_seconds() * 1000
+                    ),
+                )}},
+                error_message=ai_user_error_message(exc, "后台处理失败，已保存的进度会保留，请重试"),
             )
         return False
 
@@ -652,11 +684,7 @@ async def _run_claimed_editing_job(
 
     async def work() -> bool:
         async with session_maker() as db:
-            return await run_editing_job(
-                db,
-                lease,
-                timeout_seconds=max(0.01, settings.memoir_editing_job_deadline_seconds),
-            )
+            return await run_editing_job(db, lease)
 
     try:
         return await run_with_lease_heartbeat(
@@ -726,6 +754,9 @@ async def editing_worker_loop(stop_event: asyncio.Event) -> None:
     poll_seconds = max(1, settings.memoir_editing_poll_seconds)
     while not stop_event.is_set():
         try:
+            from app.services.memoir.book_completion_jobs import advance_book_completion_jobs
+            async with async_session_maker() as db:
+                await advance_book_completion_jobs(db)
             await run_available_editing_jobs(should_stop=stop_event.is_set)
         except Exception:
             logger.exception("memoir editing worker tick failed")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -111,6 +113,7 @@ async def enqueue_chapter_preparation_job(
     chapter_id: str,
     req: MemoirChapterPreparationJobRequest,
     allow_admin: bool = False,
+    on_enqueued: Callable[[MemoirEditingJob], Awaitable[None]] | None = None,
 ) -> dict[str, object]:
     project = await load_memoir_project(
         db,
@@ -140,6 +143,8 @@ async def enqueue_chapter_preparation_job(
         chapter_id=chapter_id,
     )
     if existing is not None and existing.status in _ACTIVE_STATUSES:
+        if on_enqueued is not None:
+            await on_enqueued(existing)
         return _job_state(
             project_id=project_id,
             chapter_id=chapter_id,
@@ -207,6 +212,8 @@ async def enqueue_chapter_preparation_job(
         **checkpoint,
     }
     db.add(job)
+    if on_enqueued is not None:
+        await on_enqueued(job)
     await db.commit()
     await db.refresh(job)
     return _job_state(
