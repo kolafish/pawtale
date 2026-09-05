@@ -30,7 +30,10 @@
           <text class="overview-outcome ui-tabular">{{story.overview.outcomeText}}</text>
         </view>
         <view wx:if="{{showSummary}}" class="overview-book">
-          <text class="overview-readable ui-tabular">{{story.overview.readableText}}</text>
+          <view class="overview-readability">
+            <text class="overview-readable ui-tabular">{{story.overview.readableText}}</text>
+            <text wx:if="{{story.overview.bookText}}" class="overview-readable ui-tabular">{{story.overview.bookText}}</text>
+          </view>
           <button size="mini" class="story-inline-action ui-button" bindtap="openBook" aria-label="查看{{story.memoir.title}}的书稿">{{story.memoir.progressDetail}} ›</button>
         </view>
       </view>
@@ -62,14 +65,14 @@
             <text wx:if="{{item.timeRangeText}}">{{item.timeRangeText}} · </text>{{item.summaryText}}
           </text>
         </view>
-        <text class="chapter-status {{item.state}}">{{item.outcomeText}}</text>
+        <text wx:if="{{item.outcomeText}}" class="chapter-status {{item.state}}">{{item.outcomeText}}</text>
         <view class="chapter-chevron {{item.expanded ? 'expanded' : ''}}" aria-hidden="true">⌄</view>
       </view>
 
       <view wx:if="{{item.expanded}}" class="section-list">
         <view class="chapter-reading-actions">
           <button wx:if="{{item.readable}}" size="mini" class="ui-button story-inline-action" data-id="{{item.id}}" bindtap="readChapter">阅读本章 ›</button>
-          <button size="mini" class="ui-button story-inline-action {{item.readable ? 'is-secondary' : ''}}" data-id="{{item.id}}" bindtap="openChapter">{{item.state === 'attention' ? '查看待处理事项' : item.readable ? '查看详情' : '查看本章'}} ›</button>
+          <button size="mini" class="ui-button story-inline-action {{item.readable ? 'is-secondary' : ''}}" data-id="{{item.id}}" bindtap="openChapter">{{item.detailActionText}} ›</button>
         </view>
         <view
           wx:if="{{item.imageCount || item.videoCount}}"

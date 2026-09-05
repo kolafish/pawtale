@@ -1,10 +1,16 @@
-import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot } from "../../domain/memoir-snapshots";
+import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot, MemoirStoryIssueCounts } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
 import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
 
 export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
 
-export interface HomeStoryData {
+interface StoryNotice {
+  reviewNoticeText: string;
+  reviewNoticeDetail: string;
+  reviewNoticeAction: "issues" | "transcripts" | "book" | "";
+}
+
+export interface HomeStoryData extends StoryNotice {
   story: StoryViewData;
   storyLoaded: boolean;
   hasStories: boolean;
@@ -42,6 +48,7 @@ export class HomeGrowthTracker {
 
 export function emptyHomeStoryData(): HomeStoryData {
   return {
+    reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "",
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
     bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
     growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
@@ -100,6 +107,7 @@ export function homeStorySnapshotData(
     bookUpdated ? "书稿已更新" : "",
   ].filter(Boolean).join("，");
   return {
+    ...homeStoryNotice(snapshot),
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
@@ -112,4 +120,36 @@ export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
     ...chapter, growthAnimating: false,
     sections: chapter.sections.map(section => ({ ...section, growthAnimating: false })),
   })) };
+}
+
+
+function issueSummary(counts: MemoirStoryIssueCounts): string {
+  return [
+    counts.review_count ? `${counts.review_count} 项待确认` : "",
+    counts.supplement_count ? `${counts.supplement_count} 项待补充` : "",
+  ].filter(Boolean).join(" · ");
+}
+
+export function homeStoryNotice(snapshot: MemoirStorySnapshot): StoryNotice {
+  const chapters = snapshot.chapters.reduce((counts, chapter) => ({
+    review_count: counts.review_count + (chapter.issues?.review_count || 0),
+    supplement_count: counts.supplement_count + (chapter.issues?.supplement_count || 0),
+  }), { review_count: 0, supplement_count: 0 });
+  const chapterText = issueSummary(chapters);
+  const bookText = snapshot.book_issues ? issueSummary(snapshot.book_issues) : "";
+  if (chapterText || bookText) return {
+    reviewNoticeText: chapterText ? `章节：${chapterText}` : `全书：${bookText}`,
+    reviewNoticeDetail: chapterText && bookText ? `全书：${bookText}` : "",
+    reviewNoticeAction: "issues",
+  };
+  const materials = snapshot.progress?.needs_user_material_count || 0;
+  if (materials) return {
+    reviewNoticeText: `有 ${materials} 段讲述需要您查看`, reviewNoticeDetail: "", reviewNoticeAction: "transcripts",
+  };
+  if (snapshot.book_manual_edit_preserved) return {
+    reviewNoticeText: "已保留您修改的稿件", reviewNoticeDetail: "", reviewNoticeAction: "book",
+  };
+  // Finished/closed issues disappear even while an older generation job still
+  // reports needs_input or omitted chapters. Those job records are not tasks.
+  return { reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "" };
 }

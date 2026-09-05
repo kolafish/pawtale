@@ -17,6 +17,7 @@ export interface StorySectionView {
 }
 
 export interface StoryChapterView {
+  detailActionText: string;
   id: string;
   ordinal: number;
   hasSections: boolean;
@@ -37,6 +38,7 @@ export interface StoryChapterView {
 
 export interface StoryOverviewView {
   readableText: string;
+  bookText: string;
   title: string;
   summaryText: string;
   outcomeText: string;
@@ -61,6 +63,7 @@ export function emptyStoryViewData(): StoryViewData {
     },
     overview: {
       readableText: "还没有正文",
+      bookText: "",
       title: "人生总览",
       summaryText: "0 章 · 0 小节 · 0 段讲述",
       outcomeText: "还没有正文",

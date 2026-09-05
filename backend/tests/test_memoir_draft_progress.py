@@ -60,6 +60,7 @@ async def test_story_snapshot_reads_counts_and_jobs_without_advancing_them(clien
     assert not await run_test_editing_job(test_db, parent_id)
     data = (await client.get("/api/mobile/memoir/story-snapshot")).json()
     assert data["book_readable"] and data["book_char_count"] > 0
+    assert data["book_chapter_count"] == 1
     assert data["chapters"][0]["readable"]
     assert data["progress"]["readable_chapter_count"] == 1
     assert "drafts_by_chapter_id" not in data and "output" not in data

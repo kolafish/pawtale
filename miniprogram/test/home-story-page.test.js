@@ -329,3 +329,58 @@ test("story keeps readable chapter drafts available while the assembled book awa
   assert.equal(view.chapters[0].readable, true);
   assert.equal(view.memoir.progressDetail, "查看书稿");
 });
+
+const { homeStoryNotice } = require("../pages/home/home-story-state.ts");
+
+test("home separates chapter decisions, optional supplements and book decisions", () => {
+  const current = snapshot({
+    book_issues: { review_count: 1, supplement_count: 0 },
+    chapters: snapshot().chapters.map((chapter, i) => ({ ...chapter,
+      issues: { review_count: i ? 0 : 2, supplement_count: i ? 1 : 0 } })),
+  });
+  assert.deepEqual(homeStoryNotice(current), {
+    reviewNoticeText: "章节：2 项待确认 · 1 项待补充", reviewNoticeDetail: "全书：1 项待确认", reviewNoticeAction: "issues",
+  });
+  const view = storyViewData(current);
+  assert.equal(view.chapters[0].detailActionText, "2 项待确认");
+  assert.equal(view.chapters[1].detailActionText, "1 项待补充");
+  assert.equal(view.chapters[0].outcomeText, "");
+});
+
+test("closed issues disappear despite an old needs_input job; five readable drafts are independent of one book decision", () => {
+  const current = snapshot({
+    chapters: Array.from({length: 5}, (_, i) => ({...snapshot().chapters[0], id: `chapter-${i}`})),
+    progress: progress({status: "needs_input", readable_chapter_count: 0, needs_user_material_count: 0}),
+    book_readable: false, book_chapter_count: 0, book_issues: {review_count: 1, supplement_count: 0},
+  });
+  assert.equal(homeStoryNotice(current).reviewNoticeText, "全书：1 项待确认");
+  assert.equal(storyViewData(current).overview.readableText, "5 章可读");
+  assert.equal(storyViewData(current).overview.bookText, "");
+  current.book_issues.review_count = 0;
+  assert.deepEqual(homeStoryNotice(current), {reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: ""});
+  current.book_readable = true;
+  current.book_chapter_count = 3;
+  assert.equal(storyViewData(current).overview.bookText, "3 章已入书稿");
+});
+
+test("home notice opens the matching issue, transcript or manuscript destination", async () => {
+  const current = snapshot({book_issues: {review_count: 1, supplement_count: 0}});
+  const {page, calls} = loadStoryPage({current});
+  const context = pageContext(page), urls = [];
+  global.wx.navigateTo = ({url}) => urls.push(url);
+  await context.onShow();
+  context.openStoryNotice();
+  assert.match(urls[0], /^\/pages\/book-completion\/index\?projectId=project-1/);
+  current.book_issues.review_count = 0;
+  await context.loadHome(true);
+  assert.equal(context.data.reviewNoticeText, "有 1 段讲述需要您查看");
+  context.openStoryNotice();
+  assert.equal(calls.transcripts, 1);
+  current.progress.needs_user_material_count = 0;
+  current.book_manual_edit_preserved = true;
+  await context.loadHome(true);
+  assert.equal(context.data.reviewNoticeText, "已保留您修改的稿件");
+  context.openStoryNotice();
+  assert.deepEqual(calls.bookTargets, ["chapters"]);
+  context.onHide();
+});

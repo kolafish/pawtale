@@ -173,11 +173,14 @@
     <view wx:if="{{storyError}}" class="story-refresh-error ui-error-banner">{{storyError}}</view>
     <button wx:if="{{storyError || (!storyLoaded && error)}}" class="home-story-action ui-button" bindtap="refreshStory" loading="{{loading}}" disabled="{{loading}}">重新读取故事</button>
     <view wx:if="{{loading && !storyLoaded}}" class="story-loading">正在读取故事树…</view>
-    <view wx:if="{{progress && progress.status === 'needs_input'}}" class="home-review-notice" aria-live="polite">
-      <text class="home-review-text">有内容需要您确认</text>
-      <button size="mini" class="home-inline-action ui-button" bindtap="openReviewIssues">查看 ›</button>
+    <view wx:if="{{reviewNoticeText}}" class="home-review-notice" aria-live="polite">
+      <view class="home-review-copy">
+        <text class="home-review-text">{{reviewNoticeText}}</text>
+        <text wx:if="{{reviewNoticeDetail}}" class="home-review-text">{{reviewNoticeDetail}}</text>
+      </view>
+      <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
     </view>
-    <view wx:elif="{{progress && progress.status !== 'idle'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
+    <view wx:if="{{progress && progress.status !== 'idle' && progress.status !== 'needs_input'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
       <text class="home-story-progress-title">{{progress.title}}</text>
       <text class="home-story-progress-detail">{{progress.detail}}</text>
       <button wx:if="{{progress.can_retry}}" size="mini" class="home-inline-action ui-button" bindtap="retryDraft" loading="{{retryingDraft}}" disabled="{{retryingDraft}}">继续整理 ›</button>
