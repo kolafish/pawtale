@@ -61,9 +61,19 @@ export interface MemoirStoryChapter {
   sections: Array<{ id: string; title: string; material_count: number; image_count: number; video_count: number }>;
 }
 
-export interface MemoirStorySnapshot {
-  server_revision: number;
-  identity: MemoirIdentity;
+export type MemoirStoryChange =
+  | { kind: "chapter_added" | "chapter_updated"; chapter_id: string }
+  | { kind: "section_added" | "section_updated"; chapter_id: string; section_id: string }
+  | { kind: "book_updated" };
+
+export interface MemoirStoryGrowthEvent {
+  event_id: string;
+  summary_text: string;
+  created_at: string;
+  changes: MemoirStoryChange[];
+}
+
+export interface MemoirStorySnapshot extends MemoirHomeSnapshot {
   progress: MemoirDraftProgress | null;
   chapters: MemoirStoryChapter[];
   book_readable: boolean;
@@ -72,4 +82,5 @@ export interface MemoirStorySnapshot {
   unassigned_image_count: number;
   unassigned_video_count: number;
   automation_events: MemoirAutomationEventListResponse;
+  growth_events: MemoirStoryGrowthEvent[];
 }
