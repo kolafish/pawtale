@@ -52,14 +52,13 @@
 
     <view
       wx:for="{{story.chapters}}"
-      wx:for-index="chapterIndex"
       wx:key="id"
       id="story-chapter-{{item.id}}"
       class="chapter-block {{item.highlighted ? 'is-new-growth' : ''}} {{item.growthAnimating ? 'growth-arriving' : ''}}"
     >
       <view class="chapter-decoration" aria-hidden="true"></view>
       <view class="chapter-branch" aria-hidden="true"></view>
-      <view class="chapter-node ui-tabular" aria-hidden="true">{{chapterIndex + 1}}</view>
+      <view class="chapter-node ui-tabular" aria-hidden="true">{{item.ordinal}}</view>
 
       <view
         class="chapter-card ui-card ui-card-borderless ui-pressable"
@@ -131,7 +130,7 @@
           <text class="section-action" aria-hidden="true">›</text>
         </view>
         <view
-          wx:if="{{!item.sections.length}}"
+          wx:if="{{!item.hasSections}}"
           class="section-row section-empty ui-pressable"
           data-id="{{item.id}}"
           bindtap="openChapter"

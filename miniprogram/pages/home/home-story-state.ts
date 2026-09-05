@@ -7,6 +7,7 @@ export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
 export interface HomeStoryData {
   story: StoryViewData;
   storyLoaded: boolean;
+  hasStories: boolean;
   storyError: string;
   progress: MemoirDraftProgress | null;
   bookReadable: boolean;
@@ -41,7 +42,7 @@ export class HomeGrowthTracker {
 
 export function emptyHomeStoryData(): HomeStoryData {
   return {
-    story: emptyStoryViewData(), storyLoaded: false, storyError: "", progress: null,
+    story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
     bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
     growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
   };
@@ -99,7 +100,7 @@ export function homeStorySnapshotData(
     bookUpdated ? "书稿已更新" : "",
   ].filter(Boolean).join("，");
   return {
-    story, storyLoaded: true, storyError: "", progress: snapshot.progress,
+    story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
     growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),

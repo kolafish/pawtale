@@ -22,6 +22,8 @@ export interface StorySectionView {
 
 export interface StoryChapterView {
   id: string;
+  ordinal: number;
+  hasSections: boolean;
   title: string;
   timeRangeText: string;
   summaryText: string;

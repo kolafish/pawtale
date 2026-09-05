@@ -147,7 +147,7 @@ type HomeViewPatch = Pick<
 
 type HomeContext = {
   data: HomeData;
-  setData(patch: Partial<HomeData>): void;
+  setData(patch: Partial<HomeData>, callback?: () => void): void;
 };
 
 function normalizedResumeText(value: string): string {
@@ -310,12 +310,12 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
   };
 }
 
-function setHomeData(context: HomeContext, patch: Partial<HomeData>): void {
+function setHomeData(context: HomeContext, patch: Partial<HomeData>, callback?: () => void): void {
   const nextData: HomeData = { ...context.data, ...patch };
   context.setData({
     ...patch,
     ...homeViewPatch(nextData),
-  });
+  }, callback);
 }
 
 function applyHomeSnapshotData(
@@ -717,7 +717,7 @@ definePage<HomeData>()({
     setHomeData(this, {
       voiceAuthorizationAgreed: consent.agreed,
       error: agreed ? "" : this.data.error,
-    });
+    }, () => this.measureNarration());
     void syncVoiceAuthorizationConsent({ consent }).catch((error) => {
       console.warn("sync voice authorization consent change failed", error);
     });
@@ -732,11 +732,11 @@ definePage<HomeData>()({
     setHomeData(this, {
       launchVariant: "none",
       ...launchCopy("none", this.data.projectDisplayTitle),
-    });
+    }, () => this.measureNarration());
   },
 
   dismissReturnPrompt() {
-    setHomeData(this, { launchVariant: "none", showReturnPrompt: false });
+    setHomeData(this, { launchVariant: "none", showReturnPrompt: false }, () => this.measureNarration());
   },
 
   createProject() {
@@ -779,7 +779,7 @@ definePage<HomeData>()({
   },
 
   toggleMoreActions() {
-    setHomeData(this, { showMoreActions: !this.data.showMoreActions });
+    setHomeData(this, { showMoreActions: !this.data.showMoreActions }, () => this.measureNarration());
   },
 
   openBookWorkspace() {

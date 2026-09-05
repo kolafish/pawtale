@@ -6,8 +6,8 @@
         <text class="subtitle">老余口述</text>
       </view>
       <view class="header-actions">
-      <button id="home-settings" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
-      <button class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
+      <button id="home-settings" size="mini" class="home-settings-button ui-button" bindtap="openSettings" aria-label="打开设置" hover-class="ui-subtle-action-hover">设置</button>
+      <button size="mini" class="home-share-button" open-type="share" data-share-kind="home" hover-class="ui-accent-action-hover">
         分享给家人
       </button>
       </view>
@@ -72,9 +72,7 @@
       <text class="project-switch-action">切换 ›</text>
     </view>
     <text wx:else class="project-title">{{projectHeadingText}}</text>
-    <text class="project-meta">
-      {{projectMetaText}}
-    </text>
+    <text class="project-meta">{{projectMetaText}}</text>
 
     <view
       id="primary-voice-action"
@@ -88,14 +86,10 @@
         <image class="voice-start-icon" src="/assets/memoir-microphone.png" mode="aspectFit" />
       </view>
       <view class="voice-start-copy">
-        <text class="voice-start-title">
-          {{primaryVoiceButtonTitle}}
-        </text>
+        <text class="voice-start-title">{{primaryVoiceButtonTitle}}</text>
       </view>
     </view>
-    <text class="voice-start-note">
-      {{voiceStartNoteText}}
-    </text>
+    <text class="voice-start-note">{{voiceStartNoteText}}</text>
 
 
     <view wx:if="{{showResumeActions}}" class="resume-actions">
@@ -207,7 +201,7 @@
         <button size="mini" class="home-story-action home-growth-dismiss ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
       </view>
     </view>
-    <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && story.chapters.length > 0}}"
+    <story-tree wx:if="{{storyLoaded || needsLogin}}" id="story-tree" story="{{story}}" large-text="{{largeTextEnabled}}" show-summary="{{hasProject && hasStories}}"
       bind:focusgrowth="focusStoryGrowth" bind:togglechapter="toggleChapter" bind:openbook="openBook" bind:readchapter="readChapter"
       bind:openchapter="openChapter" bind:openmedia="openMedia" bind:opentranscripts="openTranscripts" bind:managechapters="openChapterManager" />
   </view>

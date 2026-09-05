@@ -708,9 +708,6 @@
   color: var(--ui-accent-strong);
   background: var(--ui-accent-surface);
   box-shadow: var(--ui-control-shadow);
-}
-
-.chapter-reading-actions button {
   min-height: 88rpx;
   margin: 0;
 }
