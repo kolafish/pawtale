@@ -1,398 +1,175 @@
 require("./register-ts");
-
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const {
-  flushAsyncWork,
-  loadPageModule,
-  mockModule,
-  pageContext,
-} = require("./page-harness");
+const { flushAsyncWork, loadPageModule, mockModule, pageContext } = require("./page-harness");
 const { storyViewData } = require("../pages/story/story-view-adapter.ts");
 
-function source(utteranceId) {
-  return { utterance_id: utteranceId };
-}
-
-function section(id, sortOrder, utteranceIds, patch = {}) {
-  return {
-    id,
-    title: `小节 ${id}`,
-    status: "active",
-    sort_order: sortOrder,
-    material_count: utteranceIds.length,
-    materials: utteranceIds.map((utteranceId) => ({ utterance_id: utteranceId })),
-    ...patch,
-  };
-}
-
-function chapter(id, sortOrder, utteranceIds, sections, patch = {}) {
-  return {
-    id,
-    title: `章节 ${id}`,
-    sort_order: sortOrder,
-    include_in_book: true,
-    source_refs: utteranceIds.map(source),
-    sections,
-    pending_source_count: 0,
-    removed_source_count: 0,
-    ...patch,
-  };
-}
-
-function image(id, patch = {}) {
-  return {
-    id,
-    status: "ready",
-    source_utterance_id: null,
-    source_chapter_id: null,
-    updated_at: "2026-08-03T00:00:00Z",
-    ...patch,
-  };
-}
-
-function snapshot(patch = {}) {
-  const firstChapter = chapter(
-    "chapter-1",
-    1,
-    ["utterance-1", "utterance-2"],
-    [
-      section("section-1", 1, ["utterance-1"]),
-      section("section-archived", 2, ["utterance-2"], { status: "archived" }),
-    ],
-  );
-  const secondChapter = chapter(
-    "chapter-2",
-    2,
-    ["utterance-3"],
-    [section("section-2", 1, ["utterance-3"])],
-    { include_in_book: false },
-  );
-  return {
-    identity: {
-      active_project_id: "project-1",
-      active_project: {
-        id: "project-1",
-        title: "余仲尤的回忆录",
-        created_at: "2026-08-01T00:00:00Z",
-        updated_at: "2026-08-02T00:00:00Z",
-      },
-    },
-    plan: {
-      updated_at: "2026-08-03T00:00:00Z",
-      chapters: [secondChapter, firstChapter],
-    },
-    drafts_by_chapter_id: {
-      "chapter-1": {
-        status: "confirmed",
-        pending_source_count: 0,
-        removed_source_count: 0,
-        latest_version: { content: "已经写好的章节正文" },
-        updated_at: "2026-08-04T00:00:00Z",
-      },
-      "chapter-2": null,
-    },
-    output: null,
-    automation_events: { items: [], total: 0, limit: 8 },
-    image_assets: {
-      items: [
-        image("section-image", { source_utterance_id: "utterance-1" }),
-        image("chapter-image", { source_chapter_id: "chapter-1" }),
-        image("unsectioned-image", { source_utterance_id: "utterance-2" }),
-        image("unassigned-image", { source_utterance_id: "utterance-4" }),
-        image("placed-manual-image", {
-          placements: [{ enabled: true, chapter_id: "chapter-1" }],
-        }),
-        image("unassigned-manual-image", { placements: [] }),
-        image("pending-image", { status: "pending", source_chapter_id: "chapter-1" }),
-      ],
-    },
-    share_video_counts: [
-      { utterance_id: "utterance-1", count: 2, job_ids: ["video-1", "video-2"] },
-      { utterance_id: "utterance-2", count: 1, job_ids: ["video-3"] },
-      { utterance_id: "utterance-5", count: 1, job_ids: ["video-4"] },
-    ],
-    ...patch,
-  };
-}
-
 function progress(patch = {}) {
+  return { project_id: "project-1", status: "ready", title: "可读草稿已更新", detail: "全书检查已完成",
+    readable_chapter_count: 1, total_chapter_count: 1, material_count: 5, pending_material_count: 2,
+    needs_user_material_count: 1, can_retry: false, ...patch };
+}
+function snapshot(patch = {}) {
   return {
-    utterance_count: 6,
-    snapshot: {
-      valid_utterance_count: 5,
-      pending_utterance_count: 2,
-    },
-    ...patch,
+    identity: { active_project_id: "project-1", active_project: { id: "project-1", title: "余仲尤的回忆录" } },
+    progress: progress(), book_readable: true, book_char_count: 200, updated_at: "2026-09-05T00:00:00Z",
+    chapters: [1, 2].map((n) => ({ id: `chapter-${n}`, title: `章节 ${n}`, include_in_book: n === 1,
+      material_count: 2, char_count: n === 1 ? 200 : 0, readable: n === 1,
+      state: n === 1 ? "settled" : "muted", state_text: n === 1 ? "可阅读" : "暂不入书",
+      image_count: 3, video_count: 1,
+      sections: [{ id: `section-${n}`, title: `小节 ${n}`, material_count: 1, image_count: 1, video_count: 2 }],
+    })),
+    automation_events: { items: [], total: 0, limit: 8 },
+    unassigned_image_count: 2, unassigned_video_count: 1, ...patch,
   };
 }
-
-function loadStoryPage({
-  bookSnapshot = snapshot(),
-  voiceProgress = progress(),
-  snapshotError = null,
-  largeText = false,
-} = {}) {
-  const calls = {
-    book: 0,
-    bookTargets: [],
-    login: 0,
-    transcripts: 0,
-    progressProjectIds: [],
-    acknowledgedEventIds: [],
-  };
-  mockModule("../services/accessibility-settings.ts", {
-    accessibilityPageClass: (baseClass) => largeText ? `${baseClass} large-text` : baseClass,
-  });
-  mockModule("../services/book-workspace-navigation.ts", {
-    writeBookWorkspaceNavigationTarget: (target) => {
-      calls.bookTargets.push(target);
-    },
-  });
+function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false } = {}) {
+  const calls = { book: 0, bookTargets: [], login: 0, transcripts: 0, acknowledgedEventIds: [] };
+  mockModule("../services/accessibility-settings.ts", { accessibilityPageClass: (base) => largeText ? `${base} large-text` : base });
+  mockModule("../services/book-workspace-navigation.ts", { writeBookWorkspaceNavigationTarget: (target) => calls.bookTargets.push(target) });
   mockModule("../services/memoir-snapshot-api.ts", {
-    getMemoirBookSnapshot: async () => {
-      if (snapshotError) {
-        throw snapshotError;
-      }
-      return bookSnapshot;
-    },
+    getMemoirStorySnapshot: getSnapshot || (async () => current),
+    retryMemoirDraftProgress: retry || (async () => progress({ status: "processing" })),
   });
   mockModule("../services/memoir-voice-session-api.ts", {
-    acknowledgeMemoirAutomationEvent: async (_projectId, eventId) => {
-      calls.acknowledgedEventIds.push(eventId);
-      return {};
-    },
-    getMemoirVoiceProgress: async (projectId) => {
-      calls.progressProjectIds.push(projectId);
-      return voiceProgress;
-    },
+    acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); },
   });
   mockModule("../services/navigation.ts", {
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
-    isAuthError: (error) => error?.statusCode === 401 || error?.statusCode === 403,
-    navigateToBook: () => { calls.book += 1; },
-    navigateToLogin: () => { calls.login += 1; },
-    navigateToTranscripts: () => { calls.transcripts += 1; },
+    isAuthError: (error) => [401, 403].includes(error?.statusCode),
+    navigateToBook: () => calls.book++, navigateToLogin: () => calls.login++, navigateToTranscripts: () => calls.transcripts++,
   });
+  global.wx = {};
   return { ...loadPageModule("../pages/story/index.ts"), calls };
 }
 
-test("story page replaces record and book with the three-tab product navigation", () => {
-  const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
-
-  assert.ok(appJson.pages.includes("pages/story/index"));
-  assert.deepEqual(
-    appJson.tabBar.list.map(({ pagePath, text }) => ({ pagePath, text })),
-    [
-      { pagePath: "pages/home/index", text: "讲述" },
-      { pagePath: "pages/story/index", text: "故事" },
-      { pagePath: "pages/me/index", text: "我的" },
-    ],
-  );
-  appJson.tabBar.list.forEach(({ iconPath, selectedIconPath }) => {
+test("story is registered in the three-tab navigation", () => {
+  const app = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
+  assert.ok(app.pages.includes("pages/story/index"));
+  assert.deepEqual(app.tabBar.list.map(({ text }) => text), ["讲述", "故事", "我的"]);
+  app.tabBar.list.forEach(({ iconPath, selectedIconPath }) => {
     assert.ok(fs.existsSync(path.join(__dirname, "..", iconPath)));
     assert.ok(fs.existsSync(path.join(__dirname, "..", selectedIconPath)));
   });
 });
 
-test("story adapter maps current chapters, outcomes and existing image ownership", () => {
-  const view = storyViewData(snapshot(), progress());
-
-  assert.equal(view.memoir.title, "余仲尤的回忆录");
-  assert.equal(view.memoir.progressLabel, "书稿");
-  assert.equal(view.memoir.progressValue, "1 章");
-  assert.equal(view.memoir.progressDetail, "已整理");
+test("story maps server counts and distinguishes pending from user decisions", () => {
+  const view = storyViewData(snapshot());
+  assert.equal(view.memoir.progressDetail, "阅读草稿");
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
-  assert.equal(view.unassignedMaterialTitle, "待归入故事的讲述");
-  assert.equal(view.unassignedMaterialText, "已经记录了 2 段讲述");
-  assert.equal(view.unassignedMaterialDetail, "小余会把它们整理成人生故事");
-  assert.deepEqual(view.chapters.map((item) => item.id), ["chapter-1", "chapter-2"]);
-  assert.equal(view.chapters[0].sections.length, 1);
+  assert.match(view.unassignedMaterialDetail, /1 段需要您补充或确认/);
+  assert.equal(view.chapters[0].readable, true);
   assert.equal(view.chapters[0].sections[0].imageCount, 1);
   assert.equal(view.chapters[0].sections[0].videoCount, 2);
-  assert.equal(view.chapters[0].imageCount, 3);
-  assert.equal(view.chapters[0].videoCount, 1);
   assert.equal(view.chapters[1].outcomeText, "暂不入书");
-  assert.equal(view.chapters[0].state, "settled");
-  assert.equal(view.chapters[1].state, "muted");
   assert.equal(view.unassignedImageCount, 2);
   assert.equal(view.unassignedVideoCount, 1);
-  assert.equal(view.chapters[0].expanded, true);
-  assert.equal(view.chapters[1].expanded, false);
 });
 
-test("story adapter falls back to current source assignments when progress has no snapshot", () => {
-  const view = storyViewData(snapshot(), { utterance_count: 5 });
-
-  assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
-  assert.equal(view.unassignedMaterialText, "已经记录了 2 段讲述");
-});
-
-test("story adapter handles a memoir before chapters have been generated", () => {
-  const view = storyViewData(snapshot({ plan: null, drafts_by_chapter_id: {} }), progress());
-
-  assert.equal(view.memoir.progressValue, "尚未生成");
-  assert.equal(view.memoir.progressDetail, "开始整理");
-  assert.equal(view.chapters.length, 0);
-  assert.equal(view.overview.summaryText, "0 章 · 0 小节 · 5 段讲述");
-  assert.equal(view.unassignedVideoCount, 4);
-});
-
-test("story adapter distinguishes an empty memoir from fully assigned narration", () => {
-  const empty = storyViewData(
-    snapshot({ plan: null, drafts_by_chapter_id: {} }),
-    progress({ utterance_count: 0, snapshot: { valid_utterance_count: 0, pending_utterance_count: 0 } }),
-  );
-  const assigned = storyViewData(snapshot(), progress({
-    snapshot: { valid_utterance_count: 3, pending_utterance_count: 0 },
-  }));
-
-  assert.equal(empty.unassignedMaterialTitle, "从一段讲述开始");
+test("story distinguishes empty and fully assigned material", () => {
+  const empty = storyViewData(snapshot({ chapters: [], book_readable: false, progress: null }));
   assert.equal(empty.unassignedMaterialText, "还没有讲述");
-  assert.match(empty.unassignedMaterialDetail, /第一段回忆/);
-  assert.equal(assigned.unassignedMaterialTitle, "全部讲述");
+  assert.equal(empty.memoir.progressValue, "尚未生成");
+  const assigned = storyViewData(snapshot({ progress: progress({ pending_material_count: 0, needs_user_material_count: 0 }) }));
   assert.equal(assigned.unassignedMaterialText, "所有讲述都已归入故事");
-  assert.match(assigned.unassignedMaterialDetail, /继续讲下新的回忆/);
 });
 
-test("story adapter uses semantic states instead of chapter position colors", () => {
-  const current = snapshot();
-  const firstChapter = current.plan.chapters.find((item) => item.id === "chapter-1");
-  firstChapter.pending_source_count = 1;
-  let view = storyViewData(current, progress());
-
-  assert.equal(view.chapters[0].state, "attention");
-  assert.equal(view.chapters[0].outcomeText, "有新内容");
-  assert.equal(view.memoir.progressDetail, "继续整理");
-
-  firstChapter.pending_source_count = 0;
-  current.drafts_by_chapter_id["chapter-1"].status = "draft";
-  view = storyViewData(current, progress());
-  assert.equal(view.chapters[0].state, "draft");
-  assert.equal(view.chapters[0].outcomeText, "已有正文");
-});
-
-test("story page loads the active project and preserves a user's expanded chapters", async () => {
-  const { page, calls } = loadStoryPage({ largeText: true });
+test("story keeps expansion while refreshing the same project", async () => {
+  const { page } = loadStoryPage({ largeText: true });
   const context = pageContext(page);
-  global.wx = {};
-
-  await page.onShow.call(context);
-
+  await context.onShow();
   assert.match(context.data.pageClass, /large-text/);
-  assert.deepEqual(calls.progressProjectIds, ["project-1"]);
-  assert.equal(context.data.projectId, "project-1");
-  assert.equal(context.data.chapters[0].expanded, true);
-
-  page.toggleChapter.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
+  context.toggleChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
+  await context.loadStory();
   assert.equal(context.data.chapters[0].expanded, false);
-
-  await page.loadStory.call(context);
-  assert.equal(context.data.chapters[0].expanded, false);
+  context.onHide();
 });
 
-test("story page expands and acknowledges newly grown sections", async () => {
-  const growthEvent = {
-    id: "growth-1",
-    project_id: "project-1",
-    event_type: "story_structure_updated",
-    status: "completed",
-    utterance_ids: ["utterance-3"],
-    summary_text: "故事树新长出了 1 个新小节",
-    metadata_json: {
-      voice_session_id: "voice-1",
-      new_chapter_ids: [],
-      new_section_ids: ["section-2"],
-    },
-    created_at: "2026-09-01T00:00:00Z",
-    updated_at: "2026-09-01T00:00:00Z",
-  };
-  const { page, calls } = loadStoryPage({
-    bookSnapshot: snapshot({
-      automation_events: { items: [growthEvent], total: 1, limit: 8 },
-    }),
-  });
+test("story acknowledges and expands newly grown sections", async () => {
+  const event = { id: "growth-1", project_id: "project-1", event_type: "story_structure_updated", status: "completed",
+    summary_text: "新长出了一个小节", metadata_json: { new_chapter_ids: [], new_section_ids: ["section-2"] } };
+  const { page, calls } = loadStoryPage({ current: snapshot({ automation_events: { items: [event] } }) });
   const context = pageContext(page);
-  const hidden = [];
-  global.wx = {
-    hideTabBarRedDot: ({ index }) => hidden.push(index),
-  };
-
-  await page.onShow.call(context);
+  await context.onShow();
   await flushAsyncWork();
-
-  const chapter = context.data.chapters.find((item) => item.id === "chapter-2");
-  assert.equal(context.data.growthNoticeText, growthEvent.summary_text);
-  assert.equal(chapter.expanded, true);
-  assert.equal(chapter.sections[0].highlighted, true);
+  assert.equal(context.data.chapters[1].expanded, true);
+  assert.equal(context.data.chapters[1].sections[0].highlighted, true);
   assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
-  assert.deepEqual(hidden, [1]);
+  context.onHide();
 });
 
-test("story page does not request progress before a memoir exists", async () => {
-  const bookSnapshot = snapshot({
-    identity: { active_project_id: "", active_project: null },
-    plan: null,
-    drafts_by_chapter_id: {},
-  });
-  const { page, calls } = loadStoryPage({ bookSnapshot });
+test("story stops polling on hide, rejects old responses and resumes on reentry", async () => {
+  let resolve;
+  let current = snapshot({ progress: progress({ status: "processing" }) });
+  const { page } = loadStoryPage({ getSnapshot: () => current ? Promise.resolve(current) : new Promise((done) => { resolve = done; }) });
   const context = pageContext(page);
-
-  await page.loadStory.call(context);
-
-  assert.equal(context.data.projectId, "");
-  assert.equal(context.data.loading, false);
-  assert.deepEqual(calls.progressProjectIds, []);
+  await context.onShow();
+  assert.equal(context.progressTimer.pending, true);
+  current = null;
+  const pending = context.loadStory(true);
+  context.onHide();
+  assert.equal(context.progressTimer.pending, false);
+  resolve(snapshot({ progress: progress({ status: "ready" }) }));
+  await pending;
+  assert.equal(context.data.progress.status, "processing");
+  current = snapshot({ identity: { active_project: { id: "project-2" } }, progress: progress({ status: "failed", can_retry: true }) });
+  await context.onShow();
+  assert.equal(context.data.projectId, "project-2");
+  assert.equal(context.data.progress.status, "failed");
+  assert.equal(context.progressTimer.pending, false);
+  context.onUnload();
 });
 
-test("story page exposes login state after an authentication error", async () => {
-  const { page } = loadStoryPage({ snapshotError: { statusCode: 401 } });
+test("story offers explicit retry and does not turn a refresh failure into job failure", async () => {
+  let fail = false;
+  let retries = 0;
+  const current = snapshot({ progress: progress({ status: "failed", can_retry: true }) });
+  const { page } = loadStoryPage({ getSnapshot: async () => { if (fail) throw Error("offline"); return current; },
+    retry: async (id) => { assert.equal(id, "project-1"); retries++; current.progress = progress({ status: "processing" }); return current.progress; } });
   const context = pageContext(page);
-
-  await page.loadStory.call(context);
-
-  assert.equal(context.data.needsLogin, true);
-  assert.equal(context.data.error, "");
+  await context.onShow();
+  await context.retryDraft();
+  assert.equal(retries, 1);
+  fail = true;
+  await context.loadStory(true);
+  assert.equal(context.data.progress.status, "processing");
+  assert.equal(context.progressTimer.pending, true);
+  assert.match(context.data.error, /进度暂未刷新/);
+  context.onHide();
 });
 
-test("story page reuses the existing book, record and chapter destinations", async () => {
+test("story reads book and chapter directly and retains editing destinations", async () => {
   const { page, calls } = loadStoryPage();
-  const context = pageContext(page, { projectId: "project-1" });
-  const navigated = [];
-  global.wx = {
-    navigateTo: ({ url }) => navigated.push(url),
-  };
+  const context = pageContext(page);
+  const urls = [];
+  global.wx.navigateTo = ({ url }) => urls.push(url);
+  await context.onShow();
+  context.openBook();
+  context.readChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
+  context.readChapter({ currentTarget: { dataset: { id: "chapter-2" } } });
+  context.openChapterManager();
+  context.openChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
+  assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project-1", "/pages/book-reader/index?projectId=project-1&chapterId=chapter-1",
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1"]);
+  assert.equal(calls.book, 1);
+  context.onHide();
+});
 
-  page.openBook.call(context);
-  page.openChapterManager.call(context);
-  page.openTranscripts.call(context);
-  page.openChapter.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  page.openChapter.call(context, {
-    currentTarget: {
-      dataset: { chapterId: "chapter-1", sectionId: "section-1" },
-    },
-  });
-  page.openMedia.call(context, {
-    currentTarget: { dataset: { id: "chapter-1" } },
-  });
-  page.openMedia.call(context, { currentTarget: { dataset: {} } });
-  page.openLogin.call(context);
-  await flushAsyncWork();
-
-  assert.equal(calls.book, 2);
-  assert.deepEqual(calls.bookTargets, ["chapters"]);
-  assert.equal(calls.login, 1);
-  assert.equal(calls.transcripts, 1);
-  assert.deepEqual(navigated, [
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1&sectionId=section-1",
-    "/pages/image-assets/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
-    "/pages/image-assets/index?projectId=project-1&scope=unassigned",
-  ]);
+test("story clears prior project data on auth loss or an empty account", async () => {
+  let authFailure = true;
+  const { page } = loadStoryPage({ getSnapshot: async () => {
+    if (authFailure) throw { statusCode: 401 };
+    return snapshot({ identity: { active_project: null } });
+  } });
+  const context = pageContext(page);
+  await context.onShow();
+  assert.equal(context.data.needsLogin, true);
+  assert.equal(context.data.progress, null);
+  authFailure = false;
+  await context.loadStory();
+  assert.equal(context.data.projectId, "");
+  assert.equal(context.data.chapters.length, 0);
+  context.onHide();
 });

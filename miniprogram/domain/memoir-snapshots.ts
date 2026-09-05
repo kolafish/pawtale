@@ -30,3 +30,46 @@ export interface MemoirBookSnapshot {
   image_assets: MemoirImageAssetListResponse;
   share_video_counts: MemoirShareVideoCount[];
 }
+
+export interface MemoirDraftProgress {
+  project_id: string;
+  status: "idle" | "processing" | "ready" | "partial_ready" | "needs_input" | "no_change" | "failed";
+  stage: string;
+  title: string;
+  detail: string;
+  can_retry: boolean;
+  readable_chapter_count: number;
+  total_chapter_count: number;
+  material_count: number;
+  pending_material_count: number;
+  needs_user_material_count: number;
+  review_status: string;
+  review_error: string;
+}
+
+export interface MemoirStoryChapter {
+  id: string;
+  title: string;
+  include_in_book: boolean;
+  material_count: number;
+  image_count: number;
+  video_count: number;
+  char_count: number;
+  readable: boolean;
+  state: "settled" | "attention" | "draft" | "muted";
+  state_text: string;
+  sections: Array<{ id: string; title: string; material_count: number; image_count: number; video_count: number }>;
+}
+
+export interface MemoirStorySnapshot {
+  server_revision: number;
+  identity: MemoirIdentity;
+  progress: MemoirDraftProgress | null;
+  chapters: MemoirStoryChapter[];
+  book_readable: boolean;
+  book_char_count: number;
+  updated_at: string;
+  unassigned_image_count: number;
+  unassigned_video_count: number;
+  automation_events: MemoirAutomationEventListResponse;
+}

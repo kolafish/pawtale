@@ -421,8 +421,8 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
       applyVoiceChatDataPatch(this, {
         storyGrowthNoticeState: "pending",
         storyGrowthNoticeTitle: "讲述已经保存",
-        storyGrowthNoticeDetail: "小余正在后台把它整理进故事树，您可以先离开。",
-        storyGrowthNoticeActionText: "先返回",
+        storyGrowthNoticeDetail: "小余正在后台整理章节和可读草稿，离开页面也会继续。",
+        storyGrowthNoticeActionText: "看整理进度",
       });
       this.startStoryGrowthWatch();
     } catch (error) {

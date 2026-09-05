@@ -1526,3 +1526,38 @@ test("chapter workspace can rewrite while optional suggestions remain open", asy
   assert.equal(context.data.chapterPreparationProgressMode, "indeterminate");
   assert.equal(toasts.length, 0);
 });
+
+test("candidate remains separate from edited draft and only acceptance writes it", async () => {
+  let accepted = 0;
+  const candidate = chapterPreparationJob({ job_id: "candidate-job", status: "succeeded", outcome: "needs_review",
+    candidate_content: "根据新增讲述整理的新稿", candidate_base_version_id: "version-1" });
+  const { page } = loadWorkspacePage({ voiceApiExports: {
+    acceptMemoirChapterCandidate: async (projectId, chapterId, jobId) => {
+      assert.deepEqual([projectId, chapterId, jobId], ["project-1", "chapter-1", "candidate-job"]);
+      accepted++;
+    },
+  } });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace() });
+  context.pageVisible = true;
+  context.loadPageData = async () => {};
+  global.wx = { showToast() {} };
+  await context.applyChapterPreparationJob(candidate, true);
+  assert.equal(context.data.chapterPreparationJob.candidate_content, candidate.candidate_content);
+  assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(accepted, 0);
+  await context.acceptChapterCandidate();
+  assert.equal(accepted, 1);
+  assert.equal(context.data.chapterPreparationJob, null);
+});
+
+test("stale candidate acceptance preserves original and surfaces conflict", async () => {
+  const { page } = loadWorkspacePage({ voiceApiExports: { acceptMemoirChapterCandidate: async () => { throw Error("正文已更新，请重新检查候选稿"); } } });
+  const candidate = chapterPreparationJob({ job_id: "candidate-job", status: "succeeded", outcome: "needs_review", candidate_content: "候选" });
+  const context = pageContext(page, { projectId: "project-1", chapterId: "chapter-1", workspace: workspace(), chapterPreparationJob: candidate });
+  context.pageVisible = true;
+  await context.acceptChapterCandidate();
+  assert.match(context.data.error, /正文已更新/);
+  assert.equal(context.data.chapterPreparationJob, candidate);
+  assert.equal(context.data.workspace.draft_content, "十八岁那年，我第一次离开家。");
+  assert.equal(context.data.operationKind, "");
+});

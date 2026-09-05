@@ -64,6 +64,7 @@ function loadVoiceChatPage({
     closeMemoirCompletionIssue: unmockedAsync("closeMemoirCompletionIssue"),
     markMemoirAutomationEventsVoicePlayed: async () => ({ updated_count: 0 }),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
+    getMemoirDraftProgress: async () => ({ status: "ready", title: "可读草稿已更新", detail: "全书检查已完成" }),
     stopMemoirVoiceSession: unmockedAsync("stopMemoirVoiceSession"),
     ...voiceApiExports,
   });
@@ -935,7 +936,7 @@ test("voice chat finishSession ignores duplicate finish taps", async () => {
   assert.equal(context.data.persistenceStateText, "已保存");
   await flushAsyncWork();
   assert.equal(context.data.storyGrowthNoticeState, "ready");
-  assert.equal(context.data.storyGrowthNoticeActionText, "去看看");
+  assert.equal(context.data.storyGrowthNoticeActionText, "查看故事");
   page.handleStoryGrowthNoticeAction.call(context);
   assert.deepEqual(storyTabs, ["/pages/story/index"]);
 });
@@ -3167,4 +3168,47 @@ test("voice chat pauses after the second consecutive no-answer prompt", async ()
   assert.equal(context.data.autoListenStateText, "已暂停，可点继续说话");
   assert.equal(context.data.persistenceStateText, "已暂停收音");
   assert.equal(context.consecutiveNoAnswerPrompts, 2);
+});
+
+test("voice progress rejects responses after hide and shows terminal failures without endless polling", async () => {
+  let resolve;
+  const page = loadVoiceChatPage({ voiceApiExports: {
+    getMemoirDraftProgress: () => new Promise((done) => { resolve = done; }),
+  } });
+  const context = { ...page, data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1", storyGrowthNoticeState: "pending" },
+    setData(patch) { this.data = { ...this.data, ...patch }; } };
+  const pending = context.watchStoryGrowth(context.storyGrowthWatchToken);
+  context.pageSuspended = true;
+  context.stopStoryGrowthWatch();
+  resolve({ status: "ready", title: "可读草稿已更新", detail: "" });
+  await pending;
+  assert.equal(context.data.storyGrowthNoticeState, "pending");
+  assert.equal(context.storyGrowthTimer.pending, false);
+  context.pageSuspended = false;
+  const failed = context.watchStoryGrowth(context.storyGrowthWatchToken);
+  resolve({ status: "failed", title: "本次整理需要继续处理", detail: "模型超时" });
+  await failed;
+  assert.equal(context.data.storyGrowthNoticeState, "failed");
+  assert.equal(context.data.storyGrowthNoticeDetail, "模型超时");
+  assert.equal(context.storyGrowthTimer.pending, false);
+});
+
+test("voice progress continues beyond the former 48 polls and terminates on no change", async () => {
+  let calls = 0;
+  const page = loadVoiceChatPage({ voiceApiExports: { getMemoirDraftProgress: async () => ({
+    status: ++calls > 50 ? "no_change" : "processing", title: "讲述已保存", detail: "故事结构没有新增",
+  }) } });
+  const context = { ...page, data: { ...page.data, projectId: "project-1", voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; } };
+  const { PollingTimer } = require("../services/polling-timer.ts");
+  let next;
+  let serial = 0;
+  context.storyGrowthTimer = new PollingTimer(1, {
+    schedule(callback) { next = callback; return ++serial; }, cancel() { next = null; },
+  });
+  await context.watchStoryGrowth(context.storyGrowthWatchToken);
+  while (next) { const callback = next; next = null; callback(); await flushAsyncWork(); }
+  assert.equal(calls, 51);
+  assert.equal(context.data.storyGrowthNoticeState, "no_change");
+  assert.equal(context.storyGrowthTimer.pending, false);
 });

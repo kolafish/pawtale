@@ -198,6 +198,8 @@ export interface MemoirBookRevisionProposal {
 }
 
 export interface MemoirChapterPreparationJob {
+  candidate_content?: string;
+  candidate_base_version_id?: string | null;
   job_id: string | null;
   project_id: string;
   chapter_id: string;
@@ -215,6 +217,13 @@ export interface MemoirChapterPreparationJob {
   resolved_ai_model: string | null;
   can_cancel: boolean;
   error_message: string;
+}
+
+export function acceptMemoirChapterCandidate(projectId: string, chapterId: string, jobId: string): Promise<MemoirChapterPreparationJob> {
+  return memoirRequest<MemoirChapterPreparationJob>(
+    `/api/memoir/projects/${projectId}/book-completion/chapters/${chapterId}/jobs/${jobId}/candidate/accept`,
+    { method: "POST" },
+  );
 }
 
 export interface MemoirBookCompletionJobChapter {

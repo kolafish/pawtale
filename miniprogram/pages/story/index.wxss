@@ -804,3 +804,32 @@
 .large-text .media-chip {
   font-size: 25rpx;
 }
+.chapter-reading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  padding: 16rpx 0;
+}
+
+.story-state.story-progress {
+  min-height: 0;
+  padding: 28rpx;
+  align-items: stretch;
+  text-align: left;
+  margin-bottom: 20rpx;
+}
+
+.story-progress .story-state-action {
+  margin-top: 20rpx;
+}
+
+.story-secondary-action {
+  color: var(--ui-accent-strong);
+  background: var(--ui-accent-surface);
+  box-shadow: var(--ui-control-shadow);
+}
+
+.chapter-reading-actions button {
+  min-height: 88rpx;
+  margin: 0;
+}

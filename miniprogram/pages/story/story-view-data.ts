@@ -24,6 +24,7 @@ export interface StoryChapterView {
   timeRangeText: string;
   summaryText: string;
   outcomeText: string;
+  readable: boolean;
   imageCount: number;
   videoCount: number;
   state: StoryChapterState;
