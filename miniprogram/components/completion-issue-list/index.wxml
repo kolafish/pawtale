@@ -1,7 +1,7 @@
 <view wx:if="{{requiredIssues.length}}" class="issue-group required">
   <text class="group-title">需要确认 · {{requiredIssues.length}} 项</text>
   <text class="group-detail">
-    {{allowRequiredConfirmation ? "请填写回答或处理说明，保存后才能生成全书。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
+    {{allowRequiredConfirmation ? "请填写回答或处理说明；已保存的草稿仍可阅读。" : "涉及隐私、事实冲突或内容取舍，需要处理后才能确认本章。"}}
   </text>
   <view wx:for="{{requiredIssues}}" wx:key="id" class="issue">
     <text class="question">{{item.question}}</text>

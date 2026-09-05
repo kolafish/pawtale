@@ -366,7 +366,7 @@
   <view wx:else class="section">
     <view class="section-head chapter-section-head">
       <view class="section-head-copy">
-        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "逐章成稿"}}</text>
+        <text class="section-title">{{chapterStructureEditing ? "调整章节顺序" : "章节正文"}}</text>
         <text wx:if="{{chapterStructureEditing && updatingPlanStructure}}" class="section-count saving">正在保存顺序…</text>
         <text wx:else class="section-count">{{confirmedDraftCount}}/{{totalChapterCount}} 已确认</text>
       </view>

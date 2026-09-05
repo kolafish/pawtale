@@ -1347,7 +1347,7 @@ export function stageText(stage: BookStage): string {
   if (stage === "plan_draft") {
     return "确认章节结构";
   }
-  return "逐章成稿";
+  return "书稿管理";
 }
 
 export function guestBookData(): Partial<BookHomeData> {
