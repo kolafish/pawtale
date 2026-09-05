@@ -620,6 +620,9 @@ async def run_editing_job(
             )
             result_json = {
                 **(job.result_json or {}),
+                "requested_model": (job.payload_json or {}).get("requested_ai_model"),
+                "model": (job.result_json or {}).get("resolved_ai_model"),
+                "provider": (job.result_json or {}).get("provider"),
                 "error_type": "job_deadline_exceeded",
                 "timeout_seconds": deadline_seconds,
                 "elapsed_seconds": deadline_seconds,

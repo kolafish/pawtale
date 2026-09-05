@@ -112,7 +112,7 @@ async def schedule_semantic_indexing_job(
             f"index_retrieval_semantics:v{SEMANTIC_INDEX_VERSION}:"
             f"{utterance.id}:{transcript_version_id or 'none'}:{text_hash}"
         ),
-        retry_failed=True,
+        retry_failed=source == "retry",
         preserve_progress=True,
     )
 

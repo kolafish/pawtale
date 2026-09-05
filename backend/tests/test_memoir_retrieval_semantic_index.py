@@ -374,6 +374,9 @@ async def test_embedding_retry_reuses_persisted_semantic_generation(client, test
     await test_db.commit()
     from app.services.memoir.retrieval_source_index import schedule_semantic_indexing_job
     utterance = await _load_utterance(test_db, created["utterance_id"])
+    automatic = await schedule_semantic_indexing_job(test_db, project_id=job.project_id,
+        utterance=utterance, source="source_indexed")
+    assert automatic.status == "failed"
     retry = await schedule_semantic_indexing_job(test_db, project_id=job.project_id, utterance=utterance,
                                                 source="retry")
     await claim_editing_job(test_db, retry.id, now=retry.run_after)
