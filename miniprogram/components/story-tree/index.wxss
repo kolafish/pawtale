@@ -1,6 +1,6 @@
 .story-toolbar {
-  min-height: 96rpx;
-  margin: 20rpx 2rpx 18rpx;
+  min-height: 44px;
+  margin: 8rpx 2rpx 18rpx;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -26,7 +26,7 @@
 }
 
 .transcript-list-entry {
-  min-height: 80rpx;
+  min-height: 44px;
   padding: 0 8rpx 0 14rpx;
   display: flex;
   align-items: center;
@@ -63,8 +63,6 @@
   box-shadow:
     inset 3rpx 0 0 rgba(255, 255, 255, 0.22),
     4rpx 2rpx 10rpx rgba(87, 65, 48, 0.10);
-  transform: rotate(0.35deg);
-  transform-origin: top center;
 }
 
 .story-tree::after {
@@ -77,22 +75,20 @@
   width: 5rpx;
   border-radius: 999rpx;
   background: rgba(238, 226, 210, 0.28);
-  transform: rotate(-0.25deg);
-  transform-origin: top center;
 }
 
 .overview-row {
   position: relative;
   z-index: 2;
   min-height: 112rpx;
-  margin: 0 0 18rpx 92rpx;
+  margin: 0 0 18rpx 116rpx;
   display: flex;
   align-items: center;
 }
 
 .overview-symbol {
   position: absolute;
-  left: -62rpx;
+  left: -92rpx;
   top: 25rpx;
   width: 64rpx;
   height: 64rpx;
@@ -183,26 +179,24 @@
   z-index: 2;
   min-height: 130rpx;
   margin-bottom: 18rpx;
-  padding-left: 92rpx;
+  padding-left: 116rpx;
 }
 
 .chapter-branch {
   position: absolute;
   z-index: 0;
-  left: 54rpx;
-  top: 61rpx;
-  width: 56rpx;
-  height: 9rpx;
+  left: 56rpx;
+  top: 60rpx;
+  width: 62rpx;
+  height: 6rpx;
   border-radius: 0 10rpx 10rpx 0;
   background: linear-gradient(90deg, #8d725e, #b39a83);
-  transform: rotate(-3deg);
-  transform-origin: left center;
 }
 
 .chapter-node {
   position: absolute;
   z-index: 3;
-  left: 11rpx;
+  left: 18rpx;
   top: 25rpx;
   width: 76rpx;
   height: 76rpx;
@@ -259,9 +253,10 @@
   min-height: 126rpx;
   padding: 23rpx 24rpx 23rpx 22rpx;
   border-radius: 28rpx;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 20rpx;
+  gap: 8rpx 12rpx;
   background: rgba(255, 253, 250, 0.96);
 }
 
@@ -274,8 +269,8 @@
 }
 
 .chapter-copy {
+  grid-column: 1;
   min-width: 0;
-  flex: 1;
 }
 
 .chapter-title {
@@ -298,7 +293,8 @@
 }
 
 .chapter-status {
-  flex: 0 0 auto;
+  grid-column: 1;
+  justify-self: start;
   padding: 8rpx 13rpx;
   border-radius: 999rpx;
   color: #786c65;
@@ -307,11 +303,6 @@
   line-height: 1.35;
   background: #f0ece7;
   white-space: nowrap;
-}
-
-.chapter-status.settled {
-  color: #5e745d;
-  background: #e7eee5;
 }
 
 .chapter-status.attention {
@@ -325,9 +316,11 @@
 }
 
 .chapter-chevron {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: start;
   width: 40rpx;
   height: 40rpx;
-  flex: 0 0 40rpx;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -345,7 +338,7 @@
 
 .section-list {
   position: relative;
-  margin: 10rpx 4rpx 4rpx 68rpx;
+  margin: 10rpx 4rpx 4rpx 44rpx;
   padding-left: 18rpx;
 }
 
@@ -365,6 +358,7 @@
 }
 
 .chapter-media-row {
+  position: relative;
   min-height: 86rpx;
   margin-bottom: 10rpx;
   padding: 14rpx 18rpx 14rpx 26rpx;
@@ -387,10 +381,10 @@
 .section-row::before {
   content: "";
   position: absolute;
-  left: -61rpx;
-  top: 47rpx;
-  width: 62rpx;
-  height: 5rpx;
+  left: -38rpx;
+  top: 46rpx;
+  width: 38rpx;
+  height: 4rpx;
   border-radius: 5rpx;
   background: linear-gradient(90deg, #9e806b, var(--chapter-tone));
   opacity: 0.72;
@@ -399,10 +393,10 @@
 .section-marker {
   position: absolute;
   z-index: 2;
-  left: -68rpx;
-  top: 38rpx;
-  width: 19rpx;
-  height: 19rpx;
+  left: -46rpx;
+  top: 40rpx;
+  width: 16rpx;
+  height: 16rpx;
   border-radius: 50%;
   background: #fffaf4;
   box-shadow:
@@ -445,7 +439,8 @@
 }
 
 .section-media-entry {
-  min-height: 80rpx;
+  min-width: 40px;
+  min-height: 40px;
   padding: 0 8rpx;
   box-sizing: border-box;
   border-radius: 18rpx;
@@ -483,21 +478,21 @@
   position: relative;
   z-index: 2;
   min-height: 108rpx;
-  margin: 12rpx 4rpx 0 92rpx;
+  margin: 12rpx 4rpx 0 116rpx;
   padding: 20rpx 24rpx;
   border-radius: 24rpx;
-  display: flex;
-  align-items: center;
-  gap: 18rpx;
+  display: grid;
+  grid-template-columns: 44rpx minmax(0, 1fr);
+  align-items: start;
+  gap: 8rpx 16rpx;
   color: #665851;
   background: rgba(248, 242, 234, 0.86);
   box-shadow: inset 0 0 0 2rpx rgba(157, 129, 106, 0.24);
 }
 
 .unassigned-mark {
-  width: 54rpx;
-  height: 54rpx;
-  flex: 0 0 54rpx;
+  width: 44rpx;
+  height: 44rpx;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -508,8 +503,8 @@
 }
 
 .unassigned-copy {
+  grid-column: 2;
   min-width: 0;
-  flex: 1;
 }
 
 .unassigned-title {
@@ -534,7 +529,10 @@
 }
 
 .unassigned-action {
-  flex: 0 0 auto;
+  grid-column: 2;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
   color: #8c7161;
   font-size: 22rpx;
   font-weight: 700;
@@ -542,7 +540,7 @@
 
 .add-chapter-action {
   min-height: 96rpx;
-  margin: 24rpx 2rpx 0 92rpx;
+  margin: 24rpx 2rpx 0 116rpx;
   border-radius: 24rpx;
   display: flex;
   align-items: center;
@@ -561,34 +559,12 @@
   line-height: 1;
 }
 
-.large-text .story-toolbar {
-  align-items: flex-start;
-  flex-direction: column;
-  gap: 10rpx;
-}
-
-.large-text .transcript-list-entry {
-  min-height: 96rpx;
-  font-size: 30rpx;
-}
-
-.large-text .chapter-card {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.large-text .chapter-copy {
-  min-width: 260rpx;
-}
-
-.large-text .section-row {
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
-
-.large-text .section-copy {
-  min-width: 260rpx;
-}
+/* Keep headings and navigation together; text can wrap within its own column. */
+.large-text .timeline-label { font-size: 30rpx; }
+.large-text .transcript-list-entry { font-size: 30rpx; }
+.large-text .section-row { flex-wrap: wrap; }
+.large-text .section-copy { flex-basis: 100%; }
+.large-text .section-action { margin-left: auto; }
 
 .large-text .overview-title,
 .large-text .unassigned-title {
@@ -600,6 +576,7 @@
 }
 
 .chapter-reading-actions {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 4rpx 16rpx;
@@ -655,3 +632,37 @@
 .large-text .overview-readable { font-size: 30rpx; }
 
 .overview-readability { display: flex; flex-wrap: wrap; gap: 4rpx 16rpx; }
+
+/* The child stem connects the chapter card, actions and each section node. */
+.section-list > view::after {
+  content: "";
+  position: absolute;
+  left: -38rpx;
+  top: -10rpx;
+  bottom: -10rpx;
+  width: 3rpx;
+  background: var(--chapter-tone);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.section-list > .section-row:last-child::after { bottom: auto; height: 58rpx; }
+.unassigned-card .section-media-entry {
+  grid-column: 2;
+  justify-self: start;
+  justify-content: flex-start;
+  max-width: 100%;
+  padding: 0;
+}
+.overview-heading { align-items: flex-start; flex-wrap: wrap; }
+.overview-copy { flex: 1 1 220rpx; }
+.large-text .unassigned-meta,
+.large-text .unassigned-detail { font-size: 28rpx; }
+.large-text .unassigned-action { font-size: 30rpx; }
+@media (max-width: 360px) {
+  .chapter-card { padding-right: 16rpx; }
+  .section-row { flex-wrap: wrap; }
+  .section-copy { flex-basis: 100%; }
+  .section-action { margin-left: auto; }
+  .chapter-media-row { flex-wrap: wrap; }
+  .chapter-media-title { flex-basis: 100%; }
+}
