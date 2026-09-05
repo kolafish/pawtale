@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 import json
+from typing import Literal
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
@@ -49,10 +51,12 @@ from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_organization import material_organization_candidates
 from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
-from app.services.memoir.section_regeneration import regenerate_chapter_sections
+from app.services.memoir.section_regeneration import SectionRegenerationConflict, regenerate_chapter_sections
 from app.services.memoir.sections import place_material
 from app.services.memoir.transcript_projection import (
-    current_transcript_version_id, current_utterance_text, source_text_hash,
+    current_transcript_version_id,
+    current_utterance_text,
+    source_text_hash,
 )
 
 
@@ -99,6 +103,42 @@ class GrowthGroup:
     new_section_title: str | None = None
     confidence: float | None = None
     reason: str = ""
+
+
+class DeferredSource(BaseModel):
+    text_hash: str
+    status: Literal["pending", "needs_user"]
+    reason: str
+
+
+class GrowthBatch(BaseModel):
+    groups: list[GrowthGroup] = Field(default_factory=list)
+    sources: dict[str, tuple[str, str | None]]
+    section_versions: dict[str, int]
+    section_chapters: dict[str, str]
+    chapter_updated_at: dict[str, datetime]
+
+
+class StoryGrowthProgress(BaseModel):
+    initial_sections: dict[str, list[MemoirSectionVersionReference]] = Field(default_factory=dict)
+    completed_initial_chapters: list[str] = Field(default_factory=list)
+    structure_conflicts: list[str] = Field(default_factory=list)
+    batch: GrowthBatch | None = None
+    deferred: dict[str, DeferredSource] = Field(default_factory=dict)
+    placed_ids: list[str] = Field(default_factory=list)
+
+
+def _progress(job: MemoirEditingJob) -> StoryGrowthProgress:
+    return StoryGrowthProgress.model_validate((job.result_json or {}).get("growth", {}))
+
+
+async def _save_progress(db: AsyncSession, job: MemoirEditingJob, progress: StoryGrowthProgress) -> None:
+    if not await editing_jobs.update_editing_job_progress(
+        db,
+        job,
+        {**(job.result_json or {}), "growth": progress.model_dump(mode="json")},
+    ):
+        raise editing_jobs.EditingJobProgressLost
 
 
 def _clean_text(value: object, *, limit: int) -> str:
@@ -208,7 +248,7 @@ def _normalize_groups(
                 new_chapter_title=(new_chapter_title if action == "create_chapter" else None),
                 new_section_title=(new_section_title if action in {"create_section", "create_chapter"} else None),
                 confidence=_confidence(raw.confidence),
-                reason=_clean_text(raw.reason, limit=300),
+                reason=_clean_text(raw.reason, limit=300) or "暂时无法确定素材归属",
             )
         )
     missing = [utterance.id for index, utterance in enumerate(utterances, start=1) if index not in used]
@@ -292,6 +332,7 @@ async def schedule_story_tree_growth(
         run_after=utcnow_naive() + timedelta(seconds=SETTLE_SECONDS),
         dedupe_key=f"organize_session:{voice_session_id}",
         replace_completed=True,
+        preserve_progress=True,
     )
 
 
@@ -353,29 +394,59 @@ async def _create_initial_tree(
     *,
     user_id: str,
     project_id: str,
+    job: MemoirEditingJob,
+    progress: StoryGrowthProgress,
 ) -> None:
-    plan_response = await generate_book_plan(
+    async def checkpoint_plan() -> None:
+        sections = (await db.scalars(select(MemoirSection).where(MemoirSection.project_id == project_id))).all()
+        for section in sections:
+            progress.initial_sections.setdefault(section.chapter_id, []).append(
+                MemoirSectionVersionReference(id=section.id, version=section.version)
+            )
+        progress.placed_ids = list(
+            (
+                await db.scalars(
+                    select(MemoirSectionMaterial.utterance_id).where(
+                        MemoirSectionMaterial.project_id == project_id,
+                    )
+                )
+            ).all()
+        )
+        # Persist the directory and its unfinished section work in the same transaction.
+        job.result_json = {**(job.result_json or {}), "growth": progress.model_dump(mode="json")}
+        db.add(job)
+
+    await generate_book_plan(
         db,
         user_id=user_id,
         project_id=project_id,
         req=MemoirBookPlanGenerateRequest(),
         status=MemoirBookPlanStatus.CONFIRMED,
+        before_commit=checkpoint_plan,
     )
-    for chapter in plan_response.chapters:
-        if not chapter.sections:
+
+
+async def _finish_initial_sections(
+    db: AsyncSession, *, user_id: str, job: MemoirEditingJob, progress: StoryGrowthProgress
+) -> None:
+    for chapter_id, expected in progress.initial_sections.items():
+        if chapter_id in progress.completed_initial_chapters:
             continue
-        await regenerate_chapter_sections(
-            db,
-            user_id=user_id,
-            project_id=project_id,
-            chapter_id=chapter.id,
-            req=MemoirSectionRegenerateRequest(
-                expected_sections=[
-                    MemoirSectionVersionReference(id=item.id, version=item.version) for item in chapter.sections
-                ]
-            ),
-            structure_updated_by=MemoirCreatedBy.AI,
-        )
+        try:
+            await regenerate_chapter_sections(
+                db,
+                user_id=user_id,
+                project_id=job.project_id,
+                chapter_id=chapter_id,
+                req=MemoirSectionRegenerateRequest(expected_sections=expected),
+                structure_updated_by=MemoirCreatedBy.AI,
+            )
+        except HTTPException as exc:
+            if exc.status_code != 404 and not isinstance(exc, SectionRegenerationConflict):
+                raise
+            progress.structure_conflicts.append(chapter_id)
+        progress.completed_initial_chapters.append(chapter_id)
+        await _save_progress(db, job, progress)
 
 
 async def _place_groups(
@@ -383,14 +454,11 @@ async def _place_groups(
     *,
     user_id: str,
     project_id: str,
-    groups: list[GrowthGroup],
-    sources: dict[str, tuple[str, str | None]],
-    section_versions: dict[str, int],
-    section_chapters: dict[str, str],
-    chapter_updated_at: dict[str, datetime],
+    batch: GrowthBatch,
+    on_placed: Callable[[str], Awaitable[None]],
 ) -> list[str]:
     placed: list[str] = []
-    for group in groups:
+    for group_index, group in enumerate(batch.groups):
         if group.action == "leave_unassigned":
             continue
         target_section_id = group.section_id
@@ -419,10 +487,10 @@ async def _place_groups(
                     assigned_by=MemoirSectionMaterialAssignedBy.AI,
                     structure_updated_by=MemoirCreatedBy.AI,
                     assignment_reason=group.reason or "story_tree_growth",
-                    expected_source=sources[utterance_id],
-                    expected_section_version=section_versions.get(target_section_id),
-                    expected_chapter_updated_at=chapter_updated_at.get(
-                        section_chapters.get(target_section_id) or group.chapter_id
+                    expected_source=batch.sources[utterance_id],
+                    expected_section_version=batch.section_versions.get(target_section_id),
+                    expected_chapter_updated_at=batch.chapter_updated_at.get(
+                        batch.section_chapters.get(target_section_id) or group.chapter_id
                     ),
                     commit=False,
                 )
@@ -431,11 +499,16 @@ async def _place_groups(
                     raise
                 continue
             target_section_id = placement.section_id
-            section_versions[target_section_id] = await db.scalar(
+            batch.section_versions[target_section_id] = await db.scalar(
                 select(MemoirSection.version).where(MemoirSection.id == target_section_id)
             )
-            section_chapters[target_section_id] = placement.chapter_id
-            await db.commit()
+            batch.section_chapters[target_section_id] = placement.chapter_id
+            if placement.chapter_id not in batch.chapter_updated_at:
+                batch.chapter_updated_at[placement.chapter_id] = await db.scalar(
+                    select(MemoirBookPlanChapter.updated_at).where(MemoirBookPlanChapter.id == placement.chapter_id)
+                )
+            batch.groups[group_index] = replace(group, section_id=target_section_id)
+            await on_placed(utterance_id)
             placed.append(utterance_id)
     return placed
 
@@ -453,60 +526,112 @@ async def grow_story_tree(
         db,
         project_id=job.project_id,
     )
+    progress = _progress(job)
+    initial_tree = before_plan is None or bool(progress.initial_sections)
+    if before_plan is None:
+        await _create_initial_tree(db, user_id=project.user_id, project_id=job.project_id, job=job, progress=progress)
+    await _finish_initial_sections(db, user_id=project.user_id, job=job, progress=progress)
+
     existing_material_ids = set(
         (
             await db.scalars(
-                select(MemoirSectionMaterial.utterance_id).where(MemoirSectionMaterial.project_id == job.project_id)
+                select(MemoirSectionMaterial.utterance_id).where(
+                    MemoirSectionMaterial.project_id == job.project_id,
+                )
             )
         ).all()
     )
+    project_sources = (
+        await db.scalars(
+            select(MemoirVoiceUtterance)
+            .join(MemoirVoiceSession)
+            .where(
+                MemoirVoiceSession.project_id == job.project_id,
+                MemoirVoiceSession.status == MemoirVoiceSessionStatus.STOPPED.value,
+                MemoirVoiceSession.session_goal == MemoirSessionGoal.OPEN_NARRATION.value,
+            )
+            .options(selectinload(MemoirVoiceUtterance.chat_message))
+            .order_by(MemoirVoiceUtterance.created_at, MemoirVoiceUtterance.id)
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    deferred = {}
+    history = (
+        await db.scalars(
+            select(MemoirEditingJob)
+            .where(
+                MemoirEditingJob.project_id == job.project_id,
+                MemoirEditingJob.job_type == MemoirEditingJobType.ORGANIZE_MATERIAL.value,
+            )
+            .order_by(MemoirEditingJob.updated_at)
+        )
+    ).all()
+    for previous in history:
+        deferred.update(_progress(previous).deferred)
     utterances = [
         item
-        for item in sorted(session.utterances, key=lambda value: (value.created_at, value.id))
-        if item.id not in existing_material_ids and not item.completion_issue_id and is_countable_material(item)
-    ]
-    initial_tree = before_plan is None
-    if initial_tree:
-        await _create_initial_tree(
-            db,
-            user_id=project.user_id,
-            project_id=job.project_id,
+        for item in project_sources
+        if item.id not in existing_material_ids
+        and not item.completion_issue_id
+        and is_countable_material(item)
+        and not (
+            item.id in deferred
+            and deferred[item.id].status == "needs_user"
+            and deferred[item.id].text_hash == source_text_hash(current_utterance_text(item))
         )
-        placed_ids = list(
+    ]
+    if progress.batch is None and utterances:
+        _plan, chapters, sections = await _load_tree(db, project_id=job.project_id)
+        batch = GrowthBatch(
+            sources={
+                item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
+                for item in utterances
+            },
+            section_versions={item.id: item.version for item in sections},
+            section_chapters={item.id: item.chapter_id for item in sections},
+            chapter_updated_at={item.id: item.updated_at for item in chapters},
+        )
+        await db.commit()
+        batch.groups = await decide_story_growth(
+            utterances=utterances,
+            chapters=chapters,
+            sections=sections,
+            ai_model=await load_project_ai_model(db, job.project_id, None),
+        )
+        progress.batch = batch
+        await _save_progress(db, job, progress)
+    if progress.batch is not None:
+        batch = progress.batch
+
+        async def on_placed(utterance_id: str) -> None:
+            progress.placed_ids.append(utterance_id)
+            await _save_progress(db, job, progress)
+
+        await _place_groups(db, user_id=project.user_id, project_id=job.project_id, batch=batch, on_placed=on_placed)
+        assigned_ids = set(
             (
                 await db.scalars(
                     select(MemoirSectionMaterial.utterance_id).where(
                         MemoirSectionMaterial.project_id == job.project_id,
-                        MemoirSectionMaterial.utterance_id.in_([item.id for item in session.utterances]),
                     )
                 )
             ).all()
         )
-    elif utterances:
-        ai_model = await load_project_ai_model(db, job.project_id, None)
-        sources = {item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
-                   for item in utterances}
-        section_versions = {item.id: item.version for item in before_sections}
-        section_chapters = {item.id: item.chapter_id for item in before_sections}
-        chapter_updated_at = {item.id: item.updated_at for item in before_chapters}
-        groups = await decide_story_growth(
-            utterances=utterances,
-            chapters=before_chapters,
-            sections=before_sections,
-            ai_model=ai_model,
-        )
-        placed_ids = await _place_groups(
-            db,
-            user_id=project.user_id,
-            project_id=job.project_id,
-            groups=groups,
-            sources=sources,
-            section_versions=section_versions,
-            section_chapters=section_chapters,
-            chapter_updated_at=chapter_updated_at,
-        )
-    else:
-        placed_ids = []
+        for group in batch.groups:
+            for source_id in group.utterance_ids:
+                if source_id in assigned_ids:
+                    progress.deferred.pop(source_id, None)
+                    continue
+                needs_user = group.action == "leave_unassigned" and bool(group.reason)
+                progress.deferred[source_id] = DeferredSource(
+                    text_hash=batch.sources[source_id][0],
+                    status="needs_user" if needs_user else "pending",
+                    reason=group.reason if needs_user else "素材尚未归类，等待下一次整理",
+                )
+        progress.batch = None
+    placed_ids = list(dict.fromkeys(progress.placed_ids))
+    progress.placed_ids = []
+    await _save_progress(db, job, progress)
 
     _after_plan, after_chapters, after_sections = await _load_tree(
         db,
@@ -540,6 +665,7 @@ async def grow_story_tree(
     return EditingJobResult(
         result_json={
             "voice_session_id": session.id,
+            "growth": progress.model_dump(mode="json"),
             "initial_tree": initial_tree,
             "new_chapter_ids": new_chapter_ids,
             "new_section_ids": new_section_ids,

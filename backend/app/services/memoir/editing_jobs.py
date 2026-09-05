@@ -200,6 +200,7 @@ async def enqueue_editing_job(
     dedupe_key: str | None = None,
     replace_completed: bool = False,
     retry_failed: bool = False,
+    preserve_progress: bool = False,
 ) -> MemoirEditingJob:
     scheduled_at = run_after or utcnow_naive()
     payload = payload_json or {}
@@ -240,7 +241,7 @@ async def enqueue_editing_job(
                 "lease_expires_at": None,
                 "error_message": "",
                 "payload_json": payload,
-                "result_json": {},
+                "result_json": dict(existing.result_json or {}) if preserve_progress else {},
             }
             if reset_attempts:
                 values["attempts"] = 0

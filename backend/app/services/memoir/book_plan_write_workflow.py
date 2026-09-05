@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -227,6 +228,7 @@ async def _replace_plan(
     model: str | None,
     prompt_snapshot: str,
     metadata_json: dict[str, object] | None = None,
+    before_commit: Callable[[], Awaitable[None]] | None = None,
 ) -> MemoirBookPlanResponse:
     plan = await _load_plan(db, project_id)
     if not plan:
@@ -266,6 +268,8 @@ async def _replace_plan(
         assigned_by=_material_assigned_by_for_created_by(created_by),
         assignment_reason="replace_book_plan",
     )
+    if before_commit is not None:
+        await before_commit()
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -282,6 +286,7 @@ async def generate_book_plan(
     ai_client: AITextClient | None = None,
     allow_admin: bool = False,
     status: MemoirBookPlanStatus = MemoirBookPlanStatus.DRAFT,
+    before_commit: Callable[[], Awaitable[None]] | None = None,
 ) -> MemoirBookPlanResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
     sources = await _source_segments(
@@ -303,6 +308,7 @@ async def generate_book_plan(
         db,
         project_id=project_id,
         title=generated.title,
+        before_commit=before_commit,
         chapters=generated.chapters,
         status=status,
         created_by=MemoirCreatedBy.AI,
