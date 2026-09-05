@@ -217,6 +217,7 @@ def _generated_chapter_checkpoint(
         "checkpoint_editor_notes": list(generated.editor_notes),
         "checkpoint_model": generated.model,
         "resolved_ai_model": generated.model,
+        "provider_request_pending": False,
     }
 
 
@@ -1009,6 +1010,14 @@ async def generate_chapter(
             previous_content = (
                 completed_sections[-1].content if completed_sections else ""
             )
+            if progress_callback is not None:
+                await progress_callback({
+                    **_generated_chapter_checkpoint(context, _partial_generated_chapter(
+                        generated_target_sections, missing_source_candidates=missing_source_candidates,
+                        editor_notes=editor_notes, model=resolved_model,
+                    ), current_section=section),
+                    "provider_request_pending": True,
+                })
             generated_section = await generate_chapter_section(
                 context,
                 section=section,
@@ -1276,6 +1285,7 @@ async def generate_and_save_chapter_draft(
     ai_client: AITextClient | None = None,
     checkpoint: dict[str, object] | None = None,
     progress_callback: ChapterGenerationProgressCallback | None = None,
+    automatic: bool = False,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
     before = await load_chapter_generation_context(
         db,
@@ -1287,6 +1297,18 @@ async def generate_and_save_chapter_draft(
         project_id=project_id,
         chapter_id=chapter_id,
     )
+    base_version_id = latest_before.id if latest_before else None
+    protected = latest_before is not None and (
+        latest_before.created_by == MemoirCreatedBy.USER.value or bool(latest_before.feedback)
+    )
+    draft_before = await db.scalar(select(MemoirBookChapterDraft).where(
+        MemoirBookChapterDraft.chapter_id == chapter_id,
+    ))
+    protected = protected or bool(draft_before and (
+        draft_before.status == MemoirBookChapterDraftStatus.CONFIRMED.value
+        or ((draft_before.metadata_json or {}).get("confirmed_version_id") == base_version_id
+            and base_version_id is not None)
+    ))
     plan = chapter_draft_generation_plan(before, latest_before)
     continuity = await load_section_continuity(db, context=before)
     generated = await generate_chapter(
@@ -1302,6 +1324,7 @@ async def generate_and_save_chapter_draft(
         section_continuity=continuity,
     )
     db.expire_all()
+    await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
     after = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -1309,6 +1332,43 @@ async def generate_and_save_chapter_draft(
     )
     if after.input_signature != before.input_signature:
         raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
+    latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
+    changed = (latest.id if latest else None) != base_version_id
+    blocking_issue = await db.scalar(select(MemoirCompletionIssue.id).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.chapter_id == chapter_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+    ).limit(1)) if automatic else None
+    if changed and not automatic:
+        raise HTTPException(status_code=409, detail="生成期间正文已被修改，原稿已保留，请刷新")
+    if automatic and (protected or changed or blocking_issue):
+        candidate = {
+            **_generated_chapter_checkpoint(before, generated, current_section=None),
+            "candidate_content": generated.content,
+            "candidate_base_version_id": latest.id if latest else None,
+        }
+        raise ChapterDraftCandidateReady(candidate)
+    return await _save_generated_draft(db, context=before, generated=generated)
+
+
+class ChapterDraftCandidateReady(Exception):
+    def __init__(self, candidate: dict[str, object]):
+        self.candidate = candidate
+        super().__init__("新稿已生成，请确认是否替换人工修订")
+
+
+async def lock_chapter_draft_write(db: AsyncSession, *, project_id: str, chapter_id: str) -> None:
+    await db.execute(select(MemoirBookPlanChapter.id).where(
+        MemoirBookPlanChapter.project_id == project_id, MemoirBookPlanChapter.id == chapter_id,
+    ).with_for_update())
+
+
+async def _save_generated_draft(
+    db: AsyncSession, *, context: ChapterGenerationContext, generated: GeneratedChapter,
+) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    before = context
+    project_id, chapter_id = context.project_id, context.chapter_id
     draft = await db.scalar(
         select(MemoirBookChapterDraft).where(
             MemoirBookChapterDraft.project_id == project_id,
@@ -1378,6 +1438,22 @@ async def generate_and_save_chapter_draft(
     return draft, version
 
 
+async def save_chapter_draft_candidate(
+    db: AsyncSession, *, project_id: str, chapter_id: str, checkpoint: dict[str, object],
+) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
+    context = await load_chapter_generation_context(db, project_id=project_id, chapter_id=chapter_id)
+    latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
+    if (latest.id if latest else None) != checkpoint.get("candidate_base_version_id"):
+        raise HTTPException(status_code=409, detail="候选稿生成后正文已修改，请重新整理")
+    generated = _generated_chapter_from_checkpoint(context, checkpoint)
+    if generated is None or len(generated.sections) != len(context.sections):
+        raise HTTPException(status_code=409, detail="候选稿对应的素材已变化，请重新整理")
+    draft, version = await _save_generated_draft(db, context=context, generated=generated)
+    version.feedback = "用户采纳后台候选稿"
+    return draft, version
+
+
 async def apply_chapter_section_candidate(
     db: AsyncSession,
     *,
@@ -1391,6 +1467,7 @@ async def apply_chapter_section_candidate(
     requested_ai_model: str | None,
     resolved_ai_model: str | None,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
     context = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -1523,6 +1600,7 @@ async def confirm_chapter_draft(
     project_id: str,
     chapter_id: str,
 ) -> tuple[MemoirBookChapterDraft, MemoirBookChapterDraftVersion]:
+    await lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
     context = await load_chapter_generation_context(
         db,
         project_id=project_id,
@@ -1563,6 +1641,7 @@ async def confirm_chapter_draft(
     if blocking_issue is not None:
         raise HTTPException(status_code=409, detail="本章还有一项需要确认")
     draft.status = MemoirBookChapterDraftStatus.CONFIRMED.value
+    draft.metadata_json = {**(draft.metadata_json or {}), "confirmed_version_id": latest.id}
     draft.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.add(draft)
     await db.flush()

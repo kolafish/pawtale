@@ -883,6 +883,8 @@ async def mark_section_structure_changed(
     operation: str,
     updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
 ) -> None:
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id)
     drafts = list(
         (
             await db.scalars(

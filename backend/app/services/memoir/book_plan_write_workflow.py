@@ -439,6 +439,8 @@ async def _set_chapter_book_inclusion(
         db.add(output)
     db.add(chapter)
     db.add(plan)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -516,6 +518,8 @@ async def _save_chapter_title(
     plan.metadata_json = _merge_metadata(plan.metadata_json, plan_metadata_patch)
     db.add(chapter)
     db.add(plan)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -665,6 +669,8 @@ async def update_book_plan(
         },
     )
     db.add(plan)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:
@@ -755,6 +761,8 @@ async def apply_book_plan_structure_command(
         )
     _touch_plan_structure(plan, operation=req.type, now=now)
     db.add(plan)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="structure")
     await db.commit()
     refreshed = await _load_plan(db, project_id)
     if not refreshed:

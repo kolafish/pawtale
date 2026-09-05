@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.domain.memoir.types import MemoirEditingJobType
 from app.services.memoir import book_generation_jobs
+from app.services.memoir import automatic_book_draft
 from app.services.memoir import book_review_jobs
 from app.services.memoir import book_revision_jobs
 from app.services.memoir import chapter_preparation_jobs
@@ -19,6 +20,7 @@ from app.services.memoir.narrative import framework_matching
 
 
 def register_memoir_editing_job_handlers() -> None:
+    register_editing_job_handler(MemoirEditingJobType.UPDATE_BOOK_DRAFT, automatic_book_draft.run_book_draft_job)
     register_editing_job_handler(
         MemoirEditingJobType.CORRECT_TRANSCRIPT,
         voice_transcript_correction.run_transcript_correction_job,

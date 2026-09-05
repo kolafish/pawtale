@@ -232,6 +232,7 @@ async def revise_chapter_draft(
     req: MemoirBookChapterDraftRevisionRequest,
     allow_admin: bool = False,
 ) -> MemoirBookChapterDraftResponse:
+    await chapter_generation.lock_chapter_draft_write(db, project_id=project_id, chapter_id=chapter_id)
     chapter = await _load_chapter(
         db,
         user_id=user_id,
@@ -321,6 +322,8 @@ async def revise_chapter_draft(
     if output is not None:
         invalidate_book_output(output)
         db.add(output)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=project_id, source="manual_draft")
     await db.commit()
     refreshed = await _load_draft(
         db,

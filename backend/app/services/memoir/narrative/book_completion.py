@@ -75,6 +75,7 @@ async def prepare_chapter(
     ai_model: str | None = None,
     checkpoint: dict[str, object] | None = None,
     progress_callback: ChapterPreparationProgressCallback | None = None,
+    automatic: bool = False,
 ) -> MemoirChapterWorkspaceResponse:
     await ensure_chapter_sections(
         db,
@@ -87,7 +88,7 @@ async def prepare_chapter(
         project_id=project_id,
         chapter_id=chapter_id,
         ai_model=ai_model,
-        force_regenerate=True,
+        force_regenerate=not automatic,
         progress_callback=progress_callback,
     )
     if digest.status != MemoirSemanticCacheStatus.READY.value:
@@ -139,6 +140,7 @@ async def prepare_chapter(
                 ),
                 checkpoint=checkpoint,
                 progress_callback=progress_callback,
+                automatic=automatic,
             )
     if progress_callback is not None:
         await progress_callback(

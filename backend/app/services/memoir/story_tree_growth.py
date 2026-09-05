@@ -698,4 +698,7 @@ async def run_story_tree_growth_job(
             status=MemoirEditingJobStatus.PENDING,
             result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
-    return await grow_story_tree(db, job=job, session=session)
+    result = await grow_story_tree(db, job=job, session=session)
+    from app.services.memoir.automatic_book_draft import schedule_book_draft
+    await schedule_book_draft(db, project_id=job.project_id)
+    return result
