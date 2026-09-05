@@ -1334,9 +1334,15 @@ async def generate_and_save_chapter_draft(
         raise HTTPException(status_code=409, detail="生成期间章节素材已变化，请重试")
     latest = await latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
     changed = (latest.id if latest else None) != base_version_id
+    blocking_issue = await db.scalar(select(MemoirCompletionIssue.id).where(
+        MemoirCompletionIssue.project_id == project_id,
+        MemoirCompletionIssue.chapter_id == chapter_id,
+        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
+        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+    ).limit(1)) if automatic else None
     if changed and not automatic:
         raise HTTPException(status_code=409, detail="生成期间正文已被修改，原稿已保留，请刷新")
-    if automatic and (protected or changed):
+    if automatic and (protected or changed or blocking_issue):
         candidate = {
             **_generated_chapter_checkpoint(before, generated, current_section=None),
             "candidate_content": generated.content,

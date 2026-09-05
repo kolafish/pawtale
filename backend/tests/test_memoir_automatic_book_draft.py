@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
-from app.models.memoir import MemoirBookChapterDraftVersion, MemoirEditingJob, MemoirSection
+from app.models.memoir import MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
 from app.services.memoir import automatic_book_draft, chapter_generation
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -171,3 +171,23 @@ async def test_candidate_rejects_changed_source_and_interrupted_call_requires_re
         )
         is None
     )
+
+
+async def test_new_privacy_decision_during_generation_prevents_publication(client, test_db, monkeypatch):
+    project_id, chapter_id, _, fake, _ = await _setup(client, test_db, monkeypatch)
+    generate = fake._call_llm
+
+    async def add_privacy_decision(*args, **kwargs):
+        async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+            other.add(MemoirCompletionIssue(project_id=project_id, chapter_id=chapter_id, scope="chapter",
+                issue_type="privacy", channel="manual_review", question="是否保留这段私人经历？",
+                priority="high", fingerprint="a" * 64, input_signature="review"))
+            await other.commit()
+        return await generate(*args, **kwargs)
+
+    monkeypatch.setattr(fake, "_call_llm", add_privacy_decision)
+    with pytest.raises(chapter_generation.ChapterDraftCandidateReady):
+        await chapter_generation.generate_and_save_chapter_draft(test_db, project_id=project_id,
+            chapter_id=chapter_id, editorial_guidance=[], ai_client=fake, automatic=True)
+    assert await chapter_generation.latest_chapter_draft_version(test_db, project_id=project_id,
+        chapter_id=chapter_id) is None
