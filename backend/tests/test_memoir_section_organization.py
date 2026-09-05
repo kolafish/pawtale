@@ -1069,7 +1069,7 @@ async def test_section_update_rejects_stale_version(client, test_db):
     assert stale.status_code == 409
 
 
-@pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "delete_section"])
+@pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "chapter_existing", "delete_section"])
 async def test_story_growth_discards_decisions_changed_during_model_wait(
     client, test_db, monkeypatch, change,
 ):
@@ -1107,7 +1107,7 @@ async def test_story_growth_discards_decisions_changed_during_model_wait(
             elif change == "section":
                 await other.execute(update(MemoirSection).where(MemoirSection.id == target_id)
                                     .values(title="用户改过的小节", version=MemoirSection.version + 1))
-            elif change == "chapter":
+            elif change in {"chapter", "chapter_existing"}:
                 await other.execute(update(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapters[0].id)
                                     .values(title="用户改过的章节"))
             else:

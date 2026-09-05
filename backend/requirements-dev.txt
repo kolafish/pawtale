@@ -3,3 +3,5 @@
 pytest==9.0.3
 pytest-asyncio==1.4.0
 ruff==0.15.22
+# Match the verified test runtime; newer AnyIO deprecates Starlette 0.35's TestClient alias.
+anyio==4.13.0

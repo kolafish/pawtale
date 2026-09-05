@@ -386,6 +386,7 @@ async def _place_groups(
     groups: list[GrowthGroup],
     sources: dict[str, tuple[str, str | None]],
     section_versions: dict[str, int],
+    section_chapters: dict[str, str],
     chapter_updated_at: dict[str, datetime],
 ) -> list[str]:
     placed: list[str] = []
@@ -420,7 +421,10 @@ async def _place_groups(
                     assignment_reason=group.reason or "story_tree_growth",
                     expected_source=sources[utterance_id],
                     expected_section_version=section_versions.get(target_section_id),
-                    expected_chapter_updated_at=chapter_updated_at.get(group.chapter_id),
+                    expected_chapter_updated_at=chapter_updated_at.get(
+                        section_chapters.get(target_section_id) or group.chapter_id
+                    ),
+                    commit=False,
                 )
             except HTTPException as exc:
                 if exc.status_code not in {404, 409}:
@@ -430,6 +434,8 @@ async def _place_groups(
             section_versions[target_section_id] = await db.scalar(
                 select(MemoirSection.version).where(MemoirSection.id == target_section_id)
             )
+            section_chapters[target_section_id] = placement.chapter_id
+            await db.commit()
             placed.append(utterance_id)
     return placed
 
@@ -481,6 +487,7 @@ async def grow_story_tree(
         sources = {item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
                    for item in utterances}
         section_versions = {item.id: item.version for item in before_sections}
+        section_chapters = {item.id: item.chapter_id for item in before_sections}
         chapter_updated_at = {item.id: item.updated_at for item in before_chapters}
         groups = await decide_story_growth(
             utterances=utterances,
@@ -495,6 +502,7 @@ async def grow_story_tree(
             groups=groups,
             sources=sources,
             section_versions=section_versions,
+            section_chapters=section_chapters,
             chapter_updated_at=chapter_updated_at,
         )
     else:

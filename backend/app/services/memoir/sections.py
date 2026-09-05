@@ -933,6 +933,7 @@ async def place_material(
     expected_source: tuple[str, str | None] | None = None,
     expected_section_version: int | None = None,
     expected_chapter_updated_at: datetime | None = None,
+    commit: bool = True,
 ) -> MemoirSectionMaterialPlacementResponse:
     await load_memoir_project(
         db,
@@ -1112,7 +1113,10 @@ async def place_material(
         ),
         updated_by=structure_updated_by,
     )
-    await db.commit()
+    if commit:
+        await db.commit()
+    else:
+        await db.flush()
     return MemoirSectionMaterialPlacementResponse(
         project_id=project_id,
         utterance_id=utterance_id,
