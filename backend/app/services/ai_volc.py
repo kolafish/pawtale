@@ -236,23 +236,3 @@ class VolcArkTextService(AITextServiceBase):
         message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
         raw_content = message.get("content") if isinstance(message, dict) else None
         return self._normalize_message_content(raw_content)
-
-    def _normalize_message_content(self, raw_content: str | list | dict | None) -> str:
-        if isinstance(raw_content, str):
-            return raw_content.strip()
-        if isinstance(raw_content, list):
-            parts: list[str] = []
-            for item in raw_content:
-                if isinstance(item, str) and item.strip():
-                    parts.append(item.strip())
-                    continue
-                if isinstance(item, dict):
-                    text = item.get("text")
-                    if isinstance(text, str) and text.strip():
-                        parts.append(text.strip())
-            return "\n".join(parts).strip()
-        if isinstance(raw_content, dict):
-            text = raw_content.get("text")
-            if isinstance(text, str):
-                return text.strip()
-        return ""

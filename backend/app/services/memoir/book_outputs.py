@@ -14,7 +14,6 @@ from app.domain.memoir.types import (
     MemoirOutputStatus,
 )
 from app.models.memoir import (
-    MemoirBookChapterDraft,
     MemoirBookChapterDraftVersion,
     MemoirBookOutput,
     MemoirBookOutputVersion,
@@ -65,6 +64,7 @@ from app.services.memoir.book_output_manuscript import (
     updated_manuscript_payload as _updated_manuscript_payload,
 )
 from app.services.memoir.book_output_snapshots import (
+    load_book_plan_drafts,
     latest_chapter_version,
     readable_chapter_versions,
     book_content_from_chapter_snapshots,
@@ -168,29 +168,6 @@ def _output_response(
         created_at=output.created_at,
         updated_at=output.updated_at,
     )
-
-
-async def _load_plan(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str,
-    allow_admin: bool = False,
-) -> MemoirBookPlan:
-    await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    plan = await db.scalar(
-        select(MemoirBookPlan)
-        .where(MemoirBookPlan.project_id == project_id)
-        .options(
-            selectinload(MemoirBookPlan.chapters)
-            .selectinload(MemoirBookPlanChapter.draft)
-            .selectinload(MemoirBookChapterDraft.versions)
-        )
-        .execution_options(populate_existing=True)
-    )
-    if not plan:
-        raise HTTPException(status_code=404, detail="章节规划不存在")
-    return plan
 
 
 def _compose_book_content(
@@ -359,12 +336,7 @@ async def book_output_response_or_none(
     output = await _load_output(db, project_id=project_id)
     if not output:
         return None
-    plan = await _load_plan(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        allow_admin=allow_admin,
-    )
+    plan = await load_book_plan_drafts(db, project_id=project_id)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)
     try:
         current_review = await book_reviews.get_current_book_review(
@@ -588,12 +560,7 @@ async def suggest_book_output_titles(
     allow_admin: bool = False,
 ) -> MemoirBookTitleSuggestionResponse:
     project = await load_memoir_project(db, project_id, user_id, allow_admin=allow_admin)
-    plan = await _load_plan(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        allow_admin=allow_admin,
-    )
+    plan = await load_book_plan_drafts(db, project_id=project_id)
     chapters = readable_chapter_versions(plan)
     base_title = _formal_book_title(plan.title)
     refs_by_chapter = await plan_source_ref_dicts_by_chapter(db, plan)

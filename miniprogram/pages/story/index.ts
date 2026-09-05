@@ -223,6 +223,11 @@ definePage<StoryPageData>()({
     navigateToBook();
   },
 
+  openReviewIssues() {
+    if (!this.data.projectId) return;
+    wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.memoir.title }) });
+  },
+
   openTranscripts() {
     navigateToTranscripts();
   },

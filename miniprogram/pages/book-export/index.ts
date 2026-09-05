@@ -109,7 +109,6 @@ type BookExportData = Pick<
   | "bookViewingHistoricalVersion"
   | "bookVersionNotice"
   | "bookStaleNotice"
-  | "bookActionText"
   | "bookExportBusyTarget"
   | "bookExportShowSourceAppendix"
   | "bookTitleInput"
@@ -133,9 +132,9 @@ type BookExportData = Pick<
   | "bookCoverStyleOptions"
   | "bookCoverStyleChanged"
   | "bookEditorialCopyBusyTarget"
-  | "generatingBook"
 > & {
   pageClass: string;
+  generatingBook: boolean;
   requestedAction: string;
   exportNotice: string;
   exportActionHintText: string;

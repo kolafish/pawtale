@@ -17,12 +17,7 @@
   <view wx:if="{{needsLogin}}" class="empty-panel guest-panel ui-card">
     <image class="empty-icon" src="/assets/memoir-gramophone.png" mode="aspectFit" />
     <text class="empty-title">浏览书稿</text>
-    <text class="empty-copy">登录后可以把讲述记录归入章节，确认章节正文，再生成全书和章节朗读。</text>
-    <view class="guest-steps">
-      <text>1. 先生成章节规划</text>
-      <text>2. 再逐章整理正文</text>
-      <text>3. 最后合成全书朗读</text>
-    </view>
+    <text class="empty-copy">讲述保存后会在后台整理成可读草稿，登录后可以阅读、编辑和导出。</text>
     <view class="actions-row">
       <button class="primary-button" bindtap="openLogin">登录后整理</button>
       <button class="ghost-button" bindtap="openHome">返回首页</button>
@@ -52,46 +47,11 @@
       </text>
       <text wx:if="{{bookStaleNotice}}" class="progress-note">{{bookStaleNotice}}</text>
     </view>
-    <view wx:if="{{stage === 'drafting'}}" class="progress-actions">
-      <button
-        wx:if="{{!allChaptersConfirmed}}"
-        class="primary-button small"
-        bindtap="openBookCompletion"
-      >
-        继续逐章整理
-      </button>
-      <button
-        wx:elif="{{!bookContentAvailable || bookStaleNotice}}"
-        class="primary-button small"
-        loading="{{generatingBook}}"
-        disabled="{{updatingPlanStructure || generatingBook || !canGenerateBook}}"
-        bindtap="generateBook"
-      >
-        {{bookActionText}}
-      </button>
-      <button
-        wx:else
-        class="primary-button small"
-        bindtap="openBookReader"
-      >
-        阅读全书
-      </button>
-      <button
-        wx:if="{{bookContentAvailable}}"
-        class="ghost-button small"
-        data-action="preview"
-        bindtap="openBookExportPage"
-      >
-        导出与成书设置
-      </button>
-      <button
-        wx:if="{{allChaptersConfirmed}}"
-        class="ghost-button small"
-        disabled="{{generatingBook}}"
-        bindtap="openBookCompletion"
-      >
-        检查是否需要补充
-      </button>
+    <view class="progress-actions">
+      <button wx:if="{{bookContentAvailable}}" class="primary-button small" bindtap="openBookReader">阅读全书</button>
+      <button class="ghost-button small" bindtap="openStory">后台整理进度</button>
+      <button class="ghost-button small" bindtap="openBookCompletion">查看待确认事项</button>
+      <button wx:if="{{bookContentAvailable}}" class="ghost-button small" data-action="preview" bindtap="openBookExportPage">导出与成书设置</button>
     </view>
   </view>
 

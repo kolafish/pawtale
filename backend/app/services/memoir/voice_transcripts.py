@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import bindparam, delete, false, func, or_, select, text
+from sqlalchemy import delete, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 
@@ -73,7 +73,6 @@ SYSTEM_PROMPT = "你是一位谨慎的中文口述稿编辑，按指定强度润
 AI_CLEANUP_UNAVAILABLE_MESSAGE = "AI 服务暂时不可用，请稍后重试。"
 logger = logging.getLogger(__name__)
 MAX_TRANSCRIPT_VERSIONS_PER_UTTERANCE_TYPE = 3
-TRANSCRIPT_FTS_MIN_TERM_LENGTH = 3
 _FILLER = r"(?:嗯+|啊+|呃+|额+|那个|这个|就是)"
 _REPEATED_FILLERS_RE = re.compile(rf"(?:{_FILLER}[\s，,、]*){{2,}}")
 _BOUNDARY_FILLER_RE = re.compile(r"(^|[。！？!?；;，,、]\s*)(?:嗯+|啊+|呃+|额+|就是)[\s，,、]*")
@@ -431,30 +430,6 @@ def _search_terms(search_query: str | None) -> list[str]:
     return [term for term in re.split(r"\s+", search_query.strip()) if term][:8]
 
 
-def _fts_match_query(term: str) -> str:
-    escaped = term.replace('"', '""')
-    return f'"{escaped}"'
-
-
-def _transcript_text_search_filter(term: str, *, use_postgres: bool):
-    if use_postgres or len(term) < TRANSCRIPT_FTS_MIN_TERM_LENGTH:
-        pattern = _like_pattern(term)
-        return or_(
-            MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
-            MemoirVoiceUtterance.transcript_edited.ilike(pattern, escape="\\"),
-        )
-    return text(
-        """
-        EXISTS (
-            SELECT 1
-            FROM memoir_voice_utterances_fts
-            WHERE memoir_voice_utterances_fts.rowid = memoir_voice_utterances.rowid
-                AND memoir_voice_utterances_fts MATCH :fts_query
-        )
-        """
-    ).bindparams(bindparam("fts_query", _fts_match_query(term), unique=True))
-
-
 def _question_search_filter(pattern: str):
     user_message = aliased(MemoirChatMessage)
     question_message = aliased(MemoirChatMessage)
@@ -512,10 +487,11 @@ def _parent_question_search_filter(pattern: str):
     )
 
 
-def _search_filter(term: str, *, use_postgres: bool):
+def _search_filter(term: str):
     pattern = _like_pattern(term)
     return or_(
-        _transcript_text_search_filter(term, use_postgres=use_postgres),
+        MemoirVoiceUtterance.transcript_raw.ilike(pattern, escape="\\"),
+        MemoirVoiceUtterance.transcript_edited.ilike(pattern, escape="\\"),
         _parent_question_search_filter(pattern),
         _question_search_filter(pattern),
     )
@@ -864,11 +840,7 @@ async def list_voice_transcripts(
     if included not in INCLUDED_FILTER_VALUES:
         raise HTTPException(status_code=400, detail="不支持的讲述记录收录筛选条件")
     filters = _transcript_filter(user_id, project_id, allow_admin=allow_admin)
-    use_postgres = db.get_bind().dialect.name == "postgresql"
-    filters.extend(
-        _search_filter(term, use_postgres=use_postgres)
-        for term in _search_terms(search_query)
-    )
+    filters.extend(_search_filter(term) for term in _search_terms(search_query))
     if guidance_mode:
         filters.append(MemoirVoiceSession.guidance_mode == guidance_mode)
     if current_guidance_module:

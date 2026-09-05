@@ -21,17 +21,6 @@ def _job_dedupe_key(project_id: str) -> str:
     return f"generate-book-review:{project_id}"
 
 
-def _job_state(
-    *,
-    project_id: str,
-    job: MemoirEditingJob | None,
-) -> dict[str, object]:
-    return editing_jobs.project_editing_job_state(
-        project_id=project_id,
-        job=job,
-    )
-
-
 async def _load_job(
     db: AsyncSession,
     *,
@@ -73,7 +62,7 @@ async def enqueue_book_review_job(
     ):
         if on_enqueued is not None:
             await on_enqueued(existing)
-        return _job_state(project_id=project_id, job=existing)
+        return editing_jobs.project_editing_job_state(project_id=project_id, job=existing)
 
     total_chapter_count = await book_reviews.require_readable_chapter_drafts(
         db,
@@ -108,7 +97,7 @@ async def enqueue_book_review_job(
         await on_enqueued(job)
     await db.commit()
     await db.refresh(job)
-    return _job_state(project_id=project_id, job=job)
+    return editing_jobs.project_editing_job_state(project_id=project_id, job=job)
 
 
 async def book_review_job_state(
@@ -116,7 +105,7 @@ async def book_review_job_state(
     *,
     project_id: str,
 ) -> dict[str, object]:
-    return _job_state(
+    return editing_jobs.project_editing_job_state(
         project_id=project_id,
         job=await _load_job(db, project_id=project_id),
     )
@@ -148,7 +137,7 @@ async def cancel_book_review_job(
         job=job,
         result_patch={"current_chapter_title": ""},
     )
-    return _job_state(project_id=project_id, job=job)
+    return editing_jobs.project_editing_job_state(project_id=project_id, job=job)
 
 
 async def run_book_review_job(

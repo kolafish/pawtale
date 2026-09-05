@@ -2,7 +2,6 @@ import type {
   MemoirBookCoverStyle,
   MemoirBookEditorialCopyTarget,
   MemoirBookOutput,
-  MemoirBookOutputUpdateRequest,
 } from "../../domain/memoir-book";
 import {
   BOOK_COVER_STYLE_OPTIONS,
@@ -45,25 +44,6 @@ function latestBookMetadata(output: MemoirBookOutput | null): Record<string, str
     preface: trimText(preface),
     afterword: trimText(manuscript?.back_matter?.afterword?.content || ""),
     back_cover_quote: trimText(manuscript?.render_settings?.back_cover_quote || ""),
-  };
-}
-
-export function bookGenerationSettings(
-  output: MemoirBookOutput | null,
-  defaults: { title: string; narratorName: string },
-): MemoirBookOutputUpdateRequest {
-  const stored = latestBookMetadata(output);
-  const title = latestBookTitle(output) || trimText(defaults.title);
-  const narratorName = stored.narrator_name || trimText(defaults.narratorName);
-  return {
-    ...(title ? { title } : {}),
-    ...(stored.subtitle ? { subtitle: stored.subtitle } : {}),
-    ...(narratorName ? { narrator_name: narratorName } : {}),
-    prepared_by: stored.prepared_by || "家人整理",
-    ...(stored.preface ? { preface: stored.preface } : {}),
-    ...(stored.afterword ? { afterword: stored.afterword } : {}),
-    ...(stored.back_cover_quote ? { back_cover_quote: stored.back_cover_quote } : {}),
-    cover_style: latestBookCoverStyle(output),
   };
 }
 

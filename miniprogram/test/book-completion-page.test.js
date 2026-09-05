@@ -231,7 +231,7 @@ test("book completion overview exposes confirmed chapter progress and one action
   assert.equal(patch.progressText, "1 / 2 章正文已确认");
   assert.equal(patch.chapters[0].actionText, "确认");
   assert.equal(patch.chapters[1].actionText, "查看正文");
-  assert.equal(patch.allChaptersConfirmed, false);
+  assert.equal(patch.canReviewBook, false);
   assert.doesNotMatch(JSON.stringify(patch), /Story|Claim|slot|Contract|visible_tasks/);
 });
 
@@ -606,7 +606,7 @@ test("book completion can check only chapters that have not been checked", async
   const context = pageContext(page, {
     projectId: "project-1",
     chapters: patch.chapters,
-    allChaptersConfirmed: false,
+    canReviewBook: false,
     bulkCheckVisible: true,
   });
   await page.checkPendingChapters.call(context);
@@ -716,7 +716,7 @@ test("book completion restores and polls an active chapter batch after reopening
   }
 });
 
-test("book completion restores and can cancel an active full-book review after reopening", async () => {
+test("book completion restores and can cancel an active full-book review for unconfirmed drafts after reopening", async () => {
   const scheduled = [];
   const cancellations = [];
   const originalSetTimeout = global.setTimeout;
@@ -728,6 +728,7 @@ test("book completion restores and can cancel an active full-book review after r
   global.clearTimeout = () => {};
   global.wx = { showToast() {} };
   const overview = confirmedOverview();
+  overview.chapters = overview.chapters.map((chapter) => ({ ...chapter, state: "draft_ready" }));
   let currentReviewJob = reviewJob({
     job_id: "review-job-1",
     status: "running",
@@ -910,4 +911,17 @@ test("book completion prepares an untouched chapter in place", async () => {
   });
 
   assert.deepEqual(prepared, [["project-1", "chapter-1", "prepare"]]);
+});
+
+test("unconfirmed readable chapters can review the book and stale manual decisions remain visible", () => {
+  const { bookCompletionViewPatch, bookReviewViewPatch } = loadBookCompletionPage().mod;
+  const overview = confirmedOverview();
+  overview.chapters = overview.chapters.map((chapter) => ({ ...chapter, state: "draft_ready" }));
+  const view = bookCompletionViewPatch(overview);
+  assert.equal(view.canReviewBook, true);
+  const issues = [{ id: "privacy", scope: "book", channel: "manual_review", status: "open", input_signature: "older" },
+    { id: "optional", scope: "book", channel: "interview", status: "open", input_signature: "older" }];
+  const review = bookReviewViewPatch(null, issues);
+  assert.deepEqual(review.requiredBookIssues.map((issue) => issue.id), ["privacy"]);
+  assert.deepEqual(review.optionalBookIssues, []);
 });

@@ -488,8 +488,6 @@ test("book page excludes hidden chapters from full-book generation readiness", (
 
   assert.equal(context.data.confirmedDraftCount, 1);
   assert.equal(context.data.totalChapterCount, 1);
-  assert.equal(context.data.allChaptersConfirmed, true);
-  assert.equal(context.data.canGenerateBook, true);
   assert.equal(context.data.progressText, "1/1 章已确认，1 章已有正文");
   assert.equal("plan" in context.data, false);
 });
@@ -513,7 +511,6 @@ test("book page stores only the full-book summary needed by the home view", () =
   assert.equal(data.bookCharCount, 4);
   assert.equal(data.bookPreviewTitle, "外婆回忆录");
   assert.equal(data.bookStaleNotice, "章节「外婆家的童年、第一次离家」等章节已更新，请重新整理一版。");
-  assert.equal(data.bookActionText, "更新书稿");
   assert.equal("bookPreviewChapters" in data, false);
   assert.equal("bookTitleInput" in data, false);
   assert.equal("bookOutput" in data, false);
@@ -857,7 +854,6 @@ test("book page reorders chapters through structure command", async () => {
   assert.equal(outputReads, 0);
   assert.equal(context.bookOutput.is_stale, true);
   assert.deepEqual(context.bookOutput.stale_chapter_titles, ["第一次离家", "外婆家的童年"]);
-  assert.equal(context.data.bookActionText, "更新书稿");
 });
 
 test("book page restores chapter order when structure save fails", async () => {
@@ -978,85 +974,20 @@ test("book page merges chapters and directs the user back to the workspace", asy
   assert.equal(context.data.chapters[0].draftError, "章节已合并，请进入章节工作台重新整理正文");
 });
 
-test("book page assembles confirmed chapter drafts and updates the full-book projection", async () => {
-  const calls = [];
-  global.wx = { showToast() {} };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      assembleMemoirBookOutput: async (projectId) => {
-        calls.push({ kind: "assemble", projectId });
-      },
-      updateMemoirBookOutput: async (projectId, data) => {
-        calls.push({ kind: "update", projectId, data });
-        return sampleBookOutput(
-          2,
-          "全书第二版正文",
-          false,
-          [],
-          [],
-          sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
-        );
-      },
-    },
-  });
-  const plan = samplePlan("confirmed");
-  const context = pageContext(page, { projectId: "project/1", projectTitle: "外婆回忆录" });
-  page.applyPlan.call(context, plan, {
-    "chapter-1": sampleDraft(1, "confirmed"),
-    "chapter-2": sampleDraft(1, "confirmed"),
-  });
-  page.applyBookOutput.call(
-    context,
-    sampleBookOutput(
-      1,
-      "全书第一版正文",
-      false,
-      [],
-      [],
-      sampleBookManuscript("外婆回忆录", "moonlit_courtyard"),
-    ),
-  );
-
-  await page.generateBook.call(context);
-
-  assert.deepEqual(calls[0], { kind: "assemble", projectId: "project/1" });
-  assert.deepEqual(calls[1], {
-    kind: "update",
-    projectId: "project/1",
-    data: {
-      title: "外婆回忆录",
-      subtitle: "根据口述访谈整理",
-      prepared_by: "家人整理",
-      preface: "这些故事来自家里的讲述。",
-      afterword: "这些故事还可以继续补充。",
-      back_cover_quote: "我小时候常在院子里晒太阳。",
-      cover_style: "moonlit_courtyard",
-    },
-  });
-  assert.equal(context.data.generatingBook, false);
-  assert.equal(context.data.bookContentAvailable, true);
-  assert.equal(context.bookOutput.latest_version.content, "全书第二版正文");
-});
-
-test("book page shows assembly errors without leaving the page busy", async () => {
-  global.wx = { showToast() {} };
-  const { page } = loadBookPage({
-    voiceApiExports: {
-      assembleMemoirBookOutput: async () => {
-        throw new Error("request:fail network");
-      },
-    },
-  });
-  const context = pageContext(page, { projectId: "project/1" });
+test("book page opens automatically assembled drafts without chapter confirmation", () => {
+  const urls = [];
+  global.wx = { navigateTo: ({ url }) => urls.push(url), switchTab: ({url}) => urls.push(url) };
+  const { page } = loadBookPage();
+  const context = pageContext(page, { projectId: "project-1", projectTitle: "外婆回忆录" });
   page.applyPlan.call(context, samplePlan("confirmed"), {
-    "chapter-1": sampleDraft(1, "confirmed"),
-    "chapter-2": sampleDraft(1, "confirmed"),
+    "chapter-1": sampleDraft(1, "draft"), "chapter-2": sampleDraft(1, "draft"),
   });
-
-  await page.generateBook.call(context);
-
-  assert.equal(context.data.error, "request:fail network");
-  assert.equal(context.data.generatingBook, false);
+  page.applyBookOutput.call(context, sampleBookOutput(1, "后台整理好的草稿"));
+  page.openBookReader.call(context);
+  page.openStory.call(context);
+  assert.equal(context.data.bookContentAvailable, true);
+  assert.ok(urls[0].startsWith("/pages/book-reader/index?"));
+  assert.equal(urls[1], "/pages/story/index");
 });
 
 test("book page sends TTS voice and speed for chapter and outline audio", async () => {

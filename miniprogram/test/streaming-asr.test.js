@@ -1,8 +1,6 @@
 require("./register-ts");
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
 
 function resetMemoirApiModules() {
@@ -89,23 +87,17 @@ function pcm16Frame(sample, byteLength = 3200) {
   return frame;
 }
 
-test("streaming ASR does not read constructor options from class field initializers", () => {
-  const source = fs.readFileSync(
-    path.join(__dirname, "../services/memoir-streaming-asr.ts"),
-    "utf8",
-  );
-  assert.doesNotMatch(source, /private\s+voiceActivityDetector\s*=\s*this\.createVoiceActivityDetector\(\)/);
-  assert.match(source, /private\s+voiceActivityDetector:\s*VoiceActivityDetector;/);
-
-  const constructorIndex = source.indexOf("constructor(");
-  const assignOptionsIndex = source.indexOf("this.options = options;", constructorIndex);
-  const createDetectorIndex = source.indexOf(
-    "this.voiceActivityDetector = this.createVoiceActivityDetector();",
-    constructorIndex,
-  );
-  assert.ok(constructorIndex > 0);
-  assert.ok(assignOptionsIndex > constructorIndex);
-  assert.ok(createDetectorIndex > assignOptionsIndex);
+test("streaming ASR initializes VAD with caller sensitivity", () => {
+  const { MemoirStreamingAsrClient } = streamingAsrModule();
+  const create = (silenceLevelThreshold) => new MemoirStreamingAsrClient({
+    voiceSessionId: "voice-1", guidanceMode: "free_narration", silenceLevelThreshold,
+    callbacks: { onStatus() {}, onEvent() {}, onPartial() {}, onFinal() {}, onError() {} },
+  });
+  const sensitive = create(0.05);
+  const lessSensitive = create(0.5);
+  const frame = pcm16Frame(3277, 9600);
+  assert.equal(sensitive.voiceActivityDetector.update(frame).hasVoiceActivity, true);
+  assert.equal(lessSensitive.voiceActivityDetector.update(frame).hasVoiceActivity, false);
 });
 
 test("streaming ASR client defaults to the shared recorder resource", () => {

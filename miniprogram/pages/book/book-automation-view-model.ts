@@ -42,38 +42,6 @@ export interface BookAutomationEventDetailView {
   previewText: string;
 }
 
-function isBookGenerationEvent(event: MemoirAutomationEvent): boolean {
-  return (
-    event.event_type === "chapter_draft_generated"
-    || event.event_type === "book_output_generated"
-    || event.event_type === "book_editorial_copy_generated"
-  );
-}
-
-export function pendingBookGenerationEvents(events: MemoirAutomationEvent[]): MemoirAutomationEvent[] {
-  return events.filter((event) => isBookGenerationEvent(event) && event.status === "pending");
-}
-
-export function pendingChapterDraftGenerationIds(events: MemoirAutomationEvent[]): Set<string> {
-  return new Set(
-    pendingBookGenerationEvents(events)
-      .filter((event) => event.event_type === "chapter_draft_generated")
-      .map((event) => trimText(event.chapter_id || ""))
-      .filter(Boolean),
-  );
-}
-
-export function hasPendingBookOutputGeneration(events: MemoirAutomationEvent[]): boolean {
-  return pendingBookGenerationEvents(events).some((event) => event.event_type === "book_output_generated");
-}
-
-export function mergeAutomationEvent(
-  events: MemoirAutomationEvent[],
-  event: MemoirAutomationEvent,
-): MemoirAutomationEvent[] {
-  return [event, ...events.filter((candidate) => candidate.id !== event.id)];
-}
-
 function automationEventTitle(event: MemoirAutomationEvent): string {
   if (event.event_type === "chapter_draft_generated") {
     if (event.status === "failed") {
