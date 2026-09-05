@@ -343,7 +343,6 @@ async def activate_memory_for_turn(
 
     started = time.perf_counter()
     trace_id = str(uuid.uuid4())
-    current_narration = current_message.content_text.strip()
     current_utterance_id = await db.scalar(
         select(MemoirVoiceUtterance.id)
         .where(MemoirVoiceUtterance.chat_message_id == current_message.id)
