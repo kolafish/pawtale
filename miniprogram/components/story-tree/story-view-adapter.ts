@@ -1,5 +1,4 @@
 import type { MemoirStorySnapshot } from "../../domain/memoir-snapshots";
-import { formatBeijingDateTimeShort } from "../../services/time";
 import type { StoryViewData } from "./story-view-data";
 
 export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
@@ -32,21 +31,18 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       growthAnimating: false,
     })),
   }));
+  const readableCount = chapters.filter(chapter => chapter.readable).length;
   const count = snapshot.book_char_count || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);
   const pending = progress?.pending_material_count || 0;
   const needsUser = progress?.needs_user_material_count || 0;
   const materialCount = progress?.material_count || 0;
-  const included = snapshot.chapters.filter((chapter) => chapter.include_in_book).length;
   return {
     memoir: {
       title: project?.title || "我的故事",
-      createdText: project?.created_at ? `创建于 ${formatBeijingDateTimeShort(project.created_at)}` : "",
-      updatedText: snapshot.updated_at ? `更新于 ${formatBeijingDateTimeShort(snapshot.updated_at)}` : "",
-      progressLabel: "书稿",
-      progressValue: included ? `${included} 章` : "尚未生成",
-      progressDetail: snapshot.book_readable ? "阅读草稿" : "查看整理进度",
+      progressDetail: snapshot.book_readable ? "阅读草稿" : "查看书稿",
     },
     overview: {
+      readableText: readableCount ? `${readableCount} 章可读` : "还没有正文",
       title: "人生总览",
       summaryText: `${chapters.length} 章 · ${chapters.reduce((total, chapter) => total + chapter.sections.length, 0)} 小节 · ${materialCount} 段讲述`,
       outcomeText: count >= 10_000 ? `约 ${(count / 10_000).toFixed(1)} 万字` : count ? `${count} 字` : "还没有正文",

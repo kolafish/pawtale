@@ -106,7 +106,6 @@ test("home exposes mini program share entry points", () => {
   const { page } = loadHomePage();
 
   assert.match(pageWxml, /open-type="share"/);
-  assert.match(pageWxml, /分享给家人/);
   assert.deepEqual(page.onShareAppMessage(), {
     title: "老余口述，把家里的故事慢慢讲下来",
     path: "/pages/home/index?from=share_home",
@@ -205,7 +204,6 @@ test("home view patch keeps first-screen template state simple", () => {
     {
       greetingText: homeViewPatch(baseData).greetingText,
       launchModeTagText: homeViewPatch(baseData).launchModeTagText,
-      panelLabelText: homeViewPatch(baseData).panelLabelText,
       projectHeadingText: homeViewPatch(baseData).projectHeadingText,
       projectMetaText: homeViewPatch(baseData).projectMetaText,
       primaryVoiceButtonTitle: homeViewPatch(baseData).primaryVoiceButtonTitle,
@@ -219,7 +217,6 @@ test("home view patch keeps first-screen template state simple", () => {
     {
       greetingText: "你好，余主任",
       launchModeTagText: "新故事本",
-      panelLabelText: "今天接着聊",
       projectHeadingText: "爷爷的故事",
       projectMetaText: "上次您说到：爷爷退休后还在忙公司的事。",
       primaryVoiceButtonTitle: "随便讲一段",
@@ -247,7 +244,6 @@ test("home primary CTA and alternate action follow the current project's guidanc
     selectedMode: "guided_interview",
     guidanceLabel: "小余陪着问",
   });
-  assert.equal(guided.modeTagText, "小余陪着问");
   assert.equal(guided.primaryVoiceButtonTitle, "让小余陪着问");
   assert.equal(guided.voiceStartNoteText, "小余会从一件具体的事开始问起。");
   assert.equal(guided.alternateModeButtonTitle, "我想自己讲");

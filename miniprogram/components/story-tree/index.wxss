@@ -1,86 +1,3 @@
-.memoir-card {
-  min-height: 196rpx;
-  padding: 30rpx 28rpx 30rpx 32rpx;
-  display: flex;
-  align-items: stretch;
-  justify-content: space-between;
-  gap: 24rpx;
-  border-radius: 32rpx;
-  background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(253, 249, 244, 0.96));
-}
-
-.memoir-copy {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-.memoir-eyebrow {
-  display: block;
-  color: #8b8178;
-  font-size: 24rpx;
-  line-height: 1.4;
-}
-
-.memoir-title {
-  margin-top: 10rpx;
-  display: block;
-  color: #3d302b;
-  font-size: 40rpx;
-  font-weight: 800;
-  line-height: 1.3;
-  overflow-wrap: anywhere;
-  text-wrap: balance;
-}
-
-.memoir-meta {
-  margin-top: 12rpx;
-  display: block;
-  color: #8b8178;
-  font-size: 23rpx;
-  line-height: 1.5;
-  text-wrap: pretty;
-}
-
-.memoir-progress {
-  width: 178rpx;
-  flex: 0 0 178rpx;
-  padding: 22rpx 16rpx;
-  border-radius: 22rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  background: rgba(247, 239, 231, 0.78);
-  box-shadow:
-    inset 0 0 0 1rpx rgba(94, 73, 62, 0.07),
-    0 8rpx 20rpx rgba(89, 64, 51, 0.04);
-}
-
-.memoir-progress-label {
-  color: #7c6d65;
-  font-size: 22rpx;
-  line-height: 1.4;
-}
-
-.memoir-progress-value {
-  margin-top: 7rpx;
-  color: #9b4d43;
-  font-size: 34rpx;
-  font-weight: 800;
-  line-height: 1.25;
-}
-
-.memoir-progress-detail {
-  margin-top: 7rpx;
-  color: #8e625a;
-  font-size: 21rpx;
-  line-height: 1.4;
-}
-
 .story-toolbar {
   min-height: 96rpx;
   margin: 20rpx 2rpx 18rpx;
@@ -224,12 +141,11 @@
 .overview-card {
   width: 100%;
   min-height: 108rpx;
-  padding: 22rpx 26rpx;
+  padding: 20rpx 24rpx;
   border-radius: 26rpx;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20rpx;
+  flex-direction: column;
+  align-items: stretch;
   background: rgba(255, 253, 250, 0.90);
 }
 
@@ -645,20 +561,6 @@
   line-height: 1;
 }
 
-.large-text .memoir-card {
-  flex-direction: column;
-}
-
-.large-text .memoir-progress {
-  width: 100%;
-  flex-basis: auto;
-  align-items: flex-start;
-}
-
-.large-text .memoir-title {
-  font-size: 46rpx;
-}
-
 .large-text .story-toolbar {
   align-items: flex-start;
   flex-direction: column;
@@ -700,16 +602,8 @@
 .chapter-reading-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 16rpx;
-  padding: 16rpx 0;
-}
-
-.story-secondary-action {
-  color: var(--ui-accent-strong);
-  background: var(--ui-accent-surface);
-  box-shadow: var(--ui-control-shadow);
-  min-height: 88rpx;
-  margin: 0;
+  gap: 4rpx 16rpx;
+  padding: 0;
 }
 
 .growth-label {
@@ -732,3 +626,30 @@
   .growth-arriving { animation: none; }
 }
 .large-text .growth-label { font-size: 28rpx; }
+
+.overview-heading,
+.overview-book {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+.overview-book { margin-top: 8rpx; flex-wrap: wrap; }
+.overview-readable { color: var(--ui-text-secondary); font-size: 24rpx; line-height: 1.5; }
+.chapter-reading-actions .story-inline-action,
+.overview-book .story-inline-action {
+  display: flex;
+  align-items: center;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 8rpx;
+  background: transparent;
+  color: var(--ui-accent-strong);
+  font-size: 26rpx;
+  line-height: 1.5;
+  border-radius: 14rpx;
+}
+.chapter-reading-actions .is-secondary { color: var(--ui-text-secondary); font-weight: 400; }
+.large-text .story-inline-action,
+.large-text .overview-readable { font-size: 30rpx; }

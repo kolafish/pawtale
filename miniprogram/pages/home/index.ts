@@ -95,8 +95,6 @@ interface HomeData extends HomeStoryData {
   greetingText: string;
   launchModeTagText: string;
   launchVoiceButtonTitle: string;
-  panelLabelText: string;
-  modeTagText: string;
   projectHeadingText: string;
   projectMetaText: string;
   voiceStartButtonClass: string;
@@ -127,8 +125,6 @@ type HomeViewPatch = Pick<
   | "greetingText"
   | "launchModeTagText"
   | "launchVoiceButtonTitle"
-  | "panelLabelText"
-  | "modeTagText"
   | "projectHeadingText"
   | "projectMetaText"
   | "voiceStartButtonClass"
@@ -237,8 +233,6 @@ export function homeViewPatch(state: HomeData): HomeViewPatch {
     greetingText: `你好，${state.displayName || "作者"}`,
     launchModeTagText: state.launchVariant === "new_project" ? "新故事本" : "第一次来",
     launchVoiceButtonTitle: state.creatingVoice ? "正在准备" : state.launchPrimaryText,
-    panelLabelText: state.loading ? "正在准备" : (state.hasProject ? "今天接着聊" : "准备开始"),
-    modeTagText: state.loading ? "加载中" : (state.hasProject ? state.guidanceLabel : "待创建"),
     projectHeadingText: state.loading
       ? "正在加载回忆录"
       : (
@@ -394,8 +388,6 @@ definePage<HomeData>()({
     greetingText: "你好，作者",
     launchModeTagText: "第一次来",
     launchVoiceButtonTitle: "今天先聊一段",
-    panelLabelText: "准备开始",
-    modeTagText: "待创建",
     projectHeadingText: "还没有回忆录",
     projectMetaText: "先创建一本回忆录，我再听你讲。",
     voiceStartButtonClass: "voice-start-button",

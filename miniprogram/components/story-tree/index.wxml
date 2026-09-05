@@ -1,24 +1,4 @@
 <view class="ui-accessible-page {{largeText ? 'large-text' : ''}}">
-  <view
-    wx:if="{{showSummary}}"
-    class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"
-    bindtap="openBook"
-    hover-class="ui-subtle-action-hover"
-    aria-role="button"
-    aria-label="查看{{story.memoir.title}}的书稿"
-  >
-    <view class="memoir-copy">
-      <text class="memoir-eyebrow">回忆录名称</text>
-      <text class="memoir-title">{{story.memoir.title}}</text>
-      <text class="memoir-meta">{{story.memoir.createdText}} · {{story.memoir.updatedText}}</text>
-    </view>
-    <view class="memoir-progress">
-      <text class="memoir-progress-label">{{story.memoir.progressLabel}}</text>
-      <text class="memoir-progress-value ui-tabular">{{story.memoir.progressValue}}</text>
-      <text class="memoir-progress-detail">{{story.memoir.progressDetail}} ›</text>
-    </view>
-  </view>
-
   <view class="story-toolbar">
     <view class="timeline-label">
       <view class="timeline-mark"></view>
@@ -42,11 +22,17 @@
         <view class="overview-sprout"></view>
       </view>
       <view class="overview-card ui-card ui-card-borderless">
-        <view class="overview-copy">
-          <text class="overview-title">{{story.overview.title}}</text>
-          <text class="overview-summary ui-tabular">{{story.overview.summaryText}}</text>
+        <view class="overview-heading">
+          <view class="overview-copy">
+            <text class="overview-title">{{story.overview.title}}</text>
+            <text class="overview-summary ui-tabular">{{story.overview.summaryText}}</text>
+          </view>
+          <text class="overview-outcome ui-tabular">{{story.overview.outcomeText}}</text>
         </view>
-        <text class="overview-outcome ui-tabular">{{story.overview.outcomeText}}</text>
+        <view wx:if="{{showSummary}}" class="overview-book">
+          <text class="overview-readable ui-tabular">{{story.overview.readableText}}</text>
+          <button size="mini" class="story-inline-action ui-button" bindtap="openBook" aria-label="查看{{story.memoir.title}}的书稿">{{story.memoir.progressDetail}} ›</button>
+        </view>
       </view>
     </view>
 
@@ -82,8 +68,8 @@
 
       <view wx:if="{{item.expanded}}" class="section-list">
         <view class="chapter-reading-actions">
-          <button wx:if="{{item.readable}}" class="ui-button story-secondary-action" data-id="{{item.id}}" bindtap="readChapter">阅读本章</button>
-          <button class="ui-button story-secondary-action" data-id="{{item.id}}" bindtap="openChapter">{{item.state === 'attention' ? '查看待处理事项' : '查看与编辑'}}</button>
+          <button wx:if="{{item.readable}}" size="mini" class="ui-button story-inline-action" data-id="{{item.id}}" bindtap="readChapter">阅读本章 ›</button>
+          <button size="mini" class="ui-button story-inline-action {{item.readable ? 'is-secondary' : ''}}" data-id="{{item.id}}" bindtap="openChapter">{{item.state === 'attention' ? '查看待处理事项' : item.readable ? '查看详情' : '查看本章'}} ›</button>
         </view>
         <view
           wx:if="{{item.imageCount || item.videoCount}}"
@@ -179,9 +165,9 @@
     bindtap="openChapterManager"
     hover-class="ui-subtle-action-hover"
     aria-role="button"
-    aria-label="开始整理故事"
+    aria-label="查看书稿"
   >
-    <text class="add-chapter-mark">＋</text>
-    <text>开始整理故事</text>
+    <text>查看书稿</text>
+    <text class="add-chapter-mark">›</text>
   </view>
 </view>
