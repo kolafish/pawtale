@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
 const { flushAsyncWork, loadPageModule, mockModule, pageContext } = require("./page-harness");
-const { storyViewData } = require("../pages/story/story-view-adapter.ts");
+const { storyViewData } = require("../components/story-tree/story-view-adapter.ts");
 
 function progress(patch = {}) {
   return { project_id: "project-1", status: "ready", title: "可读草稿已更新", detail: "全书检查已完成",
@@ -27,7 +27,7 @@ function snapshot(patch = {}) {
 }
 function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false } = {}) {
   const calls = { book: 0, bookTargets: [], login: 0, transcripts: 0, acknowledgedEventIds: [] };
-  mockModule("../services/accessibility-settings.ts", { accessibilityPageClass: (base) => largeText ? `${base} large-text` : base });
+  mockModule("../services/accessibility-settings.ts", { readLargeTextEnabled: () => largeText, accessibilityPageClass: (base) => largeText ? `${base} large-text` : base });
   mockModule("../services/book-workspace-navigation.ts", { writeBookWorkspaceNavigationTarget: (target) => calls.bookTargets.push(target) });
   mockModule("../services/memoir-snapshot-api.ts", {
     getMemoirStorySnapshot: getSnapshot || (async () => current),
@@ -81,9 +81,10 @@ test("story keeps expansion while refreshing the same project", async () => {
   const context = pageContext(page);
   await context.onShow();
   assert.match(context.data.pageClass, /large-text/);
-  context.toggleChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
+  assert.equal(context.data.largeText, true);
+  context.toggleChapter({ detail: { chapterId: "chapter-1" } });
   await context.loadStory();
-  assert.equal(context.data.chapters[0].expanded, false);
+  assert.equal(context.data.story.chapters[0].expanded, false);
   context.onHide();
 });
 
@@ -94,8 +95,8 @@ test("story expands new sections but acknowledges only after explicit dismissal"
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
-  assert.equal(context.data.chapters[1].expanded, true);
-  assert.equal(context.data.chapters[1].sections[0].highlighted, true);
+  assert.equal(context.data.story.chapters[1].expanded, true);
+  assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
   assert.deepEqual(calls.acknowledgedEventIds, []);
   await context.dismissGrowthNotice();
   assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
@@ -109,6 +110,7 @@ test("story stops polling on hide, rejects old responses and resumes on reentry"
   const context = pageContext(page);
   await context.onShow();
   assert.equal(context.progressTimer.pending, true);
+  context.toggleChapter({ detail: { chapterId: "chapter-1" } });
   current = null;
   const pending = context.loadStory(true);
   context.onHide();
@@ -116,10 +118,12 @@ test("story stops polling on hide, rejects old responses and resumes on reentry"
   resolve(snapshot({ progress: progress({ status: "ready" }) }));
   await pending;
   assert.equal(context.data.progress.status, "processing");
+  assert.equal(context.data.story.chapters[0].expanded, false);
   current = snapshot({ identity: { active_project: { id: "project-2" } }, progress: progress({ status: "failed", can_retry: true }) });
   await context.onShow();
   assert.equal(context.data.projectId, "project-2");
   assert.equal(context.data.progress.status, "failed");
+  assert.equal(context.data.story.chapters[0].expanded, true);
   assert.equal(context.progressTimer.pending, false);
   context.onUnload();
 });
@@ -149,29 +153,45 @@ test("story reads book and chapter directly and retains editing destinations", a
   global.wx.navigateTo = ({ url }) => urls.push(url);
   await context.onShow();
   context.openBook();
-  context.readChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
-  context.readChapter({ currentTarget: { dataset: { id: "chapter-2" } } });
+  context.readChapter({ detail: { chapterId: "chapter-1" } });
+  context.readChapter({ detail: { chapterId: "chapter-2" } });
   context.openChapterManager();
-  context.openChapter({ currentTarget: { dataset: { id: "chapter-1" } } });
+  context.openChapter({ detail: { chapterId: "chapter-1" } });
+  context.openChapter({ detail: { chapterId: "chapter-2", sectionId: "section-2" } });
+  context.openMedia({ detail: { chapterId: "chapter-1" } });
+  context.openMedia({ detail: { chapterId: "" } });
   assert.deepEqual(urls, ["/pages/book-reader/index?projectId=project-1", "/pages/book-reader/index?projectId=project-1&chapterId=chapter-1",
-    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1"]);
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1",
+    "/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-2&sectionId=section-2",
+    "/pages/image-assets/index?projectId=project-1&scope=chapter&chapterId=chapter-1",
+    "/pages/image-assets/index?projectId=project-1&scope=unassigned"]);
   assert.equal(calls.book, 1);
+  assert.deepEqual(calls.bookTargets, ["chapters"]);
   context.onHide();
 });
 
 test("story clears prior project data on auth loss or an empty account", async () => {
-  let authFailure = true;
+  let authFailure = false;
+  let current = snapshot();
   const { page } = loadStoryPage({ getSnapshot: async () => {
     if (authFailure) throw { statusCode: 401 };
-    return snapshot({ identity: { active_project: null } });
+    return current;
   } });
   const context = pageContext(page);
   await context.onShow();
+  assert.equal(context.data.story.chapters.length, 2);
+  authFailure = true;
+  await context.loadStory();
   assert.equal(context.data.needsLogin, true);
   assert.equal(context.data.progress, null);
+  assert.equal(context.data.story.chapters.length, 0);
+  assert.equal(context.data.story.unassignedImageCount, 0);
   authFailure = false;
   await context.loadStory();
+  assert.equal(context.data.story.chapters.length, 2);
+  current = snapshot({ identity: { active_project: null } });
+  await context.loadStory();
   assert.equal(context.data.projectId, "");
-  assert.equal(context.data.chapters.length, 0);
+  assert.equal(context.data.story.chapters.length, 0);
   context.onHide();
 });

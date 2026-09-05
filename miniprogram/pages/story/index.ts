@@ -1,4 +1,4 @@
-import { accessibilityPageClass } from "../../services/accessibility-settings";
+import { accessibilityPageClass, readLargeTextEnabled } from "../../services/accessibility-settings";
 import { writeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 import type { MemoirDraftProgress } from "../../domain/memoir-snapshots";
 import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
@@ -20,29 +20,20 @@ import {
   storyGrowthTargets,
   syncStoryTabRedDot,
 } from "../../services/story-growth-notice";
-import {
-  datasetString,
-  pageUrl,
-  type PageDatasetEvent,
-} from "../../services/page-input";
-import { storyViewData } from "./story-view-adapter";
+import { pageUrl } from "../../services/page-input";
+import type { StoryTreeChapterEvent, StoryTreeMediaEvent } from "../../components/story-tree/events";
+import { storyViewData } from "../../components/story-tree/story-view-adapter";
 import {
   emptyStoryViewData,
   highlightStoryGrowth,
   toggleStoryChapter,
   type StoryViewData,
-} from "./story-view-data";
+} from "../../components/story-tree/story-view-data";
 
-interface StoryDataset {
-  chapterId?: string;
-  id?: string;
-  sectionId?: string;
-}
-
-type DatasetEvent = PageDatasetEvent<StoryDataset>;
-
-interface StoryPageData extends StoryViewData {
+interface StoryPageData {
+  story: StoryViewData;
   pageClass: string;
+  largeText: boolean;
   loading: boolean;
   error: string;
   needsLogin: boolean;
@@ -65,6 +56,7 @@ definePage<StoryPageData>()({
 
   data: {
     pageClass: STORY_PAGE_CLASS,
+    largeText: false,
     loading: true,
     error: "",
     needsLogin: false,
@@ -76,12 +68,13 @@ definePage<StoryPageData>()({
     progress: null,
     bookReadable: false,
     retrying: false,
-    ...emptyStoryViewData(),
+    story: emptyStoryViewData(),
   },
 
   async onShow() {
     this.pageVisible = true;
-    this.setData({ pageClass: accessibilityPageClass(STORY_PAGE_CLASS) });
+    const largeText = readLargeTextEnabled();
+    this.setData({ pageClass: accessibilityPageClass(STORY_PAGE_CLASS, largeText), largeText });
     await this.loadStory();
   },
 
@@ -108,7 +101,7 @@ definePage<StoryPageData>()({
       if (!projectId) {
         syncStoryTabRedDot([]);
         this.setData({
-          ...emptyStoryViewData(),
+          story: emptyStoryViewData(),
           loading: false,
           needsLogin: false,
           projectId: "",
@@ -119,7 +112,7 @@ definePage<StoryPageData>()({
         return;
       }
       const previousExpansion = new Map(
-        (projectId === this.data.projectId ? this.data.chapters : []).map((chapter) => [chapter.id, chapter.expanded]),
+        (projectId === this.data.projectId ? this.data.story.chapters : []).map((chapter) => [chapter.id, chapter.expanded]),
       );
       const viewData = storyViewData(snapshot);
       const growthEvents = storyProgressEvents(snapshot.automation_events?.items || []);
@@ -131,12 +124,14 @@ definePage<StoryPageData>()({
           : chapter
       ));
       this.setData({
-        ...viewData,
-        chapters: highlightStoryGrowth(
-          restoredChapters,
-          growthTargets.flatMap((item) => item.chapterIds),
-          growthTargets.flatMap((item) => item.sectionIds),
-        ),
+        story: {
+          ...viewData,
+          chapters: highlightStoryGrowth(
+            restoredChapters,
+            growthTargets.flatMap((item) => item.chapterIds),
+            growthTargets.flatMap((item) => item.sectionIds),
+          ),
+        },
         loading: false,
         needsLogin: false,
         projectId,
@@ -156,7 +151,7 @@ definePage<StoryPageData>()({
       if (isAuthError(error)) {
         syncStoryTabRedDot([]);
         this.setData({
-          ...emptyStoryViewData(),
+          story: emptyStoryViewData(),
           loading: false,
           needsLogin: true,
           projectId: "",
@@ -216,13 +211,13 @@ definePage<StoryPageData>()({
     }
   },
 
-  toggleChapter(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
+  toggleChapter(event: StoryTreeChapterEvent) {
+    const { chapterId } = event.detail;
     if (!chapterId) {
       return;
     }
     this.setData({
-      chapters: toggleStoryChapter(this.data.chapters, chapterId),
+      story: { ...this.data.story, chapters: toggleStoryChapter(this.data.story.chapters, chapterId) },
     });
   },
 
@@ -234,9 +229,9 @@ definePage<StoryPageData>()({
     }
   },
 
-  readChapter(event: DatasetEvent) {
-    const chapterId = datasetString(event, "id");
-    if (!this.data.projectId || !this.data.chapters.some((chapter) => chapter.id === chapterId && chapter.readable)) return;
+  readChapter(event: StoryTreeChapterEvent) {
+    const { chapterId } = event.detail;
+    if (!this.data.projectId || !this.data.story.chapters.some((chapter) => chapter.id === chapterId && chapter.readable)) return;
     wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId, chapterId }) });
   },
 
@@ -247,21 +242,18 @@ definePage<StoryPageData>()({
 
   openReviewIssues() {
     if (!this.data.projectId) return;
-    wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.memoir.title }) });
+    wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
   },
 
   openTranscripts() {
     navigateToTranscripts();
   },
 
-  openChapter(event: DatasetEvent) {
-    const chapterId = (
-      datasetString(event, "chapterId") || datasetString(event, "id")
-    );
+  openChapter(event: StoryTreeChapterEvent) {
+    const { chapterId, sectionId } = event.detail;
     if (!this.data.projectId || !chapterId) {
       return;
     }
-    const sectionId = datasetString(event, "sectionId");
     wx.navigateTo({
       url: pageUrl(CHAPTER_WORKSPACE_PAGE_URL, {
         projectId: this.data.projectId,
@@ -271,13 +263,11 @@ definePage<StoryPageData>()({
     });
   },
 
-  openMedia(event: DatasetEvent) {
+  openMedia(event: StoryTreeMediaEvent) {
     if (!this.data.projectId) {
       return;
     }
-    const chapterId = (
-      datasetString(event, "chapterId") || datasetString(event, "id")
-    );
+    const { chapterId } = event.detail;
     wx.navigateTo({
       url: pageUrl("/pages/image-assets/index", {
         projectId: this.data.projectId,
