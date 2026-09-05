@@ -1295,3 +1295,18 @@ async def test_active_session_only_schedules_sealed_narration(client, test_db):
     assert same.status == "failed"
     retry = await story_tree_growth.schedule_story_tree_growth(test_db, **{**request, "source": "retry"})
     assert retry.status == "pending"
+
+
+async def test_waiting_for_correction_preserves_story_checkpoint(client, test_db):
+    from app.domain.memoir.types import MemoirEditingJobType
+    from app.services.memoir.editing_jobs import enqueue_editing_job
+
+    project_id = await ensure_mobile_memoir_project(client)
+    _, job = await _stopped_growth_job(client, test_db, project_id, "童年在成都生活。")
+    progress = {"completed_initial_chapters": ["already-written"]}
+    job.result_json = {"growth": progress}
+    await enqueue_editing_job(test_db, project_id=project_id, job_type=MemoirEditingJobType.CORRECT_TRANSCRIPT)
+    await test_db.commit()
+    waiting = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert waiting.status.value == "pending"
+    assert waiting.result_json["growth"] == progress

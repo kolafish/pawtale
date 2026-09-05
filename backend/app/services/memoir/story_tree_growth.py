@@ -696,6 +696,6 @@ async def run_story_tree_growth_job(
         await db.flush()
         return EditingJobResult(
             status=MemoirEditingJobStatus.PENDING,
-            result_json={"voice_session_id": session.id, "stage": "waiting_for_transcripts"},
+            result_json={**(job.result_json or {}), "voice_session_id": session.id, "stage": "waiting_for_transcripts"},
         )
     return await grow_story_tree(db, job=job, session=session)
