@@ -54,6 +54,7 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
 test("story maps server counts and distinguishes pending from user decisions", () => {
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.progressDetail, "阅读草稿");
+  assert.equal(view.overview.readableText, "1 章可读");
   assert.deepEqual(view.chapters.map(chapter => chapter.ordinal), [1, 2]);
   assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
@@ -69,7 +70,7 @@ test("story maps server counts and distinguishes pending from user decisions", (
 test("story distinguishes empty and fully assigned material", () => {
   const empty = storyViewData(snapshot({ chapters: [], book_readable: false, progress: null }));
   assert.equal(empty.unassignedMaterialText, "还没有讲述");
-  assert.equal(empty.memoir.progressValue, "尚未生成");
+  assert.equal(empty.overview.readableText, "还没有正文");
   const noSections = storyViewData(snapshot({chapters:[{...snapshot().chapters[0], sections:[]}]}));
   assert.equal(noSections.chapters[0].hasSections, false);
   const assigned = storyViewData(snapshot({ progress: progress({ pending_material_count: 0, needs_user_material_count: 0 }) }));
@@ -316,4 +317,15 @@ test("continue narration directs an unconsented reader to the authorization cont
   assert.equal(context.data.creatingVoice, false);
   assert.match(context.data.error, /声纹授权/);
   context.onHide();
+});
+
+
+test("story keeps readable chapter drafts available while the assembled book awaits review", () => {
+  const view = storyViewData(snapshot({
+    book_readable: false,
+    progress: progress({ status: "needs_input", readable_chapter_count: 0 }),
+  }));
+  assert.equal(view.overview.readableText, "1 章可读");
+  assert.equal(view.chapters[0].readable, true);
+  assert.equal(view.memoir.progressDetail, "查看书稿");
 });

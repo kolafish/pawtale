@@ -2,10 +2,6 @@ export type StoryChapterState = "settled" | "attention" | "draft" | "muted";
 
 export interface StoryMemoirSummaryView {
   title: string;
-  createdText: string;
-  updatedText: string;
-  progressLabel: string;
-  progressValue: string;
   progressDetail: string;
 }
 
@@ -40,6 +36,7 @@ export interface StoryChapterView {
 }
 
 export interface StoryOverviewView {
+  readableText: string;
   title: string;
   summaryText: string;
   outcomeText: string;
@@ -60,13 +57,10 @@ export function emptyStoryViewData(): StoryViewData {
   return {
     memoir: {
       title: "我的故事",
-      createdText: "",
-      updatedText: "",
-      progressLabel: "书稿",
-      progressValue: "尚未生成",
-      progressDetail: "开始整理",
+      progressDetail: "查看书稿",
     },
     overview: {
+      readableText: "还没有正文",
       title: "人生总览",
       summaryText: "0 章 · 0 小节 · 0 段讲述",
       outcomeText: "还没有正文",
