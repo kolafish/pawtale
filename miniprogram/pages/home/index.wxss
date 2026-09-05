@@ -1,7 +1,7 @@
 .home-page {
   max-width: 980rpx;
   margin: 0 auto;
-  padding: 24rpx 24rpx calc(160rpx + env(safe-area-inset-bottom));
+  padding: 24rpx 24rpx calc(88px + env(safe-area-inset-bottom));
 }
 
 .header-actions {
@@ -805,26 +805,34 @@
   z-index: 20;
   left: 0;
   right: 0;
-  bottom: 0;
-  padding: 16rpx 32rpx calc(16rpx + env(safe-area-inset-bottom));
-  background: var(--ui-page-background);
-  box-shadow: 0 -1rpx 0 var(--ui-divider);
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
 }
 
 .continue-narration-bar .continue-narration-button {
-  width: 100%;
-  max-width: 860rpx;
-  margin: 0 auto;
-  min-height: 96rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  max-width: calc(100% - 48rpx);
+  min-width: 260rpx;
+  min-height: 48px;
+  margin: 0;
+  padding: 10rpx 44rpx;
   border-radius: 999rpx;
   color: var(--ui-on-accent);
   background: var(--ui-accent);
-  font-size: 34rpx;
+  box-shadow: 0 4px 12px rgba(97, 49, 39, 0.18), 0 1px 3px rgba(97, 49, 39, 0.10);
+  font-size: 32rpx;
   font-weight: 700;
+  line-height: 1.5;
+  pointer-events: auto;
   transition: transform 150ms ease-out, background-color 150ms ease-out;
 }
 
-.large-text .continue-narration-button { min-height: 112rpx; font-size: 40rpx; }
+.large-text .continue-narration-button { min-height: 56px; font-size: 38rpx; }
 .large-text .home-saved-notice { font-size: 34rpx; }
 
 .home-review-notice {
