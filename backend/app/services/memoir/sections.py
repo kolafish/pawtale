@@ -50,7 +50,9 @@ from app.services.memoir.material_roles import (
 )
 from app.services.memoir.section_digests import mark_section_digests_stale
 from app.services.memoir.section_roles import requires_user_assignment
-from app.services.memoir.transcript_projection import current_material_text
+from app.services.memoir.transcript_projection import (
+    current_material_text, current_transcript_version_id, current_utterance_text, source_text_hash,
+)
 
 
 async def _load_plan(
@@ -529,6 +531,9 @@ async def _load_project_utterances(
                     MemoirVoiceUtterance.id.in_(utterance_ids),
                 )
                 .options(selectinload(MemoirVoiceUtterance.chat_message))
+                .order_by(MemoirVoiceUtterance.id)
+                .with_for_update(of=MemoirVoiceUtterance)
+                .execution_options(populate_existing=True)
             )
         ).scalars().all()
     )
@@ -925,6 +930,9 @@ async def place_material(
     assigned_by: MemoirSectionMaterialAssignedBy = MemoirSectionMaterialAssignedBy.USER,
     structure_updated_by: MemoirCreatedBy = MemoirCreatedBy.USER,
     assignment_reason: str | None = None,
+    expected_source: tuple[str, str | None] | None = None,
+    expected_section_version: int | None = None,
+    expected_chapter_updated_at: datetime | None = None,
 ) -> MemoirSectionMaterialPlacementResponse:
     await load_memoir_project(
         db,
@@ -933,7 +941,7 @@ async def place_material(
         allow_admin=allow_admin,
     )
     plan = await _load_plan(db, project_id=project_id)
-    await _load_project_utterances(
+    utterances = await _load_project_utterances(
         db,
         project_id=project_id,
         utterance_ids=[utterance_id],
@@ -942,8 +950,13 @@ async def place_material(
         select(MemoirSectionMaterial).where(
             MemoirSectionMaterial.project_id == project_id,
             MemoirSectionMaterial.utterance_id == utterance_id,
-        )
+        ).execution_options(populate_existing=True)
     )
+    if expected_source is not None:
+        utterance = utterances[utterance_id]
+        source = (source_text_hash(current_utterance_text(utterance)), current_transcript_version_id(utterance))
+        if current_material is not None or source != expected_source:
+            raise HTTPException(status_code=409, detail="素材文字或归属已变化，已放弃过时的自动归类")
     current_section = (
         await _load_section(
             db,
@@ -970,6 +983,20 @@ async def place_material(
             chapter_id=req.target_chapter_id,
         )
         target_chapter_id = req.target_chapter_id
+
+    if expected_section_version is not None and target is not None:
+        await db.refresh(target, with_for_update=True)
+        if target.version != expected_section_version:
+            raise HTTPException(status_code=409, detail="目标小节已变化，已放弃过时的自动归类")
+    if expected_chapter_updated_at is not None and target_chapter_id is not None:
+        chapter = await db.scalar(
+            select(MemoirBookPlanChapter).where(
+                MemoirBookPlanChapter.id == target_chapter_id,
+                MemoirBookPlanChapter.project_id == project_id,
+            ).with_for_update().execution_options(populate_existing=True)
+        )
+        if chapter is None or chapter.updated_at != expected_chapter_updated_at:
+            raise HTTPException(status_code=409, detail="目标章节已变化，已放弃过时的自动归类")
 
     moves_included_source = bool(
         current_material is not None
