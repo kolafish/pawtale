@@ -47,6 +47,7 @@ from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
+from app.services.memoir.memory_activation import delete_source_memory_traces
 from app.services.memoir.material_offline_asr_state import material_offline_asr_states
 from app.services.memoir.asr_text_normalization import normalize_memoir_asr_text
 from app.services.memoir.book_source_links import (
@@ -1300,6 +1301,7 @@ async def delete_voice_transcript(
         clear_message = other_utterances == 0 and child_messages > 0
 
     await _mark_book_sources_deleted(db, project_id=project_id, utterance_id=utterance.id)
+    await delete_source_memory_traces(db, project_id=project_id, utterance_id=utterance.id)
     await db.delete(utterance)
     await db.flush()
 

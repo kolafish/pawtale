@@ -223,3 +223,82 @@ async def test_embedding_failure_is_logged_without_injecting_context(
     assert trace.injected_count == 0
     assert trace.trace_json["failure"]["error_type"] == "RuntimeError"
     assert trace.trace_json["failure"]["stage"] == "hybrid_retrieval"
+
+
+async def test_same_session_early_memory_is_retrieved_but_recent_context_is_excluded(client, test_db):
+    from app.services.memoir.voice_followup_ai import recent_context_messages
+
+    created = await create_test_voice_transcript(client, test_db, "李桂芳曾在华西医院做手术。")
+    await _add_entry(test_db, created=created, text="李桂芳曾在华西医院做手术。")
+    first, _ = await _message_and_utterance(test_db, created)
+    messages = [first]
+    for index in range(1, 15):
+        message = MemoirChatMessage(project_id=first.project_id, voice_session_id=first.voice_session_id,
+                                   role="user", content_text="华西医院那次手术后来怎么样了？", turn_index=index)
+        test_db.add(message)
+        messages.append(message)
+    await test_db.flush()
+    recent = MemoirVoiceUtterance(voice_session_id=first.voice_session_id,
+        chat_message_id=messages[-2].id, transcript_raw="最近已经说过的手术细节。", provider="test")
+    test_db.add(recent)
+    await test_db.flush()
+    test_db.add(MemoirRetrievalEntry(project_id=first.project_id, voice_session_id=first.voice_session_id,
+        utterance_id=recent.id, entry_kind="source_text", ordinal=0, search_text="华西医院手术",
+        text_source="raw", source_text_hash=source_text_hash(recent.transcript_raw),
+        embedding=list(_vector(0)), embedding_model="test-bge-small", index_version=1))
+    await test_db.commit()
+    result = await activate_memory_for_turn(test_db, project_id=first.project_id,
+        voice_session_id=first.voice_session_id, current_message=messages[-1],
+        context_message_ids=tuple(item.id for item in recent_context_messages(messages)),
+        embedding_client=FakeEmbeddingClient())
+    assert "李桂芳" in result.context
+    assert "最近已经说过" not in result.context
+    trace = await test_db.get(MemoirMemoryActivationTrace, result.trace_id)
+    assert [item["utterance_id"] for item in trace.trace_json["activation"]["packages"]] == [created["utterance_id"]]
+
+
+async def test_changed_source_invalidates_cached_excerpt(client, test_db):
+    from sqlalchemy import update
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    current = await create_test_voice_transcript(client, test_db, "她是在华西医院做的手术？")
+    historical = await create_test_voice_transcript(client, test_db, "李桂芳是在华西医院做手术。",
+                                                  project_id=current["session"]["project_id"])
+    await _add_entry(test_db, created=historical, text="李桂芳是在华西医院做手术。")
+    message, _ = await _message_and_utterance(test_db, current)
+    arguments = dict(project_id=message.project_id, voice_session_id=message.voice_session_id,
+                     current_message=message, embedding_client=FakeEmbeddingClient())
+    previous = await activate_memory_for_turn(test_db, **arguments)
+    async with AsyncSession(test_db.bind) as other:
+        await other.execute(update(MemoirVoiceUtterance).where(MemoirVoiceUtterance.id == historical["utterance_id"])
+                            .values(transcript_edited="更正：接受手术的是张阿姨。"))
+        await other.commit()
+    result = await activate_memory_for_turn(test_db, **arguments)
+    assert not result.cached
+    assert result.trace_id != previous.trace_id
+    assert "李桂芳" not in result.context
+    assert "张阿姨" in result.context
+    message.content_text = "我想接着说姐姐。"
+    await test_db.commit()
+    assert not (await activate_memory_for_turn(test_db, **arguments)).cached
+
+
+async def test_deleted_source_removes_diagnostic_copies_and_cached_context(client, test_db):
+    from sqlalchemy import select
+    from app.services.memoir.voice_transcripts import delete_voice_transcript
+
+    current = await create_test_voice_transcript(client, test_db, "华西医院那次手术？")
+    historical = await create_test_voice_transcript(client, test_db, "李桂芳是在华西医院做手术。",
+                                                  project_id=current["session"]["project_id"])
+    await _add_entry(test_db, created=historical, text="李桂芳是在华西医院做手术。")
+    message, _ = await _message_and_utterance(test_db, current)
+    arguments = dict(project_id=message.project_id, voice_session_id=message.voice_session_id,
+                     current_message=message, embedding_client=FakeEmbeddingClient())
+    previous = await activate_memory_for_turn(test_db, **arguments)
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    await delete_voice_transcript(test_db, historical["utterance_id"], user_id)
+    assert await test_db.scalar(select(MemoirMemoryActivationTrace.id).where(
+        MemoirMemoryActivationTrace.id == previous.trace_id)) is None
+    result = await activate_memory_for_turn(test_db, **arguments)
+    assert not result.cached
+    assert result.context == ""
