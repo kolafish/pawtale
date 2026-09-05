@@ -34,7 +34,7 @@ function isDeleteConfirmationSource(source) {
 }
 
 function loginSourceState(source) {
-  if (source.includes("首页") && !source.includes("欢迎登录")) {
+  if (source.includes("分享给家人") && source.includes("老余口述") && !source.includes("欢迎登录")) {
     return "complete";
   }
   if (
@@ -215,9 +215,8 @@ async function returnToPreviousPage(client, previousSource, options = {}) {
 }
 
 function isPawtaleSource(source) {
-  const authenticatedShell = ["首页", "记录", "书稿", "我的"].every(
-    (name) => source.includes(`name="${name}"`) || source.includes(`label="${name}"`),
-  );
+  const authenticatedShell = source.includes("老余口述")
+    && source.includes("分享给家人") && source.includes("设置");
   return authenticatedShell || (
     source.includes("老余口述") && (
       source.includes("欢迎登录")
@@ -565,14 +564,14 @@ async function loginIfNeeded(client, config, artifacts, initialSource) {
   return source;
 }
 
-async function verifyTab(client, name, expectedMarkers, artifacts, screenshotName) {
+async function verifyPageEntry(client, name, expectedMarkers, artifacts, screenshotName) {
   await tapLargestNamedElement(client, name);
   const source = await waitForSource(
     client,
     (value) => containsAll(value, expectedMarkers),
-    `${name} Tab 内容`,
+    `${name} 页面内容`,
   );
-  artifacts.mark(`ios-ui:tab:${name}:complete`);
+  artifacts.mark(`ios-ui:page:${name}:complete`);
   if (screenshotName) {
     await artifacts.screenshot(client, screenshotName, source);
   }
@@ -582,38 +581,19 @@ async function verifyTab(client, name, expectedMarkers, artifacts, screenshotNam
 async function runIOSUISmoke(client, config, artifacts) {
   let source = await openPawtale(client, config, artifacts);
   source = await loginIfNeeded(client, config, artifacts, source);
-  if (!source.includes("首页")) {
-    throw new Error("测试账号登录后未显示主 Tab");
+  if (loginSourceState(source) !== "complete") {
+    throw new Error("测试账号登录后未显示首页");
   }
-  await verifyTab(client, "记录", ["讲述记录"], artifacts, "records.png");
-  await verifyTab(
-    client,
-    "书稿",
-    ["书稿", "章节"],
-    artifacts,
-    "book.png",
-  );
-  const meSource = await verifyTab(
-    client,
-    "我的",
-    ["管理回忆录、语音工具和个人偏好"],
-    artifacts,
+  const meSource = await verifyPageEntry(
+    client, "设置", ["管理回忆录、语音工具和个人偏好"], artifacts, "settings.png",
   );
   if (!meSource.includes(config.account.email)) {
-    throw new Error("“我的”页未显示本机配置的测试账号");
+    throw new Error("设置页未显示本机配置的测试账号");
   }
-  const homeSource = await verifyTab(
-    client,
-    "首页",
-    ["分享给家人"],
-    artifacts,
-    "home.png",
-  );
-  return {
-    accountVerified: true,
-    homeGreetingVisible: homeSource.includes("你好"),
-    tabs: ["首页", "记录", "书稿", "我的"],
-  };
+  await returnToPreviousPage(client, meSource);
+  const homeSource = await waitForSource(client, value => loginSourceState(value) === "complete", "返回首页");
+  await artifacts.screenshot(client, "home.png", homeSource);
+  return { accountVerified: true, homeGreetingVisible: homeSource.includes("你好"), pages: ["首页", "设置"] };
 }
 
 function iosSessionCapabilities(config, tunnel) {
@@ -663,7 +643,7 @@ module.exports = {
   tapLargestNamedElement,
   tapLargestNamedElementCenter,
   tapLargestNamedElementAndWait,
-  verifyTab,
+  verifyPageEntry,
   waitForSource,
   waitForMaskedTextField,
 };

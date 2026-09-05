@@ -15,7 +15,7 @@ function rememberSnapshotIdentity<T extends MemoirHomeSnapshot | MemoirBookSnaps
 }
 
 export async function getMemoirStorySnapshot(): Promise<MemoirStorySnapshot> {
-  return rememberSnapshotIdentity(await memoirRequest<MemoirStorySnapshot>("/api/mobile/memoir/story-snapshot"));
+  return memoirRequest<MemoirStorySnapshot>("/api/mobile/memoir/story-snapshot");
 }
 
 export function getMemoirDraftProgress(projectId: string, voiceSessionId = ""): Promise<MemoirDraftProgress> {

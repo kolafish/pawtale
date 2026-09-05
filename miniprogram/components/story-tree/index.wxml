@@ -1,5 +1,6 @@
 <view class="ui-accessible-page {{largeText ? 'large-text' : ''}}">
   <view
+    wx:if="{{showSummary}}"
     class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"
     bindtap="openBook"
     hover-class="ui-subtle-action-hover"

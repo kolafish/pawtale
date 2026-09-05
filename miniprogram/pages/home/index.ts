@@ -15,7 +15,13 @@ import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
 } from "../../services/memoir-voice-session-api";
-import { getMemoirHomeSnapshot } from "../../services/memoir-snapshot-api";
+import { getMemoirStorySnapshot, retryMemoirDraftProgress } from "../../services/memoir-snapshot-api";
+import { acknowledgeMemoirAutomationEvent } from "../../services/memoir-voice-session-api";
+import { writeMemoirIdentitySnapshot } from "../../stores/memoir-cache";
+import { PollingTimer } from "../../services/polling-timer";
+import { emptyHomeStoryData, homeStorySnapshotData, type HomeStoryData } from "./home-story-state";
+import { toggleStoryChapter } from "../../components/story-tree/story-view-data";
+import type { StoryTreeChapterEvent, StoryTreeMediaEvent } from "../../components/story-tree/events";
 import {
   dismissHomeLaunch,
   resolveHomeLaunch,
@@ -27,6 +33,10 @@ import {
 } from "../../services/memoir-project-profile";
 import {
   isAuthError,
+  CHAPTER_WORKSPACE_PAGE_URL,
+  consumeHomeStoryTarget,
+  navigateToMe,
+  navigateToTranscripts,
   navigateToBook,
   navigateToLogin,
 } from "../../services/navigation";
@@ -49,14 +59,13 @@ import {
   writeCachedMemoirHome,
 } from "../../stores/memoir-read-cache";
 import { userDisplayName } from "../../services/user-display-name";
-import { StoryProgressWatcher, storyProgressTitle, syncStoryTabRedDot } from "../../services/story-growth-notice";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
 
 type HomeVoiceEntry = "home" | "home_launch" | "home_resume";
 
-interface HomeData {
+interface HomeData extends HomeStoryData {
   loading: boolean;
   creatingVoice: boolean;
   needsLogin: boolean;
@@ -103,8 +112,6 @@ interface HomeData {
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
-  growthNoticeTitle: string;
-  growthNoticeText: string;
 }
 
 interface CheckboxChangeEvent {
@@ -314,6 +321,7 @@ function applyHomeSnapshotData(
   snapshot: MemoirHomeSnapshot,
 ): void {
   const identity = snapshot.identity;
+  const changedProject = identity.id !== context.data.userId || (identity.active_project?.id || "") !== context.data.projectId;
   const hasProject = Boolean(identity.active_project_id && identity.active_project);
   const profile = memoirProjectProfile(identity.active_project);
   const projectDisplayTitle = hasProject
@@ -331,11 +339,10 @@ function applyHomeSnapshotData(
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
-    ...(identity.active_project_id !== context.data.projectId || identity.id !== context.data.userId
-      ? { growthNoticeTitle: "", growthNoticeText: "" } : {}),
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
+    ...(changedProject ? emptyHomeStoryData() : {}),
     lastStoryHint: latestHint,
     lastStoryText: lastStoryText(latestHint),
     hasLastStoryHint: Boolean(latestHint),
@@ -349,7 +356,8 @@ function applyHomeSnapshotData(
 definePage<HomeData>()({
   homeLoadSequence: 0,
   homeVisible: false,
-  progressNoticeWatcher: pageRuntime(() => new StoryProgressWatcher()),
+  homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
+  storyNavigationProjectId: null as string | null,
 
   data: {
     loading: false,
@@ -398,24 +406,27 @@ definePage<HomeData>()({
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
-    growthNoticeTitle: "",
-    growthNoticeText: "",
+    ...emptyHomeStoryData(),
+  },
+
+  onLoad(query?: { section?: string; projectId?: string }) {
+    if (query?.section === "story") this.storyNavigationProjectId = query.projectId || "";
   },
 
   async onShow() {
     this.homeVisible = true;
-    this.progressNoticeWatcher.stop();
+    this.storyNavigationProjectId = consumeHomeStoryTarget() ?? this.storyNavigationProjectId;
+    this.homeRefreshTimer.cancel();
     enableMiniProgramShareMenu();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
-    if (!this.data.loading) {
-      await this.loadHome();
-    }
+    await this.loadHome();
   },
 
   onHide() {
     this.homeVisible = false;
-    this.progressNoticeWatcher.stop();
+    this.homeLoadSequence += 1;
+    this.homeRefreshTimer.cancel();
   },
 
   onUnload() {
@@ -438,16 +449,17 @@ definePage<HomeData>()({
     setHomeData(this, { voiceAuthorizationAgreed: readVoiceAuthorizationConsent() });
   },
 
-  async loadHome() {
+  async loadHome(background = false) {
+    this.homeRefreshTimer.cancel();
     const loadSequence = (this.homeLoadSequence || 0) + 1;
     this.homeLoadSequence = loadSequence;
     const cached = readCachedMemoirHome();
     const localInvalidationRevision = cached.localInvalidationRevision || 0;
     let showedCachedData = false;
-    if (cached.payload) {
+    if (!background && cached.payload) {
       applyHomeSnapshotData(this, cached.payload);
       showedCachedData = true;
-    } else {
+    } else if (!background) {
       const cachedIdentity = readCachedMemoirIdentity();
       if (cachedIdentity) {
         applyHomeSnapshotData(this, {
@@ -458,11 +470,11 @@ definePage<HomeData>()({
         showedCachedData = true;
       }
     }
-    if (!showedCachedData) {
+    if (!background && !showedCachedData) {
       setHomeData(this, { loading: true, error: "" });
     }
     try {
-      const snapshot = await getMemoirHomeSnapshot();
+      const snapshot = await getMemoirStorySnapshot();
       if (loadSequence !== this.homeLoadSequence) {
         return;
       }
@@ -473,24 +485,24 @@ definePage<HomeData>()({
       ) {
         return;
       }
-      writeCachedMemoirHome(snapshot);
+      writeMemoirIdentitySnapshot(snapshot.identity);
+      writeCachedMemoirHome({ server_revision: snapshot.server_revision, identity: snapshot.identity, latest_transcript: snapshot.latest_transcript });
       applyHomeSnapshotData(this, snapshot);
-      if (snapshot.identity.active_project?.id) {
-        void this.refreshStoryGrowthNotice(snapshot.identity.active_project.id);
-      } else {
-        this.progressNoticeWatcher.stop();
-        syncStoryTabRedDot([]);
-      }
+      this.setData(homeStorySnapshotData(snapshot, this.data.story), () => {
+        if (loadSequence !== this.homeLoadSequence) return;
+        if (this.storyNavigationProjectId !== null) {
+          if (!this.storyNavigationProjectId || this.storyNavigationProjectId === this.data.projectId) this.openStoryProgress();
+          this.storyNavigationProjectId = null;
+        }
+      });
     } catch (error) {
       if (loadSequence !== this.homeLoadSequence) {
         return;
       }
       if (isAuthError(error)) {
-        this.progressNoticeWatcher.stop();
-        syncStoryTabRedDot([]);
+        this.homeRefreshTimer.cancel();
         setHomeData(this, {
-          growthNoticeTitle: "",
-          growthNoticeText: "",
+          ...emptyHomeStoryData(),
           needsLogin: true,
           userId: "",
           displayName: "作者",
@@ -509,7 +521,8 @@ definePage<HomeData>()({
         });
         return;
       }
-      if (showedCachedData) {
+      if (showedCachedData || background || this.data.storyLoaded) {
+        setHomeData(this, { storyError: "进度暂未刷新，已保存的讲述和故事仍在，稍后会再试。" });
         console.warn("refresh memoir home snapshot failed", error);
       } else {
         setHomeData(this, { error: error instanceof Error ? error.message : "首页加载失败" });
@@ -517,26 +530,124 @@ definePage<HomeData>()({
     } finally {
       if (loadSequence === this.homeLoadSequence) {
         setHomeData(this, { loading: false });
+        if (this.homeVisible && this.data.hasProject && !this.data.needsLogin) {
+          this.homeRefreshTimer.schedule(() => { void this.loadHome(true); });
+        }
       }
     }
   },
 
-  refreshStoryGrowthNotice(projectId: string) {
-    if (!this.homeVisible) return;
-    const userId = this.data.userId;
-    this.progressNoticeWatcher.start(projectId, (events) => {
-      if (!this.homeVisible || this.data.projectId !== projectId || this.data.userId !== userId) return;
-      const event = events[0];
-      setHomeData(this, {
-        growthNoticeTitle: event ? storyProgressTitle(event) : "",
-        growthNoticeText: event?.summary_text || "",
-      });
-      syncStoryTabRedDot(events);
-    });
+  openSettings() {
+    navigateToMe();
   },
 
   openStoryProgress() {
-    wx.switchTab({ url: "/pages/story/index" });
+    wx.pageScrollTo({ selector: "#home-story", duration: 250 });
+  },
+
+  async dismissGrowthNotice() {
+    const projectId = this.data.projectId;
+    const eventIds = this.data.growthEvents.map((event) => event.event_id);
+    if (!projectId || !eventIds.length || this.data.dismissingGrowth) return;
+    this.setData({ dismissingGrowth: true });
+    try {
+      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(projectId, id)));
+      if (this.homeVisible && this.data.projectId === projectId) await this.loadHome(true);
+    } catch (error) {
+      if (this.homeVisible && this.data.projectId === projectId) {
+        this.setData({ error: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+      }
+    } finally {
+      this.setData({ dismissingGrowth: false });
+    }
+  },
+
+  async retryDraft() {
+    const projectId = this.data.projectId;
+    if (!projectId || this.data.retryingDraft || !this.data.progress?.can_retry) return;
+    this.setData({ retryingDraft: true, error: "" });
+    try {
+      const progress = await retryMemoirDraftProgress(projectId);
+      if (this.homeVisible && projectId === this.data.projectId) {
+        this.setData({ progress });
+        await this.loadHome(true);
+      }
+    } catch (error) {
+      if (this.homeVisible && projectId === this.data.projectId) {
+        this.setData({ error: error instanceof Error ? error.message : "继续整理失败" });
+      }
+    } finally {
+      this.setData({ retryingDraft: false });
+    }
+  },
+
+  toggleChapter(event: StoryTreeChapterEvent) {
+    const { chapterId } = event.detail;
+    if (!chapterId) {
+      return;
+    }
+    this.setData({
+      story: { ...this.data.story, chapters: toggleStoryChapter(this.data.story.chapters, chapterId) },
+    });
+  },
+
+  openBook() {
+    if (!this.canStartVoiceChat(false)) return;
+    if (this.data.bookReadable) {
+      wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId }) });
+    } else {
+      navigateToBook();
+    }
+  },
+
+  readChapter(event: StoryTreeChapterEvent) {
+    const { chapterId } = event.detail;
+    if (!this.data.projectId || !this.data.story.chapters.some((chapter) => chapter.id === chapterId && chapter.readable)) return;
+    wx.navigateTo({ url: pageUrl("/pages/book-reader/index", { projectId: this.data.projectId, chapterId }) });
+  },
+
+  openChapterManager() {
+    if (!this.canStartVoiceChat(false)) return;
+    writeBookWorkspaceNavigationTarget("chapters");
+    navigateToBook();
+  },
+
+  openReviewIssues() {
+    if (!this.data.projectId) return;
+    wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
+  },
+
+  openTranscripts() {
+    if (!this.canStartVoiceChat(false)) return;
+    navigateToTranscripts();
+  },
+
+  openChapter(event: StoryTreeChapterEvent) {
+    const { chapterId, sectionId } = event.detail;
+    if (!this.data.projectId || !chapterId) {
+      return;
+    }
+    wx.navigateTo({
+      url: pageUrl(CHAPTER_WORKSPACE_PAGE_URL, {
+        projectId: this.data.projectId,
+        chapterId,
+        sectionId,
+      }),
+    });
+  },
+
+  openMedia(event: StoryTreeMediaEvent) {
+    if (!this.data.projectId) {
+      return;
+    }
+    const { chapterId } = event.detail;
+    wx.navigateTo({
+      url: pageUrl("/pages/image-assets/index", {
+        projectId: this.data.projectId,
+        scope: chapterId ? "chapter" : "unassigned",
+        chapterId,
+      }),
+    });
   },
 
   changeVoiceAuthorization(event: CheckboxChangeEvent) {

@@ -38,7 +38,8 @@ import {
   navigateToTranscripts,
   navigateToLogin,
   routeAuthError,
-  switchToHome,
+  returnToHome,
+  returnToStory,
 } from "../../services/navigation";
 import {
   datasetChoice,
@@ -1089,12 +1090,12 @@ definePage<BookPageData>()({
   },
 
   openStory() {
-    wx.switchTab({ url: "/pages/story/index" });
+    returnToStory(this.data.projectId);
   },
 
   openHome() {
     this.stopPlayback();
-    switchToHome();
+    returnToHome();
   },
 
   openLogin() {

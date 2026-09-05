@@ -466,6 +466,7 @@ declare namespace WechatMiniprogram {
     reLaunch(option: NavigateOption): void;
     switchTab(option: NavigateOption): void;
     navigateBack(option?: NavigateBackOption): void;
+    pageScrollTo(option: { scrollTop?: number; selector?: string; duration?: number }): void;
     showActionSheet(option: ActionSheetOption): void;
     showModal(option: ModalOption): void;
     showToast(option: ToastOption): void;

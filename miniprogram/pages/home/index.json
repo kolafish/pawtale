@@ -1,3 +1,6 @@
 {
-  "navigationBarTitleText": "老余口述"
+  "navigationBarTitleText": "老余口述",
+  "usingComponents": {
+    "story-tree": "/components/story-tree/index"
+  }
 }

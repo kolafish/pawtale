@@ -14,6 +14,14 @@ const LEGACY_PAGE_REDIRECTS: Record<string, string> = {
   "pages/book-chapter/index": CHAPTER_WORKSPACE_PAGE_URL,
 };
 
+let pendingStoryProjectId: string | null = null;
+
+export function consumeHomeStoryTarget(): string | null {
+  const projectId = pendingStoryProjectId;
+  pendingStoryProjectId = null;
+  return projectId;
+}
+
 function appendQuery(url: string, query: PageNotFoundQuery): string {
   const search = Object.entries(query)
     .filter((entry): entry is [string, string] => typeof entry[1] === "string")
@@ -27,6 +35,9 @@ export function missingPageRecoveryUrl(
   query: PageNotFoundQuery = {},
 ): string | null {
   const normalizedPath = path.replace(/^\/+/, "").split("?")[0];
+  if (normalizedPath === "pages/story/index") {
+    return appendQuery(HOME_PAGE_URL, { ...query, section: "story" });
+  }
   const legacyTarget = LEGACY_PAGE_REDIRECTS[normalizedPath];
   if (legacyTarget) {
     return appendQuery(legacyTarget, query);
@@ -45,8 +56,22 @@ export function isAuthError(error: unknown): boolean {
   return error instanceof ApiError && [401, 403].includes(error.statusCode);
 }
 
-export function switchToHome(): void {
-  wx.switchTab({ url: HOME_PAGE_URL });
+export function returnToHome(): void {
+  const pages = typeof getCurrentPages === "function" ? getCurrentPages() : [];
+  const homeRoute = HOME_PAGE_URL.slice(1);
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    if (pages[index]?.route !== homeRoute) continue;
+    if (index < pages.length - 1) {
+      wx.navigateBack({ delta: pages.length - 1 - index, fail: relaunchHome });
+    }
+    return;
+  }
+  relaunchHome();
+}
+
+export function returnToStory(projectId = ""): void {
+  pendingStoryProjectId = projectId;
+  returnToHome();
 }
 
 export function navigateToBook(): void {
@@ -84,8 +109,8 @@ export function relaunchHome(): void {
   wx.reLaunch({ url: HOME_PAGE_URL });
 }
 
-export function switchToMe(): void {
-  wx.switchTab({ url: ME_PAGE_URL });
+export function navigateToMe(): void {
+  wx.navigateTo({ url: ME_PAGE_URL });
 }
 
 export function navigateToLogin(): void {
@@ -103,7 +128,7 @@ export function routeAuthError(error: unknown, target: AuthNavigationTarget = "l
   if (target === "login") {
     relaunchLogin();
   } else {
-    switchToMe();
+    navigateToMe();
   }
   return true;
 }

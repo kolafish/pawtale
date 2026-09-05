@@ -45,7 +45,7 @@ function loadHomePage({
     createMemoirVoiceSession: unmockedAsync("createMemoirVoiceSession"),
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     listMemoirVoiceTranscripts,
-    getMemoirHomeSnapshot: async () => {
+    getMemoirStorySnapshot: async () => {
       const identity = await getMemoirIdentity();
       const latest = identity.active_project_id
         ? await listMemoirVoiceTranscripts({
@@ -55,12 +55,15 @@ function loadHomePage({
         : { items: [] };
       return {
         server_revision: 1,
+        chapters: [], progress: null, growth_events: [], automation_events: { items: [], total: 0, limit: 8 },
+        book_readable: false, book_char_count: 0, updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
         identity,
         latest_transcript: latest.items[0] || null,
       };
     },
     ...voiceApiExports,
   });
+  mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", {
     readCachedMemoirIdentity: () => null,
     readCachedMemoirHome: () => ({ status: "miss" }),
@@ -123,6 +126,7 @@ test("home supports a local large text mode without changing the default class",
   const { homeViewPatch } = loaded.mod;
   const { page } = loaded;
   const context = {
+    ...page,
     data: { ...page.data },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -336,6 +340,7 @@ test("home treats wechat-only accounts as logged in users without projects", asy
     },
   });
   const context = {
+    ...page,
     data: { ...page.data },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -393,6 +398,7 @@ test("home refreshes guidance mode from current project on load", async () => {
     },
   });
   const context = {
+    ...page,
     data: { ...page.data },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -434,6 +440,7 @@ test("home paints cached memoir data before the aggregate refresh completes", as
   };
   const refreshedSnapshot = {
     ...cachedSnapshot,
+    chapters: [], progress: null, growth_events: [], book_readable: false, book_char_count: 0, updated_at: "", unassigned_image_count: 0, unassigned_video_count: 0,
     server_revision: 3,
     identity: {
       ...cachedSnapshot.identity,
@@ -446,7 +453,7 @@ test("home paints cached memoir data before the aggregate refresh completes", as
   const writes = [];
   const { page } = loadHomePage({
     voiceApiExports: {
-      getMemoirHomeSnapshot: () => refresh.promise,
+      getMemoirStorySnapshot: () => refresh.promise,
     },
     cacheExports: {
       readCachedMemoirHome: () => ({
@@ -492,6 +499,7 @@ test("home shows explicit project creation state for logged-in users without pro
     },
   });
   const context = {
+    ...page,
     data: { ...page.data },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -984,21 +992,4 @@ test("home persists voice authorization checkbox changes", () => {
   assert.equal(savedValue, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
   assert.equal(context.data.error, "");
-});
-
-test("home shows a new readable draft after the earlier structure notification was read", async () => {
-  const { page } = loadHomePage({ voiceApiExports: {
-    listMemoirAutomationEvents: async () => ({ items: [
-      { id: "structure", event_type: "story_structure_updated", status: "completed", summary_text: "新增一章", metadata_json: { acknowledged_at: "2026-09-05T08:50:49Z" } },
-      { id: "draft", event_type: "chapter_draft_generated", status: "completed", summary_text: "新章节正文已更新", metadata_json: {}, created_at: "2026-09-05T08:51:31Z" },
-    ] }),
-  } });
-  const context = { ...page, homeVisible: true, data: { ...page.data, projectId: "project-1", userId: "user-1" },
-    setData(patch) { this.data = { ...this.data, ...patch }; } };
-  global.wx = {};
-  await context.refreshStoryGrowthNotice("project-1");
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(context.data.growthNoticeTitle, "章节正文已更新");
-  assert.equal(context.data.growthNoticeText, "新章节正文已更新");
-  context.onHide?.();
 });

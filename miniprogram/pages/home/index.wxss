@@ -1,5 +1,122 @@
 .home-page {
-  padding: 52rpx 30rpx 128rpx;
+  max-width: 980rpx;
+  margin: 0 auto;
+  padding: 28rpx 24rpx calc(52rpx + env(safe-area-inset-bottom));
+}
+
+.header-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12rpx;
+}
+
+.home-settings-button {
+  min-width: 100rpx;
+  min-height: 88rpx;
+  padding: 0 18rpx;
+  border-radius: 24rpx;
+  color: var(--ui-accent-strong);
+  background: var(--ui-surface);
+  font-size: 28rpx;
+  box-shadow: var(--ui-control-shadow);
+}
+
+.home-story {
+  margin-top: 40rpx;
+}
+
+.home-story-heading {
+  padding: 0 8rpx 22rpx;
+}
+
+.home-story-title {
+  color: var(--ui-text-secondary);
+  font-size: 28rpx;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.story-refresh-error,
+.story-loading,
+.home-story-progress,
+.home-growth-notice {
+  margin-bottom: 20rpx;
+}
+
+.story-loading {
+  color: var(--ui-text-secondary);
+  font-size: 28rpx;
+  padding: 20rpx;
+}
+
+.home-story-progress {
+  padding: 28rpx;
+}
+
+.home-story-progress-title,
+.home-story-progress-detail {
+  display: block;
+  line-height: 1.5;
+}
+
+.home-story-progress-title {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: var(--ui-text-primary);
+}
+
+.home-story-progress-detail {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  color: var(--ui-text-secondary);
+  white-space: pre-line;
+}
+
+.home-story-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.home-story-action {
+  min-height: 88rpx;
+  padding: 0 20rpx;
+  border-radius: 20rpx;
+  font-size: 26rpx;
+  color: var(--ui-accent-strong);
+  background: var(--ui-accent-surface);
+  box-shadow: var(--ui-control-shadow);
+}
+
+.home-growth-notice {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 24rpx;
+  border-radius: 24rpx;
+  background: var(--ui-accent-surface-subtle);
+}
+
+.home-growth-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.home-growth-notice .home-story-action {
+  flex: 0 0 auto;
+}
+
+.large-text .home-story-title,
+.large-text .home-story-progress-title {
+  font-size: 36rpx;
+}
+
+.large-text .home-story-progress-detail,
+.large-text .home-story-action,
+.large-text .home-settings-button {
+  font-size: 30rpx;
 }
 
 .header {

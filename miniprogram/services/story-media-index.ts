@@ -1,8 +1,8 @@
 import type {
   MemoirBookPlanChapter,
   MemoirImageAsset,
-} from "../../domain/memoir-book";
-import type { MemoirShareVideoCount } from "../../domain/memoir-snapshots";
+} from "../domain/memoir-book";
+import type { MemoirShareVideoCount } from "../domain/memoir-snapshots";
 
 export interface StoryVideoAsset {
   id: string;

@@ -41,7 +41,7 @@ import { formatBeijingDateTimeShort } from "../../services/time";
 import {
   buildStoryMediaIndex,
   type StoryVideoAsset,
-} from "../story/story-media-index";
+} from "../../services/story-media-index";
 
 interface ChapterOption {
   label: string;

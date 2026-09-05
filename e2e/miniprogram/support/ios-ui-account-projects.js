@@ -8,7 +8,7 @@ const {
   tapLargestNamedElement,
   tapLargestNamedElementCenter,
   tapLargestNamedElementAndWait,
-  verifyTab,
+  verifyPageEntry,
   waitForSource,
 } = require("./ios-ui-smoke");
 
@@ -107,9 +107,9 @@ async function tapScrollableNamedElement(client, name) {
 async function logoutAndLogin(client, config, artifacts, source) {
   let current = source;
   if (!current.includes("退出登录")) {
-    current = await verifyTab(
+    current = await verifyPageEntry(
       client,
-      "我的",
+      "设置",
       ["管理回忆录、语音工具和个人偏好", "退出登录"],
       artifacts,
     );
@@ -130,17 +130,17 @@ async function logoutAndLogin(client, config, artifacts, source) {
     "退出后的登录页",
   );
   current = await loginIfNeeded(client, config, artifacts, current);
-  if (!current.includes("首页")) {
-    throw new Error("真机重新登录后未显示主 Tab");
+  if (!current.includes("分享给家人")) {
+    throw new Error("真机重新登录后未显示首页");
   }
   artifacts.mark("ios-ui:reauthentication:complete");
   return current;
 }
 
 async function openProjects(client, artifacts) {
-  await verifyTab(
+  await verifyPageEntry(
     client,
-    "我的",
+    "设置",
     ["管理回忆录、语音工具和个人偏好", "管理回忆录"],
     artifacts,
   );
