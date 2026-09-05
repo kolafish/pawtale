@@ -6,11 +6,12 @@ import re
 import time
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import String, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 
 from app.application_errors import ResourceNotFoundError
-from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
+from app.models.memoir import MemoirChatMessage, MemoirVoiceSession, MemoirVoiceUtterance
 from app.models.memoir_retrieval import (
     MemoirMemoryActivationTrace,
     MemoirRetrievalEntry,
@@ -26,12 +27,14 @@ from app.services.memoir.hybrid_retrieval import (
     HybridRetrievalTrace,
     retrieve_hybrid_candidates,
 )
-from app.services.memoir.transcript_projection import current_utterance_text_and_source
+from app.services.memoir.transcript_projection import (
+    current_transcript_version_id, current_utterance_text_and_source, source_text_hash,
+)
 
 
 logger = logging.getLogger(__name__)
 
-MEMORY_ACTIVATION_PROMPT_VERSION = "memoir_memory_activation_v2"
+MEMORY_ACTIVATION_PROMPT_VERSION = "memoir_memory_activation_v3"
 SOURCE_EXCERPT_MAX_CHARS = 520
 ACTIVATION_CONTEXT_MAX_CHARS = 4_000
 MAX_MATCHED_INDEX_TEXTS = 4
@@ -48,6 +51,7 @@ class MemoryActivationCandidate:
     start_ms: int | None
     end_ms: int | None
     source_text_source: str
+    source_text_hash: str
     source_excerpt: str
     matched_index_texts: tuple[str, ...]
     fused_score: float
@@ -132,9 +136,11 @@ async def _prepare_candidates(
     utterance_ids = [candidate.utterance_id for candidate in hybrid.candidates]
     utterances = (
         await db.scalars(
-            select(MemoirVoiceUtterance).where(
-                MemoirVoiceUtterance.id.in_(utterance_ids)
-            )
+            select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(
+                MemoirVoiceUtterance.id.in_(utterance_ids),
+                MemoirVoiceSession.project_id == hybrid.project_id,
+            ).options(selectinload(MemoirVoiceUtterance.chat_message))
+            .execution_options(populate_existing=True)
         )
     ).all()
     utterance_by_id = {utterance.id: utterance for utterance in utterances}
@@ -209,11 +215,12 @@ async def _prepare_candidates(
             rank=candidate.rank,
             utterance_id=utterance.id,
             voice_session_id=utterance.voice_session_id,
-            transcript_version_id=candidate.representative_hit.transcript_version_id,
+            transcript_version_id=current_transcript_version_id(utterance),
             audio_file_id=utterance.audio_file_id,
             start_ms=utterance.start_ms,
             end_ms=utterance.end_ms,
             source_text_source=source,
+            source_text_hash=source_text_hash(current_utterance_text_and_source(utterance)[0]),
             source_excerpt=selected_excerpt_by_source[index],
             matched_index_texts=_matched_index_texts(candidate),
             fused_score=candidate.fused_score,
@@ -262,21 +269,43 @@ async def _persist_trace(
 async def _cached_result(
     db: AsyncSession,
     current_message_id: str,
+    *,
+    project_id: str,
+    current_narration: str,
+    excluded_utterance_ids: tuple[str, ...],
 ) -> MemoryActivationResult | None:
     trace = await db.scalar(
         select(MemoirMemoryActivationTrace)
         .where(
             MemoirMemoryActivationTrace.current_message_id == current_message_id,
+            MemoirMemoryActivationTrace.project_id == project_id,
             MemoirMemoryActivationTrace.prompt_version
             == MEMORY_ACTIVATION_PROMPT_VERSION,
-            MemoirMemoryActivationTrace.status.in_(("skipped", "succeeded")),
+            MemoirMemoryActivationTrace.status == "succeeded",
         )
         .order_by(MemoirMemoryActivationTrace.created_at.desc())
         .limit(1)
     )
-    if trace is None:
+    if trace is None or trace.trace_json.get("current_narration") != current_narration:
+        return None
+    if trace.trace_json.get("excluded_utterance_ids") != list(excluded_utterance_ids):
         return None
     activation = trace.trace_json.get("activation")
+    packages = activation.get("packages", []) if isinstance(activation, dict) else []
+    if not packages:
+        return None
+    sources = (await db.scalars(
+        select(MemoirVoiceUtterance).join(MemoirVoiceSession).where(
+            MemoirVoiceSession.project_id == project_id,
+            MemoirVoiceUtterance.id.in_([item["utterance_id"] for item in packages]),
+        ).options(selectinload(MemoirVoiceUtterance.chat_message))
+        .execution_options(populate_existing=True)
+    )).all()
+    actual = {item.id: (source_text_hash(current_utterance_text_and_source(item)[0]),
+                       current_transcript_version_id(item)) for item in sources}
+    if any(actual.get(item["utterance_id"]) != (item["source_text_hash"], item["transcript_version_id"])
+           for item in packages):
+        return None
     context = (
         activation.get("injected_context", "")
         if isinstance(activation, dict)
@@ -298,8 +327,17 @@ async def activate_memory_for_turn(
     voice_session_id: str,
     current_message: MemoirChatMessage,
     embedding_client: EmbeddingClient | None = None,
+    context_message_ids: tuple[str, ...] = (),
 ) -> MemoryActivationResult:
-    cached = await _cached_result(db, current_message.id)
+    current_narration = current_message.content_text.strip()
+    excluded_utterance_ids = tuple(sorted((await db.scalars(
+        select(MemoirVoiceUtterance.id).where(
+            MemoirVoiceUtterance.chat_message_id.in_((*context_message_ids, current_message.id))
+        )
+    )).all()))
+    cached = await _cached_result(db, current_message.id, project_id=project_id,
+                                  current_narration=current_narration,
+                                  excluded_utterance_ids=excluded_utterance_ids)
     if cached is not None:
         return cached
 
@@ -314,6 +352,7 @@ async def activate_memory_for_turn(
     )
     base_trace: dict[str, object] = {
         "current_narration": current_narration,
+        "excluded_utterance_ids": list(excluded_utterance_ids),
         "current_message_id": current_message.id,
         "current_utterance_id": current_utterance_id,
     }
@@ -321,7 +360,7 @@ async def activate_memory_for_turn(
         await db.scalar(
             select(func.count(MemoirRetrievalEntry.id)).where(
                 MemoirRetrievalEntry.project_id == project_id,
-                MemoirRetrievalEntry.voice_session_id != voice_session_id,
+                MemoirRetrievalEntry.utterance_id.not_in(excluded_utterance_ids),
             )
         )
         or 0
@@ -357,7 +396,7 @@ async def activate_memory_for_turn(
                 db,
                 project_id=project_id,
                 query_text=current_narration,
-                excluded_voice_session_id=voice_session_id,
+                excluded_utterance_ids=excluded_utterance_ids,
                 embedding_client=embedding_client,
             )
             if not hybrid.candidates:
@@ -576,3 +615,11 @@ async def get_memory_activation_trace(
     if trace is None:
         raise ResourceNotFoundError("记忆激活日志不存在")
     return trace
+
+
+async def delete_source_memory_traces(db: AsyncSession, *, project_id: str, utterance_id: str) -> None:
+    # Diagnostics also contain excerpts in retrieval hits and failed candidate preparation.
+    await db.execute(delete(MemoirMemoryActivationTrace).where(
+        MemoirMemoryActivationTrace.project_id == project_id,
+        MemoirMemoryActivationTrace.trace_json.cast(String).contains(utterance_id),
+    ).execution_options(synchronize_session=False))

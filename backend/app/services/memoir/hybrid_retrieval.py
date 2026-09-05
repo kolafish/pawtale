@@ -75,12 +75,14 @@ class _CandidateAccumulator:
     evidence: list[RetrievalHit]
 
 
-def _filters(project_id: str, excluded_voice_session_id: str | None) -> list:
+def _filters(project_id: str, excluded_voice_session_id: str | None, excluded_utterance_ids: tuple[str, ...]) -> list:
     filters = [MemoirRetrievalEntry.project_id == project_id]
     if excluded_voice_session_id:
         filters.append(
             MemoirRetrievalEntry.voice_session_id != excluded_voice_session_id
         )
+    if excluded_utterance_ids:
+        filters.append(MemoirRetrievalEntry.utterance_id.not_in(excluded_utterance_ids))
     return filters
 
 
@@ -115,6 +117,7 @@ async def _vector_hits(
     *,
     project_id: str,
     excluded_voice_session_id: str | None,
+    excluded_utterance_ids: tuple[str, ...],
     embedding: tuple[float, ...],
     embedding_model: str,
     limit: int,
@@ -126,7 +129,7 @@ async def _vector_hits(
             distance.label("distance"),
         )
         .where(
-            *_filters(project_id, excluded_voice_session_id),
+            *_filters(project_id, excluded_voice_session_id, excluded_utterance_ids),
             MemoirRetrievalEntry.embedding_model == embedding_model,
         )
         .distinct(MemoirRetrievalEntry.utterance_id)
@@ -170,6 +173,7 @@ async def _bm25_hits(
     *,
     project_id: str,
     excluded_voice_session_id: str | None,
+    excluded_utterance_ids: tuple[str, ...],
     query_text: str,
     limit: int,
 ) -> tuple[RetrievalHit, ...]:
@@ -181,7 +185,7 @@ async def _bm25_hits(
         )
         .where(
             MemoirRetrievalEntry.search_text.op("|||")(query_text),
-            *_filters(project_id, excluded_voice_session_id),
+            *_filters(project_id, excluded_voice_session_id, excluded_utterance_ids),
         )
         .distinct(MemoirRetrievalEntry.utterance_id)
         .order_by(
@@ -296,6 +300,7 @@ async def retrieve_hybrid_candidates(
     project_id: str,
     query_text: str,
     excluded_voice_session_id: str | None = None,
+    excluded_utterance_ids: tuple[str, ...] = (),
     vector_limit: int = DEFAULT_VECTOR_LIMIT,
     bm25_limit: int = DEFAULT_BM25_LIMIT,
     candidate_limit: int = DEFAULT_CANDIDATE_LIMIT,
@@ -321,6 +326,7 @@ async def retrieve_hybrid_candidates(
         db,
         project_id=project_id,
         excluded_voice_session_id=excluded_voice_session_id,
+        excluded_utterance_ids=excluded_utterance_ids,
         embedding=embedded.embeddings[0],
         embedding_model=embedded.resolved_model,
         limit=vector_limit,
@@ -332,6 +338,7 @@ async def retrieve_hybrid_candidates(
         db,
         project_id=project_id,
         excluded_voice_session_id=excluded_voice_session_id,
+        excluded_utterance_ids=excluded_utterance_ids,
         query_text=normalized_query,
         limit=bm25_limit,
     )

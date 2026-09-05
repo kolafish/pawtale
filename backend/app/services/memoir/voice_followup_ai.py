@@ -403,8 +403,12 @@ def _message_context(messages: list[MemoirChatMessage]) -> str:
     return "\n".join(lines)
 
 
+def recent_context_messages(messages: list[MemoirChatMessage]) -> list[MemoirChatMessage]:
+    return _ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]
+
+
 def _recent_context(messages: list[MemoirChatMessage]) -> str:
-    return _message_context(_ordered_messages(messages)[-MAX_CONTEXT_MESSAGES:]) or "暂无对话。"
+    return _message_context(recent_context_messages(messages)) or "暂无对话。"
 
 
 def _has_user_message(messages: list[MemoirChatMessage]) -> bool:

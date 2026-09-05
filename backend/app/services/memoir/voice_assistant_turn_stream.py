@@ -42,6 +42,7 @@ from app.services.memoir.voice_followup_ai import (
     _parse_interviewer_turn,
     _question_mark_count,
     _recent_context,
+    recent_context_messages,
     _requested_topic_hint,
     interviewer_persona_for_voice,
     strip_streaming_speaker_label_prefix,
@@ -381,6 +382,7 @@ class VoiceAssistantTurnStreamSession:
                     project_id=voice_session.project_id,
                     voice_session_id=voice_session.id,
                     current_message=current_user_message,
+                    context_message_ids=tuple(item.id for item in recent_context_messages(messages)),
                 )
                 activation_context = activation.context
                 artifacts.memory_activation_trace_id = activation.trace_id
