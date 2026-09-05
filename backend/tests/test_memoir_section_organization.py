@@ -1067,3 +1067,68 @@ async def test_section_update_rejects_stale_version(client, test_db):
         },
     )
     assert stale.status_code == 409
+
+
+@pytest.mark.parametrize("change", ["placement", "text", "section", "chapter", "chapter_existing", "delete_section"])
+async def test_story_growth_discards_decisions_changed_during_model_wait(
+    client, test_db, monkeypatch, change,
+):
+    from sqlalchemy import delete, update
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from app.models.memoir import MemoirBookPlanChapter, MemoirVoiceUtterance
+    from app.schemas.memoir_sections import MemoirSectionMaterialPlacementRequest
+    from app.services.memoir.sections import place_material
+
+    project_id, chapters, _, data = await _bootstrap_two_chapters(client, test_db)
+    source = await create_test_voice_transcript(client, test_db, "后来我们再去爬香山。", project_id=project_id)
+    session = await test_db.get(MemoirVoiceSession, source["session"]["id"])
+    session.status = "stopped"
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    target_id = data["sections"][0]["id"]
+    job = MemoirEditingJob(project_id=project_id, job_type="organize_material", status="running",
+                           run_after=datetime.now(), payload_json={"voice_session_id": session.id})
+    test_db.add(job)
+    await test_db.commit()
+    manual_section = None
+
+    async def decide(**kwargs):
+        nonlocal manual_section
+        async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+            if change == "placement":
+                placed = await place_material(other, user_id=user_id, project_id=project_id,
+                    utterance_id=source["utterance_id"],
+                    req=MemoirSectionMaterialPlacementRequest(
+                        target_chapter_id=chapters[0].id, new_section_title="用户指定的小节"))
+                manual_section = placed.section_id
+            elif change == "text":
+                await other.execute(update(MemoirVoiceUtterance).where(
+                    MemoirVoiceUtterance.id == source["utterance_id"]
+                ).values(transcript_edited="更正：那次其实是出差。"))
+            elif change == "section":
+                await other.execute(update(MemoirSection).where(MemoirSection.id == target_id)
+                                    .values(title="用户改过的小节", version=MemoirSection.version + 1))
+            elif change in {"chapter", "chapter_existing"}:
+                await other.execute(update(MemoirBookPlanChapter).where(MemoirBookPlanChapter.id == chapters[0].id)
+                                    .values(title="用户改过的章节"))
+            else:
+                await other.execute(delete(MemoirSection).where(MemoirSection.id == target_id))
+            await other.commit()
+        return [story_tree_growth.GrowthGroup(
+            utterance_ids=[source["utterance_id"]],
+            action="create_section" if change == "chapter" else "assign_existing",
+            chapter_id=chapters[0].id if change == "chapter" else None,
+            new_section_title="过时的新小节" if change == "chapter" else None,
+            section_id=None if change == "chapter" else target_id,
+        )]
+
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    material = await test_db.scalar(select(MemoirSectionMaterial).where(
+        MemoirSectionMaterial.utterance_id == source["utterance_id"]))
+    assert result.result_json["organized_utterance_ids"] == []
+    if change == "placement":
+        assert material.section_id == manual_section
+        assert material.assigned_by == "user"
+    else:
+        assert material is None
+    assert await test_db.scalar(select(MemoirSection.id).where(MemoirSection.title == "过时的新小节")) is None

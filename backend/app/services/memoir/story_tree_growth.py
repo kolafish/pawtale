@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 import json
 
+from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,7 +51,9 @@ from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import regenerate_chapter_sections
 from app.services.memoir.sections import place_material
-from app.services.memoir.transcript_projection import current_utterance_text
+from app.services.memoir.transcript_projection import (
+    current_transcript_version_id, current_utterance_text, source_text_hash,
+)
 
 
 SYSTEM_PROMPT = (
@@ -381,38 +384,58 @@ async def _place_groups(
     user_id: str,
     project_id: str,
     groups: list[GrowthGroup],
+    sources: dict[str, tuple[str, str | None]],
+    section_versions: dict[str, int],
+    section_chapters: dict[str, str],
+    chapter_updated_at: dict[str, datetime],
 ) -> list[str]:
     placed: list[str] = []
     for group in groups:
         if group.action == "leave_unassigned":
             continue
         target_section_id = group.section_id
-        for index, utterance_id in enumerate(group.utterance_ids):
+        for utterance_id in group.utterance_ids:
             if target_section_id:
                 request = MemoirSectionMaterialPlacementRequest(target_section_id=target_section_id)
-            elif group.action == "create_section" and index == 0:
+            elif group.action == "create_section":
                 request = MemoirSectionMaterialPlacementRequest(
                     target_chapter_id=group.chapter_id,
                     new_section_title=group.new_section_title,
                 )
-            elif group.action == "create_chapter" and index == 0:
+            elif group.action == "create_chapter":
                 request = MemoirSectionMaterialPlacementRequest(
                     new_chapter_title=group.new_chapter_title,
                     new_section_title=group.new_section_title,
                 )
             else:
                 raise RuntimeError("故事树生长结果缺少目标小节")
-            placement = await place_material(
-                db,
-                user_id=user_id,
-                project_id=project_id,
-                utterance_id=utterance_id,
-                req=request,
-                assigned_by=MemoirSectionMaterialAssignedBy.AI,
-                structure_updated_by=MemoirCreatedBy.AI,
-                assignment_reason=group.reason or "story_tree_growth",
-            )
+            try:
+                placement = await place_material(
+                    db,
+                    user_id=user_id,
+                    project_id=project_id,
+                    utterance_id=utterance_id,
+                    req=request,
+                    assigned_by=MemoirSectionMaterialAssignedBy.AI,
+                    structure_updated_by=MemoirCreatedBy.AI,
+                    assignment_reason=group.reason or "story_tree_growth",
+                    expected_source=sources[utterance_id],
+                    expected_section_version=section_versions.get(target_section_id),
+                    expected_chapter_updated_at=chapter_updated_at.get(
+                        section_chapters.get(target_section_id) or group.chapter_id
+                    ),
+                    commit=False,
+                )
+            except HTTPException as exc:
+                if exc.status_code not in {404, 409}:
+                    raise
+                continue
             target_section_id = placement.section_id
+            section_versions[target_section_id] = await db.scalar(
+                select(MemoirSection.version).where(MemoirSection.id == target_section_id)
+            )
+            section_chapters[target_section_id] = placement.chapter_id
+            await db.commit()
             placed.append(utterance_id)
     return placed
 
@@ -461,6 +484,11 @@ async def grow_story_tree(
         )
     elif utterances:
         ai_model = await load_project_ai_model(db, job.project_id, None)
+        sources = {item.id: (source_text_hash(current_utterance_text(item)), current_transcript_version_id(item))
+                   for item in utterances}
+        section_versions = {item.id: item.version for item in before_sections}
+        section_chapters = {item.id: item.chapter_id for item in before_sections}
+        chapter_updated_at = {item.id: item.updated_at for item in before_chapters}
         groups = await decide_story_growth(
             utterances=utterances,
             chapters=before_chapters,
@@ -472,6 +500,10 @@ async def grow_story_tree(
             user_id=project.user_id,
             project_id=job.project_id,
             groups=groups,
+            sources=sources,
+            section_versions=section_versions,
+            section_chapters=section_chapters,
+            chapter_updated_at=chapter_updated_at,
         )
     else:
         placed_ids = []

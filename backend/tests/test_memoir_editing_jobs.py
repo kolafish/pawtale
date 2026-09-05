@@ -305,7 +305,7 @@ async def test_provider_timeout_is_not_misclassified_as_job_deadline(test_db):
     assert "error_type" not in job.result_json
 
 
-async def test_run_editing_job_deadline_preserves_progress_and_fails_linked_event(test_db):
+async def test_run_editing_job_deadline_preserves_progress_and_fails_linked_event(test_db, monkeypatch):
     project = await _create_project(test_db)
     job = await enqueue_editing_job(
         test_db,
@@ -323,10 +323,12 @@ async def test_run_editing_job_deadline_preserves_progress_and_fails_linked_even
     test_db.add(event)
     await test_db.commit()
     handler_cancelled = asyncio.Event()
+    progress_saved = asyncio.Event()
 
     async def handler(db, current_job):
         current_job.result_json = {"completed_section_ids": ["section-1"]}
         await db.commit()
+        progress_saved.set()
         try:
             await asyncio.Event().wait()
         finally:
@@ -338,6 +340,12 @@ async def test_run_editing_job_deadline_preserves_progress_and_fails_linked_even
     )
     lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
 
+    async def deadline_after_checkpoint(tasks, *, timeout):
+        # Exercise cancellation after a real commit without assuming a 10 ms DB round trip.
+        await progress_saved.wait()
+        return set(), tasks
+
+    monkeypatch.setattr(asyncio, "wait", deadline_after_checkpoint)
     assert await run_editing_job(test_db, lease, timeout_seconds=0.01) is False
     assert handler_cancelled.is_set()
     await test_db.refresh(job)
