@@ -87,7 +87,7 @@ test("story keeps expansion while refreshing the same project", async () => {
   context.onHide();
 });
 
-test("story acknowledges and expands newly grown sections", async () => {
+test("story expands new sections but acknowledges only after explicit dismissal", async () => {
   const event = { id: "growth-1", project_id: "project-1", event_type: "story_structure_updated", status: "completed",
     summary_text: "新长出了一个小节", metadata_json: { new_chapter_ids: [], new_section_ids: ["section-2"] } };
   const { page, calls } = loadStoryPage({ current: snapshot({ automation_events: { items: [event] } }) });
@@ -96,6 +96,8 @@ test("story acknowledges and expands newly grown sections", async () => {
   await flushAsyncWork();
   assert.equal(context.data.chapters[1].expanded, true);
   assert.equal(context.data.chapters[1].sections[0].highlighted, true);
+  assert.deepEqual(calls.acknowledgedEventIds, []);
+  await context.dismissGrowthNotice();
   assert.deepEqual(calls.acknowledgedEventIds, ["growth-1"]);
   context.onHide();
 });

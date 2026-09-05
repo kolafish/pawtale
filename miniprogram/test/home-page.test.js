@@ -8,6 +8,7 @@ const {
   mockMemoirApiModules,
   loadPageModule,
   mockModule,
+  clearModule,
   unmockedAsync,
 } = require("./page-harness");
 const {
@@ -87,6 +88,7 @@ function loadHomePage({
     ...accessibilityExports,
   });
 
+  clearModule("../services/story-growth-notice.ts");
   return loadPageModule("../pages/home/index.ts");
 }
 
@@ -982,4 +984,21 @@ test("home persists voice authorization checkbox changes", () => {
   assert.equal(savedValue, true);
   assert.equal(context.data.voiceAuthorizationAgreed, true);
   assert.equal(context.data.error, "");
+});
+
+test("home shows a new readable draft after the earlier structure notification was read", async () => {
+  const { page } = loadHomePage({ voiceApiExports: {
+    listMemoirAutomationEvents: async () => ({ items: [
+      { id: "structure", event_type: "story_structure_updated", status: "completed", summary_text: "新增一章", metadata_json: { acknowledged_at: "2026-09-05T08:50:49Z" } },
+      { id: "draft", event_type: "chapter_draft_generated", status: "completed", summary_text: "新章节正文已更新", metadata_json: {}, created_at: "2026-09-05T08:51:31Z" },
+    ] }),
+  } });
+  const context = { ...page, homeVisible: true, data: { ...page.data, projectId: "project-1", userId: "user-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; } };
+  global.wx = {};
+  await context.refreshStoryGrowthNotice("project-1");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(context.data.growthNoticeTitle, "章节正文已更新");
+  assert.equal(context.data.growthNoticeText, "新章节正文已更新");
+  context.onHide?.();
 });

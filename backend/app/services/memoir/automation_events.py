@@ -268,14 +268,18 @@ async def list_automation_events(
     limit: int = 10,
     include_acknowledged: bool = False,
     voice_unannounced_only: bool = False,
+    completed_only: bool = False,
 ) -> MemoirAutomationEventListResponse:
     await load_memoir_project(db, project_id, user_id)
-    result = await db.execute(
+    statement = (
         select(MemoirAutomationEvent)
         .join(Project, MemoirAutomationEvent.project_id == Project.id)
         .where(Project.user_id == user_id, MemoirAutomationEvent.project_id == project_id)
         .order_by(MemoirAutomationEvent.created_at.desc(), MemoirAutomationEvent.id.desc())
     )
+    if completed_only:
+        statement = statement.where(MemoirAutomationEvent.status == MemoirAutomationEventStatus.COMPLETED.value)
+    result = await db.execute(statement)
     events = list(result.scalars().all())
     if not include_acknowledged:
         events = await _without_recovered_job_failures(db, events)

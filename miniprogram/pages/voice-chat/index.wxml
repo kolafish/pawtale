@@ -21,17 +21,17 @@
   </view>
 
   <view
-    wx:if="{{storyGrowthNoticeState !== 'hidden'}}"
-    class="story-growth-bubble {{storyGrowthNoticeState}}"
+    wx:if="{{progressNoticeTitle || storyGrowthNoticeState !== 'hidden'}}"
+    class="story-growth-bubble {{progressNoticeTitle ? 'ready' : storyGrowthNoticeState}}"
     aria-live="polite"
   >
     <view class="story-growth-mark" aria-hidden="true"></view>
     <view class="story-growth-copy">
-      <text class="story-growth-title">{{storyGrowthNoticeTitle}}</text>
-      <text class="story-growth-detail">{{storyGrowthNoticeDetail}}</text>
+      <text class="story-growth-title">{{progressNoticeTitle || storyGrowthNoticeTitle}}</text>
+      <text class="story-growth-detail">{{progressNoticeTitle ? progressNoticeDetail : storyGrowthNoticeDetail}}</text>
     </view>
-    <button class="story-growth-action" bindtap="handleStoryGrowthNoticeAction">
-      {{storyGrowthNoticeActionText}}
+    <button size="mini" class="story-growth-action" bindtap="handleStoryGrowthNoticeAction">
+      {{progressNoticeTitle ? '查看故事' : storyGrowthNoticeActionText}}
     </button>
   </view>
 

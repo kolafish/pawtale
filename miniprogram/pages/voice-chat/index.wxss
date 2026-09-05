@@ -120,8 +120,9 @@
 
 .story-growth-action {
   flex: 0 0 auto;
+  width: auto;
   min-width: 112rpx;
-  min-height: 72rpx;
+  min-height: 88rpx;
   margin: 0;
   padding: 0 18rpx;
   border: 0;
@@ -130,7 +131,17 @@
   color: var(--ui-section-title);
   font-size: 25rpx;
   font-weight: 700;
-  line-height: 72rpx;
+  line-height: 88rpx;
+}
+
+.large-text .story-growth-title {
+  font-size: 36rpx;
+  line-height: 1.45;
+}
+
+.large-text .story-growth-detail {
+  font-size: 30rpx;
+  line-height: 1.5;
 }
 
 .story-growth-action::after {

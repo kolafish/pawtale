@@ -13,6 +13,21 @@
 
   <view wx:if="{{error}}" class="error ui-error-banner">{{error}}</view>
 
+  <view
+    wx:if="{{growthNoticeText}}"
+    class="return-prompt ui-pressable"
+    bindtap="openStoryProgress"
+    aria-role="button"
+    aria-live="polite"
+    aria-label="{{growthNoticeTitle}}，查看故事"
+  >
+    <view class="return-prompt-copy">
+      <text class="return-prompt-title">{{growthNoticeTitle}}</text>
+      <text class="return-prompt-text">{{growthNoticeText}}</text>
+    </view>
+    <text class="narration-overview-action">查看 ›</text>
+  </view>
+
   <view wx:if="{{showLaunchPanel}}" class="launch-card">
     <view class="project-row">
       <text class="panel-label">{{launchEyebrow}}</text>

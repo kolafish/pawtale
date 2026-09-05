@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.domain.memoir.types import (
+    MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
@@ -42,6 +43,7 @@ from app.services.ai_timeouts import (
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_output_state import invalidate_book_output
+from app.services.memoir import automation_events
 from app.services.memoir.project_ai_preferences import (
     load_project_transcript_polish_level,
     text_polish_requirements,
@@ -1435,6 +1437,14 @@ async def _save_generated_draft(
         invalidate_book_output(output)
         db.add(output)
     await db.flush()
+    await automation_events.record_automation_event(
+        db,
+        project_id=project_id,
+        event_type=MemoirAutomationEventType.CHAPTER_DRAFT_GENERATED,
+        chapter_id=chapter_id,
+        summary_text=f"《{context.chapter_title}》正文已更新，可以阅读了。",
+        metadata_json={"draft_version_id": version.id},
+    )
     return draft, version
 
 

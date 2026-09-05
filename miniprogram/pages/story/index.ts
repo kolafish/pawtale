@@ -15,7 +15,8 @@ import {
 } from "../../services/navigation";
 import { definePage, pageRuntime } from "../../services/page-definition";
 import {
-  storyGrowthEvent,
+  storyProgressEvents,
+  storyProgressTitle,
   storyGrowthTargets,
   syncStoryTabRedDot,
 } from "../../services/story-growth-notice";
@@ -47,6 +48,9 @@ interface StoryPageData extends StoryViewData {
   needsLogin: boolean;
   projectId: string;
   growthNoticeText: string;
+  growthNoticeTitle: string;
+  growthEventIds: string[];
+  dismissingGrowth: boolean;
   progress: MemoirDraftProgress | null;
   bookReadable: boolean;
   retrying: boolean;
@@ -66,6 +70,9 @@ definePage<StoryPageData>()({
     needsLogin: false,
     projectId: "",
     growthNoticeText: "",
+    growthNoticeTitle: "",
+    growthEventIds: [],
+    dismissingGrowth: false,
     progress: null,
     bookReadable: false,
     retrying: false,
@@ -115,8 +122,9 @@ definePage<StoryPageData>()({
         (projectId === this.data.projectId ? this.data.chapters : []).map((chapter) => [chapter.id, chapter.expanded]),
       );
       const viewData = storyViewData(snapshot);
-      const growthEvent = storyGrowthEvent(snapshot.automation_events?.items || []);
-      const growthTargets = storyGrowthTargets(growthEvent);
+      const growthEvents = storyProgressEvents(snapshot.automation_events?.items || []);
+      const growthEvent = growthEvents[0];
+      const growthTargets = growthEvents.map(storyGrowthTargets);
       const restoredChapters = viewData.chapters.map((chapter) => (
         previousExpansion.has(chapter.id)
           ? { ...chapter, expanded: previousExpansion.get(chapter.id) || false }
@@ -126,24 +134,21 @@ definePage<StoryPageData>()({
         ...viewData,
         chapters: highlightStoryGrowth(
           restoredChapters,
-          growthTargets.chapterIds,
-          growthTargets.sectionIds,
+          growthTargets.flatMap((item) => item.chapterIds),
+          growthTargets.flatMap((item) => item.sectionIds),
         ),
         loading: false,
         needsLogin: false,
         projectId,
-        growthNoticeText: growthEvent?.summary_text || "",
+        growthNoticeText: growthEvents.map((event) => event.summary_text).join("\n"),
+        growthNoticeTitle: growthEvents.length > 1 ? `${growthEvents.length} 项书稿新进展` : growthEvent ? storyProgressTitle(growthEvent) : "",
+        growthEventIds: growthEvents.map((event) => event.id),
         progress: snapshot.progress,
         bookReadable: snapshot.book_readable,
         error: "",
       });
       this.scheduleProgressPolling();
-      syncStoryTabRedDot([]);
-      if (growthEvent) {
-        void acknowledgeMemoirAutomationEvent(projectId, growthEvent.id).catch((error) => {
-          console.warn("acknowledge story growth event failed", error);
-        });
-      }
+      syncStoryTabRedDot(growthEvents);
     } catch (error) {
       if (loadSequence !== this.loadSequence) {
         return;
@@ -172,6 +177,23 @@ definePage<StoryPageData>()({
   scheduleProgressPolling() {
     if (this.pageVisible && this.data.progress?.status === "processing") {
       this.progressTimer.schedule(() => { void this.loadStory(true); });
+    }
+  },
+
+  async dismissGrowthNotice() {
+    const projectId = this.data.projectId;
+    const eventIds = this.data.growthEventIds;
+    if (!projectId || !eventIds.length || this.data.dismissingGrowth) return;
+    this.setData({ dismissingGrowth: true });
+    try {
+      await Promise.all(eventIds.map((id) => acknowledgeMemoirAutomationEvent(projectId, id)));
+      if (this.pageVisible && this.data.projectId === projectId) await this.loadStory(true);
+    } catch (error) {
+      if (this.pageVisible && this.data.projectId === projectId) {
+        this.setData({ error: error instanceof Error ? error.message : "提醒确认失败，请重试" });
+      }
+    } finally {
+      this.setData({ dismissingGrowth: false });
     }
   },
 

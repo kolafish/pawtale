@@ -104,9 +104,10 @@ export function getMemoirVoiceProgress(projectId: string): Promise<MemoirVoicePr
 export function listMemoirAutomationEvents(
   projectId: string,
   limit = 10,
+  options: { completedOnly?: boolean } = {},
 ): Promise<MemoirAutomationEventListResponse> {
   return memoirRequest<MemoirAutomationEventListResponse>(
-    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events${queryString({ limit })}`,
+    `/api/mobile/memoir/projects/${encodeURIComponent(projectId)}/automation-events${queryString({ limit, completed_only: options.completedOnly || undefined })}`,
   );
 }
 
