@@ -1132,3 +1132,141 @@ async def test_story_growth_discards_decisions_changed_during_model_wait(
     else:
         assert material is None
     assert await test_db.scalar(select(MemoirSection.id).where(MemoirSection.title == "过时的新小节")) is None
+
+
+async def _stopped_growth_job(client, test_db, project_id, text):
+    source = await create_test_voice_transcript(client, test_db, text, project_id=project_id)
+    session = await test_db.get(MemoirVoiceSession, source["session"]["id"])
+    session.status = "stopped"
+    job = MemoirEditingJob(project_id=project_id, job_type="organize_material", status="running",
+                           run_after=datetime.now(), payload_json={"voice_session_id": session.id},
+                           dedupe_key=f"organize_session:{session.id}")
+    test_db.add(job)
+    await test_db.commit()
+    return source, job
+
+
+async def test_initial_story_resumes_only_unfinished_chapters(client, test_db, monkeypatch):
+    from app.services.memoir import book_plan_write_workflow as plans
+    from app.services.memoir.book_plan_ai import GeneratedBookPlan, chapters_from_payload
+
+    project_id = await ensure_mobile_memoir_project(client)
+    await _stopped_growth_job(client, test_db, project_id, "小时候我住在成都。")
+    _, job = await _stopped_growth_job(client, test_db, project_id, "后来我去北京工作。")
+    plan_calls = 0
+    section_calls = []
+
+    async def plan(**kwargs):
+        nonlocal plan_calls
+        plan_calls += 1
+        title, chapters = chapters_from_payload({"title": "我的故事", "chapters": [
+            {"title": "小时候", "source_indices": [1]}, {"title": "工作后", "source_indices": [2]},
+        ]}, sources=kwargs["sources"], max_chapters=8)
+        return GeneratedBookPlan(title=title, chapters=chapters, model="test", prompt="test")
+
+    async def sections(_db, **kwargs):
+        section_calls.append(kwargs["chapter_id"])
+        if len(section_calls) == 2:
+            raise RuntimeError("second chapter provider failure")
+
+    monkeypatch.setattr(plans, "_generate_book_plan_from_sources", plan)
+    monkeypatch.setattr(story_tree_growth, "regenerate_chapter_sections", sections)
+    with pytest.raises(RuntimeError, match="second chapter"):
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    await test_db.rollback()
+    await test_db.refresh(job)
+    progress = story_tree_growth._progress(job)
+    assert len(progress.initial_sections) == 2
+    assert progress.completed_initial_chapters == [section_calls[0]]
+    job.status = "failed"
+    await test_db.commit()
+    retried = await story_tree_growth.schedule_story_tree_growth(
+        test_db, project_id=project_id, voice_session_id=job.payload_json["voice_session_id"], source="retry",
+    )
+    assert retried.id == job.id
+    assert story_tree_growth._progress(retried).completed_initial_chapters == [section_calls[0]]
+    job.status = "running"
+    await test_db.commit()
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert result.status.value == "succeeded"
+    assert plan_calls == 1
+    assert section_calls == [section_calls[0], section_calls[1], section_calls[1]]
+    assert len(result.result_json["growth"]["completed_initial_chapters"]) == 2
+
+
+@pytest.mark.parametrize("reason", ["", "需要确认讲的是哪一段经历"])
+async def test_later_story_includes_omissions_but_preserves_explicit_pending_decisions(
+    client, test_db, monkeypatch, reason,
+):
+    project_id, _, _, data = await _bootstrap_two_chapters(client, test_db)
+    old, old_job = await _stopped_growth_job(client, test_db, project_id, "早年一次旅行。")
+    async def first(**kwargs):
+        return [story_tree_growth.GrowthGroup(utterance_ids=[old["utterance_id"]],
+                                            action="leave_unassigned", reason=reason)]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", first)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, old_job)
+    old_job.result_json = result.result_json
+    old_job.status = "succeeded"
+    await test_db.commit()
+    assert result.result_json["growth"]["deferred"][old["utterance_id"]]["reason"]
+    current, job = await _stopped_growth_job(client, test_db, project_id, "最近去香山的经历。")
+    seen = []
+    async def second(**kwargs):
+        seen.extend(item.id for item in kwargs["utterances"])
+        return [story_tree_growth.GrowthGroup(utterance_ids=list(seen), action="assign_existing",
+                                            section_id=data["sections"][0]["id"])]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", second)
+    await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert current["utterance_id"] in seen
+    assert (old["utterance_id"] in seen) == (not reason)
+
+
+async def test_story_assignment_resumes_saved_group_without_repeating_model_or_structure(
+    client, test_db, monkeypatch,
+):
+    from sqlalchemy import func
+
+    project_id, chapters, _, _ = await _bootstrap_two_chapters(client, test_db)
+    first, job = await _stopped_growth_job(client, test_db, project_id, "第一次去香山。")
+    second, _ = await _stopped_growth_job(client, test_db, project_id, "后来又去了香山。")
+    model_calls = 0
+    async def decide(**kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        return [story_tree_growth.GrowthGroup(utterance_ids=[first["utterance_id"], second["utterance_id"]],
+            action="create_section", chapter_id=chapters[0].id, new_section_title="香山往事")]
+    monkeypatch.setattr(story_tree_growth, "decide_story_growth", decide)
+    save = story_tree_growth._save_progress
+    async def interrupted(db, current_job, progress):
+        await save(db, current_job, progress)
+        if progress.placed_ids == [first["utterance_id"]]:
+            raise RuntimeError("worker stopped after persisted placement")
+    monkeypatch.setattr(story_tree_growth, "_save_progress", interrupted)
+    with pytest.raises(RuntimeError, match="worker stopped"):
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    await test_db.rollback()
+    await test_db.refresh(job)
+    monkeypatch.setattr(story_tree_growth, "_save_progress", save)
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert model_calls == 1
+    assert set(result.result_json["organized_utterance_ids"]) == {first["utterance_id"], second["utterance_id"]}
+    assert await test_db.scalar(select(func.count(MemoirSection.id)).where(MemoirSection.title == "香山往事")) == 1
+
+
+async def test_initial_story_does_not_treat_model_rejection_as_completed_structure(client, test_db, monkeypatch):
+    from fastapi import HTTPException
+    from app.schemas.memoir_sections import MemoirSectionVersionReference
+
+    project_id, chapters, _, data = await _bootstrap_two_chapters(client, test_db)
+    _, job = await _stopped_growth_job(client, test_db, project_id, "后来去香山。")
+    section = data["sections"][0]
+    job.result_json = {"growth": story_tree_growth.StoryGrowthProgress(initial_sections={
+        chapters[0].id: [MemoirSectionVersionReference(id=section["id"], version=section["version"])],
+    }).model_dump(mode="json")}
+    await test_db.commit()
+    async def rejected(*args, **kwargs):
+        raise HTTPException(status_code=409, detail="AI 未能为本章生成任何小节，请重试")
+    monkeypatch.setattr(story_tree_growth, "regenerate_chapter_sections", rejected)
+    with pytest.raises(HTTPException):
+        await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    assert story_tree_growth._progress(job).completed_initial_chapters == []

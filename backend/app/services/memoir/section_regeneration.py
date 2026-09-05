@@ -122,6 +122,10 @@ SECTION_REGENERATION_SYSTEM_PROMPT = (
 ProgressCallback = Callable[[dict[str, object]], Awaitable[None]]
 
 
+class SectionRegenerationConflict(HTTPException):
+    """The source snapshot changed while a section rewrite was pending."""
+
+
 class _SectionRegenerationCancelled(RuntimeError):
     pass
 
@@ -174,7 +178,7 @@ def _validate_expected_sections(
         for section in req.expected_sections
     }
     if current != expected:
-        raise HTTPException(status_code=409, detail="本章小节已经变化，请刷新后重试")
+        raise SectionRegenerationConflict(status_code=409, detail="本章小节已经变化，请刷新后重试")
 
 
 def _ordered_materials(
@@ -236,7 +240,7 @@ def _validate_material_snapshots(
     expected: list[_MaterialSnapshot],
 ) -> None:
     if current != expected:
-        raise HTTPException(status_code=409, detail="本章讲述已经变化，请刷新后重试")
+        raise SectionRegenerationConflict(status_code=409, detail="本章讲述已经变化，请刷新后重试")
 
 
 def _compact_excerpt(value: str, *, limit: int) -> str:
