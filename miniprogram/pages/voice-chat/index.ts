@@ -30,6 +30,7 @@ import {
 } from "../../services/memoir-voice-session-api";
 import { getMemoirDraftProgress } from "../../services/memoir-snapshot-api";
 import { PollingTimer } from "../../services/polling-timer";
+import { StoryProgressWatcher, storyProgressTitle } from "../../services/story-growth-notice";
 import { canAutoStartListeningAfterTTS } from "../../services/voice-chat-auto-listen";
 import {
   VoiceAssistantTTSProgressRuntime,
@@ -133,6 +134,7 @@ definePage<VoiceChatData>()({
   completionIssueRuntime: null as VoiceChatCompletionIssueRuntime | null,
   storyGrowthWatchToken: 0,
   storyGrowthTimer: pageRuntime(() => new PollingTimer(3000)),
+  progressNoticeWatcher: pageRuntime(() => new StoryProgressWatcher()),
 
   data: initialVoiceChatData(),
 
@@ -205,6 +207,7 @@ definePage<VoiceChatData>()({
   onShow() {
     const wasSuspended = this.pageSuspended;
     this.pageSuspended = false;
+    this.startProgressNoticeWatch();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     if (wasSuspended && this.data.storyGrowthNoticeState === "pending") {
@@ -250,6 +253,7 @@ definePage<VoiceChatData>()({
     this.noAnswerPromptRequestSerial += 1;
     this.noAnswerPromptInFlight = false;
     this.stopStoryGrowthWatch();
+    this.progressNoticeWatcher.stop();
     this.persistCurrentTranscriptSnapshot();
     this.persistPendingVoiceClose(reason);
     this.cancelFollowUpTTS(reason === "hide" ? "page_hidden" : "page_unloaded");
@@ -308,6 +312,19 @@ definePage<VoiceChatData>()({
 
   handleStoryGrowthNoticeAction() {
     wx.switchTab({ url: "/pages/story/index" });
+  },
+
+  startProgressNoticeWatch() {
+    const projectId = this.data.projectId;
+    if (this.pageSuspended || !projectId || this.progressNoticeWatcher.projectId === projectId) return;
+    this.progressNoticeWatcher.start(projectId, (events) => {
+      if (this.pageSuspended || this.data.projectId !== projectId) return;
+      const event = events[0];
+      applyVoiceChatDataPatch(this, {
+        progressNoticeTitle: event ? storyProgressTitle(event) : "",
+        progressNoticeDetail: event?.summary_text || "",
+      });
+    });
   },
 
   refreshVoiceAuthorizationConsent() {
@@ -498,7 +515,11 @@ definePage<VoiceChatData>()({
   },
 
   applyVoiceSessionDetail(detail: MemoirVoiceSessionDetail) {
+    if (detail.session.project_id !== this.data.projectId) {
+      applyVoiceChatDataPatch(this, { progressNoticeTitle: "", progressNoticeDetail: "" });
+    }
     applyVoiceChatDataPatch(this, voiceSessionDetailPatch(detail, this.data));
+    this.startProgressNoticeWatch();
   },
 
   async refreshCompletionIssue(silent = false) {

@@ -112,6 +112,8 @@ export interface VoiceChatData {
   storyGrowthNoticeTitle: string;
   storyGrowthNoticeDetail: string;
   storyGrowthNoticeActionText: string;
+  progressNoticeTitle: string;
+  progressNoticeDetail: string;
   topModeLabel: string;
   topSubtitle: string;
   topicTitleText: string;
@@ -264,6 +266,8 @@ export function initialVoiceChatData(): VoiceChatData {
     storyGrowthNoticeTitle: "",
     storyGrowthNoticeDetail: "",
     storyGrowthNoticeActionText: "",
+    progressNoticeTitle: "",
+    progressNoticeDetail: "",
     topModeLabel: "AI 访谈",
     topSubtitle: "小余陪您慢慢讲",
     topicTitleText: "这段回忆",

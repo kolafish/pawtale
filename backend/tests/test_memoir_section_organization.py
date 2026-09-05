@@ -13,6 +13,8 @@ from app.models.memoir import (
     MemoirSection,
     MemoirSectionMaterial,
     MemoirVoiceSession,
+    MemoirVoiceUtterance,
+    MemoirTranscriptVersion,
 )
 from app.services.memoir import chapter_generation, section_regeneration, story_tree_growth
 from app.services.memoir.narrative import book_completion
@@ -590,6 +592,32 @@ async def test_story_tree_growth_groups_session_materials_into_new_section(
     assert fake.calls == 1
     assert "create_section" in fake.prompts[0]
     assert chapters[0].id not in fake.prompts[0]
+
+    acknowledged = await client.post(
+        f"/api/mobile/memoir/projects/{project_id}/automation-events/{event.id}/acknowledge"
+    )
+    assert acknowledged.status_code == 200
+    later = await create_test_voice_transcript(client, test_db, "后来同一年我们又去爬了黄山。", project_id=project_id)
+    utterance = await test_db.get(MemoirVoiceUtterance, later["utterance_id"])
+    message = await test_db.get(MemoirChatMessage, later["message_id"])
+    transcript = await test_db.get(MemoirTranscriptVersion, later["transcript_version_id"])
+    utterance.voice_session_id = message.voice_session_id = transcript.voice_session_id = session.id
+    message.turn_index = 2
+    session.status = "listening"
+    job.result_json = result.result_json
+    fake.payload["groups"][0]["new_section_title"] = "后来一起爬黄山"
+    await test_db.commit()
+    result = await story_tree_growth.run_story_tree_growth_job(test_db, job)
+    events = (await test_db.scalars(select(MemoirAutomationEvent).where(
+        MemoirAutomationEvent.project_id == project_id,
+        MemoirAutomationEvent.event_type == "story_structure_updated",
+    ))).all()
+    assert len(events) == 2
+    fresh = next(item for item in events if item.id != event.id)
+    assert not fresh.metadata_json.get("acknowledged_at")
+    assert fresh.metadata_json["voice_session_id"] == session.id
+    assert fresh.metadata_json["new_section_ids"] == result.result_json["new_section_ids"]
+    assert fresh.utterance_ids_json == [later["utterance_id"]]
 
 
 async def test_section_regeneration_job_reports_progress_and_deduplicates(

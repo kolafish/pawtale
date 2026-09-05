@@ -68,6 +68,7 @@ function loadVoiceChatPage({
     stopMemoirVoiceSession: unmockedAsync("stopMemoirVoiceSession"),
     ...voiceApiExports,
   });
+  clearModule("../services/story-growth-notice.ts");
   clearModule("../pages/voice-chat/voice-chat-completion-issue-runtime.ts");
   clearModule("../services/audio-playback.ts");
   mockModule("../services/tts-text-progress.ts", {
@@ -3211,4 +3212,17 @@ test("voice progress continues beyond the former 48 polls and terminates on no c
   assert.equal(calls, 51);
   assert.equal(context.data.storyGrowthNoticeState, "no_change");
   assert.equal(context.storyGrowthTimer.pending, false);
+});
+
+test("voice page starts progress notifications for an active session before finish is pressed", async () => {
+  const page = loadVoiceChatPage({ voiceApiExports: {
+    listMemoirAutomationEvents: async () => ({ items: [{ id: "growth-1", event_type: "story_structure_updated", status: "completed", summary_text: "故事树新长出了1个新章节", metadata_json: {} }] }),
+  } });
+  const context = { ...page, data: { ...page.data, voiceSessionId: "voice-1" },
+    setData(patch) { this.data = { ...this.data, ...patch }; } };
+  context.applyVoiceSessionDetail({ session: { id: "voice-1", project_id: "project-1", status: "listening", guidance_mode: "free_narration" }, messages: [], utterances: [] });
+  await flushAsyncWork();
+  assert.equal(context.data.progressNoticeDetail, "故事树新长出了1个新章节");
+  assert.notEqual(context.data.status, "closed");
+  context.progressNoticeWatcher?.stop();
 });

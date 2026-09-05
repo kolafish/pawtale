@@ -37,9 +37,10 @@
     <view wx:if="{{growthNoticeText}}" class="growth-notice" aria-live="polite">
       <view class="growth-notice-mark" aria-hidden="true"></view>
       <view class="growth-notice-copy">
-        <text class="growth-notice-title">故事树长出了新内容</text>
+        <text class="growth-notice-title">{{growthNoticeTitle}}</text>
         <text class="growth-notice-detail">{{growthNoticeText}}</text>
       </view>
+      <button class="growth-notice-dismiss story-secondary-action ui-button" bindtap="dismissGrowthNotice" loading="{{dismissingGrowth}}" disabled="{{dismissingGrowth}}">知道了</button>
     </view>
     <view
       class="memoir-card ui-card ui-card-borderless ui-card-raised ui-pressable"

@@ -34,6 +34,24 @@
 
 .growth-notice-copy {
   min-width: 0;
+  flex: 1;
+}
+
+.growth-notice-dismiss {
+  flex: 0 0 auto;
+  min-height: 88rpx;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+}
+
+.large-text .growth-notice-title {
+  font-size: 36rpx;
+  line-height: 1.45;
+}
+
+.large-text .growth-notice-detail {
+  font-size: 30rpx;
+  line-height: 1.5;
 }
 
 .growth-notice-title,

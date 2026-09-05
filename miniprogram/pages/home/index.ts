@@ -5,7 +5,7 @@ import type {
 } from "../../domain/memoir-voice-session";
 import type { MemoirVoiceTranscriptItem } from "../../domain/memoir-transcript";
 import type { MemoirHomeSnapshot } from "../../domain/memoir-snapshots";
-import { definePage } from "../../services/page-definition";
+import { definePage, pageRuntime } from "../../services/page-definition";
 import { trackAuditAction } from "../../services/audit-tracker";
 import {
   memoirHomePrompt,
@@ -14,7 +14,6 @@ import {
 import { readLargeTextEnabled } from "../../services/accessibility-settings";
 import {
   createMemoirVoiceSession,
-  listMemoirAutomationEvents,
 } from "../../services/memoir-voice-session-api";
 import { getMemoirHomeSnapshot } from "../../services/memoir-snapshot-api";
 import {
@@ -50,7 +49,7 @@ import {
   writeCachedMemoirHome,
 } from "../../stores/memoir-read-cache";
 import { userDisplayName } from "../../services/user-display-name";
-import { syncStoryTabRedDot } from "../../services/story-growth-notice";
+import { StoryProgressWatcher, storyProgressTitle, syncStoryTabRedDot } from "../../services/story-growth-notice";
 
 const VOICE_AUTHORIZATION_VALUE = "voice_authorization";
 const RESUME_HINT_CHAR_LIMIT = 28;
@@ -104,6 +103,8 @@ interface HomeData {
   showVoiceAuthorizationPanel: boolean;
   largeTextEnabled: boolean;
   homePageClass: string;
+  growthNoticeTitle: string;
+  growthNoticeText: string;
 }
 
 interface CheckboxChangeEvent {
@@ -330,6 +331,8 @@ function applyHomeSnapshotData(
     userId: identity.id,
     displayName: userDisplayName(identity.display_name, identity.email),
     projectId: identity.active_project_id,
+    ...(identity.active_project_id !== context.data.projectId || identity.id !== context.data.userId
+      ? { growthNoticeTitle: "", growthNoticeText: "" } : {}),
     projectTitle: identity.active_project?.title || "还没有回忆录",
     projectDisplayTitle,
     projectPromptText: memoirHomePrompt(identity.active_project?.title || ""),
@@ -345,6 +348,8 @@ function applyHomeSnapshotData(
 
 definePage<HomeData>()({
   homeLoadSequence: 0,
+  homeVisible: false,
+  progressNoticeWatcher: pageRuntime(() => new StoryProgressWatcher()),
 
   data: {
     loading: false,
@@ -393,15 +398,28 @@ definePage<HomeData>()({
     showVoiceAuthorizationPanel: false,
     largeTextEnabled: false,
     homePageClass: "home-page",
+    growthNoticeTitle: "",
+    growthNoticeText: "",
   },
 
   async onShow() {
+    this.homeVisible = true;
+    this.progressNoticeWatcher.stop();
     enableMiniProgramShareMenu();
     this.refreshAccessibilitySettings();
     this.refreshVoiceAuthorizationConsent();
     if (!this.data.loading) {
       await this.loadHome();
     }
+  },
+
+  onHide() {
+    this.homeVisible = false;
+    this.progressNoticeWatcher.stop();
+  },
+
+  onUnload() {
+    this.onHide();
   },
 
   onShareAppMessage() {
@@ -460,6 +478,7 @@ definePage<HomeData>()({
       if (snapshot.identity.active_project?.id) {
         void this.refreshStoryGrowthNotice(snapshot.identity.active_project.id);
       } else {
+        this.progressNoticeWatcher.stop();
         syncStoryTabRedDot([]);
       }
     } catch (error) {
@@ -467,8 +486,11 @@ definePage<HomeData>()({
         return;
       }
       if (isAuthError(error)) {
+        this.progressNoticeWatcher.stop();
         syncStoryTabRedDot([]);
         setHomeData(this, {
+          growthNoticeTitle: "",
+          growthNoticeText: "",
           needsLogin: true,
           userId: "",
           displayName: "作者",
@@ -499,15 +521,22 @@ definePage<HomeData>()({
     }
   },
 
-  async refreshStoryGrowthNotice(projectId: string) {
-    try {
-      const response = await listMemoirAutomationEvents(projectId, 8);
-      if (this.data.projectId === projectId) {
-        syncStoryTabRedDot(response.items);
-      }
-    } catch (error) {
-      console.warn("refresh story growth notice failed", error);
-    }
+  refreshStoryGrowthNotice(projectId: string) {
+    if (!this.homeVisible) return;
+    const userId = this.data.userId;
+    this.progressNoticeWatcher.start(projectId, (events) => {
+      if (!this.homeVisible || this.data.projectId !== projectId || this.data.userId !== userId) return;
+      const event = events[0];
+      setHomeData(this, {
+        growthNoticeTitle: event ? storyProgressTitle(event) : "",
+        growthNoticeText: event?.summary_text || "",
+      });
+      syncStoryTabRedDot(events);
+    });
+  },
+
+  openStoryProgress() {
+    wx.switchTab({ url: "/pages/story/index" });
   },
 
   changeVoiceAuthorization(event: CheckboxChangeEvent) {

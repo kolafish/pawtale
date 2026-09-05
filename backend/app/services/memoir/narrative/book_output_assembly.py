@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
+    MemoirAutomationEventType,
     MemoirBookPlanStatus,
     MemoirCompletionIssueChannel,
     MemoirCompletionIssueStatus,
@@ -21,6 +22,7 @@ from app.models.memoir import (
 from app.models.projects import Project
 from app.schemas.memoir_book import MemoirBookAssemblyResponse
 from app.services.memoir import (
+    automation_events,
     book_editorial_actions,
     book_output_versions,
     book_review_answer_state,
@@ -213,6 +215,14 @@ async def assemble_book_output(
         manuscript_json=manuscript.model_dump(mode="json") if manuscript else {},
         created_by=MemoirCreatedBy.SYSTEM,
     )
+    if chapter_snapshots:
+        await automation_events.record_automation_event(
+            db,
+            project_id=project_id,
+            event_type=MemoirAutomationEventType.BOOK_OUTPUT_GENERATED,
+            summary_text=f"书稿已更新，已有 {len(chapter_snapshots)} 章可阅读。",
+            metadata_json={"output_version_id": version.id, "chapter_count": len(chapter_snapshots)},
+        )
     return MemoirBookAssemblyResponse(
         project_id=project_id,
         output_id=output.id,

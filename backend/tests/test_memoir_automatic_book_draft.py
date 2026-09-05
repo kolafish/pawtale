@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.clock import utcnow_naive
-from app.models.memoir import MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
+from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
 from app.services.memoir import automatic_book_draft, chapter_generation
 from app.services.memoir.editing_job_handlers import register_memoir_editing_job_handlers
 from app.services.memoir.editing_jobs import clear_editing_job_handlers
@@ -53,11 +53,24 @@ async def test_backend_alone_creates_chapter_and_reuses_same_input(client, test_
         test_db, project_id=project_id, chapter_id=chapter_id
     )
     assert latest and "朋友" in latest.content
+    events = list((await test_db.scalars(select(MemoirAutomationEvent).where(
+        MemoirAutomationEvent.project_id == project_id,
+    ))).all())
+    assert {event.event_type for event in events} == {"chapter_draft_generated", "book_output_generated"}
+    assert all(event.status == "completed" for event in events)
+    chapter_event = next(event for event in events if event.event_type == "chapter_draft_generated")
+    assert chapter_event.chapter_id == chapter_id
+    assert chapter_event.metadata_json["draft_version_id"] == latest.id
+    event_ids = {event.id for event in events}
+    chapter_event.metadata_json = {**chapter_event.metadata_json, "acknowledged_at": "2026-09-05T08:50:49Z"}
     calls = len(fake.prompts)
     await automatic_book_draft.schedule_book_draft(test_db, project_id=project_id)
     await test_db.commit()
     assert await run_test_editing_job(test_db, parent_id)
     assert len(fake.prompts) == calls
+    assert set((await test_db.scalars(select(MemoirAutomationEvent.id).where(
+        MemoirAutomationEvent.project_id == project_id,
+    ))).all()) == event_ids
     assert parent.result_json["stage"] == "ready"
     output = await client.get(f"/api/mobile/memoir/projects/{project_id}/book-output")
     assert output.status_code == 200

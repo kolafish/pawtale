@@ -54,6 +54,7 @@ from app.services.memoir.material_roles import is_ready_story_material
 from app.services.memoir.project_ai_preferences import load_project_ai_model
 from app.services.memoir.section_regeneration import SectionRegenerationConflict, regenerate_chapter_sections
 from app.services.memoir.sections import place_material
+from app.services.memoir.semantic_state import semantic_json_signature
 from app.services.memoir.transcript_projection import (
     current_transcript_version_id,
     current_utterance_text,
@@ -621,7 +622,6 @@ async def grow_story_tree(
         progress.batch = None
     placed_ids = list(dict.fromkeys(progress.placed_ids))
     progress.placed_ids = []
-    await _save_progress(db, job, progress)
 
     _after_plan, after_chapters, after_sections = await _load_tree(
         db,
@@ -641,7 +641,11 @@ async def grow_story_tree(
             project_id=job.project_id,
             event_type=MemoirAutomationEventType.STORY_STRUCTURE_UPDATED,
             summary_text=summary,
-            event_signature=f"story_tree_growth:{session.id}",
+            event_signature=f"story_tree_growth:{session.id}:" + semantic_json_signature({
+                "chapter_ids": sorted(new_chapter_ids),
+                "section_ids": sorted(new_section_ids),
+                "utterance_ids": sorted(placed_ids),
+            }),
             utterance_ids=placed_ids,
             editing_job_id=job.id,
             metadata_json={
@@ -652,6 +656,7 @@ async def grow_story_tree(
                 "organized_utterance_count": len(placed_ids),
             },
         )
+    await _save_progress(db, job, progress)
     return EditingJobResult(
         result_json={
             "voice_session_id": session.id,
