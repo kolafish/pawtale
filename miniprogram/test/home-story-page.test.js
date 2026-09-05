@@ -51,6 +51,8 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
 test("story maps server counts and distinguishes pending from user decisions", () => {
   const view = storyViewData(snapshot());
   assert.equal(view.memoir.progressDetail, "阅读草稿");
+  assert.deepEqual(view.chapters.map(chapter => chapter.ordinal), [1, 2]);
+  assert.equal(view.chapters[0].hasSections, true);
   assert.equal(view.overview.summaryText, "2 章 · 2 小节 · 5 段讲述");
   assert.match(view.unassignedMaterialDetail, /1 段需要您补充或确认/);
   assert.equal(view.chapters[0].readable, true);
@@ -65,6 +67,8 @@ test("story distinguishes empty and fully assigned material", () => {
   const empty = storyViewData(snapshot({ chapters: [], book_readable: false, progress: null }));
   assert.equal(empty.unassignedMaterialText, "还没有讲述");
   assert.equal(empty.memoir.progressValue, "尚未生成");
+  const noSections = storyViewData(snapshot({chapters:[{...snapshot().chapters[0], sections:[]}]}));
+  assert.equal(noSections.chapters[0].hasSections, false);
   const assigned = storyViewData(snapshot({ progress: progress({ pending_material_count: 0, needs_user_material_count: 0 }) }));
   assert.equal(assigned.unassignedMaterialText, "所有讲述都已归入故事");
 });
