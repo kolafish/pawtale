@@ -1,41 +1,115 @@
 import type { MemoirDraftProgress, MemoirStoryGrowthEvent, MemoirStorySnapshot } from "../../domain/memoir-snapshots";
 import { storyViewData } from "../../components/story-tree/story-view-adapter";
-import { emptyStoryViewData, highlightStoryGrowth, type StoryViewData } from "../../components/story-tree/story-view-data";
+import { emptyStoryViewData, type StoryViewData } from "../../components/story-tree/story-view-data";
+
+export interface StoryGrowthTarget { chapterId: string; sectionId?: string }
 
 export interface HomeStoryData {
   story: StoryViewData;
   storyLoaded: boolean;
+  hasStories: boolean;
   storyError: string;
   progress: MemoirDraftProgress | null;
   bookReadable: boolean;
   growthEvents: MemoirStoryGrowthEvent[];
   growthNoticeTitle: string;
   growthNoticeText: string;
+  growthTarget: StoryGrowthTarget | null;
+  narrationSaved: boolean;
   dismissingGrowth: boolean;
   retryingDraft: boolean;
 }
 
+/** Viewing a snapshot never acknowledges server events. Initial content stays still. */
+export class HomeGrowthTracker {
+  private scope = "";
+  private seen = new Set<string>();
+
+  observe(userId: string, projectId: string, events: MemoirStoryGrowthEvent[]): Set<string> {
+    const scope = `${userId}/${projectId}`;
+    const firstSnapshot = this.scope !== scope;
+    if (firstSnapshot) { this.scope = scope; this.seen.clear(); }
+    const fresh = new Set<string>();
+    for (const event of events) {
+      if (!firstSnapshot && !this.seen.has(event.event_id)) fresh.add(event.event_id);
+      this.seen.add(event.event_id);
+    }
+    return fresh;
+  }
+
+  reset(): void { this.scope = ""; this.seen.clear(); }
+}
+
 export function emptyHomeStoryData(): HomeStoryData {
   return {
-    story: emptyStoryViewData(), storyLoaded: false, storyError: "", progress: null,
+    story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
     bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
-    dismissingGrowth: false, retryingDraft: false,
+    growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
   };
 }
 
-export function homeStorySnapshotData(snapshot: MemoirStorySnapshot, previous: StoryViewData): Partial<HomeStoryData> {
+export function homeStorySnapshotData(
+  snapshot: MemoirStorySnapshot,
+  previous: StoryViewData,
+  freshEventIds: Set<string> = new Set(),
+): Partial<HomeStoryData> {
   const story = storyViewData(snapshot);
   const expanded = new Map(previous.chapters.map((chapter) => [chapter.id, chapter.expanded]));
-  const changes = snapshot.growth_events.flatMap((event) => event.changes);
-  story.chapters = highlightStoryGrowth(
-    story.chapters.map((chapter) => ({ ...chapter, expanded: expanded.get(chapter.id) ?? chapter.expanded })),
-    changes.flatMap((change) => change.kind === "chapter_added" || change.kind === "chapter_updated" ? [change.chapter_id] : []),
-    changes.flatMap((change) => "section_id" in change ? [change.section_id] : []),
-  );
+  const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
+  const newChapters = new Set<string>(), newSections = new Set<string>();
+  const updatedChapters = new Set<string>(), updatedSections = new Set<string>();
+  const sectionParents = new Set<string>();
+  let bookUpdated = false;
+  let growthTarget: StoryGrowthTarget | null = null;
+  for (const event of snapshot.growth_events) {
+    for (const change of event.changes) {
+      if (change.kind === "book_updated") { bookUpdated = true; continue; }
+      const chapter = chapters.get(change.chapter_id);
+      if (!chapter) continue;
+      const added = change.kind === "chapter_added" || change.kind === "section_added";
+      if ("section_id" in change) {
+        const section = chapter.sections.find(item => item.id === change.section_id);
+        if (!section) continue;
+        (added ? newSections : updatedSections).add(section.id);
+        sectionParents.add(chapter.id);
+        section.growthLabel = added || section.growthLabel === "新长出" ? "新长出" : "已补充";
+        section.highlighted = true;
+        section.growthAnimating ||= freshEventIds.has(event.event_id);
+        growthTarget ||= { chapterId: chapter.id, sectionId: section.id };
+      } else {
+        (added ? newChapters : updatedChapters).add(chapter.id);
+        chapter.growthLabel = added || chapter.growthLabel === "新长出" ? "新长出" : "已更新";
+        chapter.growthAnimating ||= freshEventIds.has(event.event_id);
+        growthTarget ||= { chapterId: chapter.id };
+      }
+      chapter.highlighted = true;
+    }
+  }
+  // A repeated snapshot must not reopen a chapter the reader has collapsed.
+  for (const chapter of story.chapters) {
+    chapter.expanded = expanded.get(chapter.id) ?? chapter.expanded;
+    if (chapter.highlighted && !chapter.growthLabel) chapter.growthLabel = "有更新";
+  }
+  const addedCount = newChapters.size + newSections.size;
+  const updatedCount = [...updatedSections].filter(id => !newSections.has(id)).length
+    + [...updatedChapters].filter(id => !newChapters.has(id) && !sectionParents.has(id)).length;
+  const summary = [
+    newChapters.size ? `新长出 ${newChapters.size} 章` : "",
+    newSections.size ? `新长出 ${newSections.size} 个小节` : "",
+    updatedCount ? `补充了 ${updatedCount} 个已有故事` : "",
+    bookUpdated ? "书稿已更新" : "",
+  ].filter(Boolean).join("，");
   return {
-    story, storyLoaded: true, storyError: "", progress: snapshot.progress,
-    bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events,
-    growthNoticeTitle: "故事有了新进展",
-    growthNoticeText: snapshot.growth_events.map((event) => event.summary_text).join("\n"),
+    story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
+    bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
+    growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",
+    growthNoticeText: summary || snapshot.growth_events.map(event => event.summary_text).join("\n"),
   };
+}
+
+export function clearStoryGrowthAnimation(story: StoryViewData): StoryViewData {
+  return { ...story, chapters: story.chapters.map(chapter => ({
+    ...chapter, growthAnimating: false,
+    sections: chapter.sections.map(section => ({ ...section, growthAnimating: false })),
+  })) };
 }

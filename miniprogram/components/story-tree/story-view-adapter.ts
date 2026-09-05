@@ -19,6 +19,8 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
     state: chapter.state,
     expanded: index === 0,
     highlighted: false,
+    growthLabel: "",
+    growthAnimating: false,
     sections: chapter.sections.map((section) => ({
       id: section.id,
       title: section.title || "未命名小节",
@@ -26,6 +28,8 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       imageCount: section.image_count,
       videoCount: section.video_count,
       highlighted: false,
+      growthLabel: "",
+      growthAnimating: false,
     })),
   }));
   const count = snapshot.book_char_count || snapshot.chapters.reduce((total, chapter) => total + chapter.char_count, 0);

@@ -11,3 +11,9 @@ export interface StoryTreeMediaEvent {
     chapterId: string;
   };
 }
+
+export interface StoryTreeHandle {
+  focusGrowth(chapterId: string, sectionId?: string): void;
+}
+
+export interface StoryTreeFocusEvent { detail: { top: number } }

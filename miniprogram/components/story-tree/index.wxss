@@ -711,3 +711,24 @@
   min-height: 88rpx;
   margin: 0;
 }
+
+.growth-label {
+  display: inline-block;
+  margin-top: 10rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 10rpx;
+  color: #846138;
+  background: #f3ead6;
+  font-size: 22rpx;
+  line-height: 1.5;
+}
+
+.growth-arriving { animation: story-growth-arrive 650ms ease-out; }
+@keyframes story-growth-arrive {
+  from { opacity: 0.55; transform: translateY(8rpx); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .growth-arriving { animation: none; }
+}
+.large-text .growth-label { font-size: 28rpx; }

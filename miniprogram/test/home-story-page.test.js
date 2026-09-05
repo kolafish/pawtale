@@ -23,7 +23,7 @@ function snapshot(patch = {}) {
     unassigned_image_count: 2, unassigned_video_count: 1, growth_events: [], latest_transcript: null, ...patch,
   };
 }
-function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false } = {}) {
+function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = false, navigationTarget = null } = {}) {
   const calls = { book: 0, bookTargets: [], login: 0, transcripts: 0, acknowledgedEventIds: [] };
   mockModule("../stores/memoir-cache.ts", { writeMemoirIdentitySnapshot: () => {} });
   mockModule("../stores/memoir-read-cache.ts", { readCachedMemoirHome: () => ({status:"miss"}), readCachedMemoirIdentity: () => null, writeCachedMemoirHome: () => {} });
@@ -39,12 +39,15 @@ function loadStoryPage({ current = snapshot(), getSnapshot, retry, largeText = f
     acknowledgeMemoirAutomationEvent: async (_, id) => { calls.acknowledgedEventIds.push(id); },
   });
   mockModule("../services/navigation.ts", {
-    consumeHomeStoryTarget: () => null,
+    consumeHomeStoryTarget: () => { const target = navigationTarget; navigationTarget = null; return target; },
     CHAPTER_WORKSPACE_PAGE_URL: "/pages/chapter-workspace/index",
     isAuthError: (error) => [401, 403].includes(error?.statusCode),
     navigateToBook: () => calls.book++, navigateToLogin: () => calls.login++, navigateToTranscripts: () => calls.transcripts++,
   });
-  global.wx = {};
+  global.wx = {
+    pageScrollTo: () => {},
+    createSelectorQuery: () => ({select: () => ({boundingClientRect: callback => ({exec: () => callback({bottom:600})})})}),
+  };
   return { ...loadPageModule("../pages/home/index.ts"), calls };
 }
 
@@ -85,13 +88,18 @@ test("story keeps expansion while refreshing the same project", async () => {
   context.onHide();
 });
 
-test("story expands new sections but acknowledges only after explicit dismissal", async () => {
+test("story marks new sections and expands their chapter only when the reader asks", async () => {
   const event = { event_id: "growth-1", created_at: "2026-09-05T00:00:00Z", summary_text: "新长出了一个小节", changes: [{kind:"section_added",chapter_id:"chapter-2",section_id:"section-2"}] };
   const { page, calls } = loadStoryPage({ current: snapshot({ growth_events: [event] }) });
   const context = pageContext(page);
   await context.onShow();
   await flushAsyncWork();
+  assert.equal(context.data.story.chapters[1].expanded, false);
+  const targets = [];
+  context.selectComponent = () => ({ focusGrowth: (...target) => targets.push(target) });
+  context.viewStoryGrowth();
   assert.equal(context.data.story.chapters[1].expanded, true);
+  assert.deepEqual(targets, [["chapter-2", "section-2"]]);
   assert.equal(context.data.story.chapters[1].sections[0].highlighted, true);
   assert.deepEqual(calls.acknowledgedEventIds, []);
   await context.dismissGrowthNotice();
@@ -201,7 +209,111 @@ test("home shows a later readable draft after an earlier structure event was ack
   await context.loadHome(true);
   assert.equal(context.data.bookReadable, true);
   assert.equal(context.data.progress.status, "ready");
-  assert.match(context.data.growthNoticeText, /这一章已经整理好了/);
+  assert.equal(context.data.story.chapters[0].growthLabel, "已更新");
+  assert.doesNotMatch(context.data.growthNoticeText, /新长出/);
   assert.deepEqual(calls.acknowledgedEventIds, []);
+  context.onHide();
+});
+
+function growth(id, kind = "section_added", chapterId = "chapter-2", sectionId = "section-2") {
+  return { event_id: id, summary_text: "已整理", created_at: "2026-09-05T00:00:00Z", changes: [{ kind, chapter_id: chapterId, section_id: sectionId }] };
+}
+
+test("growth animates once after initial data, retains collapse and never scrolls during a refresh", async () => {
+  let current = snapshot({ growth_events: [growth("old")] });
+  const { page, calls } = loadStoryPage({ getSnapshot: async () => current });
+  const context = pageContext(page);
+  const scrolls = [];
+  global.wx.pageScrollTo = options => scrolls.push(options);
+  await context.onShow();
+  assert.equal(context.data.storyError, "");
+  assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
+  current = snapshot({ growth_events: [growth("fresh", "section_updated"), growth("old")] });
+  await context.loadHome(true);
+  assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, true);
+  assert.equal(context.data.story.chapters[1].expanded, false);
+  context.toggleChapter({detail:{chapterId:"chapter-2"}});
+  context.toggleChapter({detail:{chapterId:"chapter-2"}});
+  await context.loadHome(true);
+  assert.equal(context.data.story.chapters[1].expanded, false);
+  assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
+  context.onHide();
+  await context.onShow();
+  assert.equal(context.data.story.chapters[1].sections[0].growthAnimating, false);
+  assert.deepEqual(scrolls, []);
+  assert.deepEqual(calls.acknowledgedEventIds, []);
+  context.onHide();
+});
+
+test("updating an existing section leaves tree counts unchanged and deleted targets stay out", async () => {
+  const { page } = loadStoryPage({ current: snapshot({growth_events:[growth("updated", "section_updated"), growth("deleted", "section_added", "missing", "gone")]}) });
+  const context = pageContext(page);
+  await context.onShow();
+  assert.equal(context.data.story.chapters.length, 2);
+  assert.equal(context.data.story.chapters[1].sections.length, 1);
+  assert.equal(context.data.story.chapters[1].sections[0].growthLabel, "已补充");
+  assert.equal(context.data.growthNoticeText, "补充了 1 个已有故事");
+  context.onHide();
+});
+
+test("saved return scrolls once for its project; settings returns and foreign project intents do not", async () => {
+  for (const projectId of ["project-1", "foreign"]) {
+    const { page } = loadStoryPage({navigationTarget:{projectId,narrationSaved:true}});
+    const context = pageContext(page), scrolls = [];
+    global.wx.pageScrollTo = options => scrolls.push(options);
+    await context.onShow();
+    assert.equal(context.data.narrationSaved, projectId === "project-1");
+    assert.equal(scrolls.length, projectId === "project-1" ? 1 : 0);
+    context.onHide();
+    await context.onShow();
+    assert.equal(context.data.narrationSaved, false);
+    assert.equal(scrolls.length, projectId === "project-1" ? 1 : 0);
+    context.onHide();
+  }
+});
+
+test("continue narration appears beyond the narration panel and hides on return or account loss", async () => {
+  let current = snapshot();
+  const { page } = loadStoryPage({getSnapshot: async () => current});
+  const context = pageContext(page);
+  await context.onShow();
+  context.onPageScroll({scrollTop:650});
+  assert.equal(context.data.showContinueNarration, true);
+  let starts = 0;
+  context.startPrimaryVoiceChat = async () => starts++;
+  await context.continueNarration();
+  assert.equal(starts, 1);
+  context.onPageScroll({scrollTop:300});
+  assert.equal(context.data.showContinueNarration, false);
+  context.onPageScroll({scrollTop:650});
+  current = snapshot({identity:{id:"user-2",display_name:"另一位作者",email:"other@example.com",active_project_id:"",active_project:null},chapters:[],progress:null});
+  await context.loadHome(true);
+  assert.equal(context.data.showContinueNarration, false);
+  context.onHide();
+});
+
+test("growth observation is isolated by user and project and reset on authentication loss", () => {
+  const {HomeGrowthTracker} = require("../pages/home/home-story-state.ts");
+  const tracker = new HomeGrowthTracker();
+  assert.equal(tracker.observe("u1", "p1", []).size, 0);
+  assert.equal(tracker.observe("u1", "p1", [growth("event")]).size, 1);
+  assert.equal(tracker.observe("u1", "p2", [growth("event")]).size, 0);
+  assert.equal(tracker.observe("u2", "p2", [growth("event")]).size, 0);
+  tracker.reset();
+  assert.equal(tracker.observe("u2", "p2", [growth("another")]).size, 0);
+});
+
+
+test("continue narration directs an unconsented reader to the authorization control", async () => {
+  const {page} = loadStoryPage();
+  const context = pageContext(page), scrolls = [];
+  global.wx.pageScrollTo = options => scrolls.push(options);
+  global.wx.showToast = () => {};
+  await context.onShow();
+  context.data.voiceAuthorizationAgreed = false;
+  await context.continueNarration();
+  assert.deepEqual(scrolls, [{selector:"#home-voice-authorization",duration:250}]);
+  assert.equal(context.data.creatingVoice, false);
+  assert.match(context.data.error, /声纹授权/);
   context.onHide();
 });
