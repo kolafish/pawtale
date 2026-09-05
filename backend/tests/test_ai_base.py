@@ -891,3 +891,14 @@ class RecordingLimiter:
     async def run(self, key, limit, operation):
         self.calls.append((key, limit))
         return await operation()
+
+
+@pytest.mark.parametrize("service_type", [ClaudeTextService, VolcArkTextService])
+@pytest.mark.parametrize("payload,expected", [
+    (" 正文 ", "正文"),
+    ([{"type": "text", "text": " 第一段 "}, {"type": "image", "url": "unused"}, "第二段", {"text": "  "}], "第一段\n第二段"),
+    ({"text": " 单块正文 "}, "单块正文"),
+    (None, ""),
+])
+def test_provider_text_content_shapes_share_normalization(service_type, payload, expected):
+    assert service_type()._normalize_message_content(payload) == expected

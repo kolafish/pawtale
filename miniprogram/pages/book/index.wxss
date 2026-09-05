@@ -1039,21 +1039,6 @@
   padding: 46rpx 34rpx;
 }
 
-.guest-steps {
-  margin-top: 22rpx;
-  padding: 22rpx 24rpx;
-  border-radius: 18rpx;
-  background: var(--ui-accent-surface-subtle);
-}
-
-.guest-steps text {
-  display: block;
-  color: var(--ui-text-primary);
-  font-size: 26rpx;
-  font-weight: 700;
-  line-height: 1.55;
-}
-
 .actions-row {
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -1376,11 +1361,6 @@
 
 .book-page.large-text .source-preview,
 .book-page.large-text .source-ref-text,
-.book-page.large-text .guest-steps {
-  font-size: 32rpx;
-  line-height: 1.6;
-}
-
 .book-page.large-text .field-label {
   font-size: 28rpx;
   line-height: 1.5;

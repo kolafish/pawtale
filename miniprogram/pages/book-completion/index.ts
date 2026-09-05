@@ -90,7 +90,7 @@ interface BookCompletionData {
   detail: string;
   progressText: string;
   chapters: ChapterView[];
-  allChaptersConfirmed: boolean;
+  canReviewBook: boolean;
   bulkCheckVisible: boolean;
   bulkCheckActionText: string;
   bulkCheckTitle: string;
@@ -156,13 +156,12 @@ export function bookReviewViewPatch(
       },
     }
     : null;
-  const current = normalizedReview?.status === "ready"
-    ? issues.filter((issue) => (
-      issue.scope === "book"
-      && issue.input_signature === normalizedReview.input_signature
-      && issue.status !== "closed"
-    ))
-    : [];
+  const current = issues.filter((issue) => (
+    issue.scope === "book"
+    && issue.status !== "closed"
+    && (issue.channel === "manual_review" || (normalizedReview?.status === "ready"
+      && issue.input_signature === normalizedReview.input_signature))
+  ));
   return {
     bookReview: normalizedReview,
     requiredBookIssues: current.filter(
@@ -402,15 +401,15 @@ export function bookCompletionViewPatch(
   | "detail"
   | "progressText"
   | "chapters"
-  | "allChaptersConfirmed"
+  | "canReviewBook"
   | "bulkCheckVisible"
   | "bulkCheckActionText"
   | "bulkCheckTitle"
   | "bulkCheckDetail"
 > {
-  const allChaptersConfirmed = (
+  const canReviewBook = (
     overview.chapters.length > 0
-    && overview.chapters.every((item) => item.state === "confirmed")
+    && overview.chapters.every((item) => item.state === "confirmed" || item.state === "draft_ready")
   );
   const hasCheckableChapters = overview.chapters.some(
     (item) => item.next_action.kind === "prepare",
@@ -424,7 +423,7 @@ export function bookCompletionViewPatch(
     chapters: overview.chapters.map(
       (item) => chapterView(item, preparingChapterId, recheckingAll),
     ),
-    allChaptersConfirmed,
+    canReviewBook,
     bulkCheckVisible: recheckingAll || hasCheckableChapters,
     bulkCheckActionText: "检查待检查章节",
     bulkCheckTitle: "先检查是否真的需要补充",
@@ -446,7 +445,7 @@ definePage<BookCompletionData>()({
     detail: "",
     progressText: "",
     chapters: [],
-    allChaptersConfirmed: false,
+    canReviewBook: false,
     bulkCheckVisible: false,
     bulkCheckActionText: "",
     bulkCheckTitle: "",
@@ -531,32 +530,16 @@ definePage<BookCompletionData>()({
         this.data.projectId,
       );
       const bulkCheckJob = overview.completion_job;
-      const initialView = bookCompletionViewPatch(
-        overview,
-        this.data.preparingChapterId,
-        false,
-      );
-      const batchActive = (
-        !initialView.allChaptersConfirmed
-        && bookCompletionJobActive(bulkCheckJob)
-      );
+      const batchActive = bookCompletionJobActive(bulkCheckJob);
       const view = bookCompletionViewPatch(
         overview,
         this.data.preparingChapterId,
         batchActive,
       );
-      const bookReview = view.allChaptersConfirmed
-        ? overview.book_review
-        : null;
-      const bookReviewJob = view.allChaptersConfirmed
-        ? overview.book_review_job
-        : null;
-      const bookIssues = view.allChaptersConfirmed
-        ? overview.book_issues
-        : [];
-      const revisionJob = view.allChaptersConfirmed
-        ? overview.revision_job
-        : null;
+      const bookReview = overview.book_review;
+      const bookReviewJob = overview.book_review_job;
+      const bookIssues = overview.book_issues;
+      const revisionJob = overview.revision_job;
       const reviewJobActive = Boolean(
         bookReviewJob && bookReviewJobActive(bookReviewJob),
       );
@@ -616,14 +599,8 @@ definePage<BookCompletionData>()({
         revisionProgress,
         revisionJob,
         generatingRevision: revisionActive,
-        bulkCheckProgress: bookCompletionJobView(
-          view.allChaptersConfirmed ? null : bulkCheckJob,
-        ),
-        bulkCheckJob: (
-          view.allChaptersConfirmed || bulkCheckJob.status === "idle"
-            ? null
-            : bulkCheckJob
-        ),
+        bulkCheckProgress: bookCompletionJobView(bulkCheckJob),
+        bulkCheckJob: bulkCheckJob.status === "idle" ? null : bulkCheckJob,
         recheckingAll: batchActive,
         loading: false,
         error: "",
@@ -753,7 +730,6 @@ definePage<BookCompletionData>()({
   async checkPendingChapters() {
     if (
       !this.data.bulkCheckVisible
-      || this.data.allChaptersConfirmed
       || this.data.recheckingAll
       || this.data.bulkCheckCancelling
       || this.data.preparingChapterId
@@ -797,7 +773,7 @@ definePage<BookCompletionData>()({
 
   async reviewBook() {
     if (
-      !this.data.allChaptersConfirmed
+      !this.data.canReviewBook
       || this.data.checkingBook
     ) {
       return;

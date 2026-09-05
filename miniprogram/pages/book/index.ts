@@ -19,20 +19,17 @@ import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace
 import {
   acknowledgeMemoirAutomationEvent,
   acknowledgeDismissibleMemoirAutomationEvents,
-  listMemoirAutomationEvents,
 } from "../../services/memoir-voice-session-api";
 import {
   applyMemoirBookPlanStructureCommand,
   confirmMemoirBookPlan,
   createMemoirBookChapterDraftTTS,
   createMemoirBookPlanOutlineTTS,
-  assembleMemoirBookOutput,
   generateMemoirBookChapterTitle,
   generateMemoirBookPlan,
   getMemoirBookChapterDraft,
   getMemoirBookOutput,
   updateMemoirBookChapterTitle,
-  updateMemoirBookOutput,
 } from "../../services/memoir-book-api";
 import { getMemoirBookSnapshot } from "../../services/memoir-snapshot-api";
 import { ApiError, optionalApiResource } from "../../services/request";
@@ -92,17 +89,11 @@ import {
   trimText,
   bookOutlineNarrationText,
   buildAutomationEventViews,
-  pendingBookGenerationEvents,
-  pendingChapterDraftGenerationIds,
 } from "./book-view-model";
-import {
-  bookGenerationSettings,
-} from "./book-design-model";
 import {
   readCachedMemoirBook,
   writeCachedMemoirBook,
 } from "../../stores/memoir-read-cache";
-import { PollingTimer } from "../../services/polling-timer";
 export {
   bookChapterDetailUrl,
   bookExportPageUrl,
@@ -140,17 +131,6 @@ type DatasetEvent = PageDatasetEvent<BookDataset>;
 type TextInputEvent = PageTextInputEvent<BookDataset>;
 type PickerEvent = PagePickerEvent<BookDataset>;
 
-const BOOK_GENERATION_EVENT_POLL_INTERVAL_MS = 3000;
-const BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS = 120;
-
-function defaultBookTitle(planTitle: string, projectTitle: string): string {
-  return (
-    trimText(planTitle.replace("章节规划", "").replace("主题回忆录", "回忆录").replace("主题", ""))
-    || trimText(projectTitle)
-    || "家庭回忆录"
-  );
-}
-
 type BookWorkspaceView = "chapters" | "tools";
 
 type BookPageData = BookHomeData & {
@@ -164,10 +144,6 @@ definePage<BookPageData>()({
   audioPlayback: pageRuntime(() => new AudioPlaybackController()),
   ttsProgress: pageRuntime(() => new VoiceAssistantTTSProgressRuntime()),
   playToken: 0,
-  bookGenerationPoller: pageRuntime(
-    () => new PollingTimer(BOOK_GENERATION_EVENT_POLL_INTERVAL_MS),
-  ),
-  bookGenerationPollAttempts: 0,
   automationEvents: [] as MemoirAutomationEvent[],
   bookLoadSequence: 0,
   bookPlan: null as MemoirBookPlan | null,
@@ -185,7 +161,6 @@ definePage<BookPageData>()({
     updatingPlanStructure: false,
     planStructureBusyChapterId: "",
     planStructureBusyDirection: "",
-    generatingBook: false,
     error: "",
     projectId: "",
     projectTitle: "我的回忆录",
@@ -198,15 +173,12 @@ definePage<BookPageData>()({
     splitSourceSelections: {},
     confirmedDraftCount: 0,
     totalChapterCount: 0,
-    allChaptersConfirmed: false,
-    canGenerateBook: false,
     progressText: "还没有章节",
     titleBusyTarget: "",
     bookContentAvailable: false,
     bookCharCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
-    bookActionText: "生成全书",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",
@@ -236,7 +208,6 @@ definePage<BookPageData>()({
     this.applyBookWorkspaceNavigationTarget();
     this.setData({ pageClass: accessibilityPageClass("book-page") });
     enableMiniProgramShareMenu({ includeTimeline: false });
-    this.bookGenerationPollAttempts = 0;
     await this.loadBookHome();
   },
 
@@ -304,15 +275,6 @@ definePage<BookPageData>()({
     }
   },
 
-  async loadPlanForProject(projectId: string) {
-    const snapshot = await getMemoirBookSnapshot();
-    if (snapshot.identity.active_project_id !== projectId) {
-      return;
-    }
-    writeCachedMemoirBook(snapshot);
-    this.applyBookSnapshot(snapshot);
-  },
-
   applyBookSnapshot(snapshot: MemoirBookSnapshot) {
     const identity = snapshot.identity;
     const projectId = identity.active_project_id;
@@ -330,66 +292,6 @@ definePage<BookPageData>()({
     this.applyBookOutput(snapshot.output || null);
     this.applyAutomationEvents(snapshot.automation_events.items || []);
     this.applyImageAssetSummary(snapshot.image_assets);
-  },
-
-  async loadAutomationEvents(projectId: string) {
-    this.setData({ automationEventLoading: true, automationEventError: "" });
-    try {
-      const response = await listMemoirAutomationEvents(projectId, 8);
-      return response.items || [];
-    } catch (error) {
-      this.setData({
-        automationEventError: error instanceof Error ? error.message : "自动处理记录加载失败",
-      });
-      return [];
-    } finally {
-      this.setData({ automationEventLoading: false });
-    }
-  },
-
-  async refreshAutomationEventsAfterGeneration() {
-    if (!this.data.projectId) {
-      return;
-    }
-    const hadPendingGeneration = pendingBookGenerationEvents(this.automationEvents).length > 0;
-    const events = await this.loadAutomationEvents(this.data.projectId);
-    if (this.data.automationEventError) {
-      if (hadPendingGeneration) {
-        this.scheduleBookGenerationEventPoll();
-      }
-      return;
-    }
-    const hasPendingGeneration = pendingBookGenerationEvents(events).length > 0;
-    this.applyAutomationEvents(events);
-    if (hasPendingGeneration) {
-      this.scheduleBookGenerationEventPoll();
-      return;
-    }
-    if (hadPendingGeneration) {
-      this.bookGenerationPollAttempts = 0;
-      await this.loadPlanForProject(this.data.projectId);
-    }
-  },
-
-  scheduleBookGenerationEventPoll() {
-    if (this.bookGenerationPoller.pending || !this.data.projectId) {
-      return;
-    }
-    if (!pendingBookGenerationEvents(this.automationEvents).length) {
-      this.bookGenerationPollAttempts = 0;
-      return;
-    }
-    if (this.bookGenerationPollAttempts >= BOOK_GENERATION_EVENT_POLL_MAX_ATTEMPTS) {
-      return;
-    }
-    this.bookGenerationPollAttempts += 1;
-    this.bookGenerationPoller.schedule(() => {
-      void this.refreshAutomationEventsAfterGeneration();
-    });
-  },
-
-  clearBookGenerationEventPoll() {
-    this.bookGenerationPoller.cancel();
   },
 
   async loadDraftsForPlan(plan: MemoirBookPlan) {
@@ -468,17 +370,7 @@ definePage<BookPageData>()({
 
   applyAutomationEvents(events: MemoirAutomationEvent[]) {
     this.automationEvents = events;
-    const pendingChapterIds = pendingChapterDraftGenerationIds(events);
-    const chapters = this.data.chapters.map((chapter) => ({
-      ...chapter,
-      draftBusy: pendingChapterIds.has(chapter.id),
-    }));
     this.setData({
-      ...chapterCollectionData(
-        chapters,
-        this.bookChapterSources,
-        this.data.splitSourceSelections,
-      ),
       automationEventItems: buildAutomationEventViews(
         events,
         this.data.automationEventBusyTarget,
@@ -488,7 +380,6 @@ definePage<BookPageData>()({
         event.status === "completed" || event.status === "failed"
       )).length,
     });
-    this.scheduleBookGenerationEventPoll();
   },
 
   toggleAutomationEventDetails(event: DatasetEvent) {
@@ -1057,40 +948,6 @@ definePage<BookPageData>()({
     }
   },
 
-  async generateBook() {
-    if (!this.data.projectId || this.data.generatingBook || this.data.updatingPlanStructure) {
-      return;
-    }
-    if (!this.data.allChaptersConfirmed) {
-      this.setData({ error: "请先确认所有收入本书的章节正文" });
-      return;
-    }
-    this.stopPlayback();
-    this.setData({ generatingBook: true, error: "" });
-    try {
-      const settings = bookGenerationSettings(this.bookOutput, {
-        title: defaultBookTitle(this.data.planTitle, this.data.projectTitle),
-        narratorName: this.data.projectNarratorName,
-      });
-      await assembleMemoirBookOutput(this.data.projectId);
-      const output = await updateMemoirBookOutput(this.data.projectId, settings);
-      this.applyBookOutput(output);
-      trackAuditAction(
-        "book.output_generate",
-        { source: "confirmed_chapter_drafts" },
-        { projectId: this.data.projectId },
-      );
-      wx.showToast({ title: "全书稿已更新", icon: "success" });
-    } catch (error) {
-      if (routeAuthError(error, "login")) {
-        return;
-      }
-      this.setData({ error: error instanceof Error ? error.message : "书稿整理提交失败" });
-    } finally {
-      this.setData({ generatingBook: false });
-    }
-  },
-
   async playChapterAudioById(chapterId: string, options: { showPreparingToast?: boolean } = {}) {
     const chapter = findBookChapter(this.data.chapters, chapterId);
     if (!chapter || !this.data.projectId || this.data.updatingPlanStructure) {
@@ -1154,7 +1011,6 @@ definePage<BookPageData>()({
       !this.data.projectId
       || this.data.ttsBusyTarget
       || this.data.updatingPlanStructure
-      || this.data.generatingBook
     ) {
       return;
     }
@@ -1217,12 +1073,10 @@ definePage<BookPageData>()({
   },
 
   onHide() {
-    this.clearBookGenerationEventPoll();
     this.stopPlayback();
   },
 
   onUnload() {
-    this.clearBookGenerationEventPoll();
     this.stopPlayback();
   },
 
@@ -1232,6 +1086,10 @@ definePage<BookPageData>()({
       writeTranscriptNavigationTarget(utteranceId);
     }
     navigateToTranscripts();
+  },
+
+  openStory() {
+    wx.switchTab({ url: "/pages/story/index" });
   },
 
   openHome() {

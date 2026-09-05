@@ -31,10 +31,6 @@ export type {
 } from "./book-automation-view-model";
 export {
   buildAutomationEventViews,
-  hasPendingBookOutputGeneration,
-  mergeAutomationEvent,
-  pendingBookGenerationEvents,
-  pendingChapterDraftGenerationIds,
 } from "./book-automation-view-model";
 export { trimText } from "./book-view-model-utils";
 
@@ -222,8 +218,6 @@ export interface BookData {
   splitSourceSelections: Record<string, string[]>;
   confirmedDraftCount: number;
   totalChapterCount: number;
-  allChaptersConfirmed: boolean;
-  canGenerateBook: boolean;
   progressText: string;
   titleBusyTarget: string;
   bookOutput: MemoirBookOutput | null;
@@ -249,7 +243,6 @@ export interface BookData {
   bookViewingHistoricalVersion: boolean;
   bookVersionNotice: string;
   bookStaleNotice: string;
-  bookActionText: string;
   bookExportBusyTarget: string;
   bookExportShowSourceAppendix: boolean;
   bookTitleInput: string;
@@ -273,7 +266,6 @@ export interface BookData {
   bookCoverStyleOptions: BookCoverStyleOptionView[];
   bookCoverStyleChanged: boolean;
   bookEditorialCopyBusyTarget: string;
-  generatingBook: boolean;
   ttsBusyTarget: string;
   playingTarget: string;
   bookTTSActiveTarget: string;
@@ -941,13 +933,6 @@ export function bookOutputStaleNotice(output: MemoirBookOutput | null): string {
   return `章节「${titles.join("、")}」${suffix}已更新，请重新整理一版。`;
 }
 
-function bookActionText(output: MemoirBookOutput | null): string {
-  if (output?.is_stale) {
-    return "更新书稿";
-  }
-  return output?.latest_version ? "重新整理一版" : "生成全书";
-}
-
 function bookVersionNotice(output: MemoirBookOutput | null, viewingHistorical: boolean): string {
   if (!output?.latest_version) {
     return "";
@@ -984,7 +969,6 @@ export function bookOutputData(
   | "bookViewingHistoricalVersion"
   | "bookVersionNotice"
   | "bookStaleNotice"
-  | "bookActionText"
   | "bookTitleInput"
   | "bookSubtitleInput"
   | "bookNarratorNameInput"
@@ -1021,7 +1005,6 @@ export function bookOutputData(
     bookViewingHistoricalVersion: versionState.viewingHistorical,
     bookVersionNotice: bookVersionNotice(output, versionState.viewingHistorical),
     bookStaleNotice: bookOutputStaleNotice(output),
-    bookActionText: bookActionText(output),
     bookTitleInput: manuscriptData.bookManuscriptTitle || bookOutputPreviewTitle(output, selectedVersion),
     ...bookMetadataInputData(output, selectedVersion),
     bookTitleChanged: false,
@@ -1039,7 +1022,6 @@ export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
   | "bookCharCount"
   | "bookPreviewTitle"
   | "bookStaleNotice"
-  | "bookActionText"
 > {
   const content = latestBookContent(output);
   return {
@@ -1047,7 +1029,6 @@ export function bookHomeOutputData(output: MemoirBookOutput | null): Pick<
     bookCharCount: trimText(content).length,
     bookPreviewTitle: bookOutputPreviewTitle(output),
     bookStaleNotice: bookOutputStaleNotice(output),
-    bookActionText: bookActionText(output),
   };
 }
 
@@ -1162,7 +1143,7 @@ function decorateChapterStructureOptions(
 
 function chapterStateData(chapters: BookChapterView[]): Pick<
   BookData,
-  "confirmedDraftCount" | "totalChapterCount" | "allChaptersConfirmed" | "canGenerateBook" | "progressText"
+  "confirmedDraftCount" | "totalChapterCount" | "progressText"
 > {
   const includedChapters = chapters.filter((chapter) => chapter.include_in_book !== false);
   const confirmedDraftCount = includedChapters.filter(
@@ -1173,12 +1154,9 @@ function chapterStateData(chapters: BookChapterView[]): Pick<
     ),
   ).length;
   const totalChapterCount = includedChapters.length;
-  const allChaptersConfirmed = totalChapterCount > 0 && confirmedDraftCount === totalChapterCount;
   return {
     confirmedDraftCount,
     totalChapterCount,
-    allChaptersConfirmed,
-    canGenerateBook: allChaptersConfirmed,
     progressText: bookProgressText(chapters),
   };
 }
@@ -1192,8 +1170,6 @@ export function chapterCollectionData(
   | "chapters"
   | "confirmedDraftCount"
   | "totalChapterCount"
-  | "allChaptersConfirmed"
-  | "canGenerateBook"
   | "progressText"
 > {
   const decorated = decorateChapterStructureOptions(chapters, chapterSources, splitSelections);
@@ -1371,7 +1347,7 @@ export function stageText(stage: BookStage): string {
   if (stage === "plan_draft") {
     return "确认章节结构";
   }
-  return "逐章成稿";
+  return "书稿管理";
 }
 
 export function guestBookData(): Partial<BookHomeData> {
@@ -1387,8 +1363,6 @@ export function guestBookData(): Partial<BookHomeData> {
     chapterStructureEditing: false,
     confirmedDraftCount: 0,
     totalChapterCount: 0,
-    allChaptersConfirmed: false,
-    canGenerateBook: false,
     progressText: "登录后可以开始整理",
     splitSourceSelections: {},
     titleBusyTarget: "",
@@ -1396,7 +1370,6 @@ export function guestBookData(): Partial<BookHomeData> {
     bookCharCount: 0,
     bookPreviewTitle: "",
     bookStaleNotice: "",
-    bookActionText: "生成全书",
     ttsBusyTarget: "",
     playingTarget: "",
     bookTTSActiveTarget: "",

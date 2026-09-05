@@ -15,10 +15,10 @@
   <view wx:if="{{loading}}" class="loading-state">正在查看全书...</view>
 
   <view wx:else class="chapter-list">
-    <view wx:if="{{allChaptersConfirmed}}" class="book-review">
+    <view wx:if="{{canReviewBook || bookReview || bookReviewProgress.visible || requiredBookIssues.length || optionalBookIssues.length}}" class="book-review">
       <text class="book-review-kicker">全书审阅</text>
       <text class="book-review-title">
-        {{bookReview && bookReview.status === "ready" ? "检查跨章衔接与取舍" : "章节已确认，再看全书"}}
+        检查跨章衔接与取舍
       </text>
 
       <view
@@ -127,15 +127,6 @@
           >{{includeBookReviewAnswers || selectedEditorialActionIds.length ? "根据已选内容生成修改思路" : "请先选择要处理的内容"}}</view>
         </view>
 
-        <completion-issue-list
-          project-id="{{projectId}}"
-          project-title="{{projectTitle}}"
-          required-issues="{{requiredBookIssues}}"
-          optional-issues="{{optionalBookIssues}}"
-          allow-required-confirmation="{{true}}"
-          bindrefresh="loadOverview"
-        />
-
         <text
           wx:if="{{!requiredBookIssues.length && !optionalBookIssues.length}}"
           class="review-complete"
@@ -149,13 +140,23 @@
         检查跨章重复、衔接断裂、人物交代不清和篇幅失衡，必要时请您做出取舍。
       </text>
 
+      <completion-issue-list
+        project-id="{{projectId}}"
+        project-title="{{projectTitle}}"
+        required-issues="{{requiredBookIssues}}"
+        optional-issues="{{optionalBookIssues}}"
+        allow-required-confirmation="{{true}}"
+        bindrefresh="loadOverview"
+      />
+
       <view
         wx:if="{{bookReview && bookReview.status === 'ready'}}"
         class="book-ready-action ui-block-action ui-pressable"
         aria-role="button"
         bindtap="openBookHome"
-      >暂不修改，继续成书</view>
+      >返回书稿</view>
       <view
+        wx:if="{{canReviewBook}}"
         class="recheck-book-action ui-block-action ui-pressable {{checkingBook || bookReviewCancelling ? 'is-disabled' : ''}}"
         aria-role="button"
         aria-disabled="{{checkingBook || bookReviewCancelling}}"
