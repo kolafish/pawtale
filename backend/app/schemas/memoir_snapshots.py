@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
-from typing import Literal
+from datetime import datetime
+from typing import Annotated, Literal
 
 from app.schemas.memoir_book import (
     MemoirBookChapterDraftResponse,
@@ -73,9 +74,35 @@ class MemoirStoryChapterResponse(BaseModel):
     sections: list[MemoirStorySectionResponse] = Field(default_factory=list)
 
 
-class MemoirStorySnapshotResponse(BaseModel):
-    server_revision: int
-    identity: MemoirIdentityResponse
+class MemoirStoryChapterChange(BaseModel):
+    kind: Literal["chapter_added", "chapter_updated"]
+    chapter_id: str
+
+
+class MemoirStorySectionChange(BaseModel):
+    kind: Literal["section_added", "section_updated"]
+    chapter_id: str
+    section_id: str
+
+
+class MemoirStoryBookChange(BaseModel):
+    kind: Literal["book_updated"] = "book_updated"
+
+
+MemoirStoryChange = Annotated[
+    MemoirStoryChapterChange | MemoirStorySectionChange | MemoirStoryBookChange,
+    Field(discriminator="kind"),
+]
+
+
+class MemoirStoryGrowthEvent(BaseModel):
+    event_id: str
+    summary_text: str
+    created_at: datetime
+    changes: list[MemoirStoryChange] = Field(default_factory=list)
+
+
+class MemoirStorySnapshotResponse(MemoirHomeSnapshotResponse):
     progress: MemoirDraftProgressResponse | None = None
     chapters: list[MemoirStoryChapterResponse] = Field(default_factory=list)
     book_readable: bool = False
@@ -84,3 +111,4 @@ class MemoirStorySnapshotResponse(BaseModel):
     unassigned_image_count: int = 0
     unassigned_video_count: int = 0
     automation_events: MemoirAutomationEventListResponse
+    growth_events: list[MemoirStoryGrowthEvent] = Field(default_factory=list)

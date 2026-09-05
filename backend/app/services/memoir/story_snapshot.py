@@ -20,10 +20,11 @@ from app.schemas.memoir_snapshots import (
     MemoirStorySectionResponse,
     MemoirStorySnapshotResponse,
 )
-from app.services.memoir import automation_events, draft_progress, projects, share_video_jobs
+from app.services.memoir import automation_events, draft_progress, projects, share_video_jobs, voice_transcripts
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automatic_book_draft import DraftProgress
 from app.services.memoir.read_snapshots import _empty_automation_events
+from app.services.memoir.story_growth_projection import story_growth_events
 
 
 async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotResponse:
@@ -36,6 +37,8 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     project = await load_memoir_project(db, identity.active_project_id, user.id)
     result.server_revision = project.memoir_data_revision
     result.updated_at = project.updated_at.isoformat()
+    transcripts = await voice_transcripts.list_voice_transcripts(db, user.id, project_id=project.id, limit=1)
+    result.latest_transcript = transcripts.items[0] if transcripts.items else None
     jobs = await draft_progress.project_jobs(db, project.id)
     result.progress = await draft_progress.read_draft_progress(db, project_id=project.id, jobs=jobs)
     parent = next((job for job in jobs if job.job_type == "update_book_draft"), None)
@@ -153,5 +156,11 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     result.book_readable = result.book_char_count > 0
     result.automation_events = await automation_events.list_automation_events(
         db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
+    )
+    result.growth_events = story_growth_events(
+        result.automation_events.items,
+        chapter_ids=set(chapter_views),
+        section_chapters=section_chapters,
+        section_by_utterance=section_by_utterance,
     )
     return result
