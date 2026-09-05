@@ -1270,3 +1270,28 @@ async def test_initial_story_does_not_treat_model_rejection_as_completed_structu
     with pytest.raises(HTTPException):
         await story_tree_growth.run_story_tree_growth_job(test_db, job)
     assert story_tree_growth._progress(job).completed_initial_chapters == []
+
+
+async def test_active_session_only_schedules_sealed_narration(client, test_db):
+    project_id = await ensure_mobile_memoir_project(client)
+    created = await create_test_voice_transcript(client, test_db, "还没说完的素材。", project_id=project_id)
+    message = await test_db.get(MemoirChatMessage, created["message_id"])
+    session = await test_db.get(MemoirVoiceSession, created["session"]["id"])
+    session.status = "listening"
+    message.content_status = "partial"
+    await test_db.commit()
+    request = dict(project_id=project_id, voice_session_id=created["session"]["id"], source="transcript_ready")
+    assert await story_tree_growth.schedule_story_tree_growth(test_db, **request) is None
+    message.content_status = "final"
+    await test_db.commit()
+    job = await story_tree_growth.schedule_story_tree_growth(test_db, **request)
+    assert job is not None
+    session = await test_db.get(MemoirVoiceSession, created["session"]["id"])
+    assert session.status == "listening"
+    job.status = "failed"
+    job.error_message = "模型响应超时，结果未知"
+    await test_db.commit()
+    same = await story_tree_growth.schedule_story_tree_growth(test_db, **request)
+    assert same.status == "failed"
+    retry = await story_tree_growth.schedule_story_tree_growth(test_db, **{**request, "source": "retry"})
+    assert retry.status == "pending"

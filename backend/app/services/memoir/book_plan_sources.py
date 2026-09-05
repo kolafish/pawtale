@@ -351,6 +351,7 @@ async def source_segments(
         .where(
             MemoirVoiceSession.project_id == project_id,
             MemoirChatMessage.role == "user",
+            MemoirChatMessage.content_status.in_(("final", "corrected")),
             or_(
                 MemoirVoiceUtterance.transcript_raw != "",
                 MemoirVoiceUtterance.transcript_edited != "",

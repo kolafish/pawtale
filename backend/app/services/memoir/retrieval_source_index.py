@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 import logging
 import time
 
+from pydantic import TypeAdapter
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +34,7 @@ from app.services.memoir import editing_jobs
 from app.services.memoir.editing_jobs import EditingJobResult
 from app.services.memoir.material_roles import is_countable_material
 from app.services.memoir.retrieval_semantic_units import (
+    SemanticUnitGenerationTrace,
     generate_semantic_units,
     semantic_unit_workload_policy,
 )
@@ -110,6 +113,7 @@ async def schedule_semantic_indexing_job(
             f"{utterance.id}:{transcript_version_id or 'none'}:{text_hash}"
         ),
         retry_failed=True,
+        preserve_progress=True,
     )
 
 
@@ -366,11 +370,13 @@ async def run_semantic_indexing_job(
     generation_client = ai_client or get_ai_service(SEMANTIC_INDEX_MODEL)
     generation_started = time.perf_counter()
     try:
-        generation = await generate_semantic_units(
-            source_text=text,
-            requested_model=SEMANTIC_INDEX_MODEL,
-            ai_client=generation_client,
-        )
+        saved = (job.result_json or {}).get("semantic_generation")
+        if saved and (job.result_json or {}).get("source_text_hash") == expected_hash:
+            generation = TypeAdapter(SemanticUnitGenerationTrace).validate_python(saved)
+        else:
+            generation = await generate_semantic_units(
+                source_text=text, requested_model=SEMANTIC_INDEX_MODEL, ai_client=generation_client,
+            )
     except Exception as error:
         policy = semantic_unit_workload_policy()
         metadata = ai_error_metadata(
@@ -420,6 +426,10 @@ async def run_semantic_indexing_job(
             utterance=current,
         )
 
+    checkpoint = {"stage": "embed_semantic_units", "source_text_hash": expected_hash,
+                  "semantic_generation": asdict(generation)}
+    if not await editing_jobs.update_editing_job_progress(db, job, checkpoint):
+        raise editing_jobs.EditingJobProgressLost
     embedded = None
     if generation.units:
         client: EmbeddingClient = embedding_client or create_embedding_client()
@@ -443,6 +453,7 @@ async def run_semantic_indexing_job(
             return EditingJobResult(
                 status=MemoirEditingJobStatus.FAILED,
                 result_json={
+                    **checkpoint,
                     "stage": "embed_semantic_units",
                     "utterance_id": utterance_id,
                     "source_text_hash": expected_hash,

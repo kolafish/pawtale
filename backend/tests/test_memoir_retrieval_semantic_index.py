@@ -13,6 +13,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import MemoirEditingJob, MemoirVoiceUtterance
 from app.models.memoir_retrieval import MemoirRetrievalEntry
 from app.services.embeddings import EmbeddingBatchResult
+from app.services.memoir.editing_jobs import claim_editing_job
 from app.services.memoir.retrieval_source_index import (
     SEMANTIC_INDEX_MODEL,
     SEMANTIC_INDEX_VERSION,
@@ -133,6 +134,8 @@ async def _create_source_and_semantic_job(test_db, created: dict):
         source_result.result_json["semantic_job_id"],
     )
     assert semantic_job is not None
+    await claim_editing_job(test_db, semantic_job.id, now=semantic_job.run_after)
+    await test_db.refresh(semantic_job)
     return semantic_job
 
 
@@ -285,12 +288,14 @@ async def test_empty_semantic_decision_removes_existing_units(client, test_db):
         text="这是一段可以建立语义入口的讲述。",
     )
     semantic_job = await _create_source_and_semantic_job(test_db, created)
-    await run_semantic_indexing_job(
+    completed = await run_semantic_indexing_job(
         test_db,
         semantic_job,
         embedding_client=FakeEmbeddingClient(),
         ai_client=FakeAIClient(["已有语义入口"]),
     )
+    semantic_job.result_json = completed.result_json
+    await test_db.commit()
     no_embedding = FakeEmbeddingClient()
 
     result = await run_semantic_indexing_job(
@@ -356,3 +361,24 @@ async def test_source_change_invalidates_old_units_and_stale_job_cannot_restore_
     ]
     assert entries[0].search_text == "已经修改的讲述"
     assert stale_result.result_json["replacement_job_id"] is not None
+
+
+async def test_embedding_retry_reuses_persisted_semantic_generation(client, test_db):
+    created = await create_test_voice_transcript(client, test_db, text="小时候我们在成都的院子里生活。")
+    job = await _create_source_and_semantic_job(test_db, created)
+    result = await run_semantic_indexing_job(test_db, job, embedding_client=FailingEmbeddingClient(),
+                                           ai_client=FakeAIClient(["小时候住在成都"]))
+    assert result.status is MemoirEditingJobStatus.FAILED
+    job.status = "failed"
+    job.result_json = result.result_json
+    await test_db.commit()
+    from app.services.memoir.retrieval_source_index import schedule_semantic_indexing_job
+    utterance = await _load_utterance(test_db, created["utterance_id"])
+    retry = await schedule_semantic_indexing_job(test_db, project_id=job.project_id, utterance=utterance,
+                                                source="retry")
+    await claim_editing_job(test_db, retry.id, now=retry.run_after)
+    await test_db.refresh(retry)
+    completed = await run_semantic_indexing_job(test_db, retry, embedding_client=FakeEmbeddingClient(),
+                                               ai_client=FailingAIClient())
+    assert completed.status is MemoirEditingJobStatus.SUCCEEDED
+    assert completed.result_json["units"] == ["小时候住在成都"]

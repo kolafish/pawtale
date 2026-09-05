@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import and_, func, or_
 
-from app.domain.memoir.types import MemoirChatMessageRole, MemoirSpeakerRole
+from app.domain.memoir.types import MemoirChatContentStatus, MemoirChatMessageRole, MemoirSpeakerRole
 from app.models.memoir import MemoirChatMessage, MemoirVoiceUtterance
 from app.services.memoir.transcript_projection import current_utterance_text
 
@@ -46,4 +46,13 @@ def narrator_material_clause():
             )
             != MemoirSpeakerRole.INTERVIEWER.value,
         ),
+    )
+
+
+def is_ready_story_material(utterance: MemoirVoiceUtterance) -> bool:
+    message = utterance.chat_message
+    return is_countable_material(utterance) and (
+        message is None or message.content_status in {
+            MemoirChatContentStatus.FINAL.value, MemoirChatContentStatus.CORRECTED.value,
+        }
     )

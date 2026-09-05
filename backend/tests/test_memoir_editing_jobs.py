@@ -249,7 +249,7 @@ async def test_run_editing_job_skips_when_handler_missing(test_db):
     assert await run_editing_job(test_db, lease) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.SKIPPED.value
-    assert job.error_message == "no handler registered for generate_book_editorial_copy"
+    assert job.error_message == "后台任务暂不支持此操作，请联系管理员"
     event = await test_db.scalar(select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project.id))
     assert event is None
 
@@ -275,7 +275,8 @@ async def test_run_editing_job_records_failure_without_legacy_business_event(tes
     assert await run_editing_job(test_db, lease) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.FAILED.value
-    assert job.error_message == "provider down"
+    assert "已保存的进度会保留" in job.error_message
+    assert job.result_json["failure"]["error_type"] == "RuntimeError"
 
     event = await test_db.scalar(
         select(MemoirAutomationEvent).where(MemoirAutomationEvent.project_id == project_id)
@@ -301,7 +302,8 @@ async def test_provider_timeout_is_not_misclassified_as_job_deadline(test_db):
     assert await run_editing_job(test_db, lease, timeout_seconds=1) is False
     await test_db.refresh(job)
     assert job.status == MemoirEditingJobStatus.FAILED.value
-    assert job.error_message == "provider deadline exceeded"
+    assert "已保存的进度会保留" in job.error_message
+    assert job.result_json["failure"]["error_type"] == "TimeoutError"
     assert "error_type" not in job.result_json
 
 
@@ -594,3 +596,51 @@ async def test_lease_heartbeat_cancels_work_after_ownership_is_lost():
         )
 
     assert work_cancelled.is_set()
+
+
+async def test_source_arriving_during_execution_is_processed_by_next_durable_run(test_db):
+    project = await _create_project(test_db)
+    job = await enqueue_editing_job(test_db, project_id=project.id,
+        job_type=MemoirEditingJobType.ORGANIZE_MATERIAL, payload_json={"source": "first"}, dedupe_key="growth")
+    seen = []
+    async def handler(db, current):
+        seen.append(current.payload_json["source"])
+        if len(seen) == 1:
+            async with AsyncSession(test_db.bind, expire_on_commit=False) as other:
+                await enqueue_editing_job(other, project_id=project.id,
+                    job_type=MemoirEditingJobType.ORGANIZE_MATERIAL, payload_json={"source": "second"},
+                    dedupe_key="growth", preserve_progress=True, reschedule_running=True)
+                await other.commit()
+        return EditingJobResult(result_json={"checkpoint": "saved"})
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, handler)
+    lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+    assert not await run_editing_job(test_db, lease)
+    await test_db.refresh(job)
+    assert job.status == "pending"
+    assert job.first_started_at is None
+    assert job.result_json == {"checkpoint": "saved"}
+    lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+    assert await run_editing_job(test_db, lease)
+    assert seen == ["first", "second"]
+
+
+@pytest.mark.parametrize("worker", [False, True])
+async def test_reclaimed_job_cannot_reset_its_total_deadline(test_db, worker):
+    project = await _create_project(test_db)
+    job = await enqueue_editing_job(test_db, project_id=project.id,
+                                   job_type=MemoirEditingJobType.ORGANIZE_MATERIAL)
+    job.first_started_at = _utcnow() - timedelta(hours=2)
+    job.result_json = {"checkpoint": "saved"}
+    await test_db.commit()
+    async def must_not_run(*args):
+        pytest.fail("expired job was restarted")
+    register_editing_job_handler(MemoirEditingJobType.ORGANIZE_MATERIAL, must_not_run)
+    if worker:
+        assert await run_due_editing_jobs(async_sessionmaker(test_db.bind, expire_on_commit=False)) == 0
+    else:
+        lease = (await claim_due_editing_jobs(test_db, now=_utcnow(), limit=1))[0]
+        assert not await run_editing_job(test_db, lease)
+    await test_db.refresh(job)
+    assert job.status == "failed"
+    assert job.result_json["checkpoint"] == "saved"
+    assert job.result_json["error_type"] == "job_deadline_exceeded"
