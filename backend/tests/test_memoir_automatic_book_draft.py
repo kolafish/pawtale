@@ -262,3 +262,25 @@ async def test_auto_assembly_preserves_manual_book_and_omits_pending_decisions(c
     assert preserved.preserved_manual
     assert preserved.output_version_id == partial.output_version_id
     assert preserved.content == "用户亲自整理的全书。"
+
+
+async def test_stale_book_review_decisions_still_omit_their_chapters(client, test_db):
+    from app.domain.memoir.types import MemoirBookChapterDraftStatus
+    from app.models.memoir import MemoirBookReview
+    from app.services.memoir import completion_issues
+    from app.services.memoir.narrative.book_output_assembly import assemble_book_output
+    from tests.test_memoir_book_completion import _book, _create_current_draft
+    project_id, chapters, _ = await _book(client, test_db, chapter_count=2)
+    for chapter in chapters:
+        await _create_current_draft(test_db, project_id=project_id, chapter_id=chapter.id,
+            status=MemoirBookChapterDraftStatus.DRAFT)
+    candidates = [{"issue_type": "privacy", "channel": "manual_review", "priority": "high",
+        "question": "是否保留私人经历？", "reason": "包含个人隐私", "chapter_ids": [chapters[0].id]}]
+    test_db.add(MemoirBookReview(project_id=project_id, engine="old", input_signature="old-input",
+        status="stale", review_json={"candidate_issues": candidates}))
+    await completion_issues.sync_book_review_issues(test_db, project_id=project_id,
+        input_signature="old-input", candidates=candidates)
+    await test_db.commit()
+    result = await assemble_book_output(test_db, project_id=project_id, automatic=True)
+    assert result.omitted_chapter_ids == [chapters[0].id]
+    assert [item["chapter_id"] for item in result.chapter_snapshot_json] == [chapters[1].id]

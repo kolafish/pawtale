@@ -15,6 +15,7 @@ from app.domain.memoir.types import (
 from app.models.memoir import (
     MemoirBookOutput,
     MemoirBookOutputVersion,
+    MemoirBookReview,
     MemoirCompletionIssue,
 )
 from app.models.projects import Project
@@ -71,10 +72,19 @@ async def assemble_book_output(
         raise ValueError("book output requires resolving book review decisions")
     blocked_chapter_ids = {issue.chapter_id for issue in decisions if issue.chapter_id}
     unresolved = {issue.fingerprint for issue in decisions if issue.scope == "book"}
-    if current_review:
-        for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(current_review.review_json.get("candidate_issues", [])):
+    # An unresolved decision outlives the review cache that first identified it.
+    decision_reviews = (await db.scalars(select(MemoirBookReview).where(
+        MemoirBookReview.project_id == project_id,
+        MemoirBookReview.input_signature.in_({issue.input_signature for issue in decisions if issue.scope == "book"}),
+    ))).all() if unresolved else []
+    for review in decision_reviews:
+        for fingerprint, candidate in completion_issues.book_review_candidate_fingerprints(review.review_json.get("candidate_issues", [])):
             if fingerprint in unresolved:
                 blocked_chapter_ids.update(candidate.get("chapter_ids", []))
+                unresolved.discard(fingerprint)
+    if unresolved:
+        # Missing scope evidence cannot establish which chapters are safe to include.
+        blocked_chapter_ids.update(chapter.id for chapter in chapters)
     chapter_versions = [(chapter, version) for chapter, version in chapter_versions if chapter.id not in blocked_chapter_ids]
     omitted = [chapter.id for chapter in chapters if chapter.id not in {item.id for item, _ in chapter_versions}]
     answer_context = await book_review_answer_state.load_answer_context(db, review=current_review) if current_review else None
