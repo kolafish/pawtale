@@ -441,6 +441,7 @@ async def test_interview_editor_converts_misclassified_question_to_answer(client
     assert set(jobs_by_type) == {
         MemoirEditingJobType.INDEX_RETRIEVAL_SOURCE.value,
         MemoirEditingJobType.UPDATE_TOPIC_MAP.value,
+        MemoirEditingJobType.ORGANIZE_MATERIAL.value,
     }
 
 
