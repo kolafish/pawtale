@@ -5,7 +5,9 @@ from collections import defaultdict
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.memoir.types import MemoirCompletionIssueChannel, MemoirCompletionIssueStatus
 from app.models.memoir import (
+    MemoirCompletionIssue,
     MemoirBookChapterDraftVersion,
     MemoirBookImagePlacement,
     MemoirBookOutputVersion,
@@ -17,10 +19,18 @@ from app.models.memoir import (
 from app.models.users import User
 from app.schemas.memoir_snapshots import (
     MemoirStoryChapterResponse,
+    MemoirStoryIssueCounts,
     MemoirStorySectionResponse,
     MemoirStorySnapshotResponse,
 )
-from app.services.memoir import automation_events, draft_progress, projects, share_video_jobs, voice_transcripts
+from app.services.memoir import (
+    automation_events,
+    book_reviews,
+    draft_progress,
+    projects,
+    share_video_jobs,
+    voice_transcripts,
+)
 from app.services.memoir.access import load_memoir_project
 from app.services.memoir.automatic_book_draft import DraftProgress
 from app.services.memoir.read_snapshots import _empty_automation_events
@@ -62,21 +72,68 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
             .order_by(MemoirBookPlanChapter.sort_order, MemoirBookPlanChapter.id)
         )
     ).all()
+    # Match the canonical active issue queue. Book-level decisions are counted
+    # once, never copied to every chapter they may temporarily keep out of a book.
+    issue_counts = defaultdict(MemoirStoryIssueCounts)
+    for chapter_id, channel, count in (
+        await db.execute(
+            select(MemoirCompletionIssue.chapter_id, MemoirCompletionIssue.channel, func.count())
+            .where(
+                MemoirCompletionIssue.project_id == project.id,
+                MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+            )
+            .group_by(MemoirCompletionIssue.chapter_id, MemoirCompletionIssue.channel)
+        )
+    ).all():
+        if channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value:
+            issue_counts[chapter_id].review_count = count
+        else:
+            issue_counts[chapter_id].supplement_count = count
+    # The book workspace only offers optional questions from the current ready
+    # review. Manual decisions stay active across regenerated reviews.
+    if issue_counts[None].supplement_count:
+        review = await book_reviews.get_current_book_review(db, project_id=project.id)
+        issue_counts[None].supplement_count = (
+            (
+                await db.scalar(
+                    select(func.count())
+                    .select_from(MemoirCompletionIssue)
+                    .where(
+                        MemoirCompletionIssue.project_id == project.id,
+                        MemoirCompletionIssue.scope == "book",
+                        MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.INTERVIEW.value,
+                        MemoirCompletionIssue.status != MemoirCompletionIssueStatus.CLOSED.value,
+                        MemoirCompletionIssue.input_signature == review.input_signature,
+                    )
+                )
+            )
+            if review and review.status == "ready"
+            else 0
+        )
+    result.book_issues = issue_counts[None]
+    result.book_manual_edit_preserved = progress.preserved_manual
     chapter_views = {}
     for chapter in chapters:
         view = MemoirStoryChapterResponse(**chapter._asdict() | {"char_count": chapter.char_count or 0})
         view.readable = view.char_count > 0
+        view.issues = issue_counts[chapter.id]
         state = progress.chapters.get(chapter.id)
         if not chapter.include_in_book:
             view.state, view.state_text = "muted", "暂不入书"
-        elif state and state.status in {"needs_input", "needs_review", "failed", "cancelled"}:
-            view.state, view.state_text = "attention", "查看待处理事项"
+        elif state and state.status in {"failed", "cancelled"}:
+            view.state, view.state_text = "attention", "整理未完成"
+        elif view.issues.review_count:
+            view.state, view.state_text = "attention", f"{view.issues.review_count} 项待确认"
+        elif view.issues.supplement_count:
+            view.state, view.state_text = "attention", f"{view.issues.supplement_count} 项待补充"
         elif state and state.status in {"pending", "running"}:
-            view.state, view.state_text = "draft", "后台整理中"
-        elif chapter.id in progress.omitted_chapter_ids:
-            view.state, view.state_text = "attention", "等待确认后入稿"
+            view.state, view.state_text = "draft", "整理中"
+        elif state and state.status == "needs_material":
+            view.state, view.state_text = "attention", "待补充讲述"
         elif view.readable:
             view.state, view.state_text = "settled", "可阅读"
+        else:
+            view.state, view.state_text = "draft", "待整理"
         chapter_views[chapter.id] = view
     section_views = {}
     section_chapters = {}
@@ -154,6 +211,7 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         result.book_char_count = book[0] if book[1] else 0
         result.updated_at = max(project.updated_at, book[2]).isoformat()
     result.book_readable = result.book_char_count > 0
+    result.book_chapter_count = book[1] if book and result.book_readable else 0
     result.automation_events = await automation_events.list_automation_events(
         db, user_id=user.id, project_id=project.id, limit=8, completed_only=True
     )

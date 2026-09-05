@@ -653,3 +653,5 @@
 .chapter-reading-actions .is-secondary { color: var(--ui-text-secondary); font-weight: 400; }
 .large-text .story-inline-action,
 .large-text .overview-readable { font-size: 30rpx; }
+
+.overview-readability { display: flex; flex-wrap: wrap; gap: 4rpx 16rpx; }

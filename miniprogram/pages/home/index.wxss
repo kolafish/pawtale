@@ -836,7 +836,8 @@
   border-radius: 18rpx;
   background: var(--ui-accent-surface-subtle);
 }
-.home-review-text { flex: 1; min-width: 0; color: var(--ui-text-secondary); font-size: 28rpx; line-height: 1.5; }
+.home-review-copy { flex: 1; min-width: 0; }
+.home-review-text { display: block; color: var(--ui-text-secondary); font-size: 28rpx; line-height: 1.5; }
 .home-page .home-inline-action {
   display: flex;
   align-items: center;

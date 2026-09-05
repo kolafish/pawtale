@@ -60,6 +60,11 @@ class MemoirStorySectionResponse(BaseModel):
     video_count: int = 0
 
 
+class MemoirStoryIssueCounts(BaseModel):
+    review_count: int = Field(default=0, ge=0)
+    supplement_count: int = Field(default=0, ge=0)
+
+
 class MemoirStoryChapterResponse(BaseModel):
     id: str
     title: str
@@ -71,6 +76,7 @@ class MemoirStoryChapterResponse(BaseModel):
     readable: bool = False
     state: Literal["settled", "attention", "draft", "muted"] = "muted"
     state_text: str = "待整理"
+    issues: MemoirStoryIssueCounts = Field(default_factory=MemoirStoryIssueCounts)
     sections: list[MemoirStorySectionResponse] = Field(default_factory=list)
 
 
@@ -103,6 +109,9 @@ class MemoirStoryGrowthEvent(BaseModel):
 
 
 class MemoirStorySnapshotResponse(MemoirHomeSnapshotResponse):
+    book_issues: MemoirStoryIssueCounts = Field(default_factory=MemoirStoryIssueCounts)
+    book_manual_edit_preserved: bool = False
+    book_chapter_count: int = Field(default=0, ge=0)
     progress: MemoirDraftProgressResponse | None = None
     chapters: list[MemoirStoryChapterResponse] = Field(default_factory=list)
     book_readable: bool = False

@@ -47,7 +47,13 @@ export interface MemoirDraftProgress {
   review_error: string;
 }
 
+export interface MemoirStoryIssueCounts {
+  review_count: number;
+  supplement_count: number;
+}
+
 export interface MemoirStoryChapter {
+  issues: MemoirStoryIssueCounts;
   id: string;
   title: string;
   include_in_book: boolean;
@@ -74,6 +80,9 @@ export interface MemoirStoryGrowthEvent {
 }
 
 export interface MemoirStorySnapshot extends MemoirHomeSnapshot {
+  book_issues: MemoirStoryIssueCounts;
+  book_manual_edit_preserved: boolean;
+  book_chapter_count: number;
   progress: MemoirDraftProgress | null;
   chapters: MemoirStoryChapter[];
   book_readable: boolean;

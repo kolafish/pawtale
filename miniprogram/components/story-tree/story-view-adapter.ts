@@ -11,7 +11,12 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
     title: chapter.title || "未命名章节",
     timeRangeText: "",
     summaryText: `${chapter.sections.length} 小节 · ${chapter.material_count} 段讲述`,
-    outcomeText: chapter.state_text,
+    outcomeText: chapter.state === "settled" ? "" : chapter.state_text,
+    detailActionText: chapter.issues?.review_count
+      ? `${chapter.issues.review_count} 项待确认`
+      : chapter.issues?.supplement_count
+        ? `${chapter.issues.supplement_count} 项待补充`
+        : chapter.readable ? "查看详情" : "查看本章",
     readable: chapter.readable,
     imageCount: chapter.image_count,
     videoCount: chapter.video_count,
@@ -42,6 +47,8 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
       progressDetail: snapshot.book_readable ? "阅读草稿" : "查看书稿",
     },
     overview: {
+      bookText: snapshot.book_readable && snapshot.book_chapter_count
+        ? `${snapshot.book_chapter_count} 章已入书稿` : "",
       readableText: readableCount ? `${readableCount} 章可读` : "还没有正文",
       title: "人生总览",
       summaryText: `${chapters.length} 章 · ${chapters.reduce((total, chapter) => total + chapter.sections.length, 0)} 小节 · ${materialCount} 段讲述`,

@@ -665,6 +665,12 @@ definePage<HomeData>()({
     navigateToBook();
   },
 
+  openStoryNotice() {
+    if (this.data.reviewNoticeAction === "issues") this.openReviewIssues();
+    else if (this.data.reviewNoticeAction === "transcripts") this.openTranscripts();
+    else if (this.data.reviewNoticeAction === "book") this.openChapterManager();
+  },
+
   openReviewIssues() {
     if (!this.data.projectId) return;
     wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
