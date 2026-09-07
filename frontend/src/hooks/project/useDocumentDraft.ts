@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { projectsApi } from '../../api';
 import type { Project } from '../../types';
+import { useAppStore } from '../../stores/appStore';
+import { useRegisterDraftSave } from './draftSaves';
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'conflict';
 
@@ -69,6 +71,9 @@ export function useDocumentDraft({
   const contentRevisionRef = useRef(0);
   const isLoadingDocRef = useRef(false);
   const isReviewingRef = useRef(false);
+  const loadSequenceRef = useRef(0);
+  const savePromiseRef = useRef<Promise<void> | null>(null);
+  const conflictRef = useRef(false);
 
   const getCurrentSnapshot = useCallback(
     () => createSnapshot(documentName, documentContent, synopsis, status, label),
@@ -80,19 +85,22 @@ export function useDocumentDraft({
   }, [getCurrentSnapshot]);
 
   const saveMutation = useMutation({
-    mutationFn: async ({ projectId, docId, snapshot }: {
+    mutationFn: async ({ projectId, docId, snapshot, revision }: {
       projectId: string;
       docId: string;
       snapshot: DocumentSnapshot;
+      revision: number;
     }) => projectsApi.updateDocument(projectId, docId, {
       name: snapshot.name,
       content: snapshot.content,
       synopsis: snapshot.synopsis,
       status: snapshot.status,
       label: snapshot.label,
-      expected_content_revision: contentRevisionRef.current,
+      expected_content_revision: revision,
     }),
     onSuccess: (doc, variables) => {
+      const active = useAppStore.getState();
+      if (active.currentProject?.id !== variables.projectId || active.currentDocumentId !== variables.docId) return;
       contentRevisionRef.current = doc.content_revision;
       lastSavedSnapshotRef.current = variables.snapshot;
       setSaveStatus(
@@ -105,6 +113,7 @@ export function useDocumentDraft({
         error as { response?: { status?: number } }
       ).response?.status;
       setSaveStatus(status === 409 ? 'conflict' : 'unsaved');
+      conflictRef.current = status === 409;
     },
   });
 
@@ -140,19 +149,36 @@ export function useDocumentDraft({
       contentRevisionRef.current = contentRevision;
     }
     setSaveStatus('saved');
+    conflictRef.current = false;
   }, []);
 
-  const replaceContentAsSaved = useCallback((content: string, contentRevision: number) => {
+  const applyContinuedContent = useCallback((content: string, contentRevision: number, base: {
+    projectId: string; docId: string; content: string; generation: number;
+  }) => {
+    const active = useAppStore.getState();
+    if (active.currentProject?.id !== base.projectId || active.currentDocumentId !== base.docId
+      || base.generation !== loadSequenceRef.current) return;
+    if (currentSnapshotRef.current.content !== base.content) {
+      conflictRef.current = true;
+      setSaveStatus('conflict');
+      return;
+    }
     const snapshot = { ...currentSnapshotRef.current, content };
-    markSnapshotSaved(snapshot, contentRevision);
+    currentSnapshotRef.current = snapshot;
+    lastSavedSnapshotRef.current = { ...lastSavedSnapshotRef.current, content };
+    contentRevisionRef.current = contentRevision;
+    setSaveStatus(snapshotsEqual(snapshot, lastSavedSnapshotRef.current) ? 'saved' : 'unsaved');
     setDocumentContent(content);
-  }, [markSnapshotSaved]);
+  }, []);
 
-  const markCurrentDocumentRenamed = useCallback((name: string) => {
+  const markCurrentDocumentRenamed = useCallback((docId: string, name: string) => {
+    if (useAppStore.getState().currentDocumentId !== docId) return;
     const snapshot = { ...currentSnapshotRef.current, name };
-    markSnapshotSaved(snapshot);
+    currentSnapshotRef.current = snapshot;
+    lastSavedSnapshotRef.current = { ...lastSavedSnapshotRef.current, name };
+    setSaveStatus(snapshotsEqual(snapshot, lastSavedSnapshotRef.current) ? 'saved' : 'unsaved');
     setDocumentName(name);
-  }, [markSnapshotSaved]);
+  }, []);
 
   const resetDraft = useCallback(() => {
     setCurrentDocumentId(null);
@@ -169,22 +195,42 @@ export function useDocumentDraft({
   }, []);
 
   const saveCurrentIfDirty = useCallback(async () => {
+    if (savePromiseRef.current) return savePromiseRef.current;
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
-    const snapshot = getCurrentSnapshot();
-    if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
-    setSaveStatus('saving');
-    await saveMutation.mutateAsync({
-      projectId: currentProject.id,
-      docId: currentDocumentId,
-      snapshot,
-    });
-  }, [currentProject, currentDocumentId, getCurrentSnapshot, saveMutation]);
+    const save = async () => {
+      while (conflictRef.current || !snapshotsEqual(currentSnapshotRef.current, lastSavedSnapshotRef.current)) {
+        if (conflictRef.current) throw new Error('正文存在冲突，请保留当前输入后重新加载。');
+        const active = useAppStore.getState();
+        if (active.currentProject?.id !== currentProject.id || active.currentDocumentId !== currentDocumentId) return;
+        setSaveStatus('saving');
+        await saveMutation.mutateAsync({
+          projectId: currentProject.id,
+          docId: currentDocumentId,
+          snapshot: currentSnapshotRef.current,
+          revision: contentRevisionRef.current,
+        });
+      }
+    };
+    const pending = save();
+    savePromiseRef.current = pending;
+    try {
+      await pending;
+    } finally {
+      if (savePromiseRef.current === pending) savePromiseRef.current = null;
+    }
+  }, [currentProject, currentDocumentId, saveMutation]);
+
+  useRegisterDraftSave(saveCurrentIfDirty, () => Boolean(currentDocumentId) && (
+    conflictRef.current || !snapshotsEqual(currentSnapshotRef.current, lastSavedSnapshotRef.current)
+  ));
 
   const loadDocument = useCallback(async (docId: string) => {
     if (!currentProject) return;
+    const sequence = ++loadSequenceRef.current;
     isLoadingDocRef.current = true;
     try {
       const doc = await projectsApi.getDocument(currentProject.id, docId);
+      if (sequence !== loadSequenceRef.current || useAppStore.getState().currentProject?.id !== currentProject.id) return;
       setDocumentName(doc.name);
       setDocumentContent(doc.content);
       setSynopsis(doc.synopsis || '');
@@ -196,7 +242,7 @@ export function useDocumentDraft({
       );
       setCurrentDocumentId(docId);
     } finally {
-      isLoadingDocRef.current = false;
+      if (sequence === loadSequenceRef.current) isLoadingDocRef.current = false;
     }
   }, [currentProject, markSnapshotSaved, setCurrentDocumentId]);
 
@@ -208,7 +254,7 @@ export function useDocumentDraft({
 
   useEffect(() => {
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
-    if (isReviewingRef.current) return;
+    if (isReviewingRef.current || conflictRef.current) return;
     const snapshot = getCurrentSnapshot();
     if (snapshotsEqual(snapshot, lastSavedSnapshotRef.current)) return;
     setSaveStatus('unsaved');
@@ -240,6 +286,7 @@ export function useDocumentDraft({
     } else if (currentDocumentId) {
       loadDocument(currentDocumentId);
     }
+    return () => { loadSequenceRef.current += 1; };
   }, [currentProject?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
@@ -260,10 +307,12 @@ export function useDocumentDraft({
     switchDocument,
     handleSave: saveCurrentIfDirty,
     saveCurrentIfDirty,
-    replaceContentAsSaved,
+    applyContinuedContent,
     markCurrentDocumentRenamed,
     resetDraft,
     setIsReviewing,
     getContentRevision: () => contentRevisionRef.current,
+    getContent: () => currentSnapshotRef.current.content,
+    getLoadSequence: () => loadSequenceRef.current,
   };
 }
