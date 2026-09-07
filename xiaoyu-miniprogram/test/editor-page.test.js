@@ -79,6 +79,63 @@ function loadEditorPage(overrides = {}, dictationRuntime = {}) {
   return loadPageModule("../../xiaoyu-miniprogram/pages/editor/index.ts");
 }
 
+for (const lifecycle of ["onHide", "onUnload"]) {
+  test(`editor ignores permission completion after ${lifecycle}`, async () => {
+    let allow;
+    const permission = new Promise((resolve) => { allow = resolve; });
+    let starts = 0;
+    const { page } = loadEditorPage({}, {
+      ensureRecorderAuthorization: () => permission,
+      ArticleDictationClient: class {
+        async connect() { throw new Error("hidden page must not connect"); }
+        async start() { starts += 1; }
+        async close() {}
+      },
+    });
+    const context = pageContext(page);
+    await context.onLoad({ projectId: "project-1" });
+    const starting = context.startDictation();
+    context[lifecycle]();
+    await context.finishPromise;
+    allow();
+    await starting;
+    assert.equal(starts, 0);
+    assert.equal(context.dictationClient, null);
+    assert.equal(context.data.error, "");
+  });
+}
+
+test("editor cancels a pending connection and can start again after showing", async () => {
+  let connected;
+  const connecting = new Promise((resolve) => { connected = resolve; });
+  let clients = 0;
+  let starts = 0;
+  let closes = 0;
+  const { page } = loadEditorPage({}, {
+    ArticleDictationClient: class {
+      constructor() { clients += 1; }
+      async connect() { if (clients === 1) await connecting; }
+      async start() { starts += 1; }
+      async close() { closes += 1; }
+    },
+  });
+  const context = pageContext(page);
+  await context.onLoad({ projectId: "project-1" });
+  const first = context.startDictation();
+  await Promise.resolve();
+  const duplicate = context.startDictation();
+  context.onHide();
+  await context.finishPromise;
+  context.onShow();
+  await context.startDictation();
+  connected();
+  await Promise.all([first, duplicate]);
+  assert.equal(clients, 2);
+  assert.equal(starts, 1);
+  assert.equal(closes, 1);
+  await context.releaseDictationClient();
+});
+
 test("editor autosave sends the loaded content revision", async () => {
   const updates = [];
   const { page } = loadEditorPage({

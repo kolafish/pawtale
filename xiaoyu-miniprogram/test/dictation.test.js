@@ -7,7 +7,7 @@ async function flushAsyncWork() {
   await Promise.resolve();
 }
 
-function runtimeHarness() {
+function runtimeHarness(ensureBackendSession = async () => {}) {
   const socketCallbacks = {};
   const recorderCallbacks = {};
   const sent = [];
@@ -81,7 +81,7 @@ function runtimeHarness() {
     },
   };
   mockModule("../../xiaoyu-miniprogram/services/auth.ts", {
-    ensureBackendSession: async () => {},
+    ensureBackendSession,
   });
   mockModule("../../xiaoyu-miniprogram/services/request.ts", {
     readSessionCookie: () => "pawtale_session=dictation",
@@ -112,6 +112,32 @@ function runtimeHarness() {
     },
   };
 }
+
+test("closing while authentication is pending does not open a socket later", async () => {
+  let authenticated;
+  const authentication = new Promise((resolve) => { authenticated = resolve; });
+  const runtime = runtimeHarness(() => authentication);
+  const connecting = runtime.client.connect();
+  const rejected = assert.rejects(connecting, /已关闭/);
+  await runtime.client.close();
+  authenticated();
+  await rejected;
+  assert.equal(runtime.connectOptions, undefined);
+  assert.equal(runtime.recorder.starts.length, 0);
+});
+
+test("closing a pending socket rejects connection and ignores late ready", async () => {
+  const runtime = runtimeHarness();
+  const connecting = runtime.client.connect();
+  const rejected = assert.rejects(connecting, /已关闭/);
+  await flushAsyncWork();
+  await runtime.client.close();
+  await rejected;
+  runtime.socketCallbacks.message({ data: JSON.stringify({ type: "session.ready" }) });
+  await assert.rejects(runtime.client.start(), /尚未就绪/);
+  assert.equal(runtime.states.at(-1), "idle");
+  assert.equal(runtime.recorder.starts.length, 0);
+});
 
 test("dictation streams PCM frames and returns final text without interview events", async () => {
   const runtime = runtimeHarness();

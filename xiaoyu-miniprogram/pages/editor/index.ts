@@ -153,8 +153,12 @@ definePage<EditorData>()({
   dictationLatestText: "",
   dictationFinalReceived: false,
   finishPromise: null as Promise<void> | null,
+  pageVisible: false,
+  dictationStarting: false,
+  dictationStartGeneration: 0,
 
   async onLoad(options: { projectId?: string }) {
+    this.pageVisible = true;
     if (!options.projectId) {
       this.setData({ loading: false, error: "缺少文章编号" });
       return;
@@ -163,12 +167,27 @@ definePage<EditorData>()({
     await this.loadArticle();
   },
 
+  onShow() {
+    this.pageVisible = true;
+    if (!this.dictationClient && !this.dictationStarting) {
+      this.setData(dictationView("idle"));
+    }
+  },
+
   onHide() {
+    this.cancelDictationStart();
     void this.finishPendingWork();
   },
 
   onUnload() {
+    this.cancelDictationStart();
     void this.finishPendingWork();
+  },
+
+  cancelDictationStart() {
+    this.pageVisible = false;
+    this.dictationStartGeneration += 1;
+    this.dictationStarting = false;
   },
 
   async loadArticle() {
@@ -239,11 +258,19 @@ definePage<EditorData>()({
   },
 
   async startDictation() {
-    this.setData({ error: "" });
+    if (!this.pageVisible || this.dictationStarting) return;
+    const generation = ++this.dictationStartGeneration;
+    const isCurrent = () => this.pageVisible && this.dictationStartGeneration === generation;
+    this.dictationStarting = true;
+    this.setData({ error: "", dictationDisabled: true });
     try {
+      if (this.finishPromise) await this.finishPromise;
+      if (!isCurrent()) return;
       await ensureRecorderAuthorization();
+      if (!isCurrent()) return;
       if (this.data.dictationState === "error") {
         await this.releaseDictationClient();
+        if (!isCurrent()) return;
       }
       const cursor = Math.max(0, Math.min(this.data.cursorPosition, this.data.content.length));
       this.dictationPrefix = this.data.content.slice(0, cursor);
@@ -261,11 +288,16 @@ definePage<EditorData>()({
           },
         });
       }
-      await this.dictationClient.connect();
-      await this.dictationClient.start();
+      const client = this.dictationClient;
+      await client.connect();
+      if (!isCurrent()) return;
+      await client.start();
     } catch (error) {
+      if (!isCurrent()) return;
       const message = error instanceof Error ? error.message : "口述启动失败";
       this.setData({ error: message, ...dictationView("error") });
+    } finally {
+      if (this.dictationStartGeneration === generation) this.dictationStarting = false;
     }
   },
 

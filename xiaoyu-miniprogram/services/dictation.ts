@@ -112,6 +112,7 @@ export class ArticleDictationClient {
   private turnStarted = false;
   private audioEndSent = false;
   private connectPromise: Promise<void> | null = null;
+  private cancelConnect: (() => void) | null = null;
   private startPromise: Promise<void> | null = null;
   private startResolve: (() => void) | null = null;
   private startReject: ((error: Error) => void) | null = null;
@@ -123,6 +124,7 @@ export class ArticleDictationClient {
   constructor(private readonly options: ArticleDictationOptions) {}
 
   async connect(): Promise<void> {
+    if (this.closing) throw new Error("口述连接已关闭");
     if (this.state === "ready") {
       return;
     }
@@ -137,6 +139,7 @@ export class ArticleDictationClient {
 
   private async openSocket(): Promise<void> {
     await ensureBackendSession();
+    if (this.closing) throw new Error("口述连接已关闭");
     this.setState("connecting");
     const cookie = readSessionCookie();
     await new Promise<void>((resolve, reject) => {
@@ -153,6 +156,7 @@ export class ArticleDictationClient {
         clearTimeout(timer);
         callback();
       };
+      this.cancelConnect = () => settle(() => reject(new Error("口述连接已关闭")));
       const socket = wx.connectSocket({
         url: gatewayUrl(this.options.projectId, this.options.documentId),
         header: cookie ? { Cookie: cookie } : {},
@@ -162,11 +166,13 @@ export class ArticleDictationClient {
       }) as SocketTask;
       this.socket = socket;
       socket.onOpen(() => {
+        if (this.closing) return;
         this.socketOpen = true;
       });
       socket.onMessage((message) => {
         const event = this.parseEvent(message.data);
         if (event.type === "session.ready") {
+          if (this.closing) return;
           this.setState("ready");
           settle(resolve);
         }
@@ -191,13 +197,15 @@ export class ArticleDictationClient {
         }
       });
     }).catch((error) => {
-      this.setState("error");
+      if (!this.closing) this.setState("error");
       throw error;
+    }).finally(() => {
+      this.cancelConnect = null;
     });
   }
 
   start(): Promise<void> {
-    if (this.state !== "ready") {
+    if (this.closing || this.state !== "ready") {
       return Promise.reject(new Error("语音连接尚未就绪"));
     }
     this.setState("starting");
@@ -255,6 +263,7 @@ export class ArticleDictationClient {
       return this.closePromise;
     }
     this.closing = true;
+    this.cancelConnect?.();
     this.closePromise = (async () => {
       try {
         await this.stop();
