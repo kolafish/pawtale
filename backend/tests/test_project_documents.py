@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -7,6 +8,7 @@ from app.services.content_storage import content_exists, read_content, write_con
 from app.services.project_documents import (
     commit_created_document,
     commit_document_update,
+    ContentRevisionConflict,
     delete_document,
     delete_project,
 )
@@ -17,6 +19,7 @@ def _failing_db():
         commit=AsyncMock(side_effect=RuntimeError("commit failed")),
         rollback=AsyncMock(),
         delete=AsyncMock(),
+        execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: 1)),
     )
 
 
@@ -75,3 +78,49 @@ async def test_delete_project_restores_directory_when_commit_fails(tmp_path):
         assert await read_content("project-1", "doc-1") == "project content"
         db.delete.assert_awaited_once_with(project)
         db.rollback.assert_awaited_once()
+
+
+async def test_conflicting_save_never_restores_content(tmp_path):
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        await write_content("project-1", "doc-1", "committed by another writer")
+        db = _failing_db()
+        db.execute.return_value.scalar_one_or_none = lambda: None
+        doc = SimpleNamespace(id="doc-1", word_count=0, content_revision=0)
+        with patch("app.services.project_documents._snapshot_content", new_callable=AsyncMock) as snapshot:
+            with pytest.raises(ContentRevisionConflict):
+                await commit_document_update(db, "project-1", doc, "stale edit", expected_content_revision=0)
+        snapshot.assert_not_awaited()
+        assert await read_content("project-1", "doc-1") == "committed by another writer"
+
+
+async def test_failed_commit_restores_before_next_writer_can_save(tmp_path):
+    from app.services.project_documents import _restore_content
+
+    restore_started = asyncio.Event()
+    allow_restore = asyncio.Event()
+
+    async def delayed_restore(*args):
+        restore_started.set()
+        await allow_restore.wait()
+        await _restore_content(*args)
+
+    with patch("app.services.content_storage.PROJECTS_DIR", tmp_path / "projects"):
+        await write_content("project-1", "doc-1", "original")
+        failed_db = _failing_db()
+        next_db = _failing_db()
+        next_db.commit.side_effect = None
+        first = SimpleNamespace(id="doc-1", word_count=0, content_revision=0)
+        second = SimpleNamespace(id="doc-1", word_count=0, content_revision=0)
+        with patch("app.services.project_documents._restore_content", delayed_restore):
+            failed = asyncio.create_task(commit_document_update(failed_db, "project-1", first, "failed write"))
+            await asyncio.wait_for(restore_started.wait(), timeout=2)
+            saved = asyncio.create_task(commit_document_update(next_db, "project-1", second, "successful write"))
+            await asyncio.sleep(0)
+            try:
+                next_db.execute.assert_not_awaited()
+            finally:
+                allow_restore.set()
+                results = await asyncio.gather(failed, saved, return_exceptions=True)
+        assert isinstance(results[0], RuntimeError)
+        assert results[1] is None
+        assert await read_content("project-1", "doc-1") == "successful write"

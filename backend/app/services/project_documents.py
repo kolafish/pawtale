@@ -161,80 +161,81 @@ async def commit_document_update(
     *,
     expected_content_revision: int | None = None,
 ) -> None:
-    document_id = doc.id
-    snapshot: ContentSnapshot | None = None
-    try:
-        if content is not None:
-            snapshot = await _snapshot_content(project_id, document_id)
-            if expected_content_revision is None:
-                doc.content_revision += 1
-            else:
+    async with storage.project_content_lock(project_id):
+        document_id = doc.id
+        snapshot: ContentSnapshot | None = None
+        try:
+            if content is not None:
+                statement = update(Document).where(Document.id == document_id)
+                if expected_content_revision is not None:
+                    statement = statement.where(Document.content_revision == expected_content_revision)
                 result = await db.execute(
-                    update(Document)
-                    .where(
-                        Document.id == document_id,
-                        Document.content_revision == expected_content_revision,
-                    )
-                    .values(content_revision=Document.content_revision + 1)
+                    statement.values(content_revision=Document.content_revision + 1)
+                    .returning(Document.content_revision)
                     .execution_options(synchronize_session=False)
                 )
-                if result.rowcount != 1:
+                revision = result.scalar_one_or_none()
+                if revision is None:
                     raise ContentRevisionConflict
-                doc.content_revision = expected_content_revision + 1
-            await storage.write_content(project_id, document_id, content)
-            doc.word_count = count_words(content)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        if snapshot is not None:
-            await _restore_content(project_id, document_id, snapshot)
-        raise
+                doc.content_revision = revision
+                snapshot = await _snapshot_content(project_id, document_id)
+                await storage.write_content(project_id, document_id, content)
+                doc.word_count = count_words(content)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            if snapshot is not None:
+                await _restore_content(project_id, document_id, snapshot)
+            raise
 
 
 async def delete_document(db: AsyncSession, project_id: str, doc: Document) -> None:
-    snapshot = await _snapshot_content(project_id, doc.id)
-    try:
-        await storage.delete_content(project_id, doc.id)
-        await db.delete(doc)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        await _restore_content(project_id, doc.id, snapshot)
-        raise
+    async with storage.project_content_lock(project_id):
+        snapshot = await _snapshot_content(project_id, doc.id)
+        try:
+            await storage.delete_content(project_id, doc.id)
+            await db.delete(doc)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            await _restore_content(project_id, doc.id, snapshot)
+            raise
 
 
 async def delete_group(db: AsyncSession, project_id: str, group: DocumentGroup) -> None:
-    snapshots = {
-        doc.id: await _snapshot_content(project_id, doc.id)
-        for doc in (group.documents or [])
-    }
-    try:
-        for doc_id in snapshots:
-            await storage.delete_content(project_id, doc_id)
-        await db.delete(group)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        for doc_id, snapshot in snapshots.items():
-            await _restore_content(project_id, doc_id, snapshot)
-        raise
+    async with storage.project_content_lock(project_id):
+        snapshots = {
+            doc.id: await _snapshot_content(project_id, doc.id)
+            for doc in (group.documents or [])
+        }
+        try:
+            for doc_id in snapshots:
+                await storage.delete_content(project_id, doc_id)
+            await db.delete(group)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            for doc_id, snapshot in snapshots.items():
+                await _restore_content(project_id, doc_id, snapshot)
+            raise
 
 
 async def delete_project(db: AsyncSession, project: Project) -> None:
-    source = storage.PROJECTS_DIR / project.id
-    backup = source.parent / f".{project.id}.{uuid4().hex}.delete-backup"
+    async with storage.project_content_lock(project.id):
+        source = storage.PROJECTS_DIR / project.id
+        backup = source.parent / f".{project.id}.{uuid4().hex}.delete-backup"
 
-    try:
-        if source.exists():
-            shutil.copytree(source, backup)
-            await storage.delete_project_dir(project.id)
-        await db.delete(project)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        if backup.exists() and not source.exists():
-            shutil.copytree(backup, source)
-        raise
-    finally:
-        if backup.exists():
-            shutil.rmtree(backup)
+        try:
+            if source.exists():
+                shutil.copytree(source, backup)
+                await storage.delete_project_dir(project.id)
+            await db.delete(project)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            if backup.exists() and not source.exists():
+                shutil.copytree(backup, source)
+            raise
+        finally:
+            if backup.exists():
+                shutil.rmtree(backup)

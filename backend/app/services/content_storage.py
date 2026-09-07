@@ -3,13 +3,38 @@ Document content file storage.
 
 Layout: {DATA_DIR}/projects/{project_id}/{document_id}.md
 """
+import asyncio
+import fcntl
 import shutil
+from contextlib import asynccontextmanager
 import aiofiles
 import aiofiles.os
 from pathlib import Path
 from app.config import DATA_DIR
 
 PROJECTS_DIR = DATA_DIR / "projects"
+
+
+@asynccontextmanager
+async def project_content_lock(project_id: str):
+    """Keep file writes and database rollback compensation under one owner.
+
+    The lock survives transaction rollback and is shared by backend processes.
+    Keep its inode outside the project directory so deletion cannot replace it.
+    """
+    lock_dir = PROJECTS_DIR / ".locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    with (lock_dir / f"{project_id}.lock").open("a") as lock_file:
+        while True:
+            try:
+                fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                await asyncio.sleep(0.01)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 def _doc_path(project_id: str, document_id: str) -> Path:
