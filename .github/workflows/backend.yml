@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "scripts/test-backend.sh"
       - ".github/workflows/backend.yml"
   push:
     branches:
       - main
     paths:
       - "backend/**"
+      - "scripts/test-backend.sh"
       - ".github/workflows/backend.yml"
 
 jobs:
