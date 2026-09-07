@@ -1,0 +1,43 @@
+name: Frontend
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - "miniprogram/**"
+      - "xiaoyu-miniprogram/**"
+      - "scripts/test-frontend.sh"
+      - "scripts/test-miniprogram.sh"
+      - ".github/workflows/frontend.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - "miniprogram/**"
+      - "xiaoyu-miniprogram/**"
+      - "scripts/test-frontend.sh"
+      - "scripts/test-miniprogram.sh"
+      - ".github/workflows/frontend.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [frontend, miniprogram, xiaoyu-miniprogram]
+    defaults:
+      run:
+        working-directory: ${{ matrix.project }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+      - run: npm ci
+      - if: matrix.project == 'frontend'
+        run: bash ../scripts/test-frontend.sh
+      - if: matrix.project != 'frontend'
+        run: npm run typecheck && npm test

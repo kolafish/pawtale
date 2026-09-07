@@ -12,9 +12,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
-if not POSTGRES_DATABASE_URL:
-    raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for backend tests")
-os.environ["DATABASE_URL"] = POSTGRES_DATABASE_URL
+if POSTGRES_DATABASE_URL:
+    os.environ["DATABASE_URL"] = POSTGRES_DATABASE_URL
 os.environ["APP_ENV"] = "test"
 
 from app.main import app  # noqa: E402
@@ -31,6 +30,8 @@ from app.migrations.postgres_runtime import (  # noqa: E402
 
 
 def _assert_dedicated_postgres_test_database() -> None:
+    if not POSTGRES_DATABASE_URL:
+        raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required for database/API tests")
     database_name = (make_url(POSTGRES_DATABASE_URL).database or "").lower()
     if not (database_name.startswith("test_") or database_name.endswith("_test")):
         raise RuntimeError(
@@ -46,7 +47,7 @@ def _postgres_alembic_config() -> Config:
     return config
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def postgres_schema():
     _assert_dedicated_postgres_test_database()
     command.upgrade(_postgres_alembic_config(), "head")
@@ -61,7 +62,7 @@ async def _truncate_postgres_tables(engine) -> None:
 
 
 @pytest_asyncio.fixture
-async def test_db():
+async def test_db(postgres_schema):
     """创建隔离的 PostgreSQL 测试会话。"""
     register_models()
     test_settings = settings.model_copy(
