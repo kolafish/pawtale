@@ -163,13 +163,13 @@ def _provider_timed_chars(utterance: MemoirVoiceUtterance) -> tuple[list[TimedCh
     timed_chars: list[TimedChar] = []
     used_words = False
     for item in utterances:
-        utterance_start = _int_ms(item.get("start_time") or item.get("start_ms"))
-        utterance_end = _int_ms(item.get("end_time") or item.get("end_ms"))
+        utterance_start = _provider_timestamp_ms(item, "start_time", "start_ms")
+        utterance_end = _provider_timestamp_ms(item, "end_time", "end_ms")
         words = [word for word in _as_list(item.get("words")) if isinstance(word, dict)]
         for word in words:
             text = str(word.get("text") or "")
-            start_ms = _int_ms(word.get("start_time") or word.get("start_ms"))
-            end_ms = _int_ms(word.get("end_time") or word.get("end_ms"))
+            start_ms = _provider_timestamp_ms(word, "start_time", "start_ms")
+            end_ms = _provider_timestamp_ms(word, "end_time", "end_ms")
             if text and start_ms is not None and end_ms is not None:
                 timed_chars.extend(_timed_chars_for_text(text, start_ms, end_ms))
                 used_words = True
@@ -179,6 +179,11 @@ def _provider_timed_chars(utterance: MemoirVoiceUtterance) -> tuple[list[TimedCh
         strategy = ALIGNMENT_STRATEGY_PROVIDER_WORDS if used_words else ALIGNMENT_STRATEGY_PROVIDER_UTTERANCES
         return timed_chars, strategy
     return [], ALIGNMENT_STRATEGY_LINEAR
+
+
+def _provider_timestamp_ms(item: dict[str, Any], primary: str, fallback: str) -> int | None:
+    value = item.get(primary)
+    return _int_ms(item.get(fallback) if value is None else value)
 
 
 def _duration_ms(utterance: MemoirVoiceUtterance, timed_chars: list[TimedChar]) -> int:
