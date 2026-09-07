@@ -173,7 +173,6 @@ function loadBookPage({
     listMemoirAutomationEvents: async () => ({ items: [], total: 0, limit: 8 }),
     acknowledgeMemoirAutomationEvent: async () => ({}),
     acknowledgeDismissibleMemoirAutomationEvents: async () => ({ updated_count: 0 }),
-    updateMemoirBookPlan: unmockedAsync("updateMemoirBookPlan"),
     ...voiceApiExports,
   });
   mockModule("../stores/memoir-read-cache.ts", {

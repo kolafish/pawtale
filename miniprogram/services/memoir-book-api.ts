@@ -17,7 +17,6 @@ import type {
   MemoirBookPlanConfirmRequest,
   MemoirBookPlanGenerateRequest,
   MemoirBookPlanStructureCommandRequest,
-  MemoirBookPlanUpdateRequest,
   MemoirBookTitleSuggestionRequest,
   MemoirBookTitleSuggestionResponse,
   MemoirImageAsset,
@@ -69,19 +68,6 @@ export function confirmMemoirBookPlan(
     bookPlanPath(projectId),
     {
       method: "PUT",
-      data,
-    },
-  );
-}
-
-export function updateMemoirBookPlan(
-  projectId: string,
-  data: MemoirBookPlanUpdateRequest,
-): Promise<MemoirBookPlan> {
-  return memoirRequest<MemoirBookPlan>(
-    bookPlanPath(projectId),
-    {
-      method: "PATCH",
       data,
     },
   );

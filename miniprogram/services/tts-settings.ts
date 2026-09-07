@@ -121,14 +121,6 @@ export function normalizeScopedTTSSettings(value: unknown): ScopedTTSSettings {
   };
 }
 
-export function ttsVoiceLabel(value: string): string {
-  return TTS_VOICE_OPTIONS.find((option) => option.value === value)?.label || TTS_VOICE_OPTIONS[0].label;
-}
-
-export function ttsSpeedLabel(value: number): string {
-  return TTS_SPEED_OPTIONS.find((option) => option.value === value)?.label || TTS_SPEED_OPTIONS[1].label;
-}
-
 export function readScopedTTSSettings(scope: TTSSettingsScope): TTSSettings {
   try {
     return normalizeScopedTTSSettings(wx.getStorageSync<ScopedTTSSettings | TTSSettings>(STORAGE_KEY))[scope];

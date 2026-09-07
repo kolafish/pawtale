@@ -247,30 +247,6 @@ export function writeMemoirCache<T>(
   }
 }
 
-export function markMemoirCacheStale<T>(
-  descriptor: MemoirCacheDescriptor<T>,
-  incrementLocalRevision = false,
-): void {
-  if (!validDescriptor(descriptor)) {
-    return;
-  }
-  const envelope = envelopeFor(descriptor);
-  if (!envelope) {
-    return;
-  }
-  try {
-    wx.setStorageSync(cacheStoreKey(descriptor.scope), {
-      ...envelope,
-      stale: true,
-      local_invalidation_revision: incrementLocalRevision
-        ? (envelope.local_invalidation_revision || 0) + 1
-        : envelope.local_invalidation_revision,
-    });
-  } catch (error) {
-    console.warn("mark memoir cache entry stale failed", error);
-  }
-}
-
 export function removeMemoirCache(scope: MemoirCacheScope): void {
   removeKey(cacheStoreKey(scope));
 }

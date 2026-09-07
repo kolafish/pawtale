@@ -634,3 +634,17 @@ test("book export page assembles confirmed chapter drafts as a new full-book ver
   assert.equal(context.data.exportNotice, "已根据各章确认正文更新全书稿。");
   assert.equal(toasts[0].title, "书稿已更新");
 });
+
+
+test("plain text output without a manuscript does not invent book structure", async () => {
+  const output = sampleBookOutput();
+  output.latest_version.content = "已有的纯文字正文";
+  output.latest_version.manuscript = null;
+  const { bookOutputData } = require("../pages/book/book-view-model.ts");
+  const data = bookOutputData(output);
+  assert.equal(data.bookContent, "已有的纯文字正文");
+  assert.equal(data.bookManuscriptAvailable, false);
+  assert.deepEqual(data.bookManuscriptStructureItems, []);
+  assert.deepEqual(data.bookManuscriptChapterItems, []);
+  assert.deepEqual(data.bookPreviewChapters, []);
+});

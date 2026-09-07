@@ -36,10 +36,10 @@ import {
   enableMiniProgramShareMenu,
 } from "../../services/share";
 import {
-  bookOutputData,
+  bookReadingData,
   readingParagraphs,
   trimText,
-  type BookData,
+  type BookReadingData,
   type BookOutputChapterPreviewView,
 } from "../book/book-view-model";
 import {
@@ -48,20 +48,7 @@ import {
   type BookTTSState,
 } from "../book/book-tts-player";
 
-type BookReaderData = Pick<
-  BookData,
-  | "bookContent"
-  | "bookCharCount"
-  | "bookPreviewTitle"
-  | "bookPreviewTocItems"
-  | "bookPreviewChapters"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookVersionText"
-  | "bookViewingHistoricalVersion"
-  | "bookVersionNotice"
-  | "bookStaleNotice"
-> & BookTTSState & {
+type BookReaderData = BookReadingData & BookTTSState & {
   pageClass: string;
   loading: boolean;
   playbackError: string;
@@ -176,40 +163,15 @@ function sentenceHighlight(
 function readerData(
   output: MemoirBookOutput | null,
   version: MemoirBookOutputVersion | null = null,
-): Pick<
-  BookReaderData,
-  | "bookContent"
-  | "bookCharCount"
-  | "bookPreviewTitle"
-  | "bookPreviewTocItems"
-  | "bookPreviewChapters"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookVersionText"
-  | "bookViewingHistoricalVersion"
-  | "bookVersionNotice"
-  | "bookStaleNotice"
-  | "readerTitle"
-  | "readerSubtitle"
-> {
-  const data = bookOutputData(output, version);
+): BookReadingData & Pick<BookReaderData, "readerTitle" | "readerSubtitle"> {
+  const data = bookReadingData(output, version);
   const readerTitle = (
     trimText(data.bookManuscriptTitle)
     || trimText(data.bookPreviewTitle)
     || "家庭回忆录"
   );
   return {
-    bookContent: data.bookContent,
-    bookCharCount: data.bookCharCount,
-    bookPreviewTitle: data.bookPreviewTitle,
-    bookPreviewTocItems: data.bookPreviewTocItems,
-    bookPreviewChapters: data.bookPreviewChapters,
-    bookManuscriptTitle: data.bookManuscriptTitle,
-    bookManuscriptSubtitle: data.bookManuscriptSubtitle,
-    bookVersionText: data.bookVersionText,
-    bookViewingHistoricalVersion: data.bookViewingHistoricalVersion,
-    bookVersionNotice: data.bookVersionNotice,
-    bookStaleNotice: data.bookStaleNotice,
+    ...data,
     readerTitle,
     readerSubtitle: trimText(data.bookManuscriptSubtitle || "根据口述访谈整理"),
   };

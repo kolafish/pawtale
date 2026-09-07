@@ -60,8 +60,6 @@ function loadMePage({
     }),
     readScopedTTSSettings: () => ({ voice: "", speedRatio: 1 }),
     saveScopedTTSSettings: (_scope, settings) => settings,
-    ttsSpeedLabel: () => "正常 1.0x",
-    ttsVoiceLabel: () => "默认音色",
     ...ttsExports,
   });
   mockModule("../services/ai-model-settings.ts", {

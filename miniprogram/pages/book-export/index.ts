@@ -41,7 +41,7 @@ import {
   bookOutputData,
   buildAutomationEventViews,
   trimText,
-  type BookData,
+  type BookOutputData,
   type BookAutomationEventView,
 } from "../book/book-view-model";
 import {
@@ -81,58 +81,18 @@ type WxWithDocument = WechatMiniprogram.Wx & {
   openDocument?: (options: OpenDocumentOptions) => void;
 };
 
-type BookExportData = Pick<
-  BookData,
-  | "loading"
-  | "error"
-  | "projectId"
-  | "planTitle"
-  | "totalChapterCount"
-  | "bookContent"
-  | "bookCharCount"
-  | "bookPreviewTitle"
-  | "bookPreviewTocItems"
-  | "bookPreviewChapters"
-  | "bookPreviewChaptersExpanded"
-  | "bookManuscriptAvailable"
-  | "bookManuscriptTitle"
-  | "bookManuscriptSubtitle"
-  | "bookManuscriptTemplateLabel"
-  | "bookManuscriptSettingsText"
-  | "bookManuscriptStructureItems"
-  | "bookManuscriptChapterItems"
-  | "bookManuscriptBackMatterItems"
-  | "bookVersionText"
-  | "bookVersionOptions"
-  | "bookSelectedVersionId"
-  | "bookSelectedVersionIndex"
-  | "bookViewingHistoricalVersion"
-  | "bookVersionNotice"
-  | "bookStaleNotice"
-  | "bookExportBusyTarget"
-  | "bookExportShowSourceAppendix"
-  | "bookTitleInput"
-  | "bookSubtitleInput"
-  | "bookNarratorNameInput"
-  | "bookPreparedByInput"
-  | "bookPrefaceInput"
-  | "bookAfterwordInput"
-  | "bookBackCoverQuoteInput"
-  | "bookTitleChanged"
-  | "bookMetadataChanged"
-  | "bookTitleSaving"
-  | "bookDesignSaveStatusText"
-  | "bookTitleSuggesting"
-  | "bookTitleSuggestions"
-  | "bookCoverStyle"
-  | "bookCoverStylePreviewClass"
-  | "bookCoverStyleIndex"
-  | "bookCoverStyleLabel"
-  | "bookCoverStyleDetailText"
-  | "bookCoverStyleOptions"
-  | "bookCoverStyleChanged"
-  | "bookEditorialCopyBusyTarget"
-> & {
+type BookExportData = BookOutputData & {
+  loading: boolean;
+  error: string;
+  projectId: string;
+  planTitle: string;
+  totalChapterCount: number;
+  bookPreviewChaptersExpanded: boolean;
+  bookExportBusyTarget: string;
+  bookExportShowSourceAppendix: boolean;
+  bookTitleSaving: boolean;
+  bookTitleSuggesting: boolean;
+  bookEditorialCopyBusyTarget: string;
   pageClass: string;
   generatingBook: boolean;
   requestedAction: string;
