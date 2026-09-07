@@ -223,56 +223,63 @@ class VoiceAssistantTurnStreamSession:
         cancel_event = asyncio.Event()
         cancel_task = asyncio.create_task(self._wait_for_cancel(cancel_event))
         stream_task = asyncio.create_task(self._stream_turn(turn_id, req, cancel_event))
-        done, _pending = await asyncio.wait(
-            {cancel_task, stream_task},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        if cancel_task in done:
-            try:
-                cancel_signal = await cancel_task
-            except Exception:
-                cancel_signal = AssistantTurnCancelSignal(reason="connection_close", client_disconnected=True)
-            cancel_event.set()
-            stream_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await stream_task
-            await self.db.rollback()
-            if cancel_signal.client_disconnected:
-                return
-            await self.client.send_json(
-                {
-                    "type": "turn.cancelled",
-                    "turn_id": turn_id,
-                    "voice_session_id": self.voice_session_id,
-                    "state": cancel_signal.state,
-                    "reason": cancel_signal.reason,
-                }
-            )
-            return
-
-        cancel_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await cancel_task
-
         try:
-            await stream_task
-        except Exception as exc:
-            await self.db.rollback()
-            logger.exception(
-                "Streaming assistant turn failed voice_session_id=%s turn_id=%s",
-                self.voice_session_id,
-                turn_id,
+            done, _pending = await asyncio.wait(
+                {cancel_task, stream_task},
+                return_when=asyncio.FIRST_COMPLETED,
             )
-            await self.client.send_json(
-                {
-                    "type": "turn.failed",
-                    "turn_id": turn_id,
-                    "voice_session_id": self.voice_session_id,
-                    "state": "failed",
-                    "error": _exception_message(exc),
-                }
-            )
+
+            if cancel_task in done:
+                try:
+                    cancel_signal = await cancel_task
+                except Exception:
+                    cancel_signal = AssistantTurnCancelSignal(reason="connection_close", client_disconnected=True)
+                cancel_event.set()
+                stream_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await stream_task
+                await self.db.rollback()
+                if cancel_signal.client_disconnected:
+                    return
+                await self.client.send_json(
+                    {
+                        "type": "turn.cancelled",
+                        "turn_id": turn_id,
+                        "voice_session_id": self.voice_session_id,
+                        "state": cancel_signal.state,
+                        "reason": cancel_signal.reason,
+                    }
+                )
+                return
+
+            cancel_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_task
+
+            try:
+                await stream_task
+            except Exception as exc:
+                await self.db.rollback()
+                logger.exception(
+                    "Streaming assistant turn failed voice_session_id=%s turn_id=%s",
+                    self.voice_session_id,
+                    turn_id,
+                )
+                await self.client.send_json(
+                    {
+                        "type": "turn.failed",
+                        "turn_id": turn_id,
+                        "voice_session_id": self.voice_session_id,
+                        "state": "failed",
+                        "error": _exception_message(exc),
+                    }
+                )
+        finally:
+            cancel_event.set()
+            for task in (cancel_task, stream_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(cancel_task, stream_task, return_exceptions=True)
 
     async def _wait_for_cancel(self, cancel_event: asyncio.Event) -> AssistantTurnCancelSignal:
         while not cancel_event.is_set():
@@ -598,7 +605,8 @@ class VoiceAssistantTurnStreamSession:
                 cancel_event=cancel_event,
             )
         )
-        try:
+
+        async def produce_text() -> None:
             await self._stream_progress_prefix(
                 text_queue=text_queue,
                 turn_id=turn_id,
@@ -620,15 +628,16 @@ class VoiceAssistantTurnStreamSession:
             await text_queue.put(None)
             if cancel_event.is_set():
                 audio_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await audio_task
-                return
-            await audio_task
-        except Exception:
-            audio_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await audio_task
-            raise
+
+        text_task = asyncio.create_task(produce_text())
+        tasks = (text_task, audio_task)
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _stream_progress_prefix(
         self,
@@ -720,20 +729,20 @@ class VoiceAssistantTurnStreamSession:
         artifacts: AssistantTurnArtifacts,
         cancel_event: asyncio.Event,
     ) -> None:
-        await stream_tts_events(
-            client=self.client,
-            tts_client=tts_client,
-            text_chunks=chunk_text_for_tts(
-                queued_text_chunks(text_queue, cancel_event),
-                cancel_event,
-            ),
-            event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
-            voice=req.voice,
-            speed_ratio=req.speed_ratio,
-            cancel_event=cancel_event,
-            audio_protocol=req.audio_protocol,
-            on_chunk=artifacts.append_tts_chunk,
-        )
+        async with contextlib.aclosing(
+            chunk_text_for_tts(queued_text_chunks(text_queue, cancel_event), cancel_event)
+        ) as text_chunks:
+            await stream_tts_events(
+                client=self.client,
+                tts_client=tts_client,
+                text_chunks=text_chunks,
+                event_context={"turn_id": turn_id, "voice_session_id": self.voice_session_id},
+                voice=req.voice,
+                speed_ratio=req.speed_ratio,
+                cancel_event=cancel_event,
+                audio_protocol=req.audio_protocol,
+                on_chunk=artifacts.append_tts_chunk,
+            )
 
     async def _persist_completed_turn(
         self,
