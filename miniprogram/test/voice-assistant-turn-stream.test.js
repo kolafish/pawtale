@@ -179,7 +179,8 @@ test("assistant turn stream rejects when socket does not open before connect tim
   delete global.wx;
 });
 
-test("assistant turn stream connect timeout stops after socket opens", async () => {
+test("assistant turn stream connect timeout stops after socket opens", async (context) => {
+  context.mock.timers.enable({ apis: ["setTimeout"] });
   const harness = installWxSocketHarness();
   delete require.cache[require.resolve("../services/request.ts")];
   delete require.cache[require.resolve("../services/voice-assistant-turn-stream.ts")];
@@ -200,7 +201,8 @@ test("assistant turn stream connect timeout stops after socket opens", async () 
   harness.handlers.open();
   socketMessage(harness.handlers, { type: "turn.ready" });
 
-  await sleep(20);
+  context.mock.timers.tick(20);
+  await Promise.resolve();
   assert.equal(rejected, undefined);
   assert.equal(resolved, undefined);
   assert.deepEqual(harness.sent, [{
