@@ -32,7 +32,6 @@ export function voiceRecordingReconnectPatch(
   return {
     error: "",
     recordingStarting: true,
-    captureStateText: "正在连接麦克风",
     persistenceStateText: "正在准备收音",
     autoListenStateText: autoTriggered ? "正在重新连接语音" : currentAutoListenStateText,
   };
@@ -42,7 +41,6 @@ export function voiceRecordingStartRequestedPatch(): VoiceChatPatch {
   return {
     recordingStarting: true,
     error: "",
-    captureStateText: "正在打开麦克风",
   };
 }
 

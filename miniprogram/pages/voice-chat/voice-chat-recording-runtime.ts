@@ -437,7 +437,6 @@ export const voiceChatRecordingRuntimeMethods: VoiceChatRecordingRuntimeMethods
     const noAnswerPromptAlreadyHandled = noAnswerAutoStopped
       && this.handledNoAnswerFrameCount === stats.frameCount;
     const { patch, shouldHandleNoAnswerAutoStop } = voiceCaptureStatsPatch(stats, {
-      autoStopEnabled: this.data.autoStopEnabled,
       noAnswerPromptAlreadyHandled,
     });
     applyVoiceChatDataPatch(this, patch);

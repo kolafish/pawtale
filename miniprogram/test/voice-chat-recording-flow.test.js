@@ -27,7 +27,6 @@ test("voice recording flow derives recording start and unavailable patches", () 
   assert.deepEqual(voiceRecordingStartRequestedPatch(), {
     recordingStarting: true,
     error: "",
-    captureStateText: "正在打开麦克风",
   });
   assert.deepEqual(voiceRecordingStartedPatch(true), {
     recording: true,

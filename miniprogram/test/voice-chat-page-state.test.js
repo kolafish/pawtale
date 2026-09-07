@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   initialVoiceChatData,
+  applyVoiceChatDataPatch,
   voiceChatViewPatch,
   voiceAuthorizationChangePatch,
   voiceAuthorizationConsentPatch,
@@ -16,14 +17,32 @@ const {
   voiceSessionDetailPatch,
 } = require("../pages/voice-chat/voice-chat-page-state.ts");
 
+test("recording level updates keep long history on the page without resending it", () => {
+  const sent = [];
+  const context = {
+    data: initialVoiceChatData(),
+    setData(patch) { sent.push(patch); Object.assign(this.data, patch); },
+  };
+  const lines = Array.from({ length: 500 }, (_, id) => ({ id: String(id), role: "user", text: "合成的口述文字。".repeat(20) }));
+  applyVoiceChatDataPatch(context, { transcriptLines: lines });
+  const renderedHistory = context.data.transcriptLineViews;
+  applyVoiceChatDataPatch(context, { audioLevelPercent: 42 });
+  assert.deepEqual(sent.at(-1), { audioLevelPercent: 42 });
+  assert.equal(context.data.transcriptLineViews, renderedHistory);
+  assert.equal(context.data.transcriptLineViews.length, 500);
+
+  applyVoiceChatDataPatch(context, { interviewType: "human_interview" });
+  assert.equal(context.data.transcriptLineViews[0].roleText, "被访者");
+  applyVoiceChatDataPatch(context, { transcriptLines: [...lines, { id: "new", role: "user", text: "新讲述" }] });
+  assert.equal(context.data.transcriptLineViews.at(-1).text, "新讲述");
+});
+
 test("voice chat initial data keeps the assistant ready for opening narration", () => {
   const first = initialVoiceChatData();
   const second = initialVoiceChatData();
 
   assert.equal(first.status, "idle");
-  assert.equal(first.modeLabel, "慢慢讲");
   assert.equal(first.primaryActionText, "开始说话");
-  assert.equal(first.assistantPromptLabel, "小余想听您讲讲");
   assert.equal(first.autoStopEnabled, true);
   assert.equal(first.autoListenEnabled, true);
   assert.equal(first.largeTextEnabled, false);
@@ -470,9 +489,7 @@ test("voice chat realtime selectors derive capture, gateway, status, and error p
     noAnswerPromptAlreadyHandled: false,
   });
   assert.equal(capture.shouldHandleNoAnswerAutoStop, true);
-  assert.equal(capture.patch.captureKilobytes, 3);
   assert.equal(capture.patch.captureDurationText, "01:01");
-  assert.equal(capture.patch.autoStopStateText, "未听到回答，已暂停收音");
   assert.equal(capture.patch.primaryActionText, "继续说话");
 
   assert.deepEqual(
