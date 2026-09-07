@@ -6,6 +6,7 @@ import { useAppStore } from './stores/appStore';
 import { Layout } from './components/Layout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthView } from './components/AuthView';
+import { DraftSaveProvider } from './components/DraftSaveProvider';
 import type { User } from './types';
 
 const queryClient = new QueryClient({
@@ -59,7 +60,7 @@ function AppContent() {
     return <AuthView onAuthenticated={setUser} />;
   }
 
-  return <Layout user={user} onLogout={handleLogout} />;
+  return <DraftSaveProvider><Layout user={user} onLogout={handleLogout} /></DraftSaveProvider>;
 }
 
 function App() {

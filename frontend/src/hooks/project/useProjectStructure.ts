@@ -6,8 +6,9 @@ interface UseProjectStructureArgs {
   currentDocumentId: string | null;
   refreshProject: () => Promise<void>;
   loadDocument: (docId: string) => Promise<void>;
-  markCurrentDocumentRenamed: (name: string) => void;
+  markCurrentDocumentRenamed: (docId: string, name: string) => void;
   resetDraft: () => void;
+  saveCurrentIfDirty: () => Promise<void>;
 }
 
 export function useProjectStructure({
@@ -17,6 +18,7 @@ export function useProjectStructure({
   loadDocument,
   markCurrentDocumentRenamed,
   resetDraft,
+  saveCurrentIfDirty,
 }: UseProjectStructureArgs) {
   const createGroup = async (name: string) => {
     if (!currentProject) return;
@@ -38,6 +40,7 @@ export function useProjectStructure({
 
   const createDocument = async (groupId: string, name?: string) => {
     if (!currentProject) return;
+    await saveCurrentIfDirty();
     const doc = await projectsApi.createDocument(currentProject.id, groupId, name);
     await refreshProject();
     await loadDocument(doc.id);
@@ -48,7 +51,7 @@ export function useProjectStructure({
     await projectsApi.updateDocument(currentProject.id, docId, { name });
     await refreshProject();
     if (docId === currentDocumentId) {
-      markCurrentDocumentRenamed(name);
+      markCurrentDocumentRenamed(docId, name);
     }
   };
 

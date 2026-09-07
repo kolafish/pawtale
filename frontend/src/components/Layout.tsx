@@ -6,6 +6,7 @@ import { WritingWorkspace } from './WritingWorkspace';
 import { UserAuditDashboard } from './audit/UserAuditDashboard';
 import { AI_MODEL_OPTIONS } from '../constants/aiModels';
 import type { User } from '../types';
+import { useDraftSaves } from '../hooks/project/draftSaves';
 
 interface LayoutProps {
   user: User;
@@ -14,15 +15,21 @@ interface LayoutProps {
 
 export function Layout({ user, onLogout }: LayoutProps) {
   const queryClient = useQueryClient();
+  const drafts = useDraftSaves();
+  const [navigationError, setNavigationError] = useState('');
   const { defaultAiModel, setDefaultAiModel, closeProject } = useAppStore();
   const [activeView, setActiveView] = useState<'workspace' | 'audit'>('workspace');
   const canViewAudit = user.role === 'admin';
   const currentView = canViewAudit ? activeView : 'workspace';
 
-  const handleLogoClick = () => {
-    setActiveView('workspace');
-    closeProject();
-    queryClient.invalidateQueries({ queryKey: ['projects'] });
+  const leaveWorkspace = async (action: () => void | Promise<void>) => {
+    setNavigationError('');
+    try {
+      await drafts.flush();
+      await action();
+    } catch {
+      setNavigationError('保存未完成，请重试保存后再离开。');
+    }
   };
 
   return (
@@ -32,7 +39,11 @@ export function Layout({ user, onLogout }: LayoutProps) {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={handleLogoClick}
+            onClick={() => leaveWorkspace(() => {
+              setActiveView('workspace');
+              closeProject();
+              void queryClient.invalidateQueries({ queryKey: ['projects'] });
+            })}
             className="flex items-center gap-3 rounded-lg px-1.5 py-1 transition-colors hover:bg-pink-50 focus:outline-none focus:ring-2 focus:ring-pink-500"
             aria-label="返回我的项目"
             title="返回我的项目"
@@ -59,10 +70,10 @@ export function Layout({ user, onLogout }: LayoutProps) {
               </button>
               <button
                 type="button"
-                onClick={() => {
+                onClick={() => leaveWorkspace(() => {
                   closeProject();
                   setActiveView('audit');
-                }}
+                })}
                 className={`inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors ${
                   currentView === 'audit'
                     ? 'bg-white text-pink-600 shadow-sm'
@@ -97,7 +108,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
             <span className="max-w-28 truncate">{user.display_name}</span>
           </div>
           <button
-            onClick={onLogout}
+            onClick={() => leaveWorkspace(onLogout)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 px-2.5 py-1.5 text-sm text-gray-600 transition-colors hover:bg-gray-50"
           >
             <LogOut size={15} />
@@ -105,6 +116,7 @@ export function Layout({ user, onLogout }: LayoutProps) {
           </button>
         </div>
       </header>
+      {navigationError && <p role="alert" className="px-4 py-2 text-sm text-red-700">{navigationError}</p>}
 
       {/* Main content */}
       <main className="flex-1 flex overflow-hidden">

@@ -7,11 +7,13 @@ import { saveBlob } from '../utils/download';
 import { useDocumentDraft } from './project/useDocumentDraft';
 import { useProjectReferences } from './project/useProjectReferences';
 import { useProjectStructure } from './project/useProjectStructure';
+import { useDraftSaves } from './project/draftSaves';
 
 export type { SaveStatus } from './project/useDocumentDraft';
 
 export function useProjectState() {
   const queryClient = useQueryClient();
+  const drafts = useDraftSaves();
   const {
     currentProject, setCurrentProject,
     currentDocumentId, setCurrentDocumentId,
@@ -29,7 +31,7 @@ export function useProjectState() {
   const refreshProject = useCallback(async () => {
     if (!currentProject) return;
     const updated = await projectsApi.get(currentProject.id);
-    setCurrentProject(updated);
+    if (useAppStore.getState().currentProject?.id === currentProject.id) setCurrentProject(updated);
   }, [currentProject, setCurrentProject]);
 
   const draft = useDocumentDraft({
@@ -46,12 +48,13 @@ export function useProjectState() {
     loadDocument: draft.loadDocument,
     markCurrentDocumentRenamed: draft.markCurrentDocumentRenamed,
     resetDraft: draft.resetDraft,
+    saveCurrentIfDirty: drafts.flush,
   });
 
   const references = useProjectReferences({
     currentProject,
     refreshProject,
-    saveCurrentIfDirty: draft.saveCurrentIfDirty,
+    saveCurrentIfDirty: drafts.flush,
   });
 
   // ─── AI continue mutation ───
@@ -59,6 +62,8 @@ export function useProjectState() {
     mutationFn: async ({ projectId, docId, payload }: {
       projectId: string;
       docId: string;
+      content: string;
+      generation: number;
       payload: {
         instruction?: string;
         ai_model?: string;
@@ -66,8 +71,8 @@ export function useProjectState() {
         expected_content_revision?: number;
       };
     }) => projectsApi.aiContinue(projectId, docId, payload),
-    onSuccess: (result) => {
-      draft.replaceContentAsSaved(result.content, result.content_revision);
+    onSuccess: (result, variables) => {
+      draft.applyContinuedContent(result.content, result.content_revision, variables);
       setDebugInfo(result.debug_info || null);
       refreshProject();
     },
@@ -76,9 +81,14 @@ export function useProjectState() {
 
   const handleContinue = async () => {
     if (!currentProject || !currentDocumentId) return;
+    await drafts.flush();
+    const active = useAppStore.getState();
+    if (active.currentProject?.id !== currentProject.id || active.currentDocumentId !== currentDocumentId) return;
     await continueMutation.mutateAsync({
       projectId: currentProject.id,
       docId: currentDocumentId,
+      content: draft.getContent(),
+      generation: draft.getLoadSequence(),
       payload: {
         instruction: continueInstruction.trim() || undefined,
         ai_model: aiModel,
@@ -101,7 +111,8 @@ export function useProjectState() {
     }
   };
 
-  const closeProject = () => {
+  const closeProject = async () => {
+    await drafts.flush();
     clearCurrentProject();
     queryClient.invalidateQueries({ queryKey: ['projects'] });
   };
@@ -124,7 +135,10 @@ export function useProjectState() {
     setStatus: draft.setStatus,
     label: draft.label,
     setLabel: draft.setLabel,
-    switchDocument: draft.switchDocument,
+    switchDocument: async (docId: string) => {
+      await drafts.flush();
+      await draft.switchDocument(docId);
+    },
     loadDocument: draft.loadDocument,
 
     // Save
