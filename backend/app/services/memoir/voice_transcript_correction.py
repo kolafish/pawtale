@@ -23,7 +23,9 @@ from app.services.memoir.project_ai_preferences import (
     normalize_transcript_polish_level,
 )
 from app.services.memoir.utterance_editing_pipeline import (
+    claim_transcript_mutation_guard,
     schedule_ready_utterance_background_work,
+    transcript_mutation_guard,
 )
 from app.services.memoir.voice_transcripts import (
     generate_cleaned_transcript_text,
@@ -180,6 +182,7 @@ async def run_transcript_correction_job(
             error_message="transcript version changed",
         )
 
+    expected = transcript_mutation_guard(utterance)
     cleaned = await generate_cleaned_transcript_text(
         source_text,
         ai_model=ai_model,
@@ -191,6 +194,13 @@ async def run_transcript_correction_job(
         ),
         strict=False,
     )
+    if not await claim_transcript_mutation_guard(db, utterance=utterance, expected=expected):
+        return EditingJobResult(
+            status=MemoirEditingJobStatus.SKIPPED,
+            result_json={"utterance_id": utterance.id},
+            error_message="transcript version changed",
+        )
+
     corrected_version = MemoirTranscriptVersion(
         voice_session_id=utterance.voice_session_id,
         source_artifact_id=utterance.id,
