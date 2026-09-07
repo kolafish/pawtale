@@ -1,7 +1,6 @@
-
-from app.services.ai_base import AITextServiceBase
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.projects import Project

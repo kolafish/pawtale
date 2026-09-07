@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import asyncio
 
 import pytest
@@ -7,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirAutomationEventType,
     MemoirBookChapterDraftStatus,

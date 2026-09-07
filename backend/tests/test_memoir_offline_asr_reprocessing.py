@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from app.services.ai_base import AITextServiceBase
-
 from datetime import datetime
 
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirChatContentStatus,
     MemoirChatMessageRole,

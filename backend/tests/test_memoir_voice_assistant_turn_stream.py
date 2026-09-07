@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import asyncio
 import base64
 from pathlib import Path
@@ -7,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from app.services.ai_base import AITextServiceBase
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,

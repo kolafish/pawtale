@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import json
 import re
 from datetime import datetime
@@ -7,6 +5,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
     MemoirAutomationEvent,

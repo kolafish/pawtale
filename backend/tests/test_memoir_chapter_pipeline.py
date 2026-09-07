@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -7,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,
     MemoirSectionMaterialAssignedBy,
@@ -603,7 +602,6 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
 
     class BoundaryCopyingAI(AITextServiceBase):
         provider_name = "test"
-        model_name = "test-model"
         model_name = "test-boundary-copy"
 
         def __init__(self):

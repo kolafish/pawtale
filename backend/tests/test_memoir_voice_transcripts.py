@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import base64
 import asyncio
 import json
@@ -12,6 +10,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
 from app.domain.memoir.types import (
     MemoirBookChapterDraftStatus,

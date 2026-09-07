@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from app.services.ai_base import AITextServiceBase
-
 from hashlib import sha256
 
 import pytest
@@ -9,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.narrative_types import (
     MemoirInterviewAction,
     MemoirInterviewPolicyFailureCode,

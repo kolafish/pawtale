@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from app.services.ai_base import AITextServiceBase
-
 import json
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,

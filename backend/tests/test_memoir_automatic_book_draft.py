@@ -1,5 +1,3 @@
-
-from app.services.ai_base import AITextServiceBase
 import copy
 import json
 
@@ -8,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
 from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
 from app.services.memoir import automatic_book_draft, chapter_generation

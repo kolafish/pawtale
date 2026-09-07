@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from app.services.ai_base import AITextServiceBase
-
 import json
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.framework_templates import (
     FrameworkTemplateItemDefinition,
     canonical_template_snapshot,
