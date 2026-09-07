@@ -598,7 +598,8 @@ class VoiceAssistantTurnStreamSession:
                 cancel_event=cancel_event,
             )
         )
-        try:
+
+        async def produce_text() -> None:
             await self._stream_progress_prefix(
                 text_queue=text_queue,
                 turn_id=turn_id,
@@ -620,15 +621,16 @@ class VoiceAssistantTurnStreamSession:
             await text_queue.put(None)
             if cancel_event.is_set():
                 audio_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await audio_task
-                return
-            await audio_task
-        except Exception:
-            audio_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await audio_task
-            raise
+
+        text_task = asyncio.create_task(produce_text())
+        tasks = (text_task, audio_task)
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _stream_progress_prefix(
         self,
