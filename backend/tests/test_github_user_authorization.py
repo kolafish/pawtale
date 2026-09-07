@@ -4,6 +4,7 @@ import hashlib
 from datetime import timedelta
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -32,11 +33,16 @@ async def _connect(client):
     return state
 
 
-async def test_claiming_another_installation_requires_github_user_access(client, test_db, monkeypatch):
+@pytest.mark.parametrize("extra_installation", ["", "&installation_id=123"])
+async def test_claiming_another_installation_requires_github_user_access(
+    client, test_db, monkeypatch, extra_installation,
+):
     monkeypatch.setattr(git_sync, "GitHubAppClient", FakeGitHubClient)
     state = await _oauth_state(client, installation_id=999)
     assert await test_db.scalar(select(GitHubInstallation)) is None
-    response = await client.get(f"/api/github/setup?code=valid-code&state={state}", follow_redirects=False)
+    response = await client.get(
+        f"/api/github/setup?code=valid-code&state={state}{extra_installation}", follow_redirects=False,
+    )
     assert response.status_code == 403
     assert await test_db.scalar(select(GitHubInstallation)) is None
     assert await test_db.scalar(select(GitHubUserAuthorization)) is None
@@ -166,3 +172,24 @@ async def test_revoked_authorization_keeps_reconnect_available(client, monkeypat
     assert response.json()["configured"] is True
     assert response.json()["authorization_error"] == "GitHub 用户授权已失效，请重新连接"
     assert response.json()["repositories"] == []
+
+
+async def test_concurrent_callbacks_cannot_consume_one_state_twice(client, test_db, monkeypatch):
+    fake = FakeGitHubClient()
+    monkeypatch.setattr(git_sync, "GitHubAppClient", lambda: fake)
+    user_id = (await client.get("/api/auth/me")).json()["id"]
+    state = await _create_setup_state(client)
+    sessions = async_sessionmaker(test_db.bind, expire_on_commit=False)
+
+    async def callback():
+        async with sessions() as db:
+            return await git_sync.handle_setup_callback(
+                db, user_id, state=state, installation_id=123, client=fake,
+            )
+
+    results = await asyncio.gather(callback(), callback(), return_exceptions=True)
+    assert sum(isinstance(result, str) for result in results) == 1
+    errors = [result for result in results if isinstance(result, HTTPException)]
+    assert len(errors) == 1
+    assert errors[0].status_code == 400
+    assert errors[0].detail == "GitHub setup state 已使用"
