@@ -79,7 +79,6 @@ import {
 import { VoiceChatCompletionIssueRuntime } from "./voice-chat-completion-issue-runtime";
 import { voiceChatAssistantPlaybackMethods } from "./voice-chat-assistant-playback";
 import {
-  AUTO_STOP_SILENCE_MS,
   voiceChatRecordingRuntimeMethods,
 } from "./voice-chat-recording-runtime";
 import {
@@ -1020,19 +1019,6 @@ definePage<VoiceChatData>()({
     });
   },
 
-  changeSpeakerRole(event: SpeakerRoleTapEvent) {
-    if (this.data.recording || this.data.interviewType !== "human_interview") {
-      return;
-    }
-    const role = queryChoice({ role: datasetString(event, "role") }, "role", SPEAKER_ROLE_VALUES, "narrator");
-    applyVoiceChatDataPatch(this, {
-      speakerRole: role,
-      liveText: "",
-      liveCharCount: 0,
-      primaryActionText: "开始说话",
-    });
-  },
-
   startRecordingAsSpeaker(event: SpeakerRoleTapEvent) {
     if (
       this.data.recording
@@ -1073,15 +1059,6 @@ definePage<VoiceChatData>()({
   },
 
   ...voiceChatAssistantPlaybackMethods,
-
-  toggleAutoStop() {
-    const autoStopEnabled = !this.data.autoStopEnabled;
-    this.voiceStreaming.configureAutoStop(autoStopEnabled ? AUTO_STOP_SILENCE_MS : 0);
-    applyVoiceChatDataPatch(this, {
-      autoStopEnabled,
-      autoStopStateText: autoStopEnabled ? "自动收尾开" : "自动收尾关",
-    });
-  },
 
   toggleHistory() {
     if (!this.data.transcriptLines.length) {

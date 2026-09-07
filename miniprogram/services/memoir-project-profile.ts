@@ -77,10 +77,6 @@ export function guidanceModuleLabel(module?: string | null): string {
   return MEMOIR_GUIDANCE_MODULE_OPTIONS.find((option) => option.value === normalized)?.label || "人物";
 }
 
-export function voiceGuidanceLabel(mode: MemoirGuidanceMode, module?: string | null): string {
-  return mode === "guided_interview" ? `小余陪着问 · ${guidanceModuleLabel(module)}` : "慢慢讲";
-}
-
 export function narratorGenderLabel(gender: MemoirNarratorGender): string {
   const labels: Record<MemoirNarratorGender, string> = {
     male: "男",

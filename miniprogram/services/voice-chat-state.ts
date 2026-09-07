@@ -1,16 +1,11 @@
 import type {
   MemoirGuidanceMode,
-  MemoirVoiceAssistantIntent,
   VoiceChatErrorInfo,
   VoiceChatTranscriptLine,
   VoiceGatewayState,
 } from "../domain/memoir-voice-session";
 import type { TTSAlignmentSegment } from "../domain/memoir-audio";
 import type { VoiceChatConnectionStatus } from "./memoir-streaming-asr";
-
-export function modeLabel(mode: MemoirGuidanceMode): string {
-  return mode === "guided_interview" ? "小余陪着问" : "慢慢讲";
-}
 
 export function statusText(status: VoiceChatConnectionStatus): string {
   const labels: Record<VoiceChatConnectionStatus, string> = {
@@ -133,40 +128,6 @@ export function visibleAssistantLine(
   return latestMessageId === dismissedMessageId ? undefined : latest;
 }
 
-function stringFromMetadata(metadata: Record<string, unknown> | undefined, key: string): string {
-  const value = metadata?.[key];
-  return typeof value === "string" ? value : "";
-}
-
-export function assistantPrimaryIntent(line?: VoiceChatTranscriptLine): MemoirVoiceAssistantIntent | "" {
-  const metadata = line?.metadata_json;
-  const primaryIntent = stringFromMetadata(metadata, "primary_intent");
-  if (primaryIntent) {
-    return primaryIntent as MemoirVoiceAssistantIntent;
-  }
-  const source = stringFromMetadata(metadata, "source");
-  const sourceIntent = source.startsWith("ai.") ? source.slice(3) : "";
-  return sourceIntent === "no_answer_prompt"
-    ? "repair"
-    : sourceIntent as MemoirVoiceAssistantIntent | "";
-}
-
-export function assistantIntentLabel(
-  intent: MemoirVoiceAssistantIntent | string,
-  hasUserMessage: boolean,
-): string {
-  const labels: Record<string, string> = {
-    opening: "小余想听您讲讲",
-    follow_up: "小余想听您讲讲",
-    acknowledge: "小余帮您接着整理",
-    encourage_continue: "小余陪您继续讲",
-    reflect_summary: "阶段小结",
-    transition: "换个方向",
-    repair: "小余再问一句",
-  };
-  return labels[intent] || (hasUserMessage ? "小余帮您接着整理" : "小余想听您讲讲");
-}
-
 export function assistantExpectsAnswer(line?: VoiceChatTranscriptLine): boolean {
   const value = line?.metadata_json?.expects_answer;
   return typeof value === "boolean" ? value : true;
@@ -186,16 +147,12 @@ export function canRequestFollowUp(
 
 export function assistantPanelCopy(
   lines: VoiceChatTranscriptLine[],
-  assistantLine = latestAssistantLine(lines),
 ): {
-  assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
 } {
   const hasUserMessage = Boolean(latestUserMessageId(lines));
-  const intent = assistantPrimaryIntent(assistantLine);
   return {
-    assistantPromptLabel: assistantIntentLabel(intent, hasUserMessage),
     assistantLoadingText: hasUserMessage ? "小余正在想一想" : "小余正在准备第一句话",
     assistantEmptyText: hasUserMessage
       ? "可以让小余根据刚才的内容接着问。"
@@ -222,7 +179,6 @@ export interface AssistantTranscriptStatePatch {
   transcriptLines: VoiceChatTranscriptLine[];
   latestTranscriptText: string;
   assistantPromptText: string;
-  assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
   assistantExpectsAnswer: boolean;
@@ -245,7 +201,7 @@ export function assistantTranscriptState(
     transcriptLines: lines,
     latestTranscriptText: latestTranscriptText(lines),
     assistantPromptText: options.assistantPromptText ?? (assistantLine?.text || ""),
-    ...assistantPanelCopy(lines, assistantLine),
+    ...assistantPanelCopy(lines),
     assistantExpectsAnswer: options.assistantExpectsAnswer ?? assistantExpectsAnswer(assistantLine),
     followUpMessageId: options.followUpMessageId ?? assistantMessageId,
     followUpAudioFileId: options.followUpAudioFileId ?? assistantAudioFileId,

@@ -10,7 +10,6 @@ import type {
   VoiceChatTranscriptLine,
   VoiceGatewayServerEvent,
 } from "../../domain/memoir-voice-session";
-import { voiceGuidanceLabel } from "../../services/memoir-project-profile";
 import type {
   MemoirCaptureStats,
   VoiceChatConnectionStatus,
@@ -64,7 +63,6 @@ export interface VoiceChatData {
   latestTranscriptText: string;
   transcriptLines: VoiceChatTranscriptLine[];
   assistantPromptText: string;
-  assistantPromptLabel: string;
   assistantLoadingText: string;
   assistantEmptyText: string;
   openingTopicOptions: OpeningTopicOption[];
@@ -86,15 +84,10 @@ export interface VoiceChatData {
   ttsRemainingText: string;
   ttsProgressPercent: number;
   ttsAlignment: TTSAlignmentSegment[];
-  modeLabel: string;
   primaryActionText: string;
-  captureStateText: string;
-  captureFrameCount: number;
-  captureKilobytes: number;
   captureDurationText: string;
   audioLevelPercent: number;
   autoStopEnabled: boolean;
-  autoStopStateText: string;
   autoListenEnabled: boolean;
   autoListenStateText: string;
   liveCharCount: number;
@@ -212,7 +205,6 @@ export function initialVoiceChatData(): VoiceChatData {
     latestTranscriptText: "",
     transcriptLines: [],
     assistantPromptText: "",
-    assistantPromptLabel: "小余想听您讲讲",
     assistantLoadingText: "小余正在准备第一句话",
     assistantEmptyText: "小余会先问一句，帮您开始讲。",
     openingTopicOptions: [
@@ -240,15 +232,10 @@ export function initialVoiceChatData(): VoiceChatData {
     ttsRemainingText: "",
     ttsProgressPercent: 0,
     ttsAlignment: [],
-    modeLabel: "慢慢讲",
     primaryActionText: "开始说话",
-    captureStateText: "麦克风未开始",
-    captureFrameCount: 0,
-    captureKilobytes: 0,
     captureDurationText: "00:00",
     audioLevelPercent: 0,
     autoStopEnabled: true,
-    autoStopStateText: "自动收尾开",
     autoListenEnabled: true,
     autoListenStateText: "小余说完自动听",
     liveCharCount: 0,
@@ -342,10 +329,14 @@ export function applyVoiceChatDataPatch(
   patch: VoiceChatPatch,
 ): void {
   const nextData: VoiceChatData = { ...context.data, ...patch };
-  context.setData({
+  const values = {
     ...patch,
-    ...voiceChatViewPatch(nextData),
-  });
+    ...voiceChatViewPatch(nextData, context.data),
+  };
+  const changed = Object.fromEntries(
+    Object.entries(values).filter(([key, value]) => !Object.is(context.data[key as keyof VoiceChatData], value)),
+  ) as VoiceChatPatch;
+  if (Object.keys(changed).length) context.setData(changed);
 }
 
 export type VoiceChatViewPatch = Pick<
@@ -463,7 +454,7 @@ export function bookCompletionRoundFinished(
     && state.transcriptLines.some((line) => line.role === "user");
 }
 
-export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
+export function voiceChatViewPatch(state: VoiceChatData, previous?: VoiceChatData): VoiceChatViewPatch {
   const assistantBusy = state.followUpLoading || state.followUpTTSLoading || state.followUpTTSPlaying;
   const hasAssistantPrompt = Boolean(state.assistantPromptText);
   const isHumanInterview = state.interviewType === "human_interview";
@@ -663,7 +654,10 @@ export function voiceChatViewPatch(state: VoiceChatData): VoiceChatViewPatch {
     showHistoryPanel: state.transcriptLines.length > 0,
     showHistoryLines: state.historyExpanded && state.transcriptLines.length > 0,
     historyToggleText: state.historyExpanded ? "收起" : "查看",
-    transcriptLineViews: state.transcriptLines.map((line) => ({
+    transcriptLineViews: previous && previous.transcriptLines === state.transcriptLines
+      && previous.interviewType === state.interviewType
+      ? previous.transcriptLineViews
+      : state.transcriptLines.map((line) => ({
       ...line,
       lineClass: line.role === "assistant"
         ? "transcript-line assistant"
@@ -735,7 +729,6 @@ export function voiceChatSessionEntryPatch(options: {
     currentGuidanceModule: options.currentGuidanceModule,
     interviewType: options.interviewType,
     sessionGoal: options.sessionGoal,
-    modeLabel: voiceGuidanceLabel(options.guidanceMode, options.currentGuidanceModule),
     voiceAuthorizationAgreed: options.voiceAuthorizationAgreed,
     primaryActionText: options.voiceAuthorizationAgreed ? "开始说话" : "同意后开始说话",
     autoListenEnabled: !isHumanInterview,
@@ -811,7 +804,6 @@ function assistantSessionPatch(
   const isHumanInterview = current.interviewType === "human_interview";
   return {
     guidanceMode,
-    modeLabel: voiceGuidanceLabel(guidanceMode, current.currentGuidanceModule),
     ...assistantTranscriptState(lines, {
       dismissedFollowUpMessageId: current.dismissedFollowUpMessageId,
       guidanceMode,
@@ -921,35 +913,15 @@ export interface VoiceCaptureStatsPatch {
 export function voiceCaptureStatsPatch(
   stats: MemoirCaptureStats,
   options: {
-    autoStopEnabled: boolean;
     noAnswerPromptAlreadyHandled: boolean;
   },
 ): VoiceCaptureStatsPatch {
-  const labels: Record<MemoirCaptureStats["state"], string> = {
-    idle: "麦克风未开始",
-    opening: "正在打开麦克风",
-    recording: "录音中",
-    stopping: "正在收尾",
-    error: "录音异常",
-  };
-  let autoStopStateText = `自动收尾开 · 静音 ${formatDuration(stats.silentElapsedMs || 0)}`;
-  if (stats.autoStopped && stats.autoStopReason === "no_voice") {
-    autoStopStateText = "未听到回答，已暂停收音";
-  } else if (!options.autoStopEnabled) {
-    autoStopStateText = "自动收尾关";
-  } else if (stats.autoStopped) {
-    autoStopStateText = "检测到停顿，已自动收尾";
-  }
   const noAnswerAutoStopped = stats.autoStopped && stats.autoStopReason === "no_voice";
   const shouldHandleNoAnswerAutoStop = noAnswerAutoStopped && !options.noAnswerPromptAlreadyHandled;
   const patch: VoiceChatPatch = {
-    captureStateText: labels[stats.state],
-    captureFrameCount: stats.frameCount,
-    captureKilobytes: Math.round(stats.audioBytesSent / 1024),
     captureDurationText: formatDuration(stats.recordingElapsedMs),
     gatewayStateText: gatewayStateText(stats.gatewayState),
     audioLevelPercent: Math.min(100, Math.round(Math.sqrt(stats.audioLevel || 0) * 100)),
-    autoStopStateText,
   };
   if (shouldHandleNoAnswerAutoStop) {
     patch.autoListenStateText = "没听到回答，已暂停，可点继续说话";
@@ -1001,7 +973,6 @@ export function voiceChatErrorPatch(
     statusText: statusText("error"),
     recording: false,
     primaryActionText: "重新连接",
-    captureStateText: "录音异常",
     recoveryNotice: error?.kind === "connection" ? "语音连接中断，已保留本地讲述记录" : current.recoveryNotice,
     canReconnect: error?.kind === "connection",
     canFinishAfterDisconnect: error?.kind === "connection",

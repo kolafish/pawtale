@@ -614,14 +614,14 @@ test("home creates voice sessions with the project-bound guidance mode", async (
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
   assert.equal(syncedConsents.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "guided_interview");
   assert.equal(createdSessions[0].input.session_goal, "open_narration");
   assert.equal(createdSessions[0].input.current_guidance_module, undefined);
-  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home");
+  assert.equal(createdSessions[0].input.metadata_json.entry, "miniprogram_home_resume");
   assert.deepEqual(createdSessions[0].options, { projectId: "project/1" });
   assert.equal(navigations[0], "/pages/voice-chat/index?voiceSessionId=voice%2F1&mode=guided_interview&interviewType=ai_interview&sessionGoal=open_narration&projectTitle=%E7%88%B7%E7%88%B7%E7%9A%84%E6%95%85%E4%BA%8B");
   assert.equal(context.data.creatingVoice, false);
@@ -662,7 +662,7 @@ test("home creates free narration voice sessions without a guidance module", asy
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createdSessions.length, 1);
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
@@ -708,7 +708,7 @@ test("home daily actions create free narration and human interview sessions", as
     },
   };
 
-  await page.startFreeNarration.call(context);
+  await page.startPrimaryVoiceChat.call(context);
   await page.startHumanInterview.call(context);
 
   assert.equal(createdSessions[0].input.guidance_mode, "free_narration");
@@ -807,7 +807,7 @@ test("home does not create voice sessions when consent audit sync fails", async 
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.equal(context.data.error, "授权同步失败");
@@ -844,7 +844,7 @@ test("home sends voice starts without a project to project creation", async () =
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.deepEqual(navigations, ["/pages/project-edit/index"]);
@@ -870,7 +870,7 @@ test("home sends login-required voice starts to the dedicated login page", async
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.deepEqual(navigations, ["/pages/login/index"]);
 });
@@ -931,7 +931,7 @@ test("home blocks voice session creation before voice authorization consent", as
     },
   };
 
-  await page.startVoiceChat.call(context);
+  await page.startPrimaryVoiceChat.call(context);
 
   assert.equal(createCalls, 0);
   assert.match(context.data.error, /声纹授权协议/);

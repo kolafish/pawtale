@@ -753,20 +753,12 @@ definePage<HomeData>()({
     wx.navigateTo({ url: "/pages/projects/index" });
   },
 
-  async startVoiceChat() {
-    await this.startVoiceChatWithMode(this.data.selectedMode, "home");
-  },
-
   async startPrimaryVoiceChat() {
     await this.startVoiceChatWithMode(this.data.selectedMode, "home_resume");
   },
 
   async startLaunchVoiceChat() {
     await this.startVoiceChatWithMode(this.data.selectedMode, "home_launch");
-  },
-
-  async startFreeNarration() {
-    await this.startVoiceChatWithMode("free_narration", "home_resume");
   },
 
   async startAlternateGuidance() {

@@ -90,7 +90,6 @@ function loadVoiceChatPage({
   });
   mockModule("../services/voice-chat-state.ts", {
     assistantPanelCopy: () => ({
-      assistantPromptLabel: "小余想听您讲讲",
       assistantLoadingText: "小余正在准备第一句话",
       assistantEmptyText: "小余会先问一句，帮您开始讲。",
     }),
@@ -98,7 +97,6 @@ function loadVoiceChatPage({
       transcriptLines: lines,
       latestTranscriptText: lines.length ? lines[lines.length - 1].text : "",
       assistantPromptText: options.assistantPromptText || "",
-      assistantPromptLabel: "小余想听您讲讲",
       assistantLoadingText: "小余正在准备第一句话",
       assistantEmptyText: "小余会先问一句，帮您开始讲。",
       assistantExpectsAnswer: true,
@@ -122,7 +120,6 @@ function loadVoiceChatPage({
       return latest?.role === "assistant" ? latest.message_id || "" : "";
     },
     latestTranscriptText: () => "",
-    modeLabel: (mode) => (mode === "guided_interview" ? "小余陪着问" : "慢慢讲"),
     statusText: (status) => status,
     totalTranscriptChars: () => 0,
     ttsAlignmentFromAssistantLine: () => [],
@@ -1114,7 +1111,6 @@ test("human interview surfaces a real provider close after an earlier transcript
       transcriptLines: [{ id: "line-1", role: "user", text: "这段已经保存。" }],
       latestTranscriptText: "这段已经保存。",
       persistenceStateText: "已保存",
-      captureStateText: "录音异常",
     },
     setData(patch) {
       this.data = { ...this.data, ...patch };
@@ -1130,7 +1126,6 @@ test("human interview surfaces a real provider close after an earlier transcript
 
   assert.equal(context.data.error, "语音识别服务连接已关闭，请重新保存这段");
   assert.equal(context.data.status, "error");
-  assert.equal(context.data.captureStateText, "录音异常");
 });
 
 test("voice chat refreshes session on show only after page suspension", () => {
@@ -2960,8 +2955,6 @@ test("voice chat asks with AI voice when auto-listen hears no answer", async () 
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(context.data.captureStateText, "正在收尾");
-  assert.equal(context.data.autoStopStateText, "未听到回答，已暂停收音");
   assert.deepEqual(noAnswerRequests, [{ voiceSessionId: "voice-1", data: { attempt: 1 } }]);
   assert.deepEqual(queuedTurns.map((item) => ({
     messageId: item.messageId,
