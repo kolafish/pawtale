@@ -1,3 +1,5 @@
+
+from app.services.ai_base import AITextServiceBase
 import base64
 import asyncio
 import json
@@ -82,7 +84,7 @@ async def _claim_and_run_share_video_job(test_db, job_id: str) -> bool:
     )
 
 
-class FakeAIClient:
+class FakeAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 
@@ -90,7 +92,7 @@ class FakeAIClient:
         return "我小时候住在外婆家。"
 
 
-class EchoFillerAIClient:
+class EchoFillerAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 
@@ -98,7 +100,7 @@ class EchoFillerAIClient:
         return "那个就是今天下雨了，那个那个那个雨下的很大。"
 
 
-class FailingAIClient:
+class FailingAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 
@@ -106,7 +108,7 @@ class FailingAIClient:
         raise RuntimeError("provider down")
 
 
-class CapturingAIClient:
+class CapturingAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 

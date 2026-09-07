@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.ai_base import AITextServiceBase
+
 import json
 
 from sqlalchemy import select
@@ -46,7 +48,7 @@ class FakeEmbeddingClient:
         )
 
 
-class FakeAIClient:
+class FakeAIClient(AITextServiceBase):
     provider_name = "fake-provider"
     model_name = "fake-index-model"
 
@@ -85,7 +87,7 @@ class FakeAIClient:
         }
 
 
-class FailingAIClient:
+class FailingAIClient(AITextServiceBase):
     provider_name = "fake-provider"
     model_name = "fake-index-model"
 

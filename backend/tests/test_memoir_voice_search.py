@@ -1,3 +1,5 @@
+
+from app.services.ai_base import AITextServiceBase
 import asyncio
 import base64
 
@@ -233,7 +235,7 @@ class FakeSearchASRClient:
         self.closed = True
 
 
-class FakeAIClient:
+class FakeAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-model"
 

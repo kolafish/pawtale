@@ -1,3 +1,5 @@
+
+from app.services.ai_base import AITextServiceBase
 import asyncio
 
 import pytest
@@ -82,7 +84,7 @@ class FakeBookTTS:
         )
 
 
-class FakeEditorialAI:
+class FakeEditorialAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-editorial-model"
 
@@ -130,7 +132,7 @@ class FakeEditorialAI:
         """
 
 
-class FakeTitleAI:
+class FakeTitleAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-title-model"
 
@@ -150,7 +152,7 @@ class FakeTitleAI:
         return '{"suggestions": ["外婆慢慢说", "外婆的一生", "从前的日子", "外婆主题回忆录"]}'
 
 
-class FakeTemplateCopyAI:
+class FakeTemplateCopyAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-template-copy-model"
 

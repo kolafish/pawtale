@@ -1,3 +1,5 @@
+
+from app.services.ai_base import AITextServiceBase
 import json
 
 from sqlalchemy import select
@@ -14,7 +16,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeDigestAI:
+class FakeDigestAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-section-digest"
 

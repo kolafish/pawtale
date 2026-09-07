@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.ai_base import AITextServiceBase
+
 import json
 
 from httpx import Response
@@ -64,7 +66,7 @@ from tests.memoir_helpers import (
 )
 
 
-class LayeredBookAI:
+class LayeredBookAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-layered-book"
 

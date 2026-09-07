@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.ai_base import AITextServiceBase
+
 import json
 
 import pytest
@@ -27,7 +29,7 @@ from app.services.memoir.narrative import framework_matching, frameworks
 from tests.memoir_helpers import create_test_voice_transcript
 
 
-class FakeFrameworkAI:
+class FakeFrameworkAI(AITextServiceBase):
     provider_name = "test"
     model_name = "topic-map-test"
 

@@ -8,6 +8,7 @@ from app.services.ai_calls import (
     AIStructuredCallResult,
     AIStructuredOutputError,
     AITextCallResult,
+    StructuredModel,
     build_text_call_result,
     validate_structured_response,
     with_attempt_totals,
@@ -118,13 +119,13 @@ class AITextServiceBase(ABC):
         system_prompt: str,
         user_prompt: str,
         *,
-        output_model: type[BaseModel],
+        output_model: type[StructuredModel],
         requested_model: str | None = None,
         temperature: float = 0.2,
         max_tokens: int = 4000,
         timeout: float | None = None,
         max_attempts: int = 1,
-    ) -> AIStructuredCallResult:
+    ) -> AIStructuredCallResult[StructuredModel]:
         last_error: AIStructuredOutputError | None = None
         started_at = time.monotonic()
         responses: list[AITextCallResult] = []

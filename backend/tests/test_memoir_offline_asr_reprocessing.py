@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from app.services.ai_base import AITextServiceBase
+
 from datetime import datetime
 
 from sqlalchemy import select
@@ -33,7 +35,7 @@ from app.services.memoir.offline_asr import (
 from app.services.memoir.offline_asr_reprocessing import reprocess_offline_asr
 
 
-class FakeCleanupAI:
+class FakeCleanupAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-model"
 

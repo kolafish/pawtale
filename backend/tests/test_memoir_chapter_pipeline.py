@@ -1,3 +1,5 @@
+
+from app.services.ai_base import AITextServiceBase
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -45,7 +47,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeChapterAI:
+class FakeChapterAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-chapter"
 
@@ -314,7 +316,7 @@ def test_chapter_generation_rejects_cross_section_material():
 
 
 async def test_chapter_generation_retries_only_the_invalid_section():
-    class RetryingSectionAI:
+    class RetryingSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-section-retry"
 
@@ -394,7 +396,7 @@ async def test_chapter_generation_retries_only_the_invalid_section():
 
 
 async def test_chapter_generation_resumes_from_completed_section_checkpoint():
-    class SectionAI:
+    class SectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-section-checkpoint"
 
@@ -472,7 +474,7 @@ async def test_chapter_generation_resumes_from_completed_section_checkpoint():
 
 
 async def test_chapter_generation_reuses_unchanged_draft_sections():
-    class ChangedSectionAI:
+    class ChangedSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-incremental-section"
 
@@ -599,7 +601,9 @@ async def test_chapter_generation_does_not_copy_previous_section_boundary():
         "二零零四年，\n你们婆病了",
     )
 
-    class BoundaryCopyingAI:
+    class BoundaryCopyingAI(AITextServiceBase):
+        provider_name = "test"
+        model_name = "test-model"
         model_name = "test-boundary-copy"
 
         def __init__(self):
@@ -937,7 +941,7 @@ async def test_chapter_draft_update_generates_only_section_with_new_material(
     client,
     test_db,
 ):
-    class PerSectionAI:
+    class PerSectionAI(AITextServiceBase):
         provider_name = "test"
         model_name = "test-incremental-save"
 
