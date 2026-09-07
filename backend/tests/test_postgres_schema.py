@@ -14,8 +14,6 @@ from app.migrations.postgres_runtime import assert_postgres_runtime_schema
 
 
 POSTGRES_DATABASE_URL = os.getenv("TEST_POSTGRES_DATABASE_URL", "").strip()
-if not POSTGRES_DATABASE_URL:
-    raise RuntimeError("TEST_POSTGRES_DATABASE_URL is required")
 
 
 def _alembic_config() -> Config:
@@ -69,7 +67,7 @@ async def _retrieval_index_names() -> set[str]:
         await engine.dispose()
 
 
-def test_postgres_baseline_round_trip_matches_models():
+def test_postgres_baseline_round_trip_matches_models(postgres_schema):
     _assert_dedicated_test_database()
     config = _alembic_config()
 

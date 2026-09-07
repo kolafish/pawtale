@@ -43,6 +43,14 @@ metadata 一致、降级并再次升级。生产变更先备份，再显式运�
 
 ## 测试
 
+纯逻辑和 provider 协议测试不需要数据库，也不会执行 Alembic：
+
+```bash
+venv/bin/python -m pytest -q tests/test_ai_base.py tests/test_volc_streaming_asr.py tests/test_database_transactions.py
+```
+
+数据库/API 测试通过 `test_db` 显式依赖 `postgres_schema`，迁移测试直接使用该 fixture。运行完整测试仍必须配置独立的 ParadeDB 测试库，包含 `pg_search` 等运行时扩展；缺少配置或扩展会失败，不会跳过集成测试。
+
 ```bash
 cd backend
 venv/bin/ruff check app tests scripts

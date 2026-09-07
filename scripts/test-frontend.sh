@@ -15,12 +15,8 @@ fi
 echo "✅ 依赖检查通过"
 echo ""
 
-echo "🔍 TypeScript 类型检查..."
-if ! npx tsc --noEmit; then
-    echo "❌ TypeScript 类型检查失败"
-    exit 1
-fi
-echo "✅ TypeScript 类型检查通过"
+echo "🔍 前端 lint..."
+npm run lint
 echo ""
 
 echo "🧪 前端单元测试..."
@@ -31,9 +27,9 @@ fi
 echo "✅ 前端单元测试通过"
 echo ""
 
-echo "🏗️  Vite 构建测试（不输出文件）..."
-if ! npx vite build --mode development --logLevel error; then
-    echo "❌ Vite 构建失败"
+echo "🏗️  TypeScript 类型检查与生产构建..."
+if ! npm run build; then
+    echo "❌ 类型检查或生产构建失败"
     exit 1
 fi
 echo "✅ Vite 构建测试通过"
