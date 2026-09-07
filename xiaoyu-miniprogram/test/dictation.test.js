@@ -50,10 +50,11 @@ function runtimeHarness(ensureBackendSession = async () => {}) {
     },
   };
   const socket = {
+    closes: 0,
     send({ data }) {
       sent.push(JSON.parse(data));
     },
-    close() {},
+    close() { this.closes += 1; },
     onOpen(callback) {
       socketCallbacks.open = callback;
     },
@@ -105,6 +106,7 @@ function runtimeHarness(ensureBackendSession = async () => {}) {
     recorderOffs,
     sent,
     socketCallbacks,
+    socket,
     states,
     transcripts,
     get connectOptions() {
@@ -133,6 +135,8 @@ test("closing a pending socket rejects connection and ignores late ready", async
   await flushAsyncWork();
   await runtime.client.close();
   await rejected;
+  runtime.socketCallbacks.open();
+  assert.equal(runtime.socket.closes, 2);
   runtime.socketCallbacks.message({ data: JSON.stringify({ type: "session.ready" }) });
   await assert.rejects(runtime.client.start(), /尚未就绪/);
   assert.equal(runtime.states.at(-1), "idle");

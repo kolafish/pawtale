@@ -166,7 +166,10 @@ export class ArticleDictationClient {
       }) as SocketTask;
       this.socket = socket;
       socket.onOpen(() => {
-        if (this.closing) return;
+        if (this.closing) {
+          socket.close({ code: 1000, reason: "dictation page closed" });
+          return;
+        }
         this.socketOpen = true;
       });
       socket.onMessage((message) => {
