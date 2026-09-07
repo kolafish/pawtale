@@ -12,7 +12,6 @@ from app.services.ai_calls import generate_structured_with_client
 from app.services.ai_factory import get_ai_service
 from app.services.ai_timeouts import ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
-from app.services.json_utils import extract_json_payload
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 from app.services.memoir.book_plan_sources import SourceSegment
 
@@ -208,15 +207,7 @@ def build_chapter_title_prompt(sources: list[ChapterTitleSourceDigest]) -> str:
 """
 
 
-def clean_generated_chapter_title(content: str) -> str:
-    payload = extract_json_payload(content)
-    title = ""
-    if isinstance(payload, dict):
-        value = payload.get("title")
-        title = value.strip() if isinstance(value, str) else ""
-    if not title:
-        lines = [line.strip() for line in str(content).splitlines() if line.strip()]
-        title = lines[0] if lines else ""
+def clean_generated_chapter_title(title: str) -> str:
     title = title.strip().strip("“”\"'「」《》")
     for prefix in ("章节标题：", "标题：", "章名：", "章节名："):
         if title.startswith(prefix):
@@ -309,7 +300,7 @@ async def generate_chapter_title_from_sources(
         raise HTTPException(status_code=503, detail=AI_BOOK_PLAN_UNAVAILABLE_MESSAGE) from exc
 
     return GeneratedChapterTitle(
-        title=clean_generated_chapter_title(generated.response.content),
+        title=clean_generated_chapter_title(generated.value.title),
         model=generated.response.resolved_model,
         prompt=prompt,
     )
