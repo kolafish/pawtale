@@ -4,11 +4,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config import get_settings
-from app.services.ai_calls import generate_structured_with_client
+from app.services.ai_calls import AIStructuredOutputError, generate_structured_with_client
 from app.services.ai_factory import (
     DEEPSEEK_V4_FLASH_MODEL,
     DEEPSEEK_V4_PRO_MODEL,
@@ -16,7 +17,7 @@ from app.services.ai_factory import (
     get_ai_service,
 )
 from app.services.ai_references import ModelReferenceMap
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
@@ -576,7 +577,7 @@ async def generate_manuscript_editorial_copy(
             raise
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except Exception:
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
@@ -620,7 +621,7 @@ async def generate_title_suggestions(
             raise
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except Exception:
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
