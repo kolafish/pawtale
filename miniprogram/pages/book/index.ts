@@ -12,7 +12,6 @@ import { definePage, pageRuntime } from "../../services/page-definition";
 import { accessibilityPageClass } from "../../services/accessibility-settings";
 import { trackAuditAction } from "../../services/audit-tracker";
 import type { BookChapterSources, BookChapterView, BookHomeData } from "./book-view-model";
-import { memoirProjectProfile } from "../../services/memoir-project-profile";
 import { promptRequiredText } from "../../services/text-prompt";
 import { takeBookWorkspaceNavigationTarget } from "../../services/book-workspace-navigation";
 
@@ -104,7 +103,6 @@ export {
   bookOutlineNarrationText,
   bookProgressText,
   buildAutomationEventViews,
-  buildChapterPickerOptions,
   buildChapterViews,
 } from "./book-view-model";
 
@@ -165,7 +163,6 @@ definePage<BookPageData>()({
     error: "",
     projectId: "",
     projectTitle: "我的回忆录",
-    projectNarratorName: "",
     planTitle: "",
     stage: "empty",
     stageText: "等待生成章节",
@@ -199,9 +196,6 @@ definePage<BookPageData>()({
     automationEventError: "",
     imageAssetLoading: false,
     imageAssetTotal: 0,
-    imageAssetReadyCount: 0,
-    imageAssetIncludedCount: 0,
-    imageAssetUnusedCount: 0,
     imageAssetSummaryText: "还没有图片素材",
   },
 
@@ -280,14 +274,12 @@ definePage<BookPageData>()({
     const identity = snapshot.identity;
     const projectId = identity.active_project_id;
     const projectTitle = identity.active_project?.title || "尚未创建回忆录";
-    const projectNarratorName = memoirProjectProfile(identity.active_project).narratorName;
     this.setData({
       loading: false,
       error: "",
       needsLogin: false,
       projectId,
       projectTitle,
-      projectNarratorName,
     });
     this.applyPlan(snapshot.plan || null, snapshot.drafts_by_chapter_id || {});
     this.applyBookOutput(snapshot.output || null);
@@ -324,9 +316,6 @@ definePage<BookPageData>()({
       : "生成分享视频背景后，会自动收集到这里";
     this.setData({
       imageAssetTotal: total,
-      imageAssetReadyCount: response?.ready_count || 0,
-      imageAssetIncludedCount: included,
-      imageAssetUnusedCount: unused,
       imageAssetSummaryText: summary,
     });
   },

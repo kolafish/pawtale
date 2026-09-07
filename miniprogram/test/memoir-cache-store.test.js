@@ -46,7 +46,6 @@ function descriptor(userId = "user-1", schemaVersion = 1) {
 test("memoir snapshots preserve the newest server revision and expose stale data", () => {
   installStorageMock();
   const {
-    markMemoirCacheStale,
     markMemoirCacheResourcesStaleForUser,
     readMemoirCache,
     writeMemoirCache,
@@ -75,7 +74,7 @@ test("memoir snapshots preserve the newest server revision and expose stale data
     "ignored_older",
   );
 
-  markMemoirCacheStale(descriptor(), true);
+  markMemoirCacheResourcesStaleForUser("user-1", new Set(["book"]));
   const stale = readMemoirCache(descriptor(), cachedAt + 3_000);
   assert.equal(stale.status, "stale");
   assert.equal(stale.payload.title, "第二版");

@@ -6,7 +6,6 @@ import {
   memoirRequest,
 } from "./memoir-api-client";
 
-
 function chapterWorkspacePath(projectId: string, chapterId: string): string {
   return memoirNarrativeProjectPath(
     projectId,
@@ -252,25 +251,6 @@ export const dismissMemoirChapterSectionRevision = (
 ) => finalizeMemoirChapterSectionRevision(
   projectId, chapterId, sectionId, proposalId, "dismiss",
 );
-
-export function moveMemoirChapterMaterial(
-  projectId: string,
-  utteranceId: string,
-  targetSectionId: string,
-): Promise<unknown> {
-  return memoirRequest<unknown>(
-    memoirNarrativeProjectPath(
-      projectId,
-      `/section-materials/${encodeURIComponent(utteranceId)}/move`,
-    ),
-    {
-      method: "POST",
-      data: {
-        target_section_id: targetSectionId,
-      },
-    },
-  );
-}
 
 export function placeMemoirChapterMaterial(
   projectId: string,

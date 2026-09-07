@@ -1,18 +1,10 @@
 import type {
   MemoirBookSnapshot,
-  MemoirHomeSnapshot,
   MemoirDraftProgress,
   MemoirStorySnapshot,
 } from "../domain/memoir-snapshots";
 import { writeMemoirIdentitySnapshot } from "../stores/memoir-cache";
 import { memoirRequest } from "./memoir-api-client";
-
-function rememberSnapshotIdentity<T extends MemoirHomeSnapshot | MemoirBookSnapshot | MemoirStorySnapshot>(
-  snapshot: T,
-): T {
-  writeMemoirIdentitySnapshot(snapshot.identity);
-  return snapshot;
-}
 
 export async function getMemoirStorySnapshot(): Promise<MemoirStorySnapshot> {
   return memoirRequest<MemoirStorySnapshot>("/api/mobile/memoir/story-snapshot");
@@ -27,14 +19,8 @@ export function retryMemoirDraftProgress(projectId: string): Promise<MemoirDraft
   return memoirRequest<MemoirDraftProgress>(`/api/mobile/memoir/projects/${projectId}/draft-progress/retry`, { method: "POST" });
 }
 
-export async function getMemoirHomeSnapshot(): Promise<MemoirHomeSnapshot> {
-  return rememberSnapshotIdentity(
-    await memoirRequest<MemoirHomeSnapshot>("/api/mobile/memoir/home-snapshot"),
-  );
-}
-
 export async function getMemoirBookSnapshot(): Promise<MemoirBookSnapshot> {
-  return rememberSnapshotIdentity(
-    await memoirRequest<MemoirBookSnapshot>("/api/mobile/memoir/book-snapshot"),
-  );
+  const snapshot = await memoirRequest<MemoirBookSnapshot>("/api/mobile/memoir/book-snapshot");
+  writeMemoirIdentitySnapshot(snapshot.identity);
+  return snapshot;
 }

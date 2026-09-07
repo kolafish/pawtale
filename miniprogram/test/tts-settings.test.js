@@ -9,8 +9,6 @@ const {
   normalizeScopedTTSSettings,
   normalizeTTSSpeedRatio,
   normalizeTTSVoice,
-  ttsSpeedLabel,
-  ttsVoiceLabel,
 } = require("../services/tts-settings.ts");
 
 test("normalizes supported TTS voices", () => {
@@ -59,14 +57,6 @@ test("normalizes supported TTS speed ratios", () => {
   assert.equal(normalizeTTSSpeedRatio(1), 1);
   assert.equal(normalizeTTSSpeedRatio(1.5), 1.5);
   assert.equal(normalizeTTSSpeedRatio(1.25), 1);
-});
-
-test("returns labels for TTS voices with default fallback", () => {
-  assert.equal(ttsVoiceLabel("zh_female_vv_uranus_bigtts"), "通用女声");
-  assert.equal(ttsVoiceLabel("bad"), "默认音色");
-  assert.equal(ttsSpeedLabel(0.7), "慢速 0.7x");
-  assert.equal(ttsSpeedLabel(1.5), "快速 1.5x");
-  assert.equal(ttsSpeedLabel(1.25), "正常 1.0x");
 });
 
 test("builds book TTS requests without redundant defaults", () => {

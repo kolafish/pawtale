@@ -2,31 +2,13 @@ require("./register-ts");
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
+const { sourceRefKey } = require("../services/memoir-book-sources.ts");
 
-const {
-  uniqueSourceRefs,
-} = require("../services/memoir-book-sources.ts");
-
-function sourceRef(overrides = {}) {
-  return {
-    voice_session_id: "voice-1",
-    message_id: "message-1",
-    utterance_id: "utterance-1",
-    quote: "往事",
-    ...overrides,
-  };
-}
-
-test("uniqueSourceRefs deduplicates by stable source identity", () => {
-  const refs = uniqueSourceRefs([
-    sourceRef({ utterance_id: "utterance-1", quote: "第一条" }),
-    sourceRef({ utterance_id: "utterance-1", quote: "重复条" }),
-    sourceRef({ utterance_id: "", voice_session_id: "voice-2", message_id: "message-2" }),
-    sourceRef({ utterance_id: "", voice_session_id: "voice-2", message_id: "message-2", quote: "重复兜底" }),
-  ]);
-
-  assert.deepEqual(
-    refs.map((ref) => ref.quote),
-    ["第一条", "往事"],
+test("source identity prefers utterance id and scopes legacy messages to their session", () => {
+  assert.equal(sourceRefKey({ utterance_id: "utterance-1", voice_session_id: "voice-1", message_id: "message-1" }), "utterance-1");
+  assert.equal(sourceRefKey({ utterance_id: "", voice_session_id: "voice-1", message_id: "message-1" }), "voice-1:message-1");
+  assert.notEqual(
+    sourceRefKey({ voice_session_id: "voice-1", message_id: "message-1" }),
+    sourceRefKey({ voice_session_id: "voice-2", message_id: "message-1" }),
   );
 });
