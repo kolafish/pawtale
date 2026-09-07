@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -88,5 +88,5 @@ class TTSClient(Protocol):
         speed_ratio: float | None = None,
         response_format: str | None = None,
         sample_rate: int | None = None,
-    ) -> AsyncIterator[StreamingTTSChunk]:
+    ) -> AsyncGenerator[StreamingTTSChunk, None]:
         raise NotImplementedError(f"{self.provider_name} does not support bidirectional streaming TTS")

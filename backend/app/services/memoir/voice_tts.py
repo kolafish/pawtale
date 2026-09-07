@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 import contextlib
 from dataclasses import dataclass, field
 import json
@@ -284,7 +284,7 @@ class VolcTTSClient:
         speed_ratio: float | None = None,
         response_format: str | None = None,
         sample_rate: int | None = None,
-    ) -> AsyncIterator[StreamingTTSChunk]:
+    ) -> AsyncGenerator[StreamingTTSChunk, None]:
         effective_voice, effective_speed_ratio, output_format, output_sample_rate, headers, timeout = (
             self._bidirectional_context(
                 voice=voice,
