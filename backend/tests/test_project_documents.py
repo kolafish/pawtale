@@ -56,6 +56,8 @@ async def test_delete_document_restores_file_when_commit_fails(tmp_path):
         await write_content("project-1", "doc-1", "keep me")
         db = _failing_db()
         doc = SimpleNamespace(id="doc-1")
+        # A real rollback expires ORM attributes, including the document ID.
+        db.rollback.side_effect = lambda: delattr(doc, "id")
 
         with pytest.raises(RuntimeError, match="commit failed"):
             await delete_document(db, "project-1", doc)

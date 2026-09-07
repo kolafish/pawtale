@@ -190,15 +190,16 @@ async def commit_document_update(
 
 
 async def delete_document(db: AsyncSession, project_id: str, doc: Document) -> None:
+    document_id = doc.id
     async with storage.project_content_lock(project_id):
-        snapshot = await _snapshot_content(project_id, doc.id)
+        snapshot = await _snapshot_content(project_id, document_id)
         try:
-            await storage.delete_content(project_id, doc.id)
+            await storage.delete_content(project_id, document_id)
             await db.delete(doc)
             await db.commit()
         except Exception:
             await db.rollback()
-            await _restore_content(project_id, doc.id, snapshot)
+            await _restore_content(project_id, document_id, snapshot)
             raise
 
 
