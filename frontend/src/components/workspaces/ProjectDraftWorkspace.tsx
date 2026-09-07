@@ -41,6 +41,15 @@ export function ProjectDraftWorkspace({
   });
   const refEditor = useReferenceEditor();
   const [showAnalyze, setShowAnalyze] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const navigate = async (action: () => Promise<void>) => {
+    setSaveError('');
+    try {
+      await action();
+    } catch {
+      setSaveError('保存未完成，请重试保存后再切换。');
+    }
+  };
 
   const renderEditor = () => {
     if (ps.currentDocumentId) {
@@ -55,7 +64,7 @@ export function ProjectDraftWorkspace({
           totalWordCount={ps.totalWordCount}
           isSaving={ps.isSaving}
           onSave={ps.handleSave}
-          onCloseProject={ps.closeProject}
+          onCloseProject={() => navigate(ps.closeProject)}
           onSelectionChange={revision.setSelection}
           diffChunks={revision.diffChunks}
           onAcceptChunk={revision.acceptChunk}
@@ -116,15 +125,15 @@ export function ProjectDraftWorkspace({
   };
 
   const renderBinder = (closeBinder: () => void) => {
-    const handleSelectDocument = (docId: string) => {
-      ps.switchDocument(docId);
+    const handleSelectDocument = (docId: string) => navigate(async () => {
+      await ps.switchDocument(docId);
       closeBinder();
-    };
+    });
 
-    const handleSelectReference = (refId: string) => {
-      ps.selectReference(refId);
+    const handleSelectReference = (refId: string) => navigate(async () => {
+      await ps.selectReference(refId);
       closeBinder();
-    };
+    });
 
     return (
       <Binder
@@ -192,6 +201,7 @@ export function ProjectDraftWorkspace({
       dialogs={dialogs}
     >
       <div className="flex-1 min-h-0">
+        {saveError && <p role="alert" className="px-4 py-2 text-sm text-red-700">{saveError}</p>}
         {renderEditor()}
       </div>
       {showInspector && ps.currentDocumentId && (
