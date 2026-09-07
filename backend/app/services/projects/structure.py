@@ -113,16 +113,26 @@ async def reorder_documents(
     items: list[DocumentReorderItem],
 ) -> dict[str, bool]:
     await _load_document_project(db, project_id, user_id)
-    for item in items:
-        result = await db.execute(
-            select(Document)
-            .join(DocumentGroup)
-            .where(Document.id == item.id, DocumentGroup.project_id == project_id)
+    documents = {
+        doc.id: doc
+        for doc in await db.scalars(
+            select(Document).join(DocumentGroup).where(
+                Document.id.in_({item.id for item in items}),
+                DocumentGroup.project_id == project_id,
+            )
         )
-        doc = result.scalar_one_or_none()
-        if doc:
-            doc.group_id = item.group_id
-            doc.sort_order = item.sort_order
+    }
+    target_group_ids = set(await db.scalars(
+        select(DocumentGroup.id).where(
+            DocumentGroup.id.in_({item.group_id for item in items}),
+            DocumentGroup.project_id == project_id,
+        )
+    ))
+    if any(item.id not in documents or item.group_id not in target_group_ids for item in items):
+        raise HTTPException(status_code=404, detail="文档或目标分组不属于当前项目")
+    for item in items:
+        documents[item.id].group_id = item.group_id
+        documents[item.id].sort_order = item.sort_order
     await db.commit()
     return {"ok": True}
 
