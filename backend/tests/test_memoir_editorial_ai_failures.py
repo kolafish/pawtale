@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from app.services.ai_base import AITextServiceBase
 from app.services.ai_calls import AIInvalidStructuredOutputError, AIOutputTruncatedError
+from app.services.ai_timeouts import AIProviderTimeoutError
 from app.services.memoir import book_manuscript_ai
 
 
@@ -37,6 +38,7 @@ async def test_programming_errors_do_not_become_optional_ai_success(generate, er
 
 @pytest.mark.parametrize("error", [
     HTTPException(503, "provider unavailable"),
+    AIProviderTimeoutError(provider="test", model="test-model", timeout_seconds=60),
     httpx.ReadTimeout("provider timeout"),
     httpx.ConnectError("connection refused"),
     AIInvalidStructuredOutputError("invalid output"),

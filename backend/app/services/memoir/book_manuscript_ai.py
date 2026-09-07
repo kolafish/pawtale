@@ -17,7 +17,7 @@ from app.services.ai_factory import (
     get_ai_service,
 )
 from app.services.ai_references import ModelReferenceMap
-from app.services.ai_timeouts import ai_text_timeout_seconds
+from app.services.ai_timeouts import AIProviderTimeoutError, ai_text_timeout_seconds
 from app.services.ai_types import AITextClient
 from app.services.ai_workloads import AITextWorkload, ai_text_workload_policy
 
@@ -577,7 +577,7 @@ async def generate_manuscript_editorial_copy(
             raise
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except (httpx.HTTPError, AIStructuredOutputError):
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir manuscript copy failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
@@ -621,7 +621,7 @@ async def generate_title_suggestions(
             raise
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
-    except (httpx.HTTPError, AIStructuredOutputError):
+    except (httpx.HTTPError, AIProviderTimeoutError, AIStructuredOutputError):
         logger.exception("AI memoir title suggestions failed provider=%s", getattr(client, "provider_name", "unknown"))
         return None
 
