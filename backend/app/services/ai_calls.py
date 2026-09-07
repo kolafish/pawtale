@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 import logging
-import time
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -207,32 +206,13 @@ async def generate_text_with_client(
     max_tokens: int,
     timeout: float,
 ) -> AITextCallResult:
-    generate_text = getattr(client, "generate_text", None)
-    if callable(generate_text):
-        return await generate_text(
-            system_prompt,
-            user_prompt,
-            requested_model=requested_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-        )
-
-    started_at = time.monotonic()
-    raw = await client._call_llm(
+    return await client.generate_text(
         system_prompt,
         user_prompt,
+        requested_model=requested_model,
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
-        return_raw=True,
-    )
-    return build_text_call_result(
-        raw,
-        client=client,
-        requested_model=requested_model,
-        elapsed_ms=round((time.monotonic() - started_at) * 1000),
-        attempt_count=1,
     )
 
 
@@ -315,64 +295,13 @@ async def generate_structured_with_client(
     timeout: float,
     max_attempts: int,
 ) -> AIStructuredCallResult[StructuredModel]:
-    generate_structured = getattr(client, "generate_structured", None)
-    if callable(generate_structured):
-        return await generate_structured(
-            system_prompt,
-            user_prompt,
-            output_model=output_model,
-            requested_model=requested_model,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            max_attempts=max_attempts,
-        )
-
-    last_error: AIStructuredOutputError | None = None
-    overall_started_at = time.monotonic()
-    responses: list[AITextCallResult] = []
-    for attempt in range(1, max(1, max_attempts) + 1):
-        attempt_prompt = user_prompt
-        if last_error is not None:
-            attempt_prompt += (
-                "\n上次输出未通过结构校验。"
-                "请重新生成完整结果，确保所有字符串和字段都是合法 JSON。"
-            )
-        attempt_started_at = time.monotonic()
-        raw = await client._call_llm(
-            system_prompt,
-            attempt_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            return_raw=True,
-        )
-        response = build_text_call_result(
-            raw,
-            client=client,
-            requested_model=requested_model,
-            elapsed_ms=round((time.monotonic() - attempt_started_at) * 1000),
-            attempt_count=attempt,
-        )
-        responses.append(response)
-        total_response = with_attempt_totals(
-            response,
-            attempts=responses,
-            elapsed_ms=round(
-                (time.monotonic() - overall_started_at) * 1000
-            ),
-        )
-        try:
-            validated = validate_structured_response(
-                total_response,
-                output_model=output_model,
-            )
-            return validated
-        except AIStructuredOutputError as exc:
-            last_error = type(exc)(
-                str(exc),
-                response=exc.response,
-            )
-    if last_error is not None:
-        raise last_error
-    raise AIInvalidStructuredOutputError("模型没有返回结构化结果，请重试")
+    return await client.generate_structured(
+        system_prompt,
+        user_prompt,
+        output_model=output_model,
+        requested_model=requested_model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        timeout=timeout,
+        max_attempts=max_attempts,
+    )

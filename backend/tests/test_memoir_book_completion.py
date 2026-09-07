@@ -5,6 +5,7 @@ import json
 from httpx import Response
 import pytest
 from sqlalchemy import func, select
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirBookCompletionJobStatus,
     MemoirBookChapterDraftStatus,
@@ -64,7 +65,7 @@ from tests.memoir_helpers import (
 )
 
 
-class LayeredBookAI:
+class LayeredBookAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-layered-book"
 

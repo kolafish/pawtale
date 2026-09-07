@@ -5,6 +5,8 @@ from pydantic import BaseModel, ConfigDict
 from unittest.mock import AsyncMock, patch, MagicMock
 
 from app.services.ai_calls import (
+    generate_structured_with_client,
+    generate_text_with_client,
     AIInvalidStructuredOutputError,
     AIOutputTruncatedError,
 )
@@ -587,14 +589,20 @@ class TestCallLlmContract:
         call = AsyncMock(side_effect=[truncated, complete])
 
         with patch.object(service, "_call_llm", call):
-            result = await service.generate_structured(
+            result = await generate_structured_with_client(
+                service,
                 "system",
                 "user",
                 output_model=_StructuredProbe,
                 requested_model="deepseek-v4-flash",
+                temperature=0.2,
+                max_tokens=512,
+                timeout=30,
                 max_attempts=2,
             )
 
+        assert result.response.requested_model == "deepseek-v4-flash"
+        assert result.response.resolved_model == service.model_name
         assert result.value.ok is True
         assert result.response.attempt_count == 2
         assert result.response.usage == {
@@ -902,3 +910,41 @@ class RecordingLimiter:
 ])
 def test_provider_text_content_shapes_share_normalization(service_type, payload, expected):
     assert service_type()._normalize_message_content(payload) == expected
+
+
+@pytest.mark.asyncio
+async def test_public_structured_call_does_not_retry_transport_timeout():
+    service = DeepSeekTextService()
+    call = AsyncMock(side_effect=TimeoutError("provider deadline"))
+    with patch.object(service, "_call_llm", call):
+        with pytest.raises(TimeoutError, match="provider deadline"):
+            await generate_structured_with_client(
+                service, "system", "user",
+                output_model=_StructuredProbe,
+                requested_model="deepseek-v4-flash",
+                temperature=0.2,
+                max_tokens=512,
+                timeout=30,
+                max_attempts=3,
+            )
+    assert call.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_public_text_call_preserves_provider_diagnostics():
+    service = DeepSeekTextService()
+    raw = ("完成", {"model": service.model_name, "usage": {"total_tokens": 12}})
+    with patch.object(service, "_call_llm", AsyncMock(return_value=raw)):
+        result = await generate_text_with_client(
+            service, "system", "user",
+            requested_model="deepseek-v4-flash",
+            temperature=0.2,
+            max_tokens=512,
+            timeout=30,
+        )
+    assert result.content == "完成"
+    assert result.provider == service.provider_name
+    assert result.requested_model == "deepseek-v4-flash"
+    assert result.resolved_model == result.response_model == service.model_name
+    assert result.usage == {"total_tokens": 12}
+    assert result.attempt_count == 1

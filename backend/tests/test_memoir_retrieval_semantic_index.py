@@ -5,6 +5,7 @@ import json
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirEditingJobStatus,
     MemoirEditingJobType,
@@ -46,7 +47,7 @@ class FakeEmbeddingClient:
         )
 
 
-class FakeAIClient:
+class FakeAIClient(AITextServiceBase):
     provider_name = "fake-provider"
     model_name = "fake-index-model"
 
@@ -85,7 +86,7 @@ class FakeAIClient:
         }
 
 
-class FailingAIClient:
+class FailingAIClient(AITextServiceBase):
     provider_name = "fake-provider"
     model_name = "fake-index-model"
 

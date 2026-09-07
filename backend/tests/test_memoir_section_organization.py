@@ -5,6 +5,7 @@ from datetime import datetime
 import pytest
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirChatMessageRole
 from app.models.memoir import (
     MemoirAutomationEvent,
@@ -32,7 +33,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeStoryGrowthAI:
+class FakeStoryGrowthAI(AITextServiceBase):
     provider_name = "fake"
     model_name = "fake-story-growth"
 
@@ -57,7 +58,7 @@ def test_section_structure_prompt_does_not_require_specific_titles():
     assert "避免用空泛" not in prompt
 
 
-class ReplayMaterialOrganizationAI:
+class ReplayMaterialOrganizationAI(AITextServiceBase):
     provider_name = "fake"
     model_name = "fake-section-organizer"
 

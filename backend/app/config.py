@@ -37,9 +37,6 @@ class Settings(BaseSettings):
     database_max_overflow: int = 10
     database_pool_timeout_seconds: float = 30.0
     database_pool_recycle_seconds: int = 1800
-    local_default_user_email: str = "local@pawtale.local"
-    local_default_user_password: str = "pawtale-local"
-    local_default_user_display_name: str = "本地作者"
 
     # WeChat Mini Program auth
     wechat_miniprogram_appid: str = ""
@@ -93,8 +90,6 @@ class Settings(BaseSettings):
     stepfun_asr_timeout_seconds: float = 120.0
 
     # Memoir editing worker
-    memoir_chapter_revision_delay_seconds: int = 300
-    memoir_quality_audit_delay_seconds: int = 120
     memoir_editing_worker_enabled: bool = True
     memoir_editing_poll_seconds: int = 1
     memoir_story_settle_seconds: int = 30
@@ -108,8 +103,6 @@ class Settings(BaseSettings):
     memoir_interview_policy_active_rollout_percent: int = 0
     memoir_interview_policy_active_model: str = ""
     memoir_interview_policy_outcome_model: str = ""
-    memoir_topic_map_shadow_enabled: bool = False
-    memoir_topic_map_shadow_model: str = ""
     memoir_share_video_worker_enabled: bool = True
     memoir_share_video_poll_seconds: int = 2
     memoir_share_video_batch_size: int = 1
@@ -128,7 +121,6 @@ class Settings(BaseSettings):
     github_api_base_url: str = "https://api.github.com"
     github_web_base_url: str = "https://github.com"
     github_app_setup_redirect_url: str = "http://localhost:5173/"
-    github_sync_default_branch: str = "main"
 
     # VolcEngine / Doubao Streaming ASR
     volc_asr_api_key: str = ""

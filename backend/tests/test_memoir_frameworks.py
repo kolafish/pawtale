@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.framework_templates import (
     FrameworkTemplateItemDefinition,
     canonical_template_snapshot,
@@ -27,7 +28,7 @@ from app.services.memoir.narrative import framework_matching, frameworks
 from tests.memoir_helpers import create_test_voice_transcript
 
 
-class FakeFrameworkAI:
+class FakeFrameworkAI(AITextServiceBase):
     provider_name = "test"
     model_name = "topic-map-test"
 

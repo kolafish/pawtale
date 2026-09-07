@@ -3,6 +3,7 @@ import base64
 
 import pytest
 
+from app.services.ai_base import AITextServiceBase
 from app.services.asr.streaming import StreamingASREvent
 from app.services.memoir.voice_search import (
     MAX_VOICE_SEARCH_AUDIO_BYTES,
@@ -233,7 +234,7 @@ class FakeSearchASRClient:
         self.closed = True
 
 
-class FakeAIClient:
+class FakeAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-model"
 

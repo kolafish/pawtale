@@ -1,12 +1,13 @@
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirEditingJobType
 from app.models.memoir import MemoirChatMessage, MemoirEditingJob, MemoirTranscriptVersion, MemoirVoiceUtterance
 from app.models.projects import Project
 from tests.memoir_helpers import create_test_voice_transcript
 
 
-class CapturingCleanupAIClient:
+class CapturingCleanupAIClient(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-cleaner"
 

@@ -2,6 +2,7 @@ import json
 
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import MemoirSemanticCacheStatus
 from app.models.memoir import MemoirSectionDigest, MemoirSectionMaterial
 from app.services.ai_timeouts import AIProviderTimeoutError
@@ -14,7 +15,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeDigestAI:
+class FakeDigestAI(AITextServiceBase):
     provider_name = "test"
     model_name = "test-section-digest"
 

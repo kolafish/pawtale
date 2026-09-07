@@ -6,6 +6,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.ai_base import AITextServiceBase
 from app.clock import utcnow_naive
 from app.models.memoir import MemoirAutomationEvent, MemoirBookChapterDraftVersion, MemoirCompletionIssue, MemoirEditingJob, MemoirSection
 from app.services.memoir import automatic_book_draft, chapter_generation
@@ -230,7 +231,7 @@ async def test_review_failure_leaves_readable_book_and_does_not_repeat_model(cli
     version_id = parent.result_json["output_version_id"]
     review_id = parent.result_json["review_job_id"]
     calls = 0
-    class FailedReview:
+    class FailedReview(AITextServiceBase):
         provider_name = "test"
         model_name = "failed-review"
         async def _call_llm(self, *args, **kwargs):

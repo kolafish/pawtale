@@ -2,6 +2,7 @@ import json
 
 from sqlalchemy import select
 
+from app.services.ai_base import AITextServiceBase
 from app.domain.memoir.types import (
     MemoirSectionMaterialAssignedBy,
 )
@@ -18,7 +19,7 @@ from tests.memoir_helpers import (
 )
 
 
-class FakeBookPlanAI:
+class FakeBookPlanAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-book-plan"
 

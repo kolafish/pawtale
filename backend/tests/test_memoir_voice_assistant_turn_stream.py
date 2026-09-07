@@ -5,6 +5,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from app.services.ai_base import AITextServiceBase
 from app.config import get_settings
 from app.domain.memoir.types import (
     MemoirAutomationEventStatus,
@@ -1065,7 +1066,7 @@ class FakeTurnClient:
         self.sent.append(payload)
 
 
-class FakeStreamingAI:
+class FakeStreamingAI(AITextServiceBase):
     provider_name = "fake-ai"
     model_name = "fake-stream-model"
 
@@ -1099,7 +1100,7 @@ class FakeStreamingAI:
         )
 
 
-class FakePolicyAI:
+class FakePolicyAI(AITextServiceBase):
     provider_name = "fake-policy"
     model_name = "fake-policy-model"
 
