@@ -26,13 +26,8 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def _configured_admin_emails() -> set[str]:
-    raw = get_settings().admin_emails
-    return {normalize_email(item) for item in raw.split(",") if item.strip()}
-
-
 def is_admin_user(user: User) -> bool:
-    return user.role == ADMIN_ROLE or normalize_email(user.email) in _configured_admin_emails()
+    return user.role == ADMIN_ROLE
 
 
 def hash_password(password: str) -> str:

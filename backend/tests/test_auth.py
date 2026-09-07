@@ -51,26 +51,51 @@ class TestAuthAPI:
         response = await anonymous_client.get("/api/projects")
         assert response.status_code == 401
 
-    async def test_auth_response_uses_configured_admin_email_role(self, anonymous_client, monkeypatch):
+    @pytest.mark.parametrize("via_wechat", [False, True])
+    async def test_unverified_email_cannot_grant_admin_role(
+        self, anonymous_client, test_db, monkeypatch, via_wechat,
+    ):
+        monkeypatch.setenv("ADMIN_EMAILS", "config-admin@example.com")
         monkeypatch.setattr(
             "app.auth.get_settings",
-            lambda: Settings(admin_emails="config-admin@example.com"),
+            lambda: Settings(_env_file=None),
         )
+        if via_wechat:
+            async def exchange(_code, _miniprogram):
+                return WeChatSession(openid="admin-email-regression")
+
+            monkeypatch.setattr("app.routers.auth.exchange_wechat_login_code", exchange)
+            login = await anonymous_client.post("/api/auth/wechat-login", json={"code": "test"})
+            assert login.status_code == 200
 
         register = await anonymous_client.post(
-            "/api/auth/register",
+            "/api/auth/set-credentials" if via_wechat else "/api/auth/register",
             json={
                 "email": "config-admin@example.com",
                 "password": "password123",
                 "display_name": "配置管理员",
             },
         )
-        assert register.status_code == 201
-        assert register.json()["user"]["role"] == "admin"
+        assert register.status_code == (200 if via_wechat else 201)
+        assert register.json()["user"]["role"] == "user"
 
         me = await anonymous_client.get("/api/auth/me")
         assert me.status_code == 200
+        assert me.json()["role"] == "user"
+        dashboard = "/api/audit/dashboard?from=2026-09-01&to=2026-09-07"
+        assert (await anonymous_client.get(dashboard)).status_code == 403
+
+        user = await test_db.get(User, register.json()["user"]["id"])
+        assert user.role == "user"
+        user.role = "admin"
+        await test_db.commit()
+        me = await anonymous_client.get("/api/auth/me")
         assert me.json()["role"] == "admin"
+        assert (await anonymous_client.get(dashboard)).status_code == 200
+
+        user.role = "user"
+        await test_db.commit()
+        assert (await anonymous_client.get(dashboard)).status_code == 403
 
     async def test_update_me_display_name(self, anonymous_client, test_db):
         register = await anonymous_client.post(
