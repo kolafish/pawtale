@@ -281,6 +281,7 @@ class ProjectGitSyncConfigResponse(BaseModel):
 
 
 class GitSyncStatusResponse(BaseModel):
+    authorization_error: str | None = None
     configured: bool
     install_url: str | None = None
     installations: list[GitSyncInstallationResponse] = Field(default_factory=list)

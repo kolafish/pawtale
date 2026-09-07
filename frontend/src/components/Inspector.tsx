@@ -365,6 +365,9 @@ export function Inspector({
                     )}
                   </div>
 
+                  {syncStatus.authorization_error && (
+                    <p className="text-xs text-red-500">{syncStatus.authorization_error}</p>
+                  )}
                   {syncStatus.repositories.length === 0 ? (
                     <p className="text-xs text-gray-400">暂无可用仓库</p>
                   ) : (

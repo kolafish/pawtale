@@ -34,6 +34,19 @@ class GitHubSetupState(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow_naive, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    installation_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    code_verifier: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class GitHubUserAuthorization(Base):
+    __tablename__ = "github_user_authorizations"
+
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), primary_key=True)
+    github_user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    refresh_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ProjectGitSync(Base):

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import select
@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.clock import utcnow_naive
 from app.models.git_sync import GitHubSetupState
 from app.services.projects import git_sync as git_sync_service
+from app.services.github_client import UserTokens
 from tests.project_helpers import create_project_with_document
 
 
@@ -19,14 +20,28 @@ class FakeGitHubClient:
         self.files: list[dict] = []
         self.commits: list[dict] = []
 
-    async def get_installation(self, installation_id: int):
-        assert installation_id == 123
-        return {
+    def authorize_url(self, *, state, challenge):
+        return f"https://github.com/login/oauth/authorize?state={state}&code_challenge={challenge}"
+
+    async def exchange_code(self, code, verifier):
+        assert code == "valid-code"
+        assert len(verifier) >= 43
+        return UserTokens(access_token="user-token")
+
+    async def get_user(self, token):
+        assert token == "user-token"
+        return {"id": 42}
+
+    async def list_installations(self, token):
+        assert token == "user-token"
+        return [{
+            "id": 123,
             "repository_selection": "selected",
             "account": {"login": "author", "type": "User"},
-        }
+        }]
 
-    async def list_repositories(self, installation_id: int):
+    async def list_repositories(self, installation_id: int, *, token: str):
+        assert token == "user-token"
         assert installation_id == 123
         return [
             {
@@ -39,6 +54,7 @@ class FakeGitHubClient:
         ]
 
     async def commit_files(self, **kwargs):
+        assert kwargs["token"] == "user-token"
         self.commits.append(kwargs)
         self.files.extend(
             {"path": file.path, "content": file.content}
@@ -53,9 +69,6 @@ class TokenGitHubClient(git_sync_service.GitHubAppClient):
         self.responses = responses
         self.requests: list[dict] = []
 
-    def _app_jwt(self) -> str:
-        return "app-jwt"
-
     async def _request(self, method, path, *, token, json_body=None, expected_status=None):
         self.requests.append(
             {
@@ -67,10 +80,6 @@ class TokenGitHubClient(git_sync_service.GitHubAppClient):
             }
         )
         return self.responses.pop(0)
-
-
-def _github_timestamp(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _state_from_install_url(install_url: str) -> str:
@@ -116,6 +125,10 @@ async def test_configure_and_run_git_sync(client, monkeypatch):
     state = await _create_setup_state(client)
     setup = await client.get(f"/api/github/setup?installation_id=123&state={state}", follow_redirects=False)
     assert setup.status_code in {302, 307}
+
+    oauth_state = _state_from_install_url(setup.headers["location"])
+    connected = await client.get(f"/api/github/setup?code=valid-code&state={oauth_state}", follow_redirects=False)
+    assert connected.status_code in {302, 307}
 
     status = await client.get(f"/api/projects/{project_id}/git-sync")
     assert status.status_code == 200
@@ -225,72 +238,9 @@ async def test_github_setup_state_expires(client, test_db, monkeypatch):
     assert response.json()["detail"] == "GitHub setup state 已过期"
 
 
-async def test_github_installation_token_cache_reuses_valid_token():
-    client = TokenGitHubClient(
-        [
-            {
-                "token": "token-1",
-                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
-            }
-        ]
-    )
-
-    first = await client.create_installation_token(123)
-    second = await client.create_installation_token(123)
-
-    assert first == "token-1"
-    assert second == "token-1"
-    assert len(client.requests) == 1
-
-
-async def test_github_installation_token_cache_refreshes_near_expiry():
-    client = TokenGitHubClient(
-        [
-            {
-                "token": "token-1",
-                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(minutes=4)),
-            },
-            {
-                "token": "token-2",
-                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
-            },
-        ]
-    )
-
-    first = await client.create_installation_token(123)
-    second = await client.create_installation_token(123)
-
-    assert first == "token-1"
-    assert second == "token-2"
-    assert len(client.requests) == 2
-
-
-async def test_github_installation_token_cache_ignores_invalid_expiry():
-    client = TokenGitHubClient(
-        [
-            {"token": "token-1", "expires_at": "not-a-date"},
-            {
-                "token": "token-2",
-                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
-            },
-        ]
-    )
-
-    first = await client.create_installation_token(123)
-    second = await client.create_installation_token(123)
-
-    assert first == "token-1"
-    assert second == "token-2"
-    assert len(client.requests) == 2
-
-
 async def test_github_commit_files_updates_ref_with_single_commit():
     client = TokenGitHubClient(
         [
-            {
-                "token": "token-1",
-                "expires_at": _github_timestamp(datetime.now(timezone.utc) + timedelta(hours=1)),
-            },
             {"object": {"sha": "base-commit"}},
             {"tree": {"sha": "base-tree"}},
             {"sha": "blob-1"},
@@ -302,7 +252,7 @@ async def test_github_commit_files_updates_ref_with_single_commit():
     )
 
     commit_sha = await client.commit_files(
-        installation_id=123,
+        token="user-token",
         owner="author",
         repo="pawtale-backup",
         branch="feature/demo",
@@ -316,7 +266,6 @@ async def test_github_commit_files_updates_ref_with_single_commit():
     assert commit_sha == "new-commit"
     request_keys = [(request["method"], request["path"]) for request in client.requests]
     assert request_keys == [
-        ("POST", "/app/installations/123/access_tokens"),
         ("GET", "/repos/author/pawtale-backup/git/ref/heads/feature/demo"),
         ("GET", "/repos/author/pawtale-backup/git/commits/base-commit"),
         ("POST", "/repos/author/pawtale-backup/git/blobs"),
@@ -326,7 +275,8 @@ async def test_github_commit_files_updates_ref_with_single_commit():
         ("PATCH", "/repos/author/pawtale-backup/git/refs/heads/feature/demo"),
     ]
     assert not any(request["method"] == "PUT" for request in client.requests)
-    tree_request = client.requests[5]
+    assert all(request["token"] == "user-token" for request in client.requests)
+    tree_request = client.requests[4]
     assert tree_request["json_body"] == {
         "base_tree": "base-tree",
         "tree": [
@@ -334,11 +284,11 @@ async def test_github_commit_files_updates_ref_with_single_commit():
             {"path": "pawtale/documents/001.md", "mode": "100644", "type": "blob", "sha": "blob-2"},
         ],
     }
-    commit_request = client.requests[6]
+    commit_request = client.requests[5]
     assert commit_request["json_body"] == {
         "message": "Sync Pawtale project backup",
         "tree": "new-tree",
         "parents": ["base-commit"],
     }
-    ref_request = client.requests[7]
+    ref_request = client.requests[6]
     assert ref_request["json_body"] == {"sha": "new-commit", "force": False}

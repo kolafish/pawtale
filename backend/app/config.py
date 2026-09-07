@@ -122,14 +122,13 @@ class Settings(BaseSettings):
     memoir_book_export_deadline_seconds: float = 240.0
 
     # GitHub App one-way project backup
-    github_app_id: str = ""
     github_app_slug: str = ""
-    github_app_private_key: str = ""
-    github_app_private_key_path: str = ""
+    github_app_client_id: str = ""
+    github_app_client_secret: str = ""
+    github_app_callback_url: str = "http://localhost:8000/api/github/setup"
     github_api_base_url: str = "https://api.github.com"
     github_web_base_url: str = "https://github.com"
     github_app_setup_redirect_url: str = "http://localhost:5173/"
-    github_sync_default_branch: str = "main"
 
     # VolcEngine / Doubao Streaming ASR
     volc_asr_api_key: str = ""
