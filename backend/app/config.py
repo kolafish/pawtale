@@ -40,7 +40,6 @@ class Settings(BaseSettings):
     local_default_user_email: str = "local@pawtale.local"
     local_default_user_password: str = "pawtale-local"
     local_default_user_display_name: str = "本地作者"
-    admin_emails: str = ""
 
     # WeChat Mini Program auth
     wechat_miniprogram_appid: str = ""
