@@ -166,6 +166,9 @@ test('AI response preserves new local input and blocks conflicting autosave', as
   expect(result.current.page.saveStatus).toBe('conflict');
   await act(async () => { await expect(result.current.page.handleSave()).rejects.toThrow('冲突'); });
   expect(projectsApi.updateDocument).not.toHaveBeenCalled();
+  act(() => result.current.page.setDocumentContent('original-a'));
+  await act(async () => { await expect(result.current.page.closeProject()).rejects.toThrow('冲突'); });
+  expect(useAppStore.getState().currentDocumentId).toBe('a');
 });
 
 test('AI response for a previous document cannot replace the current document', async () => {

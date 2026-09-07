@@ -198,7 +198,7 @@ export function useDocumentDraft({
     if (savePromiseRef.current) return savePromiseRef.current;
     if (!currentProject || !currentDocumentId || isLoadingDocRef.current) return;
     const save = async () => {
-      while (!snapshotsEqual(currentSnapshotRef.current, lastSavedSnapshotRef.current)) {
+      while (conflictRef.current || !snapshotsEqual(currentSnapshotRef.current, lastSavedSnapshotRef.current)) {
         if (conflictRef.current) throw new Error('正文存在冲突，请保留当前输入后重新加载。');
         const active = useAppStore.getState();
         if (active.currentProject?.id !== currentProject.id || active.currentDocumentId !== currentDocumentId) return;
