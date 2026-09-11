@@ -78,6 +78,10 @@ async def test_retaining_old_draft_never_reintroduces_excluded_sources(client, t
     project_id, chapter_id, section_id, _, parent = await _ready_book(client, test_db, monkeypatch)
     if exclusion == "chapter":
         (await test_db.get(MemoirBookPlanChapter, chapter_id)).include_in_book = False
+        test_db.add(MemoirCompletionIssue(
+            project_id=project_id, scope="book", issue_type="meaning", channel="interview",
+            question="旧书稿中的补充问题", priority="medium", fingerprint="d" * 64, input_signature="old-review",
+        ))
     elif exclusion == "section":
         (await test_db.get(MemoirSection, section_id)).include_in_book = False
     elif exclusion == "material":
@@ -98,6 +102,7 @@ async def test_retaining_old_draft_never_reintroduces_excluded_sources(client, t
     await run_test_editing_job(test_db, parent.id)
     data = await _snapshot(client)
     assert not data["book_readable"] and data["book_chapter_count"] == 0
+    assert data["book_issues"]["supplement_count"] == 0
 
 
 @pytest.mark.parametrize("metadata", [{"title": "给家人看的回忆"}, {"cover_style": "warm_gray"}])
