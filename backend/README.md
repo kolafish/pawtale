@@ -84,6 +84,21 @@ venv/bin/python -m pytest \
   tests/test_memoir_book_outputs.py -q
 ```
 
+## 同条口述更正验证
+
+转写整理会处理同一条记录内目标明确、给出确定新说法的年份、人名、地点等更正，并去掉已执行的更正指令。复用原有一次整理调用，仅增加提示词长度；原始录音和 ASR 原文保留。该能力适用于新记录的自动整理和已有记录主动重新整理，不自动批量重处理历史记录。
+
+当前范围以后台一条 VoiceUtterance 为界。停顿导致录音分成多条时，不跨条修改；不确定、未完成的更正和故事里的引语保留原意。此入口不执行删稿、隐私、章节调整或风格指令。
+
+以下评测使用合成口述样本，显式调用所选付费 provider，需要配置其凭据和有效的 PostgreSQL DATABASE_URL（不会读写数据库）：
+
+```bash
+PYTHONPATH=. venv/bin/python scripts/eval_memoir_self_correction.py \
+  --ai-model deepseek-v4-flash --output /tmp/memoir-self-correction.json
+```
+
+可用 `--case correct_relationship` 缩小范围，或用 `--polish-level medium` / `high` 验证其他整理档位。脚本保存实际输出和模型信息；片段检查通过后仍需人工核对人物关系、时间归属和事实完整性，不能把样本通过率当成线上准确率。
+
 ## 应用结构
 
 ```text

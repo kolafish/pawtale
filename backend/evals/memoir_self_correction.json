@@ -1,0 +1,78 @@
+{
+  "description": "Synthetic cases for same-record spoken corrections. Fragment checks supplement manual review; they do not prove factual fidelity.",
+  "cases": [
+    {
+      "id": "correct_year",
+      "source": "我1968年去了东北。不对，我说错了，是1969年。那年冬天特别冷。",
+      "required": [["1969", "一九六九"], ["东北"], ["冬天"], ["冷"]],
+      "forbidden": ["1968", "一九六八", "说错", "不对"]
+    },
+    {
+      "id": "correct_relationship",
+      "source": "小时候是外婆送我上学。刚才说错了，是奶奶送我上学。她每天陪我走两里路。",
+      "required": [["小时候"], ["奶奶"], ["上学"], ["两里", "二里", "2里"]],
+      "forbidden": ["外婆", "说错"]
+    },
+    {
+      "id": "correct_place",
+      "source": "我第一次出远门去了南京，住在同学家。地点说错了，把南京改成南昌。同学带我吃了一碗面。",
+      "required": [["南昌"], ["同学家"], ["一碗面"]],
+      "forbidden": ["南京", "说错", "改成"]
+    },
+    {
+      "id": "correct_name_spelling",
+      "source": "师傅叫刘凯峰，他教我修自行车。名字里的峰写错了，是刮风的风，刘凯风。",
+      "required": [["刘凯风"], ["修自行车"]],
+      "forbidden": ["刘凯峰", "写错", "刮风"]
+    },
+    {
+      "id": "two_local_corrections",
+      "source": "我1972年在南京参加工作。年份说错了，是1973年，地方也说错了，是南昌。我在厂里学修机器。",
+      "required": [["1973", "一九七三"], ["南昌"], ["厂里"], ["修机器"]],
+      "forbidden": ["1972", "一九七二", "南京", "说错"]
+    },
+    {
+      "id": "preserve_other_person",
+      "source": "哥哥1968年去了东北。我1968年去了上海。我的年份说错了，我是1969年去上海的。哥哥的年份没错。",
+      "required": [["哥哥"], ["1968", "一九六八"], ["东北"], ["1969", "一九六九"], ["上海"]],
+      "forbidden": ["我1968年", "我一九六八年"]
+    },
+    {
+      "id": "keep_uncertain_year",
+      "source": "我记得是1968年去的东北，也可能是1969年，具体哪年记不清了。",
+      "required": [["1968", "一九六八"], ["1969", "一九六九"], ["可能"], ["记不清", "不记得"]],
+      "forbidden": []
+    },
+    {
+      "id": "keep_uncertain_replacement",
+      "source": "接我的人是老张。不对，也许是老李，我现在记不准了。后来我们一起去了车站。",
+      "required": [["老张"], ["老李"], ["也许", "可能"], ["记不准", "记不清"], ["车站"]],
+      "forbidden": []
+    },
+    {
+      "id": "keep_quoted_correction",
+      "source": "我1968年到的东北。老张总说：不对，是1969年。我一直不同意，我们为这事争了很多年。",
+      "required": [["1968", "一九六八"], ["1969", "一九六九"], ["老张"], ["不同意"], ["争"]],
+      "forbidden": []
+    },
+    {
+      "id": "keep_quoted_command",
+      "source": "父亲指着信对我说：把最后一句删掉，别让你母亲看见。我没听他的，还是把信寄了。",
+      "required": [["父亲"], ["最后一句"], ["母亲"], ["寄"]],
+      "forbidden": []
+    },
+    {
+      "id": "keep_incomplete_correction",
+      "source": "我1968年去了东北。刚才年份说错了，让我再想想。",
+      "required": [["1968", "一九六八"], ["说错"], ["想想"]],
+      "forbidden": ["1969", "一九六九"]
+    },
+    {
+      "id": "keep_previous_record_request",
+      "source": "上一条的年份说错了，把1968年改成1969年。",
+      "context": {"recent_user_utterances": ["我1968年去了东北，住在同学家。"]},
+      "required": [["上一条"], ["1968", "一九六八"], ["1969", "一九六九"]],
+      "forbidden": ["东北", "同学", "已修改", "已改"]
+    }
+  ]
+}
