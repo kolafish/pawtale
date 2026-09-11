@@ -89,6 +89,7 @@ async def test_one_book_decision_does_not_create_five_chapter_decisions(client, 
 @pytest.mark.parametrize("review_status", ["ready", "stale", None])
 async def test_book_optional_counts_match_current_review_queue(client, test_db, monkeypatch, review_status):
     project_id = await ensure_mobile_memoir_project(client)
+    await create_test_book_plan_with_chapters(test_db, project_id=project_id)
     test_db.add_all(
         [
             issue(project_id, "persistent-decision", signature="old"),

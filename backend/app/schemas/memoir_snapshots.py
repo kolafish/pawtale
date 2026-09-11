@@ -74,6 +74,7 @@ class MemoirStoryChapterResponse(BaseModel):
     video_count: int = 0
     char_count: int = 0
     readable: bool = False
+    candidate_job_id: str | None = None
     state: Literal["settled", "attention", "draft", "muted"] = "muted"
     state_text: str = "待整理"
     issues: MemoirStoryIssueCounts = Field(default_factory=MemoirStoryIssueCounts)

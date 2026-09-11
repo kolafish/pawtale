@@ -62,6 +62,7 @@ export interface MemoirStoryChapter {
   video_count: number;
   char_count: number;
   readable: boolean;
+  candidate_job_id: string | null;
   state: "settled" | "attention" | "draft" | "muted";
   state_text: string;
   sections: Array<{ id: string; title: string; material_count: number; image_count: number; video_count: number }>;

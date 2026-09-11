@@ -26,6 +26,7 @@ from app.schemas.memoir_snapshots import (
 from app.services.memoir import (
     automation_events,
     book_reviews,
+    chapter_preparation_jobs,
     draft_progress,
     projects,
     share_video_jobs,
@@ -92,7 +93,9 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
     # The book workspace only offers optional questions from the current ready
     # review. Manual decisions stay active across regenerated reviews.
     if issue_counts[None].supplement_count:
-        review = await book_reviews.get_current_book_review(db, project_id=project.id)
+        review = await book_reviews.get_current_book_review(db, project_id=project.id) if any(
+            chapter.include_in_book for chapter in chapters
+        ) else None
         issue_counts[None].supplement_count = (
             (
                 await db.scalar(
@@ -112,10 +115,15 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
         )
     result.book_issues = issue_counts[None]
     result.book_manual_edit_preserved = progress.preserved_manual
+    candidates = await chapter_preparation_jobs.current_chapter_candidates(
+        db, project_id=project.id,
+        chapter_ids={chapter.id for chapter in chapters if chapter.include_in_book},
+    )
     chapter_views = {}
     for chapter in chapters:
         view = MemoirStoryChapterResponse(**chapter._asdict() | {"char_count": chapter.char_count or 0})
         view.readable = view.char_count > 0
+        view.candidate_job_id = candidates.get(chapter.id)
         view.issues = issue_counts[chapter.id]
         state = progress.chapters.get(chapter.id)
         if not chapter.include_in_book:
@@ -124,6 +132,8 @@ async def story_snapshot(db: AsyncSession, user: User) -> MemoirStorySnapshotRes
             view.state, view.state_text = "attention", "整理未完成"
         elif view.issues.review_count:
             view.state, view.state_text = "attention", f"{view.issues.review_count} 项待确认"
+        elif view.candidate_job_id:
+            view.state, view.state_text = "attention", "新稿待采纳"
         elif view.issues.supplement_count:
             view.state, view.state_text = "attention", f"{view.issues.supplement_count} 项待补充"
         elif state and state.status in {"pending", "running"}:

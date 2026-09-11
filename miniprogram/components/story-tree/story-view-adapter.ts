@@ -14,7 +14,7 @@ export function storyViewData(snapshot: MemoirStorySnapshot): StoryViewData {
     outcomeText: chapter.state === "settled" ? "" : chapter.state_text,
     detailActionText: chapter.issues?.review_count
       ? `${chapter.issues.review_count} 项待确认`
-      : chapter.issues?.supplement_count
+      : chapter.candidate_job_id ? "查看新稿" : chapter.issues?.supplement_count
         ? `${chapter.issues.supplement_count} 项待补充`
         : chapter.readable ? "查看详情" : "查看本章",
     readable: chapter.readable,

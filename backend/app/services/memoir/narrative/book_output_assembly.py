@@ -64,7 +64,7 @@ async def assemble_book_output(
     current_review = await book_reviews.get_current_book_review(
         db,
         project_id=project_id,
-    )
+    ) if chapters else None
     decisions = (await db.scalars(select(MemoirCompletionIssue).where(
         MemoirCompletionIssue.project_id == project_id,
         MemoirCompletionIssue.channel == MemoirCompletionIssueChannel.MANUAL_REVIEW.value,
@@ -134,10 +134,8 @@ async def assemble_book_output(
             db,
             output_id=output.id,
         )
-        protected = bool(previous_version and (
-            previous_version.created_by == MemoirCreatedBy.USER.value
-            or book_review_answer_state.application_marker(output).get("output_version_id") == previous_version.id
-            or book_editorial_actions.application_marker(output).get("output_version_id") == previous_version.id
+        protected = bool(previous_version and await book_output_versions.book_body_is_protected(
+            db, output=output, version=previous_version,
         ))
         preserves_applied_answers = bool(answer_context and (
             book_review_answer_state.marker_matches_context(output=output, version=previous_version, context=answer_context)

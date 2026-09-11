@@ -89,9 +89,11 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
     ).all()
     progress.chapters = {chapter.id: progress.chapters.get(chapter.id, ChapterProgress()) for chapter in chapters}
     retry = (job.payload_json or {}).get("source") == "retry"
+    readable = set()
     for chapter in chapters:
         chapter_id = chapter.id
         state = progress.chapters[chapter_id]
+        state.draft_version_id = None
         try:
             context = await chapter_generation.load_chapter_generation_context(
                 db, project_id=project_id, chapter_id=chapter_id
@@ -103,6 +105,9 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
             continue
         state.input_signature = context.input_signature
         latest = await chapter_generation.latest_chapter_draft_version(db, project_id=project_id, chapter_id=chapter_id)
+        if chapter_generation.chapter_draft_sources_still_included(context, latest):
+            readable.add(chapter_id)
+            state.draft_version_id = latest.id
         if chapter_generation.chapter_draft_is_current(context, latest):
             state.status, state.error_message = "ready", ""
             state.draft_version_id = latest.id
@@ -131,7 +136,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         state.error_message = str(child.get("error_message") or "")
     # An explicit retry authorizes one dispatch, not every dependency poll.
     job.payload_json = {"source": "progress"}
-    readable = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
+    current = {chapter_id for chapter_id, item in progress.chapters.items() if item.status == "ready"}
     if readable or progress.output_id:
         assembled = await assemble_book_output(db, project_id=project_id, eligible_chapter_ids=readable, automatic=True)
         progress.output_id = assembled.output_id
@@ -145,7 +150,7 @@ async def run_book_draft_job(db: AsyncSession, job: MemoirEditingJob) -> Editing
         progress.stage = "writing_chapters"
         return _waiting(job, progress)
     progress.stage = "partial_ready" if readable else "needs_attention"
-    if readable and len(readable) == len(progress.chapters):
+    if current and len(current) == len(progress.chapters):
         review_signature = semantic_json_signature({"output_version_id": progress.output_version_id,
             "chapters": {key: item.draft_version_id for key, item in progress.chapters.items()}})
 

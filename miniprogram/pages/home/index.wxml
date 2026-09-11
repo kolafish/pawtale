@@ -180,6 +180,10 @@
       </view>
       <button size="mini" class="home-inline-action ui-button" bindtap="openStoryNotice">查看 ›</button>
     </view>
+    <view wx:if="{{candidateNoticeText}}" class="home-review-notice" aria-live="polite">
+      <view class="home-review-copy"><text class="home-review-text">{{candidateNoticeText}}</text></view>
+      <button size="mini" class="home-inline-action ui-button" bindtap="openChapterCandidate">查看新稿 ›</button>
+    </view>
     <view wx:if="{{progress && progress.status !== 'idle' && progress.status !== 'needs_input'}}" class="home-story-progress {{progress.status === 'failed' ? 'is-error' : ''}}" aria-live="polite">
       <text class="home-story-progress-title">{{progress.title}}</text>
       <text class="home-story-progress-detail">{{progress.detail}}</text>
