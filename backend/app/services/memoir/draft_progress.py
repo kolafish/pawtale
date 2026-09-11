@@ -93,7 +93,8 @@ async def read_draft_progress(
             ):
                 needs_user.add(key)
     ready = sum(
-        item.status == "ready" and key not in progress.omitted_chapter_ids for key, item in progress.chapters.items()
+        (item.status == "ready" or item.draft_version_id is not None)
+        and key not in progress.omitted_chapter_ids for key, item in progress.chapters.items()
     )
     result = MemoirDraftProgressResponse(
         project_id=project_id,

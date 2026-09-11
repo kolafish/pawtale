@@ -332,6 +332,27 @@ test("story keeps readable chapter drafts available while the assembled book awa
 
 const { homeStoryNotice } = require("../pages/home/home-story-state.ts");
 
+test("home exposes chapter candidates independently of issue notices and routes to the candidate workspace", async () => {
+  const current = snapshot({book_issues: {review_count: 1, supplement_count: 0}});
+  Object.assign(current.chapters[0], {candidate_job_id: "candidate-1", state: "attention", state_text: "新稿待采纳"});
+  const {page} = loadStoryPage({current});
+  const context = pageContext(page), urls = [];
+  global.wx.navigateTo = ({url}) => urls.push(url);
+  try {
+    await context.onShow();
+    assert.equal(context.data.reviewNoticeText, "全书：1 项待确认");
+    assert.equal(context.data.candidateNoticeText, "有 1 章整理出了新稿，原稿已保留");
+    assert.equal(context.data.story.chapters[0].detailActionText, "查看新稿");
+    context.openChapterCandidate();
+    assert.deepEqual(urls, ["/pages/chapter-workspace/index?projectId=project-1&chapterId=chapter-1"]);
+    current.chapters[0].candidate_job_id = null;
+    await context.loadHome(true);
+    assert.equal(context.data.candidateNoticeText, "");
+    context.openChapterCandidate();
+    assert.equal(urls.length, 1);
+  } finally { context.onHide(); }
+});
+
 test("home separates chapter decisions, optional supplements and book decisions", () => {
   const current = snapshot({
     book_issues: { review_count: 1, supplement_count: 0 },

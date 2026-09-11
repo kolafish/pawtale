@@ -143,6 +143,7 @@ type HomeViewPatch = Pick<
 
 type HomeContext = {
   data: HomeData;
+  homeLaunchScope?: string;
   setData(patch: Partial<HomeData>, callback?: () => void): void;
 };
 
@@ -324,10 +325,16 @@ function applyHomeSnapshotData(
     ? memoirStoryTitle(identity.active_project?.title || "")
     : "还没有回忆录";
   const latestHint = hasProject ? homeResumeHint(snapshot.latest_transcript) : "";
-  const launchVariant = resolveHomeLaunch(identity.id, {
+  const launchScope = `${identity.id}/${identity.active_project_id || ""}`;
+  const keepLaunch = context.homeLaunchScope === launchScope || (
+    Boolean(context.homeLaunchScope) && identity.id === context.data.userId
+    && context.data.launchVariant === "first_visit"
+  );
+  const launchVariant = keepLaunch ? context.data.launchVariant : resolveHomeLaunch(identity.id, {
     projectId: identity.active_project_id,
     hasProject,
   });
+  context.homeLaunchScope = launchScope;
   setHomeData(context, {
     loading: false,
     error: "",
@@ -352,6 +359,7 @@ function applyHomeSnapshotData(
 definePage<HomeData>()({
   homeLoadSequence: 0,
   homeVisible: false,
+  homeLaunchScope: "",
   homeRefreshTimer: pageRuntime(() => new PollingTimer(5000)),
   storyNavigationTarget: null as HomeStoryTarget | null,
   growthTracker: pageRuntime(() => new HomeGrowthTracker()),
@@ -414,6 +422,7 @@ definePage<HomeData>()({
 
   async onShow() {
     this.homeVisible = true;
+    this.homeLaunchScope = "";
     this.storyNavigationTarget = consumeHomeStoryTarget() ?? this.storyNavigationTarget;
     this.homeRefreshTimer.cancel();
     enableMiniProgramShareMenu();
@@ -508,6 +517,7 @@ definePage<HomeData>()({
       }
       if (isAuthError(error)) {
         this.homeRefreshTimer.cancel();
+        this.homeLaunchScope = "";
         this.growthTracker.reset();
         setHomeData(this, {
           ...emptyHomeStoryData(),
@@ -674,6 +684,11 @@ definePage<HomeData>()({
   openReviewIssues() {
     if (!this.data.projectId) return;
     wx.navigateTo({ url: pageUrl("/pages/book-completion/index", { projectId: this.data.projectId, projectTitle: this.data.story.memoir.title }) });
+  },
+
+  openChapterCandidate() {
+    if (!this.data.candidateChapterId) return;
+    this.openChapter({ detail: { chapterId: this.data.candidateChapterId } });
   },
 
   openTranscripts() {

@@ -11,6 +11,8 @@ interface StoryNotice {
 }
 
 export interface HomeStoryData extends StoryNotice {
+  candidateNoticeText: string;
+  candidateChapterId: string;
   story: StoryViewData;
   storyLoaded: boolean;
   hasStories: boolean;
@@ -49,6 +51,7 @@ export class HomeGrowthTracker {
 export function emptyHomeStoryData(): HomeStoryData {
   return {
     reviewNoticeText: "", reviewNoticeDetail: "", reviewNoticeAction: "",
+    candidateNoticeText: "", candidateChapterId: "",
     story: emptyStoryViewData(), storyLoaded: false, hasStories: false, storyError: "", progress: null,
     bookReadable: false, growthEvents: [], growthNoticeTitle: "", growthNoticeText: "",
     growthTarget: null, narrationSaved: false, dismissingGrowth: false, retryingDraft: false,
@@ -61,6 +64,7 @@ export function homeStorySnapshotData(
   freshEventIds: Set<string> = new Set(),
 ): Partial<HomeStoryData> {
   const story = storyViewData(snapshot);
+  const candidates = snapshot.chapters.filter(chapter => chapter.include_in_book && chapter.candidate_job_id);
   const expanded = new Map(previous.chapters.map((chapter) => [chapter.id, chapter.expanded]));
   const chapters = new Map(story.chapters.map(chapter => [chapter.id, chapter]));
   const newChapters = new Set<string>(), newSections = new Set<string>();
@@ -108,6 +112,8 @@ export function homeStorySnapshotData(
   ].filter(Boolean).join("，");
   return {
     ...homeStoryNotice(snapshot),
+    candidateNoticeText: candidates.length ? `有 ${candidates.length} 章整理出了新稿，原稿已保留` : "",
+    candidateChapterId: candidates[0]?.id || "",
     story, storyLoaded: true, hasStories: snapshot.chapters.length > 0, storyError: "", progress: snapshot.progress,
     bookReadable: snapshot.book_readable, growthEvents: snapshot.growth_events, growthTarget,
     growthNoticeTitle: addedCount ? "故事树长出了新内容" : updatedCount ? "回忆变得更完整了" : "故事整理有了新进展",

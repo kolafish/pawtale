@@ -228,6 +228,46 @@ async def get_chapter_preparation_job(
     )
 
 
+async def current_chapter_candidates(
+    db: AsyncSession, *, project_id: str, chapter_ids: set[str],
+) -> dict[str, str]:
+    """Project actionable candidates without sending manuscript text to the home page."""
+    if not chapter_ids:
+        return {}
+    jobs = (await db.scalars(select(MemoirEditingJob).where(
+        MemoirEditingJob.project_id == project_id,
+        MemoirEditingJob.chapter_id.in_(chapter_ids),
+        MemoirEditingJob.job_type == MemoirEditingJobType.PREPARE_CHAPTER.value,
+        MemoirEditingJob.status == MemoirEditingJobStatus.SUCCEEDED.value,
+        MemoirEditingJob.dedupe_key.is_not(None),
+    ))).all()
+    candidates = {}
+    for job in jobs:
+        result = job.result_json or {}
+        if (
+            job.dedupe_key != _job_dedupe_key(job.chapter_id)
+            or result.get("outcome") != "needs_review" or not result.get("candidate_content")
+        ):
+            continue
+        try:
+            context = await chapter_generation.load_chapter_generation_context(
+                db, project_id=project_id, chapter_id=job.chapter_id,
+            )
+        except HTTPException as exc:
+            if exc.status_code not in {404, 409, 422}:
+                raise
+            continue  # Unconfirmed plans or removed source material cannot accept a candidate.
+        latest = await chapter_generation.latest_chapter_draft_version(
+            db, project_id=project_id, chapter_id=job.chapter_id,
+        )
+        if (
+            chapter_generation.chapter_generation_checkpoint_section_count(context, result) == len(context.sections)
+            and result.get("candidate_base_version_id") == (latest.id if latest else None)
+        ):
+            candidates[job.chapter_id] = job.id
+    return candidates
+
+
 async def cancel_chapter_preparation_job(
     db: AsyncSession,
     *,

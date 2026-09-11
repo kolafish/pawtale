@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.memoir.types import MemoirCreatedBy
 from app.models.memoir import MemoirBookOutput, MemoirBookOutputVersion
+from app.services.memoir.book_output_snapshots import book_content_from_chapter_snapshots
 
 
 async def load_latest_book_output_version(
@@ -50,6 +51,52 @@ async def append_book_output_version(
     db.add(version)
     await db.flush()
     return version
+
+
+def _same_book_body(left: MemoirBookOutputVersion, right: MemoirBookOutputVersion) -> bool:
+    if left.chapter_snapshot_json != right.chapter_snapshot_json:
+        return False
+    if left.content != right.content and not all(
+        version.content == book_content_from_chapter_snapshots(
+            title=book_output_version_title(version, fallback=""),
+            snapshots=version.chapter_snapshot_json,
+        )
+        for version in (left, right)
+    ):
+        return False
+    # Design fields and image placement may change without revising the book.
+    # Chapter introductions and quotations, however, are editorial content.
+    def chapters(version: MemoirBookOutputVersion) -> list[dict]:
+        return [
+            {key: value for key, value in chapter.items() if key != "illustrations"}
+            for chapter in version.manuscript_json.get("chapters", [])
+        ]
+    return chapters(left) == chapters(right)
+
+
+async def book_body_is_protected(
+    db: AsyncSession, *, output: MemoirBookOutput, version: MemoirBookOutputVersion,
+) -> bool:
+    from app.services.memoir import book_editorial_actions, book_review_answer_state
+
+    applied_ids = {
+        book_review_answer_state.application_marker(output).get("output_version_id"),
+        book_editorial_actions.application_marker(output).get("output_version_id"),
+    }
+    # Trace unchanged body content through title/cover/image versions. This also
+    # classifies existing design-only user versions without changing their audit provenance.
+    current = version
+    while True:
+        if current.id in applied_ids:
+            return True
+        previous = await db.scalar(
+            select(MemoirBookOutputVersion)
+            .where(MemoirBookOutputVersion.output_id == output.id, MemoirBookOutputVersion.version < current.version)
+            .order_by(MemoirBookOutputVersion.version.desc()).limit(1)
+        )
+        if previous is None or not _same_book_body(current, previous):
+            return current.created_by == MemoirCreatedBy.USER.value
+        current = previous
 
 
 def book_output_version_title(

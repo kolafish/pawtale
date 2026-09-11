@@ -429,6 +429,24 @@ def chapter_draft_is_current(
     )
 
 
+def chapter_draft_sources_still_included(
+    context: ChapterGenerationContext,
+    version: MemoirBookChapterDraftVersion | None,
+) -> bool:
+    """Keep an older readable draft while adding material, never after excluding its sources."""
+    if version is None or not version.content.strip() or not version.section_snapshot_json:
+        return False
+    allowed = {
+        section.section_id: {material.material_id for material in section.materials}
+        for section in context.sections
+    }
+    return all(
+        section.get("section_id") in allowed
+        and set(section.get("used_material_ids", [])).issubset(allowed[section["section_id"]])
+        for section in version.section_snapshot_json
+    )
+
+
 async def load_chapter_draft_generation_plan(
     db: AsyncSession,
     *,
