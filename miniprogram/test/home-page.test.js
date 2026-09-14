@@ -757,7 +757,13 @@ test("home routes book organization through the book workspace without requiring
   const { takeBookWorkspaceNavigationTarget } = require("../services/book-workspace-navigation.ts");
   assert.deepEqual(navigations, ["/pages/book/index"]);
   assert.equal(takeBookWorkspaceNavigationTarget(), "chapters");
+  assert.equal(context.data.selectedMode, "free_narration");
   assert.equal(context.data.error, "");
+
+  context.data.creatingVoice = true;
+  page.openBookWorkspace.call(context);
+  page.openNarrationOverview.call(context);
+  assert.deepEqual(navigations, ["/pages/book/index"], "navigation waits for voice preparation to finish");
 });
 
 test("home opens narration overview without requiring microphone consent", () => {

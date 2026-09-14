@@ -121,12 +121,12 @@
         </view>
       </view>
 
-      <view class="home-workspace-actions">
+      <view class="home-workspace-actions {{creatingVoice ? 'button-blocked' : ''}}">
         <text class="home-workspace-heading">回顾与整理</text>
         <view
           class="home-workspace-link"
           bindtap="openNarrationOverview"
-          hover-class="ui-subtle-action-hover"
+          hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
           aria-role="button"
           aria-label="打开讲述概览"
           aria-disabled="{{creatingVoice}}"
@@ -140,7 +140,7 @@
         <view
           class="home-workspace-link"
           bindtap="openBookWorkspace"
-          hover-class="ui-subtle-action-hover"
+          hover-class="{{creatingVoice ? 'none' : 'ui-subtle-action-hover'}}"
           aria-role="button"
           aria-label="打开书稿，查看章节进度和待补内容"
           aria-disabled="{{creatingVoice}}"

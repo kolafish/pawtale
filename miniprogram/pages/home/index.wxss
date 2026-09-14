@@ -599,7 +599,8 @@
   border: 0;
 }
 
-.resume-ask-button.button-blocked {
+.resume-ask-button.button-blocked,
+.home-workspace-actions.button-blocked {
   opacity: 0.72;
 }
 
