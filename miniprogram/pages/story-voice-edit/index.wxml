@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="edit-intro">
     <text class="edit-book">{{projectTitle || '当前回忆录'}}</text>
     <text class="edit-title">说说你想怎么改</text>

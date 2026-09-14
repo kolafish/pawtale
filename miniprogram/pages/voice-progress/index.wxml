@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{projectTitle ? (projectTitle + " · 讲述概览") : "当前回忆录的讲述概览"}}</text>
     <button class="refresh-button ui-button" loading="{{loading}}" disabled="{{loading}}" bindtap="loadOverview">刷新</button>

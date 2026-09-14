@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view wx:if="{{loading}}" class="state-card ui-card ui-card-borderless">正在准备修改预览...</view>
   <block wx:elif="{{scope === 'chapter_section' && !proposal}}">
     <view class="revision-intro feedback-card initial-feedback-card ui-card ui-card-borderless">

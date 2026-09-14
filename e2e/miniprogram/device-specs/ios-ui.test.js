@@ -89,7 +89,7 @@ test("iOS real device verifies account authentication and the memoir project lif
     assert.equal(result.accountVerified, true);
     assert.equal(result.accountReauthenticated, true);
     assert.equal(result.baselineRestored, true);
-    assert.deepEqual(result.tabs, ["首页", "记录", "书稿", "我的"]);
+    assert.deepEqual(result.pages, ["首页", "设置"]);
     assert.deepEqual(
       result.projectJourney,
       ["cancel", "create", "rename", "switch", "delete"],

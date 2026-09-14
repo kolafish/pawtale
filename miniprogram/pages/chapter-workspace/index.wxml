@@ -1,4 +1,4 @@
-<view class="{{pageClass}}">
+<view class="ui-page-shell {{pageClass}}">
   <view class="ui-page-context-row">
     <text class="ui-page-context">{{workspace ? workspace.chapter_title : "本章正文"}} · {{focusedSectionId ? "当前小节" : "当前一步"}}</text>
     <button class="workspace-home-action" bindtap="openBookHome">书稿首页</button>

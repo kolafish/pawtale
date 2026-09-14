@@ -160,7 +160,7 @@ test("home closes only the current confirmed session, then refreshes the story i
   assert.deepEqual(context.storyNavigationTarget, { projectId: "p1", narrationSaved: false });
 });
 
-test("mini program opens on the browseable home tab", () => {
+test("mini program opens on the home page without a tab bar", () => {
   const appJson = JSON.parse(fs.readFileSync(path.join(__dirname, "../app.json"), "utf8"));
 
   assert.equal(appJson.pages[0], "pages/home/index");
